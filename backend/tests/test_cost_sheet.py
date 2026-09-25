@@ -578,6 +578,8 @@ async def test_backdated_publish_needs_confirmation(client, admin_auth, world):
     res = await client.post(f"{API}/versions/{d['id']}/publish", json={"valid_from": past},
                             headers=admin_auth)
     assert res.status_code == 422 and "past" in res.json()["detail"]
+    assert ("Lines already priced keep their rate; hours booked since then and "
+            "lines without a rate use the new version.") in res.json()["detail"]
     res = await client.post(f"{API}/versions/{d['id']}/publish",
                             json={"valid_from": date.today().isoformat()}, headers=admin_auth)
     assert res.status_code == 200

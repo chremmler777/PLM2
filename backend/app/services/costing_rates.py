@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change_cost import LABOUR_KINDS, CostingPosition, DepartmentRate
 from app.models.cost_sheet import CostSheetMachineClass, CostSheetVersion
 from app.models.entities import Plant, Project
+from app.core.display import fmt_number
 from app.services import cost_sheet_service as cs
 from app.utils.clock import business_today
 
@@ -99,14 +100,13 @@ class Price:
 
 
 def fmt_amount(value: float) -> str:
-    """21.5 -> '21,50', 1250 -> '1.250,00' (the plant's number format)."""
-    s = f"{value:,.2f}"
-    return s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    """21.5 -> '21.50', 1250 -> '1,250.00' (the UI's en-US number format)."""
+    return fmt_number(value, 2)
 
 
 def rate_label(price: Optional[Price], *, department: Optional[str] = None,
                position: Optional[str] = None, machine_class: Optional[str] = None) -> str:
-    """'Cost sheet v2, Tool Engineer, Engineer, 21,50 USD/h'."""
+    """'Cost sheet v2, Tool Engineer, Engineer, 21.50 USD/h'."""
     if price is None or price.rate is None:
         return NO_RATE
     head = (f"Cost sheet v{price.version}" if price.source == "cost_sheet"

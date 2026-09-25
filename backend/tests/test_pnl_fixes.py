@@ -104,18 +104,22 @@ async def test_margin_row_separates_actual_and_forecast():
 
 # --- actual costs -----------------------------------------------------------------
 
-async def test_amount_bound_and_german_amounts(client, admin_auth, session_factory, world):
+async def test_amount_bound_and_typed_amounts(client, admin_auth, session_factory, world):
     cid = world["change_id"]
     await _status(session_factory, cid, "in_implementation")
     base = {"category": "external", "cost_date": "2026-06-01"}
     url = f"/api/v1/changes/{cid}/actual-costs"
-    r = await client.post(url, headers=admin_auth, json={**base, "amount": "1.234,56"})
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "1,234.56"})
     assert r.status_code == 201, r.text
     assert r.json()["amount"] == 1234.56
-    r = await client.post(url, headers=admin_auth, json={**base, "amount": "2.500"})
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "2 500"})
     assert r.status_code == 201 and r.json()["amount"] == 2500.0
-    r = await client.post(url, headers=admin_auth, json={**base, "amount": "1,5 €"})
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "1.5 €"})
     assert r.status_code == 201 and r.json()["amount"] == 1.5
+    # a decimal comma or a German thousands dot is ambiguous: refused
+    for bad in ("1.234,56", "2.500", "1,5 €", "0,500"):
+        assert (await client.post(url, headers=admin_auth,
+                                  json={**base, "amount": bad})).status_code == 422, bad
     assert (await client.post(url, headers=admin_auth,
                               json={**base, "amount": "abc"})).status_code == 422
     assert (await client.post(url, headers=admin_auth,
@@ -183,3 +187,64 @@ async def test_department_member_reads_only_own_lines(client, session_factory, w
     listing = (await client.get(url, headers=eng)).json()
     assert [i["id"] for i in listing["items"]] == [mine]
     assert listing["total"] == 70.0
+
+
+async def test_amount_currency_sign_is_read_not_dropped(client, admin_auth, session_factory,
+                                                        world):
+    """B1 review: "$500" on a EUR change was stored as 500 EUR."""
+    cid = world["change_id"]
+    await _status(session_factory, cid, "in_implementation")
+    base = {"category": "external", "cost_date": "2026-06-01"}
+    url = f"/api/v1/changes/{cid}/actual-costs"
+    # a mark that contradicts the currency sent
+    r = await client.post(url, headers=admin_auth,
+                          json={**base, "amount": "£500", "currency": "EUR"})
+    assert r.status_code == 400 and "GBP" in r.json()["detail"]
+    # "$" is not one currency: refused on a EUR change without a currency
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "$500"})
+    assert r.status_code == 400 and "USD, CAD, MXN" in r.json()["detail"]
+    r = await client.post(url, headers=admin_auth,
+                          json={**base, "amount": "$500", "currency": "EUR"})
+    assert r.status_code == 400
+    # ... read as the dollar currency sent
+    r = await client.post(url, headers=admin_auth,
+                          json={**base, "amount": "$500", "currency": "usd"})
+    assert r.status_code == 201 and r.json()["currency"] == "USD", r.text
+    # an unambiguous mark gives the currency when none is sent
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "1,250 GBP"})
+    assert r.status_code == 201 and r.json()["currency"] == "GBP"
+    assert r.json()["amount"] == 1250
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "€ 12.5"})
+    assert r.status_code == 201 and r.json()["currency"] == "EUR"
+    r = await client.post(url, headers=admin_auth, json={**base, "amount": "$12 EUR"})
+    assert r.status_code == 422
+    # the portfolio row says the USD and GBP lines are not in its EUR actual
+    row = await _row(client, admin_auth, cid)
+    w = next(x for x in row["warnings"] if x["code"] == "other_currency_actual")
+    assert "GBP, USD" in w["message"] and "EUR" in w["message"]
+
+
+async def test_engineering_review_is_not_price_pending(client, admin_auth, session_factory,
+                                                       world, seed):
+    async with session_factory() as s:
+        s.add_all([
+            ChangeRequest(change_number="CR-ER-1", title="Review", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], status="costing",
+                          customer_relevant=False, origin="engineering_review"),
+            ChangeRequest(change_number="CR-NOPRICE-2", title="No price", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], status="costing",
+                          customer_relevant=True, origin="customer")])
+        await s.commit()
+    rows = (await client.get("/api/v1/pnl/changes", headers=admin_auth)).json()["rows"]
+    by_number = {r["change_number"]: r for r in rows}
+    review, open_ = by_number["CR-ER-1"], by_number["CR-NOPRICE-2"]
+    assert review["origin"] == "engineering_review" and open_["origin"] == "customer"
+    assert by_number["CR-OVA-1"]["origin"] == "customer"
+    assert review["pending_price"] is False and open_["pending_price"] is True
+    t = (await client.get("/api/v1/pnl/summary", headers=admin_auth)).json()["totals"]
+    unpriced = [r for r in rows if r["offer_revenue"] is None
+                and r["origin"] != "engineering_review"]
+    assert t["unpriced_count"] == len(unpriced)
+    assert t["priced_count"] + t["unpriced_count"] == len(rows) - 1

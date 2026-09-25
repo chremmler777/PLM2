@@ -28,6 +28,9 @@ REALIZED_STATUSES = PNL_STATUSES[PNL_STATUSES.index("approved"):]
 # Money that is still an offer, not a commitment — 'quoting' is the same kind
 # of not-yet as 'quoted', one step earlier.
 PIPELINE_STATUSES = ("costing", "quoting", "quoted")
+# Changes that carry no price by design (spec §17: a department's light
+# engineering review): never "price pending", never counted as unpriced.
+UNPRICED_BY_DESIGN = ("engineering_review",)
 
 
 def _round(value: Optional[float]) -> Optional[float]:
@@ -165,6 +168,9 @@ class PnlService:
                 "project_id": c.project_id,
                 "project_name": names.get(c.project_id) if c.project_id is not None else None,
                 "branch": "customer" if c.customer_relevant else "internal",
+                # customer | internal | mother_plant | engineering_review
+                "origin": c.origin or ("customer" if c.customer_relevant
+                                       else "internal"),
                 "status": c.status,
                 # Every amount of the row is in `currency` (the costing
                 # plant's) except the revenue, which is in revenue_currency;
@@ -180,7 +186,8 @@ class PnlService:
                 "margin": _round(margin),
                 "margin_pct": _round(margin_pct),
                 "effort_hours": _round(efforts.get(c.id, 0.0)),
-                "pending_price": revenue is None,
+                "pending_price": (revenue is None
+                                  and c.origin not in UNPRICED_BY_DESIGN),
                 "realized": c.status in REALIZED_STATUSES,
                 # offer versus doing (spec §13)
                 **{k: v for k, v in o.items()
@@ -394,6 +401,8 @@ class PnlService:
             .order_by(ImplementationBooking.id))).scalars().all())
         by_id = {c.id: c for c in changes}
         internal_actual: dict[int, float] = {}
+        # currencies of booked hours left out of the actual (no FX)
+        other_booked: dict[int, set] = {}
         bookings_by_change: dict[int, list] = {}
         for b in booked:
             bookings_by_change.setdefault(b.change_id, []).append(b)
@@ -407,8 +416,12 @@ class PnlService:
                 value = 0.0
                 if row["labour_value"] and row["labour_currency"] == cur:
                     value += row["labour_value"]
+                elif row["labour_value"]:
+                    other_booked.setdefault(cid, set()).add(row["labour_currency"])
                 if row["machine_value"] and row["machine_currency"] == cur:
                     value += row["machine_value"]
+                elif row["machine_value"]:
+                    other_booked.setdefault(cid, set()).add(row["machine_currency"])
                 if row["hours"] or row["machine_hours"]:
                     internal_actual[cid] = internal_actual.get(cid, 0.0) + value
 
@@ -505,6 +518,15 @@ class PnlService:
                                 f"{currency}: no margin without a currency conversion")})
             if c.id in no_rate:
                 warnings.append({"code": "no_rate", "message": costing_rates.NO_RATE_WARNING})
+            # the card says so too (PnlService.change_pnl): amounts entered
+            # or booked in another currency are left out, never converted
+            others = sorted(set(e.get("other_currency") or {})
+                            | other_booked.get(c.id, set()))
+            if others:
+                warnings.append({
+                    "code": "other_currency_actual",
+                    "message": (f"Actual costs in {', '.join(others)} are not in "
+                                f"the {currency} actual cost (no conversion)")})
             out[c.id] = {
                 "phase": phase,
                 # the card's basis rule (pnl_basis), so list and card agree
@@ -556,6 +578,9 @@ class PnlService:
             # the priced ones (a change without a price has no margin, so its
             # cost stays out of the cost too); the rest is counted.
             priced = [r for r in comparable if r.get("offer_revenue") is not None]
+            # an engineering review has no price by design: not "unpriced"
+            unpriced = [r for r in comparable if r.get("offer_revenue") is None
+                        and r.get("origin") not in UNPRICED_BY_DESIGN]
             actual_rows = [r for r in priced if r.get("phase") == "actual"]
             slips = [r["slip_days"] for r in subset if r.get("slip_days") is not None]
             return {
@@ -563,7 +588,7 @@ class PnlService:
                 "planned_cost": _round(sum(r.get("planned_cost") or 0.0 for r in priced)),
                 "planned_margin": _round(sum(r.get("planned_margin") or 0.0 for r in priced)),
                 "priced_count": len(priced),
-                "unpriced_count": len(comparable) - len(priced),
+                "unpriced_count": len(unpriced),
                 "mismatch_count": len(subset) - len(comparable),
                 "no_rate_count": sum(1 for r in subset if r.get("no_rate")),
                 "actual_revenue": _round(sum(r.get("actual_revenue") or 0.0

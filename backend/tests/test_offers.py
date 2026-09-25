@@ -471,15 +471,15 @@ async def test_numbers_are_coerced_and_validated(client, offer_world):
     o = await _create(client, sales, cid)
     res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": {
         "cost_lines": [{"key": "a", "label": "A", "category": "internal",
-                        "amount": "1.000,50", "include": True}],
+                        "amount": "1,000.50", "include": True}],
         "factors": [{"key": "margin", "label": "Margin", "type": "pct",
-                     "value": "12,5", "sign": 1, "enabled": True}],
+                     "value": "12.5", "sign": 1, "enabled": True}],
         "changeover": {"mode": "customer_pays_scrap", "scrap_qty": "10",
-                       "scrap_unit_price": "2,5"},
+                       "scrap_unit_price": "2.5"},
         "free_fields": [{"label": "Text only", "value": "x"},
                         {"label": "Transport", "amount": "30"}],
         "piece_price": {"enabled": True, "annual_volume": "1000",
-                        "rows": [{"label": "m", "delta_per_piece": "0,01"}]},
+                        "rows": [{"label": "m", "delta_per_piece": "0.01"}]},
     }}, headers=sales)
     assert res.status_code == 200, res.text
     d, t = res.json()["data"], res.json()["totals"]
@@ -493,7 +493,11 @@ async def test_numbers_are_coerced_and_validated(client, offer_world):
                 {"changeover": {"scrap_qty": "ten"}},
                 {"cost_lines": ["not an object"]},
                 {"piece_price": {"rows": [3]}},
-                {"terms": "net 30"}):
+                {"terms": "net 30"},
+                # a decimal comma or a German thousands dot is ambiguous
+                {"cost_lines": [{"key": "a", "amount": "1.000,50"}]},
+                {"cost_lines": [{"key": "a", "amount": "1.000"}]},
+                {"factors": [{"key": "m", "value": "12,5", "enabled": True}]}):
         res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": bad},
                                  headers=sales)
         assert res.status_code == 400, (bad, res.text)
@@ -593,3 +597,229 @@ async def test_pdf_flows_a_20k_note_and_escapes_markup():
         "risks": [{"label": "R", "severity": 3, "show": True, "note": "n & <m>" * 400}],
     }, status="draft"))
     assert pdf[:4] == b"%PDF" and _pages(pdf) >= 4
+
+
+async def test_send_refuses_a_quote_plan_with_errors_while_timing_is_included(
+        client, offer_world, session_factory):
+    from sqlalchemy import select
+    from app.models.change_plan import ChangePlanTask
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    await _seed_quote_plan(client, sales, cid)
+    o = await _create(client, sales, cid)
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangePlanTask).where(
+            ChangePlanTask.change_id == cid, ChangePlanTask.plan == "quote")
+            .order_by(ChangePlanTask.id))).scalars().all()
+        first, second = rows[0], rows[1]
+        old_name = first.name
+        first.name = "  "
+        second.duration_days = -3
+        await s.commit()
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert "The quote plan has 2 errors" in detail and "Timing" in detail
+    # a dependency loop blocks as well
+    async with session_factory() as s:
+        first = await s.get(ChangePlanTask, rows[0].id)
+        second = await s.get(ChangePlanTask, rows[1].id)
+        first.name, second.duration_days = old_name, 2
+        await s.commit()
+    from app.models.change_plan import ChangePlanLink
+    async with session_factory() as s:
+        s.add(ChangePlanLink(change_id=cid, plan="quote", from_task_id=rows[0].id,
+                             to_task_id=rows[0].id, type="FS", lag_days=0))
+        await s.commit()
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 400 and "loop" in res.json()["detail"]
+    # timing left out: the plan does not matter; the empty recipient company
+    # is only a warning
+    res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": {
+        "timing": {"include": False}}}, headers=sales)
+    assert res.status_code == 200 and res.json()["data"]["recipient"]["company"] == ""
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_quote_plan_ideas_are_kept_marked_and_drawn_hatched(
+        client, offer_world, session_factory):
+    """Idea blocks stay in the snapshot and the timing ("idea": True), never
+    move the weeks from order, and the PDF draws them hatched with a key."""
+    from sqlalchemy import select
+    from app.models.change_plan import ChangePlanTask
+    from app.services import offer_pdf
+    from app.services.offer_service import OfferService
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    await _seed_quote_plan(client, sales, cid)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        before = await OfferService._quote_timing(s, change)
+        rows = (await s.execute(select(ChangePlanTask).where(
+            ChangePlanTask.change_id == cid, ChangePlanTask.plan == "quote")
+            .order_by(ChangePlanTask.id))).scalars().all()
+        last = max(rows, key=lambda t: t.start_date)
+        seeded_ideas = {t.name for t in rows if t.is_idea}
+        new_ideas = {"Extra trial", "Option gate"}
+        s.add(ChangePlanTask(change_id=cid, plan="quote", name="Extra trial",
+                             kind="sampling", is_idea=True, lane="Tooling",
+                             start_date=last.start_date + timedelta(days=120),
+                             created_by=offer_world["users"]["sales"],
+                             duration_days=10, sort_order=999))
+        s.add(ChangePlanTask(change_id=cid, plan="quote", name="Option gate",
+                             kind="milestone", is_idea=True,
+                             start_date=last.start_date + timedelta(days=140),
+                             created_by=offer_world["users"]["sales"],
+                             duration_days=0, sort_order=1000))
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        timing = await OfferService._quote_timing(s, change)
+        snap = await OfferService._snapshot(s, change)
+    # the weeks follow the committed blocks only
+    assert timing["weeks_from_order"] == before["weeks_from_order"]
+    ideas = {m["label"] for m in timing["milestones"] if m.get("idea")}
+    assert new_ideas <= ideas <= new_ideas | seeded_ideas
+    assert all(not m.get("idea") for m in timing["milestones"]
+               if m["label"] not in ideas)
+    snap_ideas = {t["name"] for t in snap["tasks"] if t.get("idea")}
+    assert snap_ideas == new_ideas | seeded_ideas
+    assert all("idea" not in t for t in snap["tasks"] if t["name"] not in snap_ideas)
+
+    tasks = [{**t, "start": date.fromisoformat(t["start"]),
+              "end": date.fromisoformat(t["end"])} for t in snap["tasks"]]
+    legend = offer_pdf._kind_legend(tasks, 170 * offer_pdf.mm)
+    labels = [getattr(x, "text", None) for x in legend.contents]
+    assert offer_pdf.IDEA_LABEL in labels
+    # a plan of one idea block still explains itself
+    solo = [t for t in tasks if t["name"] == "Extra trial"]
+    assert offer_pdf._kind_legend(solo, 170 * offer_pdf.mm) is not None
+    # the idea bar is hatched: diagonal lines, where a committed bar has none
+    from reportlab.graphics.shapes import Line
+    def diagonals(ts):
+        dwg = offer_pdf._plan_charts(ts, 170 * offer_pdf.mm)[0]
+        return [x for x in dwg.contents if isinstance(x, Line)
+                and x.x1 != x.x2 and x.y1 != x.y2]
+    assert diagonals(solo)
+    assert not diagonals([{**solo[0], "idea": False}])
+    ctx = _pdf_ctx(tasks=tasks)
+    ctx["offer"]["data"]["timing"].update(timing)
+    pdf = offer_pdf.render_offer_pdf(ctx)
+    assert pdf[:4] == b"%PDF"
+    import io
+    from pypdf import PdfReader
+    text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Option gate (option)" in text
+
+
+async def test_sent_pdf_is_frozen_and_cached_draft_is_live(
+        client, offer_world, session_factory, monkeypatch):
+    """A version that went out renders from its snapshot with nothing
+    recomputed, once; later downloads come from the cache until the row
+    changes. A draft is rendered live every time."""
+    from sqlalchemy import select
+    from app.models.change_plan import ChangePlanTask
+    from app.services import offer_pdf, offer_service
+    calls = []
+    real = offer_pdf.render_offer_pdf
+
+    def counting(ctx):
+        calls.append(ctx)
+        return real(ctx)
+    monkeypatch.setattr(offer_pdf, "render_offer_pdf", counting)
+    # the costing basis (internal cost) is not on the PDF: never computed
+    async def boom(*a, **k):
+        raise AssertionError("the PDF must not compute the costing basis")
+    monkeypatch.setattr(offer_service.OfferService, "_costing_basis", boom)
+
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    await _seed_quote_plan(client, sales, cid)
+    monkeypatch.undo()
+    o = await _create(client, sales, cid)
+    monkeypatch.setattr(offer_pdf, "render_offer_pdf", counting)
+    monkeypatch.setattr(offer_service.OfferService, "_costing_basis", boom)
+    for _ in range(2):
+        assert (await client.get(_url(cid, f"/{o['id']}/pdf"), headers=sales)).status_code == 200
+    assert len(calls) == 2                               # drafts: live, never cached
+    monkeypatch.undo()
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
+                              headers=sales)).status_code == 200
+    monkeypatch.setattr(offer_pdf, "render_offer_pdf", counting)
+    monkeypatch.setattr(offer_service.OfferService, "_costing_basis", boom)
+    calls.clear()
+    first = (await client.get(_url(cid, f"/{o['id']}/pdf"), headers=sales)).content
+    # the live plan moves on; the sent PDF does not
+    async with session_factory() as s:
+        t = (await s.execute(select(ChangePlanTask).where(
+            ChangePlanTask.change_id == cid, ChangePlanTask.plan == "quote")
+            .order_by(ChangePlanTask.id))).scalars().first()
+        frozen_name = t.name
+        t.name = "Renamed after sending"
+        await s.commit()
+    again = (await client.get(_url(cid, f"/{o['id']}/pdf"), headers=sales)).content
+    assert again == first and len(calls) == 1            # served from the cache
+    names = [x["name"] for x in calls[0]["tasks"]]
+    assert frozen_name in names and "Renamed after sending" not in names
+    # the row changes (here: its snapshot is edited): rendered afresh
+    async with session_factory() as s:
+        row = await s.get(ChangeOffer, o["id"])
+        data = dict(row.data)
+        data["_snapshot"] = {**data["_snapshot"], "plant_name": "Frozen Plant"}
+        row.data = data
+        await s.commit()
+    await client.get(_url(cid, f"/{o['id']}/pdf"), headers=sales)
+    assert len(calls) == 2 and calls[1]["plant_name"] == "Frozen Plant"
+
+
+async def test_refresh_does_not_count_split_machine_time_twice(
+        client, offer_world, session_factory, monkeypatch):
+    """An offer built before machine time and sampling had their own lines,
+    with the department's internal line overridden by Sales: the refresh
+    takes the split lines out of the override and says so."""
+    from app.services import offer_service
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    o = await _create(client, sales, cid)
+    did = offer_world["depts"]["Tool Engineer"]
+
+    def fresh_line(key, amount):
+        return {"key": key, "label": key, "department": "Tool Engineer",
+                "category": "internal", "amount": amount, "source_amount": amount,
+                "include": True, "customer_category": "Engineering"}
+
+    async def basis(session, change, meta=None):
+        if meta is not None:
+            meta.update({"currency": "EUR", "warnings": [], "versions_used": []})
+        return ([fresh_line(f"dept:{did}", 2000.0), fresh_line(f"dept_mt:{did}", 600.0),
+                 fresh_line(f"dept_smp:{did}", 400.0)], 3000.0)
+    monkeypatch.setattr(offer_service.OfferService, "_costing_basis", basis)
+    # before the split: one internal line of 3000, overridden to 5000
+    async with session_factory() as s:
+        row = await s.get(ChangeOffer, o["id"])
+        data = dict(row.data)
+        data["cost_lines"] = [{**fresh_line(f"dept:{did}", 3000.0), "amount": 5000.0,
+                               "label": "Tool Engineer internal effort"}]
+        row.data = data
+        await s.commit()
+    res = await client.post(_url(cid, f"/{o['id']}/refresh"), headers=sales)
+    assert res.status_code == 200, res.text
+    lines = {l["key"]: l for l in res.json()["data"]["cost_lines"]}
+    assert lines[f"dept:{did}"]["amount"] == 4000.0             # 5000 - 600 - 400
+    assert lines[f"dept_mt:{did}"]["amount"] == 600.0
+    assert lines[f"dept_smp:{did}"]["amount"] == 400.0
+    assert res.json()["totals"]["base"] == 5000.0               # not 6000
+    w = {x["code"]: x for x in res.json()["warnings"]}
+    assert "override_split" in w and f"'dept:{did}'" in w["override_split"]["message"]
+    # a second refresh: the split lines exist now, nothing is taken twice
+    res = await client.post(_url(cid, f"/{o['id']}/refresh"), headers=sales)
+    lines = {l["key"]: l for l in res.json()["data"]["cost_lines"]}
+    assert lines[f"dept:{did}"]["amount"] == 4000.0
+    # Sales sets the amount: checked, the warning goes
+    cl = list(lines.values())
+    next(l for l in cl if l["key"] == f"dept:{did}")["amount"] = 3900
+    res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": {"cost_lines": cl}},
+                             headers=sales)
+    assert res.status_code == 200
+    assert "override_split" not in {x["code"] for x in res.json()["warnings"]}

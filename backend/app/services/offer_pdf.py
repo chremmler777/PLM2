@@ -395,10 +395,42 @@ KIND_STYLE = {
 }
 WORK_STYLE = (PLAN_GRAY, None, "Planned work")
 MILESTONE_GROUP = "Milestones"
+# An idea block (quote plan, not committed): hatched in its kind's colour,
+# outside the offered weeks from order.
+IDEA_LABEL = "Idea (option, not in the timing)"
 
 
 def _is_milestone(t: dict) -> bool:
     return t.get("kind") == "milestone" or int(_f(t.get("duration"))) == 0
+
+
+def _is_idea(t: dict) -> bool:
+    return bool(t.get("idea"))
+
+
+def _hatch(dwg: Drawing, x0: float, y0: float, w: float, h: float,
+           color, step: float = 1.1 * mm) -> None:
+    """Diagonal hatch lines inside the box (x0, y0, w, h), clipped by hand
+    (reportlab graphics shapes have no clip path)."""
+    x1, k = x0 + w, x0 - h
+    while k < x1:
+        a, b = max(k, x0), min(k + h, x1)
+        if b > a:
+            dwg.add(Line(a, y0 + (a - k), b, y0 + (b - k),
+                         strokeColor=color, strokeWidth=0.45))
+        k += step
+
+
+def _idea_bar(dwg: Drawing, x0: float, y0: float, w: float, h: float,
+              kind: str | None) -> None:
+    """A hatched bar with a dashed outline: white inside, the kind's colour
+    in the hatch, so it never reads as committed work."""
+    fill, stroke, _ = KIND_STYLE.get(kind or "", WORK_STYLE)
+    ink = stroke or (MID_GRAY if fill in (WHITE, PLAN_GRAY) else fill)
+    dwg.add(Rect(x0, y0, w, h, fillColor=WHITE, strokeColor=None))
+    _hatch(dwg, x0, y0, w, h, ink)
+    dwg.add(Rect(x0, y0, w, h, fillColor=None, strokeColor=ink,
+                 strokeWidth=0.5, strokeDashArray=[1.2, 0.8]))
 
 
 def _chart_rows(tasks: list[dict]) -> list[tuple[str, object]]:
@@ -567,8 +599,16 @@ def _plan_charts(tasks: list[dict], width: float, loc: str = "de") -> list[Drawi
             if ms:
                 cx = x(t["start"]) + min(chart_w / span, 3 * mm) / 2
                 cy, rad = y + row_h / 2, 1.3 * mm
+                # an idea milestone is an outline: an option, not a date
+                idea = _is_idea(t)
                 dwg.add(Polygon([cx, cy + rad, cx + rad, cy, cx, cy - rad, cx - rad, cy],
-                                fillColor=BLACK, strokeColor=None))
+                                fillColor=WHITE if idea else BLACK,
+                                strokeColor=BLACK if idea else None,
+                                strokeWidth=0.6 if idea else 0))
+            elif _is_idea(t):
+                x0, x1 = x(t["start"]), x(max(t["end"], t["start"]))
+                _idea_bar(dwg, x0, y + 0.8 * mm, max(0.8, x1 - x0),
+                          row_h - 1.6 * mm, t.get("kind"))
             else:
                 fill, stroke, _ = KIND_STYLE.get(t.get("kind") or "", WORK_STYLE)
                 x0, x1 = x(t["start"]), x(max(t["end"], t["start"]))
@@ -597,7 +637,9 @@ def _kind_legend(tasks: list[dict], width: float) -> Drawing | None:
     for t in tasks:
         if not (t.get("start") and t.get("end")):
             continue
-        if _is_milestone(t):
+        if _is_idea(t):
+            item = ("idea", None, None, IDEA_LABEL)
+        elif _is_milestone(t):
             item = ("milestone", BLACK, None, "Milestone")
         else:
             fill, stroke, label = KIND_STYLE.get(t.get("kind") or "", WORK_STYLE)
@@ -605,13 +647,16 @@ def _kind_legend(tasks: list[dict], width: float) -> Drawing | None:
         if item[0] not in seen:
             seen.add(item[0])
             items.append(item)
-    if len(items) < 2:
+    # a single kind needs no key, unless it is an idea: always explained
+    if len(items) < 2 and not any(i[0] == "idea" for i in items):
         return None
     size, gap, fs = 2.6 * mm, 4 * mm, 6.8
     dwg = Drawing(width, 4 * mm)
     x0, cy = 0.0, 2 * mm
     for key, fill, stroke, label in items:
-        if key == "milestone":
+        if key == "idea":
+            _idea_bar(dwg, x0, cy - size / 2, size, size, None)
+        elif key == "milestone":
             r = size / 2
             cx = x0 + r
             dwg.add(Polygon([cx, cy + r, cx + r, cy, cx, cy - r, cx - r, cy],
@@ -926,7 +971,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
         ms = [m for m in timing.get("milestones") or [] if isinstance(m, dict)]
         if ms:
             rows = [[_p("Key milestone", head_c), _p("Planned", head_r)]]
-            rows += [[_p(m.get("label"), cell, CELL_TEXT_MAX), _p(_d(m.get("date"), loc), cell_r)]
+            rows += [[_p(f"{_clean(m.get('label'))} (option)" if m.get("idea")
+                         else m.get("label"), cell, CELL_TEXT_MAX),
+                      _p(_d(m.get("date"), loc), cell_r)]
                      for m in ms]
             first += [Spacer(1, 2.5 * mm), table(rows, [width * 0.75, width * 0.25])]
         tasks = ctx.get("tasks") or []

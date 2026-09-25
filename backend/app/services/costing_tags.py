@@ -33,7 +33,6 @@ DEPARTMENT_CATEGORIES = {
         ("spare_part", "Ersatzteil", "Spare part", "money"),
         ("external_design", "Externe Konstruktion", "External design", "money"),
         ("moldflow", "Moldflow", "Moldflow", "money"),
-        ("sampling", "Bemusterung", "Sampling", "time"),
         ("trial_support", "Versuchsbegleitung", "Trial support", "time"),
     ],
     "Process Engineer": [
@@ -102,7 +101,6 @@ LEGACY_CATEGORIES = [
     ("external_design", "Externe Konstruktion", "External design", "money"),
     ("moldflow", "Moldflow", "Moldflow", "money"),
     ("testing", "Erprobung", "Testing", "time"),
-    ("sampling", "Bemusterung", "Sampling", "time"),
     ("measurement", "Messung", "Measurement", "time"),
     ("prototyping", "Prototypen", "Prototyping", "money"),
     ("packaging_change", "Verpackungsänderung", "Packaging change", "money"),
@@ -110,6 +108,14 @@ LEGACY_CATEGORIES = [
     ("automation", "Automatisierung", "Automation", "money"),
     ("documentation", "Dokumentation", "Documentation", "time"),
     ("other", "Sonstiges", "Other", "money"),
+]
+
+
+# Categories no longer offered for new lines, kept so the rows raised under
+# them still read with a label. "sampling": a sampling trial is priced per
+# trial of the machine class (a sampling line), not as own hours.
+RETIRED_CATEGORIES = [
+    ("sampling", "Bemusterung", "Sampling", "time"),
 ]
 
 
@@ -129,8 +135,10 @@ def tags_for(department_name: str | None) -> list[dict]:
 
 
 def label_for(key: str) -> str | None:
-    """English label for any coded key, wherever it lives."""
-    for items in (COMMON_CATEGORIES, LEGACY_CATEGORIES, *DEPARTMENT_CATEGORIES.values()):
+    """English label for any coded key, wherever it lives (retired keys
+    included: old rows keep their label)."""
+    for items in (COMMON_CATEGORIES, LEGACY_CATEGORIES, *DEPARTMENT_CATEGORIES.values(),
+                  RETIRED_CATEGORIES):
         for k, _de, en, _t in items:
             if k == key:
                 return en

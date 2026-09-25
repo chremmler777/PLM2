@@ -65,7 +65,7 @@ async def test_acceptance_stops_the_clock_decides_the_bank_build_and_is_final(
     await client.patch(_url(cid, f"/{o['id']}"), json={"data": {
         "timing": {"include": False},
         "changeover": {"mode": "customer_pays_scrap", "scrap_qty": 10,
-                       "scrap_unit_price": "2,5"}}}, headers=sales)
+                       "scrap_unit_price": "2.5"}}}, headers=sales)
     assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
                               headers=sales)).status_code == 200
     res = await _accept(client, sales, cid)
@@ -282,13 +282,18 @@ async def test_recipient_missing_warning(client, offer_world):
 # --- review 4: number reading, same vectors as offerFormat.test.ts -----------
 
 NUMBER_VECTORS = [
-    ("1.234", 1234), ("12.345.678", 12345678), ("1.234,5", 1234.5), ("1,5", 1.5),
-    ("1.5", 1.5), ("1.23", 1.23), ("-2.000", -2000), ("1 234,50", 1234.5),
-    ("1,", 1), ("", None), ("abc", None), ("1.23.4", None), ("1.23,4", None),
-    ("1,2,3", None), ("0.125", 0.125), ("-0.125", -0.125), ("0.500", 0.5),
-    ("1.2345", 1.2345), ("1.234,56", 1234.56), ("0.125,5", None),
-    # backend extras: en-US with both separators, and junk
-    ("1,234.50", 1234.5), ("1_000", None), ("12,34.5", None),
+    # the frontend's readNumberInput vectors (lib/format.test.ts)
+    ("1.2345", 1.2345), ("0.500", 0.5), ("12.5", 12.5), ("1.23", 1.23),
+    ("1234.500", 1234.5), ("12 500", 12500), ("1 234 567.25", 1234567.25),
+    ("12\u00a0500", 12500), ("12\u202f500", 12500), (" 42 ", 42),
+    ("1,234.5", 1234.5), ("12,500", 12500), ("1,234,567.5", 1234567.5),
+    ("-2,000", -2000), ("0.125", 0.125), ("-0.125", -0.125),
+    ("1.234", None), ("12.500", None), ("-1.234", None), ("1.234.567", None),
+    ("12,5", None), ("1,", None), ("0,500", None), ("1.234,5", None),
+    ("1,2345", None), ("12 5", None), ("1 2", None), ("12 50", None),
+    ("1 234,5", None), ("1.5 0", None), ("1e5", None),
+    ("", None), ("abc", None), ("1.23.4", None), ("1,2,3", None),
+    ("1_000", None), ("12,34.5", None),
     # Swiss apostrophe grouping is refused, as on the frontend
     ("1'234", None), ("1'234,50", None),
 ]

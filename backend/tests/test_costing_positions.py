@@ -450,7 +450,10 @@ async def test_costing_tags_offer_common_plus_department_extras(
     items = res.json()["items"]
     by_key = {i["key"]: i for i in items}
     assert by_key["hot_runner"]["entry_type"] == "money" and by_key["hot_runner"]["extra"]
-    assert by_key["sampling"]["entry_type"] == "time"
+    assert by_key["trial_support"]["entry_type"] == "time"
+    # sampling is priced per trial of the machine class now: not an own-time
+    # category any more
+    assert "sampling" not in by_key
     assert by_key["hot_runner"]["label_en"] == "Hot runner"
     assert "other_money" in by_key and "other_time" in by_key
     assert "robot_program" not in by_key      # Manufacturing's, not Tooling's
@@ -500,8 +503,8 @@ async def test_a_department_adds_its_own_category_typed_money_or_time(
 async def test_an_own_time_line_is_a_position_of_hours(client, admin_auth, costing):
     """A further line of the department's own hours: no money, valued at the
     rate in the summation like the standing effort answers."""
-    res = await _add_position(client, admin_auth, costing, label="Sampling support",
-                              kind="own_time", tag="sampling", hours=8.0,
+    res = await _add_position(client, admin_auth, costing, label="Trial support",
+                              kind="own_time", tag="trial_support", hours=8.0,
                               pricing="quote")   # nobody quotes our hours
     assert res.status_code == 201, res.text
     body = res.json()
@@ -1006,3 +1009,15 @@ async def test_the_database_refuses_a_duplicate_standing_row(session_factory, co
                                   kind="internal_effort", created_by=seed["admin_id"]))
         with pytest.raises(IntegrityError):
             await s.flush()
+
+
+async def test_retired_sampling_category_still_labels_old_rows(client, admin_auth, costing):
+    from app.services import costing_tags
+    assert "sampling" not in {i["key"] for i in costing_tags.tags_for("Tool Engineer")}
+    assert "sampling" not in {i["key"] for i in costing_tags.tags_for("Nobody configured")}
+    assert costing_tags.label_for("sampling") == "Sampling"
+    # a row raised under it before is still accepted and read back
+    res = await _add_position(client, admin_auth, costing, label="Old sampling support",
+                              kind="own_time", tag="sampling", hours=2.0)
+    assert res.status_code == 201, res.text
+    assert res.json()["tag"] == "sampling"

@@ -31,6 +31,7 @@ from app.models.cost_sheet import (
     OVERHEAD_KINDS, SAMPLING_MODES, FINANCE_DEPARTMENT, DEFAULT_REVIEW_MONTHS,
     SETTING_REVIEW_MONTHS, SETTING_PLANT_CURRENCY_CONFIRMED, CURRENCIES,
 )
+from app.core.display import fmt_date
 from app.models.entities import Plant
 from app.models.workflow import Department
 from app.utils.clock import business_today
@@ -255,19 +256,22 @@ async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
                   today: Optional[date] = None) -> CostSheetVersion:
     """Freeze a draft. valid_from must lie after the latest published
     version's, which then ends the day before. A valid_from in the past
-    re-prices everything booked since then, so it needs confirm_backdated.
+    prices the hours booked since then (and lines without a rate) from the
+    new version, so it needs confirm_backdated; lines already priced keep
+    their rate snapshot.
     A draft identical to the version it was copied from is refused."""
     _require_draft(v)
     latest = await latest_published(db, v.organization_id)
     if latest is not None and valid_from <= latest.valid_from:
         raise CostSheetError(
-            f"Valid from must be after {latest.valid_from.isoformat()} "
+            f"Valid from must be after {fmt_date(latest.valid_from)} "
             f"(version {latest.version})", 422)
     if not v.rates:
         raise CostSheetError("A version needs at least one position rate", 422)
     if valid_from < (today or business_today()) and not confirm_backdated:
         raise CostSheetError(
-            "Valid from lies in the past: costs booked since then would be re-priced. "
+            "Valid from lies in the past. Lines already priced keep their rate; "
+            "hours booked since then and lines without a rate use the new version. "
             "Confirm the backdated publish to go ahead", 422)
     prev = await previous_version(db, v)
     if prev is not None and diff_is_empty(diff_versions(prev, v)):

@@ -117,7 +117,7 @@ async def test_own_time_priced_from_the_cost_sheet_with_snapshot(
     assert line["rate"] == 21.5 and line["currency"] == "USD"
     assert line["cost_sheet_version_id"] == vid and line["cost_sheet_version"] == 1
     assert line["rate_source"] == "cost_sheet" and line["rate_is_snapshot"]
-    assert line["rate_label"] == "Cost sheet v1, Tool Engineer, Engineer, 21,50 USD/h"
+    assert line["rate_label"] == "Cost sheet v1, Tool Engineer, Engineer, 21.50 USD/h"
     assert line["line_value"] == 107.5 and line["rate_missing"] is False
     assert line["rate_match"] == "department+position+plant"
 
@@ -178,7 +178,7 @@ async def test_department_rate_only_without_any_cost_sheet(
     line = await _add(client, admin_auth, world, hours=2)
     assert line["rate"] == 65 and line["rate_source"] == "department_rate"
     assert line["cost_sheet_version_id"] is None
-    assert line["rate_label"] == "Department rate, Tool Engineer, 65,00 USD/h"
+    assert line["rate_label"] == "Department rate, Tool Engineer, 65.00 USD/h"
     # once a version exists the old table is never read: no row = no rate
     await _version(session_factory, world["org_id"], rates=[
         dict(department_id=world["qa"], hourly_rate=10, currency="USD")])
@@ -218,10 +218,10 @@ async def test_machine_time_and_sampling_lines(client, admin_auth, world, sessio
     assert m["machine_class_id"] is None and m["machine_class_used_id"] == world["big"]
     assert m["machine_class_from_change"] and m["rate"] == 85
     assert m["line_value"] == 255 and m["est_cost"] is None
-    assert m["rate_label"] == "Cost sheet v1, Machine 200-450 t, 85,00 USD/h"
+    assert m["rate_label"] == "Cost sheet v1, Machine 200-450 t, 85.00 USD/h"
     sp = await _add(client, admin_auth, world, kind="sampling", label="T1", trials=2)
     assert sp["rate"] == 1250 and sp["line_value"] == 2500 and sp["rate_unit"] == "trial"
-    assert sp["rate_label"] == "Cost sheet v1, Sampling 200-450 t, 1.250,00 USD/trial"
+    assert sp["rate_label"] == "Cost sheet v1, Sampling 200-450 t, 1,250.00 USD/trial"
     # a class without a sampling row cannot price
     bad = await _add(client, admin_auth, world, kind="sampling", label="T2", trials=1,
                      machine_class_id=world["small"])

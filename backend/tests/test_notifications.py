@@ -325,6 +325,13 @@ async def test_sweep_due_soon_overdue_and_at_risk_dedup(session_factory, seed):
             Notification.kind == "overdue"))).scalars().all()
         assert len(overdue_rows) == 1
         assert overdue_rows[0].subject_key == f"task:{overdue_task.id}:overdue"
+        # dates in bodies are written like the UI shows them: "25 Sep 2026"
+        from app.core.display import fmt_date
+        assert overdue_rows[0].body == (
+            f"Your task is overdue (was due {fmt_date(overdue_task.due_date)}).")
+        assert due_soon_rows[0].body == (
+            f"Your task is due {fmt_date(due_soon_task.due_date)}.")
+        assert "-" not in due_soon_rows[0].body.split("due ")[1]
 
         risk_rows = (await session.execute(select(Notification).where(
             Notification.user_id == seed["engineer_id"],

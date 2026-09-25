@@ -17,10 +17,13 @@ reason on the record.
 import copy
 import math
 import re
+import threading
+from collections import OrderedDict
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from app.utils.clock import business_today
+from app.core.display import fmt_date
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +34,7 @@ from app.models.change_offer import ChangeOffer, OFFER_VALIDITY_DAYS
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services.change_plan_service import (
-    ChangePlanService, PlanConflict, PlanForbidden,
+    ChangePlanService, PlanConflict, PlanForbidden, e_links, validate_plan,
 )
 from app.services.change_service import ChangeError, ChangeService
 
@@ -54,6 +57,10 @@ DEFAULT_FACTORS = [
     ("discount", "Discount", "pct", -1),
 ]
 SEEDED_LINE_PREFIXES = ("dept:", "dept_ext:", "pos:", "dept_mt:", "dept_smp:")
+# On a department's internal line whose Sales override was reduced by the
+# machine time and sampling lines split out of it (refresh): the amount it
+# was set to. While the line still has that amount, the offer warns.
+SPLIT_REDUCED_KEY = "split_reduced_amount"
 
 # What the customer reads in the cost breakdown (final walk P2-7): the kind
 # of work, never our department names. Each seeded line carries its
@@ -93,8 +100,17 @@ def _bool(v, default: bool = False) -> bool:
 
 
 def _num(v, default: float = 0.0) -> float:
-    """Lenient number for reads: never raises, understands "12,5"."""
+    """Lenient number for reads: never raises; floats pass through, text is
+    read by read_number (en-US)."""
     return parse_number(v, strict=False, default=default)
+
+
+# Rendered PDFs of versions that went out (frozen snapshot), by (offer id,
+# version, status, updated_at, change number): a sent PDF never changes, so
+# a second download is instant. Small and per process.
+PDF_CACHE_SIZE = 32
+_PDF_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_PDF_LOCK = threading.Lock()
 
 
 def _issue(code: str, message: str) -> dict:
@@ -123,37 +139,41 @@ def default_data() -> dict:
     }
 
 
-_DOT_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(\.\d{3})+$")
-_COMMA_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(,\d{3})+$")
-_PLAIN = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
+_COMMA_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(,\d{3})+$", re.ASCII)
+# "1.234", "12.500": German thousands or a decimal? Refused as ambiguous.
+_DOT_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(\.\d{3})+$", re.ASCII)
+# An integer part grouped by spaces: "12 500", "1 234 567" (also no-break).
+_SPACE_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}([ \u00a0\u202f]\d{3})+$", re.ASCII)
+_SPACES = re.compile(r"[ \u00a0\u202f]")
+_PLAIN = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$", re.ASCII)
 
 
 def read_number(text: str) -> Optional[float]:
-    """The Offer tab's parseNum rule (offerFormat.ts), plus en-US input with
-    both separators: comma is the decimal separator and dots group thousands
-    ("1.234" = 1234, "1.234,5" = 1234.5, "1,5" = 1.5); a lone dot that is not
-    a thousands group is a decimal point ("1.5", "0.125", "1.2345"); "1,234.50"
-    (comma groups, dot last) is 1234.5. None for anything else ("1.23.4",
-    "1,2,3", "1_000", "1'234", "abc")."""
-    t = re.sub(r"\s", "", text).replace("\u00a0", "")
+    """A typed number, read en-US like the UI shows it (the frontend's
+    readNumberInput in lib/format.ts, same vectors): "." is the decimal point;
+    "," only groups thousands, every group exactly three digits ("12,500",
+    "1,234,567.5"); a space only groups thousands the same way ("12 500",
+    "1 234.5"). None (refused, not guessed) for any other comma ("12,5",
+    "1,", "0,500", "1.234,5"), for a dot that looks like German thousands
+    ("1.234", "12.500", "1.234.567"; "1.2345", "0.500" and "12.5" are
+    decimals), for any other space ("12 5") and for junk ("1e5", "1_000",
+    "1'234", "abc")."""
+    t = text.strip()
     if not t:
         return None
-    if "," in t and "." in t and t.rfind(".") > t.rfind(","):
-        int_part, _, frac = t.rpartition(".")
-        if not _COMMA_GROUPS.match(int_part) or not frac.isdigit():
+    if re.search(r"\s", t):
+        int_part, dot, frac = t.partition(".")
+        if not _SPACE_GROUPS.match(int_part):
             return None
-        norm = int_part.replace(",", "") + "." + frac
-    elif "," in t:
-        int_part, *rest = t.split(",")
-        if len(rest) != 1:
+        t = _SPACES.sub("", int_part) + dot + frac
+    if _DOT_GROUPS.match(t):
+        return None
+    norm = t
+    if "," in t:
+        int_part, dot, frac = t.partition(".")
+        if not _COMMA_GROUPS.match(int_part):
             return None
-        if "." in int_part and not _DOT_GROUPS.match(int_part):
-            return None
-        norm = int_part.replace(".", "") + "." + rest[0]
-    elif _DOT_GROUPS.match(t):
-        norm = t.replace(".", "")
-    else:
-        norm = t
+        norm = int_part.replace(",", "") + dot + frac
     if not _PLAIN.match(norm):
         return None
     try:
@@ -485,7 +505,8 @@ def snapshot_diff(prev: Optional[dict], cur: dict) -> list[dict]:
     out = []
 
     def tasks(snap):
-        return [(t.get("name"), t.get("start"), int(_num(t.get("duration"))))
+        return [(t.get("name"), t.get("start"), int(_num(t.get("duration"))),
+                 bool(t.get("idea")))
                 for t in snap.get("tasks") or [] if isinstance(t, dict)]
 
     def items(snap):
@@ -699,20 +720,25 @@ class OfferService:
 
     @staticmethod
     async def _quote_timing(session: AsyncSession, change: ChangeRequest) -> dict:
-        """Weeks from order and the key milestones, from the quote plan."""
-        tasks = [t for t in await ChangePlanService.tasks(session, change, "quote")
-                 if not t.is_idea]
-        if not tasks:
-            return {"weeks_from_order": None, "milestones": []}
-        order = next((t for t in tasks if t.kind == "milestone"), tasks[0])
-        last = max(t.end_date for t in tasks)
-        weeks = max(1, math.ceil((last - order.start_date).days / 7))
+        """Weeks from order and the key milestones, from the quote plan. Idea
+        blocks (not committed) never move the weeks; an idea milestone is
+        kept, marked "idea": True, so the customer reads it as an option."""
+        tasks = await ChangePlanService.tasks(session, change, "quote")
+        real = [t for t in tasks if not t.is_idea]
+        weeks = None
+        if real:
+            order = next((t for t in real if t.kind == "milestone"), real[0])
+            last = max(t.end_date for t in real)
+            weeks = max(1, math.ceil((last - order.start_date).days / 7))
         milestones = []
         for t in tasks:
             if t.kind in ("milestone", "sampling", "customer"):
                 when = (t.start_date if int(t.duration_days or 0) == 0
                         else t.end_date - timedelta(days=1))
-                milestones.append({"label": t.name, "date": when.isoformat()})
+                m = {"label": t.name, "date": when.isoformat()}
+                if t.is_idea:
+                    m["idea"] = True
+                milestones.append(m)
         return {"weeks_from_order": weeks, "milestones": milestones}
 
     @staticmethod
@@ -881,13 +907,23 @@ class OfferService:
         data = normalise(copy.deepcopy(offer.data or {}))
         fresh, _ = await OfferService._costing_basis(session, change)
         old = {l.get("key"): l for l in data["cost_lines"]}
+        fresh_by_key = {n["key"]: n for n in fresh}
         lines = []
         for n in fresh:
             o = old.get(n["key"])
             if o is not None:
                 n["include"] = bool(o.get("include", True))
                 if _num(o.get("amount")) != _num(o.get("source_amount")):
-                    n["amount"] = _num(o.get("amount"))
+                    amount = _num(o.get("amount"))
+                    split = OfferService._split_out_of(n["key"], old, fresh_by_key)
+                    if split:
+                        # The override (from before machine time and sampling
+                        # had their own lines) covered them too: take them
+                        # out so they are not counted twice; Sales re-checks.
+                        amount = round(max(0.0, amount - sum(
+                            _num(x["amount"]) for x in split)), 2)
+                        n[SPLIT_REDUCED_KEY] = amount
+                    n["amount"] = amount
             lines.append(n)
         lines += [l for l in data["cost_lines"]
                   if not str(l.get("key") or "").startswith(SEEDED_LINE_PREFIXES)]
@@ -908,6 +944,19 @@ class OfferService:
         return offer
 
     @staticmethod
+    def _split_out_of(key: str, old: dict, fresh_by_key: dict) -> list[dict]:
+        """For a department's internal line ("dept:{id}"): the machine time
+        and sampling lines the costing now splits out of it, when the offer
+        had none of them yet (an offer built before the split)."""
+        if not key.startswith("dept:"):
+            return []
+        did = key[len("dept:"):]
+        siblings = (f"dept_mt:{did}", f"dept_smp:{did}")
+        if any(k in old for k in siblings):
+            return []
+        return [fresh_by_key[k] for k in siblings if k in fresh_by_key]
+
+    @staticmethod
     async def send(session: AsyncSession, change: ChangeRequest,
                    offer: ChangeOffer, user: User, *,
                    received_at: Optional[date] = None,
@@ -921,11 +970,8 @@ class OfferService:
         if offer.version >= 2 and not note:
             raise ChangeError(
                 "A new offer version needs a note saying what changed")
-        if (offer.data or {}).get("timing", {}).get("include") and \
-                not await ChangePlanService.tasks(session, change, "quote"):
-            raise ChangeError(
-                "The offer includes timing but the quote plan is empty - plan "
-                "it first or leave timing out")
+        if (offer.data or {}).get("timing", {}).get("include"):
+            await OfferService._check_quote_plan(session, change)
         snapshot = await OfferService._snapshot(session, change)
         if offer.version >= 2:
             prev = await OfferService._previous_sent(session, change, offer)
@@ -974,6 +1020,29 @@ class OfferService:
         return offer
 
     @staticmethod
+    async def _check_quote_plan(session, change) -> None:
+        """An offer that states the timing needs a quote plan without errors
+        (the ones the Timing step shows: a block without a name, a negative
+        duration, a must-start/finish-on on a summary, a link to a block that
+        does not exist, a dependency loop). Same rule as the Offer tab's send
+        button; plan warnings and an empty recipient company never block."""
+        tasks = await ChangePlanService.tasks(session, change, "quote")
+        if not tasks:
+            raise ChangeError(
+                "The offer includes timing but the quote plan is empty - plan "
+                "it first or leave timing out")
+        links = await ChangePlanService.links(session, change, "quote")
+        math_links = e_links(links) + ChangePlanService._legacy_extra(tasks, links)
+        errors = validate_plan(
+            tasks, plan="quote", links=math_links,
+            cal=ChangePlanService.calendar(change, "quote"))["errors"]
+        if errors:
+            n = len(errors)
+            raise ChangeError(
+                f"The quote plan has {n} error{'' if n == 1 else 's'} "
+                f"({errors[0]['message']}) - fix it in Timing or leave timing out")
+
+    @staticmethod
     async def _previous_sent(session, change, offer) -> Optional[ChangeOffer]:
         """The version this one is compared against: the latest non-draft
         version before it."""
@@ -999,10 +1068,10 @@ class OfferService:
         today = business_today()
         if received > today + timedelta(days=1):
             raise ChangeError(
-                f"The receipt date {received.isoformat()} is in the future")
+                f"The receipt date {fmt_date(received)} is in the future")
         if received < today - timedelta(days=RECEIVED_MAX_PAST_DAYS):
             raise ChangeError(
-                f"The receipt date {received.isoformat()} is more than "
+                f"The receipt date {fmt_date(received)} is more than "
                 f"{RECEIVED_MAX_PAST_DAYS} days ago")
 
     @staticmethod
@@ -1044,7 +1113,7 @@ class OfferService:
         if offer is not None and OfferService.is_expired(offer) \
                 and not (override_reason or "").strip():
             raise ChangeError(
-                f"Offer v{offer.version} expired on {offer.valid_until.isoformat()} "
+                f"Offer v{offer.version} expired on {fmt_date(offer.valid_until)} "
                 "- give a reason (expired_override_reason) to accept it anyway")
 
     @staticmethod
@@ -1181,6 +1250,17 @@ class OfferService:
                 warnings.append(_issue(
                     "recipient_missing",
                     "The recipient company is empty: say who the offer is for"))
+            reduced = [l for l in data["cost_lines"]
+                       if l.get(SPLIT_REDUCED_KEY) is not None
+                       and _num(l.get("amount")) == _num(l.get(SPLIT_REDUCED_KEY))]
+            if o.status == "draft" and reduced:
+                warnings.append(_issue(
+                    "override_split",
+                    "Machine time and sampling now have their own lines: the "
+                    "amount set by hand on " + ", ".join(
+                        f"'{l.get('label')}'" for l in reduced)
+                    + " was reduced by them so they are not counted twice. "
+                    "Check it"))
             if not any(l.get("include", True) for l in data["cost_lines"]):
                 warnings.append(_issue("no_cost_lines", "No cost line is included"))
             if totals["total_one_time"] <= 0:
@@ -1221,7 +1301,7 @@ class OfferService:
             expired = OfferService.is_expired(o)
             if expired:
                 warnings.append(_issue(
-                    "expired", f"Offer v{o.version} expired on {o.valid_until.isoformat()}"))
+                    "expired", f"Offer v{o.version} expired on {fmt_date(o.valid_until)}"))
             out.append({
                 "id": o.id, "change_id": o.change_id, "version": o.version,
                 "status": o.status, "currency": o.currency, "data": data,
@@ -1270,16 +1350,22 @@ class OfferService:
         plant = await session.get(Plant, project.plant_id) if project else None
         org = (await session.get(Organization, plant.organization_id)
                if plant else None)
+        # one query for every impacted part (never a get per item)
+        part_ids = {it.part_id for it in change.impacted_items}
+        parts = ({p.id: p for p in (await session.execute(
+            select(Part).where(Part.id.in_(part_ids)))).scalars().all()}
+            if part_ids else {})
         items = []
         for it in change.impacted_items:
-            part = await session.get(Part, it.part_id)
+            part = parts.get(it.part_id)
             items.append({
                 "number": part.part_number if part else str(it.part_id),
                 "name": part.name if part else "",
                 "index": it.eng_level_after or it.eng_level_before or "",
             })
-        tasks = [t for t in await ChangePlanService.tasks(session, change, "quote")
-                 if not t.is_idea]
+        # idea blocks are kept, marked: the PDF draws them hatched, outside
+        # the committed finish
+        tasks = await ChangePlanService.tasks(session, change, "quote")
         return {
             "taken_at": datetime.utcnow().isoformat(),
             "org_name": org.name if org else "",
@@ -1294,7 +1380,8 @@ class OfferService:
             "tasks": [{"name": t.name, "lane": t.lane or "", "kind": t.kind,
                        "start": t.start_date.isoformat(),
                        "end": t.end_date.isoformat(),
-                       "duration": int(t.duration_days or 0)} for t in tasks],
+                       "duration": int(t.duration_days or 0),
+                       **({"idea": True} if t.is_idea else {})} for t in tasks],
         }
 
     @staticmethod
@@ -1315,17 +1402,32 @@ class OfferService:
             out["data"]["scope_text"] = (change.description or "").strip()
 
     @staticmethod
-    async def pdf_bytes(session: AsyncSession, change: ChangeRequest,
-                        offer: ChangeOffer) -> bytes:
-        """A draft renders from the change as it is now; a version that went
-        out renders from the snapshot taken when it was sent (legacy versions
-        sent before snapshots existed fall back to the live data)."""
-        from app.services.offer_pdf import render_offer_pdf
-        out = (await OfferService.serialize(session, change, [offer]))[0]
+    def _pdf_offer(offer: ChangeOffer) -> dict:
+        """The offer as the PDF reads it: its data and the totals the
+        customer sees. The internal cost is not on the PDF, so it is never
+        computed here (serialize's costing basis is the slow part)."""
+        data = normalise(offer.data)
+        data.pop(SNAPSHOT_KEY, None)
+        return {"id": offer.id, "version": offer.version, "status": offer.status,
+                "currency": offer.currency, "data": data,
+                "totals": compute_totals(data, 0.0),
+                "change_note": offer.change_note, "sent_at": offer.sent_at,
+                "valid_until": offer.valid_until}
+
+    @staticmethod
+    async def pdf_context(session: AsyncSession, change: ChangeRequest,
+                          offer: ChangeOffer) -> tuple[dict, Optional[tuple]]:
+        """What render_offer_pdf needs, and the cache key when the PDF can
+        be cached. A draft renders from the change as it is now; a version
+        that went out renders from the snapshot taken when it was sent, with
+        nothing recomputed (legacy versions sent before snapshots existed
+        fall back to the live data and are never cached)."""
+        out = OfferService._pdf_offer(offer)
         snap = (offer.data or {}).get(SNAPSHOT_KEY) if offer.status != "draft" else None
-        if offer.status != "draft" and not isinstance(snap, dict):
+        frozen = isinstance(snap, dict)
+        if offer.status != "draft" and not frozen:
             OfferService._legacy_pdf_defaults(change, offer, out)
-        if not isinstance(snap, dict):
+        if not frozen:
             snap = await OfferService._snapshot(session, change)
 
         def day(v):
@@ -1335,7 +1437,8 @@ class OfferService:
                 return None
         tasks = [{**t, "start": day(t.get("start")), "end": day(t.get("end"))}
                  for t in snap.get("tasks") or [] if isinstance(t, dict)]
-        return render_offer_pdf({
+        company = snap.get("company") if isinstance(snap.get("company"), dict) else None
+        ctx = {
             "org_name": snap.get("org_name") or "",
             "plant_name": snap.get("plant_name") or "",
             "plant_location": snap.get("plant_location") or "",
@@ -1345,9 +1448,46 @@ class OfferService:
             "items": snap.get("items") or [], "offer": out, "tasks": tasks,
             # A snapshot taken before the letterhead was frozen has none:
             # the renderer then uses the live profile.
-            "company": snap.get("company") if isinstance(snap.get("company"), dict)
-            else None,
-        })
+            "company": company,
+        }
+        # Only a fully frozen version is cached: a draft (or an old snapshot
+        # without its letterhead) follows live data the key cannot see.
+        key = ((offer.id, offer.version, offer.status, offer.updated_at,
+                change.change_number) if frozen and company is not None else None)
+        return ctx, key
+
+    @staticmethod
+    def pdf_cache_get(key: Optional[tuple]) -> Optional[bytes]:
+        if key is None:
+            return None
+        with _PDF_LOCK:
+            pdf = _PDF_CACHE.get(key)
+            if pdf is not None:
+                _PDF_CACHE.move_to_end(key)
+            return pdf
+
+    @staticmethod
+    def pdf_cache_put(key: Optional[tuple], pdf: bytes) -> None:
+        if key is None:
+            return
+        with _PDF_LOCK:
+            _PDF_CACHE[key] = pdf
+            _PDF_CACHE.move_to_end(key)
+            while len(_PDF_CACHE) > PDF_CACHE_SIZE:
+                _PDF_CACHE.popitem(last=False)
+
+    @staticmethod
+    async def pdf_bytes(session: AsyncSession, change: ChangeRequest,
+                        offer: ChangeOffer) -> bytes:
+        """The offer PDF (see pdf_context), rendered in this thread; the
+        route renders in the thread pool instead."""
+        from app.services.offer_pdf import render_offer_pdf
+        ctx, key = await OfferService.pdf_context(session, change, offer)
+        pdf = OfferService.pdf_cache_get(key)
+        if pdf is None:
+            pdf = render_offer_pdf(ctx)
+            OfferService.pdf_cache_put(key, pdf)
+        return pdf
 
     @staticmethod
     async def expiring_offer(session: AsyncSession,
