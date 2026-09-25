@@ -1,4 +1,6 @@
-import { formatDate, formatMoney, formatNumber, formatPercent, formatPiecePrice } from '../../../lib/format'
+import {
+  formatCalendarDate, formatDate, formatMoney, formatMoneyDelta, formatNumber, formatPercent, formatPiecePrice,
+} from '../../../lib/format'
 import type { OfferVsActual, OvaLine } from '../../../types/pnl'
 import { TONE_CLASS, varianceTone } from './variance'
 import { plantText } from '../../../lib/plantName'
@@ -24,7 +26,7 @@ function Chip({ line, currency }: { line: OvaLine; currency: string }) {
   return (
     <span data-testid={`ova-chip-${line.key}`} data-tone={tone}
       className={`rounded px-1.5 py-0.5 text-[11px] tabular-nums ${TONE_CLASS[tone]}`}>
-      {line.variance > 0 ? '+' : ''}{money(line.variance, currency)}
+      {formatMoneyDelta(line.variance, currency)}
     </span>
   )
 }
@@ -98,7 +100,7 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
                 className={`border-t border-slate-700/60 ${l.kind === 'info' ? 'text-slate-500' : 'text-slate-200'}`}>
                 <td className="py-1 pr-2">
                   {l.label}
-                  {!l.in_margin && <span className="ml-1 text-[10px] text-slate-500">(not in margin)</span>}
+                  {!l.in_margin && <span className="ml-1 text-[11px] text-slate-500">(not in margin)</span>}
                 </td>
                 <td className="py-1 px-2 text-right tabular-nums">{money(l.planned, lineCur(l))}</td>
                 <td className="py-1 px-2 text-right tabular-nums">{money(l.actual, lineCur(l))}</td>
@@ -109,7 +111,7 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
             <tr className="border-t border-slate-600 font-semibold text-slate-100">
               <td className="py-1.5 pr-2">
                 Margin
-                {mismatch && <span className="ml-1 text-[10px] font-normal text-slate-500">(not across currencies)</span>}
+                {mismatch && <span className="ml-1 text-[11px] font-normal text-slate-500">(not across currencies)</span>}
               </td>
               <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-planned-margin">
                 {money(mr.planned, cur)}
@@ -129,7 +131,7 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
                 {mr.variance !== null && mr.variance !== undefined && (
                   <span data-testid="ova-margin-variance" data-tone={marginTone}
                     className={`rounded px-1.5 py-0.5 text-[11px] tabular-nums ${TONE_CLASS[marginTone]}`}>
-                    {mr.variance > 0 ? '+' : ''}{money(mr.variance, cur)}
+                    {formatMoneyDelta(mr.variance, cur)}
                   </span>
                 )}
               </td>
@@ -149,8 +151,8 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
       <div className="mt-2 space-y-1 text-xs text-slate-400">
         <div data-testid="ova-timing">
           <span className="text-slate-500">Timing: </span>
-          baseline {formatDate(t.baseline_finish)}
-          {t.actual_finish ? `, finished ${formatDate(t.actual_finish)}` : `, forecast ${formatDate(t.forecast_finish)}`}
+          baseline {formatCalendarDate(t.baseline_finish)}
+          {t.actual_finish ? `, finished ${formatCalendarDate(t.actual_finish)}` : `, forecast ${formatCalendarDate(t.forecast_finish)}`}
           {slip !== null && (
             <span className={`ml-2 rounded px-1.5 py-0.5 ${slip > 0 ? TONE_CLASS.rose : TONE_CLASS.green}`}>
               {slip > 0 ? `${slip} ${t.unit} late` : slip < 0 ? `${-slip} ${t.unit} early` : 'on time'}

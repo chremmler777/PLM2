@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
+import { toastError } from '../../lib/apiError';
 import { useDepartments } from '../../hooks/queries/useWorkflows';
 import {
   alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, tagLabel,
 } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
-import { addDaysIso, daysUntil, formatDate, formatMoney, formatNumber, todayIso } from '../../lib/format';
+import { addDaysIso, daysUntil, formatCalendarDate, formatDate, formatDays, formatHours, formatMoney, formatNumber, todayIso } from '../../lib/format';
+import { CircleAlert, Star } from 'lucide-react';
+import { LoadingSkeleton } from '../common/LoadingSkeleton';
+import { btnSm } from '../common/buttonStyles';
 import type { CostPosition, SummationPositionLine } from '../../types/change';
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
 
 /**
  * Sales' vendor decision on one quoted position.
@@ -40,7 +40,7 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
       qc.invalidateQueries({ queryKey: ['costing-positions', changeId] });
       qc.invalidateQueries({ queryKey: ['change-summation', changeId] });
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the decision'),
+    onError: (e: unknown) => toastError(e, 'Could not record the decision'),
   });
 
   const pick = (offerId: number) => {
@@ -62,7 +62,7 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
       </div>
       <div data-testid={`vendor-recommended-${p.id}`} className="text-xs text-slate-400">
         {fav
-          ? <>{t('vendor.recommended')}: <span className="text-amber-300">{fav.vendor_name} ★</span></>
+          ? <>{t('vendor.recommended')}: <span className="inline-flex items-center gap-1 text-amber-300">{fav.vendor_name}<Star aria-hidden="true" size={11} fill="currentColor" /></span></>
           : t('vendor.noRecommendation')}
       </div>
 
@@ -77,7 +77,7 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
           )}
           {diverges && (
             <span data-testid={`vendor-divergence-${p.id}`}
-              className="ml-2 rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[10px] leading-tight">
+              className="ml-2 rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[11px] leading-tight">
               {t('vendor.againstRecommendation')}
             </span>
           )}
@@ -104,7 +104,12 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
                 ? 'border-sky-500 bg-sky-900/40 text-sky-200'
                 : 'border-slate-600 text-slate-300 hover:bg-slate-700'}`}>
             {o.chosen ? t('vendor.chosen') : t('vendor.choose')}: {o.vendor_name}
-            {o.favorite && ' ★'}
+            {o.favorite && (
+              <>
+                <Star aria-hidden="true" size={11} fill="currentColor" className="ml-1 inline text-amber-300" />
+                <span className="sr-only"> ({t('vendor.recommended')})</span>
+              </>
+            )}
           </button>
         ))}
       </div>
@@ -124,7 +129,7 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
             <button type="button" data-testid={`vendor-reason-confirm-${p.id}`}
               disabled={reason.trim() === '' || choose.isPending}
               onClick={() => choose.mutate({ offerId: pendingOfferId, reason: reason.trim() })}
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-[11px] disabled:opacity-50">
+              className={btnSm.primary}>
               {t('vendor.confirm')}
             </button>
             <button type="button" data-testid={`vendor-reason-cancel-${p.id}`}
@@ -171,7 +176,7 @@ export default function SummationView({
   const deptName = (id: number) =>
     departments.find((d) => d.id === id)?.name ?? `#${id}`;
   const plantName = (id: number) => plants.find((p) => p.id === id)?.name ?? `Plant #${id}`;
-  if (isLoading) return <div className="text-slate-400 text-sm p-4">Loading…</div>;
+  if (isLoading) return <LoadingSkeleton count={2} />;
   if (!data) return null;
   const tot = data.totals;
   // Every figure below is the backend's, in the costing currency: the
@@ -208,10 +213,14 @@ export default function SummationView({
   const canDecideVendor = canQuote && status === 'quoting';
   // Departments in position order, plus any that only show up in the summation.
   const posDeptIds = [...new Set(allPositions.map((p) => p.department_id))];
+  // Nothing costed gives 0 d and +0 min/part: noise, not data. Shown once real.
+  const leadDays = data.max_lead_time_days ?? 0;
+  const minuteRows = (data.lifecycle_minutes_by_plant ?? []).filter((r) => r.minutes_per_part !== 0);
+  const totalMinutes = data.total_minutes_per_part ?? 0;
 
   const breakdownHeaders = (
     <tr className="text-xs text-slate-400 border-b border-slate-700">
-      <th className="text-left pb-1">-</th>
+      <th className="text-left pb-1"><span className="sr-only">{t('by_plant')}</span></th>
       <th className="text-right pb-1">{t('one_time')} {t('internal')}</th>
       <th className="text-right pb-1">{t('one_time')} {t('external')}</th>
       <th className="text-right pb-1">{t('lifecycle')} {t('internal')}</th>
@@ -312,9 +321,10 @@ export default function SummationView({
                           {p.tag && <span className="text-slate-500">{tagLabel(p.tag)}</span>}
                           <span className="text-slate-500">{t(`costpos.kind.${p.kind}`)}</span>
                           {fav && (
-                            <span className="text-amber-300"
-                              data-testid={`summation-position-vendor-${p.id}`}>
-                              ★ {fav.vendor_name}
+                            <span className="inline-flex items-center gap-1 text-amber-300"
+                              data-testid={`summation-position-vendor-${p.id}`}
+                              title={t('vendor.recommended')}>
+                              <Star aria-hidden="true" size={11} fill="currentColor" />{fav.vendor_name}
                             </span>
                           )}
                           {chosen && (
@@ -325,7 +335,7 @@ export default function SummationView({
                           )}
                           {decisionDivergesOf(p) && (
                             <span data-testid={`summation-position-divergence-${p.id}`}
-                              className="rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[10px] leading-tight">
+                              className="rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[11px] leading-tight">
                               {t('vendor.againstRecommendation')}
                             </span>
                           )}
@@ -334,7 +344,7 @@ export default function SummationView({
                           {(p.kind === 'sampling' ? (p.trials ?? 0) : (p.hours ?? 0)) > 0 && (
                             <span data-testid={`summation-position-value-${p.id}`}
                               className={p.rate_missing ? 'text-amber-300' : 'text-slate-500'}>
-                              {p.kind === 'sampling' ? `${p.trials} ${t('costpos.trialsShort')}` : `${p.hours} h`}
+                              {p.kind === 'sampling' ? `${formatNumber(p.trials)} ${t('costpos.trialsShort')}` : formatHours(p.hours)}
                               {' · '}
                               {p.rate_missing ? t('costpos.noRate')
                                 : p.line_value != null ? formatMoney(p.line_value, p.rate_currency ?? cur) : '-'}
@@ -364,7 +374,7 @@ export default function SummationView({
           <table className="w-full text-xs">
             <thead>
               <tr className="text-xs text-slate-400 border-b border-slate-700">
-                <th className="text-left pb-1">-</th>
+                <th className="text-left pb-1"><span className="sr-only">{t('by_department')}</span></th>
                 <th className="text-right pb-1">{t('one_time')} {t('internal')}</th>
                 <th className="text-right pb-1">{t('one_time')} {t('external')}</th>
                 <th className="text-right pb-1">{t('lifecycle')} {t('internal')}</th>
@@ -427,43 +437,45 @@ export default function SummationView({
 
       {/* Timing: the change is only as quick as its slowest department, and the
           production-time delta is what the piece price will have to carry. */}
-      {(data.max_lead_time_days != null || data.total_minutes_per_part != null) && (
+      {(leadDays > 0 || minuteRows.length > 0 || totalMinutes !== 0) && (
         <div data-testid="summation-timing">
           <div className="text-xs font-semibold text-slate-300 mb-1">{t('summation.timing')}</div>
           <table className="w-full text-xs">
             <tbody>
-              {data.max_lead_time_days != null && (
+              {leadDays > 0 && (
                 <tr className="border-b border-slate-800">
                   <td className="py-0.5">{t('summation.maxLeadTime')}</td>
                   <td className="text-right tabular-nums" data-testid="summation-lead-time">
-                    {data.max_lead_time_days} {t('summation.days')}
+                    {formatDays(leadDays)}
                     {deadline?.date && (
                       <span className="block text-slate-500">
                         {t('summation.earliestDone')}:{' '}
-                        {formatDate(addDaysIso(todayIso(), Math.ceil(data.max_lead_time_days)))}
+                        {formatCalendarDate(addDaysIso(todayIso(), Math.ceil(leadDays)))}
                         {' · '}{deadline.label}:{' '}
-                        {formatDate(deadline.date)}
-                        {Math.ceil(data.max_lead_time_days) > daysUntil(deadline.date) && (
-                          <span className="text-red-400"> ⚠ {t('summation.pastDeadline')}</span>
+                        {formatCalendarDate(deadline.date)}
+                        {Math.ceil(leadDays) > daysUntil(deadline.date) && (
+                          <span className="inline-flex items-center gap-1 text-red-300">
+                            {' '}<CircleAlert aria-hidden="true" size={12} />{t('summation.pastDeadline')}
+                          </span>
                         )}
                       </span>
                     )}
                   </td>
                 </tr>
               )}
-              {(data.lifecycle_minutes_by_plant ?? []).map((row) => (
+              {minuteRows.map((row) => (
                 <tr key={row.plant_id} className="border-b border-slate-800">
                   <td className="py-0.5">{plantName(row.plant_id)}</td>
                   <td className="text-right tabular-nums">
-                    {row.minutes_per_part > 0 ? '+' : ''}{row.minutes_per_part} {t('summation.perPart')}
+                    {formatNumber(row.minutes_per_part, { sign: true })} {t('summation.perPart')}
                   </td>
                 </tr>
               ))}
-              {data.total_minutes_per_part != null && (
+              {totalMinutes !== 0 && (
                 <tr className="font-semibold">
                   <td>{t('costing.minutesShort')}</td>
                   <td className="text-right tabular-nums" data-testid="summation-minutes">
-                    {data.total_minutes_per_part > 0 ? '+' : ''}{data.total_minutes_per_part}
+                    {formatNumber(totalMinutes, { sign: true })}
                   </td>
                 </tr>
               )}
@@ -480,12 +492,12 @@ export default function SummationView({
               {data.effort_by_department.map((row) => (
                 <tr key={row.department_id} className="border-b border-slate-800">
                   <td className="py-0.5">{deptName(row.department_id)}</td>
-                  <td className="text-right tabular-nums">{row.effort_hours.toFixed(2)} h</td>
+                  <td className="text-right tabular-nums">{formatHours(row.effort_hours)}</td>
                 </tr>
               ))}
               <tr className="font-semibold">
                 <td>{t('total')}</td>
-                <td className="text-right tabular-nums">{data.total_effort_hours.toFixed(2)} h</td>
+                <td className="text-right tabular-nums">{formatHours(data.total_effort_hours)}</td>
               </tr>
             </tbody>
           </table>

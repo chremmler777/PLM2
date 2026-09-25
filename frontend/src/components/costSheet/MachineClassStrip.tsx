@@ -4,6 +4,7 @@
  */
 import { useState } from 'react'
 import type { MachineClass } from '../../types/costSheet'
+import { btnSm } from '../common/buttonStyles'
 
 function band(c: MachineClass): string {
   if (c.tonnage_min === null && c.tonnage_max === null) return ''
@@ -74,7 +75,7 @@ export default function MachineClassStrip({ classes, canEdit, onAdd, onRename }:
           <input aria-label="To tonnage" className={`${INPUT} w-20`} placeholder="to t" inputMode="numeric"
                  value={max} onChange={(e) => setMax(e.target.value)} />
           <button type="button" onClick={submit}
-                  className="rounded-md bg-sky-600 px-2.5 py-1 text-white hover:bg-sky-500">Add</button>
+                  className={btnSm.primary}>Add</button>
           <button type="button" onClick={() => setOpen(false)}
                   className="px-2 py-1 text-slate-400 hover:text-slate-200">Cancel</button>
         </span>

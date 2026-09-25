@@ -44,7 +44,7 @@ describe('CustomerDecision', () => {
     fireEvent.click(screen.getByText('Customer accepted'))
     const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('accept-release-due'), { target: { value: '2026-11-30' } })
+    fireEvent.change(screen.getByLabelText(t('customer.releaseDue')), { target: { value: '2026-11-30' } })
     fireEvent.click(confirm)
     await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'accepted',
       { release_due_date: '2026-11-30T23:59:59Z', release_due_reason: null }))
@@ -55,7 +55,7 @@ describe('CustomerDecision', () => {
       canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
     expect(screen.getByTestId('accept-expired').textContent).toContain('1 Sep 2026')
-    fireEvent.change(screen.getByTestId('accept-release-due'), { target: { value: '2026-11-30' } })
+    fireEvent.change(screen.getByLabelText(t('customer.releaseDue')), { target: { value: '2026-11-30' } })
     const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.change(screen.getByTestId('accept-override'), { target: { value: 'Price confirmed by mail' } })
@@ -78,7 +78,7 @@ describe('CustomerDecision', () => {
     expect(screen.getByTestId('decline-confirm-box').textContent).toContain('cannot be undone')
     fireEvent.click(screen.getByTestId('decline-confirm'))
     await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'declined', undefined))
-    expect(screen.queryByTestId('accept-release-due')).toBeNull()
+    expect(screen.queryByLabelText(t('customer.releaseDue'))).toBeNull()
   })
 
   it('cancelling the decline confirmation records nothing', () => {
@@ -130,7 +130,7 @@ describe('InternalApproval', () => {
     fireEvent.click(screen.getByText(t('internal.approve')))
     const confirm = screen.getByTestId('internal-approve-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('internal-release-due'), { target: { value: '2026-12-15' } })
+    fireEvent.change(screen.getByLabelText(t('customer.releaseDue')), { target: { value: '2026-12-15' } })
     fireEvent.click(confirm)
     await waitFor(() => expect(changesApi.approveInternalCosts).toHaveBeenCalledWith(7,
       { note: null, release_due_date: '2026-12-15T23:59:59Z', release_due_reason: null }))

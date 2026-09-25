@@ -146,6 +146,9 @@ describe('NegotiationCard', () => {
     await waitFor(() => expect(screen.getByTestId('negotiation-delete-1')).toBeTruthy())
     expect(screen.queryByTestId('negotiation-delete-2')).toBeNull()
     fireEvent.click(screen.getByTestId('negotiation-delete-1'))
+    // Asks first.
+    expect(changesApi.deleteNegotiation).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete round' }))
     await waitFor(() => expect(changesApi.deleteNegotiation).toHaveBeenCalledWith(7, 1))
   })
 

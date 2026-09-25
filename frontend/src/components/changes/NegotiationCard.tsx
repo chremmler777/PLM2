@@ -13,18 +13,17 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { toastError } from '../../lib/apiError'
+import ConfirmDialog from '../common/ConfirmDialog'
+import { btnSm } from '../common/buttonStyles'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeNegotiation, NegotiationChannel } from '../../types/change'
 import type { OfferOut } from '../../types/changeOffer'
 import { DiffList } from './offer/SendOfferDialog'
-import { fmtDate, fmtMoney } from './offer/offerFormat'
-import { formatDate, formatMoney } from '../../lib/format'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { fmtMoney } from './offer/offerFormat'
+import { formatCalendarDate, formatDate, formatMoney } from '../../lib/format'
 
 const CHANNELS: NegotiationChannel[] = ['meeting', 'call', 'email']
 
@@ -91,22 +90,15 @@ export default function NegotiationCard({
       setNote(''); setCounter(''); setIsFinal(false)
       setAdding(false); setFailure(null); invalidate()
     },
-    onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Could not save the round'
-      setFailure(detail)
-      toast.error(detail)
-    },
+    onError: (e: unknown) => setFailure(toastError(e, 'Could not save the round')),
   })
 
+  // Deleting asks first; a refusal is said inside the confirm.
   const drop = useMutation({
     mutationFn: (negotiationId: number) => changesApi.deleteNegotiation(changeId, negotiationId),
     onSuccess: () => { setFailure(null); invalidate() },
-    onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Could not delete the round'
-      setFailure(detail)
-      toast.error(detail)
-    },
   })
+  const [dropId, setDropId] = useState<number | null>(null)
 
   // Only your own round is yours to drop. `userId != null` matters: without it
   // an unloaded session and a payload with a null author compare equal and the
@@ -135,7 +127,7 @@ export default function NegotiationCard({
         <span className="font-medium text-slate-100">{t('negotiation.title')}</span>
         {ordered.length > 0 && (
           <span data-testid="negotiation-count"
-            className="text-[10px] leading-tight rounded bg-slate-700 text-slate-300 px-1.5 py-0">
+            className="text-[11px] leading-tight rounded bg-slate-700 text-slate-300 px-1.5 py-0">
             {ordered.length}
           </span>
         )}
@@ -160,15 +152,15 @@ export default function NegotiationCard({
               className={`rounded border px-2 py-1.5 text-sm text-slate-200 ${VERSION_TONE[offer.status] ?? VERSION_TONE.sent}`}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-slate-400 tabular-nums">{formatDate(offer.sent_at ?? offer.created_at)}</span>
-                <span className="inline-flex items-center rounded border border-sky-700 bg-sky-900/60 px-1.5 py-0 text-[10px] leading-tight font-semibold text-sky-100">
+                <span className="inline-flex items-center rounded border border-sky-700 bg-sky-900/60 px-1.5 py-0 text-[11px] leading-tight font-semibold text-sky-100">
                   Offer v{offer.version} {offer.status}
                 </span>
                 {offer.received_at && (
-                  <span className="text-[11px] text-slate-400">received {fmtDate(offer.received_at)}</span>
+                  <span className="text-[11px] text-slate-400">received {formatCalendarDate(offer.received_at)}</span>
                 )}
                 {offer.valid_until && (
                   <span className={`text-[11px] ${offer.expired ? 'text-rose-300' : 'text-slate-400'}`}>
-                    valid until {fmtDate(offer.valid_until)}
+                    valid until {formatCalendarDate(offer.valid_until)}
                   </span>
                 )}
                 <span className="ml-auto tabular-nums text-slate-100">
@@ -190,15 +182,15 @@ export default function NegotiationCard({
                   {formatDate(r.created_at)}
                 </span>
                 <span data-testid={`negotiation-channel-${r.id}`}
-                  className="inline-flex items-center rounded border border-slate-600 bg-slate-800 px-1.5 py-0 text-[10px] leading-tight text-slate-200">
+                  className="inline-flex items-center rounded border border-slate-600 bg-slate-800 px-1.5 py-0 text-[11px] leading-tight text-slate-200">
                   {channelLabel(r.channel)}
                 </span>
                 {versionOf(r.offer_id) != null && (
-                  <span className="text-[10px] text-slate-500">on v{versionOf(r.offer_id)}</span>
+                  <span className="text-[11px] text-slate-500">on v{versionOf(r.offer_id)}</span>
                 )}
                 {r.is_final && (
                   <span data-testid={`negotiation-final-badge-${r.id}`}
-                    className="inline-flex items-center rounded border border-emerald-700 bg-emerald-900/80 px-1.5 py-0 text-[10px] leading-tight font-semibold text-emerald-100">
+                    className="inline-flex items-center rounded border border-emerald-700 bg-emerald-900/80 px-1.5 py-0 text-[11px] leading-tight font-semibold text-emerald-100">
                     {t('negotiation.final')}
                   </span>
                 )}
@@ -218,7 +210,7 @@ export default function NegotiationCard({
                   <button type="button" data-testid={`negotiation-delete-${r.id}`}
                     className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted disabled:opacity-50"
                     disabled={drop.isPending}
-                    onClick={() => drop.mutate(r.id)}>
+                    onClick={() => setDropId(r.id)}>
                     {t('negotiation.delete')}
                   </button>
                 )}
@@ -247,6 +239,13 @@ export default function NegotiationCard({
           </p>
         </div>
       )}
+
+      <ConfirmDialog open={dropId != null} danger data-testid="negotiation-delete-confirm"
+        title="Delete this negotiation round?"
+        body="The round leaves the negotiation log. If it was marked final, the final price goes with it."
+        confirmLabel="Delete round" errorFallback="Could not delete the round"
+        onConfirm={() => (dropId != null ? drop.mutateAsync(dropId) : undefined)}
+        onClose={() => setDropId(null)} />
 
       {failure && (
         <p role="alert" data-testid="negotiation-error"
@@ -284,7 +283,7 @@ export default function NegotiationCard({
           </label>
           <div className="flex gap-2 items-center">
             <button type="button" data-testid="negotiation-submit"
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              className={btnSm.primary}
               disabled={!note.trim() || add.isPending}
               onClick={() => add.mutate()}>
               {t('negotiation.submit')}

@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PnlCard from './PnlCard'
 import type { ChangeDetail, Summation } from '../../types/change'
 import { changesApi } from '../../api/changes'
+import { actualCostsApi } from '../../api/actualCosts'
+import { addDaysIso, todayIso } from '../../lib/format'
 
 vi.mock('../../api/changes', () => ({
   changesApi: { getSummation: vi.fn() },
@@ -286,12 +288,42 @@ describe('PnlCard', () => {
     const dept = screen.getByLabelText('Department') as HTMLSelectElement
     // a department member only sees their own department
     expect([...dept.options].map((o) => o.textContent)).toEqual(['Choose', 'Tooling'])
+    // en-US: a decimal comma is refused, not guessed.
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '250,50' } })
+    expect(screen.getByTestId('actual-cost-amount-hint').textContent).toContain('dot for decimals')
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '250.50' } })
     expect((screen.getByTestId('actual-cost-save') as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(dept, { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('Vendor'), { target: { value: 'Meusburger' } })
     fireEvent.click(screen.getByTestId('actual-cost-save'))
     await waitFor(() => expect(costAddMock).toHaveBeenCalledWith(7, expect.objectContaining({
       category: 'external', amount: 250.5, department_id: 1, vendor_name: 'Meusburger' })))
+  })
+
+  it('refuses an actual cost dated in the future and deletes one only after a confirm', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    ovaMock.mockResolvedValue(ova)
+    costListMock.mockResolvedValue({ items: [
+      { id: 3, change_id: 7, department_id: 1, department_name: 'Tooling', category: 'external',
+        vendor_name: 'Hasco', amount: 700, cost_date: '2026-06-02T00:00:00', note: null, attachment_id: null,
+        created_by: 1, created_by_name: 'Anna', created_at: '2026-06-02T08:00:00', can_delete: true },
+    ], total: 700, can_write: true, writable_department_ids: null, cost_role: true })
+    vi.mocked(actualCostsApi.remove).mockResolvedValue({} as never)
+    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })}
+      departments={[{ id: 1, name: 'Tooling' }]} />))
+    // A midnight datetime is its calendar day, in any time zone.
+    expect((await screen.findByTestId('actual-cost-3')).textContent).toContain('2 Jun 2026')
+    fireEvent.click(screen.getByTestId('actual-cost-open'))
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1,500' } })
+    fireEvent.change(screen.getByLabelText('Cost date'), { target: { value: addDaysIso(todayIso(), 3) } })
+    expect(screen.getByTestId('actual-cost-future')).toBeDefined()
+    expect((screen.getByTestId('actual-cost-save') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Cost date'), { target: { value: todayIso() } })
+    expect((screen.getByTestId('actual-cost-save') as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByTestId('actual-cost-delete-3'))
+    expect(actualCostsApi.remove).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete cost' }))
+    await waitFor(() => expect(actualCostsApi.remove).toHaveBeenCalledWith(7, 3))
   })
 })

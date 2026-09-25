@@ -4,6 +4,9 @@
  * read-only.
  */
 import { useRef, useState } from 'react'
+import { X } from 'lucide-react'
+import ConfirmDialog from '../common/ConfirmDialog'
+import { btnSm } from '../common/buttonStyles'
 import type { CostSheetRow, CostSheetSection } from '../../types/costSheet'
 import { COLUMNS, blankRow, type SheetContext } from './columns'
 import SheetCell from './SheetCell'
@@ -33,6 +36,8 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
     setAddingState(value)
   }
 
+  // A draft row goes on a confirm: one stray click must not cost a rate.
+  const [deleting, setDeleting] = useState<number | null>(null)
   const startAdd = () => setAdding(blankRow(section, ctx))
   const submitAdd = async () => {
     const row = addingRef.current
@@ -73,10 +78,10 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
               ))}
               {editable && (
                 <td className="px-2 text-right">
-                  <button type="button" onClick={() => onDelete(row.id as number)} disabled={busy}
+                  <button type="button" onClick={() => setDeleting(row.id as number)} disabled={busy}
                           aria-label="Delete row" title="Delete row"
-                          className="rounded px-1.5 py-0.5 text-slate-500 opacity-60 hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100 focus:opacity-100">
-                    ✕
+                          className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-500 opacity-60 hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100 focus:opacity-100">
+                    <X aria-hidden="true" size={14} />
                   </button>
                 </td>
               )}
@@ -102,11 +107,11 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
           {adding ? (
             <>
               <button type="button" onClick={submitAdd} disabled={busy}
-                      className="rounded-md bg-sky-600 px-3 py-1 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
+                      className={btnSm.primary}>
                 Add row
               </button>
               <button type="button" onClick={() => setAdding(null)}
-                      className="rounded-md px-3 py-1 text-sm text-slate-400 hover:text-slate-200">
+                      className={btnSm.ghost}>
                 Cancel
               </button>
               <span className="text-xs text-slate-500">Fill the line above, then add it.</span>
@@ -119,6 +124,12 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
           )}
         </div>
       )}
+      <ConfirmDialog open={deleting !== null} danger data-testid="sheet-row-delete-confirm"
+        title="Delete this row from the draft?"
+        body="The row leaves this draft. Published versions keep theirs."
+        confirmLabel="Delete row"
+        onConfirm={() => { if (deleting !== null) onDelete(deleting) }}
+        onClose={() => setDeleting(null)} />
     </div>
   )
 }

@@ -140,4 +140,32 @@ describe('CostingBuckets', () => {
     buckets({ change: change({ assessments: [] }) })
     expect(screen.getByText(t('costing.none'))).toBeTruthy()
   })
+
+  it('names the departments that have not costed yet (costing-side signal for the step button)', async () => {
+    buckets({ canSeeAll: true })
+    const note = await screen.findByTestId('costing-readiness')
+    expect(note.textContent).toContain('1 of 2 departments has not costed yet: Tool Engineer')
+  })
+
+  it('says loudly when nothing is costed at all', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation, currency: 'USD',
+      by_department: summation.by_department.map((d) => ({ ...d, one_time_internal: 0, one_time_external: 0 })),
+      totals: { ...summation.totals, one_time_internal: 0, one_time_external: 0, grand_total: 0 },
+    } as never)
+    buckets({ canSeeAll: true })
+    const note = await screen.findByTestId('costing-readiness')
+    expect(note.textContent).toContain('Nothing is costed yet: the total is 0.00 USD')
+  })
+
+  it('stays quiet once every department has costed, and outside costing', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation,
+      by_department: summation.by_department.map((d) => ({ ...d, one_time_internal: 50 })),
+    } as never)
+    buckets({ canSeeAll: true })
+    await waitFor(() => expect(changesApi.getSummation).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 10))
+    expect(screen.queryByTestId('costing-readiness')).toBeNull()
+  })
 })

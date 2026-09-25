@@ -8,8 +8,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { costSheetApi } from '../api/costSheet'
-import { apiErrorMessage } from '../lib/apiError'
-import { formatDate, formatDateTime, todayIso } from '../lib/format'
+import { apiErrorMessage, toastError } from '../lib/apiError'
+import { formatCalendarDate, formatDateTime, todayIso } from '../lib/format'
+import { LoadingSkeleton } from '../components/common/LoadingSkeleton'
+import { buttonClass } from '../components/common/buttonStyles'
 import ConfirmModal from '../components/common/ConfirmModal'
 import SectionTable from '../components/costSheet/SectionTable'
 import PublishDialog from '../components/costSheet/PublishDialog'
@@ -31,11 +33,11 @@ const ROWS_KEY: Record<CostSheetSection, keyof CostSheetVersionDetail> = {
 
 function validityText(v: CostSheetVersionSummary): string {
   if (v.status === 'draft') {
-    return v.valid_from ? `Draft, planned from ${formatDate(v.valid_from)}` : 'Draft, not yet valid'
+    return v.valid_from ? `Draft, planned from ${formatCalendarDate(v.valid_from)}` : 'Draft, not yet valid'
   }
   return v.valid_to
-    ? `Valid ${formatDate(v.valid_from)} to ${formatDate(v.valid_to)}`
-    : `Valid from ${formatDate(v.valid_from)}, open-ended`
+    ? `Valid ${formatCalendarDate(v.valid_from)} to ${formatCalendarDate(v.valid_to)}`
+    : `Valid from ${formatCalendarDate(v.valid_from)}, open-ended`
 }
 
 function StatusPill({ v, currentId }: { v: CostSheetVersionSummary; currentId: number | null }) {
@@ -45,7 +47,7 @@ function StatusPill({ v, currentId }: { v: CostSheetVersionSummary; currentId: n
   if (v.id === currentId) {
     return <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">Current</span>
   }
-  const future = v.valid_from && v.valid_from > new Date().toISOString().slice(0, 10)
+  const future = v.valid_from && v.valid_from.slice(0, 10) > todayIso()
   return future
     ? <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-300">Upcoming</span>
     : <span className="rounded-full bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-300">Superseded</span>
@@ -105,7 +107,7 @@ export default function CostSheetPage() {
     qc.setQueryData(['cost-sheet', 'version', d.id], d)
     qc.invalidateQueries({ queryKey: ['cost-sheet', 'diff', d.id] })
   }
-  const fail = (e: unknown) => toast.error(apiErrorMessage(e, 'Could not save'))
+  const fail = (e: unknown) => { toastError(e, 'Could not save the cost sheet') }
 
   const rowMut = useMutation({
     mutationFn: (a: { kind: 'add' | 'update' | 'delete'; rowId?: number; row?: CostSheetRow }) => {
@@ -144,8 +146,8 @@ export default function CostSheetPage() {
       setPublishOpen(false)
       const vf = d.valid_from ?? ''
       toast.success(vf > todayIso()
-        ? `Version ${d.version} published. It takes over on ${formatDate(vf)}; until then the current version stays in use.`
-        : `Version ${d.version} published and in use from ${formatDate(vf)}`)
+        ? `Version ${d.version} published. It takes over on ${formatCalendarDate(vf)}; until then the current version stays in use.`
+        : `Version ${d.version} published and in use from ${formatCalendarDate(vf)}`)
     },
     onError: fail,
   })
@@ -199,7 +201,13 @@ export default function CostSheetPage() {
   }
 
   if (overview.isLoading) {
-    return <div className="mx-auto max-w-7xl p-6 text-slate-400">Loading the cost sheet</div>
+    return (
+      <div className="mx-auto max-w-7xl p-6" aria-busy="true">
+        <h1 className="px-6 text-2xl font-semibold text-slate-100">Cost sheet</h1>
+        <span className="sr-only">Loading the cost sheet</span>
+        <LoadingSkeleton count={4} />
+      </div>
+    )
   }
   if (overview.isError || !ov) {
     return <div className="mx-auto max-w-7xl p-6 text-red-300">{apiErrorMessage(overview.error, 'Could not load the cost sheet')}</div>
@@ -226,7 +234,7 @@ export default function CostSheetPage() {
               e.preventDefault()
               const n = Number(cycle)
               if (Number.isInteger(n) && n >= 1 && n <= 120) cycleMut.mutate(n)
-              else toast.error('Between 1 and 120 months')
+              else toast.error('The review cycle is 1 to 120 months')
             }}>
               <input autoFocus aria-label="Review cycle in months" value={cycle} inputMode="numeric"
                      onChange={(e) => setCycle(e.target.value)}
@@ -262,8 +270,8 @@ export default function CostSheetPage() {
             {ov.versions.map((x) => (
               <option key={x.id} value={x.id}>
                 v{x.version} · {x.status === 'draft' ? 'draft' : x.valid_to
-                  ? `${formatDate(x.valid_from)} to ${formatDate(x.valid_to)}`
-                  : `from ${formatDate(x.valid_from)}`}
+                  ? `${formatCalendarDate(x.valid_from)} to ${formatCalendarDate(x.valid_to)}`
+                  : `from ${formatCalendarDate(x.valid_from)}`}
               </option>
             ))}
           </select>
@@ -296,7 +304,7 @@ export default function CostSheetPage() {
           )}
           {ov.can_edit && ov.draft_version_id === null && (
             <button type="button" onClick={() => draftMut.mutate()} disabled={draftMut.isPending}
-                    className={`${BTN} bg-sky-600 text-white hover:bg-sky-500`}>
+                    className={buttonClass('primary')}>
               New draft
             </button>
           )}
@@ -313,7 +321,7 @@ export default function CostSheetPage() {
                 Discard draft
               </button>
               <button type="button" onClick={() => setPublishOpen(true)}
-                      className={`${BTN} bg-emerald-600 text-white hover:bg-emerald-500`}>
+                      className={buttonClass('primary')}>
                 Publish version
               </button>
             </>
@@ -354,7 +362,7 @@ export default function CostSheetPage() {
                                onRename={renameClass} />
           )}
           {version.isLoading ? (
-            <div className="rounded-lg border border-slate-700 px-4 py-8 text-center text-slate-500">Loading version</div>
+            <div aria-busy="true"><span className="sr-only">Loading version</span><LoadingSkeleton count={3} /></div>
           ) : version.isError ? (
             <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-6 text-sm text-red-200">
               <p className="font-medium">This version could not be loaded.</p>

@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import PnlPage from './PnlPage'
+import { formatDays } from '../lib/format'
 
 const summaryFixture = {
   totals: { revenue: 100000, internal_cost: 20000, external_cost: 10000, total_cost: 30000, margin: 70000, margin_pct: 70,
@@ -149,7 +150,7 @@ describe('PnlPage', () => {
     renderPage()
     const link = await screen.findByRole('link', { name: 'GB-CM-0001' })
     const row = link.closest('tr') as HTMLElement
-    expect(row.textContent).toContain('+4 d')
+    expect(row.textContent).toContain(formatDays(4, { sign: true }))
     expect(row.querySelector('[class*="rose"], [class*="amber"]')).not.toBeNull()
     for (const h of ['Offer revenue', 'Planned cost', 'Actual cost', 'Planned margin', 'Actual margin', 'Variance', 'Slip']) {
       expect(screen.getByRole('button', { name: new RegExp(`^${h}`) })).toBeDefined()
@@ -256,5 +257,41 @@ describe('PnlPage', () => {
     expect(screen.getByTestId('pnl-summary-EUR').textContent).toContain('100,000.00 EUR')
     expect(screen.getByTestId('pnl-summary-notes-USD').textContent)
       .toContain('without a rate in the cost sheet')
+  })
+
+  it('labels the actual margin a forecast only while the change is running', async () => {
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[0], change_id: 31, change_number: 'CR-31', status: 'closed', realized: true,
+        actual_margin: 5000, forecast_margin: 5000 },
+      { ...rowsFixture[0], change_id: 32, change_number: 'CR-32', status: 'in_implementation', realized: true,
+        actual_margin: 9000, forecast_margin: 7000 },
+    ] })
+    renderPage()
+    await screen.findByText('CR-31')
+    expect(screen.queryByTestId('pnl-margin-forecast-31')).toBeNull()
+    expect(screen.getByTestId('pnl-actual-margin-31').textContent).not.toMatch(/forecast/)
+    expect(screen.getByTestId('pnl-margin-forecast-32').textContent).toMatch(/forecast, to date 9[.,]000/)
+    // A running change in scope: the tile says forecast.
+    expect(screen.getByText('Actual margin (forecast)')).toBeDefined()
+  })
+
+  it('a closed-only portfolio shows the booked actual margin, not a forecast', async () => {
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[0], change_id: 33, change_number: 'CR-33', status: 'closed', realized: true },
+    ] })
+    renderPage()
+    await screen.findByText('CR-33')
+    expect(screen.queryByText('Actual margin (forecast)')).toBeNull()
+    expect(screen.queryByText(/^forecast, to date/)).toBeNull()
+  })
+
+  it('shows an engineering review as unpriced by design, not "price pending"', async () => {
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[1], change_id: 34, change_number: 'CR-34', origin: 'engineering_review' },
+    ] })
+    renderPage()
+    const row = (await screen.findByText('CR-34')).closest('tr')!
+    expect(row.textContent).toContain('engineering review')
+    expect(row.textContent).not.toMatch(/price pending/i)
   })
 })

@@ -6,7 +6,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { costSheetApi } from '../../api/costSheet'
-import { formatDate } from '../../lib/format'
+import { formatCalendarDate } from '../../lib/format'
+import { btnSm } from '../common/buttonStyles'
 
 export default function CostSheetReviewTask() {
   const navigate = useNavigate()
@@ -29,12 +30,12 @@ export default function CostSheetReviewTask() {
           <p className="text-xs text-slate-400">
             {s?.latest_version == null
               ? 'No cost sheet version is published yet: costing cannot be priced.'
-              : `Cost sheet v${s.latest_version} was last reviewed ${formatDate(s.reviewed_on)}; `
-                + `the ${s.review_months}-month review was due ${formatDate(s.due_on)}.`}
+              : `Cost sheet v${s.latest_version} was last reviewed ${formatCalendarDate(s.reviewed_on)}; `
+                + `the ${s.review_months}-month review was due ${formatCalendarDate(s.due_on)}.`}
           </p>
         </div>
         <button type="button" onClick={() => navigate('/cost-sheet')}
-          className="text-xs px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white">
+          className={btnSm.primary}>
           Open the cost sheet
         </button>
       </div>

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CostPositions from './CostPositions'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { formatHours } from '../../lib/format'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -38,6 +39,7 @@ const TAGS = {
     { key: 'tool_change', entry_type: 'money', extra: true },
     { key: 'equipment_change', entry_type: 'money', extra: true },
     { key: 'sampling', entry_type: 'time', extra: true },
+    { key: 'trial_support', label_en: 'Trial support', entry_type: 'time', extra: true },
     { key: 'other', entry_type: 'money', extra: false },
   ],
 }
@@ -157,6 +159,57 @@ describe('CostPositions', () => {
     expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(2)
   })
 
+  it('after a create, queued and later changes go out as edits of the new position (review)', async () => {
+    let resolveCreate!: (v: unknown) => void
+    let resolveEdit!: (v: unknown) => void
+    vi.mocked(changesApi.createCostPosition).mockImplementationOnce(
+      () => new Promise((r) => { resolveCreate = r }) as never)
+    vi.mocked(changesApi.updateCostPosition).mockImplementationOnce(
+      () => new Promise((r) => { resolveEdit = r }) as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    const support = screen.getByTestId('costpos-effort-support_effort-2')
+    fireEvent.change(support, { target: { value: '16' } })
+    fireEvent.blur(support)
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1))
+    // Picked while the create is out: queued, not dropped.
+    fireEvent.change(screen.getByTestId('costpos-effort-position-support_effort-2'),
+      { target: { value: 'Engineer' } })
+    resolveCreate({ id: 77 })
+    await waitFor(() => expect(changesApi.updateCostPosition)
+      .toHaveBeenCalledWith(7, 77, { labour_position: 'Engineer' }))
+    // An hours commit while that edit is out is sent after it, to the same id.
+    fireEvent.change(support, { target: { value: '18' } })
+    fireEvent.blur(support)
+    expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1)
+    const listed = vi.mocked(changesApi.listCostPositions).mock.calls.length
+    resolveEdit({})
+    await waitFor(() => expect(changesApi.updateCostPosition)
+      .toHaveBeenLastCalledWith(7, 77, { hours: 18 }))
+    expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1)
+    // Once nothing is queued the row reloads.
+    await waitFor(() => expect(vi.mocked(changesApi.listCostPositions).mock.calls.length).toBeGreaterThan(listed))
+  })
+
+  it('a failed queued edit still reloads the row', async () => {
+    let resolveCreate!: (v: unknown) => void
+    vi.mocked(changesApi.createCostPosition).mockImplementationOnce(
+      () => new Promise((r) => { resolveCreate = r }) as never)
+    vi.mocked(changesApi.updateCostPosition).mockRejectedValueOnce(new Error('no'))
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    const support = screen.getByTestId('costpos-effort-support_effort-2')
+    fireEvent.change(support, { target: { value: '16' } })
+    fireEvent.blur(support)
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByTestId('costpos-effort-position-support_effort-2'),
+      { target: { value: 'Engineer' } })
+    const listed = vi.mocked(changesApi.listCostPositions).mock.calls.length
+    resolveCreate({ id: 77 })
+    await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledWith(7, 77, { labour_position: 'Engineer' }))
+    await waitFor(() => expect(vi.mocked(changesApi.listCostPositions).mock.calls.length).toBeGreaterThan(listed))
+  })
+
   it('edits that same position on every save after the first', async () => {
     positions()
     // Once the answered position has arrived, the field is bound to it.
@@ -212,8 +265,13 @@ describe('CostPositions', () => {
     positions()
     await screen.findByTestId('costpos-new-2')
     await waitFor(() => expect(screen.getByTestId('costpos-new-tag-2').textContent)
-      .toContain(t('costtag.sampling')))
-    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'sampling' } })
+      .toContain('Trial support (hours)'))
+    // The own-time "Sampling" category is not offered next to the cost sheet's
+    // "Sampling (trials x price)": one word, one meaning.
+    const values = [...(screen.getByTestId('costpos-new-tag-2') as HTMLSelectElement).options].map((o) => o.value)
+    expect(values).not.toContain('sampling')
+    expect(values).toContain('__sampling')
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'trial_support' } })
     // No pricing and no money field for hours; the amount is the hours.
     expect(screen.queryByTestId('costpos-new-pricing-2')).toBeNull()
     expect(screen.queryByTestId('costpos-new-est-2')).toBeNull()
@@ -223,7 +281,7 @@ describe('CostPositions', () => {
     fireEvent.keyDown(screen.getByTestId('costpos-new-hours-2'), { key: 'Enter' })
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        tag: 'sampling', kind: 'own_time', pricing: 'estimate', hours: 8, est_cost: null,
+        tag: 'trial_support', kind: 'own_time', pricing: 'estimate', hours: 8, est_cost: null,
         label: '2 trial runs',
       })))
   })
@@ -245,6 +303,9 @@ describe('CostPositions', () => {
     await waitFor(() => expect(changesApi.createCostCategory).toHaveBeenCalledWith(2, 'Laser texturing', 'money'))
     await waitFor(() => expect(select.value).toBe('d2_laser'))
     fireEvent.click(await screen.findByTestId('costpos-category-delete-2'))
+    // Asks first.
+    expect(changesApi.deleteCostCategory).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByTestId('costpos-category-delete-confirm-2')).getByTestId('confirm-ok'))
     await waitFor(() => expect(changesApi.deleteCostCategory).toHaveBeenCalledWith(5))
   })
 
@@ -290,7 +351,7 @@ describe('CostPositions', () => {
       .toBe(`2 ${t('costpos.partsSum')} + 2 ${t('costpos.altSum')}`)
     expect(screen.getByTestId('offer-part-81')).toBeTruthy()
     expect(screen.queryByTestId('offer-fav-81')).toBeNull()
-    expect(screen.getByTestId('offer-fav-83').textContent).toBe('★')
+    expect(screen.getByTestId('offer-fav-83').getAttribute('aria-pressed')).toBe('true')
     // The new-offer form asks which kind it is and sends it along.
     fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor P' } })
     fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '100' } })
@@ -306,7 +367,7 @@ describe('CostPositions', () => {
     // 5200 from the favourite offer; 12 h standing + 6 h around the vendor.
     const total = screen.getByTestId('costpos-total-2').textContent
     expect(total).toContain('5,200.00')
-    expect(total).toContain('18 h')
+    expect(total).toContain(formatHours(18))
   })
 
   it('draws a quoted position as one row per vendor, shipping included or separate', async () => {
@@ -367,7 +428,7 @@ describe('CostPositions', () => {
     // No vote, no price and no date — the job is not finished. Hours alone
     // (own coordination time) still show; there is no "-" for the missing
     // price once something real is known.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('6 h')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toBe(formatHours(6))
     expect(screen.queryByTestId('costpos-lead-11')).toBeNull()
   })
 
@@ -399,14 +460,50 @@ describe('CostPositions', () => {
       return {}
     }) as never)
     await screen.findByTestId('offer-fav-91')
-    expect(screen.getByTestId('offer-fav-91').textContent).toBe('★')
-    expect(screen.getByTestId('offer-fav-92').textContent).toBe('☆')
+    expect(screen.getByTestId('offer-fav-91').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('offer-fav-92').getAttribute('aria-pressed')).toBe('false')
     fireEvent.click(screen.getByTestId('offer-fav-92'))
     await waitFor(() => expect(changesApi.updateCostingOffer)
       .toHaveBeenCalledWith(7, 92, { favorite: true }))
     // The star moves the moment it is clicked — the sibling goes dark with it.
-    await waitFor(() => expect(screen.getByTestId('offer-fav-92').textContent).toBe('★'))
-    expect(screen.getByTestId('offer-fav-91').textContent).toBe('☆')
+    await waitFor(() => expect(screen.getByTestId('offer-fav-92').getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.getByTestId('offer-fav-91').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('deletes a cost line only after a confirm, and names the line on the delete button', async () => {
+    vi.mocked(changesApi.deleteCostPosition).mockClear()
+    positions()
+    const del = await screen.findByTestId('costpos-delete-11')
+    expect(del.getAttribute('aria-label')).toBe('Delete cost line: Anlagenumbau')
+    fireEvent.click(del)
+    expect(changesApi.deleteCostPosition).not.toHaveBeenCalled()
+    const dialog = await screen.findByTestId('costpos-delete-confirm-11')
+    expect(dialog.textContent).toContain('2 vendor offers')
+    // Cancel keeps it.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(changesApi.deleteCostPosition).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('costpos-delete-11'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete line' }))
+    await waitFor(() => expect(changesApi.deleteCostPosition).toHaveBeenCalledWith(7, 11))
+  })
+
+  it('deletes a vendor offer only after a confirm', async () => {
+    vi.mocked(changesApi.deleteCostingOffer).mockClear()
+    positions()
+    const del = await screen.findByTestId('offer-delete-92')
+    expect(del.getAttribute('aria-label')).toBe('Delete the offer from Vendor B')
+    fireEvent.click(del)
+    expect(changesApi.deleteCostingOffer).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete offer' }))
+    await waitFor(() => expect(changesApi.deleteCostingOffer).toHaveBeenCalledWith(7, 92))
+  })
+
+  it('shows a plain amount, not a guessed EUR, while the currency is unknown (review)', async () => {
+    vi.mocked(changesApi.costingContext).mockRejectedValueOnce(new Error('not yet'))
+    positions({ editable: false })
+    await screen.findByTestId('offer-cost-91')
+    expect(screen.getByTestId('offer-cost-91').textContent).toBe('5,000.00')
+    expect(screen.getByTestId('offer-shipping-91').textContent).not.toContain('EUR')
   })
 
   it('gives a reader the figures and no input at all', async () => {
@@ -417,7 +514,8 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
     expect(screen.queryByTestId('costpos-delete-11')).toBeNull()
     // The vote is still visible — Sales needs to know which vendor was chosen.
-    expect(screen.getByTestId('offer-fav-91').textContent).toBe('★')
+    expect(screen.getByTestId('offer-fav-91').textContent).toBe(t('costpos.favorite'))
+    expect(screen.getByTestId('offer-fav-92').textContent).toBe('')
     expect(screen.getByTestId('offer-vendor-91').textContent).toBe('Vendor A')
     expect(screen.getByTestId('offer-shipping-92').textContent)
       .toContain(t('costpos.shippingIncluded'))
@@ -582,7 +680,7 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
     expect((await screen.findByTestId('costpos-rate-20')).textContent)
       .toBe('Cost sheet v2, Tool Engineer, Engineer, 21.50 USD/h')
     expect(screen.getByTestId('costpos-value-20').textContent).toBe('107.50 USD')
-    expect(screen.getByTestId('costpos-cost-21').textContent).toBe('3 h')
+    expect(screen.getByTestId('costpos-cost-21').textContent).toBe(formatHours(3))
     expect(screen.getByTestId('costpos-value-21').textContent).toBe('255.00 USD')
     expect(screen.getByTestId('costpos-kind-21').textContent).toContain('200-450 t')
     expect(screen.getByTestId('costpos-cost-22').textContent).toBe(`2 ${t('costpos.trialsShort')}`)
@@ -624,7 +722,7 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
   it('offers the department’s cost sheet positions on an own-time line', async () => {
     positions()
     await screen.findByTestId('costpos-row-20')
-    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'sampling' } })
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'trial_support' } })
     const pick = await screen.findByTestId('costpos-new-position-2') as HTMLSelectElement
     expect([...pick.options].map((o) => o.value)).toEqual(['', 'Engineer', 'Technician'])
     fireEvent.change(pick, { target: { value: 'Technician' } })

@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
-import { formatMoney, formatNumber } from '../../lib/format'
+import { formatDays, formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeConcern, Summation } from '../../types/change'
 
 export default function QuoteBasis({
@@ -29,7 +29,11 @@ export default function QuoteBasis({
   const plantName = (id: number) => plants.find((p) => p.id === id)?.name ?? `Plant #${id}`
   const deptName = (id?: number | null) =>
     id == null ? null : departments.find((d) => d.id === id)?.name ?? `#${id}`
-  const minutes = data.lifecycle_minutes_by_plant ?? []
+  // Zeros are what an empty costing looks like, not data: left out.
+  const minutes = (data.lifecycle_minutes_by_plant ?? []).filter((m) => m.minutes_per_part !== 0)
+  const totalMinutes = data.total_minutes_per_part ?? 0
+  const leadDays = data.max_lead_time_days ?? 0
+  const nothingCosted = Math.abs(data.totals.grand_total) < 0.005
   // Only the worst still-open risks travel to the offer. A 3 that nobody could
   // close is a technical judgement Sales owes the customer — a 2, or one that was
   // settled, is internal history and would only dilute the list.
@@ -43,12 +47,14 @@ export default function QuoteBasis({
       <p className="flex items-baseline gap-2">
         <span className="text-slate-400">{t('total')}:</span>
         <span className="tabular-nums text-slate-100" data-testid="quote-basis-total">
-          {data.currency
-            ? formatMoney(data.totals.grand_total, data.currency)
-            : formatNumber(data.totals.grand_total, { min: 2, max: 2 })}
+          {nothingCosted ? '-'
+            : data.currency
+              ? formatMoney(data.totals.grand_total, data.currency)
+              : formatNumber(data.totals.grand_total, { min: 2, max: 2 })}
         </span>
+        {nothingCosted && <span className="text-xs text-slate-500">nothing costed yet</span>}
       </p>
-      {(minutes.length > 0 || data.total_minutes_per_part != null) && (
+      {(minutes.length > 0 || totalMinutes !== 0) && (
         <div className="text-xs" data-testid="quote-basis-minutes">
           <p className="text-slate-400">{t('costing.minutes')}</p>
           <ul className="mt-0.5 space-y-0.5">
@@ -56,24 +62,24 @@ export default function QuoteBasis({
               <li key={m.plant_id} className="flex justify-between gap-3">
                 <span className="text-slate-400">{plantName(m.plant_id)}</span>
                 <span className="tabular-nums text-slate-200">
-                  {m.minutes_per_part > 0 ? '+' : ''}{m.minutes_per_part} {t('summation.perPart')}
+                  {formatNumber(m.minutes_per_part, { sign: true })} {t('summation.perPart')}
                 </span>
               </li>
             ))}
-            {data.total_minutes_per_part != null && (
+            {totalMinutes !== 0 && (
               <li className="flex justify-between gap-3 font-semibold border-t border-slate-700 pt-0.5">
                 <span className="text-slate-300">{t('total')}</span>
                 <span className="tabular-nums text-slate-100">
-                  {data.total_minutes_per_part > 0 ? '+' : ''}{data.total_minutes_per_part}
+                  {formatNumber(totalMinutes, { sign: true })}
                 </span>
               </li>
             )}
           </ul>
         </div>
       )}
-      {data.max_lead_time_days != null && (
+      {leadDays > 0 && (
         <p className="text-xs text-slate-400">
-          {t('summation.maxLeadTime')}: {data.max_lead_time_days} {t('summation.days')}
+          {t('summation.maxLeadTime')}: {formatDays(leadDays)}
         </p>
       )}
       {topRisks.length > 0 && (
@@ -83,9 +89,9 @@ export default function QuoteBasis({
             {topRisks.map((c) => (
               <li key={c.id} data-testid={`quote-risk-${c.id}`}
                 className="flex items-start gap-2">
-                <span aria-label={t('risk.severity')}
-                  className="flex-shrink-0 inline-flex items-center rounded border border-red-700 bg-red-900/80 px-1.5 py-0 text-[10px] leading-tight font-semibold text-red-100">
-                  {c.severity}
+                <span
+                  className="flex-shrink-0 inline-flex items-center rounded border border-red-700 bg-red-900/80 px-1.5 py-0 text-[11px] leading-tight font-semibold text-red-100">
+                  <span className="sr-only">{t('risk.severity')} </span>{c.severity}
                 </span>
                 <span className="min-w-0">
                   {deptName(c.department_id) && (

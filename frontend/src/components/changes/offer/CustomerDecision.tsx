@@ -7,16 +7,17 @@
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { Check } from 'lucide-react'
 import { changesApi } from '../../../api/changes'
+import { toastError } from '../../../lib/apiError'
+import { formatCalendarDate } from '../../../lib/format'
+import { buttonClass } from '../../common/buttonStyles'
+import DateInput from '../../gantt/DateInput'
 import { t } from '../../../i18n/cmLabels'
 import type { ChangeDetail } from '../../../types/change'
 import type { OfferOut } from '../../../types/changeOffer'
-import { fmtDate, inputCls, offerDaysLeft, sectionLabel } from './offerFormat'
+import { inputCls, offerDaysLeft, sectionLabel } from './offerFormat'
 import { offersKey } from './useOfferDraft'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const RESPONSE_CHIP: Record<string, string> = {
   pending: 'bg-slate-800 text-slate-300 border-slate-600',
@@ -61,12 +62,12 @@ export default function CustomerDecision({
     mutationFn: (vars: { response: string; body?: Parameters<typeof changesApi.customerResponse>[2] }) =>
       changesApi.customerResponse(change.id, vars.response, vars.body),
     onSuccess: () => { setAcceptOpen(false); setDeclineOpen(false); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to record customer response'),
+    onError: (e: unknown) => toastError(e, 'Could not record the customer response'),
   })
   const signOff = useMutation({
     mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(change.id, role),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
+    onError: (e: unknown) => toastError(e, 'Could not record the sign-off'),
   })
 
   const samePersonBlocksPm = !change.pm_signed_by
@@ -88,18 +89,20 @@ export default function CustomerDecision({
         </span>
         {latestSent && (
           <span className="text-[11px] text-slate-500">
-            on v{latestSent.version}{latestSent.valid_until ? `, valid until ${fmtDate(latestSent.valid_until)}` : ''}
+            on v{latestSent.version}{latestSent.valid_until ? `, valid until ${formatCalendarDate(latestSent.valid_until)}` : ''}
           </span>
         )}
         {canRespond && open && !decided && (
           <div className="ml-auto flex gap-2">
             <button type="button" data-testid="customer-accepted" onClick={() => { setAcceptOpen((o) => !o); setDeclineOpen(false) }}
-              className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600">
+              aria-expanded={acceptOpen}
+              className={buttonClass('primary', 'sm')}>
               Customer accepted
             </button>
             <button type="button" data-testid="customer-declined" disabled={respond.isPending}
+              aria-expanded={declineOpen}
               onClick={() => { setDeclineOpen((o) => !o); setAcceptOpen(false) }}
-              className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700">
+              className={buttonClass('secondary', 'sm')}>
               Customer declined
             </button>
           </div>
@@ -115,12 +118,12 @@ export default function CustomerDecision({
           </p>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setDeclineOpen(false)}
-              className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700">
+              className={buttonClass('secondary', 'sm')}>
               Cancel
             </button>
             <button type="button" data-testid="decline-confirm" disabled={respond.isPending}
               onClick={() => respond.mutate({ response: 'declined' })}
-              className="rounded-lg bg-rose-700 px-3 py-1 text-xs font-medium text-white hover:bg-rose-600 disabled:opacity-50">
+              className={buttonClass('danger', 'sm')}>
               Yes, the customer declined
             </button>
           </div>
@@ -129,21 +132,21 @@ export default function CustomerDecision({
 
       {acceptOpen && (
         <div className="grid gap-2 rounded-lg border border-emerald-900/70 bg-emerald-950/20 p-3 sm:grid-cols-[auto_minmax(0,1fr)]">
-          <label className="text-xs text-slate-400 self-center">{t('customer.releaseDue')}</label>
-          <input type="date" data-testid="accept-release-due" value={due}
-            onChange={(e) => setDue(e.target.value)} className={`${inputCls} w-44`} />
+          <label htmlFor={`accept-release-due-${change.id}`} className="text-xs text-slate-400 self-center">{t('customer.releaseDue')}</label>
+          <DateInput id={`accept-release-due-${change.id}`} value={due} commitOnChange
+            onChange={setDue} className={`${inputCls} w-44`} />
           <label className="text-xs text-slate-400 self-center">{t('customer.releaseDueReason')}</label>
           <input type="text" value={reason} onChange={(e) => setReason(e.target.value)}
             aria-label={t('customer.releaseDueReason')} className={inputCls} />
           {expired && (
             <>
               <p data-testid="accept-expired" className="text-xs text-rose-300 sm:col-span-2">
-                Offer v{latestSent?.version} expired on {fmtDate(latestSent?.valid_until)}. Accepting it needs a reason on the record.
+                Offer v{latestSent?.version} expired on {formatCalendarDate(latestSent?.valid_until)}. Accepting it needs a reason on the record.
               </p>
               <label className="text-xs text-slate-400 self-center">Override reason</label>
               <input type="text" data-testid="accept-override" value={override}
                 onChange={(e) => setOverride(e.target.value)} className={inputCls}
-                placeholder="e.g. customer confirmed the price in writing on ..." />
+                placeholder="e.g. customer confirmed the price in writing on 2 Oct" />
             </>
           )}
           <div className="sm:col-span-2 flex justify-end">
@@ -157,7 +160,7 @@ export default function CustomerDecision({
                   ...(expired ? { expired_override_reason: override.trim() } : {}),
                 },
               })}
-              className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50">
+              className={buttonClass('primary', 'sm')}>
               {t('customer.confirmAccept')}
             </button>
           </div>
@@ -171,7 +174,7 @@ export default function CustomerDecision({
               onClick={() => signOff.mutate('pm')}
               className={`rounded-lg border px-3 py-1 text-xs disabled:cursor-not-allowed ${change.pm_signed_by
                 ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200' : 'border-slate-600 text-slate-200 hover:bg-slate-700 disabled:opacity-50'}`}>
-              PM sign-off {change.pm_signed_by ? '✓' : ''}
+              PM sign-off{change.pm_signed_by && <Check aria-label="done" size={12} strokeWidth={3} className="ml-1 inline" />}
             </button>
           )}
           {canSignQuality && (
@@ -179,7 +182,7 @@ export default function CustomerDecision({
               onClick={() => signOff.mutate('quality')}
               className={`rounded-lg border px-3 py-1 text-xs disabled:cursor-not-allowed ${change.quality_signed_by
                 ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200' : 'border-slate-600 text-slate-200 hover:bg-slate-700 disabled:opacity-50'}`}>
-              Quality sign-off {change.quality_signed_by ? '✓' : ''}
+              Quality sign-off{change.quality_signed_by && <Check aria-label="done" size={12} strokeWidth={3} className="ml-1 inline" />}
             </button>
           )}
         </div>
@@ -188,7 +191,7 @@ export default function CustomerDecision({
         <p className="text-xs text-amber-300">PM and Quality sign-off must be different users</p>
       )}
       <p className="text-[11px] text-slate-500">
-        Approve requires customer acceptance + both sign-offs. The approve button is in the cockpit above.
+        Approval needs the customer's acceptance and both sign-offs. The approve button is in the cockpit above.
       </p>
     </div>
   )

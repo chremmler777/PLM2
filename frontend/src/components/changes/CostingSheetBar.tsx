@@ -10,12 +10,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { toastError } from '../../lib/apiError'
 import { t } from '../../i18n/cmLabels'
-import { formatDate, formatMoney } from '../../lib/format'
+import { formatCalendarDate, formatMoney } from '../../lib/format'
 import type { Summation } from '../../types/change'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 export default function CostingSheetBar({ changeId, summation, editable }: {
   changeId: number
@@ -35,7 +33,7 @@ export default function CostingSheetBar({ changeId, summation, editable }: {
       qc.setQueryData(['costing-context', changeId], data)
       toast.success(t('costing.machineClassSaved'))
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not set the machine class'),
+    onError: (e: unknown) => toastError(e, 'Could not set the machine class'),
   })
   if (!ctx) return null
 
@@ -60,7 +58,7 @@ export default function CostingSheetBar({ changeId, summation, editable }: {
             : t('costing.stale')
               .replace('{v}', String(stale.latest_version))
               .replace('{m}', String(stale.review_months))
-              .replace('{due}', formatDate(stale.due_on))}
+              .replace('{due}', formatCalendarDate(stale.due_on))}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-slate-700 bg-slate-800/40 px-3 py-2 text-xs text-slate-300">

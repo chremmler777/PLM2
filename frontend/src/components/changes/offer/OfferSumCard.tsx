@@ -4,6 +4,7 @@
  * piece-price effect and the margin against internal cost. Never recomputed
  * here: the business rule lives in one place.
  */
+import { Check } from 'lucide-react'
 import type { OfferOut } from '../../../types/changeOffer'
 import { fmtMoney, fmtPct, fmtPiece, resultTone, sectionLabel } from './offerFormat'
 import type { SaveState } from './useOfferDraft'
@@ -63,10 +64,15 @@ export default function OfferSumCard({ offer, saveState, stale }: {
         <Row label="Internal cost" value={fmtMoney(tot.internal_cost, cur)} muted testId="sum-internal" />
         <div className="flex items-baseline justify-between text-xs">
           <span className="text-slate-500">Result vs internal cost</span>
-          <span data-testid="sum-margin"
-            className={`tabular-nums ${resultTone(margin)}`}>
-            {fmtMoney(margin, cur)}{tot.margin_pct != null && <span className="ml-1 text-slate-500">({fmtPct(tot.margin_pct)})</span>}
-          </span>
+          {/* No internal cost yet: nothing to compare with, not a 0 % result. */}
+          {Math.abs(tot.internal_cost ?? 0) >= 0.005 ? (
+            <span data-testid="sum-margin"
+              className={`tabular-nums ${resultTone(margin)}`}>
+              {fmtMoney(margin, cur)}{tot.margin_pct != null && <span className="ml-1 text-slate-500">({fmtPct(tot.margin_pct)})</span>}
+            </span>
+          ) : (
+            <span data-testid="sum-margin" className="text-slate-500">- (no costing yet)</span>
+          )}
         </div>
       </div>
       </div>
@@ -83,5 +89,9 @@ export function SaveBadge({ state }: { state?: SaveState }) {
     error: ['Not saved', 'text-rose-400'],
   }
   const [label, cls] = map[state]
-  return <span data-testid="offer-save-state" className={`text-[11px] ${cls}`}>{state === 'saved' ? '✓ ' : ''}{label}</span>
+  return (
+    <span data-testid="offer-save-state" role="status" className={`inline-flex items-center gap-1 text-[11px] ${cls}`}>
+      {state === 'saved' && <Check aria-hidden="true" size={11} strokeWidth={3} />}{label}
+    </span>
+  )
 }

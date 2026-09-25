@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toastError } from '../../../lib/apiError'
 import { changeOfferApi } from '../../../api/changeOffer'
 import type { OfferData, OfferOut } from '../../../types/changeOffer'
 
 export type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
 
 export const offersKey = (changeId: number) => ['change', changeId, 'offers'] as const
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 /**
  * The draft being edited: local data for instant typing, one debounced PATCH
@@ -61,7 +58,7 @@ export function useOfferDraft(changeId: number, offer: OfferOut | undefined, del
             // Put the keys back (newer edits win) so the next edit retries them.
             pending.current = { ...body, ...pending.current }
             setSaveState('error')
-            toast.error(errDetail(e) ?? 'Could not save the offer')
+            toastError(e, 'Could not save the offer')
             return false
           }
         }

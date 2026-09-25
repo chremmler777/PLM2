@@ -9,6 +9,7 @@ import {
   type OfferCostLine, type OfferData, type OfferFactor, type OfferFreeField, type OfferPiecePrice,
   type OfferChangeover,
 } from '../../../types/changeOffer'
+import { X } from 'lucide-react'
 import { fmtMoney, inputCls } from './offerFormat'
 import { Field, NumField, Segmented, SubLabel, Toggle } from './ui'
 
@@ -112,7 +113,7 @@ export default function OfferPriceSection({
                       <td className="px-2 py-1.5 text-slate-100">{l.label}</td>
                       <td className="px-2 py-1.5 text-slate-400">{l.department ?? '-'}</td>
                       <td className="px-2 py-1.5">
-                        <span className={`rounded border px-1.5 py-0 text-[10px] ${CATEGORY_CHIP[l.category] ?? CATEGORY_CHIP.other}`}>
+                        <span className={`rounded border px-1.5 py-0 text-[11px] ${CATEGORY_CHIP[l.category] ?? CATEGORY_CHIP.other}`}>
                           {l.category}
                         </span>
                       </td>
@@ -175,8 +176,8 @@ export default function OfferPriceSection({
               </label>
               {editable && f.key.startsWith('custom') ? (
                 <button type="button" aria-label={`Remove ${f.label}`}
-                  className="px-1 text-slate-500 hover:text-rose-300"
-                  onClick={() => update('factors', factors.filter((_, j) => j !== i))}>×</button>
+                  className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-rose-300"
+                  onClick={() => update('factors', factors.filter((_, j) => j !== i))}><X aria-hidden="true" size={13} /></button>
               ) : <span className="w-4" />}
             </div>
           ))}
@@ -249,8 +250,8 @@ export default function OfferPriceSection({
                   placeholder="Δ / piece"
                   onChange={(v) => setPiece({ rows: piece.rows.map((x, j) => (j === i ? { ...x, delta_per_piece: v ?? 0 } : x)) })} />
                 {editable ? (
-                  <button type="button" aria-label="Remove row" className="px-1 text-slate-500 hover:text-rose-300"
-                    onClick={() => setPiece({ rows: piece.rows.filter((_, j) => j !== i) })}>×</button>
+                  <button type="button" aria-label="Remove row" className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-rose-300"
+                    onClick={() => setPiece({ rows: piece.rows.filter((_, j) => j !== i) })}><X aria-hidden="true" size={13} /></button>
                 ) : <span />}
               </div>
             ))}
@@ -285,8 +286,8 @@ export default function OfferPriceSection({
               <NumField value={f.amount} disabled={!editable} ariaLabel="Item amount" placeholder="Amount (optional)"
                 onChange={(v) => setFree(i, { amount: v })} />
               {editable ? (
-                <button type="button" aria-label="Remove item" className="px-1 text-slate-500 hover:text-rose-300"
-                  onClick={() => update('free_fields', free.filter((_, j) => j !== i))}>×</button>
+                <button type="button" aria-label="Remove item" className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-rose-300"
+                  onClick={() => update('free_fields', free.filter((_, j) => j !== i))}><X aria-hidden="true" size={13} /></button>
               ) : <span />}
             </div>
           ))}

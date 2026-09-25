@@ -30,12 +30,16 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Star, X } from 'lucide-react'
 import { changesApi } from '../../api/changes'
+import ConfirmDialog from '../common/ConfirmDialog'
+import { btnIcon, btnSm } from '../common/buttonStyles'
+import { toastError } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
-import { formatMoney } from '../../lib/format'
+import { formatHours, formatMoney, formatNumber } from '../../lib/format'
 import type {
   CostCategory, CostEntryType, CostPosition, CostPositionKind, CostPositionPricing,
   CostingContext, CostingOffer, LeadTimeUnit,
@@ -46,10 +50,20 @@ const UNITS: LeadTimeUnit[] = ['calendar_days', 'business_days']
 /** Calendar days unless somebody says otherwise — the safer reading of a bare number. */
 const DEFAULT_UNIT: LeadTimeUnit = 'calendar_days'
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+/**
+ * A dialog opened from inside a table cell still inherits the cell's text
+ * styles (right-aligned, nowrap) through the DOM; this resets them.
+ */
+const DialogHost = ({ children }: { children: React.ReactNode }) => (
+  <div className="contents text-left whitespace-normal normal-case tracking-normal font-normal">{children}</div>
+)
 
 const num = (s: string): number | null => (s.trim() === '' ? null : Number(s))
+
+/** Money with its currency; a plain amount while the currency is not known
+    (never a guessed "EUR"). */
+const money = (v: number | null | undefined, currency: string | null | undefined): string =>
+  currency ? formatMoney(v, currency) : formatNumber(v, { min: 2, max: 2 })
 
 /** The tag reads as a label: the served one when the list is at hand, the
     coded one for known keys, else the key itself. */
@@ -271,7 +285,7 @@ function OfferRow({
       })
     },
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the offer'),
+    onError: (e: unknown) => toastError(e, 'Could not save the offer'),
   })
 
   // The vote is exclusive, so the sibling stars go dark the moment this one
@@ -287,7 +301,7 @@ function OfferRow({
     },
     onSuccess: onChanged,
     onError: (e: unknown) => {
-      toast.error(errDetail(e) ?? 'Could not set the favourite')
+      toastError(e, 'Could not set the favorite')
       onChanged()
     },
   })
@@ -295,8 +309,9 @@ function OfferRow({
   const remove = useMutation({
     mutationFn: () => changesApi.deleteCostingOffer(changeId, offer.id),
     onSuccess: onChanged,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the offer'),
   })
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const vendorName = offer.vendor_name.trim() || t('costpos.vendor')
 
   const dirty = vendor !== offer.vendor_name
     || Number(cost) !== offer.cost
@@ -311,25 +326,28 @@ function OfferRow({
     <li data-testid={`offer-row-${offer.id}`}
       // What is counted is lit: a part always, an alternative when starred.
       className={`flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-700/60 first:border-t-0 ${
-        counted ? 'bg-amber-950/20 border-l-2 border-l-amber-500 pl-2' : ''}`}>
+        counted ? 'bg-amber-950/20 border-l border-l-amber-500 pl-2' : ''}`}>
       {/* A part is always counted, so it carries no star — the star is the
           choice among alternatives. */}
       {offer.is_partial ? (
         <span data-testid={`offer-part-${offer.id}`} title={t('costpos.scopeHint')}
-          className="rounded bg-slate-700 text-slate-300 px-1 py-0 text-[10px] leading-tight">
+          className="rounded bg-slate-700 text-slate-300 px-1 py-0 text-[11px] leading-tight">
           {t('costpos.partBadge')}
         </span>
       ) : editable ? (
         <button type="button" data-testid={`offer-fav-${offer.id}`}
           title={t('costpos.favoriteHint')} aria-pressed={!!offer.favorite}
+          aria-label={`${t('costpos.favorite')}: ${vendorName}`}
           onClick={() => { if (!offer.favorite) favorite.mutate() }}
-          className={`text-sm leading-none ${offer.favorite ? 'text-amber-300' : 'text-slate-600 hover:text-slate-400'}`}>
-          {offer.favorite ? '★' : '☆'}
+          className={`inline-flex h-6 w-6 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+            offer.favorite ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`}>
+          <Star aria-hidden="true" size={14} fill={offer.favorite ? 'currentColor' : 'none'} />
         </button>
       ) : (
         <span data-testid={`offer-fav-${offer.id}`} title={t('costpos.favorite')}
-          className={`text-sm leading-none ${offer.favorite ? 'text-amber-300' : 'text-slate-600'}`}>
-          {offer.favorite ? '★' : '☆'}
+          className={`inline-flex h-6 w-6 items-center justify-center ${offer.favorite ? 'text-amber-300' : 'text-slate-600'}`}>
+          <Star aria-hidden="true" size={14} fill={offer.favorite ? 'currentColor' : 'none'} />
+          <span className="sr-only">{offer.favorite ? t('costpos.favorite') : ''}</span>
         </span>
       )}
 
@@ -359,12 +377,21 @@ function OfferRow({
           <ScopeToggle testId={`offer-scope-${offer.id}`} partial={partial} onChange={setPartial} />
           <button type="button" data-testid={`offer-save-${offer.id}`}
             disabled={!dirty || save.isPending} onClick={() => save.mutate()}
-            className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+            className={btnSm.primary}>
             {t('common.save')}
           </button>
           <button type="button" data-testid={`offer-delete-${offer.id}`}
-            onClick={() => remove.mutate()} title={t('costpos.delete')}
-            className="text-slate-500 hover:text-red-300 text-xs">✕</button>
+            onClick={() => setConfirmDelete(true)} title={t('costpos.delete')}
+            aria-label={`Delete the offer from ${vendorName}`}
+            className={`${btnIcon} h-7 w-7 hover:text-red-300`}>
+            <X aria-hidden="true" size={14} />
+          </button>
+          <DialogHost><ConfirmDialog open={confirmDelete} danger
+            title={`Delete the offer from ${vendorName}?`}
+            body="The offer and its attached quote leave this cost line. If it was the favorite, the line needs a new pick before it has a price."
+            confirmLabel="Delete offer" errorFallback="Could not delete the offer"
+            onConfirm={() => remove.mutateAsync()} onClose={() => setConfirmDelete(false)}
+            data-testid={`offer-delete-confirm-${offer.id}`} /></DialogHost>
         </>
       ) : (
         <>
@@ -372,12 +399,12 @@ function OfferRow({
             {offer.vendor_name}
           </span>
           <span data-testid={`offer-cost-${offer.id}`} className="text-slate-300 text-sm tabular-nums">
-            {formatMoney(offer.cost, currency)}
+            {money(offer.cost, currency)}
           </span>
           <span data-testid={`offer-shipping-${offer.id}`} className="text-xs text-slate-400">
             {t('costpos.shipping')}: {offer.shipping_included
               ? t('costpos.shippingIncluded')
-              : `${formatMoney(offer.shipping_cost ?? 0, currency)} ${t('costpos.shippingSeparate')}`}
+              : `${money(offer.shipping_cost ?? 0, currency)} ${t('costpos.shippingSeparate')}`}
           </span>
           {offer.lead_time_days != null && (
             <span data-testid={`offer-lead-${offer.id}`} className="text-xs text-slate-400">
@@ -431,7 +458,7 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
       setVendor(''); setCost(''); setShip(''); setLead(''); setIncluded(false); setPartial(false)
       onAdded()
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the offer'),
+    onError: (e: unknown) => toastError(e, 'Could not add the offer'),
   })
   return (
     <div data-testid={`offer-new-${positionId}`}
@@ -457,7 +484,7 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
       <ScopeToggle testId={`offer-new-scope-${positionId}`} partial={partial} onChange={setPartial} />
       <button type="button" data-testid={`offer-add-${positionId}`}
         disabled={vendor.trim() === '' || add.isPending} onClick={() => add.mutate()}
-        className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+        className={btnSm.secondary}>
         {t('costpos.addOffer')}
       </button>
     </div>
@@ -512,7 +539,7 @@ function LineValue({ p }: { p: CostPosition }) {
   if (p.line_value == null) return null
   return (
     <span data-testid={`costpos-value-${p.id}`} className="block text-xs text-slate-300 tabular-nums">
-      {formatMoney(p.line_value, p.rate_currency ?? p.currency)}
+      {money(p.line_value, p.rate_currency ?? p.currency)}
     </span>
   )
 }
@@ -600,24 +627,24 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
       })
     },
     onSuccess: () => { toast.success(t('costpos.saved')); setEditing(false); onChanged() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the position'),
+    onError: (e: unknown) => toastError(e, 'Could not save the position'),
   })
   const remove = useMutation({
     mutationFn: () => changesApi.deleteCostPosition(changeId, p.id),
     onSuccess: onChanged,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the position'),
   })
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const cur = p.currency ?? ctx?.currency ?? null
   const amount = (
     <span data-testid={`costpos-cost-${p.id}`} className="text-slate-200 tabular-nums">
       {type === 'time' || type === 'machine'
-        ? (p.hours != null ? `${p.hours} h` : '-')
+        ? formatHours(p.hours)
         : type === 'sampling'
           ? (p.trials != null ? `${p.trials} ${t('costpos.trialsShort')}` : '-')
           : cost != null
-            ? <>{formatMoney(cost, cur)}{p.hours != null && ` + ${p.hours} h`}</>
-            : p.hours != null ? `${p.hours} h` : '-'}
+            ? <>{money(cost, cur)}{p.hours != null && ` + ${formatHours(p.hours)}`}</>
+            : formatHours(p.hours)}
     </span>
   )
 
@@ -714,7 +741,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
               <LineValue p={p} />
               {needsFavorite && (
                 <span data-testid={`costpos-needs-favorite-${p.id}`}
-                  className="block text-xs text-amber-300">★ {t('costpos.pickFavorite')}</span>
+                  className="flex items-center justify-end gap-1 text-xs text-amber-300">
+                  <Star aria-hidden="true" size={12} />{t('costpos.pickFavorite')}
+                </span>
               )}
             </>
           )}
@@ -738,20 +767,31 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             <span className="inline-flex items-center gap-2">
               <button type="button" data-testid={`costpos-save-${p.id}`}
                 disabled={label.trim() === '' || save.isPending} onClick={() => save.mutate()}
-                className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50 active:scale-[0.98]">
+                className={btnSm.primary}>
                 {t('common.save')}
               </button>
-              <button type="button" className="text-xs text-slate-400 hover:text-slate-200"
+              <button type="button" className={btnSm.ghost}
                 onClick={() => setEditing(false)}>{t('costpos.cancelEdit')}</button>
             </span>
           ) : (
-            <span className="inline-flex items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1 text-xs">
               <button type="button" data-testid={`costpos-edit-${p.id}`}
-                onClick={() => setEditing(true)}
-                className="text-slate-400 hover:text-slate-200">{t('costpos.edit')}</button>
+                onClick={() => setEditing(true)} aria-label={`${t('costpos.edit')}: ${p.label}`}
+                className={btnSm.ghost}>{t('costpos.edit')}</button>
               <button type="button" data-testid={`costpos-delete-${p.id}`}
-                onClick={() => remove.mutate()} title={t('costpos.delete')}
-                className="text-slate-500 hover:text-red-300">✕</button>
+                onClick={() => setConfirmDelete(true)} title={t('costpos.delete')}
+                aria-label={`Delete cost line: ${p.label}`}
+                className={`${btnIcon} h-7 w-7 hover:text-red-300`}>
+                <X aria-hidden="true" size={14} />
+              </button>
+              <DialogHost><ConfirmDialog open={confirmDelete} danger
+                title={`Delete cost line "${p.label}"?`}
+                body={offerCount > 0
+                  ? `The line and its ${offerCount === 1 ? 'vendor offer' : `${offerCount} vendor offers`} leave the costing. This cannot be undone.`
+                  : 'The line leaves the costing and the totals. This cannot be undone.'}
+                confirmLabel="Delete line" errorFallback="Could not delete the cost line"
+                onConfirm={() => remove.mutateAsync()} onClose={() => setConfirmDelete(false)}
+                data-testid={`costpos-delete-confirm-${p.id}`} /></DialogHost>
             </span>
           ))}
         </td>
@@ -824,56 +864,60 @@ function EffortRow({
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is
   // queued, the latest of each wins, and it goes out when the save settles.
-  // A create keeps holding the row until the new position arrives (the row
-  // remounts on it), so a second create can never follow; what was queued
-  // meanwhile is sent as an edit of the created position.
+  // A create answers with the new position's id; from then on every save of
+  // this row (queued or new, until the row remounts on the listed position)
+  // is an edit of that id, never a second create.
   type Patch = { hours?: true; labour_position?: string | null }
   const inFlight = useRef(false)
   const queued = useRef<Patch | null>(null)
+  const createdId = useRef<number | null>(null)
+  const targetId = () => position?.id ?? createdId.current
   const hoursRef = useRef(hours)
   hoursRef.current = hours
   // The hours the save in flight sent: a queued hours commit of the same
   // number has nothing left to say.
   const sentHours = useRef<string | null>(null)
+  // The hours the server holds for this row, as far as this row knows.
+  const savedHours = useRef<number | null>(position?.hours ?? null)
   const body = (p: Patch) => ({
     ...(p.hours ? { hours: num(hoursRef.current) } : {}),
     ...('labour_position' in p ? { labour_position: p.labour_position ?? null } : {}),
   })
   const save = useMutation({
-    mutationFn: (p: Patch) => position
-      ? changesApi.updateCostPosition(changeId, position.id, body(p))
-      : changesApi.createCostPosition(changeId, {
-        department_id: departmentId, label: t(labelKey), kind, hours: num(hoursRef.current),
-        labour_position: ('labour_position' in p ? p.labour_position : labourPos) || null,
-      }),
-    onSuccess: (created: unknown) => {
+    mutationFn: (p: Patch) => {
+      const id = targetId()
+      return id != null
+        ? changesApi.updateCostPosition(changeId, id, body(p))
+        : changesApi.createCostPosition(changeId, {
+          department_id: departmentId, label: t(labelKey), kind, hours: num(hoursRef.current),
+          labour_position: ('labour_position' in p ? p.labour_position : labourPos) || null,
+        })
+    },
+    onSuccess: (res: unknown) => {
       toast.success(t('costpos.saved'))
+      if (targetId() == null) {
+        const id = (res as { id?: number } | undefined)?.id
+        if (id != null) createdId.current = id
+      }
+      if (sentHours.current !== null) savedHours.current = num(sentHours.current)
+      inFlight.current = false
       let q = queued.current
       queued.current = null
       if (q?.hours && hoursRef.current === sentHours.current) {
         q = 'labour_position' in q ? { labour_position: q.labour_position } : null
       }
-      if (position) {
-        inFlight.current = false
-        if (q) run(q)
-        else onChanged()
-        return
-      }
-      const id = (created as { id?: number } | undefined)?.id
-      if (q && id != null) {
-        changesApi.updateCostPosition(changeId, id, body(q))
-          .catch((e: unknown) => toast.error(errDetail(e) ?? 'Could not save the effort'))
-          .finally(onChanged)
-        return
-      }
-      onChanged()
+      if (q) run(q)
+      else onChanged()
     },
     onError: (e: unknown) => {
       inFlight.current = false
-      toast.error(errDetail(e) ?? 'Could not save the effort')
+      toastError(e, 'Could not save the effort')
       const q = queued.current
       queued.current = null
-      if (q && position) run(q)
+      // What is still queued goes out (as an edit when there is a position to
+      // edit); otherwise the row reloads what the server holds.
+      if (q && targetId() != null) run(q)
+      else onChanged()
     },
   })
   const dirty = num(hours) !== (position?.hours ?? null)
@@ -883,22 +927,26 @@ function EffortRow({
       return
     }
     inFlight.current = true
-    sentHours.current = p.hours || !position ? hoursRef.current : null
+    sentHours.current = p.hours || targetId() == null ? hoursRef.current : null
     save.mutate(p)
   }
-  const commit = () => { if (dirty) run({ hours: true }) }
+  // Compared with what the server holds now (after a create, before the row
+  // remounts, that is the created position's hours, not "nothing").
+  const commit = () => {
+    if (inFlight.current || num(hoursRef.current) !== savedHours.current) run({ hours: true })
+  }
   // The position re-prices a saved row at once; before the first save it
   // rides along with the hours (or, while the create is out, follows it).
   const pickPosition = (v: string) => {
     setLabourPos(v)
-    if (position || inFlight.current) run({ labour_position: v || null })
+    if (targetId() != null || inFlight.current) run({ labour_position: v || null })
   }
   return (
     <tr className="border-t border-slate-700/70">
       <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
       <td className={cellCls}>
         <span className="text-slate-200">{t(rowKey)}</span>
-        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[10px]">
+        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[11px]">
           {t('costpos.standing')}
         </span>
       </td>
@@ -923,7 +971,7 @@ function EffortRow({
             <span className="text-xs text-slate-500">h</span>
             <button type="button" data-testid={`costpos-effort-save-${kind}-${departmentId}`}
               disabled={!dirty || save.isPending} onClick={commit}
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+              className={btnSm.secondary}>
               {t('common.save')}
             </button>
           </span>
@@ -951,7 +999,7 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
   const save = useMutation({
     mutationFn: () => changesApi.setWeightEstimate(changeId, num(grams)),
     onSuccess: () => { toast.success(t('costpos.partWeightSaved')); onSaved() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the weight'),
+    onError: (e: unknown) => toastError(e, 'Could not save the weight'),
   })
   const dirty = num(grams) !== (weightG ?? null)
   const commit = () => { if (dirty && !save.isPending) save.mutate() }
@@ -960,7 +1008,7 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
       <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
       <td className={cellCls}>
         <span className="text-slate-200">{t('costpos.partWeightRow')}</span>
-        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[10px]">
+        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[11px]">
           {t('costpos.standing')}
         </span>
       </td>
@@ -980,7 +1028,7 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
             <span className="text-xs text-slate-500">g</span>
             <button type="button" data-testid={`costpos-weight-save-${departmentId}`}
               disabled={!dirty || save.isPending} onClick={commit}
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+              className={btnSm.secondary}>
               {t('common.save')}
             </button>
           </span>
@@ -997,6 +1045,8 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
 }
 
 const ADD_CATEGORY = '__add_category'
+/** Categories the cost sheet kinds replace for new lines (see AddLine). */
+const HIDDEN_CATEGORIES = new Set(['sampling'])
 /** The cost-sheet kinds, offered in the category list under their own group. */
 const MACHINE_TIME = '__machine_time'
 const SAMPLING = '__sampling'
@@ -1067,28 +1117,33 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
       })
     },
     onSuccess: () => { reset(); onAdded() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the position'),
+    onError: (e: unknown) => toastError(e, 'Could not add the position'),
   })
   const createCategory = useMutation({
     mutationFn: (c: { label: string; type: CostEntryType }) =>
       changesApi.createCostCategory(departmentId, c.label.trim(), c.type),
     onSuccess: (row) => { onCategoriesChanged(); setTag(row.key); setNewCat(null); toast.success(t('costpos.categoryAdded')) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the category'),
+    onError: (e: unknown) => toastError(e, 'Could not add the category'),
   })
   const deleteCategory = useMutation({
     mutationFn: (id: number) => changesApi.deleteCostCategory(id),
     onSuccess: () => { onCategoriesChanged(); setTag(''); toast.success(t('costpos.categoryDeleted')) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not remove the category'),
   })
+  const [confirmCategory, setConfirmCategory] = useState(false)
 
   const ready = label.trim() !== '' && !add.isPending
   const submitOnEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && ready) add.mutate() }
-  const own = categories.filter((c) => c.extra && c.custom_id == null)
-  const custom = categories.filter((c) => c.custom_id != null)
-  const common = categories.filter((c) => !c.extra)
+  // Sampling is priced from the cost sheet (trials x the class's price), in
+  // the group below. The old own-time "Sampling" category would sit next to
+  // it under the same name, so it is not offered for new lines; lines that
+  // already carry it keep their label.
+  const offered = categories.filter((c) => !HIDDEN_CATEGORIES.has(c.key))
+  const own = offered.filter((c) => c.extra && c.custom_id == null)
+  const custom = offered.filter((c) => c.custom_id != null)
+  const common = offered.filter((c) => !c.extra)
   const option = (c: CostCategory) => (
     <option key={c.key} value={c.key}>
-      {tagLabel(c.key, categories)}{c.entry_type === 'time' ? ' · h' : ''}
+      {tagLabel(c.key, categories)}{c.entry_type === 'time' && !tagLabel(c.key, categories).includes('(') ? ' (hours)' : ''}
     </option>
   )
 
@@ -1119,12 +1174,21 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
             <option value={ADD_CATEGORY}>{t('costpos.addCategory')}</option>
           </select>
           {category?.custom_id != null && (
-            <button type="button" data-testid={`costpos-category-delete-${departmentId}`}
-              title={t('costpos.categoryHint')} disabled={deleteCategory.isPending}
-              onClick={() => deleteCategory.mutate(category.custom_id as number)}
-              className="block mt-1 text-[11px] text-red-300 hover:text-red-200 underline decoration-dotted">
-              {t('costpos.deleteCategory')}
-            </button>
+            <>
+              <button type="button" data-testid={`costpos-category-delete-${departmentId}`}
+                title={t('costpos.categoryHint')} disabled={deleteCategory.isPending}
+                onClick={() => setConfirmCategory(true)}
+                className="block mt-1 text-[11px] text-red-300 hover:text-red-200 underline decoration-dotted">
+                {t('costpos.deleteCategory')}
+              </button>
+              <DialogHost><ConfirmDialog open={confirmCategory} danger
+                title={`Remove the category "${tagLabel(category.key, categories)}"?`}
+                body="It leaves your department's category list. Lines that already use it keep it."
+                confirmLabel="Remove category" errorFallback="Could not remove the category"
+                onConfirm={() => deleteCategory.mutateAsync(category.custom_id as number)}
+                onClose={() => setConfirmCategory(false)}
+                data-testid={`costpos-category-delete-confirm-${departmentId}`} /></DialogHost>
+            </>
           )}
         </td>
         <td className={`${cellCls} min-w-[9rem]`}>
@@ -1166,7 +1230,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
                   data-testid={`costpos-new-pricing-${departmentId}-${v}`}
                   aria-pressed={pricing === v} onClick={() => setPricing(v)}
                   className={`px-2.5 h-7 text-xs whitespace-nowrap transition-colors ${
-                    pricing === v ? 'bg-sky-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                    pricing === v ? 'bg-sky-700 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
                   {t(`costpos.pricingShort.${v}`)}
                 </button>
               ))}
@@ -1212,7 +1276,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
         <td className={`${cellCls} text-right whitespace-nowrap sticky right-0 bg-slate-800`}>
           <button type="button" data-testid={`costpos-add-${departmentId}`}
             disabled={!ready} onClick={() => add.mutate()}
-            className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 active:scale-[0.98]">
+            className={btnSm.primary}>
             {t('costpos.addLine')}
           </button>
         </td>
@@ -1240,7 +1304,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               <button type="button" data-testid={`costpos-new-category-save-${departmentId}`}
                 disabled={!newCat.label.trim() || createCategory.isPending}
                 onClick={() => createCategory.mutate(newCat)}
-                className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+                className={btnSm.secondary}>
                 {t('costpos.saveCategory')}
               </button>
               <button type="button" className="text-xs text-slate-400 hover:text-slate-200"
@@ -1304,7 +1368,7 @@ export default function CostPositions({
   const byCurrency = new Map<string, number>()
   const addTo = (cur: string, v: number) => byCurrency.set(cur, (byCurrency.get(cur) ?? 0) + v)
   for (const p of mine) {
-    const cur = p.currency ?? ctx?.currency ?? 'EUR'
+    const cur = p.currency ?? ctx?.currency ?? ''
     const type = lineTypeOf(p)
     if (type === 'estimate' || type === 'quote') {
       const c = effectiveOf(p)
@@ -1379,12 +1443,12 @@ export default function CostPositions({
               <td className={`${cellCls} ${numCls} text-slate-100 whitespace-nowrap`}
                 data-testid={`costpos-total-${departmentId}`}>
                 {totals.length === 0
-                  ? formatMoney(0, ctx?.currency ?? null)
+                  ? money(0, ctx?.currency)
                   : totals.map(([cur, v]) => (
-                    <span key={cur} className="block">{formatMoney(v, cur)}</span>
+                    <span key={cur || '-'} className="block">{money(v, cur)}</span>
                   ))}
                 {totalHours > 0 && (
-                  <span className="block text-xs text-slate-400">{totalHours} h</span>
+                  <span className="block text-xs text-slate-400">{formatHours(totalHours)}</span>
                 )}
                 {unpriced > 0 && (
                   <span data-testid={`costpos-unpriced-${departmentId}`}

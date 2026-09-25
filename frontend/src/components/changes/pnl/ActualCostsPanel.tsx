@@ -2,8 +2,15 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { actualCostsApi } from '../../../api/actualCosts'
 import { changesApi } from '../../../api/changes'
-import { formatDate, formatMoney, todayIso } from '../../../lib/format'
-import type { ActualCostCategory } from '../../../types/pnl'
+import { X } from 'lucide-react'
+import {
+  NUMBER_INPUT_HINT, formatCalendarDate, formatMoney, readNumberInput, todayIso,
+} from '../../../lib/format'
+import { apiErrorMessage } from '../../../lib/apiError'
+import ConfirmDialog from '../../common/ConfirmDialog'
+import { btnIcon, btnSm } from '../../common/buttonStyles'
+import DateInput from '../../gantt/DateInput'
+import type { ActualCost, ActualCostCategory } from '../../../types/pnl'
 
 const CATEGORY_LABEL: Record<ActualCostCategory, string> = {
   external: 'Supplier invoice',
@@ -13,11 +20,6 @@ const CATEGORY_LABEL: Record<ActualCostCategory, string> = {
 
 const input = 'bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200'
 
-function errorText(e: unknown): string {
-  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  if (typeof d === 'string') return d
-  return 'Could not save the cost'
-}
 
 /**
  * The actual costs that are not hours: supplier invoice lines, scrap, other.
@@ -56,7 +58,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   }
   const add = useMutation({
     mutationFn: () => actualCostsApi.add(changeId, {
-      category, amount: Number(amount.replace(',', '.')), cost_date: costDate,
+      category, amount: amountRead.value as number, cost_date: costDate,
       vendor_name: vendor || null, department_id: dept === '' ? null : dept,
       note: note || null,
     }),
@@ -64,12 +66,15 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
       setAmount(''); setVendor(''); setNote(''); setError(null); setOpen(false)
       refresh()
     },
-    onError: (e) => setError(errorText(e)),
+    onError: (e) => setError(apiErrorMessage(e, 'Could not save the cost')),
   })
   const remove = useMutation({
     mutationFn: (id: number) => actualCostsApi.remove(changeId, id),
     onSuccess: refresh,
   })
+  const [removing, setRemoving] = useState<ActualCost | null>(null)
+  // en-US like everything shown: "1,500" is fifteen hundred, "12,5" is refused.
+  const amountRead = readNumberInput(amount)
 
   if (!data) return null
   const allowed = data.writable_department_ids
@@ -80,7 +85,12 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   const totals = data.totals_by_currency && Object.keys(data.totals_by_currency).length > 0
     ? Object.entries(data.totals_by_currency)
     : [...data.items.reduce((m, c) => m.set(curOf(c), (m.get(curOf(c)) ?? 0) + c.amount), new Map<string, number>())]
-  const amountOk = Number(amount.replace(',', '.')) > 0
+  const amountOk = amountRead.value !== null && amountRead.value > 0
+  const amountHint = amountRead.error ? NUMBER_INPUT_HINT
+    : amountRead.value !== null && amountRead.value <= 0 ? 'The amount must be more than 0' : null
+  // An actual cost is booked when it happened: never ahead of today.
+  const future = !!costDate && costDate > todayIso()
+  const dateOk = !!costDate && !future
   const deptOk = allowed === null || dept !== ''
 
   return (
@@ -95,7 +105,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
         </span>
         {data.can_write && !open && (
           <button type="button" data-testid="actual-cost-open"
-            className="ml-auto border border-slate-600 text-slate-200 hover:bg-slate-700 px-2.5 py-1 rounded-lg text-xs"
+            className={`ml-auto ${btnSm.secondary}`}
             onClick={() => setOpen(true)}>
             Add actual cost
           </button>
@@ -105,7 +115,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
       {open && (
         <form data-testid="actual-cost-form"
           className="mt-2 grid grid-cols-2 md:grid-cols-6 gap-2 items-end"
-          onSubmit={(e) => { e.preventDefault(); if (amountOk && deptOk) add.mutate() }}>
+          onSubmit={(e) => { e.preventDefault(); if (amountOk && dateOk && deptOk) add.mutate() }}>
           <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Category
             <select className={input} value={category}
               onChange={(e) => setCategory(e.target.value as ActualCostCategory)}>
@@ -116,12 +126,24 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
           </label>
           <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Amount ({currency})
             <input aria-label="Amount" className={input} inputMode="decimal" value={amount}
+              aria-invalid={amountHint ? true : undefined}
+              aria-describedby={amountHint ? `actual-cost-amount-hint-${changeId}` : undefined}
               onChange={(e) => setAmount(e.target.value)} />
+            {amountHint && (
+              <span id={`actual-cost-amount-hint-${changeId}`} data-testid="actual-cost-amount-hint"
+                className="text-[11px] text-rose-300">{amountHint}</span>
+            )}
           </label>
-          <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Date
-            <input aria-label="Cost date" type="date" className={input} value={costDate}
-              onChange={(e) => setCostDate(e.target.value)} />
-          </label>
+          <div className="flex flex-col gap-0.5 text-[11px] text-slate-400">
+            <label htmlFor={`actual-cost-date-${changeId}`}>Date</label>
+            <DateInput id={`actual-cost-date-${changeId}`} aria-label="Cost date" className={input}
+              value={costDate} onChange={setCostDate} commitOnChange />
+            {future && (
+              <span data-testid="actual-cost-future" role="alert" className="text-[11px] text-rose-300">
+                A cost cannot be dated in the future. Book it on or after the day it happened.
+              </span>
+            )}
+          </div>
           <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Vendor
             <input aria-label="Vendor" className={input} maxLength={120} value={vendor}
               onChange={(e) => setVendor(e.target.value)} />
@@ -140,15 +162,15 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
           </label>
           <div className="col-span-2 md:col-span-6 flex items-center gap-2">
             <button type="submit" data-testid="actual-cost-save"
-              disabled={!amountOk || !deptOk || add.isPending}
-              className="bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white px-3 py-1 rounded-lg text-xs">
+              disabled={!amountOk || !dateOk || !deptOk || add.isPending}
+              className={btnSm.primary}>
               Save
             </button>
-            <button type="button" className="text-xs text-slate-400 hover:text-slate-200"
+            <button type="button" className={btnSm.ghost}
               onClick={() => { setOpen(false); setError(null) }}>
               Cancel
             </button>
-            {error && <span className="text-[11px] text-rose-300">{error}</span>}
+            {error && <span role="alert" className="text-[11px] text-rose-300">{error}</span>}
           </div>
         </form>
       )}
@@ -158,8 +180,8 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
           {data.items.map((c) => (
             <li key={c.id} data-testid={`actual-cost-${c.id}`}
               className="flex items-baseline gap-2 text-xs text-slate-300">
-              <span className="text-slate-500 w-20 shrink-0">{formatDate(c.cost_date)}</span>
-              <span className="rounded bg-slate-700 px-1.5 text-[10px] text-slate-300">{CATEGORY_LABEL[c.category] ?? c.category}</span>
+              <span className="text-slate-500 w-20 shrink-0 tabular-nums">{formatCalendarDate(c.cost_date)}</span>
+              <span className="rounded bg-slate-700 px-1.5 text-[11px] text-slate-300">{CATEGORY_LABEL[c.category] ?? c.category}</span>
               <span className="min-w-0 flex-1 truncate">
                 {[c.vendor_name, c.department_name, c.note].filter(Boolean).join(', ') || '-'}
                 {c.created_by_name && <span className="text-slate-500"> ({c.created_by_name})</span>}
@@ -167,21 +189,28 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
               <span className="tabular-nums text-slate-100">{formatMoney(c.amount, curOf(c))}</span>
               {c.can_delete && (
                 <button type="button" data-testid={`actual-cost-delete-${c.id}`}
-                  className="text-[11px] text-slate-500 hover:text-rose-300"
+                  aria-label={`Delete actual cost: ${CATEGORY_LABEL[c.category] ?? c.category}, ${formatMoney(c.amount, curOf(c))}, ${formatCalendarDate(c.cost_date)}`}
+                  className={`${btnIcon} h-6 w-6 hover:text-rose-300`}
                   disabled={remove.isPending}
-                  onClick={() => { if (window.confirm('Delete this cost line?')) remove.mutate(c.id) }}>
-                  Delete
+                  onClick={() => setRemoving(c)}>
+                  <X aria-hidden="true" size={13} />
                 </button>
               )}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-[11px] text-slate-500">
+        <p className="mt-1 text-xs text-slate-500">
           {data.cost_role ? 'No supplier invoice or other cost entered yet.'
             : 'Nothing booked to your department yet. Enter supplier invoices, scrap or other costs your department carried.'}
         </p>
       )}
+      <ConfirmDialog open={removing !== null} danger data-testid="actual-cost-delete-confirm"
+        title="Delete this actual cost?"
+        body={removing ? `${CATEGORY_LABEL[removing.category] ?? removing.category}, ${formatMoney(removing.amount, curOf(removing))} on ${formatCalendarDate(removing.cost_date)} leaves the actual costs and the P&L.` : undefined}
+        confirmLabel="Delete cost" errorFallback="Could not delete the cost"
+        onConfirm={() => (removing ? remove.mutateAsync(removing.id) : undefined)}
+        onClose={() => setRemoving(null)} />
     </div>
   )
 }

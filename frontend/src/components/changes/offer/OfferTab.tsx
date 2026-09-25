@@ -8,7 +8,12 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Check, CircleAlert, Lock } from 'lucide-react'
 import { changeOfferApi } from '../../../api/changeOffer'
+import { toastError } from '../../../lib/apiError'
+import { formatCalendarDate } from '../../../lib/format'
+import ConfirmDialog from '../../common/ConfirmDialog'
+import { buttonClass } from '../../common/buttonStyles'
 import type { ChangeDetail } from '../../../types/change'
 import type { OfferIssue, OfferOut } from '../../../types/changeOffer'
 import NegotiationCard from '../NegotiationCard'
@@ -21,7 +26,7 @@ import OfferSumCard from './OfferSumCard'
 import OfferTimingSection from './OfferTimingSection'
 import SendOfferDialog from './SendOfferDialog'
 import {
-  daysLeftTone, fmtDate, fmtMoney, fmtPct, fmtPiece, offerDaysLeft, quotePlanKey, resultTone, sectionLabel, validityText,
+  daysLeftTone, fmtMoney, fmtPct, fmtPiece, offerDaysLeft, quotePlanKey, resultTone, sectionLabel, validityText,
 } from './offerFormat'
 import { offersKey, useOfferDraft } from './useOfferDraft'
 import { StepSection } from './ui'
@@ -32,9 +37,13 @@ const useQuotePlan = (changeId: number) => useQuery({
   queryFn: () => planApi.get(changeId, 'quote'),
 })
 const planHasTasks = (p?: { tasks?: unknown[] }) => (p?.tasks?.length ?? 0) > 0
+/** Errors the quote plan's own check reports (the "1 error" chip in the planner). */
+const planErrorCount = (p?: { validation?: { errors?: unknown[] } }) => p?.validation?.errors?.length ?? 0
+const errorsText = (n: number) => `${n} error${n === 1 ? '' : 's'}`
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+/** Once the customer said yes the offer is history (backend _require_open). */
+export const offerClosed = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'>): boolean =>
+  !!change.accepted_offer_id || change.customer_response === 'accepted'
 
 export interface OfferTabProps {
   change: ChangeDetail
@@ -81,7 +90,7 @@ function useOpenPdf(changeId: number, offerId: number) {
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (e) {
       win?.close()
-      toast.error(errDetail(e) ?? 'Could not render the PDF')
+      toastError(e, 'Could not render the PDF')
     } finally {
       setBusy(false)
     }
@@ -103,7 +112,7 @@ function PdfButton({ changeId, offerId, testId = 'offer-preview-pdf' }: {
 
 function OfferHeader({
   change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings, stale, sendBlocked, sending,
-  onDiscard, discarding,
+  onDiscard, discarding, sendReasons = [],
 }: {
   change: ChangeDetail
   offer: OfferOut
@@ -118,9 +127,11 @@ function OfferHeader({
   /** A save is pending or running: Send waits for it. */
   sendBlocked?: boolean
   sending?: boolean
-  /** Throw the draft away (draft only). */
-  onDiscard?: () => void
+  /** Throw the draft away (draft only); a rejection is shown in the confirm. */
+  onDiscard?: () => Promise<unknown>
   discarding?: boolean
+  /** What still stops the send, in words; the button waits for all of them. */
+  sendReasons?: string[]
 }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const tot = offer.totals
@@ -151,7 +162,7 @@ function OfferHeader({
               <span data-testid="offer-valid-chip"
                 className={`rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${daysLeftTone(offerDaysLeft(validRef), validRef.expired)}`}>
                 {validRef.status === offer.status ? '' : `v${validRef.version} `}
-                valid until {fmtDate(validRef.valid_until)}
+                valid until {formatCalendarDate(validRef.valid_until)}
                 {validityText(validRef) && <>{' · '}{validityText(validRef)}</>}
               </span>
             )}
@@ -174,56 +185,71 @@ function OfferHeader({
         </div>
         <div>
           <div className={sectionLabel}>Result vs internal cost</div>
-          <div data-testid="offer-margin"
-            className={`mt-0.5 text-lg font-semibold tabular-nums ${resultTone(tot.margin_abs)}`}>
-            {fmtMoney(tot.margin_abs, cur)}
-            {tot.margin_pct != null && <span className="ml-1 text-xs text-slate-500">{fmtPct(tot.margin_pct)}</span>}
-          </div>
+          {/* Nothing costed means nothing to compare with: a 0.00 result
+              and 0 % would read as a break-even. */}
+          {hasInternalCost(offer) ? (
+            <div data-testid="offer-margin"
+              className={`mt-0.5 text-lg font-semibold tabular-nums ${resultTone(tot.margin_abs)}`}>
+              {fmtMoney(tot.margin_abs, cur)}
+              {tot.margin_pct != null && <span className="ml-1 text-xs text-slate-500">{fmtPct(tot.margin_pct)}</span>}
+            </div>
+          ) : (
+            <div data-testid="offer-margin" className="mt-0.5 text-lg font-semibold text-slate-400">
+              -<span className="ml-2 text-xs font-normal text-slate-500">No internal cost yet</span>
+            </div>
+          )}
         </div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
           <PdfButton changeId={change.id} offerId={offer.id} />
+          {onDiscard && offer.status === 'draft' && (
+            <>
+              <button type="button" data-testid="offer-discard" onClick={() => setConfirmDiscard(true)}
+                className={buttonClass('ghost', 'md', 'hover:text-rose-200')}>
+                Discard draft
+              </button>
+              <ConfirmDialog open={confirmDiscard} danger data-testid="offer-discard-confirm"
+                title={`Discard draft v${offer.version}?`}
+                body="The draft and everything typed into it are deleted. Sent versions are not touched. This cannot be undone."
+                confirmLabel="Discard draft" pending={discarding} errorFallback="Could not discard the draft"
+                onConfirm={() => onDiscard()} onClose={() => setConfirmDiscard(false)} />
+            </>
+          )}
           {canWrite && offer.status === 'draft' && (
             <button type="button" data-testid="offer-send" onClick={onSend}
-              disabled={sendBlocked || sending}
+              disabled={sendBlocked || sending || sendReasons.length > 0}
+              aria-describedby={sendReasons.length > 0 ? 'offer-send-reasons' : undefined}
               title={sendBlocked ? 'Saving your changes first' : undefined}
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50">
+              className={buttonClass('primary')}>
               {sending ? 'Saving' : 'Send offer'}
             </button>
           )}
-          {onDiscard && offer.status === 'draft' && (confirmDiscard ? (
-            <span data-testid="offer-discard-confirm" role="alertdialog" aria-label="Confirm discarding the draft"
-              className="flex items-center gap-1.5 rounded-lg border border-rose-900/70 bg-rose-950/30 px-2 py-1 text-xs text-rose-200">
-              Discard draft v{offer.version}? This cannot be undone.
-              <button type="button" onClick={() => setConfirmDiscard(false)}
-                className="rounded border border-slate-600 px-2 py-0.5 text-slate-300 hover:bg-slate-700">Keep</button>
-              <button type="button" data-testid="offer-discard-yes" disabled={discarding}
-                onClick={onDiscard}
-                className="rounded bg-rose-700 px-2 py-0.5 font-medium text-white hover:bg-rose-600 disabled:opacity-50">
-                Discard
-              </button>
-            </span>
-          ) : (
-            <button type="button" data-testid="offer-discard" onClick={() => setConfirmDiscard(true)}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:border-rose-700 hover:text-rose-200">
-              Discard draft
-            </button>
-          ))}
           {onNewVersion && (
             <button type="button" data-testid="offer-new-version" disabled={creating} onClick={onNewVersion}
-              className="rounded-lg border border-sky-700 px-3 py-1.5 text-sm text-sky-200 hover:bg-sky-900/40 disabled:opacity-50">
+              className={buttonClass('secondary')}>
               New version
             </button>
           )}
         </div>
       </div>
+      {canWrite && offer.status === 'draft' && sendReasons.length > 0 && (
+        <div id="offer-send-reasons" data-testid="offer-send-reasons"
+          className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300">
+          <span className="font-medium text-slate-200">Before sending:</span>
+          {sendReasons.map((r) => (
+            <span key={r} className="inline-flex items-center gap-1">
+              <CircleAlert aria-hidden="true" size={12} className="shrink-0 text-amber-300" />{r}
+            </span>
+          ))}
+        </div>
+      )}
       {warnings.length > 0 && (
         <ul data-testid="offer-warnings" className="mt-3 flex flex-wrap gap-1.5">
           {warnings.map((w, i) => (
             <li key={`${w.code}-${i}`}>
               <button type="button" onClick={() => scrollTo(SECTION_OF(w.code))}
-                className="rounded-md border border-amber-800/70 bg-amber-950/30 px-2 py-0.5 text-[11px] text-amber-200 hover:bg-amber-900/40">
-                ⚠ {w.message}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-800/70 bg-amber-950/30 px-2 py-0.5 text-[11px] text-amber-200 hover:bg-amber-900/40">
+                <CircleAlert aria-hidden="true" size={12} className="shrink-0" />{w.message}
               </button>
             </li>
           ))}
@@ -232,6 +258,9 @@ function OfferHeader({
     </div>
   )
 }
+
+/** An internal cost to judge the offer against: none until costing booked something. */
+const hasInternalCost = (o: OfferOut) => Math.abs(o.totals.internal_cost ?? 0) >= 0.005
 
 const NAV: { id: SectionId; label: string }[] = [
   { id: 'offer-timing', label: 'Timing' },
@@ -250,7 +279,8 @@ function OfferWorkspace({ props, offers, offer }: {
   const qc = useQueryClient()
   const [sendOpen, setSendOpen] = useState(false)
   const [preparingSend, setPreparingSend] = useState(false)
-  const editable = canWrite && offer.status === 'draft' && ['quoting', 'quoted'].includes(change.status)
+  const closed = offerClosed(change)
+  const editable = canWrite && !closed && offer.status === 'draft' && ['quoting', 'quoted'].includes(change.status)
   const { data, update, saveState, flush, dirty } = useOfferDraft(change.id, offer)
   // Send only what the server has: wait for the save, then open the dialog,
   // which reads the saved offer (fresh totals) from the cache.
@@ -278,12 +308,12 @@ function OfferWorkspace({ props, offers, offer }: {
       if (!o) return
       qc.setQueryData<OfferOut[]>(offersKey(change.id), (old) => (old ?? []).map((x) => (x.id === o.id ? o : x)))
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not refresh from costing'),
+    onError: (e: unknown) => toastError(e, 'Could not refresh from costing'),
   })
   const newVersion = useMutation({
     mutationFn: () => changeOfferApi.create(change.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: offersKey(change.id) }),
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not create a new version'),
+    onError: (e: unknown) => toastError(e, 'Could not create a new version'),
   })
   const discard = useMutation({
     mutationFn: () => changeOfferApi.discard(change.id, offer.id),
@@ -293,12 +323,15 @@ function OfferWorkspace({ props, offers, offer }: {
       qc.invalidateQueries({ queryKey: ['change', change.id] })
       qc.invalidateQueries({ queryKey: ['change-my-actions', change.id] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not discard the draft'),
   })
 
+  const timingIncluded = data.timing?.include !== false
+  // The plan's own errors count only while the offer states the timing.
+  const planErrors = timingIncluded ? planErrorCount(plan) : 0
   const done: Record<SectionId, boolean> = {
-    'offer-timing': data.timing?.include === false
-      || (planHasTasks(plan) && (data.timing?.weeks_from_order ?? 0) > 0),
+    // A step with errors is never "done", whatever else is filled in.
+    'offer-timing': planErrors === 0 && (!timingIncluded
+      || (planHasTasks(plan) && (data.timing?.weeks_from_order ?? 0) > 0)),
     'offer-price': (offer.totals.total_one_time ?? 0) > 0,
     'offer-risks': !(data.risks ?? []).some((r) => r.severity === 3 && !r.show),
     'offer-document': !!data.recipient?.company && !!data.subject
@@ -306,6 +339,16 @@ function OfferWorkspace({ props, offers, offer }: {
     'offer-negotiation': change.customer_response === 'accepted',
   }
   const nav = NAV.filter((n) => n.id !== 'offer-negotiation' || showNegotiation)
+  const errorsOf: Partial<Record<SectionId, number>> = { 'offer-timing': planErrors }
+  // What the backend would refuse, or what would go out wrong, said before the
+  // click (the backend still checks the same on send).
+  const sendReasons = [
+    ...((offer.totals.total_one_time ?? 0) <= 0 ? ['The offer total is zero (Price)'] : []),
+    ...(!data.recipient?.company?.trim() ? ['The recipient company is empty (Document)'] : []),
+    ...(timingIncluded && plan && !planHasTasks(plan)
+      ? ['The quote plan is empty: plan it or leave the timing out (Timing)'] : []),
+    ...(planErrors > 0 ? [`The quote plan has ${errorsText(planErrors)} (Timing)`] : []),
+  ]
 
   return (
     <div className="space-y-4">
@@ -315,27 +358,37 @@ function OfferWorkspace({ props, offers, offer }: {
         sendBlocked={saveState === 'pending' || saveState === 'saving'}
         sending={preparingSend}
         onSend={() => { void openSend() }}
-        onNewVersion={canWrite && !hasDraft && change.status === 'quoted' ? () => newVersion.mutate() : undefined}
+        sendReasons={sendReasons}
+        onNewVersion={canWrite && !hasDraft && !closed && change.status === 'quoted' ? () => newVersion.mutate() : undefined}
         creating={newVersion.isPending}
-        onDiscard={editable ? () => discard.mutate() : undefined}
+        onDiscard={editable ? () => discard.mutateAsync() : undefined}
         discarding={discard.isPending} />
 
       <nav data-testid="offer-nav"
         className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-900/90 px-2 py-1.5 backdrop-blur">
-        {nav.map((n, i) => (
-          <a key={n.id} href={`#${n.id}`} data-testid={`nav-${n.id}`}
-            onClick={(e) => { e.preventDefault(); scrollTo(n.id) }}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100">
-            <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${done[n.id]
-              ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
-              {done[n.id] ? '✓' : i + 1}
-            </span>
-            {n.label}
-          </a>
-        ))}
+        {nav.map((n, i) => {
+          const errors = errorsOf[n.id] ?? 0
+          return (
+            <a key={n.id} href={`#${n.id}`} data-testid={`nav-${n.id}`}
+              data-state={errors > 0 ? 'error' : done[n.id] ? 'done' : 'open'}
+              onClick={(e) => { e.preventDefault(); scrollTo(n.id) }}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100">
+              <span aria-hidden="true" className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[11px] leading-none ${
+                errors > 0 ? 'bg-rose-600 text-white' : done[n.id] ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                {errors > 0 ? errors : done[n.id] ? <Check size={11} strokeWidth={3} /> : i + 1}
+              </span>
+              {n.label}
+              <span className="sr-only">
+                {errors > 0 ? `, ${errorsText(errors)}` : done[n.id] ? ', complete' : ''}
+              </span>
+            </a>
+          )
+        })}
         {!editable && (
-          <span className="ml-auto text-[11px] text-slate-500">
-            {offer.status === 'draft' ? 'Read only: Sales, the change lead and admins edit the offer.' : `v${offer.version} is ${offer.status}, read only.`}
+          <span data-testid="offer-read-only" className="ml-auto flex items-center gap-1 text-[11px] text-slate-400">
+            {closed ? (
+              <><Lock aria-hidden="true" size={11} />The customer accepted the offer: offer and quote timing are closed.</>
+            ) : offer.status === 'draft' ? 'Read only: Sales, the change lead and admins edit the offer.' : `v${offer.version} is ${offer.status}, read only.`}
           </span>
         )}
       </nav>
@@ -344,9 +397,10 @@ function OfferWorkspace({ props, offers, offer }: {
           refresh runs; only the offer's own timing fields (and the other
           sections below) wait for the refreshed draft. The timing gets the
           full page width: a Gantt needs it more than the sum card beside it. */}
-      <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}>
+      <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}
+        right={planErrors > 0 ? <PlanErrorBadge n={planErrors} /> : undefined}>
         <OfferTimingSection changeId={change.id} changeNumber={change.change_number} data={data} update={update} editable={editable}
-          fieldsDisabled={refresh.isPending} />
+          fieldsDisabled={refresh.isPending} readOnly={closed} />
       </StepSection>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
@@ -367,7 +421,7 @@ function OfferWorkspace({ props, offers, offer }: {
           </StepSection>
           <StepSection id="offer-document" n={4} title="Document" done={done['offer-document']}>
             <OfferDocumentSection offer={offer} data={data} update={update} editable={editable}
-              changeNumber={change.change_number}
+              changeNumber={change.change_number} stale={dirty}
               onPreview={() => { void pdf.open() }} previewing={pdf.busy} />
           </StepSection>
           </fieldset>
@@ -393,6 +447,17 @@ function OfferWorkspace({ props, offers, offer }: {
   )
 }
 
+/** A step with errors says so in red, next to its title (never a green check). */
+function PlanErrorBadge({ n }: { n: number }) {
+  return (
+    <span data-testid="offer-timing-errors"
+      className="inline-flex items-center gap-1 rounded-full border border-rose-700 bg-rose-950/60 px-2 py-0.5 text-[11px] font-medium text-rose-200">
+      <CircleAlert aria-hidden="true" size={12} />
+      Quote plan: {errorsText(n)}
+    </span>
+  )
+}
+
 function StageHeader({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
@@ -406,7 +471,9 @@ export default function OfferTab(props: OfferTabProps) {
   const { change, canWrite, canSeePrices } = props
   const qc = useQueryClient()
   const { data: plan } = useQuotePlan(change.id)
-  const timingDone = planHasTasks(plan)
+  const quotePlanErrors = planErrorCount(plan)
+  const timingDone = planHasTasks(plan) && quotePlanErrors === 0
+  const timingBadge = quotePlanErrors > 0 ? <PlanErrorBadge n={quotePlanErrors} /> : undefined
   const customer = !!change.customer_relevant
   const offerStage = ['quoting', 'quoted', 'approved', 'in_implementation', 'in_validation', 'released', 'closed',
     'rejected', 'on_hold', 'cancelled'].includes(change.status)
@@ -423,7 +490,7 @@ export default function OfferTab(props: OfferTabProps) {
   const start = useMutation({
     mutationFn: () => changeOfferApi.create(change.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: offersKey(change.id) }),
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not start the offer'),
+    onError: (e: unknown) => toastError(e, 'Could not start the offer'),
   })
 
   // Internal changes: approval, not an offer.
@@ -433,7 +500,7 @@ export default function OfferTab(props: OfferTabProps) {
         <StageHeader title="Internal approval"
           body="Internal changes are not offered. PM approves the costs; the quote plan gives the change its timing before approval." />
         {canSeePrices && props.costSummary}
-        <StepSection id="offer-timing" n={1} title="Timing" done={timingDone}>
+        <StepSection id="offer-timing" n={1} title="Timing" done={timingDone} right={timingBadge}>
           <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
         <StepSection id="offer-approval" n={2} title="Approval" done={!!change.internal_approved_at}>
@@ -471,7 +538,7 @@ export default function OfferTab(props: OfferTabProps) {
           className="rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-400">
           The offer opens when costing is closed. The rough timing can be prepared already.
         </p>
-        <StepSection id="offer-timing" n={1} title="Timing" done={timingDone}>
+        <StepSection id="offer-timing" n={1} title="Timing" done={timingDone} right={timingBadge}>
           <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
       </div>
@@ -495,7 +562,7 @@ export default function OfferTab(props: OfferTabProps) {
           {canStart ? (
             <button type="button" data-testid="offer-start" disabled={start.isPending}
               onClick={() => start.mutate()}
-              className="mt-4 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+              className={buttonClass('primary', 'md', 'mt-4')}>
               Start the offer
             </button>
           ) : (
@@ -504,7 +571,7 @@ export default function OfferTab(props: OfferTabProps) {
             </p>
           )}
         </div>
-        <StepSection id="offer-timing" n={1} title="Timing" done={timingDone}>
+        <StepSection id="offer-timing" n={1} title="Timing" done={timingDone} right={timingBadge}>
           <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
         {change.status === 'quoted' && (

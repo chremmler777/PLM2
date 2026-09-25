@@ -104,7 +104,7 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
         <div className="text-xs text-slate-400 uppercase tracking-wide">Cost</div>
         <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(totalCost, costCurrency)}</div>
         <div className="text-xs text-slate-500 mt-1">
-          Int. {fmtMoney(internalCost, costCurrency)} · Ext. {fmtMoney(externalCost, costCurrency)}
+          Internal {fmtMoney(internalCost, costCurrency)} · External {fmtMoney(externalCost, costCurrency)}
         </div>
         {/* The costing's own warnings (spec §15 phase 2): currencies it did
             not add, lines without a rate. Shown here only, once. */}

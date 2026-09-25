@@ -5,12 +5,14 @@
  * the customer will read before opening the preview.
  */
 import type { OfferData, OfferOut } from '../../../types/changeOffer'
-import { fmtDate, fmtMoney, inputCls, sectionLabel } from './offerFormat'
+import { CircleAlert } from 'lucide-react'
+import { formatCalendarDate } from '../../../lib/format'
+import { fmtMoney, inputCls, sectionLabel } from './offerFormat'
 import { customerCbd } from './customerCbd'
 import { AutoGrowTextarea, Field, Segmented, SubLabel } from './ui'
 
 export default function OfferDocumentSection({
-  offer, data, update, editable, changeNumber, onPreview, previewing,
+  offer, data, update, editable, changeNumber, onPreview, previewing, stale = false,
 }: {
   offer: OfferOut
   data: OfferData
@@ -19,6 +21,8 @@ export default function OfferDocumentSection({
   changeNumber: string
   onPreview: () => void
   previewing?: boolean
+  /** Edits not saved yet: the price outline shows the last saved state. */
+  stale?: boolean
 }) {
   const recipient = data.recipient ?? {}
   const terms = data.terms ?? {}
@@ -29,19 +33,21 @@ export default function OfferDocumentSection({
   // The CBD as the PDF prints it: included lines summed per customer
   // category, a line without one under its own label, hidden factors and
   // folded risk surcharges spread in, so the rows add up to the total.
-  const cbd = customerCbd(data, offer.totals)
+  // Built from the saved offer: the totals are the server's, and a draft
+  // line mixed with saved totals would add up to neither.
+  const cbd = customerCbd(offer.data ?? data, offer.totals)
   const changeover = data.changeover?.mode === 'customer_pays_scrap' ? 'Customer pays scrap' : 'Running change'
 
   const outline: [string, string][] = [
-    ['Letterhead', `OFFER ${changeNumber}-Q${offer.version}${offer.valid_until ? `, valid until ${fmtDate(offer.valid_until)}` : ''}`],
+    ['Letterhead', `OFFER ${changeNumber}-Q${offer.version}${offer.valid_until ? `, valid until ${formatCalendarDate(offer.valid_until)}` : ''}`],
     ...(offer.issued_by ? [['Issued by', offer.issued_by] as [string, string]] : []),
     ['Recipient', [recipient.company, recipient.contact].filter(Boolean).join(', ') || 'Not set'],
     ['Subject', data.subject || 'Not set'],
     ['1 Scope of change', data.scope_text?.trim() ? data.scope_text.trim() : 'Not written yet'],
-    ['2 Price', mode === 'detailed'
+    ['2 Price', `${mode === 'detailed'
       ? `Detailed CBD, ${cbd.length > 0 ? cbd.map((r) => `${r.label} ${fmtMoney(r.amount, cur)}`).join('; ')
         : `${included} line${included === 1 ? '' : 's'}`}, total ${fmtMoney(offer.totals.total_one_time, cur)}`
-      : `Rough description, total ${fmtMoney(offer.totals.total_one_time, cur)}`],
+      : `Rough description, total ${fmtMoney(offer.totals.total_one_time, cur)}`}${stale ? ' (as last saved)' : ''}`],
     ['3 Changeover', changeover],
     ['4 Timing', data.timing?.include === false ? 'Not included'
       : `${data.timing?.weeks_from_order ?? '-'} weeks from order, draft disclaimer`],
@@ -62,8 +68,9 @@ export default function OfferDocumentSection({
                 data-testid="doc-company" aria-invalid={recipientMissing && !recipient.company?.trim() ? true : undefined}
                 onChange={(e) => update('recipient', { ...recipient, company: e.target.value })} />
               {recipientMissing && !recipient.company?.trim() && (
-                <span data-testid="doc-recipient-missing" className="mt-1 block text-[11px] text-amber-300">
-                  ⚠ {recipientMissing.message || 'No customer company yet: the offer would go out without a recipient.'}
+                <span data-testid="doc-recipient-missing" className="mt-1 flex items-start gap-1 text-[11px] text-amber-300">
+                  <CircleAlert aria-hidden="true" size={12} className="mt-px shrink-0" />
+                  {recipientMissing.message || 'No customer company yet: the offer would go out without a recipient.'}
                 </span>
               )}
             </Field>

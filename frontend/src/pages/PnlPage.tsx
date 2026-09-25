@@ -14,8 +14,11 @@ import client from '../api/client';
 import { pnlApi } from '../api/pnl';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
-import { formatMoney, formatPercent } from '../lib/format';
+import { formatDays, formatMoney, formatMoneyDelta, formatPercent } from '../lib/format';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import DateInput from '../components/gantt/DateInput';
+import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
+import EmptyState from '../components/common/EmptyState';
 import { TONE_CLASS, varianceTone } from '../components/changes/pnl/variance';
 import type {
   PnlAggregate, PnlBranch, PnlStatusGroup, PnlFilters, PnlRow, PnlSummary, PnlSummaryBlock,
@@ -27,6 +30,19 @@ const fmtMoney = (v: number | null | undefined, currency?: string | null) =>
 
 const fmtPct = (v: number | null | undefined) =>
   formatPercent(v);
+
+/**
+ * While a change is implemented or validated its actual margin is a forecast
+ * (open cost lines count at plan); from release on it is the booked result.
+ * Mirrors pnl_service.IN_PROGRESS_STATUSES.
+ */
+const IN_PROGRESS: ChangeStatus[] = ['in_implementation', 'in_validation'];
+const runningRow = (r: PnlRow) => r.phase === 'actual' && IN_PROGRESS.includes(r.status);
+
+/** Engineering reviews carry no price by design (spec §17). The list does not
+ *  send the origin yet; read it when it does. */
+type Row = PnlRow & { origin?: string | null };
+const isReview = (r: Row) => r.origin === 'engineering_review';
 
 type SortKey = 'change_number' | 'title' | 'status' | 'offer_revenue' | 'planned_cost'
   | 'actual_cost' | 'planned_margin' | 'actual_margin' | 'variance' | 'slip_days';
@@ -111,14 +127,17 @@ function Tile({ title, value, sub, subClassName, accent = 'text-slate-100' }: {
  * the changes in that group. The plan (offer revenue, planned cost and
  * margin) always; the actuals once any change in the group has some.
  */
-function SplitCard({ title, agg, currency }: {
+function SplitCard({ title, agg, currency, running }: {
   title: string; agg: PnlAggregate; currency?: string
+  /** Some change in this group is still running: its margin is a forecast. */
+  running: boolean
 }) {
   const revenue = agg.offer_revenue ?? agg.revenue;
   const planned = agg.planned_cost ?? agg.total_cost;
   const plannedMargin = agg.planned_margin ?? agg.margin;
   const pct = (m: number | undefined, r: number | undefined): number | null =>
     m === undefined || !r ? null : (m / r) * 100;
+  const plannedPct = agg.planned_margin !== undefined ? pct(plannedMargin, revenue) : agg.margin_pct;
   const hasActual = (agg.actual_count ?? 0) > 0;
   const actualMargin = agg.forecast_margin ?? agg.actual_margin;
   const line = (label: string, value: React.ReactNode, cls = 'text-slate-100') => (
@@ -133,12 +152,12 @@ function SplitCard({ title, agg, currency }: {
       {line('Offer revenue', fmtMoney(revenue, currency))}
       {line('Planned cost', fmtMoney(planned, currency))}
       {line('Planned margin',
-        `${fmtMoney(plannedMargin, currency)} (${fmtPct(agg.planned_margin !== undefined ? pct(plannedMargin, revenue) : agg.margin_pct)})`,
+        `${fmtMoney(plannedMargin, currency)}${plannedPct === null || plannedPct === undefined ? '' : ` (${fmtPct(plannedPct)})`}`,
         marginAccent(plannedMargin))}
       {hasActual && (
         <div className="mt-2 pt-2 border-t border-slate-700/70 space-y-0.5">
           {line('Actual cost', fmtMoney(agg.actual_cost, currency))}
-          {line('Actual margin', `${fmtMoney(actualMargin, currency)}${agg.forecast_margin !== undefined ? ' forecast' : ''}`,
+          {line(running ? 'Actual margin (forecast)' : 'Actual margin', fmtMoney(actualMargin, currency),
             marginAccent(actualMargin))}
         </div>
       )}
@@ -155,10 +174,14 @@ function SplitCard({ title, agg, currency }: {
  * currencies (no FX), and changes whose revenue is in another currency than
  * their costing carry no margin and are only counted.
  */
-function SummaryBlock({ block, currency, heading }: {
+function SummaryBlock({ block, currency, heading, rows }: {
   block: PnlSummaryBlock; currency?: string; heading?: boolean
+  /** The listed rows of this currency: which of them are still running. */
+  rows: PnlRow[]
 }) {
   const t = block.totals;
+  const running = rows.some(runningRow);
+  const realizedRunning = rows.some((r) => r.realized && runningRow(r));
   const notes = [
     (t.mismatch_count ?? 0) > 0
       && `${t.mismatch_count} change${t.mismatch_count === 1 ? '' : 's'} with the revenue in another currency: no margin, not in the sums`,
@@ -177,7 +200,7 @@ function SummaryBlock({ block, currency, heading }: {
           title="Offer revenue"
           value={fmtMoney(t.offer_revenue ?? t.revenue, currency)}
           sub={pricedLine(t, block.count)}
-          subClassName="text-[10px] text-slate-500"
+          subClassName="text-[11px] text-slate-500 mt-1"
         />
         <Tile
           title="Planned cost"
@@ -193,7 +216,7 @@ function SummaryBlock({ block, currency, heading }: {
         <Tile
           title="Late"
           value={t.late_count ?? 0}
-          sub={t.max_slip_days ? `worst slip ${t.max_slip_days} days` : 'no slip'}
+          sub={t.max_slip_days ? `worst slip ${t.max_slip_days} day${t.max_slip_days === 1 ? '' : 's'}` : 'no slip'}
           accent={(t.late_count ?? 0) > 0 ? 'text-rose-300' : 'text-slate-100'}
         />
       </div>
@@ -204,11 +227,15 @@ function SummaryBlock({ block, currency, heading }: {
           sub={actualCostLine(t, currency)}
         />
         <Tile
-          title="Actual margin"
+          title={running ? 'Actual margin (forecast)' : 'Actual margin'}
           value={fmtMoney(t.forecast_margin ?? t.actual_margin, currency)}
           accent={marginAccent(t.forecast_margin ?? t.actual_margin)}
-          sub={`forecast, to date ${fmtMoney(t.actual_margin, currency)}${
-            t.actual_revenue !== undefined ? ` on ${fmtMoney(t.actual_revenue, currency)} revenue` : ''}`}
+          sub={running
+            // Running changes count their open cost lines at plan: say so,
+            // with what is booked so far next to it.
+            ? `open lines at plan until release; booked to date ${fmtMoney(t.actual_margin, currency)}${
+              t.actual_revenue !== undefined ? ` on ${fmtMoney(t.actual_revenue, currency)} revenue` : ''}`
+            : `booked${t.actual_revenue !== undefined ? `, on ${fmtMoney(t.actual_revenue, currency)} revenue` : ''}`}
         />
         <Tile
           title="Variance"
@@ -226,8 +253,8 @@ function SummaryBlock({ block, currency, heading }: {
       )}
       {/* Pipeline vs. Realized */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <SplitCard title="Pipeline" agg={block.pipeline} currency={currency} />
-        <SplitCard title="Realized" agg={block.realized} currency={currency} />
+        <SplitCard title="Pipeline" agg={block.pipeline} currency={currency} running={false} />
+        <SplitCard title="Realized" agg={block.realized} currency={currency} running={realizedRunning} />
       </div>
     </div>
   );
@@ -306,143 +333,125 @@ export default function PnlPage() {
     else { setSortKey(k); setSortDir(k === 'change_number' || k === 'title' || k === 'status' ? 1 : -1); }
   };
 
+  const segBtn = (active: boolean) => `px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400 ${
+    active ? 'bg-sky-500/20 text-sky-200' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`;
+  const selectCls = 'bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200';
+  const dateCls = 'w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-200';
+
   return (
     <div className="max-w-7xl mx-auto p-6">
       <h1 className="text-2xl font-semibold mb-6">P&amp;L</h1>
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <select
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
-        >
-          <option value="">All projects</option>
-          {projects?.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-
-        <select
-          aria-label="Plant"
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-          value={plantId}
-          onChange={(e) => setPlantId(e.target.value ? Number(e.target.value) : '')}
-        >
-          <option value="">All plants</option>
-          {plants?.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-
-        <div className="flex rounded-lg border border-slate-700 overflow-hidden">
-          {BRANCH_OPTIONS.map((opt) => (
-            <button
-              key={opt.label}
-              type="button"
-              onClick={() => setBranch(opt.value)}
-              aria-pressed={branch === opt.value}
-              className={`px-3 py-2 text-sm font-medium ${
-                branch === opt.value ? 'bg-sky-500/20 text-sky-300' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+      {/* Filter bar: what (project, plant), which changes (scope, stage), and
+          when (one date range), each group kept together when the bar wraps. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 mb-6" data-testid="pnl-filters">
+        <div className="flex items-center gap-2">
+          <select aria-label="Project" className={selectCls} value={projectId}
+            onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}>
+            <option value="">All projects</option>
+            {projects?.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <select aria-label="Plant" className={selectCls} value={plantId}
+            onChange={(e) => setPlantId(e.target.value ? Number(e.target.value) : '')}>
+            <option value="">All plants</option>
+            {plants?.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         </div>
 
-        <div className="flex rounded-lg border border-slate-700 overflow-hidden">
-          {STATUS_GROUP_OPTIONS.map((opt) => (
-            <button
-              key={opt.label}
-              type="button"
-              onClick={() => setStatusGroup(opt.value)}
-              aria-pressed={statusGroup === opt.value}
-              className={`px-3 py-2 text-sm font-medium ${
-                statusGroup === opt.value ? 'bg-sky-500/20 text-sky-300' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div role="group" aria-label="Scope" className="flex rounded-lg border border-slate-700 overflow-hidden">
+            {BRANCH_OPTIONS.map((opt) => (
+              <button key={opt.label} type="button" onClick={() => setBranch(opt.value)}
+                aria-pressed={branch === opt.value} className={segBtn(branch === opt.value)}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div role="group" aria-label="Stage" className="flex rounded-lg border border-slate-700 overflow-hidden">
+            {STATUS_GROUP_OPTIONS.map((opt) => (
+              <button key={opt.label} type="button" onClick={() => setStatusGroup(opt.value)}
+                aria-pressed={statusGroup === opt.value} className={segBtn(statusGroup === opt.value)}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-slate-400">
-          From
-          <DateInput
-            aria-label="From"
-            className="w-36 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={setDateFrom}
-            commitOnChange
-          />
-        </label>
-
-        <label className="flex items-center gap-2 text-sm text-slate-400">
-          To
-          <DateInput
-            aria-label="To"
-            className="w-36 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={setDateTo}
-            commitOnChange
-          />
-        </label>
+        <fieldset className="m-0 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1">
+          <legend className="sr-only">Raised between</legend>
+          <span aria-hidden="true" className="text-xs text-slate-400">Raised</span>
+          <DateInput aria-label="From" className={dateCls} value={dateFrom}
+            max={dateTo || undefined} onChange={setDateFrom} commitOnChange />
+          <span aria-hidden="true" className="text-xs text-slate-500">to</span>
+          <DateInput aria-label="To" className={dateCls} value={dateTo}
+            min={dateFrom || undefined} onChange={setDateTo} commitOnChange />
+        </fieldset>
       </div>
 
       {/* Summary tiles: offer versus doing across the rows in scope */}
       {summaryLoading || !summary ? (
-        <div className="text-sm text-slate-400 mb-6">Loading…</div>
+        <div className="mb-6 -mx-6"><LoadingSkeleton count={2} /></div>
       ) : (
         <>
           {summaryBlocks(summary).map(({ currency, block }, _i, all) => (
             <SummaryBlock key={currency ?? 'all'} block={block} currency={currency}
-              heading={all.length > 1} />
+              heading={all.length > 1}
+              rows={all.length > 1 ? rows.filter((r) => r.currency === currency) : rows} />
           ))}
         </>
       )}
 
-      {/* Row table */}
+      {/* Row table: scrolls inside its card, the change number stays in view. */}
       {rowsLoading ? (
-        <div className="text-sm text-slate-400">Loading…</div>
+        <div className="-mx-6"><LoadingSkeleton count={3} /></div>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No changes in scope" hint="Widen the filters above, or clear the date range." />
       ) : (
         <div className="border border-slate-700 rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-700 text-left text-slate-400">
+            <thead className="bg-slate-700 text-left text-slate-300">
               <tr>
-                {COLUMNS.map((c) => (
+                {COLUMNS.map((c, i) => (
                   <th key={c.key} title={c.title}
                     aria-sort={sortKey === c.key ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
-                    className={`px-2 py-2.5 whitespace-nowrap ${c.numeric ? 'text-right' : ''}`}>
-                    <button type="button" className="hover:text-slate-200"
+                    className={`px-2 py-2.5 whitespace-nowrap ${c.numeric ? 'text-right' : ''} ${
+                      i === 0 ? 'sticky left-0 z-10 bg-slate-700' : ''}`}>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-slate-100"
                       onClick={() => toggleSort(c.key)}>
-                      {c.label}{sortKey === c.key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}
+                      {c.label}
+                      {sortKey === c.key && (sortDir === 1
+                        ? <ArrowUp aria-hidden="true" size={12} />
+                        : <ArrowDown aria-hidden="true" size={12} />)}
                     </button>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r) => {
+              {sorted.map((r: Row) => {
                 const tone = varianceTone(r.variance, r.planned_margin, 1);
                 // costs and margins in the costing currency, the revenue in its own
                 const cur = r.currency;
                 const rcur = r.revenue_currency ?? r.currency;
+                const running = runningRow(r);
+                const shownMargin = r.forecast_margin ?? r.actual_margin;
                 return (
-                <tr key={r.change_id} className="border-t border-slate-700 hover:bg-slate-800/60">
-                  <td className="px-2 py-2.5 font-mono whitespace-nowrap">
-                    <Link className="text-blue-400 hover:underline" to={`/changes/${r.change_id}?tab=costing`}>
+                <tr key={r.change_id} className="group border-t border-slate-700 hover:bg-slate-800/60">
+                  <td className="sticky left-0 z-[1] bg-slate-900 group-hover:bg-slate-800 px-2 py-2.5 font-mono whitespace-nowrap">
+                    <Link className="text-sky-300 hover:underline" to={`/changes/${r.change_id}?tab=costing`}>
                       {r.change_number}
                     </Link>
                     <span
-                      className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-semibold font-sans ${
+                      className={`ml-2 px-1.5 py-0.5 rounded-full text-[11px] font-semibold font-sans ${
                         r.branch === 'internal' ? 'bg-violet-900 text-violet-200' : 'bg-blue-900 text-blue-200'
                       }`}
                       title={r.branch === 'internal' ? 'Internal: margin vs. approved budget' : undefined}
                     >
-                      {r.branch === 'internal' ? 'Int' : 'Cust'}
+                      {r.branch === 'internal' ? 'Internal' : 'Customer'}
                     </span>
                   </td>
                   <td className="px-2 py-2.5 text-slate-200 truncate max-w-[180px]" title={r.title}>{r.title}</td>
@@ -452,7 +461,15 @@ export default function PnlPage() {
                     </span>
                   </td>
                   <td className="px-2 py-2.5 text-right whitespace-nowrap">
-                    {r.pending_price && (r.offer_revenue === null || r.offer_revenue === undefined) ? (
+                    {isReview(r) && (r.offer_revenue === null || r.offer_revenue === undefined) ? (
+                      <span data-testid={`pnl-review-${r.change_id}`} className="inline-flex items-center gap-1"
+                        title="An engineering review is not priced">
+                        <span className="text-slate-400">-</span>
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-slate-700 text-slate-300">
+                          engineering review
+                        </span>
+                      </span>
+                    ) : r.pending_price && (r.offer_revenue === null || r.offer_revenue === undefined) ? (
                       <span className="inline-flex items-center gap-1">
                         <span className="text-slate-400">-</span>
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-900 text-amber-200">
@@ -463,7 +480,7 @@ export default function PnlPage() {
                       <span className="text-slate-100">{fmtMoney(r.offer_revenue ?? r.revenue, rcur)}</span>
                     )}
                     {differs(r.actual_revenue, r.offer_revenue ?? r.revenue) && (
-                      <div data-testid={`pnl-actual-revenue-${r.change_id}`} className="text-[10px] text-slate-500"
+                      <div data-testid={`pnl-actual-revenue-${r.change_id}`} className="text-[11px] text-slate-500"
                         title="Revenue with the validation issue costs billed to the customer">
                         actual {fmtMoney(r.actual_revenue, rcur)}
                       </div>
@@ -472,7 +489,7 @@ export default function PnlPage() {
                   <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">
                     {fmtMoney(r.planned_cost ?? r.total_cost, cur)}
                     {r.no_rate && (
-                      <div data-testid={`pnl-no-rate-${r.change_id}`} className="text-[10px] text-amber-300"
+                      <div data-testid={`pnl-no-rate-${r.change_id}`} className="text-[11px] text-amber-300"
                         title={r.warnings?.find((w) => w.code === 'no_rate')?.message}>
                         no rate, too low
                       </div>
@@ -481,7 +498,7 @@ export default function PnlPage() {
                   <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">
                     {fmtMoney(r.actual_cost, cur)}
                     {differs(r.forecast_cost, r.actual_cost) && (
-                      <div data-testid={`pnl-forecast-cost-${r.change_id}`} className="text-[10px] text-slate-500"
+                      <div data-testid={`pnl-forecast-cost-${r.change_id}`} className="text-[11px] text-slate-500"
                         title="Expected cost at release: open cost lines count at plan">
                         forecast {fmtMoney(r.forecast_cost, cur)}
                       </div>
@@ -496,19 +513,30 @@ export default function PnlPage() {
                     </span>
                     {r.currency_mismatch && (
                       <div data-testid={`pnl-currency-mismatch-${r.change_id}`}
-                        className="mt-1 text-[10px] text-amber-300"
+                        className="mt-1 text-[11px] text-amber-300"
                         title={r.warnings?.find((w) => w.code === 'currency_mismatch')?.message}>
                         {rcur} vs {cur}: no margin
                       </div>
                     )}
                   </td>
-                  <td className={`px-2 py-2.5 text-right whitespace-nowrap ${marginAccent(r.forecast_margin ?? r.actual_margin)}`}>{fmtMoney(r.forecast_margin ?? r.actual_margin, cur)}</td>
+                  <td className={`px-2 py-2.5 text-right whitespace-nowrap ${marginAccent(shownMargin)}`}
+                    data-testid={`pnl-actual-margin-${r.change_id}`}>
+                    {fmtMoney(shownMargin, cur)}
+                    {/* Only a running change has a forecast; a released or
+                        closed one shows its booked result, unlabelled. */}
+                    {running && shownMargin !== null && shownMargin !== undefined && (
+                      <div data-testid={`pnl-margin-forecast-${r.change_id}`} className="text-[11px] text-slate-500"
+                        title="Still running: open cost lines count at plan until release">
+                        forecast{differs(r.actual_margin, shownMargin) ? `, to date ${fmtMoney(r.actual_margin, cur)}` : ''}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-2 py-2.5 text-right whitespace-nowrap">
                     {r.variance === null || r.variance === undefined ? (
                       <span className="text-slate-500">-</span>
                     ) : (
                       <span className={`rounded px-1.5 py-0.5 text-xs ${TONE_CLASS[tone]}`}>
-                        {r.variance > 0 ? '+' : ''}{fmtMoney(r.variance, cur)}
+                        {formatMoneyDelta(r.variance, cur)}
                       </span>
                     )}
                   </td>
@@ -517,16 +545,13 @@ export default function PnlPage() {
                       <span className="text-slate-500">-</span>
                     ) : (
                       <span className={r.slip_days > 0 ? 'text-rose-300' : 'text-emerald-400'}>
-                        {r.slip_days > 0 ? '+' : ''}{r.slip_days} d
+                        {formatDays(r.slip_days, { sign: true })}
                       </span>
                     )}
                   </td>
                 </tr>
                 );
               })}
-              {rows.length === 0 && (
-                <tr><td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-slate-400">No changes in scope.</td></tr>
-              )}
             </tbody>
           </table>
         </div>

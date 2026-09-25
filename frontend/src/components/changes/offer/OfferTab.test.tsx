@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { planApi } from '../../../api/changePlan'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { addDaysIso, formatDate, todayIso } from '../../../lib/format'
 import OfferTab, { type OfferTabProps } from './OfferTab'
@@ -142,7 +143,7 @@ describe('OfferTab', () => {
     renderTab(props())
     fireEvent.click(await screen.findByTestId('offer-send'))
     const day = addDaysIso(todayIso(), -1)
-    fireEvent.change(await screen.findByTestId('send-received'), { target: { value: day } })
+    fireEvent.change(await screen.findByLabelText('Received by the customer on'), { target: { value: day } })
     expect(screen.getByTestId('send-valid-until').textContent)
       .toBe(`The offer is valid 30 days from receipt, until ${formatDate(addDaysIso(day, 30))}.`)
     expect(screen.queryByTestId('send-note')).toBeNull()
@@ -157,12 +158,13 @@ describe('OfferTab', () => {
     vi.mocked(changeOfferApi.send).mockResolvedValue(offer({ status: 'sent' }))
     renderTab(props())
     fireEvent.click(await screen.findByTestId('offer-send'))
-    const date = await screen.findByTestId('send-received') as HTMLInputElement
-    expect(date.max).toBe(todayIso())
-    expect(date.min).toBe(addDaysIso(todayIso(), -60))
+    const date = await screen.findByLabelText('Received by the customer on') as HTMLInputElement
+    // Shown as "25 Sep 2026", never the browser's mm/dd.
+    expect(date.value).toBe(formatDate(todayIso()))
     const confirm = screen.getByTestId('send-confirm') as HTMLButtonElement
     fireEvent.change(date, { target: { value: addDaysIso(todayIso(), 1) } })
     expect(confirm.disabled).toBe(true)
+    expect(screen.getByTestId('send-received-invalid').textContent).toContain('future')
     fireEvent.change(date, { target: { value: addDaysIso(todayIso(), -61) } })
     expect(confirm.disabled).toBe(true)
     fireEvent.change(date, { target: { value: todayIso() } })
@@ -178,7 +180,7 @@ describe('OfferTab', () => {
     renderTab(props())
     fireEvent.click(await screen.findByTestId('offer-discard'))
     expect(changeOfferApi.discard).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId('offer-discard-yes'))
+    fireEvent.click(within(await screen.findByTestId('offer-discard-confirm')).getByTestId('confirm-ok'))
     await waitFor(() => expect(changeOfferApi.discard).toHaveBeenCalledWith(7, 11))
   })
 
@@ -359,5 +361,54 @@ describe('OfferTab', () => {
     expect(await screen.findByText('Approve internal costs')).toBeDefined()
     expect(screen.getByText('mock-summation')).toBeDefined()
     expect(changeOfferApi.list).not.toHaveBeenCalled()
+  })
+
+  it('an accepted offer offers no new version and shows the quote timing read-only', async () => {
+    const v1 = offer({ status: 'accepted', valid_until: '2026-10-25' })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
+    // quoted with the acceptance recorded (the change moves on at approval)
+    renderTab(props({ change: change({ status: 'quoted', customer_response: 'accepted', accepted_offer_id: 11 }) }))
+    await screen.findByTestId('offer-status')
+    expect(screen.queryByTestId('offer-new-version')).toBeNull()
+    expect(screen.getByTestId('offer-timing-planner').dataset.readonly).toBe('true')
+    expect(screen.getByTestId('offer-read-only').textContent).toContain('accepted')
+  })
+
+  it('never checks the timing step while its quote plan has errors, and names the count', async () => {
+    vi.mocked(planApi.get).mockResolvedValue({
+      tasks: [{ id: 1 }], summary: { duration_days: 60 },
+      validation: { errors: [{ code: 'x', message: 'Loop' }], warnings: [] },
+    } as never)
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    renderTab(props())
+    const badge = await screen.findByTestId('offer-timing-errors')
+    expect(badge.textContent).toContain('1 error')
+    expect(screen.getByTestId('nav-offer-timing').dataset.state).toBe('error')
+    expect(screen.getByTestId('nav-offer-timing').textContent).toContain('1 error')
+    expect(screen.getByTestId('offer-timing').textContent).toContain('Step 1, open')
+    // ... and the send waits for it, saying why.
+    expect((screen.getByTestId('offer-send') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('offer-send-reasons').textContent).toContain('The quote plan has 1 error')
+    vi.mocked(planApi.get).mockResolvedValue({ tasks: [{ id: 1 }], summary: { duration_days: 60 } } as never)
+  })
+
+  it('does not send an offer without a recipient company, and says so', async () => {
+    const o = offer()
+    o.data.recipient = { company: '' }
+    vi.mocked(changeOfferApi.list).mockResolvedValue([o])
+    renderTab(props())
+    const send = await screen.findByTestId('offer-send') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(screen.getByTestId('offer-send-reasons').textContent).toContain('recipient company is empty')
+  })
+
+  it('shows no result against internal cost before anything is costed', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer({
+      totals: { ...offer().totals, internal_cost: 0, margin_abs: 12345.5, margin_pct: null },
+    })])
+    renderTab(props())
+    const margin = await screen.findByTestId('offer-margin')
+    expect(margin.textContent).toContain('No internal cost yet')
+    expect(margin.textContent).not.toContain('EUR')
   })
 })

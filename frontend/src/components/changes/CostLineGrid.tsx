@@ -14,6 +14,9 @@ import { changesApi } from '../../api/changes';
 import type { CostLine, CostLineIn, DepartmentRateRef } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
 import { formatNumber } from '../../lib/format';
+import { X } from 'lucide-react';
+import { toastError } from '../../lib/apiError';
+import { btnIcon, btnSm } from '../common/buttonStyles';
 
 // ── pure helper (exported for unit tests) ────────────────────────────────────
 
@@ -155,6 +158,7 @@ export default function CostLineGrid({
       qc.invalidateQueries({ queryKey: ['cost-lines', changeId, assessmentId] });
       qc.invalidateQueries({ queryKey: ['change-summation', changeId] });
     },
+    onError: (e: unknown) => toastError(e, 'Could not save the plant lines'),
   });
 
   const cellOf = (r: ActivityRow, plantId: number) => cells[cellKey(r, plantId)] ?? EMPTY;
@@ -261,8 +265,12 @@ export default function CostLineGrid({
                 );
               })}
               <td className="py-1 pl-1">
-                <button onClick={() => removeRow(r)} aria-label={`Remove ${r.label}`}
-                  className="text-slate-600 hover:text-rose-400 text-xs">×</button>
+                {/* Local until Save: nothing leaves the server on this click. */}
+                <button type="button" onClick={() => removeRow(r)} aria-label={`Remove ${r.label}`}
+                  title="Remove the row (saved with Save)"
+                  className={`${btnIcon} h-6 w-6 hover:text-rose-300`}>
+                  <X aria-hidden="true" size={13} />
+                </button>
               </td>
             </tr>
           ))}
@@ -293,7 +301,7 @@ export default function CostLineGrid({
                       {numberCell(`minutes-${rowKey(r)}-${p.id}`, cellOf(r, p.id).minutes,
                         (v) => setCell(r, p.id, { minutes: v }),
                         { step: 0.1, label: t('costing.minutes'), width: 'w-20' })}
-                      <span className="ml-1 text-[10px] text-slate-500">
+                      <span className="ml-1 text-[11px] text-slate-500">
                         {t('costing.minutesShort')}
                       </span>
                     </td>
@@ -313,7 +321,7 @@ export default function CostLineGrid({
                 className="pt-1 px-1 text-right tabular-nums border-l border-slate-700">
                 {formatNumber(plantSum(p.id), { min: 2, max: 2 })}
                 {plantMinutes(p.id) !== 0 && (
-                  <span className="block text-[10px] text-slate-500">
+                  <span className="block text-[11px] text-slate-500">
                     {plantMinutes(p.id) > 0 ? '+' : ''}{plantMinutes(p.id)} {t('costing.minutesShort')}
                   </span>
                 )}
@@ -335,8 +343,8 @@ export default function CostLineGrid({
             }}
             className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
         ) : (
-          <button data-testid="cost-add-row" onClick={() => setAdding(true)}
-            className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600 text-slate-100">
+          <button type="button" data-testid="cost-add-row" onClick={() => setAdding(true)}
+            className={btnSm.secondary}>
             {t('costing.addActivity')}
           </button>
         )}
@@ -346,8 +354,8 @@ export default function CostLineGrid({
         <span className="text-sm text-slate-300 tabular-nums" data-testid="cost-grand-total">
           {t('total')}: {formatNumber(grandTotal, { min: 2, max: 2 })}
         </span>
-        <button onClick={() => save.mutate()} disabled={save.isPending}
-          className="px-2.5 py-1 text-xs rounded bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50">
+        <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
+          className={btnSm.secondary}>
           {save.isPending ? t('saving') : t('save')}
         </button>
       </div>

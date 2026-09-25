@@ -5,6 +5,7 @@
  * second look, so it is flagged.
  */
 import type { OfferData, OfferRisk } from '../../../types/changeOffer'
+import { CircleAlert } from 'lucide-react'
 import { fmtMoney, inputCls } from './offerFormat'
 import { NumField, Segmented, Toggle } from './ui'
 
@@ -42,9 +43,10 @@ export default function OfferRisksSection({
       </p>
       {hiddenSevere.length > 0 && (
         <p data-testid="risk-severe-hidden" role="alert"
-          className="rounded-lg border border-amber-800/70 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
-          ⚠ {hiddenSevere.length === 1 ? '1 severity-3 risk is' : `${hiddenSevere.length} severity-3 risks are`} not shown
-          in the offer. The customer will not read about {hiddenSevere.length === 1 ? 'it' : 'them'}.
+          className="flex items-start gap-1.5 rounded-lg border border-amber-800/70 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+          <CircleAlert aria-hidden="true" size={14} className="mt-px shrink-0" />
+          <span>{hiddenSevere.length === 1 ? '1 severity-3 risk is' : `${hiddenSevere.length} severity-3 risks are`} not shown
+          in the offer. The customer will not read about {hiddenSevere.length === 1 ? 'it' : 'them'}.</span>
         </p>
       )}
       <ul className="space-y-2">
@@ -52,7 +54,7 @@ export default function OfferRisksSection({
           <li key={r.concern_id} data-testid={`risk-${r.concern_id}`}
             className={`rounded-lg border px-3 py-2 ${r.show ? 'border-slate-600 bg-slate-900/60' : 'border-slate-800 bg-slate-900/20'}`}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded border px-1.5 py-0 text-[10px] font-semibold ${SEV_CHIP[r.severity ?? 1] ?? SEV_CHIP[1]}`}>
+              <span className={`rounded border px-1.5 py-0 text-[11px] font-semibold ${SEV_CHIP[r.severity ?? 1] ?? SEV_CHIP[1]}`}>
                 S{r.severity ?? '-'}
               </span>
               {r.department && <span className="text-[11px] text-slate-500">{r.department}</span>}
