@@ -1100,6 +1100,27 @@ describe('ChangeDetailPage end-implementation confirm loading (finding 8)', () =
     // the query settles, even into an error.
     await waitFor(() => expect(dialog.textContent).not.toContain('Checking what is still open'))
   })
+
+  it('counts open plan deviations by move, as the Timing panel groups them', async () => {
+    change.status = 'in_implementation' as ChangeDetail['status']
+    const before = (change as { timing_validated_at?: string | null }).timing_validated_at
+    ;(change as { timing_validated_at?: string | null }).timing_validated_at = '2026-09-01T00:00:00'
+    const row = (id: number, status: string, group_id: number | null, task_id: number, caused_by_task_id: number | null) =>
+      ({ id, status, group_id, task_id, caused_by_task_id, task_name: `T${task_id}`, slip_days: 1 })
+    vi.mocked(planApi.deviations).mockResolvedValueOnce([
+      row(1, 'open', 5, 10, null), row(2, 'open', 5, 11, 10), row(3, 'locked', 5, 12, 10),  // one move, 2 open rows
+      row(4, 'locked', 6, 13, null), row(5, 'locked', 6, 14, 13),                            // decided move
+      row(6, 'open', null, 20, null),                                                          // older ungrouped move
+    ] as never)
+    try {
+      wrap('/changes/1')
+      fireEvent.click(await screen.findByText('mock-advance-in_validation'))
+      const dialog = await screen.findByTestId('confirm-in_validation')
+      await waitFor(() => expect(dialog.textContent).toContain('2 moves with plan deviations open'))
+    } finally {
+      ;(change as { timing_validated_at?: string | null }).timing_validated_at = before
+    }
+  })
 })
 
 describe('ChangeDetailPage Resume goes back to the status before the hold (finding 9)', () => {
@@ -1242,7 +1263,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
   it('a pending release deviation holds the dialog and says whose decision it waits on', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'in_validation' as ChangeDetail['status']
-    releaseMock.blockers = ['6 plan deviations still open']
+    releaseMock.blockers = ['6 moves with plan deviations still open']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
       { id: 7, to_status: 'released', reason: 'x', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
     ] as never)
@@ -1255,7 +1276,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
   it('an approved release deviation lets the release go ahead as a transition', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'in_validation' as ChangeDetail['status']
-    releaseMock.blockers = ['6 plan deviations still open']
+    releaseMock.blockers = ['6 moves with plan deviations still open']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
       { id: 7, to_status: 'released', reason: 'x', status: 'approved', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
     ] as never)

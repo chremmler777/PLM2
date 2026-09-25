@@ -358,7 +358,7 @@ export function resolveWaitStates(
   if (devs > 0 && ['approved', 'in_implementation'].includes(change.status)) {
     waits.push({
       key: 'plan-deviations',
-      text: `${devs} plan deviation${devs === 1 ? '' : 's'} open: lock or escalate`,
+      text: `${devs} move${devs === 1 ? '' : 's'} with plan deviations open: lock or escalate`,
       tab: 'timing',
       info: true,
     })
@@ -366,7 +366,7 @@ export function resolveWaitStates(
   if (devs > 0 && change.status === 'in_validation' && !releaseBlockers?.some((b) => /plan deviation/i.test(b))) {
     waits.push({
       key: 'plan-deviations',
-      text: `${devs} plan deviation${devs === 1 ? '' : 's'} still open: lock or escalate them first`,
+      text: `${devs} move${devs === 1 ? '' : 's'} with plan deviations still open: lock or escalate them first`,
       tab: 'timing',
     })
   }

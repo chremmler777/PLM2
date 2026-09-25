@@ -283,7 +283,7 @@ async def test_open_plan_deviations_block_the_release(client, rel_world, monkeyp
         assert (await _check(client, pm, cid, c["key"], "done")).status_code == 200
     res = await client.post(f"/api/v1/changes/{cid}/lessons/complete",
                             json={"none_reason": "routine"}, headers=pm)
-    msg = "2 plan deviations still open: lock or escalate them first"
+    msg = "2 moves with plan deviations still open: lock or escalate them first"
     assert res.json()["blockers"] == [msg] and res.json()["can_release"] is False
     res = await client.post(f"/api/v1/changes/{cid}/transition",
                             json={"to_status": "released"}, headers=pm)

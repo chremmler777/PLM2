@@ -1469,16 +1469,18 @@ class ValidationIssueService:
             d.decided_at = now
             d.decision_note = f"{issue.ref}: new timing agreed with the customer"
         await session.flush()
-        # the recovery's group(s) settle with their rows; a group escalated
-        # whole points at the same escalation
+        # the recovery's group(s) settle with their rows; settle_groups keeps
+        # an escalation on a group only when every one of its rows points at
+        # it, so the recovery's escalation lands only on a group that is
+        # wholly this recovery's (not one with rows escalated elsewhere)
         from app.models.change_plan import ChangePlanDeviationGroup
         from app.services.change_plan_service import ChangePlanService
         gids = {d.group_id for d in devs if d.group_id is not None}
         await ChangePlanService.settle_groups(session, gids)
         for gid in gids:
             g = await session.get(ChangePlanDeviationGroup, gid)
-            if g is not None and g.status == "escalated" and g.escalation_id is None:
-                g.escalation_id = esc.id
+            if (g is not None and g.status == "escalated"
+                    and g.escalation_id == esc.id):
                 g.decided_by, g.decided_at = user.id, now
                 g.decision_note = f"{issue.ref}: new timing agreed with the customer"
         await session.flush()

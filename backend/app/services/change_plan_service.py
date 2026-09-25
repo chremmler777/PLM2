@@ -24,7 +24,7 @@ from typing import Optional
 
 from app.utils.clock import business_today
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -370,7 +370,8 @@ class ChangePlanService:
         if plan == "quote" and ChangePlanService.offer_accepted(change):
             raise ChangeError(
                 f"{what} is read-only: the customer accepted the offer on it. "
-                "Timing changes from here on go into the detailed plan")
+                "Timing changes go into the detailed plan once the change is "
+                "approved.")
 
     @staticmethod
     def baselined(change: ChangeRequest, plan: str) -> bool:
@@ -2541,11 +2542,10 @@ class ChangePlanService:
         ChangePlanService._check_decision_window(change)
         if d.status != "open":
             raise ChangeError(f"The deviation is already {d.status}")
-        d.status = "locked"
-        d.decided_by = user.id
-        d.decided_at = datetime.utcnow()
-        d.decision_note = (note or "").strip() or None
-        await session.flush()
+        note = (note or "").strip() or None
+        await ChangePlanService._claim_open(
+            session, [d], status="locked", decided_by=user.id,
+            decided_at=datetime.utcnow(), decision_note=note)
         await ChangePlanService.settle_groups(session, [d.group_id])
         await ChangeService.append_changelog(
             session, change, "deviation_locked",
@@ -2567,17 +2567,13 @@ class ChangePlanService:
         ChangePlanService._check_decision_window(change)
         if d.status != "open":
             raise ChangeError(f"The deviation is already {d.status}")
-        esc = ImplementationEscalation(
-            change_id=change.id, direction="customer", note=note,
-            created_by=user.id, created_at=datetime.utcnow())
-        session.add(esc)
-        await session.flush()
-        d.status = "escalated"
-        d.escalation_id = esc.id
-        d.decided_by = user.id
-        d.decided_at = datetime.utcnow()
-        d.decision_note = note
-        await session.flush()
+        now = datetime.utcnow()
+        await ChangePlanService._claim_open(
+            session, [d], status="escalated", decided_by=user.id,
+            decided_at=now, decision_note=note)
+        # the escalation exists only once the row is ours
+        esc = await ChangePlanService._new_escalation(
+            session, change, note, user, now, [d])
         await ChangePlanService.settle_groups(session, [d.group_id])
         await ChangeService.append_changelog(
             session, change, "deviation_escalated",
@@ -2586,6 +2582,52 @@ class ChangePlanService:
             new_value={"deviation_id": d.id, "escalation_id": esc.id,
                        "slip_days": d.slip_days,
                        "finish_impact_days": d.finish_impact_days})
+
+    DECIDED_JUST_NOW = ("Someone else decided part of this move just now; "
+                        "reload")
+
+    @staticmethod
+    async def _claim_open(session, rows: list[ChangePlanDeviation],
+                          **values) -> None:
+        """Decide rows read as open, atomically: one UPDATE that only takes
+        rows still open in the database (a concurrent decision holds the
+        row lock; once it commits, the WHERE re-checks and skips the row).
+        Anything short of every row is a 409 and the caller's transaction
+        is rolled back, so a move is never half decided by two people."""
+        ids = [d.id for d in rows]
+        claimed = set((await session.execute(
+            update(ChangePlanDeviation)
+            .where(ChangePlanDeviation.id.in_(ids),
+                   ChangePlanDeviation.status == "open")
+            .values(**values)
+            .returning(ChangePlanDeviation.id)
+            .execution_options(synchronize_session=False))).scalars().all())
+        if claimed != set(ids):
+            raise PlanConflict(ChangePlanService.DECIDED_JUST_NOW)
+        for d in rows:                 # keep the loaded objects in step
+            for k, v in values.items():
+                setattr(d, k, v)
+        await session.flush()
+
+    @staticmethod
+    async def _new_escalation(session, change, note: str, user: User,
+                              now: datetime, rows: list[ChangePlanDeviation]
+                              ) -> ImplementationEscalation:
+        """One customer escalation for rows already claimed as escalated."""
+        esc = ImplementationEscalation(
+            change_id=change.id, direction="customer", note=note,
+            created_by=user.id, created_at=now)
+        session.add(esc)
+        await session.flush()
+        await session.execute(
+            update(ChangePlanDeviation)
+            .where(ChangePlanDeviation.id.in_([d.id for d in rows]))
+            .values(escalation_id=esc.id)
+            .execution_options(synchronize_session=False))
+        for d in rows:
+            d.escalation_id = esc.id
+        await session.flush()
+        return esc
 
     @staticmethod
     async def open_deviation_count(session: AsyncSession,
@@ -2614,20 +2656,34 @@ class ChangePlanService:
 
     @staticmethod
     async def settle_groups(session, group_ids) -> None:
-        """A group whose last open row was decided one by one takes its
-        rows' common status ("mixed" when they differ); one with an open row
-        is open."""
+        """Re-derive a group's summary from its rows.
+
+        ChangePlanDeviationGroup.status and its decided fields are derived
+        and informational only: the rows are the truth (every guard and count
+        reads the rows). A group with an open row is open; otherwise it takes
+        its rows' common status, or "mixed" when they differ. escalation_id
+        is kept only when every row points at that same escalation; a mixed
+        group carries no decision (decided_by/at, note, escalation null),
+        because no single decision covers it."""
         for gid in {g for g in group_ids if g is not None}:
             g = await session.get(ChangePlanDeviationGroup, gid)
             if g is None:
                 continue
-            statuses = set((await session.execute(
-                select(ChangePlanDeviation.status).where(
-                    ChangePlanDeviation.group_id == gid))).scalars().all())
+            rows = (await session.execute(
+                select(ChangePlanDeviation.status,
+                       ChangePlanDeviation.escalation_id).where(
+                    ChangePlanDeviation.group_id == gid))).all()
+            statuses = {st for st, _ in rows}
+            escs = {e for _, e in rows}
             if "open" in statuses or not statuses:
                 g.status = "open"
+            elif len(statuses) == 1:
+                g.status = statuses.pop()
             else:
-                g.status = statuses.pop() if len(statuses) == 1 else "mixed"
+                g.status = "mixed"
+                g.decided_by = g.decided_at = g.decision_note = None
+            g.escalation_id = (escs.pop() if len(escs) == 1
+                               and g.status != "mixed" else None)
         await session.flush()
 
     @staticmethod
@@ -2637,7 +2693,10 @@ class ChangePlanService:
             raise PlanForbidden(
                 "Only Project Management, Sales, the change lead or an admin "
                 "may decide a plan deviation")
-        g = await session.get(ChangePlanDeviationGroup, gid)
+        g = (await session.execute(
+            select(ChangePlanDeviationGroup)
+            .where(ChangePlanDeviationGroup.id == gid)
+            .with_for_update())).scalar_one_or_none()
         if g is None or g.change_id != change.id:
             raise PlanConflict("Deviation group not found on this change",
                                not_found=True)
@@ -2659,11 +2718,9 @@ class ChangePlanService:
         g, rows = await ChangePlanService._open_group(session, change, gid, user)
         note = (note or "").strip() or None
         now = datetime.utcnow()
-        for d in rows:
-            d.status = "locked"
-            d.decided_by = user.id
-            d.decided_at = now
-            d.decision_note = note
+        await ChangePlanService._claim_open(
+            session, rows, status="locked", decided_by=user.id,
+            decided_at=now, decision_note=note)
         g.decided_by, g.decided_at, g.decision_note = user.id, now, note
         await session.flush()
         await ChangePlanService.settle_groups(session, [g.id])
@@ -2686,17 +2743,12 @@ class ChangePlanService:
             raise ChangeError("Escalating to the customer needs a note")
         g, rows = await ChangePlanService._open_group(session, change, gid, user)
         now = datetime.utcnow()
-        esc = ImplementationEscalation(
-            change_id=change.id, direction="customer", note=note,
-            created_by=user.id, created_at=now)
-        session.add(esc)
-        await session.flush()
-        for d in rows:
-            d.status = "escalated"
-            d.escalation_id = esc.id
-            d.decided_by = user.id
-            d.decided_at = now
-            d.decision_note = note
+        await ChangePlanService._claim_open(
+            session, rows, status="escalated", decided_by=user.id,
+            decided_at=now, decision_note=note)
+        # the escalation exists only once every row is ours
+        esc = await ChangePlanService._new_escalation(
+            session, change, note, user, now, rows)
         g.decided_by, g.decided_at, g.decision_note = user.id, now, note
         g.escalation_id = esc.id
         await session.flush()

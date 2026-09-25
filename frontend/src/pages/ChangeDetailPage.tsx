@@ -24,6 +24,7 @@ import ImpactTree from '../components/changes/ImpactTree';
 import OfferTab from '../components/changes/offer/OfferTab';
 import ReleaseTab from '../components/changes/release/ReleaseTab';
 import TimingTab from '../components/changes/timing/TimingTab';
+import { groupDeviations } from '../components/changes/timing/DeviationsPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary, { gateStateText } from '../components/changes/CockpitSummary';
 import TransitionConfirmDialog, { type TransitionConfirm } from '../components/changes/TransitionConfirmDialog';
@@ -193,7 +194,10 @@ export default function ChangeDetailPage() {
     queryFn: () => planApi.deviations(changeId),
     enabled: tracking && !!change?.timing_validated_at,
   });
-  const openPlanDeviations = planDeviations.filter((d) => d.status === 'open').length;
+  // Counted by move (one edit and the rows it pushed), as the Timing tab's
+  // panel groups them and the server counts them.
+  const openPlanDeviations = groupDeviations(planDeviations)
+    .filter((g) => [g.root, ...g.pushed].some((d) => d.status === 'open')).length;
   // Open validation issues hold the release and name their escalation level.
   const { data: validationIssues = [] } = useQuery({
     queryKey: validationIssuesKey(changeId),
@@ -634,7 +638,7 @@ export default function ChangeDetailPage() {
         open: [
           ...(notDone.length ? [`${notDone.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'} not finished (plan ${avg}% done)`] : []),
           ...(owing.length ? [`Progress report due: ${owing.join(', ')}`] : []),
-          ...(openPlanDeviations ? [`${openPlanDeviations} plan deviation${openPlanDeviations === 1 ? '' : 's'} open`] : []),
+          ...(openPlanDeviations ? [`${openPlanDeviations} move${openPlanDeviations === 1 ? '' : 's'} with plan deviations open`] : []),
         ],
         allClear: 'Every task is finished and reported.',
         // Info only, never a guard: issues whose fix is still running.

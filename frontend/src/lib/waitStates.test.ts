@@ -332,18 +332,23 @@ describe('resolveWaitStates: deviations and release blockers', () => {
     const waits = resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [], {}, null, null,
       { openPlanDeviations: 2 })
     expect(waits).toEqual([expect.objectContaining({ key: 'plan-deviations', info: true, tab: 'timing' })])
-    expect(waits[0].text).toContain('2 plan deviations')
+    expect(waits[0].text).toBe('2 moves with plan deviations open: lock or escalate')
   })
   it('lists the release guard reasons at validation, once each', () => {
     const waits = resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {}, null, null, {
       openPlanDeviations: 1,
       releaseBlockers: ['Not ready to go: 2 revisions open', 'Lessons learned step not done',
-        '1 plan deviation still open: lock or escalate them first'],
+        '1 move with plan deviations still open: lock or escalate them first'],
     })
     expect(waits.map((w) => w.text)).toEqual(['Not ready to go: 2 revisions open', 'Lessons learned step not done',
-      '1 plan deviation still open: lock or escalate them first'])
+      '1 move with plan deviations still open: lock or escalate them first'])
     expect(waits.every((w) => !w.info)).toBe(true)
     expect(waits[2].tab).toBe('timing')
+  })
+  it('names open plan deviation moves itself at validation when the guard has not', () => {
+    const waits = resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {}, null, null,
+      { openPlanDeviations: 1, releaseBlockers: [] })
+    expect(waits.map((w) => w.text)).toEqual(['1 move with plan deviations still open: lock or escalate them first'])
   })
 })
 

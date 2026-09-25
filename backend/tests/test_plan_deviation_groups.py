@@ -372,3 +372,113 @@ async def test_passing_a_check_clears_the_failure_note(client, admin_auth, val):
     assert await note() == "rev E confirmed"
     await _vcheck(client, admin_auth, val, "Development", "revision_bump")
     assert await note() == "rev E confirmed"
+
+
+# --- concurrent decisions ----------------------------------------------------
+
+def _decided_between_read_and_write(monkeypatch, name):
+    """Wrap a read step of the service so that, right after it returned, one
+    open row of the change is decided behind its back (as a concurrent
+    request committing between our read and our write would)."""
+    from sqlalchemy import update
+    orig = getattr(ChangePlanService, name)
+
+    async def wrapped(session, change, *args, **kwargs):
+        out = await orig(session, change, *args, **kwargs)
+        victim = (await session.execute(
+            select(ChangePlanDeviation.id)
+            .where(ChangePlanDeviation.change_id == change.id,
+                   ChangePlanDeviation.status == "open")
+            .order_by(ChangePlanDeviation.id.desc()))).scalars().first()
+        await session.execute(
+            update(ChangePlanDeviation)
+            .where(ChangePlanDeviation.id == victim)
+            .values(status="locked", decision_note="the other user")
+            .execution_options(synchronize_session=False))
+        return out
+    monkeypatch.setattr(ChangePlanService, name, staticmethod(wrapped))
+
+
+@pytest.mark.parametrize("action,body", [
+    ("lock", {"note": "mine"}), ("escalate", {"note": "to the customer"})])
+async def test_group_decision_refuses_a_row_decided_meanwhile(
+        client, world, session_factory, monkeypatch, action, body):
+    cid, sales = await _baselined(client, world, session_factory)
+    await _move_impl(client, cid, sales)
+    devs = await _devs(client, cid, sales)
+    assert len(devs) > 1
+    gid = devs[0]["group_id"]
+    _decided_between_read_and_write(monkeypatch, "_open_group")
+    res = await client.post(
+        f"/api/v1/changes/{cid}/plan/deviations/groups/{gid}/{action}",
+        json=body, headers=sales)
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["message"] == (
+        "Someone else decided part of this move just now; reload")
+    # nothing of ours stuck: every row still open, no escalation, no log
+    monkeypatch.undo()
+    assert all(d["status"] == "open" for d in await _devs(client, cid, sales))
+    esc = (await client.get(f"/api/v1/changes/{cid}/implementation/escalations",
+                            headers=sales)).json()
+    assert esc == []
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog",
+                            headers=sales)).json()
+    assert not [e for e in log if e["action"].startswith("deviation_")]
+
+
+@pytest.mark.parametrize("action,body", [
+    ("lock", {"note": "mine"}), ("escalate", {"note": "to the customer"})])
+async def test_row_decision_refuses_a_row_decided_meanwhile(
+        client, world, session_factory, monkeypatch, action, body):
+    cid, sales = await _baselined(client, world, session_factory)
+    await _move_impl(client, cid, sales)
+    devs = await _devs(client, cid, sales)
+    newest = devs[0]["id"]           # the row the wrapper decides behind us
+    _decided_between_read_and_write(monkeypatch, "_get_deviation")
+    res = await client.post(
+        f"/api/v1/changes/{cid}/plan/deviations/{newest}/{action}",
+        json=body, headers=sales)
+    assert res.status_code == 409, res.text
+    monkeypatch.undo()
+    assert all(d["status"] == "open" for d in await _devs(client, cid, sales))
+    esc = (await client.get(f"/api/v1/changes/{cid}/implementation/escalations",
+                            headers=sales)).json()
+    assert esc == []
+
+
+async def test_settle_groups_keeps_only_a_shared_decision(
+        client, world, session_factory):
+    cid, sales = await _baselined(client, world, session_factory)
+    await _move_impl(client, cid, sales)
+    devs = await _devs(client, cid, sales)
+    gid = devs[0]["group_id"]
+    *rest, last = devs
+    # every row escalated, but under two escalations: no group escalation
+    for d, note in ((rest[0], "first"), (last, "second")):
+        res = await client.post(
+            f"/api/v1/changes/{cid}/plan/deviations/{d['id']}/escalate",
+            json={"note": note}, headers=sales)
+        assert res.status_code == 200, res.text
+    for d in rest[1:]:
+        res = await client.post(
+            f"/api/v1/changes/{cid}/plan/deviations/{d['id']}/escalate",
+            json={"note": "more"}, headers=sales)
+        assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        g = await s.get(ChangePlanDeviationGroup, gid)
+        assert g.status == "escalated" and g.escalation_id is None
+        # one escalation shared by every row: the group carries it
+        rows = (await s.execute(select(ChangePlanDeviation).where(
+            ChangePlanDeviation.group_id == gid))).scalars().all()
+        shared = rows[0].escalation_id
+        for r in rows:
+            r.escalation_id = shared
+        await ChangePlanService.settle_groups(s, [gid])
+        assert g.escalation_id == shared
+        # a mixed group carries no decision at all
+        g.decided_by, g.decision_note = rows[0].created_by, "stale"
+        rows[0].status = "locked"
+        await ChangePlanService.settle_groups(s, [gid])
+        assert g.status == "mixed"
+        assert (g.decided_by, g.decided_at, g.decision_note,
+                g.escalation_id) == (None, None, None, None)

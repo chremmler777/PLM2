@@ -227,19 +227,16 @@ class ReleaseService:
     @staticmethod
     async def open_deviation_count(session: AsyncSession,
                                    change: ChangeRequest) -> int:
-        """Plan deviations nobody decided yet (neither locked nor escalated).
-        Read-only use of the plan model."""
-        from sqlalchemy import func
-        from app.models.change_plan import ChangePlanDeviation
-        return int((await session.execute(
-            select(func.count()).select_from(ChangePlanDeviation).where(
-                ChangePlanDeviation.change_id == change.id,
-                ChangePlanDeviation.status == "open"))).scalar() or 0)
+        """Moves with a plan deviation nobody decided yet, in the one unit
+        every surface uses: one per deviation group (one edit), plus every
+        open row that belongs to no group. Read-only use of the plan model."""
+        from app.services.change_plan_service import ChangePlanService
+        return await ChangePlanService.open_deviation_count(session, change)
 
     @staticmethod
     def deviations_message(n: int) -> str:
-        return (f"{n} plan deviation{'s' if n != 1 else ''} still open: "
-                "lock or escalate them first")
+        return (f"{n} move{'s' if n != 1 else ''} with plan deviations still "
+                "open: lock or escalate them first")
 
     @staticmethod
     def not_ready_message(progress: dict) -> Optional[str]:
