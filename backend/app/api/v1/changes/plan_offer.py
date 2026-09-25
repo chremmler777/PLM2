@@ -428,8 +428,9 @@ async def set_plan_calendar(
     that plan's PlanOut."""
     change = await _change(db, change_id, current_user)
     try:
-        await ChangePlanService.set_calendar(db, change, body.model_dump(),
-                                             current_user, plan=plan)
+        # only what the client sent: {"auto": false} alone keeps the calendar
+        await ChangePlanService.set_calendar(
+            db, change, body.model_dump(exclude_unset=True), current_user, plan=plan)
     except _ERRORS as e:
         raise _http(e)
     out = await _plan_out(db, change, plan, current_user)

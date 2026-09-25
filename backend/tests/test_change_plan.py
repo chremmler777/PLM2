@@ -260,6 +260,11 @@ async def test_critical_path_slack():
 async def test_schedule_forward_pass_and_bulk_move(client, world):
     sales = await _auth(client, "sales")
     cid = world["change_id"]
+    # the explicit schedule button: automatic scheduling off
+    res = await client.put(f"/api/v1/changes/{cid}/plan/calendar?plan=quote",
+                           json={"auto": False}, headers=sales)
+    assert res.status_code == 200 and res.json()["calendar"]["auto"] is False
+    assert res.json()["revision"] == 0 and res.json()["calendar"]["mode"] == "calendar"
     res = await client.post(f"/api/v1/changes/{cid}/plan/tasks", json={
         "plan": "quote", "name": "A", "kind": "work", "lane": "Tool Engineer",
         "start_date": "2026-11-02", "duration_days": 5}, headers=sales)
@@ -686,8 +691,9 @@ async def test_link_crud_rights_and_baseline_lock(client, world, session_factory
     out = res.json()
     lk = out["links"][0]
     assert (lk["type"], lk["lag_days"]) == ("SS", 2)
-    # SS+2 on dates as they stand: B starts before A starts + 2
-    assert "dependency_violation" in {e["code"] for e in out["validation"]["errors"]}
+    # automatic scheduling moved B to A's start + 2
+    assert _by_name(out)["B"]["start_date"] == "2026-11-04"
+    assert out["validation"]["errors"] == []
     # no duplicates, no self links, no unknown type
     for bad in ({**body, "type": "FS"}, {**body, "to_task_id": a["id"]},
                 {**body, "type": "XX", "to_task_id": b["id"]}):
@@ -1427,20 +1433,30 @@ async def test_calendar_convert_keeps_real_lengths(client, world):
         "mode": "working", "convert": True}, headers=sales)
     out = res.json()
     t = _by_name(out)
-    # calendar -> working: ceil(d * 5 / 7)
+    # calendar -> working: d * 5 / 7, rounded half up
     assert (t["A"]["duration_days"], t["B"]["duration_days"],
-            t["M"]["duration_days"]) == (8, 3, 0)
-    assert out["links"][0]["lag_days"] == -3          # -ceil(3 * 5 / 7)
+            t["M"]["duration_days"]) == (7, 2, 0)
+    assert out["links"][0]["lag_days"] == -2          # -(3 * 5 / 7)
     res = await client.put(f"{url}/calendar?plan=quote", json={
         "mode": "calendar", "convert": True}, headers=sales)
     t = _by_name(res.json())
-    # working -> calendar: ceil(d * 7 / 5)
-    assert (t["A"]["duration_days"], t["B"]["duration_days"]) == (12, 5)
-    assert res.json()["links"][0]["lag_days"] == -5
+    # working -> calendar: d * 7 / 5, rounded half up: a round trip does
+    # not inflate
+    assert (t["A"]["duration_days"], t["B"]["duration_days"]) == (10, 3)
+    assert res.json()["links"][0]["lag_days"] == -3
     # without convert the numbers stay
     res = await client.put(f"{url}/calendar?plan=quote", json={"mode": "working"},
                            headers=sales)
-    assert _by_name(res.json())["A"]["duration_days"] == 12
+    assert _by_name(res.json())["A"]["duration_days"] == 10
+    # automatic scheduling repaired what snapping to working days broke
+    assert res.json()["validation"]["errors"] == []
+    # a conversion beyond the bounds is refused
+    res = await client.patch(f"{url}/tasks/{a['id']}", json={"duration_days": 30000},
+                             headers=sales)
+    assert res.status_code == 200, res.text
+    res = await client.put(f"{url}/calendar?plan=quote", json={
+        "mode": "calendar", "convert": True}, headers=sales)
+    assert res.status_code == 400 and "36500" in res.json()["detail"]
 
 
 async def test_buffer_days_count_the_chain_only(client, world):
@@ -1492,3 +1508,60 @@ async def test_summary_rollup_leaves_ideas_out(client, world):
     t = _by_name(await _plan(client, sales, cid))
     assert (t["Phase"]["start_date"], t["Phase"]["end_date"]) == \
         ("2026-11-02", "2026-11-05")
+
+
+async def test_auto_scheduling_review_fixes(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    url = f"/api/v1/changes/{cid}/plan"
+    y = await _task(client, sales, cid, "Y", "2026-11-02", 5)
+    s = await _task(client, sales, cid, "Phase", "2026-11-02", 1)
+    a = await _task(client, sales, cid, "A", "2026-11-02", 2, parent_id=s["id"])
+    # a link into a summary moves the blocks below it (single link endpoint)
+    res = await client.post(f"{url}/links", json={
+        "plan": "quote", "from_task_id": y["id"], "to_task_id": s["id"]},
+        headers=sales)
+    assert _by_name(res.json())["A"]["start_date"] == "2026-11-07"
+    lid = res.json()["links"][0]["id"]
+    # a lag on it too
+    res = await client.patch(f"{url}/links/{lid}", json={"lag_days": 2},
+                             headers=sales)
+    assert _by_name(res.json())["A"]["start_date"] == "2026-11-09"
+    # snet on a summary
+    res = await client.patch(f"{url}/tasks/{s['id']}", json={
+        "constraint_type": "snet", "constraint_date": "2026-11-16"}, headers=sales)
+    assert _by_name(res.json())["A"]["start_date"] == "2026-11-16"
+    # add_task with predecessors lands after them
+    res = await client.post(f"{url}/tasks", json={
+        "plan": "quote", "name": "Z", "start_date": "2026-11-02",
+        "duration_days": 1, "predecessors": [a["id"]]}, headers=sales)
+    assert _by_name(res.json())["Z"]["start_date"] == "2026-11-18"
+    # the changelog names the blocks a move pushed
+    res = await client.patch(f"{url}/tasks/{a['id']}", json={"duration_days": 4},
+                             headers=sales)
+    assert _by_name(res.json())["Z"]["start_date"] == "2026-11-20"
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=sales)).json()
+    entry = [e for e in log if e["action"] == "plan_task_updated"
+             and "'A' updated" in e["action_description"]][-1]
+    assert "pushed along its links: 'Z'" in entry["action_description"]
+    # a block in a multi-block set that its moved predecessor overlaps is pushed
+    z = _by_name(res.json())["Z"]
+    res = await client.patch(f"{url}/tasks", json={"plan": "quote", "updates": [
+        {"id": a["id"], "start_date": "2026-11-23"},
+        {"id": z["id"], "start_date": "2026-11-24"}]}, headers=sales)
+    t = _by_name(await _plan(client, sales, cid))
+    assert (t["A"]["start_date"], t["Z"]["start_date"]) == ("2026-11-23", "2026-11-27")
+
+
+async def test_buffer_behind_an_idea_does_not_count(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 10)
+    buf = await _task(client, sales, cid, "Buffer", "2026-11-02", 2, kind="buffer")
+    idea = await _task(client, sales, cid, "Idea", "2026-11-04", 1, is_idea=True,
+                       predecessors=[buf["id"]])
+    res = await client.post(f"/api/v1/changes/{cid}/plan/links", json={
+        "plan": "quote", "from_task_id": idea["id"], "to_task_id": a["id"],
+        "type": "SS"}, headers=sales)
+    assert res.status_code == 200, res.text
+    assert res.json()["summary"]["buffer_days"] == 0

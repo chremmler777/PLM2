@@ -11,7 +11,7 @@ import pytest
 
 from app.services.plan_engine import (
     Calendar, ELink, ETask, MspdiError, analyse, build_mspdi, engine_issues,
-    parse_mspdi, schedule, topo,
+    parse_mspdi, push, schedule, topo,
 )
 
 DATA = Path(__file__).parent / "data" / "gantt_vectors.json"
@@ -57,7 +57,7 @@ def test_vector_file_shape():
               if t["constraint"]}
     assert ctypes == {"snet", "fnlt", "mso", "mfo"}
     for c in CASES:
-        assert set(c.get("options") or {}) <= {"pull", "cycle", "refused"}
+        assert set(c.get("options") or {}) <= {"pull", "cycle", "refused", "push"}
     names = set(names)
     # spec §11 "Summary task rule": the cases both engines must cover
     for must in ("summary: FS into a summary bounds every leaf below it",
@@ -83,7 +83,12 @@ def test_vector_file_shape():
 def test_vectors(case):
     cal, tasks, links = _load(case)
     opts = case.get("options") or {}
-    res = schedule(tasks, links, cal, pull=bool(opts.get("pull")))
+    if opts.get("push"):
+        # automatic scheduling / cascade: only what the edit drives moves
+        res, _ = push(tasks, links, cal, opts["push"]["sources"],
+                      also=opts["push"]["also"])
+    else:
+        res = schedule(tasks, links, cal, pull=bool(opts.get("pull")))
     # a cycle stops the pass (blocks keep their dates); a refused link or
     # constraint is an error and is left out of the math
     assert res.cycle is bool(opts.get("cycle"))

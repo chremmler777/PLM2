@@ -762,31 +762,49 @@ def analyse(tasks: list[ETask], links: list[ELink], cal: Calendar) -> PlanResult
     return compute(tasks, links, cal, move=False)
 
 
-def downstream(tasks: list[ETask], links: list[ELink], sources: list) -> dict:
+def downstream(tasks: list[ETask], links: list[ELink], sources: list,
+               *, stop: bool = True) -> dict:
     """leaf id -> the nearest source whose move can push it along the
     links: successors, successors of every summary above it, every leaf
-    under a summary it links into. The walk stops at another source (that
-    one answers for what lies behind it); between two sources the first in
-    the given order wins. The sources themselves are not in the result."""
+    under a summary it links into. A summary source starts from its start
+    gate too (every leaf below it) as well as from its start and finish
+    points. With stop, the walk stops at another source (that one answers
+    for what lies behind it) and the sources are not in the result; without
+    it, a source another source reaches is in the result, caused by that
+    one. Between two sources the first in the given order wins."""
     g = graph(tasks, links)
     srcs = set(sources)
     cause: dict = {}
     for src in sources:
         if src not in g.by_id:
             continue
-        starts = ([("PS", src), ("PF", src)] if src in g.summaries
+        starts = ([("G", src), ("PS", src), ("PF", src)] if src in g.summaries
                   else [("L", src)])
         seen, stack = set(starts), list(starts)
+        for n in starts:                      # a summary's own leaves
+            if n[0] == "G":
+                for m in _gate_leaves(g, src):
+                    if m != src and (not stop or m not in srcs):
+                        cause.setdefault(m, src)
         while stack:
             n = stack.pop()
             for m in g.succ.get(n, []):
-                if m in seen or (m[0] == "L" and m[1] in srcs):
+                if m in seen or (stop and m[0] == "L" and m[1] in srcs):
                     continue                     # another source answers for it
                 seen.add(m)
                 stack.append(m)
-                if m[0] == "L" and m[1] not in cause:
+                if m[0] == "L" and m[1] != src and m[1] not in cause:
                     cause[m[1]] = src
     return cause
+
+
+def _gate_leaves(g: "Graph", sid) -> list:
+    out, stack = [], [sid]
+    while stack:
+        x = stack.pop()
+        for c in g.children.get(x, []):
+            (stack if c in g.summaries else out).append(c)
+    return out
 
 
 def cascade(tasks: list[ETask], links: list[ELink], cal: Calendar,
@@ -802,13 +820,22 @@ def cascade(tasks: list[ETask], links: list[ELink], cal: Calendar,
 def push(tasks: list[ETask], links: list[ELink], cal: Calendar, sources: list,
          also: Iterable = ()) -> tuple[PlanResult, dict]:
     """cascade(), plus `also`: blocks that may move themselves (a new link
-    or lag into them, a changed constraint on them), each its own cause.
+    or lag into them, a changed constraint on them, a new parent), each its
+    own cause; a summary in `also` makes every leaf below it movable (its
+    start gate may have changed) and pushes what they drive. A source that
+    another source drives moves too when its link is broken (MS Project:
+    the user's date stands only as far as its predecessors allow).
     Automatic scheduling before the baseline and the deviation cascade
     after it are this one forward pass."""
-    cause = downstream(tasks, links, list(sources) + [a for a in also
-                                                      if a not in sources])
+    also = list(also)
+    sources = list(sources)
+    everyone = sources + [a for a in also if a not in sources]
+    cause = downstream(tasks, links, everyone)
     for a in also:
         cause.setdefault(a, a)
+    for s_id, by in downstream(tasks, links, sources, stop=False).items():
+        if s_id in sources and s_id not in cause:
+            cause[s_id] = by
     cons = _constraints(tasks)
     started = {t.id for t in tasks if t.started}
     summaries = summary_ids(tasks)
