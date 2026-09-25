@@ -3,7 +3,7 @@
  * and recent activity across all parts.
  */
 import { useQuery } from '@tanstack/react-query';
-import { formatDate, formatTime } from '../lib/format';
+import { formatCalendarDate, formatTime } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
 import EscalationsCard from '../components/EscalationsCard';
@@ -245,7 +245,7 @@ export default function Dashboard() {
                 <span className="text-slate-400 text-xs ml-2">{m.project_name}</span>
                 <span className={`block text-xs mt-0.5 ${m.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
                   {m.overdue ? 'OVERDUE — ' : 'due '}
-                  {formatDate(m.due_date)}
+                  {formatCalendarDate(m.due_date)}
                 </span>
               </button>
             ))}
@@ -274,7 +274,7 @@ export default function Dashboard() {
                 <span className="text-slate-400 text-xs font-mono ml-2">{g.part_number}</span>
                 <span className={`block text-xs mt-0.5 ${g.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
                   {g.overdue ? 'OVERDUE — ' : 'due '}
-                  {formatDate(g.next_calibration_due)}
+                  {formatCalendarDate(g.next_calibration_due)}
                 </span>
               </button>
             ))}

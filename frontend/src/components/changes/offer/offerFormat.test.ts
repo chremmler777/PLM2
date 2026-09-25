@@ -1,36 +1,48 @@
 import { describe, it, expect } from 'vitest'
 import { diffLabel, diffValue, parseNum } from './offerFormat'
-import { formatDate, formatDateTime, formatMoney } from '../../../lib/format'
+import {
+  formatDate, formatDateTime, formatMoney, parseNumberInput, readNumberInput,
+} from '../../../lib/format'
 
-describe('parseNum (German input)', () => {
+describe('parseNum (en-US input: dot decimals, comma thousands groups only)', () => {
   it.each([
-    ['1.234', 1234],
-    ['12.345.678', 12345678],
-    ['1.234,5', 1234.5],
-    ['1,5', 1.5],
+    ['1.234', 1.234],
+    ['12,500', 12500],
+    ['1,234,567.5', 1234567.5],
+    ['1,234.50', 1234.5],
+    ['12,345,678.9', 12345678.9],
+    ['-2,000', -2000],
     ['1.5', 1.5],
-    ['1.23', 1.23],
-    ['-2.000', -2000],
-    ['1 234,50', 1234.5],
-    ['1,', 1],
+    ['0.125', 0.125],
+    ['-0.125', -0.125],
+    ['1.2345', 1.2345],
+    ['12500', 12500],
+    ['1 234.50', 1234.5],
+    ['.5', 0.5],
     ['', null],
     ['abc', null],
     ['1.23.4', null],
-    ['1.23,4', null],
-    ['1,2,3', null],
-    ['0.125', 0.125],
-    ['-0.125', -0.125],
-    ['0.500', 0.5],
-    ['1.2345', 1.2345],
-    ['1.234,56', 1234.56],
-    ['0.125,5', null],
-    // en-US with both separators, same as the backend's read_number
-    ['1,234.50', 1234.5],
-    ['12,345,678.9', 12345678.9],
-    ['12,34.5', null],
     ["1'234", null],
+    // A comma that is not a 3-digit thousands group is refused, never a decimal.
+    ['12,5', null],
+    ['1,5', null],
+    ['1,', null],
+    ['1,2345', null],
+    ['0,500', null],
+    ['12,34.5', null],
+    ['1,2,3', null],
+    ['1.234,5', null],
+    ['1,234,5', null],
   ] as const)('%s -> %s', (input, out) => {
     expect(parseNum(input)).toBe(out)
+  })
+
+  it('reports a stray comma as ambiguous, other junk as invalid', () => {
+    expect(readNumberInput('12,5')).toEqual({ value: null, error: 'ambiguous' })
+    expect(readNumberInput('1.234,5')).toEqual({ value: null, error: 'ambiguous' })
+    expect(readNumberInput('1.23.4')).toEqual({ value: null, error: 'invalid' })
+    expect(readNumberInput(' ')).toEqual({ value: null, error: null })
+    expect(parseNum).toBe(parseNumberInput)
   })
 })
 

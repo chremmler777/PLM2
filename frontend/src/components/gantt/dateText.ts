@@ -1,7 +1,9 @@
 /**
  * Date text for inputs: "25 Sep 2026" out; in, "25 Sep 2026", "25 sep 26",
- * "25-Sep-2026", ISO "2026-09-25", "25.09.2026", "25.09.26" and "25-09-2026".
- * Slashes are refused: 01/02/2026 could be January or February.
+ * "25-Sep-2026", US order with a month name "Sep 25, 2026" and "September 25
+ * 2026" (unambiguous: the month is a name), ISO "2026-09-25", "25.09.2026",
+ * "25.09.26" and "25-09-2026". Slashes are refused: 01/02/2026 could be
+ * January or February.
  */
 import { isIsoDay } from './engine/calendar'
 import { LIMITS, inYearRange } from './engine/types'
@@ -61,10 +63,15 @@ export function readDateInput(text: string): { iso: string | null; error: string
   else {
     const num = /^(\d{1,2})[.-](\d{1,2})[.-](\d{2}|\d{4})$/.exec(s)
     const named = /^(\d{1,2})[\s.-]*([A-Za-z]+\.?)[\s.,-]*(\d{2}|\d{4})$/.exec(s)
+    // US order, month name first: "Sep 25, 2026", "September 25 2026".
+    const us = /^([A-Za-z]+\.?)[\s-]*(\d{1,2})(?:st|nd|rd|th)?(?:,\s*|[\s-]+)(\d{2}|\d{4})$/i.exec(s)
     if (num) out = iso(yearOf(num[3]), Number(num[2]), Number(num[1]))
     else if (named) {
       const m = monthOf(named[2])
       if (m) out = iso(yearOf(named[3]), m, Number(named[1]))
+    } else if (us) {
+      const m = monthOf(us[1])
+      if (m) out = iso(yearOf(us[3]), m, Number(us[2]))
     }
   }
   if (!out || !isIsoDay(out)) return { iso: null, error: `Not a date: use ${DATE_EXAMPLE}` }

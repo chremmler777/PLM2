@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { useState } from 'react'
 import { NumField } from './ui'
 import { parseNum } from './offerFormat'
+import { NUMBER_INPUT_HINT } from '../../../lib/format'
 
 afterEach(cleanup)
 
@@ -40,14 +41,23 @@ describe('NumField', () => {
     const input = screen.getByTestId('amt') as HTMLInputElement
     input.focus()
     fireEvent.focus(input)
-    fireEvent.change(input, { target: { value: '1,5' } })
-    expect(screen.getByTestId('amt-preview').textContent).toBe('= 1.5')
     fireEvent.change(input, { target: { value: '1.5' } })
     // "1.5" is already how 1.5 reads: nothing to preview.
     expect(screen.queryByTestId('amt-preview')).toBeNull()
-    // A dot group is thousands: the preview says so.
+    // "." is the decimal point: "1.234" is 1.234 and reads the same.
     fireEvent.change(input, { target: { value: '1.234' } })
-    expect(screen.getByTestId('amt-preview').textContent).toBe('= 1,234')
+    expect(screen.queryByTestId('amt-preview')).toBeNull()
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+    // A comma that is not a thousands group is refused, not read as a decimal.
+    fireEvent.change(input, { target: { value: '1,5' } })
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(screen.queryByTestId('amt-preview')).toBeNull()
+    expect(screen.getByTestId('amt-hint').textContent).toBe(NUMBER_INPUT_HINT)
+    expect(input.getAttribute('title')).toBe(NUMBER_INPUT_HINT)
+    // "12,500" is a thousands group: taken, no hint.
+    fireEvent.change(input, { target: { value: '12,500' } })
+    expect(screen.queryByTestId('amt-hint')).toBeNull()
+    expect(input.getAttribute('aria-invalid')).toBeNull()
     fireEvent.change(input, { target: { value: '12500' } })
     expect(screen.getByTestId('amt-preview').textContent).toBe('= 12,500')
     fireEvent.blur(input)
@@ -63,6 +73,8 @@ describe('NumField', () => {
     expect(input.getAttribute('aria-invalid')).toBe('true')
     expect(spy).not.toHaveBeenCalled()
     expect(screen.queryByTestId('amt-preview')).toBeNull()
+    expect(screen.queryByTestId('amt-hint')).toBeNull()
+    expect(input.getAttribute('title')).toContain('Not a number')
   })
 
   it('reads en-US at rest', () => {
@@ -70,8 +82,8 @@ describe('NumField', () => {
     expect((screen.getByTestId('amt') as HTMLInputElement).value).toBe('1,234,567.891')
   })
 
-  // parseNum reads "1,234" as 1.234 and "1.234" as 1234: the rest text is
-  // never parsed, and the edit text always parses back to the same number.
+  // The rest text is never parsed, and the edit text always parses back to
+  // the same number.
   it.each([13200, 4.2, 1.234, -1.234, 1234.5, 0.5, 1234567.891, 999.999, 0])(
     'keeps %s through an unedited focus and blur', (v) => {
       const spy = vi.fn()

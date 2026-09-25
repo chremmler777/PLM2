@@ -4,7 +4,7 @@
  * when the value really changed. Escape restores the saved value.
  */
 import { useEffect, useState } from 'react'
-import { formatMoney, formatNumber } from '../../lib/format'
+import { NUMBER_INPUT_HINT, formatMoney, formatNumber, readNumberInput } from '../../lib/format'
 import type { CostSheetRow } from '../../types/costSheet'
 import { type Column, type SheetContext, deptName, plantName } from './columns'
 
@@ -13,18 +13,19 @@ const INPUT =
   'placeholder:text-slate-600 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/40 ' +
   'disabled:opacity-40 disabled:cursor-not-allowed'
 
-/** The raw edit value: no grouping, so it reads back through parse() unchanged. */
+/** The raw edit value: no grouping, dot decimals, so it reads back through parse() unchanged. */
 function toInput(v: unknown, money = false): string {
   if (v === null || v === undefined) return ''
   return money && typeof v === 'number' ? v.toFixed(2) : String(v)
 }
 
+/** The typed value to save; undefined when refused (not a number, or "7,5": see readNumberInput). */
 function parse(col: Column, raw: string): unknown {
   const t = raw.trim()
   if (col.kind === 'money' || col.kind === 'number') {
     if (!t) return null
-    const n = Number(t.replace(',', '.'))
-    return Number.isFinite(n) ? n : undefined
+    const r = readNumberInput(t)
+    return r.error ? undefined : r.value
   }
   if (col.kind === 'currency') return t.toUpperCase() || 'EUR'
   return t || null
@@ -65,7 +66,9 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
   const value = row[col.key]
   const money = col.kind === 'money'
   const [draft, setDraft] = useState(toInput(value, money))
-  useEffect(() => setDraft(toInput(value, money)), [value, money])
+  // A refused number stays as typed and is flagged, never silently converted.
+  const [refused, setRefused] = useState(false)
+  useEffect(() => { setDraft(toInput(value, money)); setRefused(false) }, [value, money])
   const inactive = col.inactive?.(row) ?? false
 
   if (col.kind === 'computed') {
@@ -146,20 +149,23 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
   return (
     <input
       aria-label={label}
-      className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''}`}
+      className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''} ${refused ? '!border-rose-500' : ''}`}
       inputMode={col.kind === 'money' || col.kind === 'number' ? 'decimal' : undefined}
       value={draft}
       disabled={inactive}
       placeholder={col.empty ?? ''}
-      onChange={(e) => setDraft(e.target.value)}
+      aria-invalid={refused || undefined}
+      title={refused ? `Not saved. ${NUMBER_INPUT_HINT}` : undefined}
+      onChange={(e) => { setDraft(e.target.value); setRefused(false) }}
       onBlur={() => {
         const next = parse(col, draft)
-        if (next === undefined) { setDraft(toInput(value, money)); return }
+        if (next === undefined) { setRefused(true); return }
+        setRefused(false)
         if (next !== value) onCommit(next)
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        if (e.key === 'Escape') setDraft(toInput(value, money))
+        if (e.key === 'Escape') { setDraft(toInput(value, money)); setRefused(false) }
       }}
     />
   )

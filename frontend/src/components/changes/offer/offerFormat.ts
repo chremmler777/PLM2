@@ -1,5 +1,7 @@
 /** Number, date and chip helpers shared by the offer workspace. */
-import { daysUntil, formatDate, formatMoney, formatNumber, formatPercent, formatPiecePrice } from '../../../lib/format'
+import {
+  daysUntil, formatDate, formatMoney, formatNumber, formatPercent, formatPiecePrice, parseNumberInput,
+} from '../../../lib/format'
 
 /** 2 decimals + currency code: "12,345.50 EUR". */
 export const fmtMoney = formatMoney
@@ -53,40 +55,12 @@ export function daysLeftTone(daysLeft: number | null | undefined, expired?: bool
 }
 
 /**
- * Parse a user-typed number the German way: comma is the decimal separator,
- * dot groups thousands. "1.234" is 1234 (a dot followed by exactly three
- * digits, no comma), "1.234,5" is 1234.5, "1,5" is 1.5. A lone dot that is
- * not a thousands group ("1.5", "0.125", "1.2345") is still read as a decimal
- * point: a group never starts with 0. en-US input with both separators
- * ("1,234.50": comma groups, the dot last) is 1234.5. Returns null for
- * anything else ("1.23.4", "1'234", "abc"). Same rule as the backend's
- * offer_service.read_number.
+ * A user-typed number: "." is the decimal point, "," only groups thousands
+ * in 3-digit groups ("12,500", "1,234,567.5"); "12,5" is refused as
+ * ambiguous, never read as 12.5. lib/format parseNumberInput, the same rule
+ * as the backend's offer_service.read_number.
  */
-export function parseNum(s: string): number | null {
-  const t = s.trim().replace(/\s/g, '')
-  if (t === '') return null
-  let norm: string
-  if (t.includes(',') && t.includes('.') && t.lastIndexOf('.') > t.lastIndexOf(',')) {
-    const dot = t.lastIndexOf('.')
-    const int = t.slice(0, dot)
-    const frac = t.slice(dot + 1)
-    if (!/^[+-]?[1-9]\d{0,2}(,\d{3})+$/.test(int) || !/^\d+$/.test(frac)) return null
-    norm = `${int.replace(/,/g, '')}.${frac}`
-  } else if (t.includes(',')) {
-    // Dots before the comma must be thousands groups.
-    const [int, ...rest] = t.split(',')
-    if (rest.length !== 1) return null
-    if (int.includes('.') && !/^[+-]?[1-9]\d{0,2}(\.\d{3})+$/.test(int)) return null
-    norm = `${int.replace(/\./g, '')}.${rest[0]}`
-  } else if (/^[+-]?[1-9]\d{0,2}(\.\d{3})+$/.test(t)) {
-    norm = t.replace(/\./g, '')
-  } else {
-    norm = t
-  }
-  if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(norm)) return null
-  const n = Number(norm)
-  return Number.isFinite(n) ? n : null
-}
+export const parseNum = parseNumberInput
 
 export const inputCls =
   'bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-100 '

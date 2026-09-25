@@ -8,6 +8,8 @@
  *   percent    27.2%                hours, days  13.5 h, 7 d, +7 d
  *   date       25 Sep 2026          compact      25 Sep 26 (tables, Gantt grid, chips)
  *   date+time  25 Sep 2026, 14:05   missing      -
+ *   calendar day (due / target dates): formatCalendarDate, never shifted
+ *   typed numbers: parseNumberInput ("." decimals, "," only in 3-digit groups)
  *
  * The customer offer PDF keeps its own per-currency locale (backend).
  */
@@ -72,6 +74,34 @@ export function formatDateShort(v: string | number | null | undefined): string {
   }
   const p = partsOf(v)
   return p ? `${p.d} ${MONTHS[p.m]} ${String(p.y).slice(-2)}` : v
+}
+
+/**
+ * The calendar day of a "date" field ("2026-10-05" or the midnight datetime
+ * "2026-10-05T00:00:00" many date columns send), read from its first ten
+ * characters with no time zone shift: a due date is the same day in Detroit
+ * and in Berlin. Use formatDate for real timestamps (created_at, signed_at).
+ */
+function calendarParts(iso: string): { y: number; m: number; d: number } | null {
+  const day = iso.slice(0, 10)
+  if (!DATE_ONLY.test(day) || (iso.length > 10 && !/^[T ]/.test(iso.slice(10)))) return null
+  const [y, m, d] = day.split('-').map(Number)
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null
+  return { y, m: m - 1, d }
+}
+
+/** "25 Sep 2026" from a calendar-day field (date or midnight datetime), never shifted. */
+export function formatCalendarDate(iso: string | null | undefined): string {
+  if (!iso) return '-'
+  const p = calendarParts(iso)
+  return p ? `${p.d} ${MONTHS[p.m]} ${p.y}` : iso
+}
+
+/** "25 Sep 26": the compact form of formatCalendarDate. */
+export function formatCalendarDateShort(iso: string | null | undefined): string {
+  if (!iso) return '-'
+  const p = calendarParts(iso)
+  return p ? `${p.d} ${MONTHS[p.m]} ${String(p.y).slice(-2)}` : iso
 }
 
 /** "14 Nov": day and month only, for a sentence where the year is plain. */
@@ -201,3 +231,46 @@ export function formatDays(v: number | null | undefined, { sign = false }: { sig
   if (missing(v)) return '-'
   return `${sign ? plus(v, 1) : ''}${nf(0, 1).format(v)}${UNIT_SP}d`
 }
+
+// ------------------------------------------------------------ number input
+
+/** How a typed number was read: the value, or why it was not taken. */
+export interface NumberInputRead {
+  value: number | null
+  /** 'invalid': not a number; 'ambiguous': a comma that is not a thousands group ("12,5"). */
+  error: 'invalid' | 'ambiguous' | null
+}
+
+const COMMA_GROUPED = /^[+-]?[1-9]\d{0,2}(,\d{3})+$/
+const PLAIN_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/
+
+/**
+ * A typed number, read en-US like it is shown: "." is the decimal point and
+ * "," only groups thousands, every group exactly three digits ("12,500",
+ * "1,234,567.5"). Any other comma ("12,5", "1,2345", "0,500", "1,") is
+ * ambiguous: German for a decimal, so it is refused rather than guessed.
+ * Spaces are dropped ("1 234.5"). Empty text is { value: null, error: null }.
+ * Same rule as the backend's offer_service.read_number.
+ */
+export function readNumberInput(s: string): NumberInputRead {
+  const t = s.trim().replace(/\s/g, '')
+  if (t === '') return { value: null, error: null }
+  let norm = t
+  if (t.includes(',')) {
+    const dot = t.indexOf('.')
+    const int = dot < 0 ? t : t.slice(0, dot)
+    if (!COMMA_GROUPED.test(int)) return { value: null, error: 'ambiguous' }
+    norm = int.replace(/,/g, '') + (dot < 0 ? '' : t.slice(dot))
+  }
+  if (!PLAIN_NUMBER.test(norm)) return { value: null, error: 'invalid' }
+  const n = Number(norm)
+  return Number.isFinite(n) ? { value: n, error: null } : { value: null, error: 'invalid' }
+}
+
+/** The number a user typed (see readNumberInput); null when empty, not a number or ambiguous. */
+export function parseNumberInput(s: string): number | null {
+  return readNumberInput(s).value
+}
+
+/** The message for a refused number input. */
+export const NUMBER_INPUT_HINT = 'Use a dot for decimals: 12.5, or 12,500 for twelve thousand five hundred'

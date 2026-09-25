@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
-import { formatDate } from '../lib/format';
+import { formatCalendarDate, formatDate } from '../lib/format';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '../lib/apiError';
 import FormPanel from '../forms/FormPanel';
@@ -213,7 +213,7 @@ function GateDetail({ gate, users, unbounded = false }: {
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <div className="text-sm text-slate-200 font-semibold">{gate.code} — {gate.phase_en}</div>
-          <div className="text-xs text-slate-500">{gate.phase_de} · target {fmtDate(gate.target_date)}</div>
+          <div className="text-xs text-slate-500">{gate.phase_de} · target {formatCalendarDate(gate.target_date)}</div>
         </div>
         <div className="w-40 bg-slate-700 rounded-full h-2 overflow-hidden">
           <div

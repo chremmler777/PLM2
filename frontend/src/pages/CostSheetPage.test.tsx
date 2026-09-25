@@ -97,9 +97,20 @@ describe('cost sheet pieces', () => {
     fireEvent.change(input, { target: { value: 'abc' } })
     fireEvent.blur(input)
     expect(onCommit).not.toHaveBeenCalled()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    // "7,5" is German for 7.5 but a comma only groups thousands: refused, flagged.
     fireEvent.change(input, { target: { value: '7,5' } })
     fireEvent.blur(input)
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect((input as HTMLInputElement).value).toBe('7,5')
+    fireEvent.change(input, { target: { value: '7.5' } })
+    fireEvent.blur(input)
     expect(onCommit).toHaveBeenCalledWith(7.5)
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+    fireEvent.change(input, { target: { value: '12,500' } })
+    fireEvent.blur(input)
+    expect(onCommit).toHaveBeenLastCalledWith(12500)
   })
 
   it('flags plant currencies Finance has not confirmed', () => {

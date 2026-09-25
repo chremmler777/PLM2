@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  addDaysIso, daysUntil, formatDate, formatDateShort, formatDateTime, formatDayMonth, formatDays, formatHours, formatMoney,
+  addDaysIso, daysUntil, formatCalendarDate, formatCalendarDateShort, formatDate, formatDateShort, formatDateTime, formatDayMonth, formatDays, formatHours, formatMoney,
   formatMoneyDelta, formatNumber, formatPercent, formatPiecePrice, formatTime, parseApiDateTime, todayIso,
 } from './format'
 
@@ -110,5 +110,32 @@ describe('daysUntil / todayIso / addDaysIso', () => {
     expect(todayIso(new Date(2026, 0, 1, 0, 5))).toBe('2026-01-01')
     expect(addDaysIso('2026-03-28', 2)).toBe('2026-03-30')
     expect(addDaysIso('2026-12-30', 3)).toBe('2027-01-02')
+  })
+})
+
+// Also run under TZ=America/New_York (a scratch vitest config that overrides
+// the pinned Europe/Berlin): the stored day must show in every zone.
+describe('formatCalendarDate (due and target days, never shifted)', () => {
+  it('shows the stored day of a date or a midnight datetime', () => {
+    expect(formatCalendarDate('2026-10-05T00:00:00')).toBe('5 Oct 2026')
+    expect(formatCalendarDate('2026-10-05')).toBe('5 Oct 2026')
+    expect(formatCalendarDate('2026-01-01 00:00:00')).toBe('1 Jan 2026')
+    expect(formatCalendarDate('2026-12-31T23:59:59.999')).toBe('31 Dec 2026')
+    expect(formatCalendarDateShort('2026-09-25T00:00:00')).toBe('25 Sep 26')
+  })
+
+  it('differs from formatDate exactly where a zone west of UTC shifted the day', () => {
+    const west = new Date(Date.UTC(2026, 9, 5)).getDate() !== 5
+    expect(formatDate('2026-10-05T00:00:00')).toBe(west ? '4 Oct 2026' : '5 Oct 2026')
+    expect(formatCalendarDate('2026-10-05T00:00:00')).toBe('5 Oct 2026')
+  })
+
+  it('renders missing as "-" and passes unreadable text through', () => {
+    expect(formatCalendarDate(null)).toBe('-')
+    expect(formatCalendarDate('')).toBe('-')
+    expect(formatCalendarDateShort(undefined)).toBe('-')
+    expect(formatCalendarDate('soon')).toBe('soon')
+    expect(formatCalendarDate('2026-13-01')).toBe('2026-13-01')
+    expect(formatCalendarDate('2026-10-05x')).toBe('2026-10-05x')
   })
 })

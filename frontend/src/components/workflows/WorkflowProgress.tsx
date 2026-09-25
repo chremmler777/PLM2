@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { formatDate } from '../../lib/format';
+import { formatCalendarDate, formatDate } from '../../lib/format';
 import { WfInstance, WfInstanceTask, WfDecision } from '../../types/workflow';
 import { rasicColors, instanceStatusColors } from '../../lib/constants';
 import { t } from '../../i18n/cmLabels';
@@ -299,7 +299,7 @@ function TaskRow({
           <span
             className={`ml-2 ${task.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}`}
           >
-            {formatDate(task.due_date)}
+            {formatCalendarDate(task.due_date)}
             {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
           </span>
         )}

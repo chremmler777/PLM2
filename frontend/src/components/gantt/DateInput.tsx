@@ -1,12 +1,12 @@
 /**
  * A date field that always shows "25 Sep 2026" (no locale mm/dd from the
- * native picker). It reads "25 Sep 2026", "25 sep 26", ISO yyyy-mm-dd,
- * dd.mm.yyyy, dd.mm.yy (00-69 = 20xx, 70-99 = 19xx) and dd-mm-yyyy, echoes
- * the date it read under the field while typing ("= 25 Sep 2026"), refuses
- * slashes (ambiguous) and years outside 1900-2200 with a message, and offers
- * a small month calendar in a popover (portal, kept inside the viewport,
- * arrow keys move the day). Value in and out: ISO `YYYY-MM-DD` or ''.
- */
+ * native picker). It reads "25 Sep 2026", "25 sep 26", "Sep 25, 2026",
+ * "September 25 2026", ISO yyyy-mm-dd, dd.mm.yyyy, dd.mm.yy (00-69 = 20xx,
+ * 70-99 = 19xx) and dd-mm-yyyy, echoes the date it read under the field
+ * while typing ("= 25 Sep 2026"), refuses slashes (ambiguous) and years
+ * outside 1900-2200 with a message, and offers a small month calendar in a
+ * popover (portal into the closest open <dialog>, else the body; kept inside
+ * the viewport, arrow keys move the day). Value in and out: ISO `YYYY-MM-DD` or ''. */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MONTHS, dayOf, isIsoDay, isoWeekday, toDay, toIso, todayDay, ymd } from './engine/calendar'
@@ -39,6 +39,34 @@ interface Props {
 
 const POP_W = 224
 const POP_H = 250
+
+/**
+ * Where the calendar popover mounts: the closest open <dialog>, else the body.
+ * A modal dialog (showModal) sits in the top layer and makes the rest of the
+ * page inert, so a popover portalled to the body would be hidden under it and
+ * unclickable.
+ */
+function popHost(from: Element | null): HTMLElement {
+  return from?.closest<HTMLElement>('dialog[open]') ?? document.body
+}
+
+/**
+ * The viewport point a `position: fixed` child of the host is measured from:
+ * (0, 0), unless the host is a dialog that sets a containing block for fixed
+ * descendants (transform, filter, perspective, contain, will-change), then
+ * its padding box.
+ */
+function fixedOrigin(host: HTMLElement): { x: number; y: number } {
+  if (host === document.body) return { x: 0, y: 0 }
+  const cs = getComputedStyle(host)
+  const set = (v: string | undefined) => !!v && v !== 'none' && v !== 'auto' && v !== 'normal'
+  const makesBlock = set(cs.transform) || set(cs.filter) || set(cs.perspective)
+    || /paint|layout|strict|content/.test(cs.contain || '')
+    || /transform|filter|perspective/.test(cs.willChange || '')
+  if (!makesBlock) return { x: 0, y: 0 }
+  const r = host.getBoundingClientRect()
+  return { x: r.left + host.clientLeft, y: r.top + host.clientTop }
+}
 
 export default function DateInput(p: Props) {
   const [text, setText] = useState(formatDateInput(p.value))
@@ -81,7 +109,8 @@ export default function DateInput(p: Props) {
     if (top + h > vh - 4 && r.top - 4 - h >= 4) top = r.top - 4 - h
     top = Math.max(4, Math.min(top, vh - h - 4))
     const left = Math.max(4, Math.min(r.right - POP_W, vw - POP_W - 4))
-    setPos({ left, top })
+    const o = fixedOrigin(popHost(wrap.current))
+    setPos({ left: left - o.x, top: top - o.y })
   }, [])
   useLayoutEffect(() => {
     if (!open) return
@@ -241,7 +270,7 @@ export default function DateInput(p: Props) {
             })}
           </div>
         </div>,
-        document.body,
+        popHost(wrap.current),
       )}
     </div>
   )

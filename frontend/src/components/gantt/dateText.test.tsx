@@ -27,6 +27,19 @@ describe('date text (G19: no locale mm/dd)', () => {
     expect(parseDateInput('5 Se 2026')).toBeNull()
     expect(parseDateInput('5 Foo 2026')).toBeNull()
   })
+  it('reads US order when the month is a name: Sep 25, 2026 and September 25 2026', () => {
+    expect(parseDateInput('Sep 25, 2026')).toBe('2026-09-25')
+    expect(parseDateInput('September 25 2026')).toBe('2026-09-25')
+    expect(parseDateInput('sep 25 26')).toBe('2026-09-25')
+    expect(parseDateInput('Sept. 5, 2026')).toBe('2026-09-05')
+    expect(parseDateInput('Oct 5th, 2026')).toBe('2026-10-05')
+    expect(parseDateInput('Feb 31, 2026')).toBeNull()
+    expect(parseDateInput('Foo 25, 2026')).toBeNull()
+    expect(parseDateInput('Sep 2026')).toBeNull()
+    // Slashes stay refused, month name or not.
+    expect(readDateInput('Sep/25/2026').error).toContain('slashes')
+    expect(readDateInput('09/25/2026').iso).toBeNull()
+  })
   it('two-digit years pivot at 70: 00-69 are 20xx, 70-99 are 19xx (review #8)', () => {
     expect(parseDateInput('01.01.00')).toBe('2000-01-01')
     expect(parseDateInput('01.01.69')).toBe('2069-01-01')
@@ -83,6 +96,36 @@ describe('DateInput popover and messages (review #5, #8)', () => {
     expect(btn.getAttribute('tabindex')).toBeNull()
     fireEvent.click(btn)
     expect(screen.getByTestId('date-popover').parentElement).toBe(document.body)
+  })
+
+  it('portals the popover into an open <dialog>, not under a modal top layer on the body', () => {
+    render(
+      <dialog open data-testid="dlg">
+        <DateInput aria-label="Due" value="2026-10-05" onChange={vi.fn()} />
+      </dialog>,
+    )
+    fireEvent.click(screen.getByLabelText('Open calendar'))
+    const popover = screen.getByTestId('date-popover')
+    expect(popover.parentElement).toBe(screen.getByTestId('dlg'))
+    // A day in the dialog-hosted calendar still commits.
+    fireEvent.click(screen.getByLabelText('7 Oct 2026'))
+    expect(screen.queryByTestId('date-popover')).toBeNull()
+  })
+
+  it('offsets the popover by a dialog that is the fixed containing block (transform)', () => {
+    render(
+      <dialog open data-testid="dlg" style={{ transform: 'translate(-50%, -50%)' }}>
+        <DateInput aria-label="Due" value="2026-10-05" onChange={vi.fn()} />
+      </dialog>,
+    )
+    const dlg = screen.getByTestId('dlg')
+    dlg.getBoundingClientRect = () => ({ left: 100, top: 50, right: 500, bottom: 450, width: 400, height: 400, x: 100, y: 50, toJSON: () => ({}) })
+    fireEvent.click(screen.getByLabelText('Open calendar'))
+    const popover = screen.getByTestId('date-popover')
+    expect(popover.parentElement).toBe(dlg)
+    // jsdom lays the field out at 0,0: the viewport position is clamped to 4,4.
+    expect(popover.style.left).toBe('-96px')
+    expect(popover.style.top).toBe('-46px')
   })
 
   it('Escape with the popover open closes only the popover', () => {
