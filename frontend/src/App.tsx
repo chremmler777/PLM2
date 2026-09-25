@@ -13,6 +13,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import ProjectDetailPopout from './pages/ProjectDetailPopout';
 import PartDetail from './pages/PartDetail';
 import DfmPopout from './pages/DfmPopout';
+import PlanPopout from './pages/PlanPopout';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
@@ -90,6 +91,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute bare>
             <DfmPopout />
+          </ProtectedRoute>
+        }
+      />
+      {/* Pop-out plan window: one change plan (quote or detailed) alone, no sidebar. */}
+      <Route
+        path="/changes/:changeId/plan/:plan"
+        element={
+          <ProtectedRoute bare>
+            <PlanPopout />
           </ProtectedRoute>
         }
       />

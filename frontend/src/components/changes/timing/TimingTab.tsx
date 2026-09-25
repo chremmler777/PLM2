@@ -78,6 +78,11 @@ export default function TimingTab({
   })
 
   const status = change.status
+  // Deep link ?tab=timing&task=<id> (e.g. from a Recovery VI-n group): the
+  // planner scrolls to, expands, selects and highlights that task. Read from
+  // the URL directly: the change page re-renders the tab on every navigation.
+  const taskParam = Number(new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('task'))
+  const focusTaskId = Number.isInteger(taskParam) && taskParam > 0 ? taskParam : undefined
   const implementing = phase(status) >= phase('in_implementation')
   const mode = baseline || implementing ? 'track' : 'plan'
   const tasks = plan?.tasks ?? []
@@ -243,7 +248,8 @@ export default function TimingTab({
       )}
       {/* The detailed plan is created by the "Create detailed plan" button in
           the card above; the Gantt's own seed button would be a second way in. */}
-      <GanttPlanner changeId={id} plan="detailed" mode={mode} status={status} changeNumber={change.change_number} hideSeed />
+      <GanttPlanner changeId={id} plan="detailed" mode={mode} status={status} changeNumber={change.change_number} hideSeed
+        focusTaskId={focusTaskId} />
 
       {tasks.length > 0 && (
         <TeamFeedbackPanel changeId={id} feedback={feedback} myDepartmentIds={myDepartmentIds}

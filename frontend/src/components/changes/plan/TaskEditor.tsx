@@ -192,6 +192,9 @@ export default function TaskEditor(p: Props) {
   }
   const changes = patch()
   const dirty = Object.keys(changes).length > 0
+  // Reset stays available while the form differs from the task, even when an
+  // unusable entry (a cleared field) produces no patch.
+  const edited = dirty || JSON.stringify(f) !== JSON.stringify(formOf(task))
   const nameMissing = p.canEdit && !f.name.trim()
 
   const col = KIND_COLOR[task.kind] ?? KIND_COLOR.work
@@ -200,7 +203,7 @@ export default function TaskEditor(p: Props) {
 
   return (
     <aside role="region" aria-label={`Task ${task.name}`} data-testid="task-editor"
-      onKeyDown={(e) => { if (e.key === 'Escape') p.onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); p.onClose() } }}
       className="flex flex-col rounded-lg border border-slate-700 bg-slate-900">
       <header className="flex items-start gap-2 border-b border-slate-700 px-4 py-3">
         <span className="mt-1 h-3 w-3 shrink-0 rounded-sm" style={{ background: col.fill }} />
@@ -261,7 +264,7 @@ export default function TaskEditor(p: Props) {
         <div className="grid grid-cols-[minmax(0,1fr)_60px_minmax(0,1fr)] gap-2">
           <div>
             <label className={label} htmlFor="te-start">Start</label>
-            <DateInput id="te-start" aria-label="Start" className={`${field} px-1.5`} value={f.start_date} disabled={!p.canDates}
+            <DateInput id="te-start" aria-label="Start" required className={`${field} px-1.5`} value={f.start_date} disabled={!p.canDates}
               onChange={(iso) => set('start_date', iso)} />
           </div>
           <div>
@@ -336,14 +339,17 @@ export default function TaskEditor(p: Props) {
         </div>
         )}
 
+        {/* A summary is an idea exactly when only ideas lie below it: no flag of its own (spec §11). */}
+        {(!p.isSummary || f.is_idea) && (
         <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-300">
-          <input type="checkbox" className="mt-0.5 accent-amber-500" checked={f.is_idea} disabled={!p.canEdit}
+          <input type="checkbox" className="mt-0.5 accent-amber-500" checked={f.is_idea} disabled={!p.canEdit || (!!p.isSummary && !f.is_idea)}
             onChange={(e) => set('is_idea', e.target.checked)} />
           <span>
             Idea block
-            <span className="block text-[11px] text-slate-500">A proposal (for example a parallel bank build). Not on the critical path; must be resolved before timing is validated.</span>
+            <span className="block text-[11px] text-slate-500">A proposal (for example a parallel bank build). Not on the critical path, never pushes committed work, holds no tasks; must be resolved before timing is validated.</span>
           </span>
         </label>
+        )}
 
         <div>
           <label className={label} htmlFor="te-notes">Notes</label>
@@ -391,7 +397,7 @@ export default function TaskEditor(p: Props) {
             <button type="button" className={`${btn} text-red-300`} onClick={p.onDelete}>Delete task</button>
           )}
           <div className="ml-auto flex gap-2">
-            <button type="button" className={btn} onClick={() => setF(formOf(task))} disabled={!dirty}>Reset</button>
+            <button type="button" className={btn} onClick={() => setF(formOf(task))} disabled={!edited}>Reset</button>
             <button type="button" className={btnPrimary} data-testid="task-editor-save"
               disabled={!dirty || nameMissing || !startOk || !actualsOk || !constraintOk || dur > LIMITS.maxDuration || p.saving}
               onClick={() => p.onSave(changes)}>Save</button>

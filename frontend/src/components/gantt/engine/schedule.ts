@@ -85,12 +85,33 @@ export interface Graph {
   realKids: Map<string, string[]>
 }
 
-/** Is this link used by the math? (backend `usable_link`) */
-export function usableLink(from: string, to: string, type: GanttLink['type'], tree: Tree, anc: Map<string, string[]>, summaries: Set<string>): boolean {
+/** Is this link used by the math? (backend `usable_link`): not out of an idea, not within a summary's own tree, not FF/SF into a summary. */
+export function usableLink(
+  from: string, to: string, type: GanttLink['type'], tree: Tree, anc: Map<string, string[]>, summaries: Set<string>,
+  ideas: Set<string> = ideaKeys(tree, summaries),
+): boolean {
   if (!tree.byId.has(from) || !tree.byId.has(to) || from === to) return false
+  // An idea never drives committed work (it follows): the link stays stored and
+  // shown, validation warns when the idea overlaps its successor.
+  if (ideas.has(from)) return false
   if ((anc.get(to) ?? []).includes(from) || (anc.get(from) ?? []).includes(to)) return false
   if (summaries.has(to) && (type === 'FF' || type === 'SF')) return false
   return true
+}
+
+/**
+ * Tasks that count as ideas for link driving (spec §11 Idea blocks): a leaf
+ * by its flag; a summary exactly when no committed (non-idea) work lies
+ * below it, whatever its own flag says.
+ */
+export function ideaKeys(tree: Tree, summaries: Set<string>): Set<string> {
+  const real = new Map<string, boolean>()
+  for (const t of [...tree.order].reverse()) {
+    const k = key(t.id)
+    if (!summaries.has(k)) { real.set(k, !t.isIdea); continue }
+    real.set(k, (tree.children.get(k) ?? []).some((c) => real.get(key(c.id))))
+  }
+  return new Set([...real].filter(([, r]) => !r).map(([k]) => k))
 }
 
 export function buildGraph(tasks: GanttTask[], links: GanttLink[]): Graph {
@@ -106,10 +127,11 @@ export function buildGraph(tasks: GanttTask[], links: GanttLink[]): Graph {
   const leaves = tasks.map((t) => key(t.id)).filter((k) => !summaries.has(k))
   // One link per (from, to, type); a duplicate keeps the larger lag.
   const use = new Map<string, ULink>()
+  const ideas = ideaKeys(tree, summaries)
   for (const l of links) {
     const type = (['FS', 'SS', 'FF', 'SF'] as const).includes(l.type) ? l.type : 'FS'
     const f = key(l.from), t = key(l.to)
-    if (!usableLink(f, t, type, tree, anc, summaries)) continue
+    if (!usableLink(f, t, type, tree, anc, summaries, ideas)) continue
     const lag = Math.round(l.lagDays || 0)
     const k = `${f}>${t}>${type}`
     const cur = use.get(k)
@@ -503,37 +525,33 @@ export function autoSchedulePatches(
 /**
  * Leaf key -> the nearest source whose move can push it (backend
  * `downstream`): successors, successors of every summary above it, every
- * leaf under a summary it links into. The walk stops at another source.
+ * leaf under a summary it links into. A summary source walks from its start
+ * gate (every leaf below it) as well as from its start and finish points.
+ * With `stop` (default) the walk stops at another source, which answers for
+ * what lies behind it, and sources are not in the result; without it a
+ * source another source reaches is in the result, caused by that one.
+ * Between two sources the first in the given order wins.
  */
-export function downstream(tasks: GanttTask[], links: GanttLink[], sources: GanttId[], gates: GanttId[] = []): Map<string, string> {
+export function downstream(
+  tasks: GanttTask[], links: GanttLink[], sources: GanttId[], opts: { stop?: boolean } = {},
+): Map<string, string> {
+  const stop = opts.stop ?? true
   const g = buildGraph(tasks, links)
   const srcs = new Set(sources.map(key))
-  const gateSet = new Set(gates.map(key))
   const cause = new Map<string, string>()
-  for (const src of [...new Set([...sources.map(key), ...gates.map(key)])]) {
+  for (const src of sources.map(key)) {
     if (!g.tree.byId.has(src)) continue
-    // A summary that may move itself (link into it, snet on it) walks from its
-    // start gate: the leaves below it may move.
-    const starts = g.summaries.has(src)
-      ? (gateSet.has(src) ? [nk('G', src), nk('PS', src), nk('PF', src)] : [nk('PS', src), nk('PF', src)])
-      : [nk('L', src)]
+    const starts = g.summaries.has(src) ? [nk('G', src), nk('PS', src), nk('PF', src)] : [nk('L', src)]
     const seen = new Set(starts)
     const stack = [...starts]
     while (stack.length) {
       const n = stack.pop()!
       for (const m of g.succ.get(n) ?? []) {
         const [kind, x] = parse(m)
-        if (seen.has(m)) continue
-        if (kind === 'L' && srcs.has(x)) {
-          // Another moved task downstream of this one: it may be pushed further
-          // (when its link is now violated); what lies behind it is its own walk.
-          seen.add(m)
-          if (x !== src && !cause.has(x)) cause.set(x, src)
-          continue
-        }
+        if (seen.has(m) || (stop && kind === 'L' && srcs.has(x))) continue
         seen.add(m)
         stack.push(m)
-        if (kind === 'L' && !cause.has(x)) cause.set(x, src)
+        if (kind === 'L' && x !== src && !cause.has(x)) cause.set(x, src)
       }
     }
   }
@@ -580,9 +598,15 @@ export function pushSchedule(
 ): { result: ScheduleResult; movable: Set<string>; cause: Map<string, string>; tree: Tree } {
   const srcKeys = new Set(sources.map(key))
   const g = buildGraph(tasks, links)
-  const alsoSummaries = also.filter((a) => g.summaries.has(key(a)))
-  const cause = downstream(tasks, links, [...sources, ...also.filter((a) => !srcKeys.has(key(a)))], alsoSummaries)
+  const everyone = [...sources, ...also.filter((a) => !srcKeys.has(key(a)))]
+  const cause = downstream(tasks, links, everyone)
   for (const a of also) if (!cause.has(key(a))) cause.set(key(a), key(a))
+  // A moved block that another edited block (moved or `also`) drives moves
+  // too when its link is broken: the user's date stands only as far as its
+  // predecessors allow.
+  for (const [s, by] of downstream(tasks, links, everyone, { stop: false })) {
+    if (srcKeys.has(s) && !cause.has(s)) cause.set(s, by)
+  }
   const alsoKeys = new Set(also.map(key))
   const cons = leafConstraints(tasks, g)
   // Pinned tasks (unless they move themselves) and tasks that already started stay; the walk goes on through them.

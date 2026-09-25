@@ -51,6 +51,21 @@ export class History {
     return id
   }
 
+  /**
+   * Widen an entry with what the server did on its own for it (tasks it
+   * pushed): redo repeats it, undo restores the tasks too.
+   */
+  extend(id: number, forward: ChangeSet, backward: ChangeSet): void {
+    const e = [...this.past, ...this.future, ...this.limbo].find((x) => x.id === id)
+    if (!e) return
+    const merge = (a: ChangeSet, b: ChangeSet): ChangeSet => ({
+      ...a,
+      updateTasks: [...(a.updateTasks ?? []), ...(b.updateTasks ?? [])],
+    })
+    e.forward = merge(e.forward, forward)
+    e.backward = merge(e.backward, backward)
+  }
+
   /** The ChangeSet an undo would apply, without moving anything yet. */
   peekUndo(): { id: number; cs: ChangeSet } | null {
     const e = this.past[this.past.length - 1]

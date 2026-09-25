@@ -99,6 +99,11 @@ export interface ApplyResult {
   idMap?: Record<string, GanttId>
   /** Temporary link id -> id given by the server (a separate id space from tasks). */
   linkIdMap?: Record<string, GanttId>
+  /**
+   * The plan as the server answered (its ids): the view takes it at once, and
+   * tasks the server moved on its own (not in the ChangeSet) join the undo step.
+   */
+  server?: GanttModel
 }
 
 export interface Issue {

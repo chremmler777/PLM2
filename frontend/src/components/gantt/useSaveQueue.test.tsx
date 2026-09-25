@@ -167,4 +167,43 @@ describe('useSaveQueue', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
     expect((onChange.mock.calls[1] as unknown as [ChangeSet])[0].label).toBe('keep')
   })
+
+  describe('the server answer (review 4b93d732 #11)', () => {
+    const two = (): GanttModel => ({
+      tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 3 }, { id: 2, name: 'B', start: '2026-10-08', duration: 2 }], links: [],
+    })
+
+    it('reports the tasks the server moved on its own and shows its answer without waiting', async () => {
+      const server: GanttModel = {
+        tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 5 }, { id: 2, name: 'B', start: '2026-10-12', duration: 2 }], links: [],
+      }
+      const onServerMoves = vi.fn()
+      const onChange = vi.fn(async () => ({ server }))
+      const { result, rerender } = setup({ onChange, onServerMoves, settleMs: 60_000 }, two())
+      act(() => { result.current.enqueue({ updateTasks: [{ id: 1, patch: { duration: 5 } }] }, { entry: 1, dir: 'do' }) })
+      await waitFor(() => expect(onServerMoves).toHaveBeenCalled())
+      expect(onServerMoves.mock.calls[0]).toEqual([{ entry: 1, dir: 'do' },
+        [{ id: 2, from: { start: '2026-10-08', duration: 2 }, to: { start: '2026-10-12', duration: 2 } }]])
+      // the host now shows a server answer that differs from the optimistic view
+      // for the edited task too: it wins at once, not after settleMs
+      const other: GanttModel = { tasks: [{ ...server.tasks[0], duration: 6 }, server.tasks[1]], links: [] }
+      rerender({ b: other, o: { onChange, onServerMoves, settleMs: 60_000 } })
+      await waitFor(() => expect(result.current.display.tasks[0].duration).toBe(6))
+    })
+
+    it('drops the overlay at once when the host already shows the answer', async () => {
+      const server = two()
+      server.tasks[0] = { ...server.tasks[0], duration: 4 }
+      let rer: ((p: { b: GanttModel; o: SaveQueueOptions }) => void) | null = null
+      const opts: SaveQueueOptions = {
+        settleMs: 60_000,
+        onChange: async () => { rer!({ b: server, o: opts }); return { server } },
+      }
+      const { result, rerender } = setup(opts, two())
+      rer = rerender
+      act(() => { result.current.enqueue({ updateTasks: [{ id: 1, patch: { duration: 5 } }] }) })
+      await waitFor(() => expect(result.current.saving).toBe(false))
+      expect(result.current.display.tasks[0].duration).toBe(4)
+    })
+  })
 })

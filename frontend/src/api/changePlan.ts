@@ -81,7 +81,7 @@ export const planApi = {
 
   /** Plan calendar (one per change); answers the PlanOut of `plan`. */
   /** `convert`: on a mode switch, convert durations and lags (calendar d x 5/7 -> working d, and back). */
-  setCalendar: (id: number, plan: PlanKind, calendar: PlanCalendar, convert = false) =>
+  setCalendar: (id: number, plan: PlanKind, calendar: Partial<PlanCalendar>, convert = false) =>
     client.put<PlanOut>(`${base(id)}/calendar`, { ...calendar, ...(convert ? { convert: true } : {}) }, { params: { plan } }).then((r) => r.data),
 
   /** MS Project XML into a plan (multipart). */

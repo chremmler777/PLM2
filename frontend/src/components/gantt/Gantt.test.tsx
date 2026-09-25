@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Gantt, type GanttProps } from './Gantt'
+import { gridTiming } from './columns'
 import type { ChangeSet, GanttLink, GanttModel, GanttTask } from './engine/types'
 
 const base = (): GanttTask[] => [
@@ -44,7 +45,7 @@ const editCell = (id: number, col: string, value: string, submit: 'Enter' | 'Esc
   fireEvent.keyDown(ed, { key: submit })
 }
 
-beforeEach(() => { vi.useRealTimers() })
+beforeEach(() => { vi.useRealTimers(); gridTiming.editDelay = 0 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('Gantt: rendering', () => {
@@ -1253,5 +1254,255 @@ describe('Gantt: read-only (legacy) links', () => {
     expect(cell(1, 'baselineEnd').textContent).toBe('07.10.26')
     expect(cell(1, 'variance').textContent).toBe('+2d')
     expect(cell(1, 'actualEnd').textContent).toBe('09.10.26')
+  })
+})
+
+describe('Gantt: full screen', () => {
+  const full = () => String(screen.getByTestId('gantt-root').getAttribute('data-full-screen') === 'true')
+
+  it('turns the same instance into a full-viewport layer and back, keeping selection, zoom, draft and undo', async () => {
+    const { onChange } = setup({ title: 'CR-1 - Quote plan' })
+    fireEvent.click(screen.getByTestId('gantt-zoom-week'))
+    fireEvent.click(screen.getByTestId('gantt-row-2'))
+    drag(screen.getByTestId('gantt-bar-shape-3'), 28)
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    const rowBefore = screen.getByTestId('gantt-row-2')
+    fireEvent.click(screen.getByTestId('gantt-full-screen'))
+    expect(full()).toBe('true')
+    expect(screen.getByTestId('gantt-root').className).toContain('fixed')
+    expect(screen.getByTestId('gantt-full-header').textContent).toContain('CR-1 - Quote plan')
+    expect(document.body.style.overflow).toBe('hidden')
+    // no remount: the same row element, same zoom, selection and undo history
+    expect(screen.getByTestId('gantt-row-2')).toBe(rowBefore)
+    expect(screen.getByTestId('gantt-zoom-week').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('gantt-row-2').getAttribute('aria-selected')).toBe('true')
+    expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('gantt-add-task'))
+    fireEvent.keyDown(screen.getByTestId('gantt-cell-editor'), { key: 'F', ctrlKey: true, shiftKey: true })
+    expect(full()).toBe('false')
+    expect(document.body.style.overflow).toBe('')
+    expect(screen.getByTestId('gantt-cell-editor')).toBeTruthy() // the draft row survives
+    expect(screen.getAllByRole('row').length).toBe(1 + 4)
+    expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('Ctrl+Shift+F toggles; Escape closes after popups and inline edits had theirs', () => {
+    setup()
+    fireEvent.click(screen.getByTestId('gantt-row-1'))
+    key('F', { ctrlKey: true, shiftKey: true })
+    expect(full()).toBe('true')
+    // inline edit takes Escape first
+    startEdit(1, 'name')
+    fireEvent.keyDown(screen.getByTestId('gantt-cell-editor'), { key: 'Escape' })
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+    expect(full()).toBe('true')
+    // the link popover takes Escape first
+    fireEvent.click(screen.getByTestId('gantt-link-hit-L1'))
+    expect(screen.getByTestId('gantt-link-popover')).toBeTruthy()
+    fireEvent.keyDown(screen.getByTestId('gantt-link-popover'), { key: 'Escape' })
+    expect(screen.queryByTestId('gantt-link-popover')).toBeNull()
+    expect(full()).toBe('true')
+    // now Escape closes the layer and keeps the selection
+    key('Escape')
+    expect(full()).toBe('false')
+    expect(screen.getByTestId('gantt-row-1').getAttribute('aria-selected')).toBe('true')
+    key('F', { ctrlKey: true, shiftKey: true })
+    expect(full()).toBe('true')
+    key('F', { ctrlKey: true, shiftKey: true })
+    expect(full()).toBe('false')
+  })
+
+  it('Escape from outside the chart closes too, unless a dialog is open', () => {
+    setup()
+    fireEvent.click(screen.getByTestId('gantt-full-screen'))
+    const dlg = document.createElement('div'); dlg.setAttribute('role', 'dialog'); document.body.appendChild(dlg)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(full()).toBe('true')
+    dlg.remove()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(full()).toBe('false')
+  })
+
+  it('moves focus in and restores it on close', async () => {
+    setup()
+    const btn = screen.getByTestId('gantt-full-screen')
+    btn.focus()
+    fireEvent.click(btn)
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-testid')).toBe('gantt-scroller'))
+    fireEvent.click(screen.getByTestId('gantt-full-close'))
+    expect(document.activeElement).toBe(btn)
+  })
+
+  it('renders the host content below in the layer, and hides the button when the host opts out', () => {
+    setup({ below: <p data-testid="host-below">Legend</p> })
+    fireEvent.click(screen.getByTestId('gantt-full-screen'))
+    expect(within(screen.getByTestId('gantt-root')).getByTestId('host-below')).toBeTruthy()
+    cleanup()
+    setup({ fullScreen: false })
+    expect(screen.queryByTestId('gantt-full-screen')).toBeNull()
+  })
+})
+
+describe('Gantt: click, double-click and modifier clicks (review 4b93d732 #2, #3)', () => {
+  beforeEach(() => { gridTiming.editDelay = 300 })
+  const press = (el: Element, init: Record<string, unknown> = {}, detail = 1) => {
+    fireEvent.pointerDown(el, { button: 0, ...init })
+    fireEvent.pointerUp(el, { button: 0, ...init })
+    fireEvent.click(el, { button: 0, detail, ...init })
+  }
+
+  it('double-click on the selected row opens the task panel, never the inline editor', async () => {
+    const onTaskOpen = vi.fn()
+    setup({ onTaskOpen })
+    press(cell(2, 'name'))
+    expect(screen.getByTestId('gantt-row-2').getAttribute('aria-selected')).toBe('true')
+    // real sequence on the now active row: click, click, dblclick
+    press(cell(2, 'name'), {}, 1)
+    press(cell(2, 'name'), {}, 2)
+    fireEvent.doubleClick(cell(2, 'name'), { detail: 2 })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(onTaskOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }))
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+  })
+
+  it('a double-click on a row that was not selected opens it too', async () => {
+    const onTaskOpen = vi.fn()
+    setup({ onTaskOpen })
+    press(cell(3, 'start'), {}, 1)
+    press(cell(3, 'start'), {}, 2)
+    fireEvent.doubleClick(cell(3, 'start'), { detail: 2 })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(onTaskOpen).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+  })
+
+  it('a single click on a cell of the already active row edits it after the double-click interval', async () => {
+    setup()
+    press(cell(1, 'name'))
+    press(cell(1, 'name'))
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('gantt-cell-editor')).toBeTruthy())
+  })
+
+  it('the first click on a row only selects it', async () => {
+    setup()
+    press(cell(1, 'name'))
+    await new Promise((r) => setTimeout(r, 400))
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+  })
+
+  it('ctrl or shift click on the selected row changes the selection and never edits', async () => {
+    setup()
+    press(cell(1, 'name'))
+    press(cell(2, 'name'), { ctrlKey: true })
+    expect(screen.getByTestId('gantt-row-2').getAttribute('aria-selected')).toBe('true')
+    press(cell(2, 'name'), { ctrlKey: true })
+    expect(screen.getByTestId('gantt-row-2').getAttribute('aria-selected')).toBe('false')
+    press(cell(1, 'name'), { shiftKey: true })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+    expect(screen.getByTestId('gantt-row-1').getAttribute('aria-selected')).toBe('true')
+  })
+})
+
+describe('Gantt: columns that do not fit (review 4b93d732 #9)', () => {
+  const TRACK = ['row', 'name', 'start', 'end', 'progress', 'variance', 'baselineEnd', 'actualStart', 'actualEnd', 'baselineStart', 'predecessors'] as const
+  const withWidth = (w: number) => vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(w)
+  const headers = () => screen.getAllByRole('columnheader').map((h) => h.textContent)
+
+  it('all tracking columns fit a 1600 px screen at 0.6 of the width (narrowed, not dropped)', () => {
+    withWidth(1350)
+    setup({ columns: [...TRACK], maxGridFraction: 0.6 })
+    expect(headers()).toEqual(['#', 'Task', 'Start', 'Finish', 'Done', 'Var.', 'Base finish', 'Act. start', 'Act. finish', 'Base start', 'Predecessors'])
+    expect(screen.getByTestId('gantt-columns').textContent).toBe('Columns')
+  })
+
+  it('says how many columns were dropped and brings one back from the picker', () => {
+    withWidth(900)
+    setup({ columns: [...TRACK] })
+    const btn = screen.getByTestId('gantt-columns')
+    const n = TRACK.length - headers().length
+    expect(n).toBeGreaterThan(0)
+    expect(btn.textContent).toBe(`+${n} column${n === 1 ? '' : 's'}`)
+    fireEvent.click(btn)
+    const picker = screen.getByTestId('gantt-columns-picker')
+    expect(within(picker).getAllByText('no room')).toHaveLength(n)
+    fireEvent.click(within(picker).getByRole('checkbox', { name: /^Predecessors/ }))
+    expect(headers()).toContain('Predecessors')
+    // and hides one on request
+    fireEvent.click(within(picker).getByRole('checkbox', { name: /^Start/ }))
+    expect(headers()).not.toContain('Start')
+    fireEvent.keyDown(picker, { key: 'Escape' })
+    expect(screen.queryByTestId('gantt-columns-picker')).toBeNull()
+  })
+})
+
+describe('Gantt: idea blocks hold no tasks (spec §11)', () => {
+  it('refuses to indent a task under an idea', async () => {
+    const { onChange, onError } = setup({ tasks: [{ ...base()[0], isIdea: true }, base()[1], base()[2]], links: [] })
+    fireEvent.click(screen.getByTestId('gantt-row-2'))
+    fireEvent.click(screen.getByTestId('gantt-tasks-menu'))
+    fireEvent.click(screen.getByTestId('gantt-indent'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('is an idea block: it cannot hold tasks'), undefined)
+  })
+})
+
+describe('Gantt: scale and labels (review 4b93d732 #10)', () => {
+  it('the quarter scale still fills a wide chart', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1600)
+    setup({ defaultZoom: 'quarter' })
+    const body = screen.getByTestId('gantt-body')
+    const w = Number(body.getAttribute('width'))
+    const gw = parseFloat(screen.getByTestId('gantt-grid-header').style.width)
+    expect(w).toBeGreaterThanOrEqual(1600 - gw - 4)
+  })
+
+  it('a long name that fits on neither side is cut with an ellipsis and keeps the full name as tooltip', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(700)
+    const long = 'A very long task name that describes everything about the tooling rework in detail'
+    setup({ tasks: [{ id: 1, name: long, start: '2026-10-05', duration: 20 }], links: [], defaultZoom: 'fit', columns: ['name'] })
+    const label = screen.getByTestId('gantt-label-1')
+    expect(label.textContent).toMatch(/…/)
+    expect(label.querySelector('title')?.textContent).toBe(long)
+    expect(screen.getByTestId('gantt-label-chip-1')).toBeTruthy()
+  })
+})
+
+describe('Gantt: server pushes join the undo step (review 4b93d732 #11)', () => {
+  it('undo restores a task the server moved on its own', async () => {
+    const calls: ChangeSet[] = []
+    const onChange = vi.fn(async (cs: ChangeSet) => {
+      calls.push(cs)
+      if (calls.length === 1) {
+        // the server also pushed Gamma (not in the ChangeSet) by two days
+        return { server: { tasks: [base()[0], { ...base()[1], duration: 4 }, { ...base()[2], start: '2026-10-17' }], links: baseLinks() } }
+      }
+      return {}
+    })
+    render(<Gantt tasks={base()} links={baseLinks()} onChange={onChange}
+      columns={['row', 'name', 'start', 'end', 'duration']} defaultZoom="day" showToday={false} />)
+    editCell(2, 'duration', '4')
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false))
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByTestId('gantt-undo'))
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    expect(calls[1].updateTasks).toEqual(expect.arrayContaining([
+      { id: 2, patch: { duration: 3 } },
+      { id: 3, patch: { start: '2026-10-15', duration: 2 } },
+    ]))
+  })
+})
+
+describe('Gantt: server refusals with an object detail', () => {
+  it('reads detail.message (400 summary_idea)', async () => {
+    const onError = vi.fn()
+    const err = { response: { status: 400, data: { detail: { message: 'A block with blocks under it cannot be an idea', code: 'summary_idea' } } } }
+    render(<Gantt tasks={base()} links={baseLinks()} onChange={async () => { throw err }} onError={onError}
+      columns={['row', 'name']} defaultZoom="day" showToday={false} />)
+    editCell(1, 'name', 'Renamed')
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('A block with blocks under it cannot be an idea', err))
   })
 })

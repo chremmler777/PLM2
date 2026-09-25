@@ -29,7 +29,7 @@ import type {
 import { LIMITS, LINK_TYPES, inYearRange } from './engine/types'
 import { linkViolated, validate } from './engine/validate'
 import { ChartBody, ChartHeader, HEADER_H, MARKER_STRIP, type GanttMarker, type LinkDraft, type TaskGeo } from './GanttChart'
-import { GridBody, GridHeader } from './GanttGrid'
+import { ColumnPicker, GridBody, GridHeader } from './GanttGrid'
 import { BUILTIN_COLUMNS, gridWidth, type CellContext, type ColumnKey, type GanttColumn } from './columns'
 import { ContextMenu, LinkPopover, TaskDialog, type MenuEntry } from './GanttPopups'
 import { buildChartSvg, downloadBlob, openPrint, svgToPng } from './exportImage'
@@ -39,6 +39,7 @@ import {
 } from './layout'
 import { THEMES, resolveTheme, themeVars, v, type GanttKindStyle, type GanttThemeName } from './theme'
 import { useSaveQueue, type SaveQueueOptions } from './useSaveQueue'
+import { readDateInput } from './dateText'
 
 export interface GanttRights {
   /** Add, delete, indent, reorder, duplicate, rename. Default true. */
@@ -51,6 +52,21 @@ export interface GanttRights {
   progress?: boolean | ((t: GanttTask) => boolean)
   /** Fine grained override per field: name, lane, kind, isIdea, constraint, notes, start, duration, links, progress. */
   field?: (t: GanttTask, field: string) => boolean
+}
+
+/** Why this ChangeSet would leave an idea task with subtasks, or null. */
+function ideaHolding(m: GanttModel, cs: ChangeSet): string | null {
+  const touches = (cs.updateTasks ?? []).some((u) => 'parentId' in u.patch || 'isIdea' in u.patch)
+    || (cs.addTasks ?? []).some((t) => t.parentId != null || t.isIdea) || !!cs.order
+  if (!touches) return null
+  const after = applyChangeSet(m, cs)
+  const parents = new Set(after.tasks.filter((t) => t.parentId != null).map((t) => key(t.parentId!)))
+  const holder = after.tasks.find((t) => t.isIdea && parents.has(key(t.id)))
+  if (!holder) return null
+  const flagged = (cs.updateTasks ?? []).some((u) => key(u.id) === key(holder.id) && u.patch.isIdea)
+    || (cs.addTasks ?? []).some((t) => key(t.id) === key(holder.id))
+  return flagged ? `'${holder.name}' has subtasks: a summary cannot be an idea block`
+    : `'${holder.name}' is an idea block: it cannot hold tasks`
 }
 
 export interface GanttHandle {
@@ -66,6 +82,10 @@ export interface GanttHandle {
   apply: (cs: ChangeSet) => Promise<boolean>
   /** Start a new (draft) row as "+ Task" does. */
   insertTask: (milestone?: boolean) => void
+  /** Enter or leave the full-screen layer. */
+  setFullScreen: (on: boolean) => void
+  /** Forget undo and redo (e.g. the calendar changed: old steps would replay in the wrong unit). */
+  clearHistory: () => void
 }
 
 export interface GanttProps {
@@ -124,6 +144,15 @@ export interface GanttProps {
   /** Replace the client side MS Project / CSV export (e.g. a server export). */
   onExport?: (fmt: 'mspdi' | 'csv') => void
   className?: string
+  /** Shown in the full-screen header strip. */
+  title?: string
+  /**
+   * Content that belongs to the chart (a task panel, notes, a legend): shown
+   * under it, and inside the full-screen layer too.
+   */
+  below?: ReactNode
+  /** Offer the full-screen button (default true unless compact). */
+  fullScreen?: boolean
   /** Largest share of the width the table may take (columns drop out beyond it). Default 0.45. */
   maxGridFraction?: number
   /** Tasks flashed and scrolled to by the host (e.g. from a validation list). */
@@ -211,6 +240,13 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       return forgotten && tag ? tag.entry : undefined
     },
     onSettled: (tag, seq) => { if (tag) history.current.settled(tag.entry, seq) },
+    // Tasks the server pushed on its own for a user action: undo restores them too.
+    onServerMoves: (tag, moves) => {
+      if (!tag || tag.dir !== 'do') return
+      history.current.extend(tag.entry,
+        { updateTasks: moves.map((m) => ({ id: m.id, patch: { ...m.to } })) },
+        { updateTasks: moves.map((m) => ({ id: m.id, patch: { ...m.from } })) })
+    },
     onIdMap: (m, lm) => { history.current.remap(m, lm); remapViewRef.current(m) },
   })
   const saved = queue.display
@@ -234,6 +270,13 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [editing, setEditing] = useState<EditState | null>(null)
   const [dialogKey, setDialogKey] = useState<string | null>(null)
+  /**
+   * Full screen: the SAME component tree becomes a fixed layer over the page
+   * (only classes change, nothing remounts), so selection, zoom, scroll,
+   * undo history, open panels and draft rows stay.
+   */
+  const [full, setFull] = useState(false)
+  const fullReturnFocus = useRef<HTMLElement | null>(null)
   const [flashKey, setFlashKey] = useState<string | null>(null)
   const [zoom, setZoom] = useState<Zoom | 'fit'>(p.defaultZoom ?? (p.compact ? 'week' : 'day'))
   const [showCritical, setShowCritical] = useState(!!p.criticalPath)
@@ -377,24 +420,37 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
 
   const hasHierarchy = useMemo(() => tree.order.some((t) => (tree.depth.get(key(t.id)) ?? 0) > 0), [tree])
   const viewW = viewport.w
-  const columns = useMemo<GanttColumn[]>(() => {
+  // The user's column choice: shown although crowded, or hidden.
+  const [colPrefs, setColPrefs] = useState<{ show: string[]; hide: string[] }>({ show: [], hide: [] })
+  const [colPicker, setColPicker] = useState(false)
+  const { columns, allColumns, dropped } = useMemo(() => {
     const list = p.compact ? ['name' as ColumnKey] : (p.columns ?? DEFAULT_COLUMNS)
-    let cols = list.map((c) => (typeof c === 'string' ? BUILTIN_COLUMNS[c] : c))
+    const all = list.map((c) => (typeof c === 'string' ? BUILTIN_COLUMNS[c] : c))
       .map((c) => (p.compact && c.key === 'name' ? { ...c, width: 190 } : c))
       // A WBS column without subtasks only repeats the row number.
       .filter((c) => c.key !== 'wbs' || hasHierarchy)
+    let cols = all.filter((c) => c.key === 'name' || !colPrefs.hide.includes(c.key))
     // Keep the chart readable: the grid takes at most a share of the width.
     const max = viewW ? Math.max(240, viewW * (p.maxGridFraction ?? 0.45)) : Infinity
     const width = () => cols.reduce((n, c) => n + c.width, 0)
     if (width() > max) cols = cols.map((c) => (c.key === 'name' ? { ...c, width: Math.max(150, c.width - (width() - max)) } : c))
-    // Columns drop out from the end of the configured list (the name stays).
-    while (width() > max && cols.length > 1) {
-      const i = cols.map((c) => c.key).lastIndexOf(cols.filter((c) => c.key !== 'name').map((c) => c.key).pop()!)
-      if (i < 0) break
-      cols = cols.filter((_, j) => j !== i)
+    // Then every column narrows towards its minimum width (dd.mm.yy dates stay readable).
+    if (width() > max) {
+      const room = cols.reduce((n, c) => n + (c.minWidth != null ? c.width - c.minWidth : 0), 0)
+      const need = Math.min(room, width() - max)
+      if (room > 0) cols = cols.map((c) => (c.minWidth != null ? { ...c, width: Math.max(c.minWidth, Math.floor(c.width - (c.width - c.minWidth) * need / room)) } : c))
     }
-    return cols
-  }, [p.columns, p.compact, p.maxGridFraction, hasHierarchy, viewW])
+    // Columns drop out from the end of the configured list (the name and the
+    // ones the user asked for stay); the header says how many and offers them.
+    const out: string[] = []
+    while (width() > max && cols.length > 1) {
+      const cand = cols.filter((c) => c.key !== 'name' && !colPrefs.show.includes(c.key)).map((c) => c.key).pop()
+      if (cand == null) break
+      out.unshift(cand)
+      cols = cols.filter((c) => c.key !== cand)
+    }
+    return { columns: cols, allColumns: all, dropped: out }
+  }, [p.columns, p.compact, p.maxGridFraction, hasHierarchy, viewW, colPrefs])
   const gw = gridWidth(columns)
 
   const cellCtx = useCallback((t: GanttTask): CellContext => {
@@ -434,7 +490,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       const pp = Math.max(0.3, chartViewW / (r.to - r.from))
       return { range: r, ppd: pp, unit: unitFor(pp) }
     }
-    return { range: timelineRange(allDays, zoom), ppd: PX_PER_DAY[zoom], unit: zoom }
+    // The scale always fills the visible chart (quarter zoom on a short plan too).
+    return { range: timelineRange(allDays, zoom, Math.ceil(chartViewW / PX_PER_DAY[zoom])), ppd: PX_PER_DAY[zoom], unit: zoom }
   }, [zoom, allDays, chartViewW])
   const chartW = (range.to - range.from) * ppd
 
@@ -542,10 +599,17 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const idsOf = (keys: string[]) => keys.map((k) => tree.byId.get(k)?.id).filter((x): x is GanttId => x != null)
 
   // ---------------------------------------------------------------- commit
+
   const commit = useCallback(async (cs0: ChangeSet | null, opts: { history?: boolean; undo?: number; redo?: number } = {}): Promise<boolean> => {
     if (!cs0 || isEmptyChangeSet(cs0)) return false
     let cs = cs0
     const before = modelRef.current
+    // An idea block holds no tasks (spec §11): no idea flag on a task with
+    // subtasks, nothing indented under an idea.
+    if (opts.undo == null && opts.redo == null) {
+      const bad = ideaHolding(before, cs)
+      if (bad) { notifyError(bad); return false }
+    }
     // Automatic scheduling: the successors this action pushes join the same
     // ChangeSet (one undo step), listed in meta.derived. Undo / redo replay
     // their stored ChangeSets as they are.
@@ -568,7 +632,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     } else queue.enqueue(cs)
     bumpHist()
     return true
-  }, [p, queue])
+  }, [p, queue, notifyError])
 
   // The entry moves to the other stack only once the change really went out
   // (a cancelled reason dialog leaves the history as it was).
@@ -785,6 +849,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     exportPng, print, select: (ids) => setSelection(ids.map(key)), getModel: () => modelRef.current,
     apply: (cs) => commit(cs),
     insertTask: (milestone) => insertTask(!!milestone),
+    setFullScreen: (on) => setFull(on),
+    clearHistory: () => { history.current.clear(); bumpHist() },
   }))
 
   // ---------------------------------------------------------------- pointer: bars
@@ -990,11 +1056,13 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         patch({ name: val }, 'Rename task'); return
       case 'lane': patch({ lane: val || null }, 'Change lane'); return
       case 'start':
-        if (!isIsoDay(val)) return
+        if (val === '') { notifyError('Start is required'); return }
+        if (!isIsoDay(val)) { notifyError(readDateInput(val).error ?? 'Type the date as dd.mm.yyyy'); return }
         if (!inYearRange(val)) { notifyError(`Dates must lie between ${LIMITS.minYear} and ${LIMITS.maxYear}`); return }
         patch({ start: val }, 'Change start'); return
       case 'end': {
-        if (!isIsoDay(val)) return
+        if (val === '') return
+        if (!isIsoDay(val)) { notifyError(readDateInput(val).error ?? 'Type the date as dd.mm.yyyy'); return }
         if (!inYearRange(val)) { notifyError(`Dates must lie between ${LIMITS.minYear} and ${LIMITS.maxYear}`); return }
         if (t.duration === 0) { patch({ start: val }, 'Move milestone'); return }
         const s = normStart(cal, toDay(t.start))
@@ -1010,7 +1078,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         patch({ duration: n }, 'Change duration'); return
       }
       case 'actualStart': case 'actualEnd': {
-        if (val !== '' && !isIsoDay(val)) { notifyError('Type the date as dd.mm.yyyy'); return }
+        if (val !== '' && !isIsoDay(val)) { notifyError(readDateInput(val).error ?? 'Type the date as dd.mm.yyyy'); return }
         if (val && val > toIso(todayDay() + 1)) { notifyError('Actual dates cannot lie in the future'); return }
         patch(col.key === 'actualStart' ? { actualStart: val || null } : { actualEnd: val || null }, 'Actual dates'); return
       }
@@ -1073,14 +1141,28 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   flushRef.current = flushNudge
 
   const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (isTextTarget(e.target) || p.compact) return
+    if (p.compact) return
+    // Full screen toggles from anywhere in the Gantt (toolbar and editors included).
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault(); if (p.fullScreen !== false) setFull((f) => !f); return
+    }
+    if (isTextTarget(e.target)) return
     // Only keys typed in the chart / grid (or on the root after a click there);
     // toolbar buttons, menus and dialogs keep their own keys, Tab keeps moving focus.
-    const inChart = e.target === rootRef.current || !!scrollerRef.current?.contains(e.target as Node)
-    if (!inChart || isControlTarget(e.target)) return
     const mod = e.ctrlKey || e.metaKey
     const k = e.key
-    if (k === 'Escape') { setSelection([]); setEditing(null); setDraft(null); setMenu(null); setLinkPop(null); return }
+    const inChart = e.target === rootRef.current || !!scrollerRef.current?.contains(e.target as Node)
+    if (!inChart || isControlTarget(e.target)) return
+    if (k === 'Escape') {
+      // In full screen an open popup gets Escape first; the next one closes the
+      // layer and keeps the selection (the window listener sees preventDefault).
+      if (full) {
+        e.preventDefault()
+        if (menu || linkPop || editing || draft) { setEditing(null); setDraft(null); setMenu(null); setLinkPop(null) } else setFull(false)
+        return
+      }
+      setSelection([]); setEditing(null); setDraft(null); setMenu(null); setLinkPop(null); return
+    }
     if (mod && (k === 'z' || k === 'Z')) { e.preventDefault(); if (e.shiftKey) void redo(); else void undo(); return }
     if (mod && (k === 'y' || k === 'Y')) { e.preventDefault(); void redo(); return }
     if (mod && (k === 'a' || k === 'A')) { e.preventDefault(); setSelection(taskRows); return }
@@ -1173,6 +1255,38 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     setMenu({ x: e.clientX, y: e.clientY })
   }
 
+  // ---------------------------------------------------------------- full screen
+  useEffect(() => {
+    if (!full) return
+    fullReturnFocus.current = (document.activeElement as HTMLElement | null) ?? null
+    const rootEl = rootRef.current
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // Focus into the layer: the chart.
+    requestAnimationFrame(() => scrollerRef.current?.focus({ preventScroll: true }))
+    // Escape closes, unless something inside takes it first (a dialog, a menu,
+    // a popover or an inline editor handle it and stop it, or are open).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const t = e.target as Element | null
+      if (t && (/INPUT|TEXTAREA|SELECT/.test(t.tagName) || (t as HTMLElement).isContentEditable)) return
+      if (document.querySelector('[role=dialog], [role=menu], [data-testid=date-popover]')) return
+      e.preventDefault()
+      setFull(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+      // Focus goes back where it was, unless the user is typing in a cell
+      // editor right now (moving focus would commit or drop the edit).
+      const now = document.activeElement as HTMLElement | null
+      const typing = !!now && !!rootEl?.contains(now) && isTextTarget(now)
+      const back = fullReturnFocus.current
+      if (!typing && back && document.contains(back)) back.focus({ preventScroll: true })
+    }
+  }, [full])
+
   // ---------------------------------------------------------------- stable handlers (memoised panes)
   const linkLabel = (l: GanttLink) => {
     const f = tree.byId.get(key(l.from)), t = tree.byId.get(key(l.to))
@@ -1237,8 +1351,22 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
 
   return (
     <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown} data-testid="gantt-root" data-theme={p.theme ?? 'dark'}
-      className={`space-y-2 ${p.className ?? ''}`} style={{ ...(vars as React.CSSProperties), outline: 'none' }}
-      aria-label={p.ariaLabel ?? 'Gantt planner'}>
+      data-full-screen={full || undefined}
+      className={full
+        ? 'fixed inset-0 z-[45] !m-0 flex flex-col gap-2 overflow-hidden p-3'
+        : `space-y-2 ${p.className ?? ''}`}
+      style={{ ...(vars as React.CSSProperties), outline: 'none', ...(full ? { background: v('bg') } : {}) }}
+      role={full ? 'region' : undefined}
+      aria-label={full ? `${p.title ?? p.ariaLabel ?? 'Gantt planner'} (full screen)` : p.ariaLabel ?? 'Gantt planner'}>
+      {full && (
+        <div className="flex shrink-0 items-center gap-3 border-b pb-2" style={{ borderColor: v('gridLine') }} data-testid="gantt-full-header">
+          <h2 className="truncate text-sm font-semibold" style={{ color: v('text') }}>{p.title ?? p.ariaLabel ?? 'Plan'}</h2>
+          <span className="text-[11px]" style={{ color: v('textFaint') }}>Esc or Ctrl+Shift+F closes</span>
+          <button type="button" className="ml-auto rounded-md border px-2 py-1 text-xs" data-testid="gantt-full-close"
+            style={{ borderColor: v('gridLine'), color: v('text'), background: v('panel') }}
+            aria-label="Close full screen" onClick={() => setFull(false)}>Close &#10005;</button>
+        </div>
+      )}
       {p.toolbar !== false && !p.compact && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="gantt-toolbar" role="toolbar" aria-label="Gantt tools">
           {p.toolbarStart}
@@ -1312,18 +1440,31 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
               )}
             </div>
             {p.toolbarEnd}
+            {p.fullScreen !== false && (
+              <button type="button" className={btn} style={full ? { ...btnStyle, background: v('accent'), color: '#fff', borderColor: v('accent') } : btnStyle}
+                onClick={() => setFull((f) => !f)} data-testid="gantt-full-screen" aria-pressed={full}
+                aria-label="Full screen" title={full ? 'Leave full screen (Esc, Ctrl+Shift+F)' : 'Full screen (Ctrl+Shift+F)'}>
+                <span aria-hidden="true">{full ? '\u2923' : '\u2922'}</span>
+              </button>
+            )}
           </div>
         </div>
       )}
 
       <div ref={scrollerRef} onScroll={onScroll} data-testid="gantt-scroller" tabIndex={0}
         aria-label="Plan chart. Arrow keys select rows; with tasks selected, left and right move them."
-        className="relative overflow-auto rounded-lg border outline-none focus-visible:ring-1"
-        style={{ height: heightCss, maxHeight: p.compact ? 320 : undefined, borderColor: v('gridLine'), background: v('bg') }}>
+        className={`relative overflow-auto rounded-lg border outline-none focus-visible:ring-1 ${full ? 'min-h-0 flex-1' : ''}`}
+        style={{ height: full ? undefined : heightCss, maxHeight: p.compact && !full ? 320 : undefined, borderColor: v('gridLine'), background: v('bg') }}>
         <div style={{ width: gw + chartW, position: 'relative' }}>
           <div className="sticky top-0 z-20 flex" style={{ height: headerH }}>
             <div className="sticky left-0 z-30 border-r" style={{ borderColor: v('gridLine'), background: v('headerBg') }}>
-              <GridHeader columns={columns} height={headerH} />
+              <GridHeader columns={columns} height={headerH} extra={!p.compact && allColumns.length > 1 ? (
+                <ColumnPicker all={allColumns} shown={columns} dropped={dropped} open={colPicker} onOpen={setColPicker}
+                  onToggle={(k, on) => setColPrefs((cp) => ({
+                    show: on ? [...cp.show.filter((x) => x !== k), k] : cp.show.filter((x) => x !== k),
+                    hide: on ? cp.hide.filter((x) => x !== k) : [...cp.hide.filter((x) => x !== k), k],
+                  }))} />
+              ) : undefined} />
             </div>
             <ChartHeader range={range} ppd={ppd} unit={unit} today={p.showToday === false ? null : today}
               markers={p.markers ?? []} scrollerRef={scrollerRef} cal={cal} />
@@ -1352,6 +1493,10 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
           </div>
         </div>
       </div>
+
+      {p.below != null && (
+        <div className={full ? 'max-h-[45vh] shrink-0 space-y-2 overflow-y-auto' : 'space-y-2'} data-testid="gantt-below">{p.below}</div>
+      )}
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuEntries()} onClose={() => setMenu(null)} />}
       {popLink && linkPop && (

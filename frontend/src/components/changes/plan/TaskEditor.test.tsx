@@ -70,4 +70,27 @@ describe('TaskEditor', () => {
     fireEvent.click(screen.getByTestId('task-editor-save'))
     expect(onSave).toHaveBeenCalledWith({ kind: 'milestone', duration_days: 0 })
   })
+
+  it('a cleared Start says "Start is required" and keeps the start (review #8)', () => {
+    const onSave = vi.fn()
+    render(<TaskEditor {...base} task={task()} onSave={onSave} />)
+    const start = screen.getByLabelText('Start') as HTMLInputElement
+    fireEvent.change(start, { target: { value: '' } })
+    fireEvent.blur(start)
+    expect(screen.getByTestId('date-input-error').textContent).toBe('Start is required')
+    expect(start.value).toBe('05.10.2026')
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'x' } })
+    const reset = screen.getByText('Reset') as HTMLButtonElement
+    expect(reset.disabled).toBe(false)
+    fireEvent.click(reset)
+    expect((screen.getByLabelText('Notes') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('a summary has no idea switch of its own (spec §11)', () => {
+    render(<TaskEditor {...base} task={task()} isSummary onSave={vi.fn()} />)
+    expect(screen.queryByText('Idea block')).toBeNull()
+    cleanup()
+    render(<TaskEditor {...base} task={task()} onSave={vi.fn()} />)
+    expect(screen.getByText('Idea block')).toBeTruthy()
+  })
 })

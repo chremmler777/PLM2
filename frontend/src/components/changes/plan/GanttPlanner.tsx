@@ -18,7 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { planApi } from '../../../api/changePlan'
 import { useDepartments } from '../../../hooks/queries/useWorkflows'
-import type { PlanOut, TaskOut, TaskPatch } from '../../../types/changePlan'
+import type { PlanCalendar, PlanOut, TaskOut, TaskPatch } from '../../../types/changePlan'
 import { Gantt, type GanttHandle } from '../../gantt/Gantt'
 import type { GanttMarker } from '../../gantt/GanttChart'
 import type { ColumnKey, GanttColumn } from '../../gantt/columns'
@@ -33,10 +33,10 @@ import PlanToolbar, { btn, btnPrimary, type AlignAction } from './GanttToolbar'
 import TaskEditor from './TaskEditor'
 import ValidationList from './ValidationList'
 import {
-  bankBuildChangeSet, bufferChangeSet, ideasFollow, matchSelection, runParallel, snapToLinks,
+  bankBuildChangeSet, bufferChangeSet, ideasFollow, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
 } from './ecrActions'
 import {
-  ECR_KINDS, SERVER_SLACK, hasDateChanges, persistLegacy, planToModel, serialized, toLegacyCalls, toPlanChangeSet,
+  ECR_KINDS, SERVER_SLACK, planChannelName, hasDateChanges, persistLegacy, planToModel, serialized, toLegacyCalls, toPlanChangeSet,
   translateIdMap,
 } from './ecrAdapter'
 import { deadlineColor } from './ganttMath'
@@ -49,12 +49,19 @@ export interface GanttPlannerProps {
   /** read-only small view (offer preview) */
   compact?: boolean
   onPlanChange?: (p: PlanOut) => void
-  /** Hide the seed buttons (the host offers its own). */
+  /**
+   * Hide the seed button of the empty state (the host offers its own). The
+   * "copy again" entry stays in the More menu on purpose (G12).
+   */
   hideSeed?: boolean
   /** The change status: progress is reported only in `in_implementation` (server rule). */
   status?: string
-  /** Change number for export file names (`<change_number>-<plan>.png`). */
+  /** Change number for export file names (`<change_number>-<plan>.png`) and the title. */
   changeNumber?: string
+  /** Rendered in its own browser window (no "Open in new window" then). */
+  inWindow?: boolean
+  /** Deep link: scroll to, expand the parents of, select and highlight this task once the plan is loaded. */
+  focusTaskId?: number
   /** CSS height of the chart area. */
   height?: number | string
 }
@@ -72,7 +79,7 @@ interface ReasonAsk { cs: ChangeSet; changed: MovedTask[]; moved: MovedTask[]; r
 interface ConfirmState { title: string; body?: string; label: string; danger?: boolean; run: () => void }
 
 export default function GanttPlanner({
-  changeId, plan, mode = 'plan', compact = false, onPlanChange, hideSeed = false, height, status, changeNumber,
+  changeId, plan, mode = 'plan', compact = false, onPlanChange, hideSeed = false, height, status, changeNumber, inWindow = false, focusTaskId,
 }: GanttPlannerProps) {
   const qc = useQueryClient()
   const queryKey = useMemo(() => ['change', changeId, 'plan', plan], [changeId, plan])
@@ -161,7 +168,26 @@ export default function GanttPlanner({
   // The server's plan as of the last answer: the "before" of the next save (saves are serialized).
   const serverRef = useRef<PlanOut | null>(null)
   useEffect(() => { if (data) serverRef.current = data }, [data])
+  // Other windows showing this plan (the pop-out, the change page) hear about
+  // every save and refetch; each window also refetches on focus.
+  const channelRef = useRef<BroadcastChannel | null>(null)
+  useEffect(() => {
+    let ch: BroadcastChannel | null = null
+    try {
+      if (typeof BroadcastChannel === 'undefined') return
+      ch = new BroadcastChannel(planChannelName(changeId, plan))
+      ch.onmessage = (e: MessageEvent) => {
+        if (e.data !== 'changed') return
+        qc.invalidateQueries({ queryKey })
+        qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
+        qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
+      }
+      channelRef.current = ch
+    } catch { /* no BroadcastChannel: focus refetch still keeps windows current */ }
+    return () => { try { ch?.close() } catch { /* closed already */ } channelRef.current = null }
+  }, [changeId, plan, qc, queryKey])
   const afterSave = useCallback((out: PlanOut | null) => {
+    try { channelRef.current?.postMessage('changed') } catch { /* channel closed */ }
     saveGen.current += 1
     if (out) { serverRef.current = out; qc.setQueryData(queryKey, out) }
     qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
@@ -186,8 +212,13 @@ export default function GanttPlanner({
         if (!body.tasks_upsert.length && !body.tasks_delete.length && !body.links_upsert.length && !body.links_delete.length) return {}
         const out = await planApi.applyChanges(changeId, plan, body, reason)
         afterSave(out)
-        // Task and link ids are separate spaces: never merge the two maps.
-        return { idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map) }
+        // Task and link ids are separate spaces: never merge the two maps. The
+        // server's answer is the truth: shown at once, its own pushes undoable.
+        const answered = planToModel(out)
+        return {
+          idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map),
+          server: { tasks: answered.tasks, links: answered.links },
+        }
       }
       const calls = toLegacyCalls(cs, plan, before.tasks, before.links, reason)
       const { plan: out, idMap } = await persistLegacy(calls, {
@@ -197,7 +228,9 @@ export default function GanttPlanner({
         deleteTask: (id) => planApi.deleteTask(changeId, id),
       }, before.tasks.map((t) => t.id).filter((x): x is number => typeof x === 'number'))
       afterSave(out)
-      return { idMap }
+      if (!out) return { idMap }
+      const answered = planToModel(out)
+      return { idMap, server: { tasks: answered.tasks, links: answered.links } }
     } catch (e) {
       // Part of a multi-call save may have landed: the server copy is the truth.
       qc.invalidateQueries({ queryKey })
@@ -211,9 +244,16 @@ export default function GanttPlanner({
    * (already in the ChangeSet as `meta.derived`, the server makes the same moves).
    */
   const beforeChange = useCallback((cs0: ChangeSet, m: GanttModel): Promise<ChangeSet | null> | ChangeSet => {
-    const cs = ideasFollow({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs0)
+    let cs = ideasFollow({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs0)
     if (!baselineSet || !hasDateChanges(cs)) return cs
-    const derived = new Set(Array.isArray(cs.meta?.derived) ? (cs.meta!.derived as GanttId[]).map(key) : [])
+    let derived = new Set(Array.isArray(cs.meta?.derived) ? (cs.meta!.derived as GanttId[]).map(key) : [])
+    if (!modern) {
+      // An older server (no typed links) does not push: the successors move
+      // here and each is recorded as a deviation with the same reason.
+      const r = withSuccessorMoves({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs)
+      cs = r.cs
+      derived = new Set(r.moved.map((x) => key(x.id)))
+    }
     const full = cs
     const cal = makeCal(model?.calendar)
     const byKey = new Map(m.tasks.map((t) => [key(t.id), t]))
@@ -231,12 +271,25 @@ export default function GanttPlanner({
       return { id: t.id, name: t.name, from: t.start, to: u.patch.start ?? t.start, days: cal.idx(e1) - cal.idx(e0) }
     })
     return new Promise((resolve) => setReasonAsk({ cs: full, changed, moved, resolve }))
-  }, [baselineSet, model])
+  }, [baselineSet, model, modern])
 
   const apply = (cs: ChangeSet | null) => {
     if (!cs) { toast.info?.('Nothing to change'); return }
     void ganttRef.current?.apply(cs)
   }
+
+  // Deep link to a task: once per id, when the plan holding it is on screen.
+  const plannerRef = useRef<HTMLDivElement>(null)
+  const focusedRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (focusTaskId == null || !data || focusedRef.current === focusTaskId) return
+    focusedRef.current = focusTaskId
+    if (!data.tasks.some((t) => t.id === focusTaskId)) { toast.info?.('The linked task is no longer in this plan'); return }
+    requestAnimationFrame(() => {
+      plannerRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+      ganttRef.current?.focusTask(focusTaskId)
+    })
+  }, [focusTaskId, data])
 
   // ---------------------------------------------------------------- selection + editor
   const onSelectionChange = useCallback((ids: GanttId[]) => {
@@ -279,7 +332,7 @@ export default function GanttPlanner({
   }
 
   // ---------------------------------------------------------------- server actions
-  const runServer = async (fn: () => Promise<PlanOut & { import_warnings?: string[] }>, done?: string) => {
+  const runServer = async (fn: () => Promise<PlanOut & { import_warnings?: string[] }>, done?: string): Promise<boolean> => {
     setBusy(true)
     try {
       await qc.cancelQueries({ queryKey })
@@ -290,9 +343,11 @@ export default function GanttPlanner({
         setImportWarnings(warnings)
         toast.warning?.(`${done ?? 'Done'}, ${warnings.length} note${warnings.length === 1 ? '' : 's'}: see the list under the chart`)
       } else if (done) toast.success?.(done)
+      return true
     } catch (e) {
       toast.error(errDetail(e) ?? 'Could not save the plan')
       qc.invalidateQueries({ queryKey })
+      return false
     } finally { setBusy(false) }
   }
   const seed = (replace: boolean) => {
@@ -316,6 +371,15 @@ export default function GanttPlanner({
       label: 'Import and replace', danger: true, run: () => go(true),
     })
   }
+  /** The plan alone in its own browser window (/changes/:id/plan/:plan). */
+  const openWindow = () => {
+    const url = `${import.meta.env.BASE_URL ?? '/'}changes/${changeId}/plan/${plan}`.replace(/\/{2,}/g, '/')
+    const w = Math.min(1600, Math.max(900, window.screen?.availWidth ? window.screen.availWidth - 80 : 1400))
+    const h = Math.min(1000, Math.max(640, window.screen?.availHeight ? window.screen.availHeight - 80 : 900))
+    const win = window.open(url, `plm2-plan-${changeId}-${plan}`, `popup,width=${w},height=${h}`)
+    if (!win) toast.error('The browser blocked the new window: allow pop-ups for this site')
+  }
+
   /** After the baseline the server's forward pass records deviations: preview and ask why first. */
   const scheduleWithReason = () => {
     const m = ganttRef.current?.getModel() ?? { tasks: model?.tasks ?? [], links: model?.links ?? [] }
@@ -360,10 +424,19 @@ export default function GanttPlanner({
   /** Plan calendar (G7, G11): mode (keep or convert durations), working days, holidays, auto scheduling. */
   const saveCalendar = (c: CalendarSave) => {
     setCalendarOpen(false)
-    void runServer(() => planApi.setCalendar(changeId, plan, {
-      mode: c.calendar.mode, workdays: c.calendar.workdays, holidays: c.calendar.holidays,
-      ...(c.auto !== undefined ? { auto: c.auto } : { auto: model?.auto ?? true }),
-    }, c.convert), 'Calendar saved')
+    // Only what changed: the server keeps the other fields (a lone {auto} flips only that).
+    const cur = model?.calendar
+    const body: Partial<PlanCalendar> = {}
+    if (c.calendar.mode !== cur?.mode) body.mode = c.calendar.mode
+    if (c.calendar.workdays.join() !== [...(cur?.workdays ?? [])].sort((a, b) => a - b).join()) body.workdays = c.calendar.workdays
+    if (c.calendar.holidays.join() !== [...(cur?.holidays ?? [])].sort().join()) body.holidays = c.calendar.holidays
+    if (c.auto !== undefined && c.auto !== model?.auto) body.auto = c.auto
+    if (!Object.keys(body).length) return
+    const moves = 'mode' in body || 'workdays' in body || 'holidays' in body
+    void runServer(() => planApi.setCalendar(changeId, plan, body, c.convert), 'Calendar saved').then((ok) => {
+      // Old steps would replay in the old unit: start the history over on the new plan.
+      if (ok && moves) { ganttRef.current?.clearHistory(); toast.info?.('Undo history cleared: calendar changed') }
+    })
   }
 
   // `after` is the nearest leaf above the new row: its lane is kept, and its department with it.
@@ -462,24 +535,25 @@ export default function GanttPlanner({
   const unitLabel = cal.mode === 'working' ? 'wd' : 'd'
   const editorTask = editorId != null ? byId.get(editorId) : undefined
   const stat = (label: string, value: string, tone = 'text-slate-100') => (
-    <div className="min-w-0">
+    <div className="shrink-0">
       <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`truncate text-sm font-medium tabular-nums ${tone}`}>{value}</p>
+      <p className={`whitespace-nowrap text-sm font-medium tabular-nums ${tone}`}>{value}</p>
     </div>
   )
 
   return (
-    <div className="space-y-2" data-testid="gantt-planner">
+    <div ref={plannerRef} className="space-y-2" data-testid="gantt-planner">
       {!compact && (
         <div className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2" data-testid="gantt-summary">
-          <div className="grid grid-cols-3 items-center gap-3 sm:grid-cols-7">
+          {/* Wraps instead of squeezing: the issue pill never covers a figure on a narrow screen. */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             {stat('Start', fmtShort(firstDay))}
             {stat('Finish', fmtShort(lastDay))}
             {stat('Duration', `${s.duration_days} ${unitLabel} (${spanWeeks} wk)`)}
             {stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Ideas', String(s.ideas), s.ideas > 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Critical path', `${s.critical_ids.length} task${s.critical_ids.length === 1 ? '' : 's'}`)}
-            <div className="col-span-3 sm:col-span-1 sm:justify-self-end">
+            <div className="ml-auto">
               <button type="button" onClick={() => setShowIssues((v) => !v)} aria-expanded={showIssues}
                 data-testid="gantt-validation-pill"
                 className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs ${nErr > 0
@@ -503,7 +577,7 @@ export default function GanttPlanner({
         rights={rights} readOnly={compact} compact={compact}
         onChange={onChange} beforeChange={beforeChange}
         onError={(m) => toast.error(m)} onNotify={(m) => toast.info?.(m)}
-        kinds={ECR_KINDS} columns={columns} markers={markers}
+        kinds={ECR_KINDS} columns={columns} markers={markers} maxGridFraction={track ? 0.6 : undefined}
         showBaselines={track} showProgress={track} criticalIds={s.critical_ids}
         groupByLane={groupByLane} autoSchedule={autoSchedule}
         linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern} hierarchy={modern} constraints={modern}
@@ -525,47 +599,56 @@ export default function GanttPlanner({
               : baselineSet && canDates && modern ? scheduleWithReason : undefined}
             selectionCount={selection.length} onAlign={align}
             groupByLane={groupByLane} onGroupByLane={setGroupByLane}
-            onImport={canStructure && modern ? importFile : undefined} />
+            onImport={canStructure && modern ? importFile : undefined}
+            onOpenWindow={inWindow ? undefined : openWindow} />
         ) : undefined}
-        ariaLabel={`${plan === 'quote' ? 'Quote' : 'Detailed'} plan`} />
+        ariaLabel={`${plan === 'quote' ? 'Quote' : 'Detailed'} plan`}
+        title={`${changeNumber ?? `Change ${changeId}`} - ${plan === 'quote' ? 'Quote plan' : 'Detailed plan'}`}
+        fullScreen={!compact}
+        below={compact ? undefined : (
+          <>
+          {!compact && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-500" aria-label="Legend">
+              {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-4 rounded bg-slate-400/60" />Baseline</span>}
+              {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-3 rounded-sm bg-red-500" />Slip</span>}
+              {canDates && <span>Drag bars to move, their edges to resize, the dots at the ends onto another bar to link. Double-click or Enter opens a task. Ctrl+scroll zooms, Ctrl+Z undoes.</span>}
+            </div>
+          )}
 
-      {!compact && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-500" aria-label="Legend">
-          {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-4 rounded bg-slate-400/60" />Baseline</span>}
-          {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-3 rounded-sm bg-red-500" />Slip</span>}
-          {canDates && <span>Drag bars to move, their edges to resize, the dots at the ends onto another bar to link. Double-click or Enter opens a task. Ctrl+scroll zooms, Ctrl+Z undoes.</span>}
-        </div>
-      )}
+          {importWarnings.length > 0 && !compact && (
+            <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200" data-testid="gantt-import-warnings" role="status">
+              <div className="mb-1 flex items-center">
+                <span className="font-medium">The import skipped or changed {importWarnings.length} item{importWarnings.length === 1 ? '' : 's'}:</span>
+                <button type="button" className="ml-auto text-amber-300 hover:text-amber-100" onClick={() => setImportWarnings([])}
+                  aria-label="Dismiss import notes">Dismiss</button>
+              </div>
+              <ul className="list-disc space-y-0.5 pl-4">{importWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            </div>
+          )}
 
-      {importWarnings.length > 0 && !compact && (
-        <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200" data-testid="gantt-import-warnings" role="status">
-          <div className="mb-1 flex items-center">
-            <span className="font-medium">The import skipped or changed {importWarnings.length} item{importWarnings.length === 1 ? '' : 's'}:</span>
-            <button type="button" className="ml-auto text-amber-300 hover:text-amber-100" onClick={() => setImportWarnings([])}
-              aria-label="Dismiss import notes">Dismiss</button>
-          </div>
-          <ul className="list-disc space-y-0.5 pl-4">{importWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
-        </div>
-      )}
+          {editorTask && !compact && (
+            <TaskEditor task={editorTask} tasks={data.tasks} rowNo={rowNo} departments={departments}
+              canEdit={canStructure} canDates={canDates && !summaryIds.has(editorTask.id)}
+              canProgress={canProgressOn(editorTask.department_id)}
+              track={track} baselineSet={baselineSet} saving={busy} calendar={model.calendar}
+              links={modern ? model.links : undefined} linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern}
+              constraints={modern} isSummary={summaryIds.has(editorTask.id)} summaryIds={summaryIds}
+              onLinks={(cs) => apply(cs)}
+              onSave={(patch) => saveFromEditor(editorTask, patch)}
+              onDelete={canStructure ? () => setConfirm({
+                title: `Delete "${editorTask.name}"?`, body: 'Links to the deleted task are removed too.', label: 'Delete', danger: true,
+                run: () => { apply({ label: 'Delete task', removeTasks: [editorTask.id], removeLinks: model.links.filter((l) => l.from === editorTask.id || l.to === editorTask.id).map((l) => l.id) }); setEditorId(null) },
+              }) : undefined}
+              onClose={() => setEditorId(null)} />
+          )}
 
-      {editorTask && !compact && (
-        <TaskEditor task={editorTask} tasks={data.tasks} rowNo={rowNo} departments={departments}
-          canEdit={canStructure} canDates={canDates && !summaryIds.has(editorTask.id)}
-          canProgress={canProgressOn(editorTask.department_id)}
-          track={track} baselineSet={baselineSet} saving={busy} calendar={model.calendar}
-          links={modern ? model.links : undefined} linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern}
-          constraints={modern} isSummary={summaryIds.has(editorTask.id)} summaryIds={summaryIds}
-          onLinks={(cs) => apply(cs)}
-          onSave={(patch) => saveFromEditor(editorTask, patch)}
-          onDelete={canStructure ? () => setConfirm({
-            title: `Delete "${editorTask.name}"?`, body: 'Links to the deleted task are removed too.', label: 'Delete', danger: true,
-            run: () => { apply({ label: 'Delete task', removeTasks: [editorTask.id], removeLinks: model.links.filter((l) => l.from === editorTask.id || l.to === editorTask.id).map((l) => l.id) }); setEditorId(null) },
-          }) : undefined}
-          onClose={() => setEditorId(null)} />
-      )}
+          </>
+        )} />
+
 
       {calendarOpen && (
-        <CalendarDialog calendar={model.calendar} auto={modern && !baselineSet ? model.auto : undefined}
+        <CalendarDialog calendar={model.calendar} tasks={model.tasks} links={model.links}
+          scheduleAuto={autoSchedule} auto={modern && !baselineSet ? model.auto : undefined}
           canEdit={canStructure} saving={busy} onSave={saveCalendar} onClose={() => setCalendarOpen(false)} />
       )}
 

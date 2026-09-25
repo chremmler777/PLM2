@@ -13,7 +13,7 @@
  * between a task and its own summary), duplicate_link, unknown_parent.
  */
 import { isIsoDay, makeCal, toDay, type Cal } from './calendar'
-import { buildGraph, leafConstraints } from './schedule'
+import { buildGraph, ideaKeys, leafConstraints } from './schedule'
 import { key, leaves } from './tree'
 import type { GanttCalendar, GanttLink, GanttTask, Issue } from './types'
 
@@ -58,6 +58,7 @@ export function validate(
   const cal = makeCal(calendar)
   const g = buildGraph(tasks, links)
   const { tree, summaries, anc } = g
+  const ideas = ideaKeys(tree, summaries)
   const byKey = tree.byId
   for (const t of tasks) {
     const k = key(t.id)
@@ -78,6 +79,7 @@ export function validate(
     if ((t.progress ?? 0) < 0 || (t.progress ?? 0) > 100) errors.push(err('progress_range', `'${t.name}' progress is outside 0 to 100`, t.id))
   }
   const seen = new Set<string>()
+  const latePairs = new Set<string>()
   for (const l of links) {
     const f = byKey.get(key(l.from)), t = byKey.get(key(l.to))
     if (!f || !t) {
@@ -85,10 +87,20 @@ export function validate(
       continue
     }
     if (key(l.from) === key(l.to)) { errors.push(err('self_link', `'${t.name}' is linked to itself`, t.id, l.id)); continue }
+    const fk = key(l.from), tk = key(l.to)
     const pair = `${key(l.from)}>${key(l.to)}`
     if (seen.has(pair)) warnings.push(warn('duplicate_link', `'${f.name}' and '${t.name}' are linked twice`, t.id, l.id))
     seen.add(pair)
-    const fk = key(l.from), tk = key(l.to)
+    if (ideas.has(fk)) {
+      // Out of an idea: never drives (spec §11 Idea blocks); warned about (once
+      // per pair) when the idea block ends after the start of a block it links to.
+      if (f.isIdea && !t.isIdea && !summaries.has(fk) && !latePairs.has(pair) && isIsoDay(f.start) && isIsoDay(t.start)
+        && Number.isFinite(f.duration) && spanIdx(cal, f).e > spanIdx(cal, t).s) {
+        latePairs.add(pair)
+        warnings.push(warn('bank_build_late', `'${f.name}' (idea) ends after '${t.name}' starts: move the idea earlier, it does not push '${t.name}'`, f.id, l.id))
+      }
+      continue
+    }
     if ((anc.get(tk) ?? []).includes(fk) || (anc.get(fk) ?? []).includes(tk)) {
       warnings.push(warn('summary_link', `The link between '${f.name}' and '${t.name}' joins a summary and a task under it and is not used for scheduling`, t.id, l.id))
     } else if (summaries.has(tk) && (l.type === 'FF' || l.type === 'SF')) {

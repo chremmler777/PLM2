@@ -378,6 +378,9 @@ export function serialized<T>(chainKey: string, fn: () => Promise<T>): Promise<T
 
 /** Slack as the server computed it (dates as they stand), not the local forward pass. */
 export const SERVER_SLACK: GanttColumn = {
-  key: 'slack', title: 'Slack', width: 50, align: 'right',
+  key: 'slack', title: 'Slack', width: 50, minWidth: 42, align: 'right',
   text: (t) => (typeof t.meta?.total_slack === 'number' ? `${t.meta.total_slack}d` : ''),
 }
+
+/** BroadcastChannel name of one change plan (windows tell each other about saves). */
+export const planChannelName = (changeId: number, plan: string) => `plan:${changeId}:${plan}`

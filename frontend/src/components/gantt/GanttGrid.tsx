@@ -7,7 +7,7 @@ import { memo, useEffect, useRef, useState, type ReactNode, type PointerEvent as
 import { key } from './engine/tree'
 import type { GanttTask } from './engine/types'
 import { HEADER_H } from './GanttChart'
-import { gridWidth, type CellContext, type EditKind, type GanttColumn } from './columns'
+import { gridTiming, gridWidth, type CellContext, type EditKind, type GanttColumn } from './columns'
 import { formatDateInput, parseDateInput } from './dateText'
 import type { Row } from './layout'
 import { v } from './theme'
@@ -40,15 +40,62 @@ export interface GridProps {
 }
 
 
-export function GridHeader({ columns, height = HEADER_H }: { columns: GanttColumn[]; height?: number }) {
+export function GridHeader({ columns, height = HEADER_H, extra }: { columns: GanttColumn[]; height?: number; extra?: ReactNode }) {
   return (
-    <div className="flex items-end border-b text-[10px] uppercase tracking-wide"
+    <div className="relative flex items-end border-b text-[10px] uppercase tracking-wide"
       style={{ height, width: gridWidth(columns), background: v('headerBg'), borderColor: v('gridLine'), color: v('textFaint') }}
       role="row" data-testid="gantt-grid-header">
+      {extra && <div className="absolute left-1 top-1 normal-case tracking-normal">{extra}</div>}
       {columns.map((c) => (
         <div key={c.key} role="columnheader" className={`truncate px-1.5 pb-1.5 ${c.align === 'right' ? 'text-right' : ''}`}
-          style={{ width: c.width, flex: `0 0 ${c.width}px` }}>{c.title}</div>
+          title={c.title} style={{ width: c.width, flex: `0 0 ${c.width}px` }}>{c.title}</div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Which columns the grid shows. Columns that did not fit are listed (and
+ * counted on the button, "+3 columns"); ticking one keeps it, the grid then
+ * takes the room it needs.
+ */
+export function ColumnPicker({ all, shown, dropped, open, onOpen, onToggle }: {
+  all: GanttColumn[]; shown: GanttColumn[]; dropped: string[]; open: boolean
+  onOpen: (open: boolean) => void; onToggle: (key: string, on: boolean) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: Event) => { if (ref.current && !ref.current.contains(e.target as Node)) onOpen(false) }
+    document.addEventListener('pointerdown', down, true)
+    return () => document.removeEventListener('pointerdown', down, true)
+  }, [open, onOpen])
+  const on = new Set(shown.map((c) => c.key))
+  const n = dropped.length
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" data-testid="gantt-columns" aria-expanded={open} aria-haspopup="dialog"
+        title={n ? `${n} column${n === 1 ? '' : 's'} did not fit: choose the columns` : 'Choose the columns'}
+        className="rounded border px-1.5 py-0.5 text-[10px] hover:brightness-125"
+        style={{ borderColor: n ? v('accent') : v('gridLine'), color: n ? v('accent') : v('textFaint'), background: v('panel') }}
+        onClick={(e) => { e.stopPropagation(); onOpen(!open) }}>
+        {n ? `+${n} column${n === 1 ? '' : 's'}` : 'Columns'}
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Columns" data-testid="gantt-columns-picker"
+          className="absolute left-0 top-full z-30 mt-1 w-52 space-y-0.5 rounded-md border p-2 text-xs shadow-xl"
+          style={{ background: v('panel'), borderColor: v('gridLine'), color: v('text') }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onOpen(false) } }}>
+          {all.map((c) => (
+            <label key={c.key} className="flex items-center gap-2">
+              <input type="checkbox" checked={on.has(c.key)} disabled={c.key === 'name'}
+                onChange={(e) => onToggle(c.key, e.target.checked)} />
+              <span className="flex-1">{c.title || c.key}</span>
+              {dropped.includes(c.key) && <span className="text-[10px]" style={{ color: v('textFaint') }}>no room</span>}
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -75,6 +122,8 @@ function CellEditor({ initial, type, onCommit, onCancel, label, placeholder }: {
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
+        // The full-screen shortcut still reaches the Gantt (the draft stays open).
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) return
         e.stopPropagation()
         if (e.key === 'Enter') { e.preventDefault(); commit() }
         if (e.key === 'Escape') { e.preventDefault(); done.current = true; onCancel() }
@@ -86,6 +135,11 @@ function CellEditor({ initial, type, onCommit, onCancel, label, placeholder }: {
 
 export const GridBody = memo(function GridBody(p: GridProps) {
   const width = gridWidth(p.columns)
+  // Was the row active (and selected) before this press? Set on pointer down.
+  const armed = useRef<string | null>(null)
+  const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelEdit = () => { if (editTimer.current) { clearTimeout(editTimer.current); editTimer.current = null } }
+  useEffect(() => cancelEdit, [])
   const height = Math.max(p.rows.length, 1) * p.rowH
   const out: JSX.Element[] = []
   for (let i = p.first; i <= p.last && i < p.rows.length; i++) {
@@ -159,15 +213,30 @@ export const GridBody = memo(function GridBody(p: GridProps) {
               className={`h-full truncate px-1.5 tabular-nums ${editing ? 'p-0.5' : 'flex items-center'} ${col.align === 'right' ? 'justify-end text-right' : ''} ${isHandle ? 'cursor-grab' : ''}`}
               style={{ width: col.width, flex: `0 0 ${col.width}px`, color: col.key === 'name' ? v('text') : v('textMuted') }}
               title={isHandle ? 'Drag to move the row' : undefined}
-              onPointerDown={isHandle ? (e) => p.onReorderDown(e, t) : undefined}
-              onClick={editable && !editing && p.activeKey === k && sel ? (e) => {
-                // Second click on a cell of the active row: edit it in place (F2 edits the name).
+              onPointerDown={(e) => {
+                const mods = e.ctrlKey || e.metaKey || e.shiftKey || e.altKey
+                armed.current = !mods && e.button === 0 && p.activeKey === k && sel ? `${k}|${col.key}` : null
+                if (isHandle) p.onReorderDown(e, t)
+              }}
+              onClick={(e) => {
+                // A plain click on a cell of the row that was already active edits
+                // it in place (F2 edits the name). Modifier clicks only change the
+                // selection; the second click of a double-click never edits.
+                const was = armed.current
+                armed.current = null
+                if (!editable || editing || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.detail > 1) return
+                // No pointer down seen (keyboard, synthetic click): the row's state now.
+                const ok = was != null ? was === `${k}|${col.key}` : p.activeKey === k && sel
+                if (!ok) return
                 e.stopPropagation()
-                p.onStartEdit(t, col.key)
-              } : undefined}
+                cancelEdit()
+                if (gridTiming.editDelay <= 0) { p.onStartEdit(t, col.key); return }
+                editTimer.current = setTimeout(() => { editTimer.current = null; p.onStartEdit(t, col.key) }, gridTiming.editDelay)
+              }}
               onDoubleClick={(e) => {
                 // Double-click anywhere on a row opens the task (MS Project "Task Information").
                 e.stopPropagation()
+                cancelEdit()
                 p.onRowDoubleClick(t, col)
               }}>
               {content}

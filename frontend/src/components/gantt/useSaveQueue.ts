@@ -18,7 +18,35 @@ import type { ApplyResult, ChangeSet, GanttId, GanttModel } from './engine/types
 type Status = 'queued' | 'inflight' | 'settled'
 /** Which history entry a save belongs to and what it does to it. */
 export interface SaveTag { entry: number; dir: SaveDirection }
-interface Item { seq: number; cs: ChangeSet; status: Status; at: number; tag?: SaveTag }
+interface Item { seq: number; cs: ChangeSet; status: Status; at: number; tag?: SaveTag; server?: boolean }
+
+/** A task the server moved on its own while saving a ChangeSet. */
+export interface ServerMove { id: GanttId; from: { start: string; duration: number }; to: { start: string; duration: number } }
+
+/** Tasks the ChangeSet did not touch whose dates the server answered differently. */
+export function serverMoves(before: GanttModel, cs: ChangeSet, server: GanttModel): ServerMove[] {
+  const touched = new Set(touchedTaskIds(cs).map(String))
+  const was = new Map(before.tasks.map((t) => [String(t.id), t]))
+  const out: ServerMove[] = []
+  for (const t of server.tasks) {
+    const b = was.get(String(t.id))
+    if (!b || touched.has(String(t.id))) continue
+    if (b.start !== t.start || b.duration !== t.duration) {
+      out.push({ id: t.id, from: { start: b.start, duration: b.duration }, to: { start: t.start, duration: t.duration } })
+    }
+  }
+  return out
+}
+
+/** Does the host model already show the server's answer (dates and parents)? */
+function shows(base: GanttModel, server: GanttModel): boolean {
+  if (base.tasks.length !== server.tasks.length || base.links.length !== server.links.length) return false
+  const m = new Map(base.tasks.map((t) => [String(t.id), t]))
+  return server.tasks.every((t) => {
+    const b = m.get(String(t.id))
+    return !!b && b.start === t.start && b.duration === t.duration && String(b.parentId ?? '') === String(t.parentId ?? '')
+  })
+}
 
 export interface SaveQueueOptions {
   onChange?: (cs: ChangeSet) => Promise<ApplyResult | void> | ApplyResult | void
@@ -26,6 +54,8 @@ export interface SaveQueueOptions {
   onError?: (error: unknown, tag: SaveTag | undefined, seq: number) => number | void
   /** A save was accepted. */
   onSettled?: (tag: SaveTag | undefined, seq: number) => void
+  /** The server moved tasks on its own for this save (they join its undo step). */
+  onServerMoves?: (tag: SaveTag | undefined, moves: ServerMove[]) => void
   /** Told about temp id -> real id mappings (history and view state remap); tasks and links apart. */
   onIdMap?: (idMap: Record<string, GanttId>, linkIdMap: Record<string, GanttId>) => void
   settleMs?: number
@@ -33,6 +63,8 @@ export interface SaveQueueOptions {
 
 export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
   const [items, setItems] = useState<Item[]>([])
+  const baseRef = useRef(base)
+  baseRef.current = base
   const seq = useRef(0)
   const optsRef = useRef(opts)
   optsRef.current = opts
@@ -61,7 +93,9 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
   useEffect(() => {
     update((list) => {
       if (!list.some((i) => i.status === 'settled')) return list
-      const keep = list.filter((i) => i.status !== 'settled' || !modelContains(base, i.cs))
+      // A save the server answered in full is shown by the next host model even
+      // where the server decided differently (e.g. it pushed a task further).
+      const keep = list.filter((i) => i.status !== 'settled' || (!i.server && !modelContains(base, i.cs)))
       return keep.length === list.length ? list : keep
     })
   }, [base, update])
@@ -92,6 +126,8 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
       queueMicrotask(() => { void pumpRef.current() })
       return
     }
+    // The view before this save: what "moved on its own" is measured against.
+    const beforeSend = applyAll(baseRef.current, itemsRef.current.filter((i) => i.seq < next.seq).map((i) => i.cs))
     update((list) => list.map((i) => (i.seq === next.seq ? { ...i, cs, status: 'inflight' } : i)))
     try {
       const res = await optsRef.current.onChange?.(cs)
@@ -103,9 +139,18 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
         linkMapRef.current = { ...linkMapRef.current, ...tempOnly(linkIdMap) }
         optsRef.current.onIdMap?.(idMap, linkIdMap)
       }
-      update((list) => list.map((i) => {
-        if (i.seq === next.seq) return { ...i, cs: any ? remapChangeSet(i.cs, idMap, linkIdMap) : i.cs, status: 'settled' as Status, at: Date.now() }
-        return any && i.status === 'queued' ? { ...i, cs: remapChangeSet(i.cs, idMap, linkIdMap) } : i
+      const server = res && typeof res === 'object' ? res.server : undefined
+      if (server) {
+        const moves = serverMoves(beforeSend, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, server)
+        if (moves.length) optsRef.current.onServerMoves?.(next.tag, moves)
+      }
+      // Answered in full and already shown by the host: nothing left to overlay.
+      const shown = !!server && shows(baseRef.current, server)
+      update((list) => list.flatMap((i) => {
+        if (i.seq === next.seq) {
+          return shown ? [] : [{ ...i, cs: any ? remapChangeSet(i.cs, idMap, linkIdMap) : i.cs, status: 'settled' as Status, at: Date.now(), server: !!server }]
+        }
+        return [any && i.status === 'queued' ? { ...i, cs: remapChangeSet(i.cs, idMap, linkIdMap) } : i]
       }))
       optsRef.current.onSettled?.(next.tag, next.seq)
     } catch (e) {

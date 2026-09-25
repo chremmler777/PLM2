@@ -4,7 +4,7 @@
  * out at once as a ChangeSet (one undo step). Old dependencies are listed
  * read-only.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { tempId } from '../../gantt/engine/notation'
 import { key } from '../../gantt/engine/tree'
 import { LIMITS, type ChangeSet, type GanttId, type GanttLink, type LinkType } from '../../gantt/engine/types'
@@ -26,6 +26,40 @@ interface Props {
 
 const field = 'rounded border border-slate-600 bg-slate-900 px-1 py-0.5 text-xs text-slate-100 [color-scheme:dark] disabled:opacity-60'
 const TYPE_TEXT: Record<LinkType, string> = { FS: 'FS', SS: 'SS', FF: 'FF', SF: 'SF' }
+
+/**
+ * Lag field controlled from the model: shows the link's current lag (also
+ * after undo or a server refresh), commits on blur or Enter only when the
+ * number changed, Escape or an invalid entry restores it.
+ */
+function LagInput({ label, value, disabled, onCommit }: { label: string; value: number; disabled: boolean; onCommit: (n: number) => void }) {
+  const [text, setText] = useState(String(value))
+  const [focused, setFocused] = useState(false)
+  const sent = useRef<number | null>(null)
+  const skipBlur = useRef(false)
+  useEffect(() => { sent.current = null; if (!focused) setText(String(value)) }, [value, focused])
+  const commit = (raw: string) => {
+    const n = Math.round(Number(raw))
+    if (raw.trim() === '' || !Number.isFinite(n) || Math.abs(n) > LIMITS.maxLag || n === value) { setText(String(value)); return }
+    if (n === sent.current) return
+    sent.current = n
+    onCommit(n)
+  }
+  return (
+    <input aria-label={label} type="number" className={`${field} w-14`} min={-LIMITS.maxLag} max={LIMITS.maxLag}
+      value={text} disabled={disabled}
+      onChange={(e) => setText(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => { setFocused(false); if (skipBlur.current) { skipBlur.current = false; return } commit(e.target.value) }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit((e.target as HTMLInputElement).value) }
+        if (e.key === 'Escape') {
+          e.preventDefault(); e.stopPropagation()
+          setText(String(value)); skipBlur.current = true; (e.target as HTMLInputElement).blur()
+        }
+      }} />
+  )
+}
 
 export default function TaskLinks(p: Props) {
   const me = key(p.taskId)
@@ -51,13 +85,8 @@ export default function TaskLinks(p: Props) {
           {typesInto(intoSummary).concat(typesInto(intoSummary).includes(l.type) ? [] : [l.type]).map((t) => <option key={t} value={t}>{TYPE_TEXT[t]}</option>)}
         </select>
         {p.allowLag && (
-          <input aria-label={`Lag of the link with ${other?.name ?? otherKey}`} type="number" className={`${field} w-14`}
-            min={-LIMITS.maxLag} max={LIMITS.maxLag} defaultValue={l.lagDays} disabled={!editable}
-            onBlur={(e) => {
-              const n = Math.round(Number(e.target.value))
-              if (!Number.isFinite(n) || Math.abs(n) > LIMITS.maxLag || n === l.lagDays) { e.target.value = String(l.lagDays); return }
-              p.onChange({ label: 'Edit link', updateLinks: [{ id: l.id, patch: { lagDays: n } }] })
-            }} />
+          <LagInput label={`Lag of the link with ${other?.name ?? otherKey}`} value={l.lagDays} disabled={!editable}
+            onCommit={(n) => p.onChange({ label: 'Edit link', updateLinks: [{ id: l.id, patch: { lagDays: n } }] })} />
         )}
         {l.readOnly ? (
           <span className="text-[10px] text-slate-500" title="Old dependency, re-draw to edit">old</span>

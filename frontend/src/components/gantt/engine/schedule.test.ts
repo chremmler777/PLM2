@@ -304,10 +304,29 @@ describe('idea tasks', () => {
     expect(get('I')).toMatchObject({ totalSlack: null, freeSlack: null, critical: false })
     expect(get('A').critical).toBe(true)
   })
-  it('are still scheduled forward and can push real tasks', () => {
+  it('a link out of an idea never drives (forward, push, critical path); links into an idea drive it', () => {
     const { get } = run([T('I', '2026-10-05', 3, { isIdea: true }), T('A', '2026-10-05', 2)], [L('I', 'A')])
-    expect(get('A').start).toBe('2026-10-08')
+    expect(get('A').start).toBe('2026-10-05')
     expect(get('I').critical).toBe(false)
+    const into = run([T('A', '2026-10-05', 2), T('I', '2026-10-01', 3, { isIdea: true })], [L('A', 'I')])
+    expect(into.get('I').start).toBe('2026-10-07')
+    const tasks = [T('I', '2026-10-05', 3, { isIdea: true }), T('A', '2026-10-05', 2), T('B', '2026-10-07', 1)]
+    const lk = [L('I', 'A'), L('A', 'B')]
+    expect(push(tasks, lk, CAL, ['I'])).toEqual([])
+    expect([...downstream(tasks, lk, ['I']).keys()]).toEqual([])
+  })
+  it('a summary drives exactly when committed work lies below it; its own flag is ignored', () => {
+    const ideaOnly = [T('S', '2026-10-05', 0), T('I', '2026-10-05', 5, { parentId: 'S', isIdea: true }), T('A', '2026-10-05', 2)]
+    expect(run(ideaOnly, [L('S', 'A')]).get('A').start).toBe('2026-10-05')
+    const mixed = [T('S', '2026-10-05', 0, { isIdea: true }), T('R', '2026-10-05', 3, { parentId: 'S' }), T('A', '2026-10-05', 2)]
+    expect(run(mixed, [L('S', 'A')]).get('A').start).toBe('2026-10-08')
+  })
+  it('warns bank_build_late when the idea ends after its successor starts', () => {
+    const issues = validate([T('I', '2026-10-05', 3, { isIdea: true }), T('A', '2026-10-06', 2)], [L('I', 'A')], CAL)
+    expect(issues.map((i) => [i.code, i.level])).toEqual([['bank_build_late', 'warning']])
+    expect(validate([T('I', '2026-10-01', 3, { isIdea: true }), T('A', '2026-10-06', 2)], [L('I', 'A')], CAL)).toEqual([])
+    // any link type: the idea's end against the linked block's start
+    expect(validate([T('I', '2026-10-05', 3, { isIdea: true }), T('A', '2026-10-06', 2)], [L('I', 'A', 'SS')], CAL).map((i) => i.code)).toEqual(['bank_build_late'])
   })
   it('only the idea flag of the leaf counts (backend rule), not an idea summary', () => {
     const { get, r } = run([T('S', '2026-10-05', 0, { isIdea: true }), T('A', '2026-10-05', 9, { parentId: 'S' }), T('B', '2026-10-05', 2, { isIdea: true })])
@@ -525,10 +544,16 @@ describe('automatic scheduling rules (backend push parity)', () => {
     const moves = push(tasks, [], CAL, [], ['S'])
     expect(moves.map((m) => [m.id, m.patch.start])).toEqual([['A', '2026-10-20']])
   })
+  it('a summary source walks from its start gate: its leaves and what they drive (backend parity)', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-06', 2)]
+    const cause = downstream(tasks, [L('A', 'B')], ['S'])
+    expect([...cause.entries()].sort()).toEqual([['A', 'S'], ['B', 'S']])
+  })
   it('a moved task that now violates a link from another moved task is pushed', () => {
     const tasks = [T('A', '2026-10-08', 5), T('B', '2026-10-06', 2)]
     const moves = push(tasks, [L('A', 'B')], CAL, ['A', 'B'])
     expect(moves.map((m) => [m.id, m.patch.start])).toEqual([['B', '2026-10-13']])
-    expect([...downstream(tasks, [L('A', 'B')], ['A', 'B']).entries()]).toEqual([['B', 'A']])
+    expect([...downstream(tasks, [L('A', 'B')], ['A', 'B']).entries()]).toEqual([])
+    expect([...downstream(tasks, [L('A', 'B')], ['A', 'B'], { stop: false }).entries()]).toEqual([['B', 'A']])
   })
 })

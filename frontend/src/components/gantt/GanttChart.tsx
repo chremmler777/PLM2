@@ -9,7 +9,7 @@ import { fmtShort, toDay, type Cal } from './engine/calendar'
 import { key } from './engine/tree'
 import type { GanttLink, GanttTask } from './engine/types'
 import {
-  anchorX, barGeo, linkSides, majorTicks, minorTicks, offDaySpans, routeLink, textWidth, xOf,
+  anchorX, barGeo, clipText, linkSides, majorTicks, minorTicks, offDaySpans, routeLink, textWidth, xOf,
   type BarGeo, type Obstacle, type Range, type Row, type Zoom,
 } from './layout'
 import { DEFAULT_KIND, v, type GanttKindStyle } from './theme'
@@ -313,9 +313,17 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
         const pending = p.pending.has(k)
         // Label right of the bar; left of it when it would run past the chart end.
         const labelRight = b.milestone ? b.x + 12 : b.x + b.w + (p.canLink ? 14 : 6)
-        const labelW = textWidth(t.name, 11) + (t.isIdea ? 28 : 0)
-        const flip = labelRight + labelW > width - 4 && b.x - labelW - 10 > 0
-        const labelX = flip ? (b.milestone ? b.x - 12 : b.x - (p.canLink ? 14 : 6)) : labelRight
+        const extraW = t.isIdea ? 28 : 0
+        const fullW = textWidth(t.name, 11) + extraW
+        const leftEdge = b.milestone ? b.x - 12 : b.x - (p.canLink ? 14 : 6)
+        const roomRight = width - 4 - labelRight, roomLeft = leftEdge - 4
+        // Right of the bar; left when it would run past the chart end; when
+        // neither side holds it, the roomier side with an ellipsis (full name in the tooltip).
+        const flip = fullW > roomRight && (fullW <= roomLeft || roomLeft > roomRight)
+        const room = Math.max(0, flip ? roomLeft : roomRight)
+        const name = fullW <= room ? t.name : clipText(t.name, room - extraW)
+        const labelW = Math.min(fullW, room)
+        const labelX = flip ? leftEdge : labelRight
         const baseline = p.showBaselines && t.baselineStart && t.baselineEnd ? (() => {
           const bs = toDay(t.baselineStart), be = toDay(t.baselineEnd)
           const bx = xOf(bs, range, ppd)
@@ -432,12 +440,20 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
                 <title>{side === 'end' ? 'Drag to another bar: finish-to-start (drop on its right half: finish-to-finish)' : 'Drag to another bar: start-to-start (drop on its right half: start-to-finish)'}</title>
               </circle>
             ))}
-            <text x={labelX} y={cy + 3.5} fontSize={11} pointerEvents="none" textAnchor={flip ? 'end' : 'start'}
-              style={{ fill: t.isIdea ? v('idea') : r.summary ? v('text') : v('textMuted') }}
-              fontWeight={r.summary ? 600 : 400}>
-              {t.isIdea && <tspan fontSize={9} fontWeight={700}>IDEA </tspan>}
-              {t.name}
-            </text>
+            {name && (
+              // A chip behind the label keeps it readable where link lines pass.
+              <rect x={flip ? labelX - labelW - 1 : labelX - 1} y={cy - 7} width={labelW + 2} height={14} rx={2}
+                style={{ fill: v('bg') }} opacity={0.85} pointerEvents="none" data-testid={`gantt-label-chip-${k}`} />
+            )}
+            {name && (
+              <text x={labelX} y={cy + 3.5} fontSize={11} pointerEvents="none" textAnchor={flip ? 'end' : 'start'}
+                style={{ fill: t.isIdea ? v('idea') : r.summary ? v('text') : v('textMuted') }}
+                fontWeight={r.summary ? 600 : 400} data-testid={`gantt-label-${k}`}>
+                {t.isIdea && <tspan fontSize={9} fontWeight={700}>IDEA </tspan>}
+                {name}
+                {name !== t.name && <title>{t.name}</title>}
+              </text>
+            )}
           </g>
         )
       })}

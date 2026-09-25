@@ -31,6 +31,8 @@ export interface GanttColumn {
   key: string
   title: string
   width: number
+  /** Narrowest useful width: a crowded grid shrinks to it before dropping columns. */
+  minWidth?: number
   align?: 'left' | 'right'
   /** Inline editor type; omit for read-only columns. */
   edit?: EditKind
@@ -43,57 +45,64 @@ export interface GanttColumn {
 }
 
 export const BUILTIN_COLUMNS: Record<ColumnKey, GanttColumn> = {
-  row: { key: 'row', title: '#', width: 34, align: 'right', text: (_t, c) => String(c.rowNo ?? '') },
-  wbs: { key: 'wbs', title: 'WBS', width: 44, text: (_t, c) => c.wbs ?? '' },
+  row: { key: 'row', title: '#', width: 34, minWidth: 28, align: 'right', text: (_t, c) => String(c.rowNo ?? '') },
+  wbs: { key: 'wbs', title: 'WBS', width: 44, minWidth: 34, text: (_t, c) => c.wbs ?? '' },
   name: { key: 'name', title: 'Task', width: 220, edit: 'text', text: (t) => t.name },
   start: {
-    key: 'start', title: 'Start', width: 76, edit: 'date',
+    key: 'start', title: 'Start', width: 76, minWidth: 62, edit: 'date',
     text: (_t, c) => fmtShort(c.geo?.s), editValue: (t) => t.start,
   },
   end: {
-    key: 'end', title: 'Finish', width: 76, edit: 'date', field: 'duration',
+    key: 'end', title: 'Finish', width: 76, minWidth: 62, edit: 'date', field: 'duration',
     text: (_t, c) => (c.geo ? fmtShort(c.geo.milestone ? c.geo.s : c.geo.e - 1) : '-'),
     editValue: (_t, c) => (c.geo ? toIso(c.geo.milestone ? c.geo.s : c.geo.e - 1) : ''),
   },
   duration: {
-    key: 'duration', title: 'Dur.', width: 50, align: 'right', edit: 'number',
+    key: 'duration', title: 'Dur.', width: 50, minWidth: 42, align: 'right', edit: 'number',
     text: (t, c) => (c.summary ? `${c.summaryDuration ?? 0}${c.working ? 'wd' : 'd'}`
       : t.duration === 0 ? '0d' : `${t.duration}${c.working ? 'wd' : 'd'}`),
     editValue: (t) => String(t.duration),
   },
-  predecessors: { key: 'predecessors', title: 'Predecessors', width: 92, edit: 'predecessors', field: 'links', text: (_t, c) => c.predecessors },
-  lane: { key: 'lane', title: 'Lane', width: 96, edit: 'text', text: (t) => t.lane ?? '' },
-  kind: { key: 'kind', title: 'Kind', width: 84, text: (t, c) => (t.kind ? (c.kinds[t.kind] ?? DEFAULT_KIND).label : '') },
+  predecessors: { key: 'predecessors', title: 'Predecessors', width: 92, minWidth: 64, edit: 'predecessors', field: 'links', text: (_t, c) => c.predecessors },
+  lane: { key: 'lane', title: 'Lane', width: 96, minWidth: 64, edit: 'text', text: (t) => t.lane ?? '' },
+  kind: { key: 'kind', title: 'Kind', width: 84, minWidth: 60, text: (t, c) => (t.kind ? (c.kinds[t.kind] ?? DEFAULT_KIND).label : '') },
   progress: {
-    key: 'progress', title: 'Done', width: 50, align: 'right', edit: 'number',
+    key: 'progress', title: 'Done', width: 50, minWidth: 42, align: 'right', edit: 'number',
     text: (t, c) => `${c.summary && c.sched ? c.sched.progress : Math.round(t.progress ?? 0)}%`,
     editValue: (t) => String(Math.round(t.progress ?? 0)),
   },
   slack: {
-    key: 'slack', title: 'Slack', width: 50, align: 'right',
+    key: 'slack', title: 'Slack', width: 50, minWidth: 42, align: 'right',
     text: (_t, c) => (c.sched?.totalSlack == null ? '' : `${c.sched.totalSlack}d`),
   },
   baselineStart: {
-    key: 'baselineStart', title: 'Base start', width: 76,
+    key: 'baselineStart', title: 'Base start', width: 76, minWidth: 62,
     text: (t) => (t.baselineStart ? fmtShort(toDay(t.baselineStart)) : ''),
   },
   baselineEnd: {
-    key: 'baselineEnd', title: 'Base finish', width: 76,
+    key: 'baselineEnd', title: 'Base finish', width: 76, minWidth: 62,
     text: (t) => (t.baselineEnd ? fmtShort(toDay(t.baselineEnd) - (t.baselineStart && t.baselineEnd > t.baselineStart ? 1 : 0)) : ''),
   },
   variance: {
-    key: 'variance', title: 'Var.', width: 50, align: 'right',
+    key: 'variance', title: 'Var.', width: 50, minWidth: 40, align: 'right',
     text: (_t, c) => (c.variance == null ? '' : c.variance === 0 ? '0' : `${c.variance > 0 ? '+' : ''}${c.variance}${c.working ? 'wd' : 'd'}`),
   },
   actualStart: {
-    key: 'actualStart', title: 'Act. start', width: 76, edit: 'date', field: 'progress',
+    key: 'actualStart', title: 'Act. start', width: 76, minWidth: 62, edit: 'date', field: 'progress',
     text: (t) => (t.actualStart ? fmtShort(toDay(t.actualStart)) : ''), editValue: (t) => t.actualStart ?? '',
   },
   actualEnd: {
-    key: 'actualEnd', title: 'Act. finish', width: 76, edit: 'date', field: 'progress',
+    key: 'actualEnd', title: 'Act. finish', width: 76, minWidth: 62, edit: 'date', field: 'progress',
     text: (t) => (t.actualEnd ? fmtShort(toDay(t.actualEnd)) : ''), editValue: (t) => t.actualEnd ?? '',
   },
 
 }
 
 export const gridWidth = (cols: GanttColumn[]) => cols.reduce((n, c) => n + c.width, 0)
+
+/**
+ * Click-to-edit timing: a plain click on a cell of the row that was already
+ * active before the press starts the in-place edit after this delay, unless a
+ * double-click follows (that opens the task panel). 0 edits at once (tests).
+ */
+export const gridTiming = { editDelay: 300 }

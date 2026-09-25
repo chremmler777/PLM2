@@ -180,7 +180,7 @@ export function TaskDialog(p: {
             onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <div className="grid grid-cols-3 gap-2">
           <label className="col-span-2 block"><span className={lab} style={{ color: v('textFaint') }}>Start</span>
-            <DateInput className={field} style={fs} value={f.start} disabled={!p.canField('start')} aria-label="Start"
+            <DateInput className={field} style={fs} value={f.start} disabled={!p.canField('start')} aria-label="Start" required
               onChange={(iso) => setF({ ...f, start: iso })} /></label>
           <label className="block"><span className={lab} style={{ color: v('textFaint') }}>{p.working ? 'Work days' : 'Days'}</span>
             <input type="number" min={0} className={field} style={fs} value={f.duration} disabled={!p.canField('duration')} aria-label="Duration"

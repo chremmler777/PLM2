@@ -140,6 +140,13 @@ export interface Tick { day: number; x: number; w: number; label: string }
 /** Rough text width at 10-11px for label fitting. */
 export const textWidth = (s: string, size = 11) => s.length * size * 0.56 + 4
 
+/** A name cut to about `maxW` pixels at 11px, with an ellipsis ('' when not even one letter fits). */
+export function clipText(s: string, maxW: number): string {
+  if (textWidth(s, 11) <= maxW) return s
+  const n = Math.floor((maxW - 4) / (11 * 0.56)) - 1
+  return n >= 1 ? `${s.slice(0, n).trimEnd()}\u2026` : ''
+}
+
 /** Longest label that fits `w`, from a list of candidates (longest first). */
 export function fitLabel(candidates: string[], w: number, size = 11): string {
   for (const c of candidates) if (textWidth(c, size) + 6 <= w) return c

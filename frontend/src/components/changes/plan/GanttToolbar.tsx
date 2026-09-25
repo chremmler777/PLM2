@@ -57,6 +57,7 @@ interface Props {
   onImport?: (file: File) => void
   onCalendar?: () => void
   calendarLabel?: string
+  onOpenWindow?: () => void
 }
 
 export default function PlanToolbar(p: Props) {
@@ -95,7 +96,7 @@ export default function PlanToolbar(p: Props) {
         Lanes
       </label>
       {/* Less-used actions in one menu: the toolbar stays on one line. */}
-      {(p.onSchedule || p.onCalendar || p.onImport || p.onSeed) && (
+      {(p.onSchedule || p.onCalendar || p.onImport || p.onSeed || p.onOpenWindow) && (
         <Menu label="More" ariaLabel="More plan actions" testId="gantt-more">
           {(close) => (
             <>
@@ -111,6 +112,10 @@ export default function PlanToolbar(p: Props) {
               {p.onImport && (
                 <button type="button" role="menuitem" className={menuItem} data-testid="gantt-import"
                   onClick={() => { close(); fileRef.current?.click() }}>Import MS Project (.xml)</button>
+              )}
+              {p.onOpenWindow && (
+                <button type="button" role="menuitem" className={menuItem} data-testid="gantt-open-window"
+                  onClick={() => { close(); p.onOpenWindow?.() }}>Open in new window</button>
               )}
               {p.onSeed && !p.empty && (
                 <button type="button" role="menuitem" className={menuItem} data-testid="gantt-reseed"

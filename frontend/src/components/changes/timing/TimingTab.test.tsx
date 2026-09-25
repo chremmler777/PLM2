@@ -13,7 +13,7 @@ vi.mock('../../../api/changePlan', () => ({
   },
 }))
 vi.mock('../plan/GanttPlanner', () => ({
-  default: (p: { mode?: string; hideSeed?: boolean }) => <div data-testid="gantt-stub" data-mode={p.mode} data-hide-seed={String(!!p.hideSeed)} />,
+  default: (p: { mode?: string; hideSeed?: boolean; focusTaskId?: number }) => <div data-testid="gantt-stub" data-mode={p.mode} data-hide-seed={String(!!p.hideSeed)} data-focus={String(p.focusTaskId)} />,
 }))
 vi.mock('../BankBuildCard', () => ({
   default: (p: { canSetMode?: boolean; canPublish?: boolean; hidePublish?: boolean }) =>
@@ -68,6 +68,17 @@ describe('TimingTab', () => {
     vi.mocked(planApi.deviations).mockResolvedValue([])
     vi.mocked(planApi.postFeedback).mockResolvedValue({})
     vi.mocked(planApi.validateTiming).mockResolvedValue({})
+  })
+
+  it('passes a deep-linked task (?task=<id>) to the planner', async () => {
+    window.history.pushState({}, '', '/changes/7?tab=timing&task=42')
+    renderTab()
+    expect((await screen.findByTestId('gantt-stub')).getAttribute('data-focus')).toBe('42')
+    cleanup()
+    window.history.pushState({}, '', '/changes/7?tab=timing&task=abc')
+    renderTab()
+    expect((await screen.findByTestId('gantt-stub')).getAttribute('data-focus')).toBe('undefined')
+    window.history.pushState({}, '', '/')
   })
 
   it('shows a retryable error when the confirmations fail to load', async () => {

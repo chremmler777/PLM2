@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyChangeSet } from '../../gantt/engine/changes'
+import { autoPushChangeSet } from '../../gantt/engine/schedule'
 import type { GanttLink, GanttTask } from '../../gantt/engine/types'
 import {
   bankBuildChangeSet, bufferChangeSet, ideasFollow, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
@@ -81,6 +82,13 @@ describe('bank build preset', () => {
     expect(cs.addLinks).toEqual([{ id: expect.any(String), from: cs.addTasks![0].id, to: 1, type: 'FS', lagDays: 0 }])
     expect(cs.order!.map(String)[0]).toBe(String(cs.addTasks![0].id))
     expect(cs.meta).toBeUndefined()
+  })
+
+  it('the idea link never pushes the downtime or what follows it (review 4b93d732 #1)', () => {
+    const p = plan()
+    const cs = bankBuildChangeSet(p, [3], { lane: 'Scheduling', departmentId: null }, 20)
+    const { moved } = autoPushChangeSet(p, cs, { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [] })
+    expect(moved).toEqual([])
   })
 
   it('ends at the selection start when something is selected', () => {

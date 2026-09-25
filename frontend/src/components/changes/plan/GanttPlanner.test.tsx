@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import GanttPlanner from './GanttPlanner'
+import { gridTiming } from '../../gantt/columns'
 import { planApi } from '../../../api/changePlan'
 import type { PlanOut, TaskOut } from '../../../types/changePlan'
 
@@ -71,6 +72,7 @@ function drag(el: Element, dx: number, init: { ctrlKey?: boolean } = {}) {
 describe('GanttPlanner (ECR adapter)', () => {
   afterEach(cleanup)
   beforeEach(() => {
+    gridTiming.editDelay = 0
     vi.clearAllMocks()
     vi.mocked(planApi.get).mockResolvedValue(planOut())
     vi.mocked(planApi.bulkPatch).mockResolvedValue(planOut())
@@ -226,6 +228,21 @@ describe('GanttPlanner (ECR adapter)', () => {
     await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalledWith(7, 'detailed', {
       tasks_upsert: [{ id: 1, start_date: '2026-10-06' }], tasks_delete: [], links_upsert: [], links_delete: [],
     }, 'Toolmaker one day late'))
+  })
+
+  it('a legacy server (no typed links) gets the successor moves from the browser after the baseline (review #12)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false }))
+    vi.mocked(planApi.bulkPatch).mockResolvedValue(planOut({ baseline_set: true, can_edit: false }) as never)
+    renderPlanner({ mode: 'track' })
+    await screen.findByTestId('gantt-planner')
+    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    const dialog = await screen.findByRole('dialog', { name: 'Record a deviation' })
+    expect(within(dialog).getByTestId('deviation-successors').textContent).toContain('Sampling')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'late tool' } })
+    fireEvent.click(within(dialog).getByText('Save move'))
+    await waitFor(() => expect(planApi.bulkPatch).toHaveBeenCalled())
+    const ups = vi.mocked(planApi.bulkPatch).mock.calls[0][2] as { id: number; start_date?: string }[]
+    expect(ups.map((u) => u.id).sort()).toEqual([1, 2, 3])
   })
 
   it('locks links, kind, idea and name after the baseline; notes and dates stay', async () => {
@@ -620,9 +637,74 @@ describe('GanttPlanner (ECR adapter)', () => {
     fireEvent.change(day, { target: { value: '24.12.2026' } })
     fireEvent.blur(day)
     fireEvent.click(within(dlg).getByText('Add holiday'))
+    expect(within(dlg).getByText(/recalculated for 6 working days per week \(rounded\)/)).toBeTruthy()
     fireEvent.click(within(dlg).getByTestId('calendar-save'))
+    // the preview says what moves and asks first (review #6)
+    expect(within(dlg).getByTestId('calendar-preview').textContent).toMatch(/\d+ tasks? will move, by up to \d+ days?/)
+    expect(planApi.setCalendar).not.toHaveBeenCalled()
+    fireEvent.click(within(dlg).getByTestId('calendar-confirm'))
     await waitFor(() => expect(planApi.setCalendar).toHaveBeenCalledWith(7, 'detailed',
-      { mode: 'working', workdays: [1, 2, 3, 4, 5, 6], holidays: ['2026-12-24'], auto: true }, true))
+      { mode: 'working', workdays: [1, 2, 3, 4, 5, 6], holidays: ['2026-12-24'] }, true))
+    const { toast } = await import('sonner')
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith('Undo history cleared: calendar changed'))
+  })
+
+  it('a calendar change clears the undo history; the auto switch alone does not', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    vi.mocked(planApi.applyChanges).mockResolvedValue({ ...modernOut(), id_map: {}, link_id_map: {} })
+    vi.mocked(planApi.setCalendar).mockResolvedValue(modernOut())
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    drag(screen.getByTestId('gantt-bar-shape-3'), 28)
+    await waitFor(() => expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-calendar'))
+    let dlg = await screen.findByTestId('calendar-dialog')
+    fireEvent.click(within(dlg).getByRole('checkbox', { name: /auto/i }))
+    fireEvent.click(within(dlg).getByTestId('calendar-save'))
+    await waitFor(() => expect(planApi.setCalendar).toHaveBeenCalledTimes(1))
+    expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-calendar'))
+    dlg = await screen.findByTestId('calendar-dialog')
+    fireEvent.click(within(dlg).getByLabelText('Sat'))
+    fireEvent.click(within(dlg).getByTestId('calendar-save'))
+    if (within(dlg).queryByTestId('calendar-confirm')) fireEvent.click(within(dlg).getByTestId('calendar-confirm'))
+    await waitFor(() => expect(planApi.setCalendar).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(planApi.setCalendar).mock.calls[1][2]).toEqual({ workdays: [1, 2, 3, 4, 5, 6] })
+    await waitFor(() => expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('the calendar dialog takes focus, keeps Tab inside and closes on Escape (review #7)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-calendar'))
+    const dlg = await screen.findByTestId('calendar-dialog')
+    expect(dlg.contains(document.activeElement)).toBe(true)
+    const focusables = [...dlg.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)')]
+    focusables[focusables.length - 1].focus()
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(focusables[0])
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(focusables[focusables.length - 1])
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(screen.queryByTestId('calendar-dialog')).toBeNull()
+  })
+
+  it('calendar dialog sends only what changed: auto alone flips only auto', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    vi.mocked(planApi.setCalendar).mockResolvedValue(modernOut())
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-calendar'))
+    const dlg = await screen.findByTestId('calendar-dialog')
+    const auto = within(dlg).getByRole('checkbox', { name: /auto/i })
+    fireEvent.click(auto)
+    fireEvent.click(within(dlg).getByTestId('calendar-save'))
+    await waitFor(() => expect(planApi.setCalendar).toHaveBeenCalledWith(7, 'detailed', { auto: false }, false))
   })
 
   it('lanes are off by default when the plan has summaries, and the choice is remembered (G14)', async () => {
@@ -678,5 +760,77 @@ describe('GanttPlanner (ECR adapter)', () => {
     fireEvent.click(await screen.findByTestId('gantt-export-print'))
     expect(html).toContain('<title>CR-2026-0006-detailed</title>')
     open.mockRestore()
+  })
+
+  it('deep link: selects, expands to and highlights the linked task once loaded', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({
+      tasks: [task({ id: 1, name: 'Phase', is_summary: true }), task({ id: 2, parent_id: 1, name: 'Inner' }), task({ id: 3 })],
+    }))
+    renderPlanner({ focusTaskId: 2 })
+    await waitFor(() => expect(screen.getByTestId('gantt-row-2').getAttribute('aria-selected')).toBe('true'))
+    cleanup()
+    const { toast } = await import('sonner')
+    renderPlanner({ focusTaskId: 99 })
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith('The linked task is no longer in this plan'))
+  })
+
+  describe('breakout', () => {
+    class FakeChannel {
+      static all: FakeChannel[] = []
+      onmessage: ((e: MessageEvent) => void) | null = null
+      posted: unknown[] = []
+      closed = false
+      constructor(public name: string) { FakeChannel.all.push(this) }
+      postMessage(m: unknown) { this.posted.push(m) }
+      close() { this.closed = true }
+    }
+    beforeEach(() => { FakeChannel.all = []; vi.stubGlobal('BroadcastChannel', FakeChannel) })
+    afterEach(() => { vi.unstubAllGlobals() })
+
+    it('titles the full-screen layer with the change number and plan', async () => {
+      renderPlanner({ changeNumber: 'CR-2026-0006', plan: 'quote' })
+      await screen.findByTestId('gantt-planner')
+      fireEvent.click(screen.getByTestId('gantt-full-screen'))
+      expect(screen.getByTestId('gantt-full-header').textContent).toContain('CR-2026-0006 - Quote plan')
+      // the legend travels into the layer with the chart
+      expect(within(screen.getByTestId('gantt-root')).getByLabelText('Legend')).toBeTruthy()
+    })
+
+    it('tells other windows after a save and refetches when they save', async () => {
+      vi.mocked(planApi.get).mockResolvedValue(modernOut())
+      vi.mocked(planApi.applyChanges).mockResolvedValue({ ...modernOut(), id_map: {}, link_id_map: {} })
+      renderPlanner()
+      await screen.findByTestId('gantt-planner')
+      const ch = FakeChannel.all.find((c) => c.name === 'plan:7:detailed')!
+      expect(ch).toBeTruthy()
+      drag(screen.getByTestId('gantt-bar-shape-3'), 28)
+      await waitFor(() => expect(ch.posted).toContain('changed'))
+      const calls = vi.mocked(planApi.get).mock.calls.length
+      act(() => ch.onmessage?.({ data: 'changed' } as MessageEvent))
+      await waitFor(() => expect(vi.mocked(planApi.get).mock.calls.length).toBeGreaterThan(calls))
+      act(() => ch.onmessage?.({ data: 'other' } as MessageEvent))
+      cleanup()
+      expect(ch.closed).toBe(true)
+    })
+
+    it('works without BroadcastChannel', async () => {
+      vi.stubGlobal('BroadcastChannel', class { constructor() { throw new Error('blocked') } })
+      renderPlanner()
+      expect(await screen.findByTestId('gantt-planner')).toBeTruthy()
+    })
+
+    it('opens the plan in a new window from the More menu, not when already in one', async () => {
+      const open = vi.spyOn(window, 'open').mockReturnValue({} as Window)
+      renderPlanner({ plan: 'quote' })
+      await screen.findByTestId('gantt-planner')
+      fireEvent.click(screen.getByTestId('gantt-more'))
+      fireEvent.click(screen.getByTestId('gantt-open-window'))
+      expect(open).toHaveBeenCalledWith(expect.stringMatching(/changes\/7\/plan\/quote$/), 'plm2-plan-7-quote', expect.stringContaining('popup'))
+      cleanup()
+      renderPlanner({ inWindow: true })
+      await screen.findByTestId('gantt-planner')
+      fireEvent.click(screen.getByTestId('gantt-more'))
+      expect(screen.queryByTestId('gantt-open-window')).toBeNull()
+    })
   })
 })
