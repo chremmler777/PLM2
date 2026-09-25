@@ -1265,3 +1265,85 @@ create (one request).
 - Title: recomposed when the lead item changes when `title_auto` (default
   on for composed titles); original title kept in the audit; "Make lead" in
   the Impacted tab.
+
+### 15b.1 Review fixes (migration `094_cost_sheet_fixes.py`)
+- **Numbers**: NaN/Infinity refused with 422 before parsing (the router's
+  route class rejects the JSON tokens; FastAPI's own 422 would echo NaN and
+  500). Bounds per column (API `Field` + service `BOUNDS`): hourly rate
+  0 to <1e8, prices 0 to <1e10, hours 0 to <1e6, min_factor 0 to <100,
+  tonnage 0 to <1e6 with min <= max, overhead percent 0 to 300, per_hour
+  0 to <1e6. The UI shows an error panel with "Discard draft" when a
+  version fails to load.
+- **Exports**: text cells starting with = + - @ tab CR get a leading `'`
+  (CSV and XLSX). CSV is `;`-separated with decimal comma; overhead values
+  keep full precision.
+- **Machine classes**: rows carry `machine_class_id` (094 backfills by name,
+  creates a missing class); `machine_class` stays as the display/export
+  name and follows a rename (`PATCH /machine-classes/{id} {name}`, in drafts
+  and published rows alike). Duplicate names (case-blind) 409. Rows must
+  name an existing class (422 otherwise). Lookups accept a class id (int)
+  or a name.
+- **Chain migration**: 094 replaces the single migrated version by one
+  published version per effective_from date at which department_rate
+  actually changed (dev DB: v1 25.06.2026, v2 20.07.2026), only while that
+  version is still the org's only one and carries the migration note.
+- **Currency**: `plants.currency` (094: USD where location/name/code says
+  USA, else EUR); rows default to their plant's currency; codes checked
+  against `CURRENCIES` (ISO 4217 subset). Plant currencies show on the page
+  as "set by location, Finance to confirm" until Finance confirms or
+  changes them (`PUT /cost-sheet/plants/{id}/currency`, stored as org
+  setting `plant_currency_confirmed:<id>`). Per-hour overheads carry a
+  currency; one in another currency than the rate makes the effective rate
+  None (`breakdown.missing = ["overhead_currency"]`).
+- **RateHit.rate may be None** (incomplete): components sampling with a
+  missing machine/labour rate or a part in another currency returns a hit
+  with `rate=None`, `breakdown.missing` and `breakdown.complete=False`.
+  Phase 2 must treat None as "cannot price", never as 0.
+- **Publish**: valid_from before today needs `confirm_backdated: true`
+  (UI: warning + checkbox, dd.mm.yyyy DateInput); a draft with no
+  differences to its base is refused 409 "Nothing changed since vN"; a
+  second concurrent draft is blocked by the unique index
+  (organization_id, draft_lock) and answered 409.
+
+## 17. Revision intake: every new index is captured and triaged (2026-09-25)
+Parts and their CAD/drawing revisions live in the part model (PartRevision,
+revision files, customer package receive). Today new indexes can land without
+a change. Rule: **every new index is captured**, in every phase (E1/E2 and
+series). Development decides the depth, alone (no 4-eyes).
+
+- **Intake**: a new index from any source (customer package receive, CAD /
+  drawing upload creating a new revision, manual new index) creates a
+  `revision_intakes` row (part_id, revision_id, source, received_at/by,
+  status `pending` | `decided`, route, reason, decided_by/at, change_id,
+  phase snapshot E-level/series). The new revision stays **pending**
+  (not active/released) until the intake is decided; the part shows
+  "Index <x> pending triage". One intake per new revision; a package with
+  several parts creates one intake per part, groupable.
+- **Triage** (Development members; acts-as aware; admin): route + reason:
+  - `full_ecr`: starts a change (captured, same project, lead item = the
+    part, new revision linked as the impacted item's resulting revision,
+    description prefilled from the intake/package), or attaches to an
+    existing open change chosen by the user (`attach_ecr`).
+  - `engineering_review` (light track): a change with origin
+    `engineering_review`: captured -> scoping-lite (impact lock by
+    Development) -> review (the departments serving the part via served-by
+    links: tools -> Tool Engineer, equipment -> Manufacturing Engineer,
+    gauges -> APQP, packaging -> Packaging Engineer, plus Development) each
+    answer "no impact" / "impact" with a note) -> if any "impact": escalate
+    to a full ECR (the review becomes the scoping input; one click by
+    Development, audited) -> else released (revision activated) and closed.
+    No costing, offer, timing. Reuses the lighter-track pattern of §14.
+  - `administrative`: revision activated immediately, reason required,
+    audited (title block, re-upload, no content change).
+- **Defaults**: suggested route by phase: E1/E2 -> engineering_review,
+  series -> full_ecr; Development may pick any route with a reason.
+- **Release link**: a full ECR / review releasing activates exactly the
+  linked pending revisions; the release checklist items "index updated" and
+  "drawing and 3D data released" auto-hint from those revisions (done when
+  activated with files present).
+- **Visibility**: My Tasks "Triage index <x> of <part>" for Development;
+  part page banner + intake panel; Changes list filter "from intake";
+  cockpit/process flow show the intake step and the review track.
+- **Migration** after the ones in flight (096). Existing pending/active data
+  untouched; only new indexes after deploy create intakes (a backfill script
+  can list recent unlinked revisions for optional triage).
