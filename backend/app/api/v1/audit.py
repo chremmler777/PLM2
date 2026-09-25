@@ -40,17 +40,39 @@ async def _price_redactor(db: AsyncSession, current_user: User):
     from app.services.price_redaction import PriceViewer
     viewer = PriceViewer(db, current_user)
     cache: dict[str, bool] = {}
+    changes: dict[str, object] = {}
+
+    async def change_of(cid):
+        if cid not in changes:
+            changes[cid] = (await db.execute(select(ChangeRequest).where(
+                ChangeRequest.change_number == cid))).scalars().first()
+        return changes[cid]
 
     async def must_redact(row) -> bool:
         cid = row.correlation_id
         if not cid:
             return False
         if cid not in cache:
-            change = (await db.execute(select(ChangeRequest).where(
-                ChangeRequest.change_number == cid))).scalars().first()
+            change = await change_of(cid)
             cache[cid] = change is not None and not await viewer.may_read(change)
         return cache[cid]
+    must_redact.change_of = change_of
     return must_redact
+
+
+async def _quote_hider(db: AsyncSession, current_user: User, must_redact):
+    """row -> bool: does this row name a vendor quote the caller may not
+    read (the costing-position rule, price_redaction.QuoteReader)?"""
+    from app.services.price_redaction import QuoteReader
+    reader = QuoteReader(db, current_user)
+
+    async def hides(row) -> bool:
+        if not row.correlation_id or not await must_redact(row):
+            return False
+        change = await must_redact.change_of(row.correlation_id)
+        return await reader.hides(change, row.action, row.old_values,
+                                  row.new_values)
+    return hides
 
 
 def _filtered(correlation_id, entity_type, entity_id, user_id, date_from, date_to):
@@ -73,7 +95,7 @@ def _filtered(correlation_id, entity_type, entity_id, user_id, date_from, date_t
 def _apply_org_scope(q, current_user: User):
     """Non-admins: restrict to entries correlated to a change in their org.
     Admins: unrestricted (see module docstring for the scoping decision)."""
-    if current_user.role == "admin":
+    if current_user.effective_role == "admin":
         return q
     allowed_numbers = _org_scope(select(ChangeRequest.change_number), current_user)
     return q.where(AuditLog.correlation_id.in_(allowed_numbers))
@@ -99,9 +121,19 @@ async def list_audit(
     # Newest-first by id so a limit-truncated result drops the OLDEST entries,
     # not the newest (the frontend timeline re-sorts for display either way).
     rows = (await db.execute(q.order_by(AuditLog.id.desc()).limit(limit).offset(offset))).scalars().all()
-    from app.services.price_redaction import redact_audit_row
+    from app.services.price_redaction import blank_quote_audit, redact_audit_row
     must_redact = await _price_redactor(db, current_user)
-    return [redact_audit_row(r) if await must_redact(r) else r for r in rows]
+    hides_quote = await _quote_hider(db, current_user, must_redact)
+    out = []
+    for r in rows:
+        if not await must_redact(r):
+            out.append(r)
+            continue
+        row = redact_audit_row(r)
+        if await hides_quote(r):
+            row = blank_quote_audit(row)
+        out.append(row)
+    return out
 
 
 @router.get("/verify", response_model=AuditVerifyResponse)
@@ -140,12 +172,15 @@ async def export_audit(
     writer.writerow(["id", "timestamp", "correlation_id", "entity_type", "entity_id",
                      "action", "user_id", "old_values", "new_values",
                      "previous_hash", "entry_hash"])
-    from app.services.price_redaction import redact_json
+    from app.services.price_redaction import blank_quote_json, redact_json
     must_redact = await _price_redactor(db, current_user)
+    hides_quote = await _quote_hider(db, current_user, must_redact)
     for r in rows:
         old, new = r.old_values, r.new_values
         if await must_redact(r):
             old, new = redact_json(old, r.action), redact_json(new, r.action)
+            if await hides_quote(r):
+                old, new = blank_quote_json(old), blank_quote_json(new)
         writer.writerow([r.id, r.timestamp.isoformat(), r.correlation_id, r.entity_type,
                          r.entity_id, r.action, r.user_id, old, new,
                          r.previous_hash, r.entry_hash])

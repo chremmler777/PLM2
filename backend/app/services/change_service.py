@@ -37,11 +37,13 @@ def _org_scope(stmt, viewer: Optional[User]):
     Plant.organization_id. Changes with project_id NULL stay visible to
     everyone (explicit decision - no silent data loss). viewer=None means
     "internal/service caller" and returns the statement unchanged. Admins
-    (viewer.role == "admin") also see every organization - mirrors the
-    intent already documented on the dead get_org_filter helper in
-    app/dependencies/auth.py ("Admins see all organizations").
+    (viewer.effective_role == "admin") also see every organization - mirrors
+    the intent already documented on the dead get_org_filter helper in
+    app/dependencies/auth.py ("Admins see all organizations"). An admin acting
+    as a department is scoped like that department's members: acts-as drops
+    the admin bypass everywhere, org visibility included.
     """
-    if viewer is None or viewer.role == "admin":
+    if viewer is None or viewer.effective_role == "admin":
         return stmt
     org_projects = select(Project.id).join(Plant, Project.plant_id == Plant.id).where(
         Plant.organization_id == viewer.organization_id)
@@ -3026,6 +3028,9 @@ class ChangeService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "attachment_removed", f"Removed {filename}", user_id,
-            old_value={"filename": filename},
+            # kind + offer so a vendor quote's removal can be redacted by the
+            # same rule as its addition (price_redaction.QuoteReader)
+            old_value={"filename": filename, "kind": att.kind,
+                       "costing_offer_id": att.costing_offer_id},
         )
         return stored_path

@@ -1014,6 +1014,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'RFQ hochladen: Kosten & Timing beim Lieferanten anfragen',
     en: 'Upload RFQ: request costs & timing from supplier',
   },
+  'attach.rfqHint': {
+    de: 'RFQ = Anfrage an den Lieferanten. Das Preisangebot des Lieferanten als Lieferantenangebot an der Kostenposition ablegen.',
+    en: "RFQ = request sent to the supplier. File the supplier's priced reply as a vendor quote on the costing line.",
+  },
   'attach.rfqMissing': {
     de: 'Noch keine RFQ hinterlegt',
     en: 'No RFQ attached yet',

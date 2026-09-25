@@ -16,6 +16,14 @@ describe('AttachmentDropzone', () => {
   beforeEach(() => { upload.mockReset().mockResolvedValue({ id: 1 }); toastErr.mockReset() })
   afterEach(cleanup)
 
+  it('tells an RFQ slot that the priced reply belongs on the costing line', () => {
+    render(<AttachmentDropzone changeId={7} onUploaded={vi.fn()} kind="rfq" compact />)
+    expect(screen.getByTestId('rfq-hint').textContent).toMatch(/vendor quote on the costing line/)
+    cleanup()
+    render(<AttachmentDropzone changeId={7} onUploaded={vi.fn()} kind="change_ppt" compact />)
+    expect(screen.queryByTestId('rfq-hint')).toBeNull()
+  })
+
   it('uploads each dropped file', async () => {
     const onUploaded = vi.fn()
     render(<AttachmentDropzone changeId={7} onUploaded={onUploaded} />)

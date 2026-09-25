@@ -986,7 +986,16 @@ async def get_changelog(
     # Everyone on the change reads its history; only the cost roles (admin,
     # lead, PM, Sales) read its prices. Older rows carry amounts in their
     # description, so they are redacted on the way out, never rewritten.
-    return [_redact_changelog(r) for r in rows]
+    # A vendor quote's name follows its costing position's read rule.
+    from app.services.price_redaction import QuoteReader, blank_quote_changelog
+    quotes = QuoteReader(db, current_user)
+    out = []
+    for r in rows:
+        row = _redact_changelog(r)
+        if await quotes.hides(change, r.action, r.old_value, r.new_value):
+            row = blank_quote_changelog(row)
+        out.append(row)
+    return out
 
 
 def _redact_changelog(row) -> dict:
@@ -1442,6 +1451,93 @@ async def set_assessment_due_date(
     return a
 
 
+# Who may change which header field through PATCH. Mirrors the editors the
+# UI offers (PriorityEditor, CustomerRelevantEditor, DescriptionEditor, the
+# deadline chips, the D1 panel) so the server enforces what the screen shows.
+# Acts-as aware: effective_role drops the admin bypass for an acting admin.
+_PATCH_RIGHTS = {
+    # the lead hands the change over; PM re-assigns it
+    "lead_id": ("lead", "pm"),
+    # money: the cost roles
+    "estimated_cost": ("lead", "pm", "sales"),
+    "pnl_note": ("lead", "pm", "sales"),
+    # the lead steers the change
+    "priority": ("lead",),
+    "customer_relevant": ("lead",),
+    # capture fields: Sales writes the request, the lead owns it
+    "title": ("lead", "sales"),
+    "reason": ("lead", "sales"),
+    "description": ("lead", "sales"),
+    "change_type": ("lead", "sales"),
+    # deadlines: whoever owns the quote / release date
+    "required_by_date": ("lead", "sales", "pm"),
+    "required_by_reason": ("lead", "sales", "pm"),
+    "release_due_date": ("lead", "sales", "pm"),
+    "release_due_reason": ("lead", "sales", "pm"),
+    # timing anchor: the plan editors
+    "timing_milestone_id": ("lead", "sales", "pm", "scheduling"),
+    # D1 master data: the governance roles
+    "issuer": ("lead", "quality", "pm"),
+    "car_line": ("lead", "quality", "pm"),
+    "is_series": ("lead", "quality", "pm"),
+    "cm_internal": ("lead", "quality", "pm"),
+    "cm_external": ("lead", "quality", "pm"),
+    "implementation_mode": ("lead", "quality", "pm"),
+    "affected_plant_ids": ("lead", "quality", "pm"),
+}
+_PATCH_ROLE_DEPT = {"sales": "Sales", "quality": "Quality",
+                    "scheduling": "Scheduling"}
+
+
+def _patch_changes_field(change, key, value) -> bool:
+    """Does this PATCH value actually move the field? Unchanged values (the
+    D1 panel resends every field) need no right."""
+    if key == "affected_plant_ids":
+        return value is not None and sorted(value) != sorted(
+            p.id for p in change.affected_plants)
+    if key in ("required_by_date", "release_due_date",
+               "required_by_reason", "release_due_reason"):
+        # these honor an explicit null (clearing), so None can move them
+        return value != getattr(change, key)
+    # update_change skips None for the plain fields: a None moves nothing
+    return value is not None and value != getattr(change, key, None)
+
+
+async def _require_patch_rights(db: AsyncSession, change, fields: dict,
+                                user: User) -> None:
+    moving = [k for k, v in fields.items()
+              if k in _PATCH_RIGHTS and _patch_changes_field(change, k, v)]
+    if not moving or user.effective_role == "admin":
+        return
+    held: dict[str, bool] = {}
+
+    async def has(role: str) -> bool:
+        if role not in held:
+            if role == "lead":
+                held[role] = change.lead_id is not None and change.lead_id == user.id
+            elif role == "pm":
+                held[role] = await MeetingService.user_is_pm_member(db, user)
+            else:
+                held[role] = await ChangeService._user_in_department(
+                    db, user, _PATCH_ROLE_DEPT[role])
+        return held[role]
+
+    for key in moving:
+        allowed = False
+        for role in _PATCH_RIGHTS[key]:
+            if await has(role):
+                allowed = True
+                break
+        if not allowed:
+            who = ", ".join({"lead": "the change lead", "pm": "Project Management",
+                             "sales": "Sales", "quality": "Quality",
+                             "scheduling": "Scheduling"}[r]
+                            for r in _PATCH_RIGHTS[key])
+            raise HTTPException(
+                status_code=403,
+                detail=f"Only {who} or an admin may change {key}")
+
+
 @router.patch("/{change_id}", response_model=ChangeResponse)
 async def update_change(
     change_id: int, body: ChangeUpdate,
@@ -1457,6 +1553,16 @@ async def update_change(
                 status_code=403,
                 detail="Only the change lead, a Sales department member, or "
                        "an admin may set the quoted price")
+    await _require_patch_rights(db, change, fields, current_user)
+    if "lead_id" in fields and fields["lead_id"] is not None \
+            and fields["lead_id"] != change.lead_id:
+        new_lead = await db.get(User, fields["lead_id"])
+        if new_lead is None or not new_lead.is_active:
+            raise HTTPException(status_code=400, detail="Lead user not found")
+        await ChangeService.append_changelog(
+            db, change, "lead_changed",
+            f"Change lead {change.lead_id} -> {new_lead.id}", current_user.id,
+            field_name="lead_id", old_value=change.lead_id, new_value=new_lead.id)
     try:
         await ChangeService.update_change(db, change, current_user.id, **fields)
     except ChangeError as e:
@@ -1748,6 +1854,45 @@ async def download_attachment(
                         media_type=att.content_type or "application/octet-stream")
 
 
+async def _require_attachment_delete(db: AsyncSession, change, att,
+                                     user: User) -> None:
+    """Who may remove a (non-quote) document.
+
+    Evidence filed on an assessment goes with the right to file it
+    (_may_attach_evidence), and once that assessment is submitted its
+    post-scoping evidence is the record the verdict stands on: frozen (409)
+    for everyone but an admin. Customer mail and general documents: the
+    uploader, the change lead, Project Management or an admin."""
+    is_admin = user.effective_role == "admin"
+    if att.assessment_id is not None:
+        a = await db.get(ChangeAssessment, att.assessment_id)
+        if a is not None:
+            if not await ChangeService._may_attach_evidence(db, change, a, user):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only a member of the assessed department, the "
+                           "change lead, Project Management, Sales or an "
+                           "admin may remove that assessment's evidence")
+            submitted = (a.submitted_at is not None
+                         or a.effective_status == "submitted")
+            if submitted and att.phase == "post_scoping" and not is_admin:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The assessment is submitted: its evidence is the "
+                           "record the verdict stands on and cannot be "
+                           "removed")
+        return
+    if att.kind in ("customer_email", "general"):
+        if (is_admin or att.uploaded_by == user.id
+                or (change.lead_id is not None and change.lead_id == user.id)
+                or await MeetingService.user_is_pm_member(db, user)):
+            return
+        raise HTTPException(
+            status_code=403,
+            detail="Only the uploader, the change lead, Project Management or "
+                   "an admin may remove that document")
+
+
 @router.delete("/{change_id}/attachments/{attachment_id}", status_code=204)
 async def delete_attachment(
     change_id: int, attachment_id: int,
@@ -1769,6 +1914,7 @@ async def delete_attachment(
             status_code=403,
             detail="Only a member of the costing department, Project "
                    "Management or an admin may remove that vendor quote")
+    await _require_attachment_delete(db, change, att, current_user)
     # Baseline documents freeze once scoping ends — the record a decision was
     # made on can't be removed afterwards (VDA/IATF traceability).
     from app.models.change import SCOPING_STATUSES

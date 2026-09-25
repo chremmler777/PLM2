@@ -49,7 +49,8 @@ async def _mk_template_with_stages(session, n_stages):
 @pytest.mark.asyncio
 async def test_patch_sets_required_by_and_audits(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Deadline PATCH", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Deadline PATCH", "reason": "r",
     }, headers=eng_auth)
     assert res.status_code == 200, res.text
     cid = res.json()["id"]
@@ -94,7 +95,8 @@ async def test_patch_accepts_tz_aware_z_suffix_stored_naive(
     asyncpg 500s on a tz-aware value. The schema layer must normalize it
     to naive UTC before it reaches the DB layer."""
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Deadline Z-suffix", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Deadline Z-suffix", "reason": "r",
     }, headers=eng_auth)
     cid = res.json()["id"]
 
@@ -115,7 +117,8 @@ async def test_patch_accepts_tz_aware_z_suffix_stored_naive(
 @pytest.mark.asyncio
 async def test_deadline_set_writes_audit_log(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Deadline Audit", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Deadline Audit", "reason": "r",
     }, headers=eng_auth)
     cid = res.json()["id"]
     due = (datetime.utcnow() + timedelta(days=10)).isoformat()
@@ -211,7 +214,8 @@ async def test_lead_escalations_contains_deadline_row(session_factory, seed):
 @pytest.mark.asyncio
 async def test_get_and_list_expose_deadline_fields(client, eng_auth, seed):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Deadline Expose", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Deadline Expose", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
@@ -237,7 +241,8 @@ async def test_get_and_list_expose_deadline_fields(client, eng_auth, seed):
 @pytest.mark.asyncio
 async def test_patch_clears_deadline_with_explicit_null(client, eng_auth, seed):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Deadline Clear", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Deadline Clear", "reason": "r",
     }, headers=eng_auth)
     cid = res.json()["id"]
     due = (datetime.utcnow() + timedelta(days=20)).isoformat()
@@ -255,7 +260,8 @@ async def test_patch_clears_deadline_with_explicit_null(client, eng_auth, seed):
 async def test_patch_response_recomputes_deadline_state(client, admin_auth, seed):
     # create a change (mirror this file's existing creation helper)
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "deadline", "change_type": "physical_part",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "deadline", "change_type": "physical_part",
         "customer_relevant": True,
     }, headers=admin_auth)
     change_id = res.json()["id"]
@@ -271,7 +277,8 @@ async def test_patch_response_recomputes_deadline_state(client, admin_auth, seed
 @pytest.mark.asyncio
 async def test_patch_date_only_keeps_reason(client, admin_auth, seed):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "deadline2", "change_type": "physical_part",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "deadline2", "change_type": "physical_part",
     }, headers=admin_auth)
     change_id = res.json()["id"]
     d1 = (datetime.utcnow() + timedelta(days=10)).isoformat()
@@ -425,7 +432,8 @@ async def test_in_assessment_gate_skips_deadline_for_internal(session_factory, s
 @pytest.mark.asyncio
 async def test_acceptance_requires_release_deadline(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Accept needs date", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Accept needs date", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
@@ -452,7 +460,8 @@ async def test_acceptance_requires_release_deadline(client, eng_auth, seed, sess
 @pytest.mark.asyncio
 async def test_decline_does_not_require_release_deadline(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Decline no date", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Decline no date", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
@@ -465,7 +474,8 @@ async def test_decline_does_not_require_release_deadline(client, eng_auth, seed,
 @pytest.mark.asyncio
 async def test_acceptance_release_deadline_audited(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Audit release DL", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Audit release DL", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
@@ -488,7 +498,8 @@ async def test_acceptance_release_deadline_audited(client, eng_auth, seed, sessi
 
 async def _accepted_change(client, eng_auth, seed, title, session_factory):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": title, "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": title, "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
@@ -515,7 +526,8 @@ async def test_release_deadline_editable_after_acceptance(client, eng_auth, seed
 @pytest.mark.asyncio
 async def test_release_deadline_not_settable_before_acceptance(client, eng_auth, seed):
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Too early", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Too early", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
@@ -581,7 +593,8 @@ async def test_quote_deadline_locked_after_capture_without_reason(
     """Past capture the whole team plans against the quote deadline, so moving
     it is a pushback that must say why — and lands under its own action."""
     res = await client.post("/api/v1/changes", json={
-        "project_id": seed["project_id"], "title": "Pushback", "reason": "r",
+        "project_id": seed["project_id"],
+        "lead_id": seed["engineer_id"], "title": "Pushback", "reason": "r",
     }, headers=eng_auth)
     cid = res.json()["id"]
     d1 = (datetime.utcnow() + timedelta(days=30)).isoformat()

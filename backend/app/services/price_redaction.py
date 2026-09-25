@@ -210,3 +210,94 @@ async def price_scope(session, viewer, stmt):
         return stmt
     from app.models.change import ChangeRequest
     return stmt.where(ChangeRequest.lead_id == viewer.id)
+
+
+# --- vendor quote documents ------------------------------------------------
+# A vendor quote's filename usually names the supplier and the offer ("Hasco
+# 987.65.pdf"): its attachment_added / attachment_removed entries follow the
+# costing-position read rule (CostingPositionService.readable_department_ids),
+# not the price rule, so the department that owns the position still reads
+# its own.
+QUOTE_ATTACHMENT_ACTIONS = frozenset(("attachment_added", "attachment_removed"))
+
+
+def _quote_payload(text: Optional[str]) -> Optional[dict]:
+    if not text:
+        return None
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(value, dict) and (value.get("kind") == "vendor_quote"
+                                    or value.get("costing_offer_id") is not None):
+        return value
+    return None
+
+
+def blank_quote_json(text: Optional[str]) -> Optional[str]:
+    value = _quote_payload(text)
+    if value is None:
+        return text
+    value = dict(value)
+    value["filename"] = None
+    return json.dumps(value)
+
+
+class QuoteReader:
+    """Decides, per logged row, whether the viewer may read a vendor quote's
+    name. One instance per request; department lookups are cached."""
+
+    def __init__(self, session, user):
+        self.session, self.user = session, user
+        self._visible: dict[int, Optional[set]] = {}
+        self._dept_by_offer: dict[int, Optional[int]] = {}
+
+    async def _may_read(self, change, offer_id: Optional[int]) -> bool:
+        from app.services.costing_position_service import CostingPositionService
+        if change.id not in self._visible:
+            self._visible[change.id] = (
+                await CostingPositionService.readable_department_ids(
+                    self.session, change, self.user))
+        visible = self._visible[change.id]
+        if visible is None:
+            return True
+        if offer_id is None:
+            return False
+        if offer_id not in self._dept_by_offer:
+            from sqlalchemy import select
+            from app.models.change_cost import CostingOffer, CostingPosition
+            self._dept_by_offer[offer_id] = (await self.session.execute(
+                select(CostingPosition.department_id)
+                .join(CostingOffer, CostingOffer.position_id == CostingPosition.id)
+                .where(CostingOffer.id == offer_id))).scalar_one_or_none()
+        dept = self._dept_by_offer[offer_id]
+        return dept is not None and dept in visible
+
+    async def hides(self, change, action: Optional[str],
+                    old_text: Optional[str], new_text: Optional[str]) -> bool:
+        """True when this row names a vendor quote the viewer may not read."""
+        if change is None or action not in QUOTE_ATTACHMENT_ACTIONS:
+            return False
+        value = _quote_payload(new_text) or _quote_payload(old_text)
+        if value is None:
+            return False
+        return not await self._may_read(change, value.get("costing_offer_id"))
+
+
+def blank_quote_changelog(out: dict) -> dict:
+    """A (redacted or plain) changelog dict with the quote's name removed."""
+    out = dict(out)
+    if out.get("action") == "attachment_added":
+        out["action_description"] = "Attached a vendor quote"
+    else:
+        out["action_description"] = "Removed a vendor quote"
+    out["old_value"] = blank_quote_json(out.get("old_value"))
+    out["new_value"] = blank_quote_json(out.get("new_value"))
+    return out
+
+
+def blank_quote_audit(out: dict) -> dict:
+    out = dict(out)
+    out["old_values"] = blank_quote_json(out.get("old_values"))
+    out["new_values"] = blank_quote_json(out.get("new_values"))
+    return out

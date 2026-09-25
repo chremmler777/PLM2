@@ -533,7 +533,8 @@ async def _get_plant_id(client, auth) -> int:
 async def test_affected_plant_ids_set_and_clear(client, eng_auth, seed):
     """Set affected_plant_ids → GET round-trip returns same ids; [] clears them."""
     plant_id = await _get_plant_id(client, eng_auth)
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     # Initially empty
@@ -561,7 +562,8 @@ async def test_affected_plant_ids_set_and_clear(client, eng_auth, seed):
 
 async def test_boolean_false_round_trip(client, eng_auth, seed):
     """PATCH is_series True→False and confirm GET returns False."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     # Set True
@@ -581,7 +583,8 @@ async def test_boolean_false_round_trip(client, eng_auth, seed):
 
 async def test_invalid_implementation_mode_returns_400(client, eng_auth, seed):
     """Out-of-set implementation_mode raises HTTP 400."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     res = await client.patch(
@@ -594,7 +597,8 @@ async def test_invalid_implementation_mode_returns_400(client, eng_auth, seed):
 
 async def test_valid_implementation_modes_accepted(client, eng_auth, seed):
     """Both valid implementation_mode values are accepted."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     for mode in ("integrated", "separational"):

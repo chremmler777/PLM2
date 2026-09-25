@@ -117,6 +117,14 @@ export default function AttachmentDropzone({
         </span>
         {!compact && <span className="text-xs text-slate-500">{t('attach.hint')}</span>}
       </div>
+      {/* An RFQ is what went OUT to the supplier; the priced answer that
+          came back belongs on the costing line, where its readers are
+          limited to the people who may see that price. */}
+      {kind === 'rfq' && (
+        <p className="mt-1 text-[11px] text-slate-500" data-testid="rfq-hint">
+          {t('attach.rfqHint')}
+        </p>
+      )}
       <input
         ref={inputRef}
         type="file"

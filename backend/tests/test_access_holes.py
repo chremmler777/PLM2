@@ -315,3 +315,263 @@ async def test_change_routes_are_org_scoped(
             pytest.fail(f"{method} {url} rejected the body: {res.text}")
     async with session_factory() as s:
         assert (await s.get(ChangeRequest, cid)).title == "offer me"
+
+
+# ===========================================================================
+# Round 2 (security review of 49cf1fdf)
+# ===========================================================================
+ACTS = "X-Acts-As-Department"
+
+
+async def _admin(client, acts=None):
+    h = await login(client, "admin@test.io")
+    return {**h, ACTS: str(acts)} if acts is not None else h
+
+
+async def _quality_dept(session_factory):
+    from sqlalchemy import select
+    async with session_factory() as s:
+        return (await s.execute(select(Department.id).where(
+            Department.name == "Quality"))).scalar_one()
+
+
+async def _set_lead(session_factory, cid, uid):
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).lead_id = uid
+        await s.commit()
+
+
+# --- HIGH: nobody makes themselves lead; header fields follow the UI rights -
+
+async def test_patch_lead_id_takeover_is_refused(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    aid = await _vendor_quote(session_factory, offer_world)
+    qid = await _user(session_factory, seed, "q", "Quality")
+    q = await _auth(client, "q")
+    url = f"/api/v1/changes/{cid}"
+    res = await client.patch(url, headers=q, json={"lead_id": qid})
+    assert res.status_code == 403, res.text
+    res = await client.patch(url, headers=q, json={"estimated_cost": 1.0})
+    assert res.status_code == 403, res.text
+    # the takeover would have opened the quote: still closed
+    assert (await client.get(_dl(cid, aid), headers=q)).status_code == 403
+    # an admin acting as Quality is Quality here
+    res = await client.patch(url, headers=await _admin(
+        client, await _quality_dept(session_factory)), json={"lead_id": qid})
+    assert res.status_code == 403, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).lead_id is None
+
+
+async def test_lead_hand_over_by_lead_pm_admin_is_logged(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    tool = offer_world["users"]["tool"]
+    sales = offer_world["users"]["sales"]
+    qid = await _user(session_factory, seed, "q", "Quality")
+    url = f"/api/v1/changes/{cid}"
+    await _set_lead(session_factory, cid, tool)
+    # the current lead hands over
+    res = await client.patch(url, headers=await _off(client, "tool"),
+                             json={"lead_id": sales})
+    assert res.status_code == 200, res.text
+    # PM re-assigns
+    res = await client.patch(url, headers=await _off(client, "pm"),
+                             json={"lead_id": qid})
+    assert res.status_code == 200, res.text
+    # the admin too
+    res = await client.patch(url, headers=await _admin(client),
+                             json={"lead_id": tool})
+    assert res.status_code == 200, res.text
+    # the former lead is no longer entitled
+    res = await client.patch(url, headers=await _off(client, "sales"),
+                             json={"lead_id": sales})
+    assert res.status_code == 403, res.text
+    log = (await client.get(f"{url}/changelog", headers=await _admin(client))).json()
+    moves = [(r["old_value"], r["new_value"]) for r in log
+             if r["action"] == "lead_changed"]
+    assert moves == [(str(tool), str(sales)), (str(sales), str(qid)),
+                     (str(qid), str(tool))]
+
+
+async def test_patch_fields_follow_ui_rights(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    await _user(session_factory, seed, "q", "Quality")
+    q = await _auth(client, "q")
+    url = f"/api/v1/changes/{cid}"
+    for body in ({"priority": "high"}, {"title": "mine now"},
+                 {"description": "rewritten"}, {"estimated_cost": 5.0},
+                 {"required_by_date": "2031-01-01T00:00:00",
+                  "required_by_reason": "because"}):
+        res = await client.patch(url, headers=q, json=body)
+        assert res.status_code == 403, (body, res.text)
+    # an unchanged value moves nothing and needs no right
+    cur = (await client.get(url, headers=q)).json()
+    res = await client.patch(url, headers=q, json={"priority": cur["priority"]})
+    assert res.status_code == 200, res.text
+    # Quality is a governance role: the D1 master data is theirs
+    res = await client.patch(url, headers=q, json={"issuer": "OEM"})
+    assert res.status_code == 200, res.text
+    # Sales writes the description, PM moves the quote deadline
+    res = await client.patch(url, headers=await _off(client, "sales"),
+                             json={"description": "Rib +0.7 mm"})
+    assert res.status_code == 200, res.text
+    res = await client.patch(url, headers=await _off(client, "pm"),
+                             json={"required_by_date": "2031-01-01T00:00:00",
+                                   "required_by_reason": "customer moved SOP"})
+    assert res.status_code == 200, res.text
+    # priority is the lead's (or admin's)
+    res = await client.patch(url, headers=await _off(client, "sales"),
+                             json={"priority": "high"})
+    assert res.status_code == 403, res.text
+    res = await client.patch(url, headers=await _admin(client), json={"priority": "high"})
+    assert res.status_code == 200, res.text
+
+
+# --- MEDIUM: who may delete evidence and plain documents --------------------
+
+async def _docs(session_factory, world, verdict_submitted=True):
+    tool_dept = world["depts"]["Tool Engineer"]
+    async with session_factory() as s:
+        from datetime import datetime
+        a = ChangeAssessment(change_id=world["change_id"], department_id=tool_dept,
+                             rasic_letter="S", verdict="not_feasible",
+                             status="submitted" if verdict_submitted else "active",
+                             submitted_at=datetime.utcnow() if verdict_submitted else None)
+        s.add(a)
+        await s.flush()
+        ids = {}
+        for kind, extra in (("change_ppt", {"assessment_id": a.id}),
+                            ("rfq", {"assessment_id": a.id}),
+                            ("customer_email", {}), ("general", {})):
+            fd, path = tempfile.mkstemp(suffix=".pdf")
+            os.write(fd, b"doc")
+            os.close(fd)
+            att = ChangeAttachment(
+                change_id=world["change_id"], filename=f"{kind}.pdf",
+                stored_path=path, content_type="application/pdf", size_bytes=3,
+                sha256="y" * 64, phase="post_scoping", kind=kind,
+                uploaded_by=world["users"]["tool"], **extra)
+            s.add(att)
+            await s.flush()
+            ids[kind] = att.id
+        await s.commit()
+        return ids
+
+
+async def test_evidence_delete_mirrors_attach_rule_and_freezes(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    ids = await _docs(session_factory, offer_world)
+    await _user(session_factory, seed, "q", "Quality")
+    q = await _auth(client, "q")
+    tool = await _off(client, "tool")
+    url = lambda k: f"/api/v1/changes/{cid}/attachments/{ids[k]}"  # noqa: E731
+    for kind in ("change_ppt", "rfq"):
+        assert (await client.delete(url(kind), headers=q)).status_code == 403
+        # the department may file it, but the verdict it backs is submitted
+        assert (await client.delete(url(kind), headers=tool)).status_code == 409
+    assert (await client.delete(url("change_ppt"), headers=await _admin(
+        client, offer_world["depts"]["Tool Engineer"]))).status_code == 409
+    assert (await client.delete(url("change_ppt"),
+                                headers=await _admin(client))).status_code == 204
+
+
+async def test_evidence_of_open_assessment_is_removable_by_the_department(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    ids = await _docs(session_factory, offer_world, verdict_submitted=False)
+    res = await client.delete(f"/api/v1/changes/{cid}/attachments/{ids['rfq']}",
+                              headers=await _off(client, "tool"))
+    assert res.status_code == 204, res.text
+
+
+async def test_plain_documents_uploader_lead_pm_admin_only(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    ids = await _docs(session_factory, offer_world)
+    await _user(session_factory, seed, "q", "Quality")
+    q = await _auth(client, "q")
+    url = lambda k: f"/api/v1/changes/{cid}/attachments/{ids[k]}"  # noqa: E731
+    for kind in ("customer_email", "general"):
+        assert (await client.delete(url(kind), headers=q)).status_code == 403
+        assert (await client.delete(url(kind), headers=await _off(
+            client, "sales"))).status_code == 403
+    # the uploader (Tool) and PM
+    assert (await client.delete(url("general"), headers=await _off(
+        client, "tool"))).status_code == 204
+    assert (await client.delete(url("customer_email"), headers=await _off(
+        client, "pm"))).status_code == 204
+
+
+# --- LOW: a vendor quote's name in the changelog / audit --------------------
+
+async def test_vendor_quote_name_hidden_in_changelog_and_audit(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    await _user(session_factory, seed, "q", "Quality")
+    async with session_factory() as s:
+        off = CostingOffer(position_id=offer_world["position_id"],
+                           vendor_name="Hasco", cost=987.65,
+                           created_by=offer_world["users"]["tool"])
+        s.add(off)
+        await s.flush()
+        c = await s.get(ChangeRequest, cid)
+        await ChangeService.append_changelog(
+            s, c, "attachment_added",
+            "Attached Hasco-987.pdf (post_scoping, vendor_quote)",
+            offer_world["users"]["tool"],
+            new_value={"filename": "Hasco-987.pdf", "phase": "post_scoping",
+                       "kind": "vendor_quote", "costing_offer_id": off.id})
+        await s.commit()
+    q = await _auth(client, "q")
+    tool = await _off(client, "tool")
+    url = f"/api/v1/changes/{cid}/changelog"
+
+    def added(rows):
+        return next(r for r in rows if r["action"] == "attachment_added")
+    row = added((await client.get(url, headers=q)).json())
+    assert "Hasco" not in row["action_description"]
+    assert "Hasco" not in (row["new_value"] or "")
+    assert "Hasco-987.pdf" in added((await client.get(url, headers=tool)).json())[
+        "new_value"]
+    audit = "/api/v1/audit?correlation_id=C-O-1"
+
+    def audit_added(rows):
+        return next(r for r in rows if r["action"] == "attachment_added")
+    assert "Hasco" not in (audit_added((await client.get(
+        audit, headers=q)).json())["new_values"] or "")
+    assert "Hasco-987.pdf" in audit_added((await client.get(
+        audit, headers=tool)).json())["new_values"]
+    csv = (await client.get("/api/v1/audit/export?correlation_id=C-O-1",
+                            headers=q)).text
+    assert "Hasco-987" not in csv
+
+
+# --- INFO: an acting admin loses cross-org visibility -----------------------
+
+async def test_acting_admin_is_org_scoped(client, offer_world, session_factory, seed):
+    from app.models.entities import Plant
+    async with session_factory() as s:
+        org = Organization(name="B", code="b", is_active=True)
+        s.add(org)
+        await s.flush()
+        pl = Plant(organization_id=org.id, name="PB", code="pb", location="X",
+                   is_active=True)
+        s.add(pl)
+        await s.flush()
+        pr = Project(plant_id=pl.id, name="PrB", code="prb", status="active")
+        s.add(pr)
+        await s.flush()
+        c = ChangeRequest(change_number="C-B-1", title="org B", reason="r",
+                          change_type="physical_part", project_id=pr.id,
+                          raised_by=seed["admin_id"])
+        s.add(c)
+        await s.commit()
+        cb = c.id
+    url = f"/api/v1/changes/{cb}"
+    acting = await _admin(client, offer_world["depts"]["Tool Engineer"])
+    assert (await client.get(url, headers=acting)).status_code == 404
+    assert (await client.get(url, headers=await _admin(client))).status_code == 200
