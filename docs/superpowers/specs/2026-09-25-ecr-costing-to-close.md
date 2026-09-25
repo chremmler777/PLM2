@@ -638,3 +638,134 @@ Idea blocks (decided 2026-09-25, both engines MUST match):
 Vectors: idea -> real FS (the idea, even lengthened, moves nothing real);
 real -> idea (the idea moves); a summary of ideas only does not drive; a
 summary flagged idea with real work below it drives.
+
+## 12. Validation issues: the failure branch (2026-09-25)
+
+When validation fails technically (tool cannot run, assembly does not fit,
+out of tolerance, weight or cycle time off, cosmetic, packaging), the change
+does not just bounce back. Each failure becomes a **validation issue** with
+a light 8D shape and a decided route to the fix. Customer discussion is part
+of it. Release is refused while any issue is open.
+
+### Model (migration `090_validation_issues.py`, down_revision 089)
+`change_validation_issues`:
+| column | type | note |
+|---|---|---|
+| id | pk | |
+| change_id | fk, index | |
+| number | int | per change, 1..n (shown "VI-3") |
+| title | String(200) | |
+| category | String(30) | `tool` `equipment_assembly` `dimensional` `material_weight` `cycle_time` `cosmetic` `packaging` `documentation` `other` |
+| severity | int | 1 low, 2 medium, 3 blocks production |
+| department_id | fk null | owner department (who must fix) |
+| check_id | fk validation_checks null | the failed check it came from |
+| affected_part_id / affected_tool_ref | int null / String(120) null | what failed (part id; tool/equipment number free text) |
+| description | Text | what happened |
+| containment | Text null | immediate action (hold parts, protect bank, run old state) |
+| contained_at / contained_by | | |
+| root_cause | Text null | |
+| root_cause_at / root_cause_by | | |
+| route | String(30) null | `internal_rework` `supplier_rework` `design_change` `customer_concession` `follow_up_change` |
+| route_reason | Text null | |
+| route_decided_at / route_decided_by | | |
+| supplier_name | String(120) null | for supplier_rework |
+| chargeback | bool default false | supplier pays (supplier_rework) |
+| customer_inform | bool default false | customer must be told |
+| customer_decision | String(20) null | `accept_deviation` `require_fix` `new_timing` `pending` |
+| customer_decision_note | Text null | |
+| customer_decided_at / customer_decided_by | | Sales records |
+| concession_until | Date null | temporary concession end (null = permanent) |
+| extra_cost | Numeric(12,2) null | money (redacted for non-cost roles) |
+| cost_bearer | String(12) null | `internal` `supplier` `customer` |
+| follow_up_change_id | fk change_requests null | spawned follow-up ECR |
+| status | String(20) | `open` -> `contained` -> `route_decided` -> `fixing` -> `revalidation` -> `closed` / `accepted` (concession) / `transferred` (follow-up change) |
+| closed_at / closed_by / closure_note | | |
+| created_by / created_at / updated_at | | |
+
+`change_validation_issue_actions`: id, issue_id fk, description, owner_id fk
+users null, department_id null, due_date Date null, status open|done,
+done_at/by, created_by/at. (Fix actions.)
+
+Attachments: `change_attachments.validation_issue_id` fk null (evidence and
+customer mails filed into the issue; kinds `general`, `customer_email`).
+
+### Rules
+- **Raise**: any member of a routed department, PM, lead, admin, while
+  `in_validation` (or `in_implementation` after a loop back). A `failed`
+  validation check offers "Raise issue" prefilled (category from check key:
+  cycle_time -> cycle_time, weight -> material_weight, measured ->
+  dimensional, sampled -> tool, packaging_validated -> packaging,
+  revision_bump -> documentation); one open issue per failed check.
+- **Containment** (owner dept, PM, lead): required before a route can be
+  decided when severity is 3.
+- **Root cause** (owner dept, PM, lead): required before a route (all
+  severities), except `customer_concession` may be decided with the cause
+  still open when the customer accepts as-is.
+- **Route** decided by PM or lead (not the raiser alone; 4-eyes: the decider
+  must not be the raiser unless admin), with a reason:
+  - `internal_rework` / `supplier_rework` / `design_change`: status
+    `fixing`; if the change is `in_validation` it moves to
+    `in_implementation` automatically (the existing loop back, reason =
+    "VI-n: <title>: <route_reason>", changelog `validation_escalated`);
+    fix actions are required (>= 1); a plan block "Fix VI-n" (kind `work`,
+    lane owner dept) is added to the detailed plan after the last
+    validation block via the plan service (after the baseline: as a
+    deviation with the route reason). `design_change` sets
+    `customer_inform = true` by default.
+  - `customer_concession`: requires `customer_inform`; closes as
+    `accepted` only when Sales records `customer_decision =
+    accept_deviation` with a customer mail attached to the issue
+    (hard rule); `concession_until` optional.
+  - `follow_up_change`: creates a new ChangeRequest (captured, same
+    project, reason "Follow-up of <change_number> VI-n", description from
+    the issue, lead = this change's lead) and links it; issue status
+    `transferred`; this change may then be released once the rest is
+    closed (the follow-up carries the work).
+- **Customer**: Sales records the customer decision and notes, mails filed
+  into the issue. `require_fix` on a concession route reopens the route
+  decision. `new_timing` means the plan deviation must be escalated to the
+  customer (links the deviation escalation). A Sales task appears while
+  `customer_inform` is true and no decision is recorded.
+- **Cost**: `extra_cost` + `cost_bearer`; `customer` bearer creates a
+  Sales task "Quote the fix" and, when the change is still commercially open
+  (offer workflow), allows a supplement offer version (existing offer
+  versions, note "Supplement for VI-n"). Actuals P&L includes issue extra
+  costs by bearer (internal = our cost; supplier = recoverable; customer =
+  revenue once quoted).
+- **Fix actions**: owners mark done; all done -> status `revalidation`.
+- **Re-validation**: the linked validation check is answered again
+  (`passed`) by its department -> issue auto-closes (`closed`), or PM closes
+  with a closure note (no linked check). A new `failed` answer keeps it open
+  and reopens `fixing` (loop).
+- **Guards**: `in_validation -> released` soft guard adds "n validation
+  issues open"; `in_implementation -> in_validation` shows open issues in
+  `fixing` as info. Changelog actions: `validation_issue_raised`,
+  `_contained`, `_root_cause`, `_route_decided`, `_customer_decision`,
+  `_action_done`, `_revalidated`, `_closed`, `_transferred`.
+- **My actions / my tasks**: owner department: contain / root cause / fix
+  actions; PM/lead: decide route; Sales: customer decision, quote the fix.
+- **Rights for money**: `extra_cost` redacted for non-cost roles (price
+  redactor).
+
+### API (`/api/v1/changes/{id}/validation/issues...`)
+`GET` list (IssueOut incl. actions, attachments, names, allowed next acts
+for the viewer), `POST` create, `PATCH /{iid}` (title, description,
+severity, category, department_id, affected fields), `POST /{iid}/contain
+{containment}`, `POST /{iid}/root-cause {root_cause}`, `POST /{iid}/route
+{route, reason, supplier_name?, chargeback?, customer_inform?, actions?:
+[{description, owner_id?, department_id?, due_date?}]}`, `POST
+/{iid}/customer {decision, note, concession_until?}`, `POST /{iid}/cost
+{extra_cost, cost_bearer}`, `POST /{iid}/actions`, `POST
+/{iid}/actions/{aid}/done`, `POST /{iid}/close {note}` (PM/lead, no linked
+check), attachments via the existing upload with `validation_issue_id`.
+
+### UI (Release tab, Validation step)
+Validation panel: a failed check shows "Raise issue". Issues list above the
+checklist: VI-n cards with a stepper (Raised, Contained, Root cause, Route,
+Fixing, Re-validation, Closed), severity chip, owner, route badge, customer
+decision chip, extra cost (cost roles), actions checklist, evidence and
+customer mail drop zone, and one primary button for the viewer's next act.
+Route decision dialog explains each route in one line and what happens
+(loop back to implementation, plan block, customer mail requirement,
+follow-up change). Cockpit "Blocked by" lists open issues; the release
+blockers list includes them.
