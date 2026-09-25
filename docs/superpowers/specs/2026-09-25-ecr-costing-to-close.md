@@ -819,3 +819,41 @@ level 1..3, reason, notified (text: who), created_by/at, acknowledged_by/at):
   notification sweep (notification_sweep.py) for overdue triggers.
 - The cockpit shows the highest open level ("Escalation L3: VI-2 tool
   cannot run, customer informed 25.09").
+
+## 13. P&L rough cut: offer vs doing (2026-09-25)
+Not deep, but every change always compares the offer with what happened.
+
+Per change (`GET /api/v1/pnl/changes/{id}/offer-vs-actual`, cost roles only):
+```
+{ currency, basis: "accepted_offer" | "sent_offer" | "internal_approval" | "costing",
+  offer_version, lines: [
+   {key: "revenue", label, planned, actual},          # accepted offer total (+ supplements) ; actual = same + quoted issue supplements
+   {key: "internal", label, planned, actual},         # planned: costing internal (hours x rate) snapshot at acceptance; actual: booked hours x department rate
+   {key: "external", label, planned, actual},         # planned: costing external (chosen/favourite vendor); actual: actual cost entries
+   {key: "issues_internal", label, planned: 0, actual},   # validation issues borne by us
+   {key: "issues_supplier", label, planned: 0, actual},   # recoverable from supplier (shown, not in margin)
+   {key: "issues_customer", label, planned: 0, actual},   # billed to customer (adds to revenue actual when quoted)
+   {key: "scrap", label, planned, actual} ],
+  planned_margin, actual_margin, planned_margin_pct, actual_margin_pct, variance,
+  timing: {baseline_finish, forecast_finish, actual_finish, slip_days, unit},
+  piece_price: {delta_per_piece, annual_volume, annual_effect} | null,
+  warnings: [ "no accepted offer", "hours booked without department rate", ... ] }
+```
+Planned figures are frozen at customer acceptance (or internal approval) in
+the accepted offer's `_snapshot.pnl` (add to the snapshot on acceptance;
+older changes fall back to current costing with basis "costing").
+
+New table (migration `091_actual_costs.py`, down_revision "090"):
+`change_actual_costs` (id, change_id idx, department_id null, category
+`external` | `scrap` | `other`, vendor_name String(120) null, amount
+Numeric(12,2), cost_date Date, note Text null, attachment_id null,
+created_by/at). Write: cost roles, and members of the named department
+for their own department; read: cost roles.
+`GET/POST/DELETE /api/v1/changes/{id}/actual-costs`.
+
+P&L page (`/pnl`) list gains columns Offer revenue, Planned cost, Actual
+cost, Planned margin, Actual margin, Variance, Slip; summary tiles aggregate
+the same. UI: PnlCard shows plan only before implementation, then the
+offer-vs-actual table with variance chips, the timing line and an "Add
+actual cost" form (supplier invoice lines); the release summary uses the
+same card.
