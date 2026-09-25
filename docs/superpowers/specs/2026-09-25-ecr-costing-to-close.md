@@ -820,6 +820,156 @@ level 1..3, reason, notified (text: who), created_by/at, acknowledged_by/at):
 - The cockpit shows the highest open level ("Escalation L3: VI-2 tool
   cannot run, customer informed 25.09").
 
+### 12b. Backend notes (as built)
+
+Errors: 400 business refusal (string `detail`), 403 rights, 404 unknown
+issue / action / escalation / check on this change. Every write answers the
+issue's `IssueOut`; `POST` create and `POST /{iid}/actions` answer 201.
+
+**Model additions** (migration 090, beyond the table above): issues carry
+`new_timing_date`, `customer_escalation_id` (fk implementation_escalations),
+`fix_quoted_at/by` (customer bearer: Sales quoted the fix; P&L revenue
+"once quoted"), `recovery_task_id`, `revalidation_task_id` (plain ints, no
+FK), `escalation_level` (current, default 1). Actions carry `plan_task_id`
+(their recovery block). `change_validation_issue_escalations` has a
+`trigger` code: `raised severity action_overdue plan_slip no_route
+release_deadline unacknowledged require_fix manual deescalate`, and
+`created_by` null when the sweep raised it.
+
+**Extra endpoints** (all under `/validation/issues`): `GET /summary`
+(`{open_count, fixing_count, highest_level, top: {id, ref, title, level,
+status, customer_inform, customer_decided_at}, blocker, open: [...]}`),
+`GET /prefill?check_id=` (`{check_id, check_key, check_status, title,
+category, severity, department_id, department_name, description,
+existing_issue_id, can_raise}`), `GET /{iid}`, `POST /{iid}/fix-quoted
+{note?}` (Sales), `POST /{iid}/escalate {reason, level?}` (PM, lead, Sales;
+default one up), `POST /{iid}/deescalate {reason, level?}` (PM member or
+admin; default one down), `POST /{iid}/escalations/{eid}/acknowledge`.
+
+**Bodies**: create `{title, description, category?, severity?,
+department_id?, check_id? | check_key + check_department_id?,
+affected_part_id?, affected_tool_ref?}` (from a check: category and owner
+default from it; the check must be `failed`; one open issue per check).
+PATCH also takes `customer_inform` (Sales, PM, lead, admin; cannot be
+switched off on a concession). contain `{containment}` (or `{text}`),
+root-cause `{root_cause}` (or `{text}`). customer `{decision, note,
+concession_until?, new_release_due_date?}` (`new_date` accepted as alias).
+cost `{extra_cost, cost_bearer}` (bearer required when a cost is set).
+
+**IssueOut**: every column plus `ref` ("VI-n"), `department_name`,
+`check_key`, `check_department_id`, `check {id, check_key, label,
+department_id, department_name, status}`, `affected_part_number`, `*_name`
+for every user column, `cost_visible`, `extra_cost` (null when redacted),
+`cost_set`, `currency` ("EUR"), `can_supplement_offer`,
+`follow_up_change_number`, `step` (`raised contained root_cause route
+fixing revalidation closed`), `is_open`, `actions [{id, issue_id,
+description, owner_id, owner_name, department_id, department_name,
+due_date, status, overdue, done_at, done_by, done_by_name, plan_task_id,
+can_done, created_by, created_at}]`, `attachments [{id, filename, kind,
+content_type, size_bytes, phase, validation_issue_id, uploaded_by,
+uploaded_by_name, created_at}]`, `has_customer_mail`, `escalation_level`,
+`escalations [{id, level, trigger, reason, notified, created_by,
+created_by_name, created_at, acknowledged_by, acknowledged_by_name,
+acknowledged_at, needs_ack, can_acknowledge}]` (oldest first), `escalation
+{level, level_name, unacknowledged, latest, history}` (same rows),
+`recovery` (below), `next_acts`, `primary_act`, `extra_acts`.
+
+**next_acts** is ORDERED; the first entry outside `edit attach escalate
+add_action` is the primary button (`primary_act`). Names and when:
+`acknowledge` (an unacknowledged level 2/3 row the viewer was notified of),
+`contain` / `root_cause` (no route yet, not recorded, owner department / PM
+/ lead / admin), `route` (no route, PM / lead / admin and not the raiser
+unless admin, change in approved / in_implementation / in_validation,
+containment present at severity 3), `customer` (Sales / admin while
+`customer_inform` and no decision or `pending`), `action_done`, `close`
+(PM / lead / admin, no linked check, status `revalidation`), `cost` (cost
+roles, no cost recorded yet), `add_action` (owner side, fix route),
+`escalate` (PM / lead / Sales, level < 3), `edit`, `attach` (owner side or
+Sales). `extra_acts`: `quote_fix` (Sales, customer bearer, not quoted),
+`deescalate` (PM member or admin, level > 1).
+
+**recovery** (null without a recovery group): `{summary_task_id, task_id
+(same), revalidation_task_id, start, finish, plan_finish, baseline_finish,
+release_due_date, release_deadline (same), slip_days, slip_workdays,
+slip_baseline_wd, slip_deadline_wd, past_deadline_days,
+past_deadline_workdays, plan_past_deadline_days, needs_timing_decision}`.
+Every finish is the INCLUSIVE last day. `slip_*` compare the plan finish
+with the baseline finish / release deadline; `past_deadline_*` compare the
+recovery finish with the deadline; working days are Mon-Fri.
+`needs_timing_decision`: the plan finish is past the release deadline and
+no `new_timing` is recorded.
+
+**Rules as built**:
+- Raise window: `in_validation`, or `in_implementation` when the status
+  changelog shows the change was in validation before. "Routed department"
+  = any department with an assessment row or with priced implementation
+  work.
+- Route: 4-eyes refuses the raiser (403) unless admin. Fix routes need an
+  open action (existing or in the body). The loop back runs
+  `ChangeService.transition(..., reason="VI-n: <title>: <route reason>")`
+  (its guards apply: a refusal fails the route decision). Supplier rework
+  needs `supplier_name`. A `require_fix` on a concession clears the route
+  (status back to contained / open) and the next route decision clears
+  the `require_fix` decision.
+- Recovery group: anchored after the latest-ending `validation` block of
+  the detailed plan (no validation block: no incoming link, starts today);
+  it never starts before today. Fix blocks run in parallel from the start
+  (duration to the action's due date, else 5 working days, 7 calendar days
+  in calendar mode), "Re-validation VI-n" (kind `validation`, 3 days, lane
+  of the failed check's department) after all of them; the anchor links FS
+  into the summary, the re-validation links FS into every block the anchor
+  linked to. Before the baseline it is one `ChangePlanService.apply_changes`
+  ChangeSet (auto-push moves the successors, revision bump). After the
+  baseline `apply_changes` refuses structural edits, so the service writes
+  the blocks and links itself (using the plan service's helpers, unchanged)
+  and records deviations with reason "VI-n: <route reason>": one for the
+  summary (old = zero-length at its start) and one per pushed block with
+  `caused_by_task_id` = the summary. No detailed plan: no recovery group
+  (`recovery` null). Actions added after the route are not added to the
+  plan.
+- Customer: `accept_deviation` closes (status `accepted`) only on a
+  concession route and only with a `customer_email` attachment filed into
+  the issue. `new_timing` needs `new_release_due_date`, moves
+  `release_due_date` through the audited `release_deadline_set`
+  (reason "VI-n") and escalates every OPEN deviation whose reason starts
+  with "VI-n:" under ONE `ImplementationEscalation(direction="customer")`
+  (`customer_escalation_id`). Any decision sets `customer_inform`.
+- Re-validation: `ValidationService.record_check` calls
+  `ValidationIssueService.on_check_answered`: a `passed` answer closes every
+  open issue linked to that check (whatever its step), a `failed` answer
+  sends a linked issue in `revalidation` back to `fixing`. Close by hand:
+  PM / lead / admin with a note, only without a linked check, from
+  `revalidation` (or `open` / `contained` for an issue raised in error).
+- Attachments: `POST /changes/{id}/attachments` takes form field
+  `validation_issue_id` (kinds `general`, `customer_email`; open issue;
+  owner department, PM, lead, Sales, raiser, admin; exclusive with the
+  other containers). Delete follows the default rule (uploader, lead, PM,
+  admin). `AttachmentResponse.validation_issue_id` added.
+- Escalation: a level only rises automatically; a trigger already recorded
+  at a level does not fire again (so a PM de-escalation sticks until a new
+  trigger). Level 3 sets `customer_inform`. Audience: L1 owner department +
+  PM; L2 PM + lead + Sales; L3 adds Management (or active admins when that
+  department has no members). Notifications `kind
+  validation_issue_escalated`, link `/changes/{id}?tab=release&issue={iid}`.
+  Re-evaluated after every issue write and by the sweep
+  (`counts["validation_issue_escalated"]`); plan edits outside the issue
+  endpoints are picked up by the sweep.
+- Guards: `in_validation -> released` adds "n validation issue(s) open"
+  after the validation-check blocker (transferred / accepted / closed do
+  not count); the release tab `blockers` list carries the same text.
+  `ValidationIssueService.fixing_info` gives the "still fixing" info for
+  `in_implementation -> in_validation` (not a guard).
+- my_actions / my-tasks kinds (`target_tab: "release"`, `issue_id`):
+  `validation_issue_contain` (owner dept, severity 3), `_root_cause` (owner
+  dept), `_route`, `_action` (action owner / department), `_customer`,
+  `_quote`, `_close`, `_escalation` (+ `escalation_id`, `level`; label
+  "Acknowledge escalation VI-n (level x)"). Admins get none of the role
+  rows (they act on the card). my-tasks rows carry `hint` = label.
+- Money: `extra_cost` is in `PRICE_KEYS` (changelog / audit redaction) and
+  null in `IssueOut` outside the cost roles; `cost_set` still tells.
+  `can_supplement_offer` is only a flag (customer bearer while the change is
+  quoting / quoted); no offer is created by the issue.
+
 ## 13. P&L rough cut: offer vs doing (2026-09-25)
 Not deep, but every change always compares the offer with what happened.
 
@@ -898,3 +1048,31 @@ build planning and implementation.
   tab (reference, documents, SOP, their timing file, inform list with
   receipts). LifecycleStepper shows only the used stages.
 - **P&L**: actual local costs only (no offer basis; basis "none").
+
+## 15. Cost sheet, Finance controlled (side track, 2026-09-25)
+Hourly costs come from a per-position cost sheet that Finance maintains and
+updates regularly. Separate module, feeds costing and the P&L.
+- **Model**: `cost_sheet_versions` (id, organization_id, version int,
+  valid_from Date, published_at/by, note, status draft|published) and
+  `cost_sheet_rates` (id, version_id, department_id, position String(80)
+  null (e.g. Engineer, Technician, Toolmaker; null = department default),
+  plant_id null (null = all plants), hourly_rate Numeric(10,2), currency
+  String(3), note). Existing `department_rate` rows migrate into version 1
+  (valid_from = earliest, published).
+- **Rights**: edit drafts and publish: members of the "Finance" department
+  (create it if missing) or admin; read: everyone (rates are public by
+  design). Publishing a draft freezes it; the previous version stays
+  readable with its validity end = new valid_from - 1.
+- **Stale warning**: org setting `cost_sheet_review_months` (default 12);
+  banner on the cost sheet page and in costing when the latest published
+  version is older; My Tasks item for Finance.
+- **Rate lookup**: `rate_for(department, position, plant, on_date)` =
+  most specific match (dept+position+plant > dept+position > dept+plant >
+  dept) in the version valid on that date. Costing lines store the rate
+  snapshot and the version id; P&L actuals use the rate valid on the
+  booking date; offers warn "costing used cost sheet v3, current is v4".
+  Bookings may name a position (optional) to pick the position rate.
+- **UI**: sidebar Setup > "Cost sheet": version selector with validity,
+  table department x position x plant, inline edit in drafts, "Publish
+  version" with valid-from and note, diff to previous version, CSV/XLSX
+  export.
