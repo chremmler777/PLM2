@@ -135,7 +135,8 @@ checked_by, checked_at. Unique (change_id, check_key). Seeded lazily.
   lists; refused after baseline).
 - `POST /plan/schedule {plan}` -> PlanOut. Forward pass: every task whose start
   is before its latest predecessor end moves to that end (successors cascade).
-  Never pulls tasks earlier. After baseline refused (dates move by deviation).
+  Never pulls tasks earlier. After the baseline it needs `reason` and every
+  moved block becomes a deviation (see §5).
 - `GET /plan/export.xml?plan=` -> MSPDI XML (`application/xml`, filename
   `<change_number>-<plan>.xml`) that MS Project opens: Project/Name, StartDate,
   Tasks with UID, ID, Name, Start, Finish, Duration (`PT{24*d}H0M0S`),
@@ -397,9 +398,12 @@ clarification.
 - After "Timing validated": `can_edit = false`, `can_edit_dates = true`.
   Structural fields (`name, kind, lane, department_id, predecessors, is_idea,
   sort_order`) are refused (400), `notes` stays editable, add / delete /
-  schedule are refused. A date move does NOT push successors (no forward pass
-  after the baseline): to move a chain, send the selection through the bulk
-  PATCH. `finish_impact_days` is the same value on every deviation of one call.
+  A date move pushes the successors it drives
+  (later only; pinned blocks and blocks that already started stay put); each
+  pushed block gets its own deviation with the same reason and
+  `caused_by_task_id` / `caused_by_task_name` naming the block the user moved.
+  `finish_impact_days` is the same value on every deviation of one call.
+  Schedule after the baseline needs `reason` and creates deviations.
 - Progress (`progress_pct, actual_start, actual_finish`): detailed plan only,
   status `in_implementation` only. A PATCH that carries only these fields uses
   the department rule; mixing them with other fields needs an editor.
@@ -540,9 +544,13 @@ via CSS variables.
 String(4) null, `constraint_date` Date null, `wbs` not stored (computed).
 New table `change_plan_links` (id, change_id, plan, from_task_id,
 to_task_id, type FS|SS|FF|SF, lag_days int). `predecessors` JSON stays
-readable for old rows and is migrated into links. Plan-level calendar on
-`change_requests`: `plan_calendar` JSON null (default calendar mode,
-Mon-Fri, no holidays). The service schedules with the same rules as the TS
+readable for old rows and is migrated into links. Calendar per plan on
+`change_requests.plan_calendar` JSON: `{"quote": {...}, "detailed": {...}}`
+(the old flat shape reads as the calendar of both plans; default calendar
+mode, Mon-Fri, no holidays). `PUT /plan/calendar?plan=` sets one plan's
+calendar, refused outside that plan's edit window or after the baseline;
+seeding the detailed plan copies the quote plan's calendar.
+`POST /plan/import` returns PlanOut plus `import_warnings: string[]`. The service schedules with the same rules as the TS
 engine (shared test vectors in `backend/tests/data/gantt_vectors.json`, the
 frontend engine tests read the same file). MSPDI export includes link type +
 lag (LinkLag in tenths of minutes) and summary tasks (OutlineLevel);
