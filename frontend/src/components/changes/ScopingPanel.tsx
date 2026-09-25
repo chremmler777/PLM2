@@ -491,7 +491,7 @@ export default function ScopingPanel(
             {openQuestions.map(questionCard)}
           </div>
         ) : (
-          !outstanding && <p className="text-xs text-slate-500">{t('concern.noneScoping')}</p>
+          !outstanding && <p className="text-xs text-slate-500" data-testid="scoping-now-empty">{t('scoping.noOpenQuestions')}</p>
         )}
 
         {unassignedQuestionDocs.length > 0 && (

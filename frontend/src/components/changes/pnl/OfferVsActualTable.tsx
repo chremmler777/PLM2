@@ -41,7 +41,13 @@ function Chip({ line, currency }: { line: OvaLine; currency: string }) {
 export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
   const cur = data.currency
   const running = !!data.in_progress
-  const marginTone = varianceTone(data.variance, data.planned_margin, 1)
+  // The server's margin row wins; older payloads carry only the flat fields.
+  const mr = data.margin_row ?? {
+    planned: data.planned_margin, actual: data.actual_margin, forecast: data.forecast_margin,
+    planned_pct: data.planned_margin_pct, actual_pct: data.actual_margin_pct,
+    forecast_pct: data.forecast_margin_pct, variance: data.variance,
+  }
+  const marginTone = varianceTone(mr.variance, mr.planned, 1)
   const t = data.timing
   const slip = t.slip_days
   return (
@@ -88,24 +94,24 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
             <tr className="border-t border-slate-600 font-semibold text-slate-100">
               <td className="py-1.5 pr-2">Margin</td>
               <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-planned-margin">
-                {money(data.planned_margin, cur)}
-                <span className="font-normal text-slate-500">{pct(data.planned_margin_pct)}</span>
+                {money(mr.planned, cur)}
+                <span className="font-normal text-slate-500">{pct(mr.planned_pct)}</span>
               </td>
               <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-actual-margin">
-                {money(data.actual_margin, cur)}
-                <span className="font-normal text-slate-500">{pct(data.actual_margin_pct)}</span>
+                {money(mr.actual, cur)}
+                <span className="font-normal text-slate-500">{pct(mr.actual_pct)}</span>
               </td>
               {running && (
                 <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-forecast-margin">
-                  {money(data.forecast_margin ?? data.actual_margin, cur)}
-                  <span className="font-normal text-slate-500">{pct(data.forecast_margin_pct ?? data.actual_margin_pct)}</span>
+                  {money(mr.forecast ?? mr.actual, cur)}
+                  <span className="font-normal text-slate-500">{pct(mr.forecast_pct ?? mr.actual_pct)}</span>
                 </td>
               )}
               <td className="py-1.5 pl-2 text-right">
-                {data.variance !== null && (
+                {mr.variance !== null && mr.variance !== undefined && (
                   <span data-testid="ova-margin-variance" data-tone={marginTone}
                     className={`rounded px-1.5 py-0.5 text-[11px] tabular-nums ${TONE_CLASS[marginTone]}`}>
-                    {data.variance > 0 ? '+' : ''}{money(data.variance, cur)}
+                    {mr.variance > 0 ? '+' : ''}{money(mr.variance, cur)}
                   </span>
                 )}
               </td>

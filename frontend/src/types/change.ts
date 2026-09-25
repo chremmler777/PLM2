@@ -393,6 +393,8 @@ export interface ChangeTask {
   owner_name?: string | null;
   accepted_at?: string | null;
   mine?: boolean;
+  /** The backend's word that the row is the viewer's own; wins over `mine`. */
+  is_mine?: boolean;
   // kickoff rows: which of description / attachment / date is still missing
   missing?: string[];
   // scoping wrap-up rows
@@ -544,7 +546,11 @@ export type MyActionKind =
   /** Validation issues (spec §12): the viewer's owed act on one issue. */
   | 'validation_issue_contain' | 'validation_issue_root_cause' | 'validation_issue_route'
   | 'validation_issue_action' | 'validation_issue_customer' | 'validation_issue_quote'
-  | 'validation_issue_close' | 'validation_issue_escalation';
+  | 'validation_issue_close' | 'validation_issue_escalation'
+  /** Re-validation: the check's department answers the linked check again. */
+  | 'validation_issue_recheck'
+  /** Re-validation failed with every fix action done: a new action is owed. */
+  | 'validation_issue_add_action';
 
 export interface MyAction {
   kind: MyActionKind;

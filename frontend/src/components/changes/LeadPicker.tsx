@@ -1,8 +1,10 @@
 /**
  * The change lead, on the Status card (spec §16 P1 5). The lead, Project
  * Management and admins may set it; everyone else reads it. The picker offers
- * the backend's candidates when it names them (the project's PM first, as the
- * default), else the people it can see: the current lead and the viewer.
+ * the backend's candidates (GET /changes/{id}/lead-candidates: PM members,
+ * the current lead, the project's PM as the default). An older backend
+ * without the endpoint (404) falls back to the user list for admins, and for
+ * everyone to the people the picker can see: the current lead and the viewer.
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -30,8 +32,11 @@ export default function LeadPicker({ change, canEdit, viewer, isAdmin = false }:
     queryFn: async (): Promise<LeadCandidate[]> => {
       try {
         return await changesApi.leadCandidates(change.id)
-      } catch {
-        if (!isAdmin) return []
+      } catch (e) {
+        // Only a missing endpoint falls back to the user list; a refusal or
+        // a failure leaves the lead and the viewer.
+        const status = (e as { response?: { status?: number } })?.response?.status
+        if (status !== 404 || !isAdmin) return []
         const users = (await client.get<{ id: number; full_name?: string | null; username: string; is_active?: boolean }[]>('/v1/users')).data
         return users.filter((u) => u.is_active !== false)
           // Two people may share a display name: the login tells them apart.
@@ -61,7 +66,8 @@ export default function LeadPicker({ change, canEdit, viewer, isAdmin = false }:
     <div data-testid="lead-picker" className="flex flex-wrap items-center gap-2">
       <span>{t('cockpit.lead')}:</span>
       {editing ? (
-        <select aria-label={t('cockpit.leadPick')} data-testid="lead-select" autoFocus
+        // Keyed on the default so it is preselected once the candidates arrive.
+        <select key={defaultId ?? 'none'} aria-label={t('cockpit.leadPick')} data-testid="lead-select" autoFocus
           defaultValue={change.lead_id ?? defaultId ?? ''}
           disabled={set.isPending}
           onChange={(e) => { const v = Number(e.target.value); if (v) set.mutate(v) }}

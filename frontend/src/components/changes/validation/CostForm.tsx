@@ -23,10 +23,12 @@ export function CostLine({ issue, canSeeCosts }: { issue: IssueOut; canSeeCosts:
   )
 }
 
-export default function CostForm({ changeId, issue, onDone }: {
+export default function CostForm({ changeId, issue, onDone, late = false }: {
   changeId: number
   issue: IssueOut
   onDone?: () => void
+  /** The issue is closed: a late invoice or a corrected amount. */
+  late?: boolean
 }) {
   const [amount, setAmount] = useState<number | null>(issue.extra_cost ?? null)
   const [bearer, setBearer] = useState<CostBearer>(issue.cost_bearer
@@ -43,6 +45,11 @@ export default function CostForm({ changeId, issue, onDone }: {
         <Segmented<CostBearer> value={bearer} onChange={setBearer} testId="cost-bearer"
           options={(['internal', 'supplier', 'customer'] as CostBearer[]).map((b) => ({ value: b, label: BEARER_LABEL[b] }))} />
       </div>
+      {late && (
+        <p data-testid={`issue-cost-late-${issue.id}`} className="text-[11px] text-slate-400">
+          The issue is closed. This replaces the recorded cost (a late invoice or a correction) and is logged as such.
+        </p>
+      )}
       {bearer === 'customer' && (
         <p className="text-[11px] text-slate-400">Sales gets a task to quote the fix to the customer.</p>
       )}

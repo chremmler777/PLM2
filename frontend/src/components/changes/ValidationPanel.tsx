@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { validationIssuesKey } from '../../api/validationIssues'
 import { t } from '../../i18n/cmLabels'
 import ReasonDialog from './ReasonDialog'
 import type {
@@ -113,6 +114,8 @@ function CheckRow({
       qc.invalidateQueries({ queryKey: ['change', changeId, 'validation'] })
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
+      // a re-check closes (pass) or reopens (fail) the issues linked to it
+      qc.invalidateQueries({ queryKey: validationIssuesKey(changeId) })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the check'),
   })

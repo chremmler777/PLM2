@@ -34,11 +34,14 @@ export type EscalationLevel = 1 | 2 | 3
  */
 export type IssueAct =
   | 'contain' | 'root_cause' | 'route' | 'customer' | 'cost'
-  | 'add_action' | 'action_done' | 'close' | 'acknowledge' | 'escalate'
+  | 'add_action' | 'action_done' | 'recheck' | 'close' | 'acknowledge' | 'escalate'
   | 'edit' | 'attach'
 
-/** Acts the card shows outside the step flow (backend `extra_acts`). */
-export type IssueExtraAct = 'quote_fix' | 'deescalate'
+/**
+ * Acts the card shows outside the step flow (backend `extra_acts`). On a
+ * closed issue `cost` is a late invoice or a corrected amount.
+ */
+export type IssueExtraAct = 'quote_fix' | 'deescalate' | 'cost'
 
 export interface IssueActionOut {
   id: number
@@ -107,6 +110,11 @@ export interface IssueOut {
   check_id?: number | null
   check_key?: string | null
   check_department_id?: number | null
+  /** The linked check as the backend names it (label in the viewer's words). */
+  check?: {
+    id: number; check_key: string; label?: string | null
+    department_id?: number | null; department_name?: string | null; status?: string | null
+  } | null
   affected_part_id?: number | null
   affected_part_number?: string | null
   affected_tool_ref?: string | null
@@ -152,6 +160,12 @@ export interface IssueOut {
   /** can_delete: the backend's word on removing this file, when sent. */
   attachments: (Attachment & { can_delete?: boolean })[]
   next_acts?: IssueAct[]
+  /**
+   * The backend's pick of the one primary button (null: none). Wins over the
+   * first non-quiet act when the key is sent, so add_action can lead after a
+   * failed re-validation.
+   */
+  primary_act?: IssueAct | null
   extra_acts?: IssueExtraAct[]
   /** raised, contained, root_cause, route, fixing, revalidation, closed. */
   step?: string | null
@@ -171,6 +185,11 @@ export interface IssueCreate {
   /** The failed check by its key and department, when no id is known. */
   check_key?: string | null
   check_department_id?: number | null
+  /** The linked check as the backend names it (label in the viewer's words). */
+  check?: {
+    id: number; check_key: string; label?: string | null
+    department_id?: number | null; department_name?: string | null; status?: string | null
+  } | null
   affected_part_id?: number | null
   affected_tool_ref?: string | null
 }

@@ -16,7 +16,7 @@ import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
 import { formatMoney } from '../lib/format';
 import { TONE_CLASS, varianceTone } from '../components/changes/pnl/variance';
-import type { PnlBranch, PnlStatusGroup, PnlFilters, PnlRow } from '../types/pnl';
+import type { PnlAggregate, PnlBranch, PnlStatusGroup, PnlFilters, PnlRow } from '../types/pnl';
 
 const fmtMoney = (v: number | null | undefined) =>
   v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v);
@@ -44,6 +44,25 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean; title?: string 
   { key: 'variance', label: 'Variance', numeric: true, title: 'Actual margin minus planned margin' },
   { key: 'slip_days', label: 'Slip', numeric: true, title: 'Finish against the baseline, in plan units' },
 ];
+
+/** A second figure worth a line under the first: present and not the same. */
+const differs = (v: number | null | undefined, base: number | null | undefined): v is number =>
+  v !== null && v !== undefined && Number.isFinite(v) && Math.abs(v - (base ?? 0)) > 0.005;
+
+/** Offer revenue tile: how many changes carry a price and how many still wait for one. */
+function pricedLine(t: PnlAggregate, count: number): string {
+  if (t.priced_count === undefined) return `${count} changes, incl. internal budgets`;
+  const pending = t.unpriced_count ?? 0;
+  return `${t.priced_count} priced${pending ? `, ${pending} price pending` : ''}, incl. internal budgets`;
+}
+
+/** Actual cost tile: the expected end cost next to what is booked. */
+function actualCostLine(t: PnlAggregate): string {
+  const c = t.actual_count ?? 0;
+  const n = `${c} change${c === 1 ? '' : 's'} with hours, invoices or issue costs`;
+  return t.forecast_cost !== undefined && differs(t.forecast_cost, t.actual_cost)
+    ? `forecast ${fmtMoney(t.forecast_cost)}; ${n}` : n;
+}
 
 function sortRows(rows: PnlRow[], key: SortKey, dir: 1 | -1): PnlRow[] {
   return [...rows].sort((a, b) => {
@@ -269,7 +288,7 @@ export default function PnlPage() {
             <Tile
               title="Offer revenue"
               value={fmtMoney(summary.totals.offer_revenue ?? summary.totals.revenue)}
-              sub={`${summary.count} changes, incl. internal budgets`}
+              sub={pricedLine(summary.totals, summary.count)}
               subClassName="text-[10px] text-slate-500"
             />
             <Tile
@@ -294,13 +313,14 @@ export default function PnlPage() {
             <Tile
               title="Actual cost"
               value={fmtMoney(summary.totals.actual_cost)}
-              sub={`${summary.totals.actual_count ?? 0} changes with hours, invoices or issue costs`}
+              sub={actualCostLine(summary.totals)}
             />
             <Tile
               title="Actual margin"
               value={fmtMoney(summary.totals.forecast_margin ?? summary.totals.actual_margin)}
               accent={marginAccent(summary.totals.forecast_margin ?? summary.totals.actual_margin)}
-              sub={`forecast, to date ${fmtMoney(summary.totals.actual_margin)}`}
+              sub={`forecast, to date ${fmtMoney(summary.totals.actual_margin)}${
+                summary.totals.actual_revenue !== undefined ? ` on ${fmtMoney(summary.totals.actual_revenue)} revenue` : ''}`}
             />
             <Tile
               title="Variance"
@@ -386,9 +406,23 @@ export default function PnlPage() {
                     ) : (
                       <span className="text-slate-100">{fmtMoney(r.offer_revenue ?? r.revenue)}</span>
                     )}
+                    {differs(r.actual_revenue, r.offer_revenue ?? r.revenue) && (
+                      <div data-testid={`pnl-actual-revenue-${r.change_id}`} className="text-[10px] text-slate-500"
+                        title="Revenue with the validation issue costs billed to the customer">
+                        actual {fmtMoney(r.actual_revenue)}
+                      </div>
+                    )}
                   </td>
                   <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">{fmtMoney(r.planned_cost ?? r.total_cost)}</td>
-                  <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">{fmtMoney(r.actual_cost)}</td>
+                  <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">
+                    {fmtMoney(r.actual_cost)}
+                    {differs(r.forecast_cost, r.actual_cost) && (
+                      <div data-testid={`pnl-forecast-cost-${r.change_id}`} className="text-[10px] text-slate-500"
+                        title="Expected cost at release: open cost lines count at plan">
+                        forecast {fmtMoney(r.forecast_cost)}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-2 py-2.5 text-right whitespace-nowrap">
                     <span
                       className={`px-2.5 py-1 rounded-full text-xs font-semibold ${marginBadgeClasses(r.planned_margin ?? r.margin)}`}

@@ -138,18 +138,21 @@ export default function DateInput(p: Props) {
   }
 
   return (
-    <div ref={wrap} className="relative">
+    <div ref={wrap} className="relative"
+      // The whole control commits: the field, the calendar button and the
+      // popover (a portal, but its focus events bubble here through React).
+      // Tab from the field to the calendar button and then a click elsewhere
+      // still commits the typed date.
+      onBlur={(e) => {
+        if (inside(e.relatedTarget as Node | null)) return
+        setOpen(false)
+        commitText(); p.onBlur?.()
+      }}>
       <input ref={input} id={p.id} type="text" inputMode="numeric" disabled={p.disabled} aria-label={p['aria-label']}
         aria-invalid={invalid || !!message || undefined} aria-describedby={shownMessage ? msgId : undefined}
         placeholder={p.placeholder ?? 'dd.mm.yyyy'}
         className={`${p.className ?? ''} pr-7`} style={p.style} value={text}
         onChange={(e) => { setText(e.target.value); setMessage(null) }}
-        onBlur={(e) => {
-          // Focus into the popover keeps the edit going; Tab elsewhere closes it.
-          if (inside(e.relatedTarget as Node | null)) return
-          setOpen(false)
-          commitText(); p.onBlur?.()
-        }}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); close(false); return }
           if (e.key === 'Enter') commitText()
@@ -186,11 +189,6 @@ export default function DateInput(p: Props) {
           onMouseDown={(e) => e.preventDefault()}
           onKeyDown={(e) => {
             if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true) }
-          }}
-          onBlur={(e) => {
-            // Tab out of the calendar (not back to the field) closes it.
-            const to = e.relatedTarget as Node | null
-            if (to && !inside(to)) setOpen(false)
           }}>
           <div className="mb-1 flex items-center">
             <button type="button" aria-label="Previous month" className="rounded px-1.5 hover:bg-slate-800"

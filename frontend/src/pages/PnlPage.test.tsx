@@ -164,4 +164,26 @@ describe('PnlPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Planned cost/ }))
     expect(order()).toEqual(['GB-CM-0002', 'GB-CM-0001'])
   })
+
+  it('shows priced and unpriced counts, the forecast cost, actual revenue and forecast cost per row', async () => {
+    summaryMock.mockResolvedValueOnce({ ...summaryFixture,
+      totals: { ...summaryFixture.totals, priced_count: 2, unpriced_count: 5, actual_revenue: 26892, forecast_cost: 28692 } })
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[0], actual_revenue: 53000, forecast_cost: 14000 },
+      { ...rowsFixture[1], actual_revenue: null, forecast_cost: null },
+    ] })
+    renderPage()
+    expect(await screen.findByText('2 priced, 5 price pending, incl. internal budgets')).toBeDefined()
+    expect(screen.getByText(/^forecast 28[.,]692/)).toBeDefined()
+    expect(screen.getByText(/on 26[.,]892/)).toBeDefined()
+    expect((await screen.findByTestId('pnl-actual-revenue-1')).textContent).toMatch(/actual 53[.,]000/)
+    expect(screen.getByTestId('pnl-forecast-cost-1').textContent).toMatch(/forecast 14[.,]000/)
+    expect(screen.queryByTestId('pnl-actual-revenue-2')).toBeNull()
+    expect(screen.queryByTestId('pnl-forecast-cost-2')).toBeNull()
+  })
+
+  it('an older summary without counts keeps the change count line', async () => {
+    renderPage()
+    expect(await screen.findByText('2 changes, incl. internal budgets')).toBeDefined()
+  })
 })

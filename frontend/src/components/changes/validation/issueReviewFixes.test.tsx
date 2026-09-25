@@ -280,3 +280,65 @@ describe('F6 polish', () => {
     expect(screen.getByTestId('confirm-clear')).toBeDefined()
   })
 })
+
+describe('follow-ups: recheck, add_action, acts after close', () => {
+  it('recheck is the primary act and points at the linked check in the validation panel', () => {
+    const row = document.createElement('li')
+    row.setAttribute('data-testid', 'validation-check-27-measured')
+    const scroll = vi.fn()
+    row.scrollIntoView = scroll
+    document.body.appendChild(row)
+    card(issue({
+      status: 'revalidation', route: 'internal_rework', check_id: 58, check_key: 'measured', check_department_id: 27,
+      check: { id: 58, check_key: 'measured', label: 'Part measured', department_id: 27, department_name: 'Tool Engineer' },
+      next_acts: ['recheck', 'escalate', 'edit'], primary_act: 'recheck',
+    }))
+    const btn = screen.getByTestId('issue-primary-11')
+    expect(btn.getAttribute('data-act')).toBe('recheck')
+    expect(btn.textContent).toBe('Re-check the validation')
+    fireEvent.click(btn)
+    expect(scroll).toHaveBeenCalled()
+    expect(screen.getByTestId('issue-recheck-11').textContent).toContain('Part measured')
+    expect(screen.getByTestId('issue-recheck-11').textContent).toContain('(Tool Engineer)')
+    row.remove()
+  })
+
+  it('the backend primary_act wins: add_action leads after a failed re-validation and opens the add row', () => {
+    card(issue({
+      status: 'fixing', route: 'internal_rework',
+      actions: [{ id: 1, description: 'Rework slide', status: 'done' }],
+      next_acts: ['cost', 'add_action', 'escalate', 'edit'], primary_act: 'add_action',
+    }), { canManage: true })
+    const btn = screen.getByTestId('issue-primary-11')
+    expect(btn.getAttribute('data-act')).toBe('add_action')
+    expect(screen.queryByTestId('issue-action-text-11')).toBeNull()
+    fireEvent.click(btn)
+    expect(screen.getByTestId('issue-action-text-11')).toBeDefined()
+  })
+
+  it('primary_act null means no primary button, even with a non-quiet act listed', () => {
+    card(issue({ next_acts: ['cost', 'edit'], primary_act: null }))
+    expect(screen.queryByTestId('issue-primary-11')).toBeNull()
+  })
+
+  it('a closed issue offers a late cost from extra_acts and saves it', async () => {
+    card(issue({ status: 'closed', cost_set: true, extra_cost: 1800, cost_bearer: 'internal',
+      next_acts: [], extra_acts: ['cost'] }), { canSeeCosts: true }, { defaultOpen: true })
+    fireEvent.click(screen.getByTestId('issue-act-late-cost-11'))
+    expect(screen.getByTestId('issue-act-late-cost-11').textContent).toBe('Correct the cost')
+    expect(screen.getByTestId('issue-cost-late-11')).toBeDefined()
+    fireEvent.click(screen.getByTestId('cost-submit'))
+    await waitFor(() => expect(validationIssuesApi.cost).toHaveBeenCalledWith(7, 11, { extra_cost: 1800, cost_bearer: 'internal' }))
+  })
+
+  it('a closed issue with a customer-paid fix still offers the quote', () => {
+    card(issue({ status: 'closed', cost_set: true, cost_bearer: 'customer', next_acts: [], extra_acts: ['quote_fix'] }),
+      { isSales: true })
+    expect(screen.getByTestId('issue-primary-11').getAttribute('data-act')).toBe('quote_fix')
+  })
+
+  it('the new My Actions kinds are issue acts', () => {
+    expect(isIssueActionKind('validation_issue_recheck')).toBe(true)
+    expect(isIssueActionKind('validation_issue_add_action')).toBe(true)
+  })
+})

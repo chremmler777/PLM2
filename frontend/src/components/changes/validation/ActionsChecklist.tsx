@@ -2,7 +2,7 @@
  * The fix actions of an issue. Owners tick theirs; when the last one is done
  * the issue moves to re-validation by itself.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { IssueActionOut, IssueOut } from '../../../types/validationIssue'
 import { daysUntil, formatDate, todayIso } from '../../../lib/format'
@@ -15,14 +15,17 @@ export const mayTick = (a: IssueActionOut, v: IssueViewer) =>
     || (v.id != null && a.owner_id === v.id)
     || (a.department_id != null && (v.myDepartmentIds ?? []).includes(a.department_id))))
 
-export default function ActionsChecklist({ changeId, issue, viewer, canAdd, departments }: {
+export default function ActionsChecklist({ changeId, issue, viewer, canAdd, departments, addRequest = 0 }: {
   changeId: number
   issue: IssueOut
   viewer: IssueViewer
   canAdd: boolean
   departments: { id: number; name: string }[]
+  /** Bumped by the card's add_action button: opens the add row. */
+  addRequest?: number
 }) {
   const [adding, setAdding] = useState(false)
+  useEffect(() => { if (addRequest > 0 && canAdd) setAdding(true) }, [addRequest, canAdd])
   const [text, setText] = useState('')
   const [dept, setDept] = useState<number | null>(issue.department_id ?? null)
   const [due, setDue] = useState('')

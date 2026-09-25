@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { byUrgency, foldChangeTasks, foldWorkflowTasks } from './myTasks'
+import { byUrgency, changeTaskMine, foldChangeTasks, foldWorkflowTasks } from './myTasks'
 import type { ChangeTask } from '../types/change'
 import type { MyTask } from '../types/workflow'
 
@@ -9,6 +9,16 @@ const ct = (over: Partial<ChangeTask>): ChangeTask => ({
 })
 
 describe('foldChangeTasks', () => {
+  it('is_mine wins over the older mine flag, and folds with OR', () => {
+    expect(changeTaskMine({ is_mine: false, mine: true })).toBe(false)
+    expect(changeTaskMine({ is_mine: true })).toBe(true)
+    expect(changeTaskMine({ mine: true })).toBe(true)
+    expect(changeTaskMine({})).toBe(false)
+    expect(foldChangeTasks([ct({ is_mine: false, mine: true })])[0].mine).toBe(false)
+    const folded = foldChangeTasks([ct({ rasic_letters: ['A'], is_mine: false }), ct({ rasic_letters: ['R'], is_mine: true })])
+    expect(folded[0].mine).toBe(true)
+  })
+
   it('folds R and A rows of one department into one, earliest due and both letters', () => {
     const out = foldChangeTasks([
       ct({ rasic_letters: ['A'], due_date: '2026-10-05' }),

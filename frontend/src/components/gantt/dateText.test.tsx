@@ -129,6 +129,34 @@ describe('DateInput popover and messages (review #5, #8)', () => {
     expect(screen.queryByTestId('date-popover')).toBeNull()
   })
 
+  it('Tab to the calendar button, then a click away, commits the typed date (whole-control blur)', () => {
+    const onChange = vi.fn()
+    const onBlur = vi.fn()
+    render(<><DateInput aria-label="Start" value="2026-10-05" onChange={onChange} onBlur={onBlur} /><button type="button">elsewhere</button></>)
+    const input = screen.getByLabelText('Start') as HTMLInputElement
+    const btn = screen.getByLabelText('Open calendar')
+    fireEvent.change(input, { target: { value: '09.10.2026' } })
+    // Tab: focus moves from the field to the calendar button, still inside
+    fireEvent.blur(input, { relatedTarget: btn })
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onBlur).not.toHaveBeenCalled()
+    // click away: the button loses focus to nothing focusable
+    fireEvent.blur(btn, { relatedTarget: null })
+    expect(onChange).toHaveBeenCalledWith('2026-10-09')
+    expect(onBlur).toHaveBeenCalledTimes(1)
+    expect(input.value).toBe('09.10.2026')
+  })
+
+  it('Tab from the calendar button to the next field commits too', () => {
+    const onChange = vi.fn()
+    render(<><DateInput aria-label="Start" value="2026-10-05" onChange={onChange} /><button type="button">next</button></>)
+    const input = screen.getByLabelText('Start')
+    fireEvent.change(input, { target: { value: '12.10.2026' } })
+    fireEvent.blur(input, { relatedTarget: screen.getByLabelText('Open calendar') })
+    fireEvent.blur(screen.getByLabelText('Open calendar'), { relatedTarget: screen.getByText('next') })
+    expect(onChange).toHaveBeenCalledWith('2026-10-12')
+  })
+
   it('a slash date or a year out of range keeps the value and says why', () => {
     const { input, onChange } = mount()
     fireEvent.change(input, { target: { value: '01/02/2026' } })

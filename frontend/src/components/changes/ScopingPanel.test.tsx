@@ -63,6 +63,12 @@ const change = (over: Record<string, unknown> = {}) => ({
 describe('ScopingPanel', () => {
   afterEach(cleanup)
 
+  it('Now says no open questions, not the concern line Team concerns already carries', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValueOnce([])
+    render(wrap(<ScopingPanel change={change()} />))
+    expect((await screen.findByTestId('scoping-now-empty')).textContent).toBe(t('scoping.noOpenQuestions'))
+    expect(screen.queryByText(t('concern.noneScoping'))).toBeNull()
+  })
   it('lists recorded meetings with their decision', async () => {
     render(wrap(<ScopingPanel change={change()} />))
     expect(await screen.findByText(/PM Jane/)).toBeTruthy()

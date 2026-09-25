@@ -862,6 +862,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
       + 'question. Re-upload inside a card if the link matters.',
   },
   'concern.openRequests': { de: 'Offene Rückfragen', en: 'Open questions' },
+  /** Scoping "Now" with nothing waiting (the concern line lives in Team concerns). */
+  'scoping.noOpenQuestions': { de: 'Keine offenen Rückfragen.', en: 'No open questions.' },
   'concern.solvedQuestions': { de: 'Geklärte Rückfragen', en: 'Settled questions' },
   'concern.solvedBy': { de: 'geklärt von', en: 'solved by' },
   'concern.fromMeeting': { de: 'aus Termin vom', en: 'from meeting of' },

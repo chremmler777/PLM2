@@ -29,7 +29,11 @@ export interface PnlRow {
   offer_revenue?: number | null;
   planned_cost?: number | null;
   planned_margin?: number | null;
+  /** Revenue including customer-billed issue costs (actual phase only). */
+  actual_revenue?: number | null;
   actual_cost?: number | null;
+  /** Expected end cost while running (actual phase only). */
+  forecast_cost?: number | null;
   actual_margin?: number | null;
   forecast_margin?: number | null;
   variance?: number | null;
@@ -47,6 +51,11 @@ export interface PnlAggregate {
   offer_revenue?: number;
   planned_cost?: number;
   planned_margin?: number;
+  /** Changes with a price in the offer figures, and those still without one. */
+  priced_count?: number;
+  unpriced_count?: number;
+  actual_revenue?: number;
+  forecast_cost?: number;
   actual_cost?: number;
   actual_margin?: number;
   forecast_margin?: number;
@@ -100,6 +109,16 @@ export interface OvaLine {
   in_margin: boolean;
 }
 
+export interface OvaMarginRow {
+  planned: number | null;
+  actual: number | null;
+  forecast?: number | null;
+  planned_pct: number | null;
+  actual_pct: number | null;
+  forecast_pct?: number | null;
+  variance: number | null;
+}
+
 export interface OvaTiming {
   baseline_finish: string | null;
   forecast_finish: string | null;
@@ -117,6 +136,8 @@ export interface OfferVsActual {
   offer_version: number | null;
   frozen_at: string | null;
   lines: OvaLine[];
+  /** The margin row as the server lays it out; older payloads send only the flat fields. */
+  margin_row?: OvaMarginRow;
   planned_revenue: number | null;
   actual_revenue: number | null;
   planned_cost: number | null;

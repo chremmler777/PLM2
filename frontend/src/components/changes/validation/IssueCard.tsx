@@ -13,7 +13,7 @@ import { formatDate } from '../../../lib/format'
 import { inputCls, sectionLabel } from '../offer/offerFormat'
 import {
   ACT_LABEL, CATEGORY_LABEL, DECISION_CHIP, DECISION_LABEL, FIX_ROUTES, ROUTE, SEVERITY,
-  issueActs, issueNeedsAck, primaryAct, raiserBlocked, statusChipLabel, type IssueViewer,
+  issueActs, issueNeedsAck, issuePrimaryAct, raiserBlocked, recheckTarget, statusChipLabel, type IssueViewer,
 } from './issueModel'
 import IssueStepper from './IssueStepper'
 import EscalationBadge from './EscalationBadge'
@@ -111,6 +111,8 @@ export default function IssueCard({
   const open = isIssueOpen(issue)
   const [expanded, setExpanded] = useState(defaultOpen ?? (open || highlight))
   const [active, setActive] = useState<IssueAct | 'quote_fix' | null>(null)
+  /** Bumped to open the add-action row of the checklist (add_action act). */
+  const [addRequest, setAddRequest] = useState(0)
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
     if (!highlight) return
@@ -123,10 +125,14 @@ export default function IssueCard({
   // 4 eyes: a PM or lead who raised the issue sees the route step, but not as theirs.
   const fourEyes = open && !issue.route && !acts.includes('route')
     && (!!viewer.canManage) && raiserBlocked(issue, viewer)
-  const primary = primaryAct(acts)
+  const primary = issuePrimaryAct(issue, acts)
   const secondary = acts.filter((a) => a !== primary && !['attach', 'edit', 'escalate', 'add_action', 'action_done'].includes(a))
   const extra = issue.extra_acts ?? []
-  const canQuote = open && extra.includes('quote_fix') && !issue.fix_quoted_at
+  // quote_fix and a late cost still land after the issue is closed
+  const canQuote = extra.includes('quote_fix') && !issue.fix_quoted_at
+  const canLateCost = !open && extra.includes('cost')
+  const costSet = issue.cost_set ?? issue.extra_cost != null
+  const checkRow = recheckTarget(issue)
   const canEdit = open && acts.includes('edit')
   const myAck = (issue.escalations ?? []).find((e) => !e.acknowledged_at && e.can_acknowledge)
 
@@ -142,9 +148,14 @@ export default function IssueCard({
   const run = (a: IssueAct) => {
     setExpanded(true)
     if (a === 'acknowledge' && myAck) { ack.mutate(myAck.id); return }
-    if (a === 'action_done') {
+    if (a === 'action_done' || a === 'add_action') {
+      if (a === 'add_action') setAddRequest((n) => n + 1)
       document.getElementById(`issue-actions-anchor-${issue.id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
       return
+    }
+    if (a === 'recheck' && checkRow) {
+      // the linked check lives in the validation panel on the same tab
+      document.querySelector(`[data-testid="${checkRow}"]`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
     }
     setActive(a)
   }
@@ -239,7 +250,18 @@ export default function IssueCard({
             <CustomerDecisionForm changeId={changeId} issue={issue} releaseDueDate={releaseDueDate}
               onDone={() => setActive(null)} />
           )}
-          {active === 'cost' && <CostForm changeId={changeId} issue={issue} onDone={() => setActive(null)} />}
+          {active === 'cost' && <CostForm changeId={changeId} issue={issue} late={!open} onDone={() => setActive(null)} />}
+          {active === 'recheck' && (
+            <div data-testid={`issue-recheck-${issue.id}`} role="note"
+              className="flex items-start gap-2 rounded-lg border border-sky-800/70 bg-sky-950/20 p-3 text-xs text-slate-200">
+              <p className="flex-1">
+                Answer the check{issue.check?.label ? <> <span className="font-medium">{issue.check.label}</span></> : ''}
+                {issue.check?.department_name ? ` (${issue.check.department_name})` : ''} again in the validation checks.
+                A pass closes {code}; a fail sends it back to fixing.
+              </p>
+              <button type="button" onClick={() => setActive(null)} className="px-1 text-slate-400 hover:text-slate-200">Dismiss</button>
+            </div>
+          )}
           {active === 'edit' && (
             <IssueEditForm changeId={changeId} issue={issue} departments={departments} onDone={() => setActive(null)} />
           )}
@@ -311,7 +333,7 @@ export default function IssueCard({
           {(issue.actions.length > 0 || (issue.route && FIX_ROUTES.includes(issue.route))) && (
             <div id={`issue-actions-anchor-${issue.id}`}>
               <ActionsChecklist changeId={changeId} issue={issue} viewer={viewer}
-                canAdd={acts.includes('add_action')} departments={departments} />
+                canAdd={acts.includes('add_action')} departments={departments} addRequest={addRequest} />
             </div>
           )}
 
@@ -321,7 +343,7 @@ export default function IssueCard({
           <EscalationHistory changeId={changeId} issue={issue} canEscalate={open && acts.includes('escalate')}
             canDeescalate={open && extra.includes('deescalate')} />
 
-          {(secondary.length > 0 || canEdit || (canQuote && !!primary)) && (
+          {(secondary.length > 0 || canEdit || (canQuote && !!primary) || canLateCost) && (
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-2">
               <span className="text-[11px] text-slate-500">Also:</span>
               {secondary.map((a) => (
@@ -331,6 +353,10 @@ export default function IssueCard({
               {canQuote && !!primary && (
                 <button type="button" data-testid={`issue-act-quote_fix-${issue.id}`} onClick={() => setActive('quote_fix')}
                   className="text-[11px] text-sky-300 hover:text-sky-200">Quote the fix</button>
+              )}
+              {canLateCost && (
+                <button type="button" data-testid={`issue-act-late-cost-${issue.id}`} onClick={() => setActive('cost')}
+                  className="text-[11px] text-sky-300 hover:text-sky-200">{costSet ? 'Correct the cost' : 'Record a late cost'}</button>
               )}
               {canEdit && (
                 <button type="button" data-testid={`issue-act-edit-${issue.id}`} onClick={() => setActive('edit')}

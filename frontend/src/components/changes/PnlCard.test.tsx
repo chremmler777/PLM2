@@ -139,6 +139,23 @@ describe('PnlCard', () => {
     expect(internal).toContain('1.000,00 EUR')
   })
 
+  it('the margin row reads from margin_row when the server sends it', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    ovaMock.mockResolvedValue({ ...ova, in_progress: true,
+      // flat fields deliberately stale: margin_row wins
+      margin_row: { planned: 0, actual: 19592, forecast: -1800, planned_pct: 0, actual_pct: 72.85,
+        forecast_pct: -6.69, variance: -1800 } })
+    costListMock.mockResolvedValue({ items: [], total: 0, can_write: false, writable_department_ids: null, cost_role: true })
+    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true, quoted_price: 3000 })} />))
+    await screen.findByTestId('pnl-offer-vs-actual')
+    expect(screen.getByTestId('ova-planned-margin').textContent).toContain('0,00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('19.592,00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('72.8')
+    expect(screen.getByTestId('ova-forecast-margin').textContent).toContain('-1.800,00 EUR')
+    expect(screen.getByTestId('ova-margin-variance').textContent).toContain('-1.800,00 EUR')
+    expect(screen.getByTestId('ova-margin-variance').getAttribute('data-tone')).toBe('rose')
+  })
+
   it('once released there is no forecast column: the actual is the end', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
     ovaMock.mockResolvedValue({ ...ova, in_progress: false })

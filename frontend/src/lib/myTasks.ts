@@ -14,7 +14,10 @@ const LETTER_ORDER = 'RASCI'
 const sortLetters = (ls: string[]) =>
   [...new Set(ls.filter(Boolean))].sort((x, y) => LETTER_ORDER.indexOf(x) - LETTER_ORDER.indexOf(y))
 
-/** One change-task row per change, kind and department. */
+/** The row is the viewer's own: the backend's `is_mine` wins, `mine` is the older word. */
+export const changeTaskMine = (t: Pick<ChangeTask, 'is_mine' | 'mine'>): boolean => !!(t.is_mine ?? t.mine)
+
+/** One change-task row per change, kind and department. `mine` carries the resolved flag. */
 export function foldChangeTasks(tasks: ChangeTask[] | null | undefined): ChangeTask[] {
   const out = new Map<string, ChangeTask>()
   for (const task of Array.isArray(tasks) ? tasks : []) {
@@ -22,14 +25,14 @@ export function foldChangeTasks(tasks: ChangeTask[] | null | undefined): ChangeT
     const seen = out.get(key)
     const letters = task.rasic_letters ?? []
     if (!seen) {
-      out.set(key, { ...task, rasic_letters: sortLetters(letters) })
+      out.set(key, { ...task, mine: changeTaskMine(task), rasic_letters: sortLetters(letters) })
       continue
     }
     out.set(key, {
       ...seen,
       due_date: earlier(seen.due_date, task.due_date),
       overdue: seen.overdue || task.overdue,
-      mine: !!(seen.mine || task.mine),
+      mine: !!seen.mine || changeTaskMine(task),
       owner_name: seen.owner_name ?? task.owner_name,
       rasic_letters: sortLetters([...(seen.rasic_letters ?? []), ...letters]),
     })

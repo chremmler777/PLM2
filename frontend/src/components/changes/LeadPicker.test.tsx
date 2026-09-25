@@ -13,7 +13,8 @@ vi.mock('../../api/changes', () => ({
     update: vi.fn().mockResolvedValue({}),
   },
 }))
-vi.mock('../../api/client', () => ({ default: { get: vi.fn().mockRejectedValue(new Error('403')) } }))
+const clientGet = vi.hoisted(() => vi.fn())
+vi.mock('../../api/client', () => ({ default: { get: clientGet } }))
 
 const wrap = (ui: React.ReactElement) => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>
@@ -30,8 +31,9 @@ describe('LeadPicker (spec §16 P1 5)', () => {
     render(wrap(<LeadPicker change={{ id: 7, lead_id: null, lead_name: null }} canEdit />))
     expect(screen.getByTestId('lead-name').textContent).toBe('No lead assigned')
     fireEvent.click(screen.getByTestId('lead-edit'))
-    const select = await screen.findByTestId('lead-select') as HTMLSelectElement
-    await waitFor(() => expect(select.options.length).toBe(3))
+    const sel = () => screen.getByTestId('lead-select') as HTMLSelectElement
+    await waitFor(() => expect(sel().options.length).toBe(3))
+    const select = sel()
     expect(select.options[1].text).toBe('Petra PM (Project Manager)')
     fireEvent.change(select, { target: { value: '3' } })
     await waitFor(() => expect(setLead).toHaveBeenCalledWith(7, 3))
@@ -44,6 +46,37 @@ describe('LeadPicker (spec §16 P1 5)', () => {
     fireEvent.click(screen.getByTestId('lead-edit'))
     const select = await screen.findByTestId('lead-select') as HTMLSelectElement
     await waitFor(() => expect([...select.options].map((o) => o.text)).toEqual(['Pick a lead', 'Eva', 'Me (Me)']))
+  })
+
+  it('preselects the project PM (is_default) once the candidates arrive', async () => {
+    leadCandidates.mockResolvedValue([
+      { id: 4, name: 'Lars Lead' },
+      { id: 3, name: 'Petra PM', department: 'Project Manager', is_default: true },
+    ])
+    render(wrap(<LeadPicker change={{ id: 7, lead_id: null, lead_name: null }} canEdit />))
+    fireEvent.click(screen.getByTestId('lead-edit'))
+    await waitFor(() => expect((screen.getByTestId('lead-select') as HTMLSelectElement).value).toBe('3'))
+  })
+
+  it('an admin on a backend without the endpoint (404) gets the user list', async () => {
+    leadCandidates.mockRejectedValue({ response: { status: 404 } })
+    clientGet.mockResolvedValue({ data: [
+      { id: 11, full_name: 'Ada Admin', username: 'ada' }, { id: 12, username: 'gone', is_active: false }] })
+    render(wrap(<LeadPicker change={{ id: 7, lead_id: null, lead_name: null }} canEdit isAdmin />))
+    fireEvent.click(screen.getByTestId('lead-edit'))
+    const select = await screen.findByTestId('lead-select') as HTMLSelectElement
+    await waitFor(() => expect([...select.options].map((o) => o.text)).toEqual(['Pick a lead', 'Ada Admin (ada)']))
+    expect(clientGet).toHaveBeenCalledWith('/v1/users')
+  })
+
+  it('a refusal (403) is not a missing endpoint: no user list, only the lead and the viewer', async () => {
+    clientGet.mockClear()
+    leadCandidates.mockRejectedValue({ response: { status: 403 } })
+    render(wrap(<LeadPicker change={{ id: 7, lead_id: 5, lead_name: 'Eva' }} canEdit isAdmin />))
+    fireEvent.click(screen.getByTestId('lead-edit'))
+    const select = await screen.findByTestId('lead-select') as HTMLSelectElement
+    await waitFor(() => expect([...select.options].map((o) => o.text)).toEqual(['Pick a lead', 'Eva']))
+    expect(clientGet).not.toHaveBeenCalled()
   })
 
   it('is read only for everyone else', () => {

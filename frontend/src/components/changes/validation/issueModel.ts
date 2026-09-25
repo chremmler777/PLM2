@@ -170,6 +170,7 @@ export const ACT_LABEL: Record<IssueAct, string> = {
   cost: 'Set the cost',
   add_action: 'Add fix action',
   action_done: 'Tick my fix action',
+  recheck: 'Re-check the validation',
   close: 'Close issue',
   acknowledge: 'Acknowledge escalation',
   escalate: 'Escalate',
@@ -212,6 +213,23 @@ export function issueActs(i: IssueOut, v: IssueViewer): IssueAct[] {
 
 export const primaryAct = (acts: IssueAct[]): IssueAct | null =>
   acts.find((a) => !QUIET.includes(a)) ?? null
+
+/**
+ * The card's one primary button. The backend's `primary_act` wins when the
+ * key is sent (null included): after a failed re-validation with every fix
+ * action done it names add_action, which the quiet rule would never pick.
+ */
+export const issuePrimaryAct = (i: Pick<IssueOut, 'primary_act'>, acts: IssueAct[]): IssueAct | null =>
+  i.primary_act !== undefined
+    ? (i.primary_act && acts.includes(i.primary_act) ? i.primary_act : null)
+    : primaryAct(acts)
+
+/** The linked check's row in the validation panel (ValidationPanel's test id). */
+export const recheckTarget = (i: Pick<IssueOut, 'check' | 'check_key' | 'check_department_id' | 'department_id'>): string | null => {
+  const key = i.check?.check_key ?? i.check_key
+  const dept = i.check?.department_id ?? i.check_department_id ?? i.department_id
+  return key && dept != null ? `validation-check-${dept}-${key}` : null
+}
 
 // ---------------------------------------------------------------- dates
 
