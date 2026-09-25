@@ -1347,3 +1347,40 @@ series). Development decides the depth, alone (no 4-eyes).
 - **Migration** after the ones in flight (096). Existing pending/active data
   untouched; only new indexes after deploy create intakes (a backfill script
   can list recent unlinked revisions for optional triage).
+
+### 17a. Code map and decisions (from the code study, 2026-09-25)
+Choke point: `RevisionService.receive_customer_data` (part_service.py ~L331)
+sets `part.active_revision_id` today (~L370). Callers: parts API
+customer-data, customer package confirm (~L168), promote_revision (~L437),
+UploadDialog "major". Proposals (minors, DRAFT) and ECN minors
+(spawn_ecn_revisions) are internal and get no intake; import scripts
+(WinCarat, Brose, 1994 resets) bypass (`intake_source=None`).
+Decisions:
+1. Default route: `phase == official` OR `part.lifecycle_phase == series`
+   -> full_ecr; else engineering_review.
+2. Intakes only for new customer majors (A paths + promote).
+3. Engineering review always includes Packaging Engineer for articles (no
+   packaging item category exists); others from served-by objects
+   (factor the relation walk of ChangeService.assessment_objects into a
+   helper `served_objects(part_ids)`).
+4. While pending: file uploads and BOM edits on the pending revision are
+   allowed (data completion); nothing else reads it.
+5. full_ecr / attach_ecr: the pending customer major is the impacted
+   item's `resulting_revision_id` (spawn skips it); its check workflow runs
+   on it; `ChangeService.release` activates it through the shared
+   `RevisionIntakeService.activate` helper (factor ~L1098-1107).
+6. promote_revision: the proposal-approved / siblings-rejected side effects
+   happen at activation.
+7. Pending major status `in_review`; activation sets `approved`.
+8. A newer package for a part with a pending intake supersedes it
+   automatically (old intake `superseded`, its revision `archived`,
+   changelog), unless the old one is already linked to a change (then block
+   with a clear message).
+9. First data on a part with no active revision is gated too; the suggested
+   route is `administrative` when lifecycle is rfq.
+Also: `bom_tree_service._display_revision` and the revision_files viewer
+fallback skip pending revisions; the package preview compares against the
+newest pending-or-active major; a `batch_id` groups a package's intakes;
+My Tasks gets an IntakeSection (`GET /v1/intakes/my`); PartDetail banner +
+intake panel; ItemRow and RevisionTimeline pending chips; project structure
+payload flag `intake_pending`. Migration 096 `revision_intakes` (see map).
