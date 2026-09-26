@@ -71,7 +71,7 @@ def booking_pricing_date(change, booked_at) -> date:
     BOOKING_PRICING_BASIS says so."""
     if BOOKING_PRICING_BASIS == "change_created":
         return change_pricing_date(change)
-    return booked_at.date() if booked_at else business_today()
+    return business_date_of(booked_at) if booked_at else business_today()
 
 def _qty(n: float) -> str:
     """12 -> '12', 1250.5 -> '1,250.5' (the UI's formatNumber, up to 2 decimals)."""

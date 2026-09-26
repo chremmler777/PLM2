@@ -36,7 +36,7 @@ from app.models.cost_sheet_machines import CostSheetMachineItemRate
 from app.core.display import fmt_date
 from app.models.entities import Plant
 from app.models.workflow import Department
-from app.utils.clock import business_today
+from app.utils.clock import business_date_of, business_today
 
 
 class CostSheetError(Exception):
@@ -914,7 +914,8 @@ async def stale_status(db: AsyncSession, org_id: int, today: Optional[date] = No
         return {"stale": True, "review_months": months, "latest_version": None,
                 "reviewed_on": None, "due_on": None, "reason": "no_published_version"}
     reviewed = max(latest.valid_from,
-                   latest.published_at.date() if latest.published_at else latest.valid_from)
+                   business_date_of(latest.published_at) if latest.published_at
+                   else latest.valid_from)
     due = add_months(reviewed, months)
     return {"stale": today >= due, "review_months": months, "latest_version": latest.version,
             "reviewed_on": reviewed.isoformat(), "due_on": due.isoformat(),

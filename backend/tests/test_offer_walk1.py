@@ -402,12 +402,15 @@ async def test_prices_are_redacted_for_non_cost_viewers(client, offer_world,
     cid = offer_world["change_id"]
     sales, tool = await _auth(client, "sales"), await _auth(client, "tool")
     o = await _create(client, sales, cid)
-    await client.patch(_url(cid, f"/{o['id']}"), json={"data": {
+    res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": {
         "timing": {"include": False}}}, headers=sales)
-    await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
-    await client.post(f"/api/v1/changes/{cid}/negotiations", json={
+    assert res.status_code == 200, res.text
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/changes/{cid}/negotiations", json={
         "channel": "call", "note": "they want less", "counter_price": 876.5},
         headers=sales)
+    assert res.status_code == 201, res.text
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.append_changelog(

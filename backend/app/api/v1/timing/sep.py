@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import get_current_user
+from app.utils.clock import business_today
 from app.models import get_db, User, Project, ProjectMilestone
 from app.models.sep import (
     SepGate, SepWorkItem, SepItemAudit, SepRisk,
@@ -543,7 +544,7 @@ async def sign_off_gate(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{len(open_items)} open work items: a risk assessment entry for {gate.code} with action plan is required (yellow gate)",
         )
-    deadline = (datetime.utcnow() + timedelta(days=ACTION_PLAN_MAX_DAYS)).date().isoformat()
+    deadline = (business_today() + timedelta(days=ACTION_PLAN_MAX_DAYS)).isoformat()
     if open_items or unfinished:
         incomplete = [i + 1 for i, r in enumerate(unfinished)
                       if not (r.get("countermeasure") or "").strip() or not r.get("due") or not r.get("responsible")]

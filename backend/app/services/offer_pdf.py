@@ -28,6 +28,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.utils.clock import business_today
+
 # KTX house design (the timing chart builder's palette), set in Helvetica:
 # metric-identical to Arial, which is not installed on the server.
 BLACK = colors.HexColor("#0A0A0A")
@@ -807,7 +809,7 @@ def render_offer_pdf(ctx: dict) -> bytes:
 
     # ---- Offer data strip ---------------------------------------------
     meta = [("Offer no.", number),
-            ("Date", _d(offer.get("sent_at") or date.today(), loc))]
+            ("Date", _d(offer.get("sent_at") or business_today(), loc))]
     if offer.get("valid_until"):
         meta.append(("Valid until", _d(offer["valid_until"], loc)))
     meta.append(("Change", ctx["change_number"]))

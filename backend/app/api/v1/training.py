@@ -44,6 +44,7 @@ from app.models.training import (
 from app.services import training as svc
 from app.services.audit_service import AuditService
 from app.version import SOFTWARE_VERSION
+from app.utils.clock import business_today
 
 _log = logging.getLogger(__name__)
 
@@ -446,7 +447,7 @@ async def attest(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Confirm that the training took place, or leave this and ask for your session.",
         )
-    if body.training_date > date.today():
+    if body.training_date > business_today():
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "The training date is in the future. Enter the day the session was held.",
@@ -732,7 +733,7 @@ async def record_roster_entry(
     still owed, and they are the only thing owed."""
     await _require_manage(db, user)
     _check_role(body.role)
-    if body.training_date > date.today():
+    if body.training_date > business_today():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                             "The training date is in the future.")
     if body.user_id == user.id:

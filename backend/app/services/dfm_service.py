@@ -14,6 +14,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.utils.clock import business_date_of, business_today
 from app.models.dfm import (
     DfmEntry, DfmEntryFile, DfmTopic, DFM_KIND_ORIGINAL, DFM_KINDS, DFM_PARTIES, DFM_TOPIC_FINISHED,
     DFM_TOPIC_OPEN,
@@ -151,7 +152,7 @@ def check_flow(topic: DfmTopic, party: str, targets: list[str], kind: str, reply
 
 def _msg_date(e: DfmEntry) -> date:
     """The mail date when set, else the day it was recorded."""
-    return e.sent_at or e.recorded_at.date()
+    return e.sent_at or business_date_of(e.recorded_at)
 
 
 def _order_key(e: DfmEntry):
@@ -164,7 +165,7 @@ def flow_state(topic: DfmTopic, today: date | None = None) -> dict:
     For each current (not superseded) original, forward and question, every
     addressee is either answered (a current answer from that party replies
     to any version of the message) or awaiting since the message date."""
-    today = today or date.today()
+    today = today or business_today()
     entries = list(topic.entries)
     successor = {e.supersedes_id: e.id for e in entries if e.supersedes_id is not None}
 

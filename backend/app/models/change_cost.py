@@ -11,6 +11,7 @@ from sqlalchemy import Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
+from app.utils.clock import business_today
 
 COST_KINDS = ("one_time", "lifecycle")
 
@@ -73,7 +74,7 @@ class DepartmentRate(Base):
     plant_id: Mapped[int] = mapped_column(ForeignKey("plants.id"), index=True)
     hourly_rate: Mapped[float] = mapped_column(Float)
     min_factor: Mapped[float] = mapped_column(Float, default=1.0)
-    effective_from: Mapped[date] = mapped_column(Date, default=date.today)
+    effective_from: Mapped[date] = mapped_column(Date, default=lambda: business_today())
 
 
 class AssessmentActivity(Base):
