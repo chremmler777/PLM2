@@ -5,6 +5,8 @@ legacy TYPE_DISCIPLINES dict when no ChangeRoutingStandard mapping exists.
 """
 from __future__ import annotations
 import copy
+import json
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -14,8 +16,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.change import (
-    ChangeRequest, ChangeAssessment, ChangeMeeting, ChangeRouting, ChangeRoutingStandard,
-    ASSESSMENT_LETTERS, BLOCKING_LETTERS, TASK_LETTERS,
+    ChangeRequest, ChangeAssessment, ChangeChangelog, ChangeMeeting, ChangeRouting,
+    ChangeRoutingStandard, ASSESSMENT_LETTERS, BLOCKING_LETTERS, TASK_LETTERS,
 )
 from app.models.workflow import (
     Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
@@ -106,6 +108,71 @@ async def _snapshot_stage(session: AsyncSession, routing: ChangeRouting, snap: d
         snap["stages"].append(st)
         snap["stages"].sort(key=lambda x: x["stage_order"])
     return st
+
+
+_DEVIATION_ACTIONS = ("routing_deviation", "routing_deviation_approved",
+                      "routing_deviation_rejected")
+# The changelog text of a deviation before its record (new_value) existed.
+_LEGACY_ADD = re.compile(r"added dept (\d+) as ([A-Z]) in stage (\d+)")
+_LEGACY_REMOVE = re.compile(r"removed dept (\d+)")
+_LEGACY_RELETTER = re.compile(r"dept (\d+) declined: ([A-Z]) to ([A-Z])")
+
+
+def _deviation_record(entry: ChangeChangelog) -> Optional[dict]:
+    """What one 'routing_deviation' changelog entry requested: its record
+    (new_value, written since commit 48e1069d), else the op read back from
+    the older description text (marked legacy), else None."""
+    if entry.new_value:
+        try:
+            rec = json.loads(entry.new_value)
+        except (TypeError, ValueError):
+            rec = None
+        if isinstance(rec, dict) and rec.get("op"):
+            return rec
+    text = entry.action_description or ""
+    m = _LEGACY_ADD.search(text)
+    if m:
+        return {"op": "add", "department_id": int(m.group(1)),
+                "rasic_letter": m.group(2), "stage_order": int(m.group(3)),
+                "legacy": True}
+    m = _LEGACY_RELETTER.search(text)
+    if m:
+        return {"op": "reletter", "department_id": int(m.group(1)),
+                "rasic_letter": m.group(3), "stage_order": None, "legacy": True}
+    m = _LEGACY_REMOVE.search(text)
+    if m:
+        return {"op": "remove", "department_id": int(m.group(1)),
+                "stage_order": None, "legacy": True}
+    return None
+
+
+async def _deviation_history(session: AsyncSession,
+                             change_id: int) -> tuple[list[tuple[str, list]], list]:
+    """The change's routing deviations read from the changelog, grouped by
+    decision: ([(decision action, [record|None, ...]), ...], pending), where
+    pending lists the records requested since the last decision (the
+    deviation now awaiting approval). A record is None when the entry
+    carries neither a record nor a readable description."""
+    entries = (await session.execute(
+        select(ChangeChangelog).where(
+            ChangeChangelog.change_id == change_id,
+            ChangeChangelog.action.in_(_DEVIATION_ACTIONS))
+        .order_by(ChangeChangelog.performed_at, ChangeChangelog.id)
+    )).scalars().all()
+    decided: list[tuple[str, list]] = []
+    group: list = []
+    for e in entries:
+        if e.action == "routing_deviation":
+            group.append(_deviation_record(e))
+        else:
+            decided.append((e.action, group))
+            group = []
+    return decided, group
+
+
+def _approved_records(decided: list[tuple[str, list]]) -> list[dict]:
+    return [r for action, recs in decided if action == "routing_deviation_approved"
+            for r in recs if r is not None]
 
 
 def _retarget_task(task: WfInstanceTask, rasic_letter: str,
@@ -802,23 +869,34 @@ class ChangeRoutingService:
             record = {"op": "add", "department_id": department_id,
                       "rasic_letter": rasic_letter, "stage_order": order}
         elif op == "remove":
-            if existing is not None:
-                # Drop the linked engine task first (null the FK so the row can be
-                # deleted), then the assessment row itself.
-                if existing.wf_instance_task_id is not None:
-                    task = await session.get(WfInstanceTask, existing.wf_instance_task_id)
-                    existing.wf_instance_task_id = None
-                    await session.flush()
-                    if task is not None:
-                        await session.delete(task)
-                await session.delete(existing)
-                await session.flush()
-                # Removing the last open blocking task can unblock the stage.
-                if inst is not None:
-                    await WorkflowService._maybe_advance_stage(session, inst)
-            desc = f"removed dept {department_id}"
-            record = {"op": "remove", "department_id": department_id,
-                      "stage_order": existing.stage_order if existing else None}
+            # A removal is a deviation like any other: only a request. The
+            # row, its letter and its task stay (the department still owes
+            # its answer, every gate keeps waiting on it) until the decision.
+            # The pending mark is this deviation's record in the changelog
+            # (pending_removal_ids reads it); approve_deviation deletes the
+            # row and its task, a rejection simply lets the request lapse.
+            if existing is None:
+                # Nothing to take off (no assessment row, e.g. Informed):
+                # the request is recorded, its approval changes no row.
+                desc = f"dept {department_id} to be taken off, no assessment row"
+                record = {"op": "remove", "department_id": department_id,
+                          "stage_order": None}
+            elif existing.submitted_at is not None or (
+                    existing.verdict and existing.verdict != "pending"):
+                raise ValueError(
+                    "The department has already submitted its assessment; "
+                    "its answer stays on the record")
+            elif existing.id in await ChangeRoutingService.pending_removal_ids(
+                    session, change):
+                raise ValueError(
+                    "Taking the department off this stage is already awaiting a decision")
+            else:
+                desc = (f"dept {department_id} to be taken off stage "
+                        f"{existing.stage_order}, awaiting decision")
+                record = {"op": "remove", "department_id": department_id,
+                          "stage_order": existing.stage_order,
+                          "rasic_letter": existing.rasic_letter,
+                          "assessment_id": existing.id}
         elif op == "reletter":
             if rasic_letter not in TASK_LETTERS:
                 raise ValueError("reletter requires a RASIC letter (R/A/S/C/I)")
@@ -866,6 +944,78 @@ class ChangeRoutingService:
         # A row the op added to a started stage without a task gets one now.
         await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
+
+    @staticmethod
+    async def pending_removal_ids(session: AsyncSession,
+                                  change: ChangeRequest) -> set[int]:
+        """Ids of the assessment rows a pending routing deviation asks to take
+        off the routing. The row stays (still owed) until the decision; this
+        is its pending mark, read from the deviation's changelog record.
+        Empty unless a deviation is pending."""
+        routing = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+        )).scalar_one_or_none()
+        if routing is None or routing.deviation_status != "pending_approval":
+            return set()
+        _, pending = await _deviation_history(session, change.id)
+        return {r["assessment_id"] for r in pending
+                if r is not None and r.get("op") == "remove"
+                and r.get("assessment_id") is not None}
+
+    @staticmethod
+    async def backfill_deviation_snapshot(session: AsyncSession,
+                                          change: ChangeRequest) -> list[dict]:
+        """Write the adds of approved deviations into the routing snapshot
+        (added_by_deviation), for rows approved before approve_deviation did
+        so itself. Read from the changelog: an add of an approved deviation
+        (record or older description) whose row still exists with an
+        assessment letter and has no assessment entry on the snapshot for
+        its department and stage. Idempotent. Returns the entries written,
+        each with its stage_order."""
+        routing = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+        )).scalar_one_or_none()
+        if routing is None:
+            return []
+        decided, _ = await _deviation_history(session, change.id)
+        asked = {(r["department_id"], r["stage_order"])
+                 for r in _approved_records(decided)
+                 if r.get("op") == "add" and r.get("stage_order") is not None}
+        if not asked:
+            return []
+        on_snap = {(d["department_id"], st["stage_order"])
+                   for st in (routing.standard_snapshot or {}).get("stages", [])
+                   for d in st["departments"]
+                   if not d.get("pending_deviation")
+                   and d["rasic_letter"] in ASSESSMENT_LETTERS}
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+            .order_by(ChangeAssessment.stage_order, ChangeAssessment.id)
+        )).scalars().all()
+        missing = [a for a in rows
+                   if a.rasic_letter in ASSESSMENT_LETTERS
+                   and (a.department_id, a.stage_order) in asked
+                   and (a.department_id, a.stage_order) not in on_snap]
+        if not missing:
+            return []
+        snap = copy.deepcopy(routing.standard_snapshot or {"stages": []})
+        written: list[dict] = []
+        for a in missing:
+            st = await _snapshot_stage(session, routing, snap, a.stage_order)
+            if any(d["department_id"] == a.department_id
+                   and d["rasic_letter"] in ASSESSMENT_LETTERS
+                   and not d.get("pending_deviation") for d in st["departments"]):
+                continue   # the template seeded it with the stage just now
+            entry = {"department_id": a.department_id, "rasic_letter": a.rasic_letter,
+                     "added_by_deviation": True}
+            st["departments"].append(entry)
+            written.append({**entry, "stage_order": a.stage_order})
+        if not written:
+            return []
+        routing.standard_snapshot = snap
+        flag_modified(routing, "standard_snapshot")
+        await session.flush()
+        return written
 
     @staticmethod
     async def _max_active_order(session: AsyncSession, change: ChangeRequest) -> int:
@@ -932,12 +1082,15 @@ class ChangeRoutingService:
                                reason: str, *, acting: bool = False) -> ChangeRouting:
         """Reject the pending deviation and undo what it added.
 
-        Undo covers the 'add' op, the only one the UI offers: every assessment
-        row outside the routing snapshot that has not been answered is dropped
-        together with its engine task, so the department is off the hook again.
-        Adds of earlier, APPROVED deviations are on the snapshot
-        (added_by_deviation, written by approve_deviation) and stay: a
-        rejection undoes only what is still pending.
+        Undo covers the 'add' op: the rows THIS deviation added (its
+        changelog records since the last decision name department, stage and
+        letter) are dropped with their engine tasks, so the department is off
+        the hook again. Adds of earlier, APPROVED deviations stay: they are on
+        the snapshot (added_by_deviation, since approve_deviation writes
+        them), and for a pending deviation without records (older than the
+        records) a row outside the snapshot is still kept when an approved
+        deviation entry names its department and stage. A pending decline
+        or removal simply lapses (the row was never touched).
         A row that was already answered is NOT erased — the rejection is refused
         instead; by then the department's work is a fact of the record."""
         from app.services.change_service import ChangeService
@@ -965,16 +1118,47 @@ class ChangeRoutingService:
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
+        # A pending removal simply lapses: the row was never touched.
+        refused_removals = await ChangeRoutingService.pending_removal_ids(session, change)
         # A pending decline simply lapses: the row never changed its letter.
         declined = [a for a in rows if a.pending_rasic_letter]
         for a in declined:
             a.pending_rasic_letter = None
-        added = [a for a in rows if (a.department_id, a.stage_order) not in standard]
+        # Only what THIS deviation did is undone. Its own requests are the
+        # changelog records since the last decision (department, stage and
+        # letter each asked for). An older deviation without such a record
+        # falls back to the snapshot, but never touches a row an approved
+        # deviation of that department and stage put there (an add approved
+        # before the snapshot kept approved adds).
+        decided, pending = await _deviation_history(session, change.id)
+        own = all(r is not None and not r.get("legacy") for r in pending)
+        outside = [a for a in rows if (a.department_id, a.stage_order) not in standard]
+        if own:
+            asked = {(r["department_id"], r["stage_order"], r["rasic_letter"])
+                     for r in pending if r["op"] == "add"}
+            added = [a for a in outside
+                     if (a.department_id, a.stage_order, a.rasic_letter) in asked]
+        else:
+            approved = _approved_records(decided)
+
+            def _approved_here(a: ChangeAssessment) -> bool:
+                return any(r["department_id"] == a.department_id
+                           and r.get("stage_order") in (None, a.stage_order)
+                           for r in approved)
+            added = [a for a in outside if not _approved_here(a)]
         # A re-lettered standard row ("not our responsibility" -> C) goes back
-        # to the letter the routing gave it.
+        # to the letter the routing gave it: only one this deviation
+        # re-lettered (a decline now waits, so with records nothing has moved).
         relettered = [a for a in rows
                       if (a.department_id, a.stage_order) in standard
                       and a.rasic_letter != standard[(a.department_id, a.stage_order)]]
+        if own:
+            moved = {(r["department_id"], r["stage_order"], r["rasic_letter"])
+                     for r in pending if r["op"] == "reletter"}
+            relettered = [a for a in relettered
+                          if (a.department_id, a.stage_order, a.rasic_letter) in moved]
+        else:
+            relettered = [a for a in relettered if not _approved_here(a)]
         answered = [a for a in added + relettered
                     if a.submitted_at is not None or (a.verdict and a.verdict != "pending")]
         if answered:
@@ -1009,7 +1193,8 @@ class ChangeRoutingService:
             notes=reason.strip(),
             new_value={"removed_department_ids": removed + uninformed,
                        "restored_department_ids": [a.department_id for a in relettered],
-                       "declines_refused_department_ids": [a.department_id for a in declined]})
+                       "declines_refused_department_ids": [a.department_id for a in declined],
+                       "removals_refused_assessment_ids": sorted(refused_removals)})
         if routing.deviation_proposed_by is not None and routing.deviation_proposed_by != user_id:
             await NotificationService.notify_once(
                 session, [routing.deviation_proposed_by], kind="routing_deviation_rejected",
@@ -1022,6 +1207,24 @@ class ChangeRoutingService:
         # rows get their tasks now.
         await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
+
+    @staticmethod
+    async def _drop_row(session: AsyncSession, a: ChangeAssessment) -> None:
+        """Delete an assessment row and its engine task. Documents filed with
+        the row stay on the change: their link to the row is cut first."""
+        from app.models.change import ChangeAttachment
+        for att in (await session.execute(
+                select(ChangeAttachment).where(
+                    ChangeAttachment.assessment_id == a.id))).scalars().all():
+            att.assessment_id = None
+        if a.wf_instance_task_id is not None:
+            task = await session.get(WfInstanceTask, a.wf_instance_task_id)
+            a.wf_instance_task_id = None
+            await session.flush()
+            if task is not None:
+                await session.delete(task)
+        await session.flush()
+        await session.delete(a)
 
     @staticmethod
     async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
@@ -1055,20 +1258,8 @@ class ChangeRoutingService:
                 # and its task go, the department stays on the routing as I.
                 # Documents filed with the row stay on the change (as the
                 # supersede does): the link to the row is cut first.
-                from app.models.change import ChangeAttachment
-                for att in (await session.execute(
-                        select(ChangeAttachment).where(
-                            ChangeAttachment.assessment_id == a.id))).scalars().all():
-                    att.assessment_id = None
-                if a.wf_instance_task_id is not None:
-                    task = await session.get(WfInstanceTask, a.wf_instance_task_id)
-                    a.wf_instance_task_id = None
-                    await session.flush()
-                    if task is not None:
-                        await session.delete(task)
                 informed.append((a.department_id, a.stage_order))
-                await session.flush()
-                await session.delete(a)
+                await ChangeRoutingService._drop_row(session, a)
                 continue
             moved.append((a.department_id, a.stage_order, a.rasic_letter, letter))
             a.rasic_letter = letter
@@ -1076,6 +1267,20 @@ class ChangeRoutingService:
                 task = await session.get(WfInstanceTask, a.wf_instance_task_id)
                 if task is not None:
                     _retarget_task(task, letter)
+        await session.flush()
+        # Pending removals are carried out only now: the row and its task go
+        # (documents filed with the row stay on the change, the link cut
+        # first, as for the re-letter to I). A row answered in the meantime
+        # stays: its answer is a fact of the record and the removal is moot.
+        removed: list[int] = []
+        for aid in await ChangeRoutingService.pending_removal_ids(session, change):
+            a = await session.get(ChangeAssessment, aid)
+            if a is None or a.change_id != change.id:
+                continue
+            if a.submitted_at is not None or (a.verdict and a.verdict != "pending"):
+                continue
+            await ChangeRoutingService._drop_row(session, a)
+            removed.append(a.department_id)
         await session.flush()
         # The routing rows as they stand after the re-letters: the approved
         # adds and removes are written into the snapshot below.
@@ -1137,16 +1342,22 @@ class ChangeRoutingService:
             routing.standard_snapshot = snap
             flag_modified(routing, "standard_snapshot")
             await session.flush()
-        if relettered and inst is not None:
+        # A re-letter or a removal can take the last open blocking task.
+        if (relettered or removed) and inst is not None:
             await WorkflowService._maybe_advance_stage(session, inst)
         ChangeRoutingService._settle_pending_informed(routing, keep=True)
         routing.deviation_status = "approved"
         routing.deviation_approved_by = user_id
         routing.deviation_approved_at = datetime.utcnow()
         await session.flush()
+        outcome: dict = {}
+        if relettered:
+            outcome["relettered_department_ids"] = relettered
+        if removed:
+            outcome["removed_department_ids"] = removed
         await ChangeService.append_changelog(
             session, change, "routing_deviation_approved", "Routing deviation approved", user_id,
-            new_value={"relettered_department_ids": relettered} if relettered else None)
+            new_value=outcome or None)
         await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
 

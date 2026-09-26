@@ -1624,3 +1624,178 @@ async def test_approved_remove_drops_the_department_from_the_snapshot(
     assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
                               headers=admin_auth)).status_code == 200
     assert await _snap_entries(session_factory, c["id"], apqp) == []
+
+
+# ---- adds approved before approvals wrote the snapshot; pending removals ----
+
+async def _strip_snapshot_entry(session_factory, cid, dept_id):
+    """History: the add was approved before approve_deviation wrote approved
+    adds into the snapshot (commit 9d5ee708), so it has no entry there."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.change import ChangeRouting
+    async with session_factory() as s:
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == cid))).scalar_one()
+        snap = dict(routing.standard_snapshot)
+        snap["stages"] = [{**st, "departments": [d for d in st["departments"]
+                                                  if d["department_id"] != dept_id]}
+                          for st in snap["stages"]]
+        routing.standard_snapshot = snap
+        flag_modified(routing, "standard_snapshot")
+        await s.commit()
+
+
+async def _deviation_entries(session_factory, cid):
+    from app.models.change import ChangeChangelog
+    async with session_factory() as s:
+        return (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "routing_deviation")
+            .order_by(ChangeChangelog.id))).scalars().all()
+
+
+async def _rows_of(session_factory, cid, dept_id):
+    from app.models.change import ChangeAssessment
+    async with session_factory() as s:
+        return (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid,
+            ChangeAssessment.department_id == dept_id))).scalars().all()
+
+
+async def test_reject_keeps_an_add_approved_before_the_snapshot_kept_adds(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """An add approved before approvals wrote the snapshot is outside it. A
+    rejection of a later deviation removes only the rows ITS records asked
+    for, so the earlier add stays (even when its own entry carries no record
+    at all)."""
+    from app.models.change import ChangeChangelog
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg, sales = departments["Manufacturing Engineer"], departments["Sales"]
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
+        "reason": "forgot MfgEng"}, headers=auth)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    await _strip_snapshot_entry(session_factory, c["id"], mfg)
+    # Its entry predates the records, and not even the text is readable.
+    (entry,) = await _deviation_entries(session_factory, c["id"])
+    async with session_factory() as s:
+        e = await s.get(ChangeChangelog, entry.id)
+        e.new_value = None
+        e.action_description = "Routing deviation: legacy"
+        await s.commit()
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": sales, "rasic_letter": "R", "stage_order": 1,
+        "reason": "maybe Sales"}, headers=auth)).status_code == 200
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "Sales not touched"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    (row,) = await _rows_of(session_factory, c["id"], mfg)
+    assert row.rasic_letter == "R" and row.wf_instance_task_id is not None
+    assert await _rows_of(session_factory, c["id"], sales) == []
+
+
+async def test_reject_without_records_keeps_rows_of_approved_deviations(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """A pending deviation older than the records falls back to the
+    snapshot, but never removes a row an approved deviation entry names
+    (department and stage, read from the older description)."""
+    from app.models.change import ChangeChangelog
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg, sales = departments["Manufacturing Engineer"], departments["Sales"]
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
+        "reason": "forgot MfgEng"}, headers=auth)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    await _strip_snapshot_entry(session_factory, c["id"], mfg)
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": sales, "rasic_letter": "R", "stage_order": 1,
+        "reason": "maybe Sales"}, headers=auth)).status_code == 200
+    # Both entries as they were written before the records existed.
+    async with session_factory() as s:
+        for entry in await _deviation_entries(session_factory, c["id"]):
+            e = await s.get(ChangeChangelog, entry.id)
+            e.new_value = None
+            assert "added dept" in e.action_description
+        await s.commit()
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "Sales not touched"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert len(await _rows_of(session_factory, c["id"], mfg)) == 1
+    assert await _rows_of(session_factory, c["id"], sales) == []
+
+
+async def test_sweep_backfills_snapshot_entries_of_approved_adds(
+        client, seed, ecr_template, departments, departments_member,
+        session_factory, monkeypatch):
+    """scripts/repair_routing_tasks.py writes a snapshot entry
+    (added_by_deviation) for a row an approved deviation added before
+    approvals did so: not in a dry run, once with --apply."""
+    import scripts.repair_routing_tasks as sweep_mod
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg, sales = departments["Manufacturing Engineer"], departments["Sales"]
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
+        "reason": "forgot MfgEng"}, headers=auth)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    await _strip_snapshot_entry(session_factory, c["id"], mfg)
+    # A pending add is not backfilled: it is not approved.
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": sales, "rasic_letter": "R", "stage_order": 1,
+        "reason": "maybe Sales"}, headers=auth)).status_code == 200
+    monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    assert await sweep_mod.backfill_snapshots(False, [c["id"]]) == 1
+    assert await _snap_entries(session_factory, c["id"], mfg) == []
+    await sweep_mod.sweep(apply=True)
+    assert await _snap_entries(session_factory, c["id"], mfg) == [
+        (1, {"department_id": mfg, "rasic_letter": "R", "added_by_deviation": True})]
+    assert [o for o, _ in await _snap_entries(session_factory, c["id"], sales)] \
+        == [2]                                   # the template's I, nothing more
+    assert await sweep_mod.backfill_snapshots(True, [c["id"]]) == 0
+    # And the rejection keeps the backfilled add.
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "no"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert len(await _rows_of(session_factory, c["id"], mfg)) == 1
+    assert await _rows_of(session_factory, c["id"], sales) == []
+
+
+async def test_take_off_routing_waits_for_the_decision(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """The lead's "Take off routing" (a remove deviation) leaves the row owed
+    until the decision: costing stays blocked on it, and only the approval
+    deletes the row and its task."""
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)          # the change lead
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    (row,) = await _rows_of(session_factory, c["id"], te)
+    task_id = row.wf_instance_task_id
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "remove", "department_id": te, "stage_order": 1,
+        "reason": "not involved after all"}, headers=auth)
+    assert res.status_code == 200, res.text
+    assert [r.id for r in await _rows_of(session_factory, c["id"], te)] == [row.id]
+    async with session_factory() as s:
+        assert (await s.get(WfInstanceTask, task_id)).status == "active"
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Quality"], "verdict": "feasible"},
+                      headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 400, res.text
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    assert await _rows_of(session_factory, c["id"], te) == []
+    async with session_factory() as s:
+        assert await s.get(WfInstanceTask, task_id) is None
+    assert await _snap_entries(session_factory, c["id"], te) == []

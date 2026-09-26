@@ -283,42 +283,158 @@ async def test_deviation_add_creates_task_in_running_instance(
         assert row.effective_status == "active"
 
 
-async def test_deviation_remove_deletes_task(
+async def _dev_te_row(s, cid, dept_id):
+    from app.models.change import ChangeAssessment
+    return (await s.execute(select(ChangeAssessment).where(
+        (ChangeAssessment.change_id == cid)
+        & (ChangeAssessment.department_id == dept_id)
+    ).execution_options(populate_existing=True))).scalar_one_or_none()
+
+
+async def test_deviation_remove_waits_for_approval_then_deletes_task(
         session_factory, seed, dev_ecr_template, dev_departments):
-    """op=remove on an unsubmitted stage-1 R row deletes the assessment AND its
-    task; with the last blocking task gone, stage 1 advances to stage 2."""
+    """op=remove is a request: the row and its active task stay (still owed,
+    stage 1 does not advance) until the lead's decision. On approval the row
+    and its task go, a document filed with the row stays on the change, the
+    department leaves the snapshot, and stage 1 advances to stage 2."""
     from app.services.change_routing_service import ChangeRoutingService
-    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.change import ChangeRequest, ChangeAttachment, ChangeRouting
     from app.models.workflow import WfInstance, WfInstanceTask
     cid = await _dev_seeded_change(session_factory, seed)
     await _dev_build_routing(session_factory, seed, cid)
+    te = dev_departments["Tool Engineer"]
 
     async with session_factory() as s:
-        row = (await s.execute(select(ChangeAssessment).where(
-            (ChangeAssessment.change_id == cid)
-            & (ChangeAssessment.department_id == dev_departments["Tool Engineer"])
-        ))).scalar_one()
-        task_id = row.wf_instance_task_id
+        row = await _dev_te_row(s, cid, te)
+        task_id, row_id = row.wf_instance_task_id, row.id
         assert task_id is not None
+        att = ChangeAttachment(change_id=cid, filename="moldflow.pdf", stored_path="x",
+                               content_type="application/pdf", size_bytes=1,
+                               sha256="0" * 64, assessment_id=row_id,
+                               uploaded_by=seed["engineer_id"])
+        s.add(att)
+        await s.commit()
+        att_id = att.id
 
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="remove",
-            department_id=dev_departments["Tool Engineer"], reason="test op")
+            department_id=te, reason="test op")
         await s.commit()
 
     async with session_factory() as s:
-        gone = (await s.execute(select(ChangeAssessment).where(
-            (ChangeAssessment.change_id == cid)
-            & (ChangeAssessment.department_id == dev_departments["Tool Engineer"])
-        ))).scalar_one_or_none()
-        assert gone is None
+        row = await _dev_te_row(s, cid, te)
+        assert row is not None and row.rasic_letter == "R"
+        task = await s.get(WfInstanceTask, task_id)
+        assert task.status == "active" and task.is_actionable
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid, WfInstance.status == "active"))).scalar_one()
+        assert inst.current_stage_order == 1
+        change = await s.get(ChangeRequest, cid)
+        assert await ChangeRoutingService.pending_removal_ids(s, change) == {row_id}
+        # Every gate still waits on the department.
+        assert "Tool Engineer" in await ChangeRoutingService.blocking_waiting(s, change)
+        # A second request for the same row is refused while it is pending.
+        with pytest.raises(ValueError, match="already awaiting"):
+            await ChangeRoutingService.apply_deviation(
+                s, change, seed["admin_id"], op="remove",
+                department_id=te, reason="again")
+
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
+        await s.commit()
+
+    async with session_factory() as s:
+        assert await _dev_te_row(s, cid, te) is None
         assert await s.get(WfInstanceTask, task_id) is None
-        # Removing the last open blocking task lets stage 1 advance to stage 2.
+        att = await s.get(ChangeAttachment, att_id)
+        assert att is not None and att.assessment_id is None
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == cid))).scalar_one()
+        assert not any(d["department_id"] == te
+                       for st in routing.standard_snapshot["stages"]
+                       for d in st["departments"])
         inst = (await s.execute(select(WfInstance).where(
             WfInstance.change_id == cid, WfInstance.status == "active"))).scalar_one()
         assert inst.current_stage_order == 2
+        change = await s.get(ChangeRequest, cid)
+        assert await ChangeRoutingService.pending_removal_ids(s, change) == set()
+
+
+async def test_deviation_remove_rejected_keeps_the_row_owed(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """A rejected removal lapses: the row, its letter and its active task are
+    untouched, the pending mark is gone, and the stage still waits on it."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest
+    from app.models.workflow import WfInstance, WfInstanceTask
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+    te = dev_departments["Tool Engineer"]
+    async with session_factory() as s:
+        row = await _dev_te_row(s, cid, te)
+        task_id, row_id = row.wf_instance_task_id, row.id
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="remove",
+            department_id=te, reason="test op")
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.reject_deviation(
+            s, change, seed["admin_id"], "they are needed")
+        await s.commit()
+    async with session_factory() as s:
+        row = await _dev_te_row(s, cid, te)
+        assert row is not None and row.id == row_id and row.rasic_letter == "R"
+        assert row.wf_instance_task_id == task_id
+        task = await s.get(WfInstanceTask, task_id)
+        assert task.status == "active"
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid, WfInstance.status == "active"))).scalar_one()
+        assert inst.current_stage_order == 1
+        change = await s.get(ChangeRequest, cid)
+        assert await ChangeRoutingService.pending_removal_ids(s, change) == set()
+        # The next removal request may be filed again.
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="remove",
+            department_id=te, reason="second try")
+        assert await ChangeRoutingService.pending_removal_ids(s, change) == {row_id}
+
+
+async def test_deviation_remove_of_an_answered_row_is_refused_or_moot(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """An answered row cannot be taken off; one answered while its removal
+    was pending stays on approval (its answer is on the record)."""
+    from datetime import datetime
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+    te = dev_departments["Tool Engineer"]
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="remove",
+            department_id=te, reason="test op")
+        row = await _dev_te_row(s, cid, te)
+        row.verdict = "feasible"
+        row.submitted_at = datetime.utcnow()
+        row.submitted_by = seed["engineer_id"]
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
+        await s.commit()
+    async with session_factory() as s:
+        assert await _dev_te_row(s, cid, te) is not None
+        change = await s.get(ChangeRequest, cid)
+        with pytest.raises(ValueError, match="already submitted"):
+            await ChangeRoutingService.apply_deviation(
+                s, change, seed["engineer_id"], op="remove",
+                department_id=te, reason="late")
 
 
 async def test_deviation_reletter_updates_task(
