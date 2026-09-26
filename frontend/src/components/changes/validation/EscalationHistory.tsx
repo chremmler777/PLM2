@@ -93,6 +93,7 @@ export default function EscalationHistory({ changeId, issue, canEscalate, canDee
         <div className="flex flex-wrap items-center gap-2">
           <input autoFocus data-testid={`issue-deescalate-reason-${issue.id}`} value={lowerReason}
             onChange={(ev) => setLowerReason(ev.target.value)}
+            aria-label={`Why back to L${lowerLevel} (reason, required)`}
             placeholder={`Why back to L${lowerLevel}? (required)`} className={`${inputCls} min-w-0 flex-1`} />
           <button type="button" data-testid={`issue-deescalate-confirm-${issue.id}`}
             disabled={!lowerReason.trim() || deescalate.isPending} onClick={() => deescalate.mutate(undefined)}
@@ -107,6 +108,7 @@ export default function EscalationHistory({ changeId, issue, canEscalate, canDee
         <div className="flex flex-wrap items-center gap-2">
           <input autoFocus data-testid={`issue-escalate-reason-${issue.id}`} value={reason}
             onChange={(ev) => setReason(ev.target.value)}
+            aria-label={`Why escalate ${issueCode(issue)} to L${nextLevel} (reason, required)`}
             placeholder={`Why L${nextLevel}? (required)`} className={`${inputCls} min-w-0 flex-1`} />
           <button type="button" data-testid={`issue-escalate-confirm-${issue.id}`}
             disabled={!reason.trim() || escalate.isPending} onClick={() => escalate.mutate(undefined)}

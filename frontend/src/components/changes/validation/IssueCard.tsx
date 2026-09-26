@@ -145,7 +145,7 @@ export default function IssueCard({
   // Fixed during the loop back: the re-check waits for validation (the
   // backend offers no act in implementation), so the card names the step.
   const recheckWaits = open && issue.status === 'revalidation' && changeStatus === 'in_implementation'
-    && !acts.includes('recheck')
+    && !acts.includes('recheck') && !issue.check_retired
 
   const contain = useIssueMutation(changeId, (t: string) => validationIssuesApi.contain(changeId, issue.id, t),
     { error: 'Could not save the containment', onDone: () => setActive(null) })
@@ -255,6 +255,12 @@ export default function IssueCard({
       <div className="border-t border-slate-800 px-4 py-2.5">
         <IssueStepper issue={issue} />
       </div>
+      {open && issue.check_retired && (
+        <p data-testid={`issue-check-retired-${issue.id}`} role="note"
+          className="border-t border-slate-800 px-4 py-2 text-[11px] text-slate-400">
+          The check it was raised on is no longer asked; close it with a note.
+        </p>
+      )}
 
       {expanded && (
         <div className="space-y-4 border-t border-slate-800 px-4 py-3">

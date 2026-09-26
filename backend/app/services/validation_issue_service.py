@@ -142,6 +142,7 @@ class Viewer:
         from app.services.change_people import holds_lead
         self.lead = holds_lead(change, user)
         self.dept_ids = dept_ids
+        self.dept_names = names
         mine = {names.get(i) for i in dept_ids}
         self.pm = PM_DEPARTMENT in mine
         self.sales = SALES_DEPARTMENT in mine
@@ -179,10 +180,37 @@ class ValidationIssueService:
         answered 'passed' again."""
         if check is None:
             return False
+        return ValidationIssueService._retired_in(
+            check, await ValidationIssueService._dept_names(session))
+
+    @staticmethod
+    def _retired_in(check: Optional[ValidationCheck], names: dict) -> bool:
+        """check_retired against department names already loaded."""
+        if check is None:
+            return False
         from app.services import validation_checklist as catalog
-        name = (await ValidationIssueService._dept_names(session)).get(
-            check.department_id)
+        name = names.get(check.department_id)
+        if name is None:
+            # an unknown department says nothing about the catalog: the
+            # check stays live rather than being retired by accident
+            return False
         return check.check_key not in catalog.keys_for(name)
+
+    @staticmethod
+    async def _retired_by_issue(session: AsyncSession,
+                                issues: list) -> dict[int, bool]:
+        """issue id -> its linked check is retired (no longer asked)."""
+        cids = {i.check_id for i in issues if i.check_id is not None}
+        if not cids:
+            return {}
+        checks = {c.id: c for c in (await session.execute(
+            select(ValidationCheck).where(ValidationCheck.id.in_(cids))
+        )).scalars()}
+        names = await ValidationIssueService._dept_names(session)
+        return {i.id: ValidationIssueService._retired_in(
+                    checks.get(i.check_id) if i.check_id is not None else None,
+                    names)
+                for i in issues}
 
     @staticmethod
     async def _dept_id(session: AsyncSession, name: str) -> Optional[int]:
@@ -1802,9 +1830,13 @@ class ValidationIssueService:
         return "raised"
 
     @staticmethod
-    def _step_note(change: ChangeRequest, issue: ValidationIssue) -> Optional[str]:
+    def _step_note(change: ChangeRequest, issue: ValidationIssue,
+                   retired: bool = False) -> Optional[str]:
         """Why the next step waits, when it waits on the change and not on
-        anybody's act."""
+        anybody's act (or why a retired check's issue closes by hand)."""
+        if issue.is_open and retired:
+            return ("The check it was raised on is no longer asked; close it "
+                    "with a note")
         if issue.is_open and issue.status == "revalidation" and \
                 issue.check_id is not None and change.status != "in_validation":
             return ("Re-check after implementation, when the change is back "
@@ -1873,16 +1905,21 @@ class ValidationIssueService:
             acts.append("customer")
         if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
             acts.append("action_done")
+        chk = await session.get(ValidationCheck, issue.check_id) \
+            if issue.check_id is not None else None
+        # a check no longer asked of its department can never pass again:
+        # nobody re-checks it, the issue closes with a note at any open step
+        retired = svc._retired_in(chk, v.dept_names)
         # the check is answered again in validation only: while the change is
         # back in implementation the re-check waits (step_note says so)
         if issue.status == "revalidation" and issue.check_id is not None \
-                and change.status == "in_validation":
-            chk = await session.get(ValidationCheck, issue.check_id)
+                and not retired and change.status == "in_validation":
             if v.admin or v.pm or v.in_dept(chk.department_id if chk else
                                             issue.department_id):
                 acts.append("recheck")
-        if (v.admin or v.pm or v.lead) and issue.check_id is None and \
-                issue.status == "revalidation":
+        if (v.admin or v.pm or v.lead) and (
+                retired or (issue.check_id is None
+                            and issue.status == "revalidation")):
             acts.append("close")
         if v.cost_role and issue.extra_cost is None:
             acts.append("cost")
@@ -1950,7 +1987,8 @@ class ValidationIssueService:
         # The extra cost is stated in the change's costing currency (its
         # costing plant's), the same one the actual costs are booked in.
         from app.services import costing_rates
-        currency = await costing_rates.costing_currency(session, change)
+        currency = await costing_rates.costing_currency_or_none(session, change)
+        retired = await svc._retired_by_issue(session, issues)
         out = []
         for i in issues:
             c = checks.get(i.check_id)
@@ -2022,7 +2060,8 @@ class ValidationIssueService:
                 "follow_up_change_id": i.follow_up_change_id,
                 "follow_up_change_number": follows.get(i.follow_up_change_id),
                 "status": i.status, "step": svc._step(i), "is_open": i.is_open,
-                "step_note": svc._step_note(change, i),
+                "step_note": svc._step_note(change, i, retired.get(i.id, False)),
+                "check_retired": retired.get(i.id, False),
                 "closed_at": i.closed_at, "closed_by": i.closed_by,
                 "closed_by_name": users.get(i.closed_by),
                 "closure_note": i.closure_note,
@@ -2132,6 +2171,7 @@ class ValidationIssueService:
         ids = [i.id for i in issues]
         acts = await svc.actions_of(session, ids)
         escs = await svc.escalations_of(session, ids)
+        retired = await svc._retired_by_issue(session, issues)
         out = []
         for i in issues:
             possible, _primary, extra = await svc.next_acts(
@@ -2156,7 +2196,8 @@ class ValidationIssueService:
                 owed.append("customer")
             if "quote_fix" in possible and not v.admin:
                 owed.append("quote_fix")
-            if "close" in possible and i.status == "revalidation" and not v.admin:
+            if "close" in possible and not v.admin and (
+                    i.status == "revalidation" or retired.get(i.id)):
                 owed.append("close")
             if "recheck" in possible and not v.admin:
                 owed.append("recheck")

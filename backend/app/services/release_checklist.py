@@ -301,7 +301,7 @@ def ended_at(change) -> datetime | None:
         return None
     stamps = {
         "released": ("released_at",),
-        "closed": ("released_at", "closed_at"),
+        "closed": ("released_at", "rejected_at", "cancelled_at", "closed_at"),
         "cancelled": ("cancelled_at",),
         "rejected": ("rejected_at",),
     }[status]

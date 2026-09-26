@@ -993,7 +993,7 @@ class GateDecisionIn(BaseModel):
 
 class GateResponse(BaseModel):
     gate_key: str
-    decision: str
+    decision: Optional[str] = None  # None: nobody has decided it yet
     decided_by: Optional[int] = None
     decided_by_name: Optional[str] = None
     decided_at: Optional[datetime] = None
@@ -1395,6 +1395,10 @@ class ValidationCheckState(BaseModel):
     # the change would add. A delta, not an absolute cycle time — the costing
     # never stated one.
     planned_delta_seconds: Optional[float] = None
+    # Where planned_delta_seconds comes from: "change_lifecycle_total" (the
+    # Tool Engineer's row: every department's lifecycle minutes summed) or
+    # "department_lifecycle" (that department's own lines). None with no number.
+    planned_delta_source: Optional[str] = None
     # weight only: what the quote was built on, and the gap to the weighed part.
     estimated_part_weight_g: Optional[float] = None
     delta_g: Optional[float] = None

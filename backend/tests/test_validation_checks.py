@@ -189,10 +189,13 @@ async def test_state_carries_the_costing_assumptions_to_compare_against(
     # assumption surfaces change-wide (below), not on a Development check.
     assert "cycle_time" not in {c["check_key"]
                                 for c in by_name["Development"]["checks"]}
-    # Tool Engineer priced no lifecycle minutes: no assumption is not zero.
+    # The Tool Engineer times the line for the whole change: its row is held
+    # against every department's lifecycle minutes summed (Development's
+    # 0.5 min = 30 s), and says where that number comes from.
     tool_cycle = next(c for c in by_name["Tool Engineer"]["checks"]
                       if c["check_key"] == "cycle_time")
-    assert tool_cycle["planned_delta_seconds"] is None
+    assert tool_cycle["planned_delta_seconds"] == 30.0
+    assert tool_cycle["planned_delta_source"] == "change_lifecycle_total"
 
     # Change-wide, in the unit the COSTING states it: minutes per part.
     assert state["planned_cycle_time_min_per_part"] == 0.5

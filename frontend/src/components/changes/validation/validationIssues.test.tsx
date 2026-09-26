@@ -282,7 +282,7 @@ describe('customer decision', () => {
 
 describe('cost visibility', () => {
   it('cost roles see the amount, others only that a cost is set', () => {
-    const i = issue({ extra_cost: 1250.5, cost_bearer: 'supplier', cost_set: true })
+    const i = issue({ extra_cost: 1250.5, cost_bearer: 'supplier', cost_set: true, currency: 'EUR' })
     wrap(<IssueCard changeId={7} changeStatus="in_validation" issue={i} viewer={{ canSeeCosts: true }} departments={departments} />)
     expect(screen.getByTestId('issue-cost-11').textContent).toBe('1,250.50 EUR, Supplier pays')
     cleanup()

@@ -238,6 +238,8 @@ class ValidationService:
         names = await ValidationService._department_names(session)
         planned = await ValidationService.planned_cycle_seconds_by_department(
             session, change)
+        planned_total_s = (round(sum(planned.values()), 3)
+                           if planned else None)
         people = await ValidationService._names(
             session, [r.checked_by for r in rows] + [change.weight_delta_ack_by])
         estimate = (float(change.estimated_part_weight_g)
@@ -286,7 +288,20 @@ class ValidationService:
                     # The costing never stated an absolute cycle time, only
                     # the seconds this change adds per part. Named as what it
                     # is so nobody subtracts a measurement from it.
-                    entry["planned_delta_seconds"] = planned.get(dept_id)
+                    if dept_name == catalog.CYCLE_TIME_DEPARTMENT:
+                        # The Tool Engineer measures the line for the whole
+                        # change, so its row is held against the change-wide
+                        # sum of every department's lifecycle minutes (it
+                        # rarely prices lifecycle minutes itself).
+                        entry["planned_delta_seconds"] = planned_total_s
+                        entry["planned_delta_source"] = (
+                            "change_lifecycle_total"
+                            if planned_total_s is not None else None)
+                    else:
+                        entry["planned_delta_seconds"] = planned.get(dept_id)
+                        entry["planned_delta_source"] = (
+                            "department_lifecycle"
+                            if planned.get(dept_id) is not None else None)
                 if key == catalog.WEIGHT_KEY:
                     entry["estimated_part_weight_g"] = estimate
                     entry["delta_g"] = delta

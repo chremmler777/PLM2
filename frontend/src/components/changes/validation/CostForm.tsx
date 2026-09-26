@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../../api/changes'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { CostBearer, IssueOut } from '../../../types/validationIssue'
-import { formatMoney } from '../../../lib/format'
+import { formatMoney, formatNumber } from '../../../lib/format'
 import { NumField, Segmented } from '../offer/ui'
 import { BEARER_LABEL } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
@@ -21,7 +21,9 @@ export function CostLine({ issue, canSeeCosts }: { issue: IssueOut; canSeeCosts:
   return (
     <span data-testid={`issue-cost-${issue.id}`} className="text-xs text-slate-300">
       {canSeeCosts && issue.extra_cost != null
-        ? <span className="tabular-nums text-slate-100">{formatMoney(issue.extra_cost, issue.currency)}</span>
+        ? <span className="tabular-nums text-slate-100">{issue.currency
+          ? formatMoney(issue.extra_cost, issue.currency)
+          : formatNumber(issue.extra_cost, { min: 2, max: 2 })}</span>
         : 'Cost set'}
       {issue.cost_bearer ? `, ${BEARER_LABEL[issue.cost_bearer]}` : ''}
     </span>

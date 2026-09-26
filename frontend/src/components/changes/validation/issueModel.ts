@@ -207,7 +207,8 @@ export function issueActs(i: IssueOut, v: IssueViewer): IssueAct[] {
   if (i.actions.some((a) => a.status === 'open' && (a.can_done
     || (v.id != null && a.owner_id === v.id)
     || (a.department_id != null && (v.myDepartmentIds ?? []).includes(a.department_id)) || manage))) acts.push('action_done')
-  if (manage && decided && !i.check_id && !i.check_key && i.status === 'revalidation') acts.push('close')
+  if (manage && (i.check_retired
+    || (decided && !i.check_id && !i.check_key && i.status === 'revalidation'))) acts.push('close')
   if (v.canSeeCosts && !i.cost_set && i.extra_cost == null) acts.push('cost')
   if (manage && decided && FIX_ROUTES.includes(i.route!)) acts.push('add_action')
   if (manage || v.isSales) acts.push('escalate')

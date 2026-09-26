@@ -714,3 +714,21 @@ async def test_change_finished_on_the_first_version_keeps_its_rows(
     assert by_key["process_stable_pe"]["retired"] is True
     assert by_key["cycle_time_tool"]["status"] == "open"
     assert st["open_count"] == 1
+
+
+async def test_closed_after_a_rejection_ends_at_its_rejection():
+    """A change rejected, then closed later, ended when it was rejected: the
+    close stamp is only the fallback when no earlier end is on file."""
+    from datetime import datetime
+    from types import SimpleNamespace
+    from app.services.release_checklist import ended_at
+    rejected, closed = datetime(2026, 6, 1), datetime(2026, 9, 30)
+    c = SimpleNamespace(status="closed", released_at=None, rejected_at=rejected,
+                        cancelled_at=None, closed_at=closed)
+    assert ended_at(c) == rejected
+    c.rejected_at, c.cancelled_at = None, datetime(2026, 7, 1)
+    assert ended_at(c) == datetime(2026, 7, 1)
+    c.cancelled_at = None
+    assert ended_at(c) == closed
+    c.released_at = datetime(2026, 5, 1)
+    assert ended_at(c) == datetime(2026, 5, 1)

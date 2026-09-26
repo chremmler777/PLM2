@@ -1057,3 +1057,87 @@ async def test_extra_cost_is_in_the_costing_currency(client, vi, session_factory
     assert r.json()["currency"] == "USD"
     seen = (await client.get(_url(vi), headers=pm)).json()[0]
     assert seen["currency"] == "USD" and seen["extra_cost"] == 5000
+
+
+async def test_issue_on_a_retired_check_offers_close_and_owes_no_recheck(
+        client, vi, session_factory, seed):
+    """An issue linked to a check no longer asked (the Manufacturing
+    Engineer's cycle time, which the Tool Engineer alone measures now): no
+    re-check is offered or owed, the PM may close it with a note at any open
+    step (fixing and revalidation), and the payload says why."""
+    issue = await _raised(client, vi)
+    iid = issue["id"]
+    await _ready(client, vi, iid)
+    r = await _route(client, vi, iid, who="pm")
+    assert r.status_code == 200, r.text
+    aid = r.json()["actions"][0]["id"]
+    async with session_factory() as s:
+        d = Department(name="Manufacturing Engineer", flow_type="action",
+                       is_active=True)
+        s.add(d)
+        await s.flush()
+        me = User(organization_id=seed["org_id"], username="me",
+                  email="me@vi.test", full_name="ME", role="engineer",
+                  hashed_password=get_password_hash(ENGINEER_PASSWORD),
+                  is_active=True, mfa_enabled=False)
+        s.add(me)
+        await s.flush()
+        s.add(UserDepartment(user_id=me.id, department_id=d.id))
+        chk = await s.get(ValidationCheck, vi["check_id"])
+        chk.department_id = d.id
+        chk.check_key = "cycle_time"
+        await s.commit()
+        me_id = me.id
+    pm = await _auth(client, vi, "pm")
+
+    async def owed(uid):
+        async with session_factory() as s:
+            change = await s.get(ChangeRequest, vi["change_id"])
+            u = await s.get(User, uid)
+            return [a["kind"] for a in
+                    await ValidationIssueService.my_actions(s, change, u)
+                    if a.get("issue_id") == iid]
+
+    for step in ("fixing", "revalidation"):
+        if step == "revalidation":
+            r = await client.post(_url(vi, f"/{iid}/actions/{aid}/done"),
+                                  headers=pm)
+            assert r.status_code == 200 and r.json()["status"] == "revalidation"
+        view = (await client.get(_url(vi, f"/{iid}"), headers=pm)).json()
+        assert view["status"] == step
+        assert view["check_retired"] is True
+        assert "close" in view["next_acts"] and "recheck" not in view["next_acts"]
+        assert "no longer asked" in view["step_note"]
+        assert "validation_issue_close" in await owed(vi["user"]["pm"]["id"])
+        assert "validation_issue_recheck" not in await owed(me_id)
+        assert not any(k.endswith("recheck") for k in await owed(me_id))
+    r = await client.post(_url(vi, f"/{iid}/close"), headers=pm,
+                          json={"note": "Cycle time no longer asked of ME"})
+    assert r.status_code == 200 and r.json()["status"] == "closed"
+
+
+async def test_extra_cost_currency_is_null_without_a_costing_plant(
+        client, vi, monkeypatch):
+    """No costing plant (no single affected plant, no project plant): the
+    currency is null, never a guessed EUR, so the card shows the amount
+    unitless."""
+    from app.services import costing_rates
+
+    async def no_plant(db, change):
+        return None
+    monkeypatch.setattr(costing_rates, "costing_plant_id", no_plant)
+    issue = await _raised(client, vi)
+    pm = await _auth(client, vi, "pm")
+    r = await client.post(_url(vi, f"/{issue['id']}/cost"), headers=pm,
+                          json={"extra_cost": 5000, "cost_bearer": "internal"})
+    assert r.status_code == 200, r.text
+    assert r.json()["currency"] is None
+
+
+async def test_check_retired_is_false_for_an_unknown_department(vi, session_factory):
+    """A department the lookup does not know says nothing about the
+    catalog: the check is not retired by accident."""
+    chk = ValidationCheck(change_id=vi["change_id"], department_id=999999,
+                          check_key="anything", status="failed")
+    async with session_factory() as s:
+        assert await ValidationIssueService.check_retired(s, chk) is False

@@ -412,9 +412,36 @@ describe('extra cost currency', () => {
     expect(screen.getByTestId('issue-cost-11').textContent).toContain('250.00 USD')
   })
 
+  it('without a currency the recorded cost reads unitless, not EUR', () => {
+    render(<CostLine issue={issue({ currency: null, extra_cost: 250, cost_set: true })} canSeeCosts />)
+    const text = screen.getByTestId('issue-cost-11').textContent ?? ''
+    expect(text).toContain('250.00')
+    expect(text).not.toContain('EUR')
+  })
+
   it('falls back to the costing context, never to a guessed EUR', async () => {
     vi.mocked(changesApi.costingContext).mockResolvedValue({ currency: 'USD' } as never)
     qcWrap(<CostForm changeId={7} issue={issue({ currency: null })} />)
     expect((await screen.findByTestId('issue-cost-currency-11')).textContent).toBe('USD')
+  })
+})
+
+describe('issue on a retired check', () => {
+  it('says why it closes with a note and does not wait for a re-check', () => {
+    card(issue({ status: 'revalidation', route: 'internal_rework', check_id: 58, check_key: 'cycle_time',
+      check_retired: true, actions: [{ id: 1, description: 'Rework slide', status: 'done' }],
+      next_acts: ['close', 'edit'], primary_act: 'close' }), { canManage: true },
+    { changeStatus: 'in_implementation' })
+    expect(screen.getByTestId('issue-check-retired-11').textContent)
+      .toContain('The check it was raised on is no longer asked; close it with a note')
+    expect(screen.queryByTestId('issue-recheck-waits-11')).toBeNull()
+    expect(screen.getByTestId('issue-primary-11').getAttribute('data-act')).toBe('close')
+  })
+
+  it('without next_acts the manager is still offered close in fixing', () => {
+    card(issue({ status: 'fixing', route: 'internal_rework', check_id: 58, check_key: 'cycle_time',
+      check_retired: true, next_acts: undefined, primary_act: undefined }), { canManage: true })
+    expect(screen.getByTestId('issue-check-retired-11')).toBeDefined()
+    expect(screen.getByTestId('issue-primary-11').getAttribute('data-act')).toBe('close')
   })
 })

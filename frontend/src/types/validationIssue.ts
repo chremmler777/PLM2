@@ -142,7 +142,10 @@ export interface IssueOut {
   /** True when a cost is recorded, whether or not the viewer may see it. */
   cost_set?: boolean
   cost_bearer?: CostBearer | null
+  /** The costing plant's currency; null when the change has no costing plant (shown unitless). */
   currency?: string | null
+  /** The linked check is no longer asked of its department: no re-check, the issue closes with a note. */
+  check_retired?: boolean
   /** Sales quoted a customer-paid fix to the customer. */
   fix_quoted_at?: string | null
   fix_quoted_by_name?: string | null

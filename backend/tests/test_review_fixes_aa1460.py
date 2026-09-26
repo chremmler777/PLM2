@@ -94,7 +94,8 @@ async def test_recheck_waits_for_validation():
 
     class _Session:
         async def get(self, _model, _id):
-            return SimpleNamespace(department_id=5)
+            # a check its department is still asked (not retired)
+            return SimpleNamespace(department_id=5, check_key="sampled")
 
     user = SimpleNamespace(id=9, effective_role="engineer")
     issue = SimpleNamespace(
@@ -104,7 +105,7 @@ async def test_recheck_waits_for_validation():
         extra_cost=0, escalation_level=1, cost_bearer=None, fix_quoted_at=None)
     for status, offered in (("in_implementation", False), ("in_validation", True)):
         change = SimpleNamespace(lead_id=None, status=status)
-        v = Viewer(user, change, {5}, {5: "Quality"})
+        v = Viewer(user, change, {5}, {5: "Tool Engineer"})
         acts, _, _ = await svc.next_acts(_Session(), change, issue, v, [], [])
         assert ("recheck" in acts) is offered
         note = svc._step_note(change, issue)

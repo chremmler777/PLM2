@@ -708,3 +708,13 @@ async def version_warning(db: AsyncSession, change, used: Optional[list[int]] = 
 
 async def costing_currency(db: AsyncSession, change) -> str:
     return await cs.plant_currency(db, await costing_plant_id(db, change))
+
+
+async def costing_currency_or_none(db: AsyncSession, change) -> Optional[str]:
+    """The costing plant's currency, or None when the change has no costing
+    plant (no single affected plant and no project plant): the caller shows
+    the amount unitless instead of assuming EUR."""
+    plant_id = await costing_plant_id(db, change)
+    if plant_id is None:
+        return None
+    return await cs.plant_currency(db, plant_id)
