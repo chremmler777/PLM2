@@ -307,6 +307,27 @@ describe('ReleaseTab', () => {
     expect(onAdvance).toHaveBeenCalledWith('released')
   })
 
+  it('a closed change with unfinished plan tasks shows the release date as actual finish', async () => {
+    const { planApi } = await import('../../../api/changePlan')
+    vi.mocked(planApi.get).mockResolvedValueOnce({
+      tasks: [
+        { id: 1, is_idea: false, start_date: '2026-10-01', duration_days: 14, end_date: '2026-10-15', progress_pct: 100,
+          baseline_start: '2026-10-01', baseline_finish: '2026-10-11', actual_finish: '2026-10-14' },
+        { id: 2, is_idea: false, start_date: '2026-10-01', duration_days: 14, end_date: '2026-10-20', progress_pct: 40,
+          baseline_start: '2026-10-01', baseline_finish: '2026-10-11', actual_finish: null },
+      ],
+      summary: { finish: '2026-10-20' },
+    } as never)
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state({ open_count: 0, can_release: false, blockers: [] }))
+    wrap(<ReleaseTab change={change({ status: 'closed', released_at: '2026-10-16T09:00:00' })} departments={[]}
+      myDepartmentIds={[]} canSeeAll canAcknowledge canManage onAdvance={vi.fn()} advancing={false} />)
+    await waitFor(() => expect(screen.getByTestId('summary-actual-finish').textContent).toBe('16 Oct 2026'))
+    expect(screen.getByTestId('summary-actual-finish-detail').textContent)
+      .toBe('The release date, 1 plan task never marked done')
+    expect(screen.getByTestId('summary-against-baseline-detail').textContent).toBe('2 tasks slipped')
+    expect(screen.getByTestId('release-summary').textContent).not.toMatch(/open/)
+  })
+
   it('after release shows plan against actual and the close action', async () => {
     vi.mocked(changeReleaseApi.get).mockResolvedValue(state({ open_count: 0, can_release: false, blockers: [] }))
     const onAdvance = vi.fn()
@@ -343,6 +364,27 @@ describe('closingFigures', () => {
     expect(f.open).toBe(2)
     expect(f.slipped).toBe(1)
     expect(f.slip).toBe(0)
+  })
+
+  it('on a released change, open plan tasks are a plan never completed, not open work', () => {
+    const tasks = [
+      task({ id: 1, end_date: '2026-12-21', baseline_start: '2026-12-07', baseline_finish: '2026-12-14',
+        actual_finish: '2026-12-18', progress_pct: 100 }),
+      task({ id: 2, end_date: '2026-12-21' }),
+      task({ id: 3, end_date: '2026-12-21' }),
+    ]
+    const f = closingFigures(tasks, '2026-12-19T10:00:00')
+    expect(f.actual).toBe('2026-12-19')
+    expect(f.actualFrom).toBe('release')
+    expect(f.open).toBe(0)
+    expect(f.unfinished).toBe(2)
+    // without a release date: the last actual finish
+    const g = closingFigures(tasks, null)
+    expect(g.actual).toBe('2026-12-18')
+    expect(g.actualFrom).toBe('last_finish')
+    // the Timing tab (not released) still counts them as open
+    expect(closingFigures(tasks).open).toBe(2)
+    expect(closingFigures(tasks).actual).toBeNull()
   })
 
   it('reads the server end_date, not start_date + duration_days', () => {

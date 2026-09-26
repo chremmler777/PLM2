@@ -73,25 +73,81 @@ def booking_pricing_date(change, booked_at) -> date:
         return change_pricing_date(change)
     return booked_at.date() if booked_at else business_today()
 
-def unpriced_department_messages(unpriced: list[dict],
-                                 names: dict) -> list[tuple[str, int]]:
-    """One "No cost sheet rate for <department>: hours unpriced" per
-    department with an unpriced line (department order of first
-    appearance), as (message, department_id). The same words in the
-    costing, the close-costing dialog and the P&L."""
-    seen: list[int] = []
+def _qty(n: float) -> str:
+    """12 -> '12', 1250.5 -> '1,250.5' (the UI's formatNumber, up to 2 decimals)."""
+    return f"{n:,.2f}".rstrip("0").rstrip(".")
+
+
+def unpriced_groups(unpriced: list[dict], names: dict) -> list[dict]:
+    """The unpriced lines said once per what is missing, in order of first
+    appearance: a labour line per department ("No cost sheet rate for Tool
+    Engineer: 12 h unpriced"), a machine_time or sampling line per class and
+    plant (its `subject`: "No machine rate for class 200-450 t at USA
+    Toccoa: 12 h unpriced"). The quantities are said when the lines carry
+    them (quantity, unit), else "hours". [{message, department_id, subject,
+    count}]; department_id is None for a subject group (it is not the
+    department's rate that is missing)."""
+    groups: dict = {}
     for u in unpriced:
-        if u["department_id"] not in seen:
-            seen.append(u["department_id"])
-    return [(f"No cost sheet rate for "
-             f"{names.get(d) or f'department {d}'}: hours unpriced", d) for d in seen]
+        subject = u.get("subject")
+        key = ("subject", subject) if subject else ("department", u["department_id"])
+        g = groups.setdefault(key, {"subject": subject, "department_id": u["department_id"],
+                                    "hours": 0.0, "trials": 0.0, "count": 0})
+        g["count"] += 1
+        q = float(u.get("quantity") or 0)
+        if u.get("unit") == "trial":
+            g["trials"] += q
+        else:
+            g["hours"] += q
+    out = []
+    for g in groups.values():
+        parts = ([f"{_qty(g['hours'])} h"] if g["hours"] > 0 else []) + (
+            [f"{_qty(g['trials'])} trial{'' if g['trials'] == 1 else 's'}"]
+            if g["trials"] > 0 else [])
+        what = " and ".join(parts) or "hours"
+        if g["subject"]:
+            message = f"No {g['subject']}: {what} unpriced"
+        else:
+            d = g["department_id"]
+            message = (f"No cost sheet rate for {names.get(d) or f'department {d}'}: "
+                       f"{what} unpriced")
+        out.append({"message": message, "subject": g["subject"], "count": g["count"],
+                    "department_id": None if g["subject"] else g["department_id"]})
+    return out
+
+
+def unpriced_department_messages(unpriced: list[dict],
+                                 names: dict) -> list[tuple[str, Optional[int]]]:
+    """unpriced_groups as (message, department_id): the same words in the
+    costing, the close-costing dialog and the P&L."""
+    return [(g["message"], g["department_id"]) for g in unpriced_groups(unpriced, names)]
+
+
+async def unpriced_subject(book: "RateBook", p, price: "Price", plant_id: Optional[int],
+                           classes: dict) -> Optional[str]:
+    """What is missing for an unpriced machine_time or sampling line: the
+    machine (sampling) rate of its class at the plant it is priced at, or
+    the machine class itself. None for a labour line (the department's rate
+    is missing)."""
+    if p.kind not in ("machine_time", "sampling"):
+        return None
+    cls_id = p.machine_class_id or (price.detail or {}).get("machine_class_id")
+    if cls_id is None:
+        return "machine class for " + ("sampling" if p.kind == "sampling"
+                                       else "the machine hours")
+    m = await book.machine(getattr(p, "machine_id", None))
+    at = (m.plant_id if m is not None and m.plant_id else None) or plant_id
+    plant = await book.plant_name(at)
+    what = "sampling rate" if p.kind == "sampling" else "machine rate"
+    return (f"{what} for class {classes.get(cls_id) or f'#{cls_id}'}"
+            + (f" at {plant}" if plant else ""))
 
 
 async def unpriced_departments(db: AsyncSession, change) -> list[dict]:
-    """[{department_id, department_name, count, message}] for the costing
-    positions of `change` that cannot be priced from the cost sheet (no
-    rate: never counted as 0). Read-only; what the close-costing dialog and
-    the P&L card name."""
+    """[{department_id, department_name, subject, count, message}] for the
+    costing positions of `change` that cannot be priced from the cost sheet
+    (no rate: never counted as 0), one per unpriced_groups group.
+    Read-only; what the close-costing dialog and the P&L card name."""
     from app.models.change_cost import CostingPosition
     from app.models.workflow import Department
     positions = (await db.execute(select(CostingPosition).where(
@@ -101,22 +157,26 @@ async def unpriced_departments(db: AsyncSession, change) -> list[dict]:
     plant_id = await costing_plant_id(db, change)
     org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
     book = RateBook(db)
+    classes: Optional[dict] = None
     unpriced: list[dict] = []
     for p in positions:
         price = await position_price(db, change, p, org_id=org_id,
                                      plant_id=plant_id, book=book)
         if line_value(p, price) is None:
-            unpriced.append({"department_id": p.department_id, "position_id": p.id})
+            if classes is None and p.kind in ("machine_time", "sampling"):
+                classes = await class_names(db, org_id)
+            unpriced.append({"department_id": p.department_id, "position_id": p.id,
+                             "quantity": quantity(p), "unit": price.unit,
+                             "subject": await unpriced_subject(book, p, price, plant_id,
+                                                               classes or {})})
     if not unpriced:
         return []
     names = dict((await db.execute(select(Department.id, Department.name).where(
         Department.id.in_({u["department_id"] for u in unpriced})))).all())
-    counts: dict[int, int] = {}
-    for u in unpriced:
-        counts[u["department_id"]] = counts.get(u["department_id"], 0) + 1
-    return [{"department_id": d, "department_name": names.get(d),
-             "count": counts[d], "message": m}
-            for m, d in unpriced_department_messages(unpriced, names)]
+    return [{"department_id": g["department_id"],
+             "department_name": names.get(g["department_id"]),
+             "subject": g["subject"], "count": g["count"], "message": g["message"]}
+            for g in unpriced_groups(unpriced, names)]
 
 
 NO_RATE_WARNING = ("Costing lines without a rate in the cost sheet are not counted: "
@@ -179,9 +239,13 @@ def pricing_note(price: Optional[Price]) -> Optional[str]:
     detail = (price.detail or {}) if price is not None else {}
     gap = detail.get("gap_fill")
     if gap:
-        where = ("the earliest cost sheet" if detail.get("earliest")
-                 else "on the creation date")
-        return (f"no rate in v{gap['no_rate_in']} {where}; taken from v{gap['version']} "
+        where = (", the earliest cost sheet" if detail.get("earliest")
+                 else " on the creation date")
+        if gap.get("part") == "labour_rate":
+            # a sampling row of the version whose labour rate alone was missing
+            return (f"no labour rate in v{gap['no_rate_in']}{where}; labour rate taken "
+                    f"from v{gap['version']} valid from {fmt_date(gap.get('valid_from'))}")
+        return (f"no rate in v{gap['no_rate_in']}{where}; taken from v{gap['version']} "
                 f"valid from {fmt_date(gap.get('valid_from'))}")
     if detail.get("earliest") and price.version is not None:
         return f"priced with v{price.version}, the earliest cost sheet"
@@ -340,6 +404,14 @@ class RateBook:
                 return found, later
         return None
 
+    async def plant_name(self, plant_id: Optional[int]) -> Optional[str]:
+        if plant_id is None:
+            return None
+        if getattr(self, "_plant_names", None) is None:
+            self._plant_names = dict((await self.db.execute(
+                select(Plant.id, Plant.name))).all())
+        return self._plant_names.get(plant_id)
+
     async def plant_currency(self, plant_id: Optional[int]) -> str:
         if plant_id is None:
             return "EUR"
@@ -444,7 +516,10 @@ class RateBook:
         """The class's price of a trial; a named machine prices the machine
         hours of a components row at its own rate. Gap fill as labour_price
         when the version valid on the pricing date has no sampling row for
-        the class, or its price lacks a rate (machine or labour)."""
+        the class, or its price lacks a rate (machine or labour). A row
+        that lacks ONLY its labour rate keeps its hours, handling and
+        machine rate and takes just the labour rate from the earliest later
+        version that has it (labelled "no labour rate in v1 ...")."""
         on_date = on_date or business_today()
         m = await self.machine(machine_id)
         costing_cur = await self.plant_currency(plant_id)
@@ -462,15 +537,30 @@ class RateBook:
             return hit
         hit = lookup(v) if v else None
         filled = None
-        if v is not None and _sampling_gap(hit):
+        part = None
+        if v is not None and _labour_only_gap(hit):
+            # the row is there with its hours, handling and machine rate:
+            # only the labour rate comes from the earliest later version
+            row = next((r for r in v.sampling_rates if r.id == hit.row_id), None)
+            if row is not None and row.labour_department_id:
+                filled = await self.gap_fill(
+                    org_id, v, lambda x: cs.rate_in_version(
+                        x, row.labour_department_id, row.labour_position, plant_id,
+                        with_overhead=True),
+                    usable=lambda h: h is not None and h.rate is not None)
+            if filled:
+                hit, part = _with_labour_rate(hit, filled[0]), "labour_rate"
+        if v is not None and filled is None and _sampling_gap(hit):
             filled = await self.gap_fill(org_id, v, lookup,
                                          usable=lambda h: not _sampling_gap(h))
             if filled:
                 hit = filled[0]
         if hit is None:
             return await self._no_hit(org_id, plant_id, on_date, "trial", "sampling_rate")
-        used = filled[1] if filled else v
-        price = annotate(_from_hit(hit, unit="trial"), v, earliest, filled)
+        # a labour-only fill keeps the row (and its version): the machine
+        # rate and its exchange rate are the creation-date version's
+        used = filled[1] if filled and part is None else v
+        price = annotate(_from_hit(hit, unit="trial"), v, earliest, filled, part=part)
         return in_costing_currency(price, used, costing_cur) if m is not None else price
 
 
@@ -484,7 +574,38 @@ def _sampling_gap(hit) -> bool:
     return hit.rate is None and bool(missing) and missing <= {"machine_rate", "labour_rate"}
 
 
-def annotate(price: Price, v: Optional[CostSheetVersion], earliest: bool, filled) -> Price:
+def _labour_only_gap(hit) -> bool:
+    """A components sampling row whose ONLY missing part is the labour rate
+    (the machine rate and the currencies are fine)."""
+    if hit is None or hit.rate is not None:
+        return False
+    b = hit.breakdown or {}
+    return b.get("mode") == "components" and list(b.get("missing") or []) == ["labour_rate"]
+
+
+def _with_labour_rate(hit, lhit):
+    """The creation-date version's sampling price with the labour rate taken
+    from a later version (lhit): setup / run hours, machine rate and cost,
+    handling and labour hours stay the row's. A labour rate in another
+    currency than the row is reported, not added."""
+    b = dict(hit.breakdown or {})
+    hours = float(b.get("labour_hours") or 0)
+    missing = [m for m in (b.get("missing") or []) if m != "labour_rate"]
+    if lhit.currency != hit.currency:
+        missing.append("labour_rate_currency")
+    labour_cost = round(hours * lhit.rate, 2) if not missing else 0.0
+    price = None if missing else round(
+        float(b.get("machine_cost") or 0) + labour_cost + float(b.get("handling_cost") or 0), 2)
+    b.update({"labour_rate": lhit.rate, "labour_cost": labour_cost,
+              "labour_rate_version": lhit.version, "labour_rate_version_id": lhit.version_id,
+              "missing": missing, "complete": not missing})
+    return cs.RateHit(rate=price, currency=hit.currency, version_id=hit.version_id,
+                      version=hit.version, row_id=hit.row_id, match=hit.match,
+                      base_rate=hit.base_rate, overhead=hit.overhead, breakdown=b)
+
+
+def annotate(price: Price, v: Optional[CostSheetVersion], earliest: bool, filled,
+             part: Optional[str] = None) -> Price:
     """Record why the price is not simply "the version valid on the pricing
     date": priced with the first version (the date lies before it), or taken
     from a later version because that one had no rate (gap fill). The
@@ -496,7 +617,8 @@ def annotate(price: Price, v: Optional[CostSheetVersion], earliest: bool, filled
         later = filled[1]
         extra["gap_fill"] = {"no_rate_in": v.version, "version": later.version,
                              "valid_from": later.valid_from.isoformat()
-                             if later.valid_from else None}
+                             if later.valid_from else None,
+                             **({"part": part} if part else {})}
     if extra:
         price.detail = {**price.detail, **extra}
     return price
@@ -962,38 +1084,60 @@ async def costing_versions(db: AsyncSession, change) -> list[int]:
     from app.models.change import ChangeAssessment
     from app.models.change_cost import AssessmentCostLine
     # a line priced from a later version because the change's own version
-    # had no rate for it (gap fill) is priced as the rule says: not outdated
+    # had no rate for it (gap fill) is priced as the rule says: not outdated.
+    # Only while that version is still the change's own: a version published
+    # later (backdated) may have the rate now, and then the line is outdated.
+    org_id = await change_org_id(db, change)
+    book = RateBook(db)
+    current, _ = await book.pricing_version(org_id, change_pricing_date(change))
     nums = {v for v, detail in (await db.execute(
         select(CostingPosition.cost_sheet_version, CostingPosition.rate_detail).where(
             CostingPosition.change_id == change.id,
             CostingPosition.cost_sheet_version.is_not(None)))).all()
-        if not (detail or {}).get("gap_fill")}
+        if not position_gap_filled(current, detail)}
     rows = (await db.execute(
         select(AssessmentCostLine.cost_sheet_version_id, ChangeAssessment.department_id,
                AssessmentCostLine.plant_id)
         .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
         .where(ChangeAssessment.change_id == change.id,
                AssessmentCostLine.cost_sheet_version_id.is_not(None)))).all()
-    current = None
-    if rows:
-        org_id = await change_org_id(db, change)
-        current = (await cs.pricing_version(db, org_id, change_pricing_date(change))
-                   if org_id is not None else None)
+    chain = await book.chain(org_id) if rows else []
     ids = {vid for vid, dep, plant in rows
-           if not cost_line_gap_filled(current, vid, dep, plant)}
+           if not cost_line_gap_filled(current, vid, dep, plant, chain)}
     if ids:
         nums |= set((await db.execute(select(CostSheetVersion.version).where(
             CostSheetVersion.id.in_(ids)))).scalars().all())
     return sorted(nums)
 
 
+def position_gap_filled(current: Optional[CostSheetVersion], detail: Optional[dict]) -> bool:
+    """A costing position whose snapshot was gap filled FROM the change's
+    current pricing version (rate_detail.gap_fill.no_rate_in is it): priced
+    as the rule says, not outdated. A gap fill recorded against another
+    version (a backdated version published since) counts as outdated."""
+    gap = (detail or {}).get("gap_fill")
+    return bool(gap) and current is not None and gap.get("no_rate_in") == current.version
+
+
 def cost_line_gap_filled(current: Optional[CostSheetVersion], version_id: Optional[int],
-                         department_id: int, plant_id: Optional[int]) -> bool:
+                         department_id: int, plant_id: Optional[int],
+                         chain: list[CostSheetVersion]) -> bool:
     """A cost line priced with another version than the change's own, where
-    the change's own has no rate for the department at the plant: the gap
-    fill priced it from a later version, as the rule says (not outdated)."""
-    return (current is not None and version_id is not None and version_id != current.id
-            and cs.rate_in_version(current, department_id, None, plant_id) is None)
+    the change's own has no rate for the department at the plant AND the
+    line's version is exactly the one the gap fill would choose now (the
+    earliest later published version with a rate, `chain` in validity
+    order): priced as the rule says, not outdated. Anything else counts
+    toward the outdated warning."""
+    if current is None or version_id is None or version_id == current.id:
+        return False
+    if cs.rate_in_version(current, department_id, None, plant_id) is not None:
+        return False
+    for later in chain:
+        if (later.valid_from, later.version) <= (current.valid_from, current.version):
+            continue
+        if cs.rate_in_version(later, department_id, None, plant_id) is not None:
+            return later.id == version_id
+    return False
 
 
 # ---------------------------------------------------------------- exchange

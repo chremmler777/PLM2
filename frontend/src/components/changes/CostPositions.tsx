@@ -535,7 +535,9 @@ function RateNote({ p }: { p: CostPosition }) {
  * the costing plant's currency, and that is said, never silently. */
 function CurrencyUnrecorded({ p }: { p: CostPosition }) {
   if (!p.currency_unrecorded || !p.currency) return null
-  if (!(p.est_cost || p.effective_cost || quantityOf(p) > 0)) return null
+  // only a money amount is read in the plant's currency: hours and trials
+  // are priced at the rate, in the rate's own currency
+  if (!(p.est_cost || p.effective_cost)) return null
   return (
     <span data-testid={`costpos-currency-unrecorded-${p.id}`}
       className="mt-0.5 block text-[11px] text-amber-300">

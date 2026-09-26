@@ -683,10 +683,12 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
 
   it('flags an old line without a recorded currency instead of reading it silently', async () => {
     vi.mocked(changesApi.listCostPositions).mockResolvedValue(
-      [{ ...priced, currency_unrecorded: true }, machine] as never)
+      [{ ...priced, currency_unrecorded: true, est_cost: 40 },
+        { ...machine, currency_unrecorded: true }] as never)
     positions()
     expect((await screen.findByTestId('costpos-currency-unrecorded-20')).textContent)
       .toBe(t('costpos.currencyUnrecorded').replace('{cur}', 'USD'))
+    // hours only, no money amount: priced at the rate, nothing to flag
     expect(screen.queryByTestId('costpos-currency-unrecorded-21')).toBeNull()
   })
 

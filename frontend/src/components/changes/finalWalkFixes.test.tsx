@@ -166,6 +166,19 @@ describe('Unpriced hours said per department (P2-6)', () => {
     expect(unpricedMessage('Project Manager', 8, 0, true)).toBe('No cost sheet rate for Project Manager: 8 h booked, unpriced')
   })
 
+  it('names a machine line by its class rate at the plant, not the department', () => {
+    const subject = 'machine rate for class 200-450 t at USA Toccoa'
+    const machine = [
+      { position_id: 70, department_id: 27, label: 'Press', kind: 'machine_time', quantity: 5, unit: 'h', message: 'x', subject },
+      { position_id: 71, department_id: 27, label: 'Press', kind: 'machine_time', quantity: 7, unit: 'h', message: 'x', subject },
+      { position_id: 72, department_id: 27, label: 'Rework', kind: 'own_time', quantity: 1, unit: 'h', message: 'x' },
+    ]
+    expect(unpricedByDepartment(machine, name).map((u) => u.message)).toEqual([
+      'No machine rate for class 200-450 t at USA Toccoa: 12 h unpriced',
+      'No cost sheet rate for Tool Engineer: 1 h unpriced',
+    ])
+  })
+
   it('the P&L card on the costing tab names them with the hours, once per department', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue({
       currency: 'USD', totals: { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0,

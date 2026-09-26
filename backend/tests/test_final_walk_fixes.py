@@ -427,6 +427,15 @@ async def test_unpriced_departments_are_named():
     assert msgs == [
         ("No cost sheet rate for Project Manager: hours unpriced", 6),
         ("No cost sheet rate for department 9: hours unpriced", 9)]
+    # with quantities, and a machine line grouped by what it misses
+    msgs = unpriced_department_messages(
+        [{"department_id": 6, "quantity": 12.5, "unit": "h"},
+         {"department_id": 6, "quantity": 3, "unit": "h",
+          "subject": "machine rate for class 200-450 t at Toccoa"}],
+        {6: "Project Manager"})
+    assert msgs == [
+        ("No cost sheet rate for Project Manager: 12.5 h unpriced", 6),
+        ("No machine rate for class 200-450 t at Toccoa: 3 h unpriced", None)]
 
 
 # ------------------------------------------------------------------ P2-7

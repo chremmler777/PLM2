@@ -590,7 +590,8 @@ async def update_row(db: AsyncSession, v: CostSheetVersion, section: str, row_id
     merged.update(changes)
     if section != "overheads" and not merged.get("currency"):
         merged["currency"] = await plant_currency(db, merged.get("plant_id"))
-    await _apply_entered(db, v, section, merged, set(changes))
+    moved = {k for k, val in changes.items() if getattr(row, k) != val}
+    await _apply_entered(db, v, section, merged, set(changes), moved)
     await _validate_row(db, v.organization_id, section, merged,
                         class_changed=("machine_class" in changes
                                        or changes.get("machine_class_id") is not None
@@ -1390,8 +1391,13 @@ def _check_plausible(base: str, quote: str, rate: Decimal) -> None:
             "Check the direction", 422)
 
 
+# what moves a row's price: without a change to one of these (a note-only
+# edit) an existing row is not re-checked against its plant's quote currency
+_PRICE_FIELDS = {"hourly_rate", "entered_rate", "entered_currency", "plant_id", "currency"}
+
+
 async def _apply_entered(db: AsyncSession, v: CostSheetVersion, section: str, data: dict,
-                         changed: set) -> None:
+                         changed: set, moved: Optional[set] = None) -> None:
     """Rates and machine rows: a rate typed in the plant's local currency
     (entered_rate + entered_currency) sets hourly_rate from the version's
     exchange rate; a rate typed as hourly_rate clears the typed local one; a
@@ -1420,6 +1426,11 @@ async def _apply_entered(db: AsyncSession, v: CostSheetVersion, section: str, da
     if not ecur or data.get("entered_rate") is None or ecur == cur:
         if ecur == cur:
             data["entered_rate"] = data["entered_currency"] = None
+        return
+    if moved is not None and not moved & _PRICE_FIELDS:
+        # nothing that prices the row changed (a note-only edit): the row
+        # keeps its rate and is not re-checked against the plant's quote
+        # currency (the draft's currency_mismatch warning still flags it)
         return
     plant = await db.get(Plant, data["plant_id"]) if data.get("plant_id") else None
     if plant is None or plant.local_currency != ecur:
@@ -1492,7 +1503,8 @@ async def currency_mismatch(db: AsyncSession, v: CostSheetVersion) -> list[dict]
     quote currency (a row copied before the plant's currency changed, e.g.
     Silao before its currency decision). Flagged in the draft and the
     publish dialog, never relabelled: the number was typed in the row's
-    currency. [{section, row_id, plant_id, plant_name, currency,
+    currency. Rows of retired departments are left out (hidden in the
+    draft). [{section, row_id, plant_id, plant_name, currency,
     plant_currency}]"""
     from app.models.cost_sheet_machines import CostSheetMachine
     plants = {p.id: p for p in (await db.execute(select(Plant).where(
@@ -1510,9 +1522,16 @@ async def currency_mismatch(db: AsyncSession, v: CostSheetVersion) -> list[dict]
            if r.kind != "percent"] \
         + [("machine_items", r, machine_plant.get(r.machine_id), r.hourly_rate)
            for r in v.machine_item_rates]
+    # rows of retired departments are hidden in the draft (unless "Show
+    # retired" is on) and never price a change: not counted, nobody sees them
+    from app.models.workflow import Department
+    retired = set((await db.execute(select(Department.id).where(
+        Department.is_active.is_(False)))).scalars().all())
     for section, row, plant_id, value in checks:
         plant = plants.get(plant_id) if plant_id is not None else None
         if plant is None or value is None or not row.currency:
+            continue
+        if section in ("rates", "overheads") and getattr(row, "department_id", None) in retired:
             continue
         quote = plant.currency or "EUR"
         if row.currency != quote:

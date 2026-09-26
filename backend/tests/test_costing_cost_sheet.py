@@ -646,3 +646,193 @@ async def test_old_line_without_currency_is_flagged(client, admin_auth, world, s
     summ = await _summation(session_factory, world)
     w = next(w for w in summ["warnings"] if w["code"] == "currency_unrecorded")
     assert "read as USD, the costing plant's currency" in w["message"]
+    assert w["message"].startswith("1 costing line has")
+
+
+async def test_hours_only_line_without_currency_is_not_flagged(
+        client, admin_auth, world, session_factory):
+    """Hours are priced at the rate, in the rate's own currency: a line
+    without a money amount has nothing read in the plant's currency."""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    line = await _add(client, admin_auth, world, hours=2)
+    async with session_factory() as s:
+        p = await s.get(CostingPosition, line["id"])
+        p.currency = None
+        await s.commit()
+    summ = await _summation(session_factory, world)
+    assert not any(w["code"] == "currency_unrecorded" for w in summ["warnings"])
+
+
+async def test_backdated_version_after_a_gap_fill_shows_the_outdated_warning(
+        client, admin_auth, world, session_factory):
+    """Quality was gap filled from v2 because v1 (the change's version) had
+    no rate. A v3 published later, backdated over the creation date, with a
+    Quality rate is now the change's version: the v2 line is outdated."""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD"),
+                          dict(department_id=world["qa"], hourly_rate=70, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    qa = await _add(client, admin_auth, world, department_id=world["qa"], hours=1)
+    assert (qa["rate"], qa["cost_sheet_version"]) == (70, 2)
+    summ = await _summation(session_factory, world)
+    assert summ["cost_sheet_versions_used"] == []
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        assert await costing_rates.version_warning(s, change) is None
+    await _version(session_factory, world["org_id"], version=3, valid_from=date(2026, 2, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=50, currency="USD"),
+                          dict(department_id=world["qa"], hourly_rate=65, currency="USD")])
+    summ = await _summation(session_factory, world)
+    assert summ["cost_sheet_current_version"] == 3
+    assert summ["cost_sheet_versions_used"] == [2]
+    outdated = costing_rates.outdated_message([2], 3)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        assert await costing_rates.version_warning(s, change) == outdated
+
+
+async def test_cost_line_gap_fill_only_from_the_version_the_rule_picks(
+        world, session_factory):
+    """A cost line counts as gap filled only when the change's version has
+    no rate AND the line's version is the earliest later one with a rate."""
+    ids = {}
+    ids[1] = await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    for n, vf in ((2, date(2026, 3, 1)), (3, date(2026, 4, 1))):
+        ids[n] = await _version(session_factory, world["org_id"], version=n, valid_from=vf,
+                                rates=[dict(department_id=world["qa"], hourly_rate=70 + n,
+                                            currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    async with session_factory() as s:
+        for n in (2, 3):
+            s.add(AssessmentCostLine(
+                assessment_id=world["assessments"]["Quality"], plant_id=world["home"],
+                demand_hours=1, internal_cost=70 + n, currency="USD",
+                cost_sheet_version_id=ids[n], rate_source="cost_sheet"))
+        await s.commit()
+        change = await s.get(ChangeRequest, world["change_id"])
+        book = costing_rates.RateBook(s)
+        current, _ = await book.pricing_version(world["org_id"], date(2026, 2, 10))
+        chain = await book.chain(world["org_id"])
+        filled = costing_rates.cost_line_gap_filled
+        assert filled(current, ids[2], world["qa"], world["home"], chain)
+        # v3 has a rate too, but the gap fill takes v2: v3 is not the rule
+        assert not filled(current, ids[3], world["qa"], world["home"], chain)
+        # the change's version has a Tool rate: never a gap fill
+        assert not filled(current, ids[2], world["tool"], world["home"], chain)
+        assert await costing_rates.costing_versions(s, change) == [3]
+        assert await costing_rates.version_warning(s, change) \
+            == costing_rates.outdated_message([3], 1)
+    summ = await _summation(session_factory, world)
+    assert summ["cost_sheet_versions_used"] == [3]
+
+
+async def test_sampling_fills_only_the_missing_labour_rate(
+        client, admin_auth, world, session_factory):
+    """v1 has the sampling row and the machine rate but no Quality labour
+    rate: the row's hours, handling and v1's machine rate stay, only the
+    labour rate comes from v2 (which changed the row and the press rate)."""
+    await _version(session_factory, world["org_id"],
+                   rates=[dict(department_id=world["tool"], hourly_rate=50, currency="USD")],
+                   machines=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  hourly_rate=85, currency="USD")],
+                   sampling=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  mode="components", setup_hours=1, run_hours_default=2,
+                                  labour_hours=2, labour_department_id=world["qa"],
+                                  handling_cost=10, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["qa"], hourly_rate=70, currency="USD")],
+                   machines=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  hourly_rate=100, currency="USD")],
+                   sampling=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  mode="components", setup_hours=5, run_hours_default=5,
+                                  labour_hours=4, labour_department_id=world["qa"],
+                                  handling_cost=99, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    sp = await _add(client, admin_auth, world, kind="sampling", label="T1", trials=1,
+                    machine_class_id=world["big"])
+    # (1 + 2) h x 85 + 2 h x 70 + 10 handling, on v1's row
+    assert (sp["rate"], sp["cost_sheet_version"], sp["line_value"]) == (405, 1, 405)
+    assert sp["rate_label"].endswith(
+        "no labour rate in v1 on the creation date; labour rate taken from v2 "
+        "valid from 1 Mar 2026")
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        assert await costing_rates.version_warning(s, change) is None
+
+
+async def test_plant_row_of_the_creation_date_version_beats_a_later_all_plants_row(
+        client, admin_auth, world, session_factory):
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], plant_id=world["home"], hourly_rate=50,
+             currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    line = await _add(client, admin_auth, world, hours=1)
+    assert (line["rate"], line["cost_sheet_version"]) == (50, 1)
+    assert "taken from" not in line["rate_label"]
+
+
+async def test_all_plants_row_of_the_creation_date_version_beats_a_later_plant_row(
+        client, admin_auth, world, session_factory):
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["tool"], plant_id=world["home"],
+                               hourly_rate=60, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    line = await _add(client, admin_auth, world, hours=1)
+    assert (line["rate"], line["cost_sheet_version"]) == (50, 1)
+    assert "taken from" not in line["rate_label"]
+
+
+async def test_gap_fill_label_for_a_change_older_than_the_first_version(
+        client, admin_auth, world, session_factory):
+    await _version(session_factory, world["org_id"], valid_from=date(2026, 3, 1), rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 5, 1),
+                   rates=[dict(department_id=world["qa"], hourly_rate=70, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 1, 15, 15))
+    qa = await _add(client, admin_auth, world, department_id=world["qa"], hours=1)
+    assert qa["rate_label"].endswith(
+        "no rate in v1, the earliest cost sheet; taken from v2 valid from 1 May 2026")
+
+
+async def test_unpriced_machine_lines_name_the_class_rate_not_the_department(
+        client, admin_auth, world, session_factory):
+    """A machine_time line without a rate misses the class's machine rate at
+    the plant, not the department's labour rate: said so, with the hours;
+    sampling the same way."""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    async with session_factory() as s:
+        plant = (await s.get(Plant, world["home"])).name
+    await _add(client, admin_auth, world, hours=2)
+    for h in (5, 7):
+        await _add(client, admin_auth, world, kind="machine_time", label="Press", hours=h,
+                   machine_class_id=world["big"])
+    await _add(client, admin_auth, world, kind="sampling", label="T1", trials=2,
+               machine_class_id=world["big"])
+    machine = f"No machine rate for class 200-450 t at {plant}: 12 h unpriced"
+    sampling = f"No sampling rate for class 200-450 t at {plant}: 2 trials unpriced"
+    summ = await _summation(session_factory, world)
+    named = [(w["message"], w.get("department_id"), w.get("subject"))
+             for w in summ["warnings"] if w["code"] == "no_rate_department"]
+    assert named == [(machine, None, f"machine rate for class 200-450 t at {plant}"),
+                     (sampling, None, f"sampling rate for class 200-450 t at {plant}")]
+    assert not any("No cost sheet rate for Tool Engineer" in w["message"]
+                   for w in summ["warnings"])
+    assert {u["subject"] for u in summ["unpriced_lines"]} == {
+        f"machine rate for class 200-450 t at {plant}",
+        f"sampling rate for class 200-450 t at {plant}"}
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        got = await costing_rates.unpriced_departments(s, change)
+    assert [(u["message"], u["count"]) for u in got] == [(machine, 2), (sampling, 1)]
+    # the API carries them for the change header
+    res = await client.get(_url(world), headers=admin_auth)
+    assert [u["message"] for u in res.json()["costing_unpriced"]] == [machine, sampling]

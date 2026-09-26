@@ -86,10 +86,13 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
   const unpricedLines = unpriced.map((u) => u.message);
   // A department's no-rate warning the unpriced lines already say (with the
   // hours): matched on its department, by name only when the id is missing.
-  const covered = (w: { code: string; message: string; department_id?: number | null }) =>
-    w.code === 'no_rate_department' && w.department_id != null
-      ? unpriced.some((u) => u.department_id === w.department_id)
-      : unpriced.some((u) => w.message.startsWith(`No cost sheet rate for ${u.name}:`));
+  const covered = (w: { code: string; message: string; department_id?: number | null;
+    subject?: string | null }) =>
+    w.code === 'no_rate_department' && w.subject
+      ? unpriced.some((u) => u.subject === w.subject)
+      : w.code === 'no_rate_department' && w.department_id != null
+        ? unpriced.some((u) => !u.subject && u.department_id === w.department_id)
+        : unpriced.some((u) => !u.subject && w.message.startsWith(`No cost sheet rate for ${u.name}:`));
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -255,6 +255,10 @@ class CostService:
         current = (await cs.pricing_version(session, org_id,
                                             costing_rates.change_pricing_date(change))
                    if org_id is not None else None)
+        book = costing_rates.RateBook(session)
+        # the published versions in validity order: which one a gap fill
+        # would take a cost line's rate from now
+        chain = await book.chain(org_id)
 
         def _book(cur: str, key: str, amount: float, *buckets) -> None:
             """Money into its currency group; into the margins only in the
@@ -280,7 +284,8 @@ class CostService:
             pk = "one_time" if line.cost_kind == "one_time" else "lifecycle"
             cur = line.currency or plant_currency.get(line.plant_id) or "EUR"
             if line.cost_sheet_version_id and not costing_rates.cost_line_gap_filled(
-                    current, line.cost_sheet_version_id, department_id, line.plant_id):
+                    current, line.cost_sheet_version_id, department_id, line.plant_id,
+                    chain):
                 version_ids_used.add(line.cost_sheet_version_id)
             cell = by_cell.setdefault(
                 (department_id, line.plant_id),
@@ -317,7 +322,12 @@ class CostService:
         # it is listed in unpriced_lines and the summation warns.
         pos_by_dep: dict[int, dict] = {}
         currency_unrecorded = 0
-        book = costing_rates.RateBook(session)
+        _classes: dict = {}
+
+        async def _class_names() -> dict:
+            if "names" not in _classes:
+                _classes["names"] = await costing_rates.class_names(session, org_id)
+            return _classes["names"]
         # The time a department spent on its assessment is its standing
         # internal_effort line (the assessment's own effort_hours for a
         # department that has none).
@@ -334,7 +344,7 @@ class CostService:
             # buyer moved the number and by how much.
             cost = p.quoted_cost or 0.0
             line_cur = p.currency or currency
-            if p.currency is None and cost:
+            if p.currency is None and (cost or p.est_cost):
                 # an old line (before 098) never recorded its currency: it is
                 # read in the costing plant's currency and said so, never
                 # silently (Silao's quote currency moved to USD in 106)
@@ -350,7 +360,8 @@ class CostService:
 
             price = await costing_rates.position_price(
                 session, change, p, org_id=org_id, plant_id=costing_plant, book=book)
-            if price.version_id and not price.detail.get("gap_fill"):
+            if price.version_id and not costing_rates.position_gap_filled(
+                    current, price.detail):
                 version_ids_used.add(price.version_id)
             value = costing_rates.line_value(p, price)
             if value is None:
@@ -361,7 +372,12 @@ class CostService:
                     "label": p.label, "kind": p.kind,
                     "quantity": costing_rates.quantity(p), "unit": price.unit,
                     "reason": (price.detail.get("missing") or ["rate"])[0],
-                    "message": costing_rates.NO_RATE})
+                    "message": costing_rates.NO_RATE,
+                    # a machine_time / sampling line misses its class's rate
+                    # at the plant, not the department's
+                    "subject": await costing_rates.unpriced_subject(
+                        book, p, price, costing_plant,
+                        await _class_names())})
                 value = 0.0
 
             # Own time is internal money whatever the position is FOR: the
@@ -444,10 +460,10 @@ class CostService:
                     Department.id.in_({u["department_id"] for u in unpriced})))).all())
             for u in unpriced:
                 u["department_name"] = dept_names.get(u["department_id"])
-            for message, did in costing_rates.unpriced_department_messages(
-                    unpriced, dept_names):
+            for g in costing_rates.unpriced_groups(unpriced, dept_names):
                 warnings.append({"code": "no_rate_department",
-                                 "department_id": did, "message": message})
+                                 "department_id": g["department_id"],
+                                 "subject": g["subject"], "message": g["message"]})
         if version_ids_used:
             from app.models.cost_sheet import CostSheetVersion
             versions_used = {v for (v,) in (await session.execute(

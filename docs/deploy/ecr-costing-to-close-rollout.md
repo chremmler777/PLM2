@@ -309,8 +309,10 @@ docker exec compose-plm2-db-1 psql -U plm -d plm -c "select id, name, is_active 
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) filter (where customer_relevant) as customer, count(*) filter (where not customer_relevant or customer_relevant is null) as internal from change_requests;"
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) from parts; select count(*) from part_revisions; select count(*) from projects; select count(*) from change_requests; select count(*) from lessons_learned;"
 # pricing date: the first cost sheet version starts at the earliest department rate
-docker exec compose-plm2-db-1 psql -U plm -d plm -c "select min(effective_from) from department_rate;"
-docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) from change_requests where created_at < (select min(effective_from) from department_rate);"
+# (2020-01-01 when no rate is dated); compared on the business-timezone date
+# (created_at is stored naive in UTC: read as UTC, then taken to New York)
+docker exec compose-plm2-db-1 psql -U plm -d plm -c "select coalesce(min(effective_from), '2020-01-01') from department_rate;"
+docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) from change_requests where (created_at at time zone 'UTC' at time zone 'America/New_York')::date < (select coalesce(min(effective_from), '2020-01-01') from department_rate);"
 ```
 
 What to look for:
@@ -330,9 +332,11 @@ What to look for:
   decision (Finance to-do 4): no rate is relabelled.
 - Pricing date: a change is priced with the version valid on its creation
   date. Note `min(effective_from)` (the first version's valid-from, 2020-01-01
-  when no rate is dated) and how many changes were created before it: they
-  are priced with that first version, and each line says "priced with v1,
-  the earliest cost sheet".
+  when no rate is dated) and how many changes were created before it (by
+  their creation date in the business timezone): they are priced with that
+  first version. The label "priced with v1, the earliest cost sheet" shows
+  on their costing positions only (and in the costing context note), not on
+  assessment cost lines, the P&L or offers.
 - Department rates: note which departments have a Toccoa rate. There is no
   Project Manager rate today (see the Finance to-do).
 - Departments: `Project Manager`, `Manufacturing Engineer`, `Tool Engineer`,

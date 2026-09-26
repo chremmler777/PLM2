@@ -282,6 +282,59 @@ async def test_rows_off_their_plant_currency_are_flagged_and_mxn_typing_asks_to_
     assert res.status_code == 200 and not res.json()["currency_mismatch"]
 
 
+async def test_currency_mismatch_leaves_out_retired_departments(
+        client, admin_auth, world, session_factory):
+    """A retired department's rows are hidden in the draft: the banner does
+    not count rows nobody sees."""
+    silao = world["silao"]
+    async with session_factory() as s:
+        old = Department(name="Retired-FX", flow_type="action", is_active=False)
+        s.add(old)
+        await s.commit()
+        old_id = old.id
+    d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
+    async with session_factory() as s:
+        s.add(CostSheetRate(version_id=d["id"], department_id=old_id, plant_id=silao,
+                            hourly_rate=40, currency="EUR"))
+        r = await s.get(CostSheetRate, _row(d["rates"], world["tool"], silao)["id"])
+        r.currency, r.hourly_rate = "EUR", 41
+        await s.commit()
+    detail = (await client.get(f"{API}/versions/{d['id']}", headers=admin_auth)).json()
+    rows = [m for m in detail["currency_mismatch"] if m["section"] == "rates"]
+    assert [m["row_id"] for m in rows] == [_row(d["rates"], world["tool"], silao)["id"]]
+
+
+async def test_note_only_edit_of_a_mismatched_row_is_not_refused(
+        client, admin_auth, world, session_factory):
+    """A row off its plant's quote currency that carries a typed MXN rate:
+    a note-only edit (the client may resend the unchanged row) moves no
+    price and is not re-checked; typing a new rate still is."""
+    t, silao = world["tool"], world["silao"]
+    d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
+    base = f"{API}/versions/{d['id']}"
+    await client.put(f"{base}/fx", json={"base": "USD", "quote": "MXN", "rate": "17.30"},
+                     headers=admin_auth)
+    row = _row(d["rates"], t, silao)
+    async with session_factory() as s:
+        r = await s.get(CostSheetRate, row["id"])
+        r.currency, r.hourly_rate = "EUR", 40
+        r.entered_rate, r.entered_currency = 700, "MXN"
+        await s.commit()
+    res = await client.patch(f"{base}/rates/{row['id']}", json={"note": "checked"},
+                             headers=admin_auth)
+    assert res.status_code == 200, res.text
+    # the whole row resent with only the note changed: still no price move
+    res = await client.patch(f"{base}/rates/{row['id']}", json={
+        "note": "checked again", "currency": "EUR", "hourly_rate": 40,
+        "entered_rate": 700, "entered_currency": "MXN"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    r = _row(res.json()["rates"], t, silao)
+    assert (r["hourly_rate"], r["currency"], r["note"]) == (40, "EUR", "checked again")
+    res = await client.patch(f"{base}/rates/{row['id']}", json={
+        "entered_rate": 800, "entered_currency": "MXN"}, headers=admin_auth)
+    assert res.status_code == 422 and "switch the row to USD first" in res.json()["detail"]
+
+
 def test_fx_labels_read_the_direction_and_four_decimals():
     from app.services.costing_rates import fx_direction, fmt_fx
     assert fx_direction("17.30", "USD", "MXN") == "1 USD = 17.30 MXN"
