@@ -73,3 +73,40 @@ describe('RoutingDeviationPanel add dialog', () => {
     expect(t('routingDev.letter.I')).toMatch(/Informed|Informiert/)
   })
 })
+
+describe('RoutingDeviationPanel pending removal', () => {
+  afterEach(cleanup)
+
+  it('names the department a pending deviation asks to take off, marked as awaiting decision', () => {
+    auth.current = { userId: 5 }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RoutingDeviationPanel changeId={7} departments={[{ id: 4, name: 'Quality' } as never]}
+          routing={routing({ stages: [{ stage_order: 1, departments: [
+            { department_id: 4, rasic_letter: 'R', tier: 'blocking', status: 'active',
+              verdict: 'pending', assessment_id: 40, pending_removal: true },
+            { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active',
+              verdict: 'pending', assessment_id: 20 },
+          ] }] })}
+          routedIds={[4, 2]} stageOrder={1} canAdd={false} canDecide={false} leadId={9} />
+      </QueryClientProvider>)
+    const row = screen.getByTestId('routing-removal-4-1')
+    expect(row.textContent).toContain('Quality')
+    expect(row.textContent).toContain(t('routingDev.removalPending'))
+    expect(screen.queryByTestId('routing-removal-2-1')).toBeNull()
+  })
+
+  it('lists no removal once the deviation is decided', () => {
+    auth.current = { userId: 5 }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RoutingDeviationPanel changeId={7} departments={[]} canAdd canDecide={false}
+          routing={routing({ deviation_status: 'approved', stages: [{ stage_order: 1, departments: [
+            { department_id: 4, rasic_letter: 'R', tier: 'blocking', status: 'active',
+              verdict: 'pending', assessment_id: 40, pending_removal: true },
+          ] }] })}
+          routedIds={[4]} stageOrder={1} />
+      </QueryClientProvider>)
+    expect(screen.queryByTestId('routing-deviation-removals')).toBeNull()
+  })
+})

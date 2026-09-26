@@ -1040,6 +1040,9 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
         .execution_options(populate_existing=True))).scalars().all()
     assess_by_key = {(a.department_id, a.stage_order): a for a in fresh}
     snapshot = routing.standard_snapshot if routing else {"stages": []}
+    from app.services.change_routing_service import ChangeRoutingService
+    removals = await ChangeRoutingService.pending_removal_ids(db, change)
+
     def _dep(department_id: int, snap_letter: str, a) -> RoutingDepartment:
         # The row's letter is the current one: an approved "not our
         # responsibility" re-letters the row, never the snapshot.
@@ -1050,7 +1053,8 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
             status=(a.effective_status if a else None),
             verdict=(a.verdict if a else None),
             assessment_id=(a.id if a else None),
-            pending_rasic_letter=(a.pending_rasic_letter if a else None))
+            pending_rasic_letter=(a.pending_rasic_letter if a else None),
+            pending_removal=(a is not None and a.id in removals))
 
     stages = []
     shown: set = set()

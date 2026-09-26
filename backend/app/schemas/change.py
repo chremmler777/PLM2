@@ -457,6 +457,9 @@ class RoutingDepartment(BaseModel):
     verdict: Optional[str] = None
     assessment_id: Optional[int] = None
     pending_rasic_letter: Optional[str] = None
+    # A pending deviation asks to take this row off the routing; it stays
+    # (still owed) until the decision.
+    pending_removal: bool = False
 
 
 class RoutingStage(BaseModel):

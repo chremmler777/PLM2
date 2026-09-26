@@ -174,6 +174,23 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('bucket-state-2').textContent).toBe(t('bucket.waiting'))
   })
 
+  it('marks a row a pending deviation asks to take off, still on the board', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({
+      change_id: 7, template_id: 1, template_version: 1, has_deviation: true,
+      deviation_status: 'pending_approval', deviation_proposed_by: 5,
+      stages: [{ stage_order: 1, departments: [
+        { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending',
+          assessment_id: 1, pending_removal: true },
+        { department_id: 4, rasic_letter: 'S', tier: 'optional', status: 'pending', verdict: null },
+      ] }],
+    } as never)
+    buckets({ canSeeAll: true })
+    expect((await screen.findByTestId('bucket-removal-2')).textContent)
+      .toBe(t('routingDev.removalPending'))
+    expect(screen.getByTestId('bucket-state-2').textContent).toBe(t('bucket.waiting'))
+    expect(screen.queryByTestId('bucket-removal-4')).toBeNull()
+  })
+
   it('never shows a consulted row as waiting: a C row after an approved decline reads Optional', async () => {
     buckets({ canSeeAll: true, change: change({ assessments: [
       assessment({ id: 1, department_id: 2, rasic_letter: 'C', status: 'active', verdict: 'pending' }),

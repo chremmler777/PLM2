@@ -1040,10 +1040,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Takes effect once the change lead approves it (4-eyes rule).',
   },
   'routingDev.noneLeft': { de: 'Alle Abteilungen sind bereits eingebunden.', en: 'Every department is already routed.' },
+  'routingDev.removalPending': {
+    de: 'Entfernung beantragt, Entscheidung offen', en: 'Removal requested, awaiting decision',
+  },
   'routingDev.pendingTitle': { de: 'Routing-Änderung wartet auf Freigabe', en: 'Routing change awaiting approval' },
   'routingDev.pendingBody': {
-    de: 'Die neue Abteilung ist bereits eingebunden und sieht ihre Aufgabe. Bis zur Entscheidung kann die Änderung nicht in die Kalkulation.',
-    en: 'The added department is already on the hook and sees its task. Until this is decided the change cannot move to costing.',
+    de: 'Bis zur Entscheidung gilt die bisherige Zuordnung: hinzugefügte Abteilungen sehen ihre Aufgabe bereits, zu entfernende bleiben eingebunden. Die Änderung kann bis dahin nicht in die Kalkulation.',
+    en: 'Until this is decided, added departments already see their task and departments up for removal stay on the hook. The change cannot move to costing until then.',
   },
   'routingDev.waitingForLead': { de: 'Entscheidung liegt beim Change Lead.', en: 'Waiting for the change lead to decide.' },
   'routingDev.addBlocked': {
@@ -1299,11 +1302,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Why does this department no longer need to assess?',
   },
   'lateAssess.effect': {
-    de: 'Die Bewertungszeile und ihre Aufgabe werden entfernt; die Änderung wartet nicht mehr darauf. Festgehalten als Routing-Abweichung.',
-    en: 'The assessment row and its task are removed; the change no longer waits on it. Recorded as a routing deviation.',
+    de: 'Beantragt als Routing-Abweichung: Bis zur Entscheidung bleiben Bewertungszeile und Aufgabe offen und die Änderung wartet weiter darauf. Erst die Freigabe entfernt sie.',
+    en: 'Requested as a routing deviation: until it is decided the assessment row and its task stay open and the change still waits on them. Only the approval removes them.',
   },
   'lateAssess.submit': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
-  'lateAssess.done': { de: 'Abteilung aus dem Routing genommen', en: 'Department taken off the routing' },
+  'lateAssess.done': { de: 'Entfernung beantragt, wartet auf Entscheidung', en: 'Removal requested, awaiting decision' },
   'notResp.button': { de: 'Nicht unsere Zuständigkeit', en: 'Not our responsibility' },
   'notResp.title': { de: 'Zuständigkeit ablehnen', en: 'Decline responsibility' },
   'notResp.reason': { de: 'Warum ist diese Änderung nicht Sache Ihrer Abteilung?', en: 'Why is this change not your department’s to assess?' },

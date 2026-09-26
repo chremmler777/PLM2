@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AlertTriangle, ArrowRight, Ban, Check, Hourglass, Info, TriangleAlert } from 'lucide-react'
 import { changesApi } from '../../api/changes'
@@ -18,6 +18,7 @@ import type { WaitState } from '../../lib/waitStates'
 import { formatCalendarDate, formatDate } from '../../lib/format'
 import { isIssueActionKind, issueTabFor } from '../../lib/issueTabs'
 import { plantText } from '../../lib/plantName'
+import PendingRemovalChip from './PendingRemovalChip'
 
 interface Props {
   change: ChangeDetail
@@ -308,6 +309,19 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const motherPlant = change.origin === 'mother_plant'
   /** The late flag whose "Take off routing" dialog is open. */
   const [takeOff, setTakeOff] = useState<MyAction | null>(null)
+  // A late flag whose row a pending deviation already asks to take off shows
+  // that, not a second "Take off routing". Routing is read only when a late
+  // flag is there (same cache as the assessment tab).
+  const hasLate = actions.some((a) => a.kind === 'late_assessment' && a.department_id != null)
+  const { data: routing } = useQuery({
+    queryKey: ['change-routing', change.id],
+    queryFn: () => changesApi.getRouting(change.id),
+    enabled: hasLate,
+  })
+  const removalPending = (a: MyAction) => routing?.deviation_status === 'pending_approval'
+    && (routing.stages ?? []).some((s) => s.departments.some((d) => d.pending_removal
+      && (a.assessment_id != null ? d.assessment_id === a.assessment_id
+        : d.department_id === a.department_id && (a.stage_order == null || s.stage_order === a.stage_order))))
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
     // internal one is approved outright and never sees either quoting step.
@@ -601,12 +615,18 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               return (
                 <span key={actionKey(a, i)} className="inline-flex flex-wrap items-stretch gap-1">
                   {chase}
-                  <button type="button" data-testid={`action-late-takeoff-${a.assessment_id ?? a.department_id}`}
-                    title={t('lateAssess.takeOffHint')}
-                    className={`${btnSm.secondary} h-auto min-h-9`}
-                    onClick={() => setTakeOff(a)}>
-                    {t('lateAssess.takeOff')}
-                  </button>
+                  {removalPending(a) ? (
+                    <span className="inline-flex items-center">
+                      <PendingRemovalChip testId={`action-late-removal-${a.assessment_id ?? a.department_id}`} />
+                    </span>
+                  ) : (
+                    <button type="button" data-testid={`action-late-takeoff-${a.assessment_id ?? a.department_id}`}
+                      title={t('lateAssess.takeOffHint')}
+                      className={`${btnSm.secondary} h-auto min-h-9`}
+                      onClick={() => setTakeOff(a)}>
+                      {t('lateAssess.takeOff')}
+                    </button>
+                  )}
                 </span>
               )
             })}

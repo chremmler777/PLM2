@@ -875,6 +875,9 @@ describe('CockpitSummary late assessment flag', () => {
 
   it('offers Take off routing beside Chase and files a remove deviation with the reason', async () => {
     const post = vi.spyOn(changesApi, 'postDeviation').mockResolvedValue({} as never)
+    vi.spyOn(changesApi, 'getRouting').mockResolvedValue({
+      change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+      deviation_status: 'none', stages: [] })
     const onAction = vi.fn()
     render(wrap(<CockpitSummary change={change({ status: 'costing' })} gates={[]}
       pendingDeviations={0} onAdvance={vi.fn()} advancing={false}
@@ -891,6 +894,23 @@ describe('CockpitSummary late assessment flag', () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith(7, {
       op: 'remove', department_id: 9, stage_order: 1, reason: 'not impacted after all',
     }))
+  })
+
+  it('shows the pending removal instead of a second Take off routing', async () => {
+    vi.spyOn(changesApi, 'getRouting').mockResolvedValue({
+      change_id: 7, template_id: 1, template_version: 1, has_deviation: true,
+      deviation_status: 'pending_approval', stages: [{ stage_order: 1, departments: [
+        { department_id: 9, rasic_letter: 'R', tier: 'blocking', status: 'active',
+          verdict: 'pending', assessment_id: 41, pending_removal: true },
+      ] }],
+    })
+    render(wrap(<CockpitSummary change={change({ status: 'costing' })} gates={[]}
+      pendingDeviations={1} onAdvance={vi.fn()} advancing={false}
+      actions={[late]} onAction={vi.fn()} />))
+    expect((await screen.findByTestId('action-late-removal-41')).textContent)
+      .toBe(t('routingDev.removalPending'))
+    expect(screen.queryByTestId('action-late-takeoff-41')).toBeNull()
+    expect(screen.getByTestId('action-late_assessment')).toBeDefined()   // Chase stays
   })
 
   it('offers no Take off routing on other actions', () => {

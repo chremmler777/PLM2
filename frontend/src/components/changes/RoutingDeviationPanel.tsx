@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { Plus } from 'lucide-react'
 import { changesApi } from '../../api/changes'
 import ReasonDialog from './ReasonDialog'
+import PendingRemovalChip from './PendingRemovalChip'
 import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 import FieldGroup from '../common/FieldGroup'
@@ -148,6 +149,12 @@ export default function RoutingDeviationPanel({
   })
 
   const pending = routing?.deviation_status === 'pending_approval'
+  // The rows this deviation asks to take off: still on the routing (owed)
+  // until the decision.
+  const removals = pending ? (routing?.stages ?? []).flatMap((s) => s.departments
+    .filter((d) => d.pending_removal)
+    .map((d) => ({ ...d, stage_order: s.stage_order }))) : []
+  const nameOf = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
   const candidates = departments
     .filter((d) => d.is_active !== false && !routedIds.includes(d.id))
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -163,6 +170,19 @@ export default function RoutingDeviationPanel({
           {routing?.deviation_note && (
             <p className="text-amber-100/90 mt-1 whitespace-pre-wrap"
               data-testid="routing-deviation-note">{routing.deviation_note}</p>
+          )}
+          {removals.length > 0 && (
+            <ul className="mt-2 space-y-1" data-testid="routing-deviation-removals">
+              {removals.map((d) => (
+                <li key={`${d.department_id}-${d.stage_order}`}
+                  data-testid={`routing-removal-${d.department_id}-${d.stage_order}`}
+                  className="flex flex-wrap items-center gap-2 text-amber-100">
+                  <span className="font-medium">{nameOf(d.department_id)}</span>
+                  <span className="text-xs text-amber-200/70">{d.rasic_letter}</span>
+                  <PendingRemovalChip />
+                </li>
+              ))}
+            </ul>
           )}
           <p className="text-amber-200/80 text-xs mt-1">{t('routingDev.pendingBody')}</p>
           <div className="mt-2 flex items-center gap-2">

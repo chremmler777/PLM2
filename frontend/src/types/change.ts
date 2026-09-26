@@ -63,6 +63,9 @@ export interface RoutingDepartment {
   assessment_id: number | null;
   /** A declined letter awaiting the lead's decision. */
   pending_rasic_letter?: RasicLetter | null;
+  /** A pending deviation asks to take this row off the routing; it stays
+   *  (still owed) until the decision. */
+  pending_removal?: boolean;
 }
 
 export interface RoutingStage {

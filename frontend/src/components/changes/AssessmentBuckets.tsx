@@ -16,6 +16,7 @@ import {
 import { changesApi } from '../../api/changes'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
 import RoutingDeviationPanel from './RoutingDeviationPanel'
+import PendingRemovalChip from './PendingRemovalChip'
 import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
@@ -237,6 +238,7 @@ export default function AssessmentBuckets({
   const allRouted = (routing?.stages ?? []).flatMap((s) =>
     s.departments.map((d) => ({
       department_id: d.department_id, rasic: d.rasic_letter, stage: s.stage_order,
+      pendingRemoval: !!d.pending_removal,
     })))
   // This board is the ASSESSMENT stage only — the first one. Later stages
   // (PM's summation, Sales' customer activities) also live as assessment rows
@@ -269,6 +271,8 @@ export default function AssessmentBuckets({
       stale: Math.max(0, mine.filter((x) => x.stage_order === (a?.stage_order ?? assessStage)).length - 1),
       onHold: change.blocked_department_ids?.includes(id) ?? false,
       declined: (declinedIds ?? change.stage_state?.declined_pending_department_ids ?? []).includes(id),
+      // A pending deviation asks to take this row off; it is still owed until then.
+      pendingRemoval: r?.pendingRemoval ?? false,
     }
   }).sort((x, y) => x.stage - y.stage || deptName(x.id).localeCompare(deptName(y.id)))
 
@@ -365,6 +369,7 @@ export default function AssessmentBuckets({
                 className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
                 {stateLabel(state)}
               </span>
+              {row.pendingRemoval && <PendingRemovalChip testId={`bucket-removal-${row.id}`} />}
               {a?.verdict && a.verdict !== 'pending' && (
                 <span data-testid={`bucket-verdict-${row.id}`}
                   className={`inline-flex flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}

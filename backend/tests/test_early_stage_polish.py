@@ -594,7 +594,8 @@ async def test_my_tasks_have_labels_and_stage(client, auth, seed, depts, session
 
 # ---- review follow-ups -----------------------------------------------------------------
 
-async def test_deviation_ops_with_multi_stage_rows(client, auth, seed, depts, session_factory):
+async def test_deviation_ops_with_multi_stage_rows(
+        client, auth, lead_auth, seed, depts, session_factory):
     """A department with rows in several stages: add / remove / re-letter act on
     the assessment-stage row, never a 500 on the second row."""
     cid = await _in_assessment(client, auth, seed, session_factory)
@@ -635,11 +636,23 @@ async def test_deviation_ops_with_multi_stage_rows(client, auth, seed, depts, se
     res = await client.post(f"/api/v1/changes/{cid}/routing/deviation", json={
         "op": "remove", "department_id": dev, "reason": "wrong"}, headers=auth)
     assert res.status_code == 200, res.text
-    async with session_factory() as s:
-        stages = [a.stage_order for a in (await s.execute(select(ChangeAssessment).where(
-            ChangeAssessment.change_id == cid,
-            ChangeAssessment.department_id == dev))).scalars().all()]
-        assert stages == [2]
+
+    async def _dev_stages():
+        async with session_factory() as s:
+            return sorted(a.stage_order for a in (await s.execute(select(ChangeAssessment).where(
+                ChangeAssessment.change_id == cid,
+                ChangeAssessment.department_id == dev))).scalars().all())
+
+    # A removal only requests: both rows stay (still owed) until the decision,
+    # the routing view marks the assessment-stage row as pending removal.
+    assert await _dev_stages() == [1, 2]
+    marks = {st["stage_order"]: d["pending_removal"] for st in res.json()["stages"]
+             for d in st["departments"] if d["department_id"] == dev}
+    assert marks == {1: True, 2: False}
+    res = await client.post(f"/api/v1/changes/{cid}/routing/deviation/approve",
+                            headers=lead_auth)
+    assert res.status_code == 200, res.text
+    assert await _dev_stages() == [2]
 
 
 async def test_back_to_scoping_after_not_feasible(client, auth, seed, depts, session_factory):
