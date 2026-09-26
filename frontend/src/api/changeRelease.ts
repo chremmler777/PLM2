@@ -1,12 +1,12 @@
 import client from './client'
-import type { LessonIn, LessonOut, ReleaseCheckStatus, ReleaseState } from '../types/changeRelease'
+import type { LessonIn, LessonOut, ReleaseCheckAnswer, ReleaseState } from '../types/changeRelease'
 
 /** Release checklist and lessons learned of a change (spec section 7). */
 export const changeReleaseApi = {
   get: (changeId: number) =>
     client.get<ReleaseState>(`/v1/changes/${changeId}/release`).then((r) => r.data),
 
-  setCheck: (changeId: number, key: string, body: { status: ReleaseCheckStatus; note?: string }) =>
+  setCheck: (changeId: number, key: string, body: ReleaseCheckAnswer) =>
     client.post(`/v1/changes/${changeId}/release/checks/${key}`, body).then((r) => r.data),
 
   addLesson: (changeId: number, body: LessonIn) =>

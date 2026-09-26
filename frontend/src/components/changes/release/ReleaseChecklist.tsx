@@ -2,11 +2,15 @@
  * The release checklist: what has to be true before a change is live, each
  * point owned by a department. Members of the owner department (and PM, the
  * change lead, admins) tick it done or not applicable; n.a. needs a note.
+ * The cycle time is answered changed (with the new seconds) or unchanged;
+ * the two process-stable rows (Process Engineer and APQP) take an optional
+ * Cm above 1.67. Rows answered before an item left the checklist show
+ * read-only as "No longer asked".
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { changeReleaseApi } from '../../../api/changeRelease'
-import type { ReleaseCheck, ReleaseCheckStatus } from '../../../types/changeRelease'
+import type { ReleaseCheck, ReleaseCheckAnswer, ReleaseCheckStatus } from '../../../types/changeRelease'
 import { fmtDate, inputCls, sectionLabel } from '../offer/offerFormat'
 import { releaseKey } from './releaseKeys'
 import { Check } from 'lucide-react'
@@ -19,17 +23,38 @@ const CHIP: Record<ReleaseCheckStatus, { label: string; on: string }> = {
   na: { label: 'N.a.', on: 'bg-slate-600 text-slate-100' },
 }
 
+const CM_MIN = 1.67
+
+/** The value half of a "done" answer, per value kind. Returns null while
+ *  the answer is not complete yet. */
+function valueAnswer(kind: ReleaseCheck['value_kind'], outcome: '' | 'changed' | 'unchanged', raw: string):
+  null | Pick<ReleaseCheckAnswer, 'outcome' | 'value'> {
+  const num = raw.trim() === '' ? null : Number(raw)
+  if (kind === 'cycle_time') {
+    if (outcome === 'unchanged') return { outcome }
+    if (outcome === 'changed' && num != null && Number.isFinite(num) && num > 0) return { outcome, value: num }
+    return null
+  }
+  if (kind === 'cm') {
+    if (num == null) return {}
+    return Number.isFinite(num) && num > CM_MIN ? { value: num } : null
+  }
+  return {}
+}
+
 function CheckRow({ changeId, check, canEdit }: {
   changeId: number; check: ReleaseCheck; canEdit: boolean
 }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<null | 'done' | 'na'>(null)
   const [note, setNote] = useState('')
+  const [outcome, setOutcome] = useState<'' | 'changed' | 'unchanged'>('')
+  const [value, setValue] = useState('')
   const save = useMutation({
-    mutationFn: (body: { status: ReleaseCheckStatus; note?: string }) =>
+    mutationFn: (body: ReleaseCheckAnswer) =>
       changeReleaseApi.setCheck(changeId, check.key, body),
     onSuccess: () => {
-      setEditing(null); setNote('')
+      setEditing(null); setNote(''); setOutcome(''); setValue('')
       qc.invalidateQueries({ queryKey: releaseKey(changeId) })
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId] })
@@ -39,17 +64,34 @@ function CheckRow({ changeId, check, canEdit }: {
 
   const pick = (s: ReleaseCheckStatus) => {
     if (s === 'open') { save.mutate({ status: 'open' }); return }
-    setEditing(s); setNote('')
+    setEditing(s); setNote(''); setOutcome(''); setValue('')
   }
+
+  const kind = editing === 'done' ? check.value_kind ?? null : null
+  const extra = kind ? valueAnswer(kind, outcome, value) : {}
+  const cmLow = kind === 'cm' && value.trim() !== '' && extra === null
+  const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim() : extra !== null)
+  const confirmLabel = editing === 'na' ? 'Mark not applicable'
+    : kind === 'cycle_time' ? (outcome === 'changed' ? 'Save new cycle time' : 'Confirm unchanged')
+    : 'Mark done'
+  const retired = !!check.retired
 
   return (
     <li data-testid={`release-check-${check.key}`}
-      className={`rounded-lg border px-3 py-2 ${check.status === 'open' ? 'border-slate-700 bg-slate-900/40' : 'border-slate-800 bg-slate-900/20'}`}>
+      className={`rounded-lg border px-3 py-2 ${check.status === 'open' && !retired ? 'border-slate-700 bg-slate-900/40' : 'border-slate-800 bg-slate-900/20'}`}>
       <div className="flex flex-wrap items-center gap-3">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${check.status === 'done' ? 'bg-emerald-400'
+        <span className={`h-2 w-2 shrink-0 rounded-full ${retired ? 'bg-slate-600' : check.status === 'done' ? 'bg-emerald-400'
           : check.status === 'na' ? 'bg-slate-500' : 'bg-amber-400'}`} />
         <div className="min-w-0 flex-1">
-          <div className={`text-sm ${check.status === 'open' ? 'text-slate-100' : 'text-slate-400'}`}>{check.label}</div>
+          <div className={`text-sm ${check.status === 'open' && !retired ? 'text-slate-100' : 'text-slate-400'}`}>
+            {check.label}
+            {retired && (
+              <span data-testid={`release-check-${check.key}-retired`}
+                className="ml-2 rounded border border-slate-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-slate-400">
+                No longer asked
+              </span>
+            )}
+          </div>
           {check.hint && <div className="text-[11px] text-sky-300/80">{check.hint}</div>}
           {check.status !== 'open' && (check.by_name || check.note) && (
             <div className="text-[11px] text-slate-400">
@@ -57,7 +99,7 @@ function CheckRow({ changeId, check, canEdit }: {
             </div>
           )}
         </div>
-        {canEdit ? (
+        {canEdit && !retired ? (
           <div role="radiogroup" aria-label={`Status ${check.label}`}
             className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5 text-xs">
             {(['open', 'done', 'na'] as ReleaseCheckStatus[]).map((s) => (
@@ -76,15 +118,41 @@ function CheckRow({ changeId, check, canEdit }: {
       </div>
       {editing && (
         <div className="mt-2 flex flex-wrap items-center gap-2 pl-5">
-          <input autoFocus data-testid={`release-check-${check.key}-note`} value={note}
+          {kind === 'cycle_time' && (
+            <div role="radiogroup" aria-label="Cycle time"
+              className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5 text-xs">
+              {([['unchanged', 'Unchanged'], ['changed', 'Changed']] as const).map(([o, label]) => (
+                <button key={o} type="button" role="radio" aria-checked={outcome === o}
+                  data-testid={`release-check-${check.key}-${o}`}
+                  onClick={() => setOutcome(o)}
+                  className={`rounded-md px-2 py-0.5 ${outcome === o ? 'bg-sky-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {((kind === 'cycle_time' && outcome === 'changed') || kind === 'cm') && (
+            <label className="inline-flex items-center gap-1 text-xs text-slate-400">
+              {kind === 'cm' ? 'Cm' : 'New cycle time'}
+              <input type="number" inputMode="decimal" step="any" min={0}
+                data-testid={`release-check-${check.key}-value`} value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder={kind === 'cm' ? 'optional' : 'required'}
+                aria-invalid={cmLow || undefined}
+                className={`${inputCls} w-24`} />
+              {kind === 'cycle_time' && 's'}
+            </label>
+          )}
+          {cmLow && <span className="text-[11px] text-amber-300">Cm must be above {CM_MIN}</span>}
+          <input autoFocus={!kind} data-testid={`release-check-${check.key}-note`} value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder={editing === 'na' ? 'Why does this not apply? (required)' : 'Note (optional)'}
             className={`${inputCls} min-w-0 flex-1`} />
           <button type="button" data-testid={`release-check-${check.key}-confirm`}
-            disabled={(editing === 'na' && !note.trim()) || save.isPending}
-            onClick={() => save.mutate({ status: editing, ...(note.trim() ? { note: note.trim() } : {}) })}
+            disabled={!canConfirm}
+            onClick={() => save.mutate({ status: editing, ...(note.trim() ? { note: note.trim() } : {}), ...(extra ?? {}) })}
             className={btnSm.primary}>
-            {editing === 'na' ? 'Mark not applicable' : 'Mark done'}
+            {confirmLabel}
           </button>
           <button type="button" onClick={() => setEditing(null)} className="px-1 text-xs text-slate-400 hover:text-slate-200">
             Cancel
@@ -117,14 +185,19 @@ export default function ReleaseChecklist({
   return (
     <div className="space-y-4">
       {[...groups.entries()].map(([dept, rows]) => {
-        const open = rows.filter((r) => r.status === 'open').length
+        const open = rows.filter((r) => r.status === 'open' && !r.retired).length
+        const onlyRetired = rows.every((r) => r.retired)
         return (
           <div key={dept}>
             <div className="mb-1.5 flex items-center gap-2">
               <span className={sectionLabel}>{dept}</span>
-              <span className={`inline-flex items-center gap-1 text-[11px] ${open ? (editable ? 'text-amber-300' : 'text-slate-400') : 'text-emerald-400'}`}>
-                {open ? `${open} open` : <><Check aria-hidden="true" size={12} />complete</>}
-              </span>
+              {onlyRetired ? (
+                <span className="text-[11px] text-slate-400">earlier answers, no longer asked</span>
+              ) : (
+                <span className={`inline-flex items-center gap-1 text-[11px] ${open ? (editable ? 'text-amber-300' : 'text-slate-400') : 'text-emerald-400'}`}>
+                  {open ? `${open} open` : <><Check aria-hidden="true" size={12} />complete</>}
+                </span>
+              )}
             </div>
             <ul className="space-y-1.5">
               {rows.map((c) => (

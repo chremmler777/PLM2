@@ -547,20 +547,35 @@ at-risk signal, there is no separate flag.
 existing per-department validation checks.
 
 - **Release checklist**: 17 fixed items, keyed and department-owned, config
-  in code (`app/services/release_checklist.py::CHECK_KEYS/label_for/owner_for`),
-  including Quality (`quality_samples`, `quality_control_plan`) and Process
-  Engineer (`process_parameters`, `process_fmea`), added 2026-09-25: those
-  four are left off a change that finished before they existed
-  (`release_checklist.keys_for`),
-  e.g. `index_updated` (Development), `equipment_updated` (Tool Engineer),
-  `weight_measured` (Tool Engineer, hinted when a validated weight exists),
-  `cycle_time_confirmed` (Manufacturing Engineer), `customer_approval`
-  (APQP), `erp_updated`/`stock_handled` (Scheduling),
-  `customer_informed` (Sales). Rows are seeded lazily
-  (`ReleaseService.ensure_rows`) and answered with `done`, `na` (note
-  required) or reset to `open` (`ReleaseService.set_check`,
-  `ReleaseChecklist.tsx`) by a member of the owner department, PM, lead or
-  admin (`ReleaseService.may_answer`).
+  in code (`app/services/release_checklist.py::CHECK_KEYS/label_for/owner_for`).
+  Reworked 2026-09-26: the Process Engineer keeps the process details in
+  the process database (PDB) and owes `cycle_time` ("changed" with the new
+  seconds, or "unchanged"; merged from Manufacturing Engineer's
+  `cycle_time_confirmed`) and `process_stable_pe`; APQP owes
+  `process_stable_apqp` (the stability is one confirmation in two rows,
+  complete only when both are done, each hinting the other's state),
+  `surface_quality`, `technical_quality`, `parts_measured` ("Measurements
+  confirmed"), `customer_approval` (PPAP documentation and customer
+  approval, asked once) and `control_plan`. Quality owns no release row.
+  Others: `index_updated`, `drawing_released`, `spare_parts` (Development),
+  `equipment_updated`, `weight_measured` (Tool Engineer, hinted when a
+  validated weight exists), `packaging_updated` (Packaging Engineer),
+  `erp_updated`/`stock_handled` (Scheduling), `customer_informed` (Sales).
+  The six new rows (`ADDED_LATER`) are left off a change that finished
+  before `PLM_RELEASE_ROWS_SINCE` (`release_checklist.keys_for`); retired
+  rows (`RETIRED_CHECKS`: `cycle_time_confirmed`, `documents_updated`,
+  `process_parameters`, `process_fmea`, `quality_samples`,
+  `quality_control_plan`) stay on such a change as they were, and anywhere
+  else an answer given to them shows read-only ("No longer asked",
+  `retired: true`) and is not counted (`retired_keys_for`). The cycle time
+  and the optional Cm (must exceed 1.67) have no column: they are written
+  into the note and the changelog (`release_checklist.answer_note`). The
+  `cycle_time` row hints the cycle times measured in validation. Rows are
+  written on first answer and answered with `done`, `na` (note required)
+  or reset to `open` (`ReleaseService.set_check`, `ReleaseChecklist.tsx`)
+  by a member of the owner department, PM, lead or admin
+  (`ReleaseService.may_answer`). Future, not built: process engineering
+  tasks will later be forwarded from the PDB to PLM.
 - **Lessons learned**: anyone on the change may add a lesson
   (`ReleaseService.add_lesson`, creates a `LessonLearned` linked to the
   change and its project). PM/lead/admin completes the step

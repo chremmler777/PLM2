@@ -100,24 +100,80 @@ describe('ReleaseChecklist', () => {
     expect(screen.getByTestId('release-check-erp_updated-done')).toBeDefined()
   })
 
-  it('renders the Quality and Process Engineer rows under their department, for their members', () => {
-    const q = (key: string, label: string) => check({ key, label, department_id: 20, department_name: 'Quality', hint: null })
-    const pe = (key: string, label: string) => check({ key, label, department_id: 21, department_name: 'Process Engineer', hint: null })
+  it('renders the Process Engineer and APQP rows under their department, for their members', () => {
+    const apqp = (key: string, label: string, over: Partial<ReleaseCheck> = {}) =>
+      check({ key, label, department_id: 20, department_name: 'APQP', hint: null, ...over })
+    const pe = (key: string, label: string, over: Partial<ReleaseCheck> = {}) =>
+      check({ key, label, department_id: 21, department_name: 'Process Engineer', hint: null, ...over })
     wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[20]} canManage={false} editable checks={[
-      pe('process_parameters', 'Process parameters and work instructions updated'),
-      pe('process_fmea', 'Process FMEA updated'),
-      q('quality_samples', 'Parts measured and PPAP / initial sample documentation complete'),
-      q('quality_control_plan', 'Control plan / inspection plan updated'),
+      pe('cycle_time', 'Cycle time: changed (new value entered) or confirmed unchanged', { value_kind: 'cycle_time' }),
+      pe('process_stable_pe', 'Process stable: SPC Cm > 1.67 (Process Engineer)', { value_kind: 'cm' }),
+      apqp('process_stable_apqp', 'Process stable: SPC Cm > 1.67 (APQP)', { value_kind: 'cm' }),
+      apqp('surface_quality', 'Surface quality confirmed'),
     ]} />)
-    expect(screen.getByText('Quality')).toBeDefined()
+    expect(screen.getByText('APQP')).toBeDefined()
     expect(screen.getByText('Process Engineer')).toBeDefined()
-    expect(screen.getByText('Process FMEA updated')).toBeDefined()
-    expect(screen.getByText('Control plan / inspection plan updated')).toBeDefined()
+    expect(screen.getByText('Surface quality confirmed')).toBeDefined()
     expect(screen.getAllByText('2 open')).toHaveLength(2)
-    // a Quality member answers the Quality rows only
-    expect(screen.getByTestId('release-check-quality_samples-done')).toBeDefined()
-    expect(screen.getByTestId('release-check-quality_control_plan-done')).toBeDefined()
+    // an APQP member answers the APQP rows only
+    expect(screen.getByTestId('release-check-process_stable_apqp-done')).toBeDefined()
+    expect(screen.getByTestId('release-check-surface_quality-done')).toBeDefined()
+    expect(screen.queryByTestId('release-check-process_stable_pe-done')).toBeNull()
+    expect(screen.queryByTestId('release-check-cycle_time-done')).toBeNull()
+  })
+
+  it('cycle time: unchanged saves the outcome, changed needs the new seconds', async () => {
+    const ct = check({ key: 'cycle_time', label: 'Cycle time', department_id: 21,
+      department_name: 'Process Engineer', value_kind: 'cycle_time', hint: null })
+    wrap(<ReleaseChecklist changeId={7} checks={[ct]} myDepartmentIds={[21]} canManage={false} editable />)
+    fireEvent.click(screen.getByTestId('release-check-cycle_time-done'))
+    const confirm = screen.getByTestId('release-check-cycle_time-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('release-check-cycle_time-changed'))
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('release-check-cycle_time-value'), { target: { value: '38.5' } })
+    expect(confirm.disabled).toBe(false)
+    expect(confirm.textContent).toBe('Save new cycle time')
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changeReleaseApi.setCheck).toHaveBeenCalledWith(7, 'cycle_time',
+      { status: 'done', outcome: 'changed', value: 38.5 }))
+    cleanup()
+    wrap(<ReleaseChecklist changeId={7} checks={[ct]} myDepartmentIds={[21]} canManage={false} editable />)
+    fireEvent.click(screen.getByTestId('release-check-cycle_time-done'))
+    fireEvent.click(screen.getByTestId('release-check-cycle_time-unchanged'))
+    expect(screen.queryByTestId('release-check-cycle_time-value')).toBeNull()
+    fireEvent.click(screen.getByTestId('release-check-cycle_time-confirm'))
+    await waitFor(() => expect(changeReleaseApi.setCheck).toHaveBeenCalledWith(7, 'cycle_time',
+      { status: 'done', outcome: 'unchanged' }))
+  })
+
+  it('process stable: Cm is optional but must be above 1.67', async () => {
+    const cm = check({ key: 'process_stable_apqp', label: 'Process stable (APQP)', department_id: 20,
+      department_name: 'APQP', value_kind: 'cm', hint: null })
+    wrap(<ReleaseChecklist changeId={7} checks={[cm]} myDepartmentIds={[20]} canManage={false} editable />)
+    fireEvent.click(screen.getByTestId('release-check-process_stable_apqp-done'))
+    const confirm = screen.getByTestId('release-check-process_stable_apqp-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(false)
+    fireEvent.change(screen.getByTestId('release-check-process_stable_apqp-value'), { target: { value: '1.5' } })
+    expect(confirm.disabled).toBe(true)
+    expect(screen.getByText('Cm must be above 1.67')).toBeDefined()
+    fireEvent.change(screen.getByTestId('release-check-process_stable_apqp-value'), { target: { value: '1.9' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changeReleaseApi.setCheck).toHaveBeenCalledWith(7, 'process_stable_apqp',
+      { status: 'done', value: 1.9 }))
+  })
+
+  it('shows a retired answer read-only and does not count it', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[]} canManage editable checks={[
+      check({ key: 'process_fmea', label: 'Process FMEA updated', department_id: 21,
+        department_name: 'Process Engineer', status: 'done', by_name: 'Pat', retired: true, hint: null }),
+      check({ key: 'cycle_time', label: 'Cycle time', department_id: 21,
+        department_name: 'Process Engineer', value_kind: 'cycle_time', hint: null }),
+    ]} />)
+    expect(screen.getByTestId('release-check-process_fmea-retired').textContent).toBe('No longer asked')
     expect(screen.queryByTestId('release-check-process_fmea-done')).toBeNull()
+    expect(screen.getByTestId('release-check-cycle_time-done')).toBeDefined()
+    expect(screen.getByText('1 open')).toBeDefined()
   })
 
   it('shows the hint and no controls once the stage has moved on', () => {

@@ -81,7 +81,7 @@ prod block. All are optional: unset or empty keeps the default.
 | `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs. On send the sender is frozen as signer when they are a Sales member; otherwise (PM lead, admin) the project's Sales responsible, else the "Sales" role line with no name. A draft previews exactly that for the viewer, labelled "Signed by (preview)". Set only to force one fixed name on every offer |
 | `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | not needed, leave unset (set only to force one fixed title) |
 | `PLM_BUSINESS_TZ` | `America/New_York` (IANA name; drives the business date of deadlines, plan dates, offers) | set explicitly to `America/New_York` |
-| `PLM_RELEASE_ROWS_SINCE` | `2026-09-26T04:00:00Z` (midnight New York on 26 Sep; backend/app/services/release_checklist.py) | set to the deploy moment in UTC (ISO 8601, e.g. `2026-09-27T14:30:00Z`; no offset means UTC). Changes released before it do not get the four new Quality / Process Engineer release rows; every change not yet released does |
+| `PLM_RELEASE_ROWS_SINCE` | `2026-09-26T04:00:00Z` (midnight New York on 26 Sep; backend/app/services/release_checklist.py) | set to the deploy moment in UTC (ISO 8601, e.g. `2026-09-27T14:30:00Z`; no offset means UTC). Changes released before it keep their old 13-row checklist; every change not yet released gets the reworked 17-row one |
 
 Lists are separated by `|`. Not needed: `TRAINING_GATE` (training is
 recorded, not blocking; the gate stays off, and it is also an org setting).
@@ -99,19 +99,36 @@ nothing released on the old code falls after it.
 
 ### New release rows for changes in flight
 
-The release checklist gains four rows, 13 to 17:
+The release checklist is reworked, 13 to 17 rows (decision 2026-09-26):
 
-- Quality: "Parts measured and PPAP / initial sample documentation
-  complete" (samples / PPAP) and "Control plan / inspection plan updated".
-- Process Engineer: "Process parameters and work instructions updated" and
-  "Process FMEA updated" (PFMEA).
+- Process Engineer (the process details stay in the process database,
+  PDB, where the Process Engineer confirms them): "Cycle time: changed (new
+  value entered) or confirmed unchanged" (replaces the Manufacturing
+  Engineer's "Cycle time confirmed in series production"; "changed" needs
+  the new seconds) and "Process stable: SPC Cm > 1.67 (Process Engineer)".
+- APQP: "Process stable: SPC Cm > 1.67 (APQP)" (stability counts only when
+  both process-stable rows are done), "Surface quality confirmed",
+  "Technical quality confirmed", "Measurements confirmed, measurement
+  report on file" (relabelled), "PPAP / initial sample documentation
+  complete, customer approval received (ISIR / PSW)" (PPAP asked once) and
+  "Control plan / inspection plan updated".
+- Quality: no release row.
+- Retired: "PFMEA, control plan and work instructions updated" (APQP) and
+  "Cycle time confirmed in series production" (Manufacturing Engineer). An
+  answer given to a retired row stays on the change, shown read-only as "No
+  longer asked" and not counted.
 
 Every change not yet released at the deploy moment (in validation or
-earlier) gets them as open rows and cannot be released until Quality and
-Process Engineer answer each one done, or mark it n/a with a note (PM, the
-change lead or an admin may also answer). Changes released before
-`PLM_RELEASE_ROWS_SINCE` are left as they were. Tell Quality and Process
-Engineer (step 7) and the leads of changes in validation.
+earlier) gets the six new rows open and cannot be released until they are
+answered done, or n/a with a note (PM, the change lead or an admin may also
+answer). Changes released before `PLM_RELEASE_ROWS_SINCE` are left as they
+were, retired rows included. Tell APQP and Process Engineer (step 7) and the
+leads of changes in validation. No migration: the cycle time and the
+optional Cm are written into the row's note ("Changed: new cycle time 38.5
+s", "Cm 1.85") and into the changelog as data.
+
+Future, not built: process engineering tasks will later be forwarded from
+the PDB to PLM.
 
 ## Preflight (local, before the go)
 
@@ -265,7 +282,7 @@ In the browser (as the owner, hub login):
 - `/plm2/changes` list, then one open change `/plm2/changes/<id>`: cockpit, stages, costing tab shows rates from the cost sheet (or "No rate" where none), process flow Detailed and Overview.
 - `/plm2/changes/<id>/plan/quote` and `/plan/detailed`: Gantt renders, links draw.
 - Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address. A sent version is signed by the Sales member who sent it (sent by a PM lead or an admin: the project's Sales responsible, else the "Sales" line with no name). A draft shows "Signed by (preview)" with who would sign if you sent it now: you when you are in Sales, otherwise the project's Sales responsible, else the "Sales" line.
-- Release tab of a change in validation: 17 rows, the four new Quality / Process Engineer rows open. A change released before the deploy: 13 rows.
+- Release tab of a change in validation: 17 rows, Process Engineer and APQP groups as listed above, no Quality or Manufacturing Engineer group. A change released before the deploy: 13 rows, with "Cycle time confirmed in series production" and "PFMEA, control plan and work instructions updated".
 - `/plm2/cost-sheet`: published version chain, Toccoa rows in USD, one draft at most.
 - `/plm2/pnl` and `/plm2/reports`: cost report per currency.
 - `/plm2/my-tasks`: counts plausible, backup markers after the prefill.
@@ -345,10 +362,12 @@ card on the three projects.
   triaged (full ECR, attach, engineering review, administrative).
 - Finance: the to-do below.
 - Everyone: training record is live but not blocking.
-- Quality and Process Engineer: changes in validation now carry four more
-  release rows (Quality: samples / PPAP, control plan; Process Engineer:
-  process parameters / work instructions, PFMEA) to answer done or mark
-  n/a with a note before the change can be released.
+- APQP and Process Engineer: changes in validation now carry the reworked
+  release rows (Process Engineer: cycle time changed or unchanged, process
+  stable Cm > 1.67; APQP: process stable, surface quality, technical
+  quality, measurements, PPAP with customer approval, control plan) to
+  answer done or mark n/a with a note before the change can be released.
+  Quality and Manufacturing Engineer no longer own release rows.
 
 ## Finance to-do (open after deploy)
 

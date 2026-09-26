@@ -66,7 +66,7 @@ export const basicsChapter: ContentChapter = {
               ['Development', 'Locking what is impacted, deciding the route of every new customer index, the drawing and 3D data.'],
               ['Tool, Manufacturing, Process, APQP, Packaging', 'Assessing, costing and doing their own part of the work, and their own release checks.'],
               ['Scheduling', 'How the change reaches the line (bank build), the plan with PM and Sales, ERP and old stock.'],
-              ['Quality', 'The Quality sign-off before approval, its release checks, the governance view (D1, Audit), the training record.'],
+              ['Quality', 'The Quality sign-off before approval, the governance view (D1, Audit), the training record.'],
               ['Finance', 'The cost sheet: every rate that prices a change.'],
             ],
           },
@@ -305,7 +305,7 @@ export const flowChapter: ContentChapter = {
         {
           points: [
             ['Validation checks:', 'each implementing department passes or fails its own checks.'],
-            ['Release checklist:', 'thirteen rows, each owned by a department. "N.a." needs a note.'],
+            ['Release checklist:', 'seventeen rows, each owned by a department. "N.a." needs a note.'],
             ['Lessons learned:', 'anyone adds a lesson. PM completes the step, with at least one lesson or a reason why there is none.'],
             ['Release & close:', 'PM releases once nothing blocks, reads the summary (plan against actual, offer against actual) and closes.'],
           ],

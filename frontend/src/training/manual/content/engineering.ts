@@ -245,7 +245,9 @@ export const engineeringChapter: ContentChapter = {
         {
           p:
             'Each row of the release checklist is owned by one department. Mark it "Done", or ' +
-            '"N.a." with a note that says why it does not apply.',
+            '"N.a." with a note that says why it does not apply. The Process Engineer keeps the ' +
+            'process details (parameters, PFMEA, work instructions) in the process database (PDB) ' +
+            'and confirms them there; the release asks only the cycle time and process stability.',
         },
         {
           table: {
@@ -253,13 +255,13 @@ export const engineeringChapter: ContentChapter = {
             rows: [
               ['Development', '"Part index / revision level updated in drawing and PLM", "Drawing and 3D data released and distributed", "Spare and service parts considered".'],
               ['Tool Engineer', '"Tool and equipment data updated (tool card, equipment list)", "Part weight measured and recorded".'],
-              ['Manufacturing Engineer', '"Cycle time confirmed in series production".'],
-              ['APQP', '"Parts measured, measurement report on file", "PFMEA, control plan and work instructions updated", "Customer approval received (PPAP / ISIR / PSW)".'],
-              ['Process Engineer', '"Process parameters and work instructions updated", "Process FMEA updated".'],
+              ['Process Engineer', '"Cycle time: changed (new value entered) or confirmed unchanged": pick "Changed" and enter the new seconds, or "Unchanged". "Process stable: SPC Cm > 1.67 (Process Engineer)", Cm optional.'],
+              ['APQP', '"Process stable: SPC Cm > 1.67 (APQP)", "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".'],
               ['Packaging Engineer', '"Packaging instruction updated".'],
             ],
           },
         },
+        { callout: 'Process stability is one confirmation owed by two departments: it counts only when the Process Engineer row and the APQP row are both "Done". Each row shows where the other half stands.', tone: 'rule' },
         { shot: 'eng-release-checklist', alt: 'The release checklist grouped by department with "Done" and "N.a." chips and one note.' },
       ],
     },

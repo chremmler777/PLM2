@@ -258,10 +258,7 @@ open by nature:
    for a role. The files in `docs/training/handouts/` are one-page cheat
    sheets. Keep both, or add the one-pager as a "Quick reference" section of
    each role chapter?
-6. **Release rows next to APQP.** The new Quality and Process Engineer rows
-   overlap in wording with the APQP rows "Parts measured, measurement report
-   on file" and "PFMEA, control plan and work instructions updated". Keep
-   both, or narrow the APQP rows?
+6. **Release rows next to APQP.** Answered 2026-09-26, see section 7.
 
 ## 7. Answered (decisions of 2026-09-25)
 
@@ -272,17 +269,28 @@ The app and the content follow these; the chapters and handouts say them.
   chapter ("you own the rates, not the offers") and the Quality chapter
   ("your sign-off is on the process record, not the price") state it as
   the rule. (Was question 2.)
-- **Quality owns release checklist rows:** "Parts measured and PPAP /
-  initial sample documentation complete" and "Control plan / inspection
-  plan updated" (`quality_samples`, `quality_control_plan` in
-  `backend/app/services/release_checklist.py`). The escalation audience is
-  unchanged. (Was question 4.)
-- **Process Engineer owns release checklist rows:** "Process parameters and
-  work instructions updated" and "Process FMEA updated"
-  (`process_parameters`, `process_fmea`). It still assesses only when the
-  scoping meeting gives it a letter. (Was question 5.) The four rows reach
-  every change not yet finished; a change released before 2026-09-25, or
-  ended without a release, does not show them.
+- **Release checklist rows reworked (decision 2026-09-26, replaces the
+  2026-09-25 Quality / Process Engineer rows; was questions 4, 5 and 6).**
+  The Process Engineer confirms the process in the process database (PDB)
+  and owes the release two rows: "Cycle time: changed (new value entered)
+  or confirmed unchanged" (`cycle_time`, merged from the Manufacturing
+  Engineer's "Cycle time confirmed in series production") and "Process
+  stable: SPC Cm > 1.67 (Process Engineer)". APQP owns "Process stable:
+  SPC Cm > 1.67 (APQP)" (the stability counts only when both halves are
+  done), "Surface quality confirmed", "Technical quality confirmed",
+  "Measurements confirmed, measurement report on file", "PPAP / initial
+  sample documentation complete, customer approval received (ISIR / PSW)"
+  (PPAP asked once) and "Control plan / inspection plan updated". Quality
+  owns no release row; its escalation audience is unchanged. Retired rows
+  (`process_parameters`, `process_fmea`, `quality_samples`,
+  `quality_control_plan`, `documents_updated`, `cycle_time_confirmed`)
+  keep their answers readable ("No longer asked"). The new rows reach every
+  change not yet finished; a change released before the cutoff
+  (`PLM_RELEASE_ROWS_SINCE`), or ended without a release, keeps its old
+  checklist. The Process Engineer still assesses only when the scoping
+  meeting gives it a letter.
+- **Future, not built:** process engineering tasks will later be forwarded
+  from the PDB to PLM.
 - **Project Management starts mother-plant changes.** Only PM members (and
   admins) hold `can_start_mother_plant`; Sales and the other starters no
   longer do. The start form shows everybody else "Changes from KTX

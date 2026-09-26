@@ -2,6 +2,18 @@
 
 export type ReleaseCheckStatus = 'open' | 'done' | 'na'
 
+/** Items whose "done" carries a value: the cycle time (changed with the new
+ *  seconds, or confirmed unchanged) and the optional Cm of the two
+ *  process-stable rows. */
+export type ReleaseValueKind = 'cycle_time' | 'cm'
+
+export interface ReleaseCheckAnswer {
+  status: ReleaseCheckStatus
+  note?: string
+  outcome?: 'changed' | 'unchanged'
+  value?: number
+}
+
 export interface ReleaseCheck {
   key: string
   label: string
@@ -12,6 +24,9 @@ export interface ReleaseCheck {
   by_name?: string | null
   at?: string | null
   hint?: string | null
+  value_kind?: ReleaseValueKind | null
+  /** Answered before the item was taken off the checklist: read-only, not counted. */
+  retired?: boolean
 }
 
 export type LessonCategory =

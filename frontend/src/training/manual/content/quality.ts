@@ -26,7 +26,7 @@ export const qualityChapter: ContentChapter = {
               ['Quoted', 'Give the "Quality sign-off". The cockpit asks for it once the customer accepted.'],
               ['Any stage', 'Read the change on "D1" and "Audit" in the Governance group.'],
               ['Assessment', 'Only if the scoping meeting routed Quality. Then you answer the checklist like every department.'],
-              ['Validation', 'Watch the validation issues. Answer your two release checklist rows. Add lessons learned.'],
+              ['Validation', 'Watch the validation issues. Read the release checklist (Quality owns no row). Add lessons learned.'],
               ['Training', 'Record attendance for sessions you held or witnessed, publish new versions, keep the roster.'],
             ],
           },
@@ -124,10 +124,9 @@ export const qualityChapter: ContentChapter = {
         {
           p:
             'The "Release" tab shows "Validation checks", "Release checklist", "Lessons learned" ' +
-            'and "Release & close". Quality owns two release checklist rows: "Parts measured and ' +
-            'PPAP / initial sample documentation complete" and "Control plan / inspection plan ' +
-            'updated". Mark each "Done", or "N.a." with a note. Read the other rows too: "N.a." ' +
-            'rows must carry a note that holds up.',
+            'and "Release & close". Quality owns no release checklist row: PPAP, the control plan, ' +
+            'surface and technical quality and the measurements are APQP\'s rows. Read the rows ' +
+            'anyway: "N.a." rows must carry a note that holds up.',
         },
         {
           p:

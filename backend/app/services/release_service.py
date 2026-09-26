@@ -12,7 +12,9 @@ Rows are written only when an item is first answered; reads show the catalog
 NOT depend on rows existing: it counts the catalog items without a done/na
 row, so a change nobody looked at has every item open rather than none.
 Items added to the catalog later are left off changes that had finished
-before they existed (release_checklist.keys_for).
+before they existed (release_checklist.keys_for); an answer given to an item
+since taken off the catalog stays visible, read-only and not counted
+(release_checklist.retired_keys_for).
 """
 from datetime import datetime
 from typing import Optional
@@ -93,6 +95,15 @@ class ReleaseService:
         return [existing[k] for k in keys]
 
     @staticmethod
+    async def retired_rows(session: AsyncSession,
+                           change: ChangeRequest) -> list[ChangeReleaseCheck]:
+        """Answered rows of items no longer on the catalog, kept readable."""
+        rows = await ReleaseService.rows(session, change)
+        by_key = {r.check_key: r for r in rows}
+        answered = {r.check_key for r in rows if r.status in ANSWERED}
+        return [by_key[k] for k in catalog.retired_keys_for(change, answered)]
+
+    @staticmethod
     async def _row_for_write(session: AsyncSession, change: ChangeRequest,
                              key: str) -> ChangeReleaseCheck:
         """The persisted row for one item, inserted on first answer. A
@@ -126,7 +137,17 @@ class ReleaseService:
 
     @staticmethod
     async def set_check(session: AsyncSession, change: ChangeRequest, key: str,
-                        status: str, note: Optional[str], user: User) -> None:
+                        status: str, note: Optional[str], user: User,
+                        outcome: Optional[str] = None,
+                        value: Optional[float] = None) -> None:
+        """`outcome` / `value`: only on a 'done' answer of an item that
+        carries a value (release_checklist.value_kind): the cycle time
+        ('changed' with the new seconds, or 'unchanged') and the optional
+        measured Cm of the process-stable rows."""
+        if key in catalog.RETIRED:
+            raise ChangeError(
+                f"'{catalog.label_for(key)}' is no longer on the release "
+                "checklist; its answer stays on the record")
         if key not in catalog.CHECK_KEYS:
             raise PlanConflict(f"Unknown release check '{key}'", not_found=True)
         if status not in RELEASE_CHECK_STATUSES:
@@ -134,6 +155,13 @@ class ReleaseService:
         note = (note or "").strip() or None
         if status == "na" and not note:
             raise ChangeError("'Not applicable' needs a note saying why")
+        if status == "done":
+            try:
+                note = catalog.answer_note(key, outcome, value, note)
+            except ValueError as e:
+                raise ChangeError(str(e))
+        elif outcome is not None or value is not None:
+            raise ChangeError("A value is recorded only with 'done'")
         if change.status not in CHECK_WINDOW:
             raise ChangeError(
                 "The release checklist is answered during implementation and "
@@ -158,7 +186,9 @@ class ReleaseService:
             session, change, "release_check",
             f"Release check '{catalog.label_for(key)}': {status}", user.id,
             notes=note, old_value={"status": old},
-            new_value={"check_key": key, "status": status},
+            new_value={"check_key": key, "status": status,
+                       **({"outcome": outcome} if outcome else {}),
+                       **({"value": value} if value is not None else {})},
             for_department_id=row.department_id)
 
     # ------------------------------------------------------------------
@@ -305,6 +335,11 @@ class ReleaseService:
     @staticmethod
     async def state(session: AsyncSession, change: ChangeRequest) -> dict:
         rows = await ReleaseService.view_rows(session, change)
+        retired = {r.check_key for r in await ReleaseService.retired_rows(session, change)}
+        if retired:
+            rows = sorted(rows + [r for r in await ReleaseService.rows(session, change)
+                                  if r.check_key in retired],
+                          key=lambda r: catalog.ORDER.index(r.check_key))
         names = {i: n for i, n in (await session.execute(
             select(Department.id, Department.name))).all()}
         lessons = await ReleaseService.lessons(session, change)
@@ -317,6 +352,8 @@ class ReleaseService:
         if weight is not None:
             hints["weight_measured"] = f"Validated part weight on file: {float(weight):g} g"
         hints.update(await ReleaseService.revision_hints(session, change))
+        hints.update(await ReleaseService.cycle_time_hint(session, change, names))
+        hints.update(ReleaseService.process_stable_hints(rows, names))
         blockers = await ReleaseService.blockers(session, change)
         return {
             "checks": [{
@@ -327,8 +364,11 @@ class ReleaseService:
                 "status": r.status, "note": r.note,
                 "by_name": users.get(r.checked_by), "at": r.checked_at,
                 "hint": hints.get(r.check_key),
+                "value_kind": catalog.value_kind(r.check_key),
+                "retired": r.check_key in retired,
             } for r in rows],
-            "open_count": sum(1 for r in rows if r.status not in ANSWERED),
+            "open_count": sum(1 for r in rows if r.status not in ANSWERED
+                              and r.check_key not in retired),
             "lessons": {
                 "done_at": change.lessons_done_at,
                 "done_by_name": users.get(change.lessons_done_by),
@@ -338,6 +378,42 @@ class ReleaseService:
             "can_release": change.status == "in_validation" and not blockers,
             "blockers": blockers,
         }
+
+    @staticmethod
+    async def cycle_time_hint(session: AsyncSession, change: ChangeRequest,
+                              names: dict) -> dict:
+        """The cycle times measured in validation (stage 9), next to the one
+        release row that asks whether the cycle time changed."""
+        from app.models.change_validation import ValidationCheck
+        from app.services import validation_checklist
+        rows = (await session.execute(select(ValidationCheck).where(
+            ValidationCheck.change_id == change.id,
+            ValidationCheck.check_key == validation_checklist.CYCLE_TIME_KEY,
+            ValidationCheck.status == "passed",
+            ValidationCheck.value.is_not(None)))).scalars().all()
+        if not rows:
+            return {}
+        parts = [f"{names.get(r.department_id, r.department_id)} {float(r.value):g} s"
+                 for r in sorted(rows, key=lambda r: r.department_id)]
+        return {catalog.CYCLE_TIME_KEY: "Measured in validation: " + "; ".join(parts)}
+
+    @staticmethod
+    def process_stable_hints(rows, names: dict) -> dict:
+        """The two process-stable rows are one confirmation owed by two
+        departments: each shows where the other half stands."""
+        by_key = {r.check_key: r for r in rows}
+        out = {}
+        for key in catalog.CM_KEYS:
+            other_key = next(k for k in catalog.CM_KEYS if k != key)
+            other = by_key.get(other_key)
+            if key not in by_key or other is None:
+                continue
+            who = names.get(other.department_id) or catalog.owner_for(other_key)
+            state = {"done": "confirmed", "na": "not applicable"}.get(
+                other.status, "not confirmed yet")
+            out[key] = (f"{who}: {state}. Stable once Process Engineer and "
+                        "APQP both confirmed")
+        return out
 
     @staticmethod
     async def revision_hints(session: AsyncSession, change: ChangeRequest) -> dict:

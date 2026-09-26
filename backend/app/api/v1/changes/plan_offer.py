@@ -205,6 +205,11 @@ class OfferReceivedIn(BaseModel):
 class ReleaseCheckIn(BaseModel):
     status: str
     note: Optional[str] = None
+    # Only on 'done' of an item that carries a value: the cycle time
+    # (outcome changed | unchanged, value = new seconds when changed) and the
+    # process-stable rows (value = measured Cm, optional).
+    outcome: Optional[str] = None
+    value: Optional[float] = None
 
 
 class LessonIn(BaseModel):
@@ -835,7 +840,8 @@ async def set_release_check(
     change = await _change(db, change_id, current_user)
     try:
         await ReleaseService.set_check(db, change, check_key, body.status,
-                                       body.note, current_user)
+                                       body.note, current_user,
+                                       outcome=body.outcome, value=body.value)
     except _ERRORS as e:
         raise _http(e)
     out = await ReleaseService.state(db, change)
