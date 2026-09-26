@@ -326,3 +326,36 @@ async def test_draft_preview_follows_the_viewer(
     # the fixed-name override still wins when a site sets it
     monkeypatch.setenv("KTX_COMPANY_SIGNATURE_NAME", "Fixed Signer")
     assert "Fixed Signer" in await _pdf(client, pm, cid, draft["id"])
+
+
+async def test_offer_data_strip_keeps_every_value_on_one_line():
+    """Re-check walk P2-1: the change number wrapped in its 20 mm column and
+    the issuing company wrapped too; every strip value now sits on one line."""
+    from app.services.offer_pdf import render_offer_pdf
+    ctx = _pdf_ctx({"cost_lines": [{"key": "a", "label": "Tooling", "amount": 10}],
+                    "timing": {"include": False}})
+    ctx["change_number"] = "CR-2026-0024"
+    ctx["offer"]["sent_at"] = date(2026, 9, 26)
+    ctx["offer"]["valid_until"] = date(2026, 9, 26)
+    lines = _text(render_offer_pdf(ctx)).splitlines()
+    head = next(i for i, ln in enumerate(lines)
+                if "OFFER NO." in ln and "ISSUED BY" in ln)
+    values = next(ln for ln in lines[head + 1:] if ln.strip())
+    for v in ("CR-2026-0024-Q2", "26 Sep 2026", "CR-2026-0024 ",
+              "KTX Group US Corp., Plant Wolfsburg"):
+        assert v in values, (v, values)
+    assert values.count("26 Sep 2026") == 2
+
+
+async def test_offer_data_strip_shrinks_before_it_wraps():
+    from reportlab.lib.units import mm
+    from app.services.offer_pdf import meta_strip_layout
+    meta = [("Offer no.", "CR-2026-0024-Q2"), ("Date", "26 Sep 2026"),
+            ("Valid until", "26 Sep 2026"), ("Change", "CR-2026-0024"),
+            ("Version", "2"), ("Issued by", "KTX Group US Corp., Plant Wolfsburg"),
+            ("Project", "P")]
+    fs, widths = meta_strip_layout(meta, 174 * mm)
+    assert fs == 8.5 and abs(sum(widths) - 174 * mm) < 0.01
+    long = meta[:-1] + [("Project", "VW 426 Atlas Cross Sport Underride " * 2)]
+    fs, widths = meta_strip_layout(long, 174 * mm)
+    assert fs < 8.5 and abs(sum(widths) - 174 * mm) < 0.01

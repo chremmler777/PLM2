@@ -117,8 +117,9 @@ export default function CostSheetPage() {
   // A plant with a second currency (Silao: USD and MXN): rates and machine
   // rows get the local-currency column. Stable per plant list.
   const dualColumns = useMemo((): Partial<Record<CostSheetSection, Column[]>> => {
-    if (!(ov?.plants ?? []).some((p) => p.local_currency)) return {}
-    return { rates: [localRateColumn()], machines: [localRateColumn()] }
+    const locals = (ov?.plants ?? []).map((p) => p.local_currency)
+    if (!locals.some(Boolean)) return {}
+    return { rates: [localRateColumn(locals)], machines: [localRateColumn(locals)] }
   }, [ov])
 
   const latestPublished = useMemo(() => {

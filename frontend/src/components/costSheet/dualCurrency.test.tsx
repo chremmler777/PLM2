@@ -8,11 +8,12 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import FxRates, { inverse, readFxInput } from './FxRates'
+import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID } from '../../lib/format'
 import CurrencyMismatch, { mismatchLines } from './CurrencyMismatch'
 import type { CurrencyMismatchRow } from '../../types/costSheet'
 import SectionTable from './SectionTable'
 import PlantCurrencies from './PlantCurrencies'
-import { localRateColumn, type SheetContext } from './columns'
+import { localRateColumn, localRateLabel, type SheetContext } from './columns'
 import ActualCostsPanel from '../changes/pnl/ActualCostsPanel'
 import { changesApi } from '../../api/changes'
 import { actualCostsApi } from '../../api/actualCosts'
@@ -45,13 +46,15 @@ const rows = [
 ]
 
 describe('FxRates', () => {
-  it('reads dot or comma decimals and keeps the digits as typed', () => {
+  it('reads like every number input and keeps the digits as typed', () => {
     expect(readFxInput('17.30')).toEqual({ value: '17.30' })
-    expect(readFxInput('17,30')).toEqual({ value: '17.30' })
+    // "17,30" is German for 17.30 or en-US grouping gone wrong: refused, not guessed
+    expect(readFxInput('17,30')).toEqual({ refused: NUMBER_INPUT_HINT })
+    expect(readFxInput('1,500')).toEqual({ value: '1500' })
+    expect(readFxInput('1,730.5')).toEqual({ value: '1730.5' })
     expect(readFxInput('')).toEqual({ value: null })
-    expect(readFxInput('1,730.5')).toEqual({ refused: true })
-    expect(readFxInput('0')).toEqual({ refused: true })
-    expect(readFxInput('abc')).toEqual({ refused: true })
+    expect('refused' in readFxInput('0')).toBe(true)
+    expect(readFxInput('abc')).toEqual({ refused: NUMBER_INPUT_INVALID })
   })
 
   it('edits the pair a plant needs on a draft and says when it is missing', () => {
@@ -59,8 +62,8 @@ describe('FxRates', () => {
     render(<FxRates rates={[]} needed={[{ pair: 'USD/MXN', base: 'USD', quote: 'MXN' }]}
       editable version={3} onSet={onSet} />)
     expect(screen.getByText('Rates typed in MXN cannot be priced until it is set.')).toBeDefined()
-    const input = screen.getByLabelText('MXN per USD')
-    fireEvent.change(input, { target: { value: '17,30' } })
+    const input = screen.getByLabelText('MXN per USD') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '17.30' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     fireEvent.blur(input)
     expect(onSet).toHaveBeenCalledWith('USD', 'MXN', '17.30')
@@ -68,6 +71,24 @@ describe('FxRates', () => {
     fireEvent.blur(input)
     expect(screen.getByRole('alert')).toBeDefined()
     expect(onSet).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses "17,30", puts the saved rate back and says why inline; the reverse follows the field', () => {
+    const onSet = vi.fn()
+    render(<FxRates rates={[{ pair: 'USD/MXN', base: 'USD', quote: 'MXN', rate: '17.30' }]}
+      needed={[]} editable version={3} onSet={onSet} />)
+    const input = screen.getByLabelText('MXN per USD') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '20' } })
+    expect(screen.getByTestId('fx-inverse-USD/MXN').textContent).toBe('(1 MXN = 0.0500 USD)')
+    fireEvent.change(input, { target: { value: '17,30' } })
+    fireEvent.blur(input)
+    expect(onSet).not.toHaveBeenCalled()
+    expect(input.value).toBe('17.30')
+    const msg = screen.getByTestId('fx-refused-USD/MXN')
+    expect(msg.getAttribute('role')).toBe('alert')
+    expect(msg.textContent).toBe(`"17,30" not saved. ${NUMBER_INPUT_HINT}`)
+    expect(input.getAttribute('aria-describedby')).toBe(msg.id)
+    expect(screen.getByTestId('fx-inverse-USD/MXN').textContent).toBe('(1 MXN = 0.0578 USD)')
   })
 
   it('shows a published version rate read-only, and nothing without pairs', () => {
@@ -98,6 +119,12 @@ describe('local-currency rate column', () => {
     // a one-currency plant has no local rate
     const toccoa = screen.getAllByRole('row')[2]
     expect(within(toccoa).queryByText(/MXN/)).toBeNull()
+  })
+
+  it('names the local currency in the header', () => {
+    expect(localRateColumn(['MXN', null, 'MXN']).label).toBe('Local / h (MXN)')
+    expect(localRateLabel(['MXN', 'BRL'])).toBe('Local / h (BRL, MXN)')
+    expect(localRateLabel([])).toBe('Local / h')
   })
 
   it('sends a local rate as typed in the local currency', () => {

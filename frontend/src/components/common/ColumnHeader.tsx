@@ -6,7 +6,8 @@
  * filter popover: a searchable checkbox list of the column's values, or a
  * from/to range for number columns. The popover is portalled to <body> with
  * fixed positioning, so an overflow-x-auto table wrapper never clips it, and
- * it only listens to keys inside itself, so cells being edited keep theirs.
+ * it only listens to keys inside itself (plus Escape while focus is still on
+ * the funnel), so cells being edited keep theirs.
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -72,6 +73,15 @@ export default function ColumnHeader<Row>({
           data-active={active ? 'true' : undefined}
           title={active ? `Filtered: ${describe(filter)}` : `Filter ${col.label}`}
           onClick={() => setOpen((o) => !o)}
+          onKeyDown={(e) => {
+            // Escape on the funnel closes an open popover (focus may not
+            // have moved into it yet).
+            if (e.key === 'Escape' && open) {
+              e.preventDefault()
+              e.stopPropagation()
+              close(true)
+            }
+          }}
           className={`inline-flex h-6 w-6 items-center justify-center rounded ${FOCUS} ${
             active ? 'bg-sky-500/20 text-sky-300' : 'text-slate-500 hover:bg-slate-700/60 hover:text-slate-200'}`}>
           <Filter aria-hidden="true" size={11} strokeWidth={active ? 2.5 : 2} />
@@ -139,11 +149,41 @@ function FilterPopover<Row>({ col, rows, cols, state, anchor, onApply, onClose }
     return () => document.removeEventListener('mousedown', onDown)
   }, [anchor, onClose])
 
-  // Focus moves into the popover.
+  // Focus moves into the popover once it is visible: while it is still
+  // being positioned it is visibility:hidden and cannot take focus (re-check
+  // walk P2-2), so the move waits for the placed render and retries on the
+  // next frame if the browser refused it.
+  const visible = pos !== null
+  const focused = useRef(false)
   useEffect(() => {
-    const first = ref.current?.querySelector<HTMLElement>('input, button')
-    first?.focus()
-  }, [])
+    if (!visible || focused.current) return
+    focused.current = true
+    const move = () => {
+      const first = ref.current?.querySelector<HTMLElement>('input, button')
+      first?.focus()
+      return !!first && document.activeElement === first
+    }
+    if (move()) return
+    const id = requestAnimationFrame(() => { move() })
+    return () => cancelAnimationFrame(id)
+  }, [visible])
+
+  // Escape closes it even while focus is still on the funnel (or nowhere):
+  // the popover's own handler covers keys inside it, this one the rest.
+  // Keys typed in other fields (a cell being edited) are left alone.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const a = document.activeElement
+      const ours = !a || a === document.body || a === anchor.current
+        || ref.current?.contains(a)
+      if (!ours) return
+      e.preventDefault()
+      onClose(true)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [anchor, onClose])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {

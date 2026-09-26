@@ -266,6 +266,9 @@ export interface ChangeRequest {
   timing_validated_by?: number | null;
   accepted_offer_id?: number | null;
   lessons_done_at?: string | null;
+  /** When the change was released / closed (release summary, re-check walk P3-6). */
+  released_at?: string | null;
+  closed_at?: string | null;
   lessons_done_by?: number | null;
   lessons_none_reason?: string | null;
   /** Where the change comes from (spec §14): customer, internal, or the
@@ -518,9 +521,11 @@ export interface Summation {
   totals_by_currency?: Record<string, SummationTotals>;
   mixed_currency?: boolean;
   unpriced_lines?: { position_id: number; department_id: number; label: string; kind: string;
-    quantity: number; unit: string; reason?: string | null; message: string }[];
-  /** no_rate_department names its department_id. */
-  warnings?: { code: string; message: string; department_id?: number | null }[];
+    quantity: number; unit: string; reason?: string | null; message: string;
+    /** machine_time / sampling: what is missing, e.g. "machine rate for class 200-450 t at USA Toccoa". */
+    subject?: string | null }[];
+  /** no_rate_department names its department_id, or its subject (a machine class's rate at a plant). */
+  warnings?: { code: string; message: string; department_id?: number | null; subject?: string | null }[];
   cost_sheet_versions_used?: number[];
   cost_sheet_current_version?: number | null;
   by_plant: PlantRollup[];

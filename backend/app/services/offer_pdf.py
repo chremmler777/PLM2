@@ -154,6 +154,51 @@ def issued_by(org, plant_name, location) -> str:
     return ", ".join(out)
 
 
+#: Columns of the offer data strip that take the room left over; every
+#: other column is sized to its own label and value.
+META_FLEX = ("Issued by", "Project")
+META_LABEL_SIZE = 6.5
+META_PAD = 4 + 2 + 1          # left + right cell padding + 1 pt slack
+META_SIZES = (8.5, 8, 7.5, 7)
+
+
+def meta_strip_layout(meta: list[tuple[str, str]], width: float,
+                      ) -> tuple[float, list[float]]:
+    """Font size and column widths of the offer data strip, so that every
+    value sits on one line (re-check walk P2-1: "CR-2026-0024" wrapped in a
+    fixed 20 mm column). Each column needs max(label, value) + padding; the
+    flexible columns (issued by, project) share what is left. When the
+    strip overflows the font shrinks a little; only at the smallest size
+    may a flexible value wrap, as a last resort."""
+    def need(k, v, fs):
+        return max(stringWidth(k.upper(), BOLD, META_LABEL_SIZE),
+                   stringWidth(_clean(v)[:160], BOLD, fs)) + META_PAD
+
+    flex = [i for i, (k, _) in enumerate(meta) if k in META_FLEX]
+    for fs in META_SIZES:
+        natural = [need(k, v, fs) for k, v in meta]
+        if sum(natural) <= width:
+            break
+    widths = list(natural)
+    if not flex:
+        return fs, [w * width / sum(widths) for w in widths]
+    fixed_sum = sum(w for i, w in enumerate(widths) if i not in flex)
+    if fixed_sum + 20 * mm * len(flex) > width:
+        # Even the fixed columns do not fit: everything shares the width.
+        return fs, [w * width / sum(widths) for w in widths]
+    flex_need = sum(widths[i] for i in flex)
+    rest = max(width - fixed_sum, 0)
+    if flex_need <= rest:
+        extra = (rest - flex_need) / len(flex)
+        for i in flex:
+            widths[i] += extra
+    else:
+        # Last resort: the flexible columns wrap, in proportion to their need.
+        for i in flex:
+            widths[i] = rest * natural[i] / flex_need
+    return fs, widths
+
+
 #: The customer's CBD rows, in print order (offer_service.CBD_CATEGORIES).
 CBD_ORDER = ("Engineering", "Tooling", "Sampling and trials", "Machine time",
              "Supplier parts", "Other")
@@ -776,17 +821,11 @@ def render_offer_pdf(ctx: dict) -> bytes:
         meta.append(("Issued by", issued))
     if ctx.get("project_name"):
         meta.append(("Project", ctx["project_name"]))
-    fixed = {"Offer no.": 27, "Date": 22, "Valid until": 22, "Change": 20,
-             "Version": 13}
-    widths = [fixed.get(k, 0) * mm for k, _ in meta]
-    flex = [i for i, (k, _) in enumerate(meta) if k not in fixed]
-    rest = width - sum(widths)
-    for i in flex:
-        widths[i] = rest / len(flex)
-    if not flex:
-        widths = [w * width / sum(widths) for w in widths]
+    fs, widths = meta_strip_layout(meta, width)
+    meta_fit = ParagraphStyle("metafit", parent=meta_v, fontSize=fs,
+                              leading=fs + 2)
     strip = Table([[_p(k.upper(), label_s) for k, _ in meta],
-                   [_p(v, meta_v, 160) for _, v in meta]], colWidths=widths)
+                   [_p(v, meta_fit, 160) for _, v in meta]], colWidths=widths)
     strip.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), GROUP_FILL),
                                ("LINEABOVE", (0, 0), (-1, 0), 1.2, KTX_RED),
                                ("VALIGN", (0, 0), (-1, -1), "TOP"),

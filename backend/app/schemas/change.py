@@ -328,6 +328,10 @@ class ChangeResponse(BaseModel):
     accepted_offer_id: Optional[int] = None
     lessons_done_at: Optional[datetime] = None
     lessons_none_reason: Optional[str] = None
+    # When the change was released / closed: the release summary's actual
+    # finish when plan tasks were never marked done (re-check walk P3-6).
+    released_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
     deadline_state: Optional[str] = None
     quoted_at: Optional[datetime] = None
     quoted_on_time: Optional[bool] = None
@@ -338,8 +342,10 @@ class ChangeResponse(BaseModel):
     # Populated only while the change is in costing (see the endpoint).
     costing_pending_department_ids: List[int] = []
     # Departments with costing lines the cost sheet cannot price (no rate):
-    # [{department_id, department_name, count, message}], message = "No cost
-    # sheet rate for <department>: hours unpriced". In costing and quoting.
+    # [{department_id, department_name, subject, count, message}], message =
+    # "No cost sheet rate for <department>: 12 h unpriced", or for a machine
+    # line "No machine rate for class <class> at <plant>: 12 h unpriced"
+    # (department_id None). In costing and quoting.
     costing_unpriced: List[dict] = []
     release_due_date: Optional[datetime] = None
     release_due_reason: Optional[str] = None
@@ -742,11 +748,18 @@ class UnpricedLine(BaseModel):
     unit: str = "h"
     reason: Optional[str] = None
     message: str = "No rate in the cost sheet"
+    # machine_time / sampling: what is missing ("machine rate for class
+    # 200-450 t at USA Toccoa"); None for a labour line (its department's rate)
+    subject: Optional[str] = None
 
 
 class SummationWarning(BaseModel):
     code: str
     message: str
+    # no_rate_department: the department whose rate is missing, or the
+    # subject (a machine class's rate at a plant) with department_id None
+    department_id: Optional[int] = None
+    subject: Optional[str] = None
 
 
 class SummationResponse(BaseModel):

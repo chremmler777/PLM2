@@ -190,7 +190,7 @@ export const pmChapter: ContentChapter = {
           table: {
             head: ['Button', 'Means'],
             rows: [
-              ['"Lock", or "Lock all {n}" on a group', 'Accepted internally, every open row of the group at once. No customer impact, for example a slip the buffer absorbs.'],
+              ['"Lock", or "Lock all N" on a group (N is the number of open rows)', 'Accepted internally, every open row of the group at once. No customer impact, for example a slip the buffer absorbs.'],
               ['"Escalate to customer"', 'Sales tells the customer. The whole group goes under one customer escalation.'],
             ],
           },

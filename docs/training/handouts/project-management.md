@@ -14,7 +14,7 @@ For Project Managers. One page for the session and the desk; the full chapter is
 | Costing | Check every department priced its part, "Close costing" | "Costing", "Cost summary" |
 | Quoted | "PM sign-off" (the cockpit asks once "Customer accepted" is recorded) | "Offer" |
 | Timing | "Create detailed plan from quote plan", teams confirm, "Validate timing" | "Timing" |
-| Implementing | One decision per group (the moved block and what it pushed): "Lock all {n}" or "Escalate to customer" | "Deviations from the baseline" |
+| Implementing | One decision per group (the moved block and what it pushed): "Lock all N" (N open rows) or "Escalate to customer" | "Deviations from the baseline" |
 | Validation | "Decide the route" of each validation issue, "Complete lessons step", "Release change", "Close change" | "Release" |
 
 ## Rules to remember

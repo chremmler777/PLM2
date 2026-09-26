@@ -7,14 +7,16 @@
  * MachineDB is read through a sync (Sales, Finance or admin). When the
  * server has no MachineDB connection the table keeps the last synced copy.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { RefreshCw, X } from 'lucide-react'
 import { costSheetApi } from '../../api/costSheet'
 import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import { apiErrorMessage, toastError } from '../../lib/apiError'
-import { formatDateTime, formatMoney, formatNumber } from '../../lib/format'
+import {
+  NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, formatDateTime, formatMoney, formatNumber, readNumberInput,
+} from '../../lib/format'
 import { btnSm } from '../common/buttonStyles'
 import ColumnHeader from '../common/ColumnHeader'
 import ConfirmDialog from '../common/ConfirmDialog'
@@ -472,12 +474,34 @@ function useRateSave(m: CostSheetMachine, versionId: number | null, reset: () =>
   })
 }
 
-/** A typed rate: empty = null, else a number of 0 or more (comma or point). */
-function parseRate(value: string): number | null | 'bad' {
-  const raw = value.trim().replace(',', '.')
-  if (raw === '') return null
-  const n = Number(raw)
-  return Number.isFinite(n) && n >= 0 ? n : 'bad'
+/**
+ * A typed rate, read like every number input (lib/format readNumberInput):
+ * empty = null, "1,500" = 1500, "4,5" refused as ambiguous rather than
+ * guessed (re-check walk P2-3). A refusal carries the reason to show.
+ */
+function parseRate(value: string): { value: number | null } | { refused: string } {
+  const r = readNumberInput(value)
+  if (r.error === 'ambiguous') return { refused: NUMBER_INPUT_HINT }
+  if (r.error) return { refused: NUMBER_INPUT_INVALID }
+  if (r.value !== null && r.value < 0) return { refused: 'A rate is a number of 0 or more' }
+  return { value: r.value }
+}
+
+/** A saved rate as edit text: 2 decimals like the Rates tab ("47.50"), more
+ * only when the stored number has them, so a blur never rounds it. */
+function rateEditText(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return ''
+  return Number(v.toFixed(2)) === v ? v.toFixed(2) : String(v)
+}
+
+/** The inline reason a typed rate was refused (the field is back on the saved value). */
+function RateRefusal({ id, text }: { id: string; text: string | null }) {
+  if (!text) return null
+  return (
+    <span id={id} role="alert" className="mt-0.5 block max-w-[14rem] text-left text-[11px] leading-tight text-amber-300">
+      {text}
+    </span>
+  )
 }
 
 const INPUT = 'w-24 rounded border border-slate-600 bg-slate-900 px-2 py-1 text-right text-sm tabular-nums text-slate-100 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500/40 disabled:opacity-60'
@@ -490,8 +514,10 @@ const INPUT = 'w-24 rounded border border-slate-600 bg-slate-900 px-2 py-1 text-
 function RateCell({ m, versionId, editable, currencies }: {
   m: CostSheetMachine; versionId: number | null; editable: boolean; currencies: string[]
 }) {
-  const shown = m.hourly_rate != null ? String(m.hourly_rate) : ''
+  const shown = rateEditText(m.hourly_rate)
   const [value, setValue] = useState(shown)
+  const [refused, setRefused] = useState<string | null>(null)
+  const msgId = useId()
   const defaultCur = m.currency ?? m.plant_currency ?? ''
   const [cur, setCur] = useState(defaultCur)
   useEffect(() => { setValue(shown) }, [shown])
@@ -510,12 +536,15 @@ function RateCell({ m, versionId, editable, currencies }: {
   // the currency only goes along when it is not what the server defaults to
   const withCurrency = (c: string) => (c && c !== (m.currency ?? m.plant_currency) ? { currency: c } : {})
   const commit = () => {
-    const next = parseRate(value)
-    if (next === 'bad') {
-      toast.error('A rate is a number of 0 or more')
+    if (value === shown && cur === defaultCur) return
+    const read = parseRate(value)
+    if ('refused' in read) {
+      setRefused(`"${value.trim()}" not saved. ${read.refused}`)
       setValue(shown)
       return
     }
+    setRefused(null)
+    const next = read.value
     if (next === m.hourly_rate && cur === defaultCur) return
     if (next !== null && !cur) {
       toast.error(`Choose the currency of ${m.internal_name}'s rate first: it is not mapped to a plant`)
@@ -529,8 +558,9 @@ function RateCell({ m, versionId, editable, currencies }: {
       <span>
         <input value={value} inputMode="decimal" placeholder="Class rate"
           aria-label={`Hourly rate of ${m.internal_name}`}
+          aria-describedby={refused ? msgId : undefined}
           disabled={save.isPending}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setValue(e.target.value); setRefused(null) }}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -538,6 +568,7 @@ function RateCell({ m, versionId, editable, currencies }: {
           }}
           className={INPUT} />
         {m.entered_in === 'local' && m.local_currency && <Calculated from={m.local_currency} />}
+        <RateRefusal id={msgId} text={refused} />
       </span>
       <select value={cur} aria-label={`Currency of the rate of ${m.internal_name}`}
         disabled={save.isPending}
@@ -562,8 +593,10 @@ function RateCell({ m, versionId, editable, currencies }: {
 function LocalRateCell({ m, versionId, editable }: {
   m: CostSheetMachine; versionId: number | null; editable: boolean
 }) {
-  const shown = m.local_rate != null ? String(m.local_rate) : ''
+  const shown = rateEditText(m.local_rate)
   const [value, setValue] = useState(shown)
+  const [refused, setRefused] = useState<string | null>(null)
+  const msgId = useId()
   // a typed local rate waiting for "switch the rate to the quote currency first"
   const [ask, setAsk] = useState<number | null>(null)
   useEffect(() => { setValue(shown) }, [shown])
@@ -578,12 +611,15 @@ function LocalRateCell({ m, versionId, editable }: {
       : <span className="text-slate-600">-</span>
   }
   const commit = () => {
-    const next = parseRate(value)
-    if (next === 'bad') {
-      toast.error('A rate is a number of 0 or more')
+    if (value === shown) return
+    const read = parseRate(value)
+    if ('refused' in read) {
+      setRefused(`"${value.trim()}" not saved. ${read.refused}`)
       setValue(shown)
       return
     }
+    setRefused(null)
+    const next = read.value
     if (next === m.local_rate) return
     if (next !== null && offQuote) { setAsk(next); return }
     save.mutate({ entered_rate: next, entered_currency: m.local_currency })
@@ -593,8 +629,9 @@ function LocalRateCell({ m, versionId, editable }: {
       <span>
         <input value={value} inputMode="decimal" placeholder="-"
           aria-label={`Hourly rate of ${m.internal_name} in ${m.local_currency}`}
+          aria-describedby={refused ? msgId : undefined}
           disabled={save.isPending}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setValue(e.target.value); setRefused(null) }}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -602,6 +639,7 @@ function LocalRateCell({ m, versionId, editable }: {
           }}
           className={INPUT} />
         {hint}
+        <RateRefusal id={msgId} text={refused} />
       </span>
       <span className="w-8 text-left text-xs text-slate-500">{m.local_currency}</span>
       <ConfirmDialog open={ask !== null} title={`Switch this rate to ${m.plant_currency}?`}

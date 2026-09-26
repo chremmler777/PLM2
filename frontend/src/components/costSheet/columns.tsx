@@ -78,12 +78,21 @@ function calculatedHint(row: CostSheetRow, side: 'quote' | 'local') {
   }
 }
 
+/** The column label naming the local currency: "Local / h (MXN)". With
+ * several local currencies, all of them ("Local / h (BRL, MXN)"). */
+export function localRateLabel(currencies: (string | null | undefined)[] = []): string {
+  const cur = [...new Set(currencies.filter((c): c is string => !!c))].sort()
+  return cur.length ? `Local / h (${cur.join(', ')})` : 'Local / h'
+}
+
 /** The rate in the plant's local currency (Silao: MXN next to USD). Typed
  * here, the number is kept and the quote rate is calculated from it. Empty
- * for rows without a second currency. */
-export function localRateColumn(): Column {
+ * for rows without a second currency. The header names the currency, so an
+ * edited cell ("1003.40") is never read as the quote currency (re-check
+ * walk P3-3). */
+export function localRateColumn(currencies: (string | null | undefined)[] = []): Column {
   return {
-    key: 'local_rate', label: 'Local / h', kind: 'money', numeric: true, width: 'w-32',
+    key: 'local_rate', label: localRateLabel(currencies), kind: 'money', numeric: true, width: 'w-32',
     currencyKey: 'local_currency', derived: true,
     title: 'The rate in the plant\'s local currency, at this version\'s exchange rate. Type in either column.',
     inactive: (r) => !r.local_currency,

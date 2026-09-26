@@ -732,3 +732,21 @@ async def test_closed_after_a_rejection_ends_at_its_rejection():
     assert ended_at(c) == closed
     c.released_at = datetime(2026, 5, 1)
     assert ended_at(c) == datetime(2026, 5, 1)
+
+
+async def test_change_detail_carries_the_release_and_close_dates(
+        client, rel_world, session_factory):
+    """Re-check walk P3-6: the release summary reads the release date as the
+    actual finish when plan tasks were never marked done."""
+    from datetime import datetime
+    cid = rel_world["change_id"]
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status, c.released_at = "closed", datetime(2026, 10, 16, 9, 0)
+        c.closed_at = datetime(2026, 10, 20, 9, 0)
+        await s.commit()
+    res = await client.get(f"/api/v1/changes/{cid}", headers=await _auth(client, "pm"))
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["released_at"].startswith("2026-10-16")
+    assert body["closed_at"].startswith("2026-10-20")

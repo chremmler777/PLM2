@@ -81,7 +81,7 @@ describe('MachinesPanel', () => {
     vi.mocked(costSheetMachinesApi.setRate).mockResolvedValue(null)
     wrap(<MachinesPanel versionId={9} editable plants={plants} />)
     const input = await screen.findByLabelText('Hourly rate of P-80')
-    fireEvent.change(input, { target: { value: '95,5' } })
+    fireEvent.change(input, { target: { value: '95.5' } })
     fireEvent.blur(input)
     await waitFor(() => expect(costSheetMachinesApi.setRate).toHaveBeenCalledWith(
       1, { version_id: 9, hourly_rate: 95.5 }))
@@ -204,7 +204,7 @@ describe('MachinesPanel', () => {
     vi.mocked(costSheetMachinesApi.setRate).mockResolvedValue(null)
     wrap(<MachinesPanel versionId={9} editable plants={plants} />)
     const local = await screen.findByLabelText('Hourly rate of M-300 in MXN') as HTMLInputElement
-    expect(local.value).toBe('1730')
+    expect(local.value).toBe('1730.00')
     expect(screen.getByTestId('machine-row-3').textContent).toMatch(/calculated/)
     fireEvent.change(local, { target: { value: '1800' } })
     fireEvent.blur(local)
@@ -228,6 +228,40 @@ describe('MachinesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to USD' }))
     await waitFor(() => expect(costSheetMachinesApi.setRate).toHaveBeenCalledWith(
       3, { version_id: 9, entered_rate: 1800, entered_currency: 'MXN', currency: 'USD' }))
+  })
+
+  it('reads a rate like every number input: "4,5" refused inline, "1,500" is 1500', async () => {
+    const { toast } = await import('sonner')
+    vi.mocked(costSheetMachinesApi.list).mockResolvedValue(listing({
+      machines: [machine({ id: 3, internal_name: 'M-300', machinedb_plant: 'mexico', plant_id: 5,
+        hourly_rate: 47.5, currency: 'USD', local_currency: 'MXN', local_rate: 821.75,
+        entered_rate: 821.75, entered_currency: 'MXN', entered_in: 'local' })],
+    }))
+    vi.mocked(costSheetMachinesApi.setRate).mockResolvedValue(null)
+    wrap(<MachinesPanel versionId={9} editable plants={plants} />)
+    const own = await screen.findByLabelText('Hourly rate of M-300') as HTMLInputElement
+    // 2 decimals like the Rates tab, not "47.5"
+    expect(own.value).toBe('47.50')
+    fireEvent.focus(own)
+    fireEvent.blur(own)                     // untouched: nothing saved
+    fireEvent.change(own, { target: { value: '4,5' } })
+    fireEvent.blur(own)
+    expect(costSheetMachinesApi.setRate).not.toHaveBeenCalled()
+    expect(own.value).toBe('47.50')
+    const msg = within(screen.getByTestId('machine-row-3')).getByRole('alert')
+    expect(msg.textContent).toMatch(/^"4,5" not saved\. Use a dot for decimals/)
+    expect(own.getAttribute('aria-describedby')).toBe(msg.id)
+    expect(toast.error).not.toHaveBeenCalled()
+    fireEvent.change(own, { target: { value: '-2' } })
+    fireEvent.blur(own)
+    expect(within(screen.getByTestId('machine-row-3')).getByRole('alert').textContent)
+      .toMatch(/0 or more/)
+    const local = screen.getByLabelText('Hourly rate of M-300 in MXN') as HTMLInputElement
+    expect(local.value).toBe('821.75')
+    fireEvent.change(local, { target: { value: '1,500' } })
+    fireEvent.blur(local)
+    await waitFor(() => expect(costSheetMachinesApi.setRate).toHaveBeenCalledWith(
+      3, { version_id: 9, entered_rate: 1500, entered_currency: 'MXN' }))
   })
 
   it('names the status of a machine', () => {

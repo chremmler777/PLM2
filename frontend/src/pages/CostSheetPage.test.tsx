@@ -314,7 +314,7 @@ describe('CostSheetPage: a Silao row still in another currency', () => {
     wrap(<CostSheetPage />)
     expect((await screen.findByTestId('currency-mismatch')).textContent)
       .toContain('Silao (quote currency USD): 1 row in EUR')
-    const local = screen.getAllByLabelText('Local / h')[0]
+    const local = screen.getAllByLabelText('Local / h (MXN)')[0]
     fireEvent.focus(local)
     fireEvent.change(local, { target: { value: '1730' } })
     fireEvent.blur(local)

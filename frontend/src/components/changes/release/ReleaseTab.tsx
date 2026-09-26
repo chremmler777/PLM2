@@ -66,17 +66,27 @@ function ClosingSummary({ change, departments, canSeeCosts }: {
     queryKey: ['change', change.id, 'plan', 'detailed'],
     queryFn: () => planApi.get(change.id, 'detailed'),
   })
-  const f = closingFigures(plan?.tasks ?? [])
+  // Released or closed: open plan tasks are a plan never completed, not
+  // open work (re-check walk P3-6).
+  const f = closingFigures(plan?.tasks ?? [], change.released_at ?? change.closed_at ?? null)
   const slipText = f.slip == null ? '-' : f.slip === 0 ? 'on time'
     : f.slip > 0 ? `${f.slip} d late` : `${-f.slip} d early`
   const detail = [
     f.slipped ? `${plural(f.slipped, 'task')} slipped` : null,
     f.open ? `${plural(f.open, 'task')} open` : null,
   ].filter(Boolean).join(', ')
+  const actualNote = [
+    f.actualFrom === 'release' ? 'the release date'
+      : f.actualFrom === 'last_finish' ? 'the last task finish' : null,
+    f.unfinished
+      ? `${plural(f.unfinished, 'plan task')} never marked done`
+      : null,
+  ].filter(Boolean).join(', ')
   const cells: [string, string, string, string?][] = [
     ['Baseline finish', 'baseline-finish', formatCalendarDate(f.baseline)],
     ['Planned finish', 'planned-finish', formatCalendarDate(f.planned)],
-    ['Actual finish', 'actual-finish', f.actual ? formatCalendarDate(f.actual) : f.open ? plural(f.open, 'open task') : '-'],
+    ['Actual finish', 'actual-finish', f.actual ? formatCalendarDate(f.actual) : f.open ? plural(f.open, 'open task') : '-',
+      actualNote ? actualNote.charAt(0).toUpperCase() + actualNote.slice(1) : undefined],
     ['Against baseline', 'against-baseline', slipText, detail || undefined],
   ]
   return (

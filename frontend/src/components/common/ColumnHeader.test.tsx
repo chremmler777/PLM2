@@ -135,6 +135,32 @@ describe('ColumnHeader', () => {
     expect(ids()).toHaveLength(4)
   })
 
+  it('closes on Escape while focus is still on the funnel, and at document level', () => {
+    render(<Table />)
+    const funnel = screen.getByRole('button', { name: 'Filter Department' })
+    fireEvent.click(funnel)
+    funnel.focus()                          // focus not yet moved into the popover
+    fireEvent.keyDown(funnel, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(funnel)
+    expect(funnel.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(funnel)
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(funnel)
+  })
+
+  it('leaves Escape in another field alone', () => {
+    render(<><input aria-label="cell" /><Table /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Department' }))
+    const cell = screen.getByLabelText('cell')
+    cell.focus()
+    fireEvent.keyDown(cell, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
   it('closes on a press outside', () => {
     render(<Table />)
     fireEvent.click(screen.getByRole('button', { name: 'Filter Rate' }))
