@@ -31,7 +31,7 @@ function ReadOnlyValue({ f, value, users, id, cell }:
   const tone = empty ? 'text-slate-600' : computed ? 'font-mono text-sky-200' : 'text-slate-100';
   return (
     <div id={id} className={`${base} ${tone} text-sm bg-slate-800/40 border border-transparent tabular-nums whitespace-pre-wrap break-words`}>
-      {empty ? '—' : text}
+      {empty ? '-' : text}
     </div>
   );
 }
@@ -60,7 +60,7 @@ function FieldInput({ f, value, onChange, readOnly, users, id, cell = false }:
       </div>);
     case 'choice': return (
       <select id={id} className={cls} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value || null)}>
-        <option value="">—</option>{f.options?.map((o) => <option key={o} value={o}>{o}</option>)}
+        <option value="">-</option>{f.options?.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>);
     case 'multichoice': return (
       <select id={id} multiple className={`${cls} min-h-[5rem]`} value={(value as string[]) ?? []}
@@ -137,7 +137,7 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
         {footer && Object.entries(footer).map(([k, v]) => (
           <span key={k} className="inline-flex items-baseline gap-1.5 rounded-lg bg-slate-900/60 border border-slate-700/70 px-2.5 py-1 text-xs text-slate-400">
             {k}
-            <span className="font-mono text-sm text-slate-100 tabular-nums">{display({ id: k, label: k, type: 'text' }, v, users) || '—'}</span>
+            <span className="font-mono text-sm text-slate-100 tabular-nums">{display({ id: k, label: k, type: 'text' }, v, users) || '-'}</span>
           </span>))}
       </div>
       {explained.length > 0 && (

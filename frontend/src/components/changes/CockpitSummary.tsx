@@ -385,9 +385,9 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     }] : []),
     ...(impactUnconfirmed ? [{ key: 'impact', text: t('impact.pending'), go: onShowImpact }] : []),
   ]
+  // Held departments, open assessments, customer questions, … arrive as waits;
+  // the ones that hold nothing (info) are listed apart and never counted.
   const infoWaits = waits.filter((w) => w.info)
-  // Held departments, open assessments, customer questions, … arrive as waits.
-  const listed = hardBlockers.length + infoWaits.length
   // Steps the viewer may not take are not offered (spec §16 P1 4).
   const allSteps = nextStepFor(change, assessment, review)
   // A not-feasible answer is the lead's and PM's call (reject, back to
@@ -505,6 +505,27 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       {endLabel(change) ?? STATUS_LABELS[change.status]}
     </span>
   )
+
+  const waitRow = (w: WaitState) => {
+    const Icon = w.info ? Info : Hourglass
+    const body = (
+      <>
+        <Icon aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+        <span>{w.text}{w.tab && onGo ? <Where to={tabName(w.tab)} /> : null}</span>
+      </>
+    )
+    return (
+      <li key={w.key} data-testid={`wait-${w.key}`}
+        className={w.level === 3 && !w.info ? 'text-rose-300 font-medium' : w.info ? 'text-slate-300' : 'text-amber-300'}>
+        {w.tab && onGo ? (
+          <button type="button" className={linkRow}
+            onClick={() => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!))}>
+            {body}
+          </button>
+        ) : <span className="inline-flex items-start gap-1.5">{body}</span>}
+      </li>
+    )
+  }
 
   if (variant === 'compact') {
     const primaryStep = !demoted && buttons[0] && steps[0] === buttons[0] ? buttons[0] : null
@@ -677,7 +698,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
 
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('cockpit.blocking')}</h3>
-        {listed === 0 ? (
+        {hardBlockers.length === 0 ? (
           <>
             <p className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
               <Check aria-hidden="true" size={14} />{t('cockpit.nothingBlocking')}
@@ -690,26 +711,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           </>
         ) : (
           <ul className="space-y-1.5 text-sm">
-            {waits.map((w) => {
-              const Icon = w.info ? Info : Hourglass
-              const body = (
-                <>
-                  <Icon aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
-                  <span>{w.text}{w.tab && onGo ? <Where to={tabName(w.tab)} /> : null}</span>
-                </>
-              )
-              return (
-                <li key={w.key} data-testid={`wait-${w.key}`}
-                  className={w.level === 3 ? 'text-rose-300 font-medium' : w.info ? 'text-slate-300' : 'text-amber-300'}>
-                  {w.tab && onGo ? (
-                    <button type="button" className={linkRow}
-                      onClick={() => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!))}>
-                      {body}
-                    </button>
-                  ) : <span className="inline-flex items-start gap-1.5">{body}</span>}
-                </li>
-              )
-            })}
+            {waits.filter((w) => !w.info).map(waitRow)}
             {blockingGates.map((g) => gateRow(g, true))}
             {pendingDeviations > 0 && (
               <li data-testid="blocked-pending-deviations" className="text-amber-300">
@@ -748,6 +750,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             )}
             {laterGates.map((g) => gateRow(g, false))}
           </ul>
+        )}
+        {infoWaits.length > 0 && (
+          // Worth knowing, holding nothing: listed apart and not counted, so
+          // the blocker count and this card always agree.
+          <div data-testid="cockpit-worth-knowing" className="mt-3">
+            <h4 className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('cockpit.worthKnowing')}</h4>
+            <ul className="space-y-1.5 text-sm">{infoWaits.map(waitRow)}</ul>
+          </div>
         )}
       </div>
 

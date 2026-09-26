@@ -783,7 +783,11 @@ class EarlyStageService:
                                        "confirms the impacted items"),
                               "target_tab": "impacted"})
         if change.status == "scoping":
-            open_meetings = [m for m in change.meetings if m.decision is None]
+            from app.services import mother_plants as mp
+            # A mother-plant change has no cost carrier: its scoping record
+            # only says who is informed (spec §14).
+            open_meetings = [] if mp.is_mother_plant(change) else \
+                [m for m in change.meetings if m.decision is None]
             if open_meetings and all(m.cost_carrier is None for m in open_meetings):
                 waits.append({"kind": "cost_carrier_unconfirmed",
                               "text": "Cost carrier not confirmed at the scoping meeting",

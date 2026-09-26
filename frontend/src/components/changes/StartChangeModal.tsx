@@ -234,7 +234,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   if (!projectId) missing.push('project');
   if (picked.length === 0) missing.push('affected item');
   if (!reason.trim()) missing.push('reason');
-  if (fromMotherPlant) missing.push(...motherPlantMissing(motherPlant));
+  // A mother-plant change is handed over by the PM who starts it: the
+  // kickoff needs its description, so the dialog asks for it up front.
+  if (fromMotherPlant) missing.push(...(description.trim() ? [] : ['description']), ...motherPlantMissing(motherPlant));
   else if (customerRelevant !== true) missing.push('cost carrier');
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
@@ -260,7 +262,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         impacted_part_ids: picked.map((p) => p.id),
         lead_part_id: picked[0].id,
         title_auto: true,
-        ...(!fromMotherPlant && description.trim() ? { description: description.trim() } : {}),
+        ...(description.trim() ? { description: description.trim() } : {}),
         ...(fromMotherPlant
           ? {
             // Not customer relevant here: the mother plant handles the customer.
@@ -657,6 +659,18 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
         {fromMotherPlant && (
           <MotherPlantFields value={motherPlant} onChange={setMotherPlant} plants={motherPlants} />
+        )}
+        {fromMotherPlant && (
+          <div className="mb-6" data-testid="mother-plant-description">
+            <label htmlFor="sc-mp-description" className="block text-sm text-slate-300 mb-1">
+              {t('start.description')} <span className="text-slate-500">{t('start.required')}</span>
+            </label>
+            <textarea id="sc-mp-description" rows={3} required aria-required="true"
+              className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
+              placeholder={t('start.descriptionPlaceholderPlant')}
+              value={description} onChange={(e) => setDescription(e.target.value)} />
+            <p className="mt-1 text-xs text-slate-500">{t('start.descriptionPlantHint')}</p>
+          </div>
         )}
 
         {!fromMotherPlant && (

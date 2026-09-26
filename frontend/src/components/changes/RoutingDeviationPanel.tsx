@@ -21,6 +21,7 @@ import { btnSm } from '../common/buttonStyles'
 import { toastError } from '../../lib/apiError'
 import { useAuth } from '../../contexts/AuthContext'
 import { deviationWaitKey } from '../../lib/scopingRules'
+import { getActsAsDepartmentId, setActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeRouting, DeviationRequest } from '../../types/change'
 
@@ -123,6 +124,11 @@ export default function RoutingDeviationPanel({
 }: Props) {
   const qc = useQueryClient()
   const { userId } = useAuth()
+  const waitKey = deviationWaitKey(routing?.deviation_proposed_by, leadId, userId)
+  // The viewer IS the lead the line waits on, only acting as a department.
+  const actsAs = getActsAsDepartmentId()
+  const leadActingAs = actsAs != null && waitKey === 'routingDev.waitingForLead'
+    && userId != null && leadId != null && userId === leadId ? actsAs : null
   const [addOpen, setAddOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const invalidate = () => {
@@ -197,9 +203,23 @@ export default function RoutingDeviationPanel({
                   onClick={() => setRejectOpen(true)}>{t('routingDev.reject')}</button>
               </>
             ) : (
-              <span className="text-xs text-amber-200/70" data-testid="routing-deviation-waiting">
-                {t(deviationWaitKey(routing?.deviation_proposed_by, leadId, userId))}
-              </span>
+              leadActingAs != null ? (
+                // The lead is the decider, only wearing a department's hat
+                // right now: say so, and offer the way back.
+                <span className="text-xs text-amber-200/90 inline-flex flex-wrap items-center gap-2"
+                  data-testid="routing-deviation-acting-lead">
+                  {t('routingDev.leadActingAs').replace('{x}',
+                    departments.find((d) => d.id === leadActingAs)?.name ?? `#${leadActingAs}`)}
+                  <button type="button" className={btnSm.secondary} data-testid="routing-deviation-switch-back"
+                    onClick={() => { setActsAsDepartmentId(null); window.location.reload() }}>
+                    {t('routingDev.switchBack')}
+                  </button>
+                </span>
+              ) : (
+                <span className="text-xs text-amber-200/70" data-testid="routing-deviation-waiting">
+                  {t(waitKey)}
+                </span>
+              )
             )}
           </div>
         </div>

@@ -691,6 +691,8 @@ class ChangeService:
     @staticmethod
     def gate_message(gate_key: str, decision: Optional[str]) -> str:
         label = ChangeService.GATE_LABELS.get(gate_key, gate_key)
+        if decision is None:
+            return f"D1 gate '{label}' is not decided yet"
         answer = ChangeService.GATE_DECISION_LABELS.get(decision, decision)
         return f"D1 gate '{label}' is not answered Yes (it is {answer})"
 

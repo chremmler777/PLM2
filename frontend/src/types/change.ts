@@ -590,7 +590,8 @@ export interface PnlActuals {
 export type GateKey = 'feasibility' | 'budget' | 'release';
 export interface Gate {
   gate_key: GateKey;
-  decision: 'yes' | 'no' | 'na';
+  /** null: nobody has decided it yet (a seeded gate). */
+  decision: 'yes' | 'no' | 'na' | null;
   decided_by?: number | null;
   /** The decider's full name, resolved by the backend. */
   decided_by_name?: string | null;

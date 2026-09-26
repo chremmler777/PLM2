@@ -24,6 +24,7 @@ import type {
 } from '../../types/change'
 import { carrierOf, isPersonContact } from '../../lib/scopingRules'
 import { departmentLabel, pickableDepartments } from '../../lib/departments'
+import { plantText } from '../../lib/plantName'
 
 /** The room's letters, in the order the picker shows them. I (informed) is an
  *  FYI: no assessment, nothing blocks on it. */
@@ -68,8 +69,12 @@ const DECISION_LABEL: Record<string, string> = {
 
 export default function ScopingPanel(
   { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [],
-    canRecordMeeting = true }: {
+    canRecordMeeting = true, onInformTeam }: {
     change: ChangeRequest & { attachments?: Attachment[] }
+    /** A change from KTX Weissenburg / Solingen: opens the tab where the
+     *  information goes out to the team (its scoping ends there, never in
+     *  an assessment). */
+    onInformTeam?: () => void
     /** Lead, Project Management or admin (stage-state `can_record_meeting`):
      *  records the meeting and decides it. Everyone else reads the record. */
     canRecordMeeting?: boolean
@@ -86,6 +91,10 @@ export default function ScopingPanel(
 ) {
   const changeId = change.id
   const status = change.status
+  // Mother plant (spec §14): no assessment, costing or offer. The scoping
+  // record says which departments are informed; the backend refuses
+  // "proceed" (it would enter assessment) and there is no cost carrier.
+  const motherPlant = change.origin === 'mother_plant'
   const qc = useQueryClient()
   const { userId } = useAuth()
   const { data: concerns = [] } = useQuery({
@@ -207,8 +216,11 @@ export default function ScopingPanel(
       channel,
       participants: participants.map(toParticipant),
       selected_department_ids: deptIds,
-      department_rasic: deptRasic,
-      ...(carrier ? { cost_carrier: carrier } : {}),
+      // Mother plant: every department on the record is informed, nobody
+      // assesses.
+      department_rasic: motherPlant
+        ? Object.fromEntries(deptIds.map((id) => [id, 'I' as RasicLetter])) : deptRasic,
+      ...(carrier && !motherPlant ? { cost_carrier: carrier } : {}),
     }),
     onSuccess: () => {
       // A fresh form for the next record, folded away; the letters of this
@@ -338,8 +350,11 @@ export default function ScopingPanel(
   // decision: then the next record is one click away, not in the way.
   const formShown = formOpen ?? !(latestMeeting && !latestMeeting.decision)
   const saveMissing = [
-    ...(carrier ? [] : [t('meeting.costCarrier')]),
+    ...(carrier || motherPlant ? [] : [t('meeting.costCarrier')]),
   ]
+  // The backend refuses to start the assessment on an unlocked impacted
+  // set: the step says so instead of answering 400.
+  const impactUnlocked = !change.impact_confirmed_at
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptRasic((prev) => {
@@ -353,6 +368,11 @@ export default function ScopingPanel(
   }
   const letterOf = (m: ChangeMeeting, id: number): string | null =>
     m.department_rasic?.[String(id)] ?? null
+
+  // Why "Proceed & start assessment" cannot be pressed yet, in words.
+  const proceedBlockedWhy = (m: ChangeMeeting): string | undefined =>
+    carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing')
+      : impactUnlocked ? t('meeting.impactNotLocked') : undefined
 
   // "25.09.2026 · Anna, Ben", or what is known when the record is thin.
   const meetingHeadline = (m: ChangeMeeting): string => {
@@ -374,8 +394,28 @@ export default function ScopingPanel(
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
             {DECISION_LABEL[m.decision] ?? m.decision}
           </span>
+        ) : recordOpen && motherPlant ? (
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            {onInformTeam && (
+              <button type="button" className={btnSm.primary}
+                data-testid={`meeting-inform-${m.id}`} onClick={onInformTeam}>
+                {t('mp.sendInfo')}
+              </button>
+            )}
+            <button type="button" className={btnSm.secondary}
+              disabled={decide.isPending}
+              onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
+              {t('meeting.needsInfo')}
+            </button>
+            <button type="button"
+              className={`${btnSm.secondary} text-red-300 hover:text-red-200 hover:border-red-700`}
+              disabled={decide.isPending}
+              onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
+              {t('meeting.reject')}
+            </button>
+          </span>
         ) : recordOpen ? (
-          <span className="flex gap-2">
+          <span className="flex flex-wrap items-center justify-end gap-2">
             {carrierOfMeeting(m) === '' && (
               <select aria-label={t('meeting.costCarrier')} data-testid={`meeting-carrier-${m.id}`}
                 value="" onChange={(e) => e.target.value
@@ -388,8 +428,9 @@ export default function ScopingPanel(
             )}
             <button type="button" className={btnSm.primary}
               data-testid={`meeting-proceed-${m.id}`}
-              disabled={decide.isPending || carrierOfMeeting(m) === ''}
-              title={carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing') : undefined}
+              disabled={decide.isPending || carrierOfMeeting(m) === '' || impactUnlocked}
+              title={proceedBlockedWhy(m)}
+              aria-describedby={proceedBlockedWhy(m) ? `meeting-proceed-why-${m.id}` : undefined}
               onClick={() => setConfirmProceed(m)}>
               {t('meeting.proceed')}
             </button>
@@ -405,12 +446,23 @@ export default function ScopingPanel(
               {t('meeting.reject')}
             </button>
           </span>
-        ) : meetingOpen && (
+        ) : meetingOpen && !motherPlant && (
           <span className="text-xs text-slate-500" data-testid={`meeting-undecided-${m.id}`}>
             {t('meeting.undecided')}
           </span>
         )}
       </div>
+      {!m.decision && recordOpen && !motherPlant && proceedBlockedWhy(m) && (
+        <p id={`meeting-proceed-why-${m.id}`} data-testid={`meeting-proceed-why-${m.id}`}
+          className="text-right text-[11px] text-slate-400">
+          {proceedBlockedWhy(m)}
+        </p>
+      )}
+      {!m.decision && recordOpen && motherPlant && (
+        <p data-testid={`meeting-inform-hint-${m.id}`} className="text-[11px] text-slate-400">
+          {plantText('mp.sendInfoHint', change.mother_plant_name)}
+        </p>
+      )}
       {m.decision_reason && (
         <p className={`whitespace-pre-wrap ${
           m.decision === 'reject' ? 'text-red-300' : 'text-amber-300'}`}>
@@ -428,14 +480,14 @@ export default function ScopingPanel(
       )}
       {m.selected_department_ids.length > 0 && (
         <p className="text-xs text-slate-500" data-testid={`meeting-depts-${m.id}`}>
-          {t('meeting.departments')}: {m.selected_department_ids.map((id) => {
+          {t(motherPlant ? 'mp.informDepartments' : 'meeting.departments')}: {m.selected_department_ids.map((id) => {
             const name = departments.find((d) => d.id === id)?.name ?? `#${id}`
             const letter = letterOf(m, id)
             return letter ? `${name} (${letter})` : name
           }).join(', ')}
         </p>
       )}
-      {carrierOfMeeting(m) && (
+      {carrierOfMeeting(m) && !motherPlant && (
         <p className="text-xs text-slate-500" data-testid={`meeting-carrier-line-${m.id}`}>
           {t('meeting.costCarrier')}: {carrierName(carrierOfMeeting(m))}
         </p>
@@ -651,7 +703,7 @@ export default function ScopingPanel(
             className="text-sm text-sky-300 hover:text-sky-200">
             {meetings.length > 0 ? t('meeting.recordAnother') : t('meeting.recordFirst')}
           </button>
-          {latestMeeting && !latestMeeting.decision && (
+          {latestMeeting && !latestMeeting.decision && !motherPlant && (
             <span className="text-xs text-slate-500">{t('meeting.awaitingDecision')}</span>
           )}
         </div>
@@ -670,7 +722,14 @@ export default function ScopingPanel(
           )}
           {/* No minutes field: the discussion itself lives in the mail thread,
               which belongs on the change as a document. */}
-          <p className="text-xs text-slate-500">{t('scoping.discussionByEmail')}</p>
+          {channel === 'email' && (
+            <p className="text-xs text-slate-500" data-testid="meeting-email-hint">{t('scoping.discussionByEmail')}</p>
+          )}
+          {motherPlant && (
+            <p className="text-xs text-slate-400 max-w-[65ch]" data-testid="meeting-mother-plant-hint">
+              {plantText('mp.scopingHint', change.mother_plant_name)}
+            </p>
+          )}
           <div className="flex flex-wrap gap-3">
             <div>
               <label htmlFor={channelId} className="block text-xs text-slate-400 mb-1">{t('channel.label')}</label>
@@ -747,18 +806,21 @@ export default function ScopingPanel(
           <div>
             <div className="flex items-baseline justify-between gap-4 mb-1">
               <span className="text-xs text-slate-400">
-                {t('meeting.departments')}
+                {t(motherPlant ? 'mp.informDepartments' : 'meeting.departments')}
                 {recommendedIds.length > 0 && (
                   <span className="ml-2 text-slate-500">{t('meeting.recommendedHint')}</span>
                 )}
               </span>
               <span className="text-[11px] text-slate-500 tabular-nums" data-testid="rasic-summary">
-                {t('meeting.rasicSummary')
-                  .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
-                  .replace('{n}', String(deptIds.length))}
+                {motherPlant ? t('mp.informSummary').replace('{n}', String(deptIds.length))
+                  : t('meeting.rasicSummary')
+                    .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
+                    .replace('{n}', String(deptIds.length))}
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 mb-2 max-w-[65ch]">{t('meeting.rasicHint')}</p>
+            {!motherPlant && (
+              <p className="text-[11px] text-slate-500 mb-2 max-w-[65ch]">{t('meeting.rasicHint')}</p>
+            )}
             {/* One row per department: name left, its letter right. A row
                 without a letter is not involved and reads muted. Retired
                 departments stay resolvable by name on old records but are
@@ -779,6 +841,11 @@ export default function ScopingPanel(
                         letter ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
                       {departmentLabel(d)}
                     </button>
+                    {motherPlant ? (
+                      <input type="checkbox" checked={!!letter} data-testid={`inform-${d.id}`}
+                        aria-label={`${t('mp.informDepartments')}: ${d.name}`}
+                        onChange={() => toggleDept(d.id)} />
+                    ) : (
                     <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
                       role="group" aria-label={`${d.name} RASIC`}>
                       {RASIC_PICK.map((l) => (
@@ -804,15 +871,20 @@ export default function ScopingPanel(
                         &ndash;
                       </button>
                     </span>
+                    )}
                   </div>
                 )
               })}
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-500">
-              <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
-            </p>
+            {!motherPlant && (
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
+              </p>
+            )}
           </div>
-          {/* Who pays, confirmed by the room next to who works. */}
+          {/* Who pays, confirmed by the room next to who works. A change from
+              KTX Weissenburg / Solingen has no cost carrier to confirm. */}
+          {!motherPlant && (
           <fieldset data-testid="meeting-carrier">
             <legend className="text-xs text-slate-400 mb-1">
               {t('meeting.costCarrier')}
@@ -841,6 +913,7 @@ export default function ScopingPanel(
               </p>
             )}
           </fieldset>
+          )}
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="primary" data-testid="meeting-save"
               disabled={saveMissing.length > 0} loading={create.isPending}

@@ -130,7 +130,12 @@ export default function CostSheetPage() {
       onDetail(d)
       qc.invalidateQueries({ queryKey: ['cost-sheet'], exact: true })
       setSelectedId(d.id)
-      toast.success(`Draft version ${d.version} started from the current rates`)
+      // Say what it was really copied from: the latest published version,
+      // which may be one valid only from a future date, not "the current rates".
+      const base = ov?.versions.find((x) => x.id === d.based_on_version_id)
+      toast.success(base
+        ? `Draft version ${d.version} started from v${base.version}`
+        : `Draft version ${d.version} started empty`)
     },
     onError: fail,
   })

@@ -281,7 +281,7 @@ function NewLessonModal({ onClose }: { onClose: () => void }) {
       });
     },
     onSuccess: () => {
-      toast.success('Lesson captured — now in the review queue');
+      toast.success('Lesson captured: now in the review queue');
       queryClient.invalidateQueries({ queryKey: ['lessons'] });
       queryClient.invalidateQueries({ queryKey: ['lesson-stats'] });
       queryClient.invalidateQueries({ queryKey: ['lesson-kpis'] });
@@ -314,7 +314,7 @@ function NewLessonModal({ onClose }: { onClose: () => void }) {
           />
           {duplicates.length > 0 && (
             <div className="text-xs bg-amber-600/10 border border-amber-700/40 rounded p-2 text-amber-200">
-              ⚠ Similar lessons already exist — avoid double entries:
+              ⚠ Similar lessons already exist. Avoid double entries:
               {duplicates.map((d) => (
                 <div key={d.id} className="mt-1 text-amber-100">
                   • {d.title} <span className="text-amber-400/70">({label(d.status)})</span>
@@ -363,7 +363,7 @@ function NewLessonModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setForm({ ...form, project_id: e.target.value })}
             className={inputCls}
           >
-            <option value="">— No PLM project (link later) —</option>
+            <option value="">No PLM project (link later)</option>
             {projects?.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
@@ -380,7 +380,7 @@ function NewLessonModal({ onClose }: { onClose: () => void }) {
           <textarea
             value={form.recommendation}
             onChange={(e) => setForm({ ...form, recommendation: e.target.value })}
-            placeholder="Recommendation — what should we do differently?"
+            placeholder="Recommendation: what should we do differently?"
             rows={2}
             className={inputCls}
           />
@@ -536,7 +536,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
           ) : (
             <>
               <span className="text-xs px-2 py-0.5 rounded bg-amber-600/30 text-amber-300">
-                not linked{lesson.project_ref ? ` — "${lesson.project_ref}"` : ''}
+                not linked{lesson.project_ref ? ` ("${lesson.project_ref}")` : ''}
               </span>
               {can('project_id') && (
                 <select
@@ -575,7 +575,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
                 className={inputCls}
               />
             ) : (
-              <p className="text-slate-200 whitespace-pre-wrap">{lesson.root_cause || <span className="text-slate-500">—</span>}</p>
+              <p className="text-slate-200 whitespace-pre-wrap">{lesson.root_cause || <span className="text-slate-500">-</span>}</p>
             )}
           </div>
           <div>
@@ -593,7 +593,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
                 className={inputCls}
               />
             ) : (
-              <p className="text-slate-200 whitespace-pre-wrap">{lesson.recommendation || <span className="text-slate-500">—</span>}</p>
+              <p className="text-slate-200 whitespace-pre-wrap">{lesson.recommendation || <span className="text-slate-500">-</span>}</p>
             )}
           </div>
           {lesson.tags && (
@@ -609,7 +609,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
         {lesson.status === 'in_review' && (
           <div className="mt-4 bg-slate-900/60 border border-amber-700/40 rounded p-3 space-y-2">
             <div className="text-sm font-medium text-amber-200">
-              Triage — define responsible, timing and actions, then accept or reject
+              Triage: define responsible, timing and actions, then accept or reject
             </div>
             <div className="flex gap-2">
               <select
@@ -632,7 +632,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
               />
             </div>
             <div className="text-xs text-slate-500">
-              Actions defined below: {lesson.total_actions} {lesson.total_actions === 0 && '— at least one required'}
+              Actions defined below: {lesson.total_actions} {lesson.total_actions === 0 && '(at least one required)'}
             </div>
             <div className="flex gap-2">
               <button
@@ -710,7 +710,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
         {lesson.status === 'verification' && (
           <div className="mt-4 bg-slate-900/60 border border-purple-700/40 rounded p-3 space-y-2">
             <div className="text-sm font-medium text-purple-200">
-              Verification — did the recommendation work? Check actions and evidence below.
+              Verification: did the recommendation work? Check actions and evidence below.
             </div>
             {!closeDialog && !sendBackDialog && (
               <div className="flex gap-2">
@@ -770,7 +770,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
                 <textarea
                   value={sendBackDialog.feedback}
                   onChange={(e) => setSendBackDialog({ feedback: e.target.value })}
-                  placeholder="Feedback for the owner — what is missing? (required)"
+                  placeholder="Feedback for the owner: what is missing? (required)"
                   rows={2}
                   className={inputCls}
                 />
@@ -1068,7 +1068,7 @@ export default function LessonsLearnedPage() {
       {queueMode && (
         <div className="mb-3 text-xs px-3 py-2 rounded bg-amber-600/10 border border-amber-700/40 text-amber-200">
           Review queue, oldest first. Open a lesson to triage: define responsible owner, target date
-          and actions, then accept into work — or reject with a reason.
+          and actions, then accept into work, or reject with a reason.
         </div>
       )}
 
@@ -1169,7 +1169,7 @@ export default function LessonsLearnedPage() {
                 <td className="px-4 py-2 text-slate-300">{label(l.category)}</td>
                 <td className={`px-4 py-2 ${SEVERITY_STYLE[l.severity] || ''}`}>{label(l.severity)}</td>
                 <td className="px-4 py-2 text-slate-300">
-                  {l.total_actions > 0 ? `${l.total_actions - l.open_actions}/${l.total_actions}` : '—'}
+                  {l.total_actions > 0 ? `${l.total_actions - l.open_actions}/${l.total_actions}` : '-'}
                 </td>
                 <td className="px-4 py-2 text-xs">
                   {l.target_date ? (
@@ -1194,7 +1194,7 @@ export default function LessonsLearnedPage() {
             {!isLoading && visibleLessons?.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">
-                  {queueMode ? 'Review queue is empty — nothing waiting for triage.' : 'No lessons yet — capture the first one.'}
+                  {queueMode ? 'Review queue is empty: nothing waiting for triage.' : 'No lessons yet. Capture the first one.'}
                 </td>
               </tr>
             )}

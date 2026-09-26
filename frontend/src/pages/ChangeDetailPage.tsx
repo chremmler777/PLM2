@@ -6,12 +6,14 @@ import { toast } from 'sonner';
 import { apiErrorMessage, toastError } from '../lib/apiError';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
+import { cockpitPart } from '../api/cockpitBundle';
 import { plantsApi } from '../api/plants';
 import { planApi } from '../api/changePlan';
 import AssessmentBuckets from '../components/changes/AssessmentBuckets';
 import { resolveWaitStates, earlyStageWaits, deriveAssessmentState, revisionsInCheckOf } from '../lib/waitStates';
 import LeadPicker from '../components/changes/LeadPicker';
 import { mayTransition, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
+import { plantText } from '../lib/plantName';
 import { assessmentVerdictLabel, changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
@@ -218,19 +220,19 @@ export default function ChangeDetailPage() {
   });
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
-    queryFn: () => changesApi.getGates(changeId),
+    queryFn: () => cockpitPart(changeId, 'gates'),
     ...LIVE,
   });
   const { data: deviations = [] } = useQuery({
     queryKey: ['change', changeId, 'deviations'],
-    queryFn: () => changesApi.listDeviations(changeId),
+    queryFn: () => cockpitPart(changeId, 'deviations'),
     ...LIVE,
   });
   // The waits are derived from data the page already shows; this shares the
   // concern cache key with the strips, so it costs no extra request.
   const { data: concerns = [] } = useQuery({
     queryKey: ['change', changeId, 'concerns'],
-    queryFn: () => changesApi.listConcerns(changeId),
+    queryFn: () => cockpitPart(changeId, 'concerns'),
   });
   // Spec §17: a change from an intake may carry an engineering review (its
   // own track, or escalated: the answers stay as the scoping input).
@@ -242,7 +244,7 @@ export default function ChangeDetailPage() {
   const hasReview = !!review && (review.is_review || review.answers.length > 0);
   const { data: myActions } = useQuery({
     queryKey: ['change-my-actions', changeId],
-    queryFn: () => changesApi.myActions(changeId),
+    queryFn: () => cockpitPart(changeId, 'my_actions'),
     ...LIVE,
   });
   // Your actions follow the change: an act done on any tab (confirming the
@@ -263,7 +265,7 @@ export default function ChangeDetailPage() {
   // endpoint leaves it undefined and the page derives what it can.
   const { data: stage } = useQuery({
     queryKey: ['change', changeId, 'stage-state'],
-    queryFn: () => changesApi.stageState(changeId),
+    queryFn: () => cockpitPart(changeId, 'stage_state'),
     retry: false,
     ...LIVE,
   });
@@ -337,7 +339,12 @@ export default function ChangeDetailPage() {
   const canSeeCosts = isAdmin || isChangeLead || isSalesMember || isPmMember;
   // The description is written during capture, and capture is Sales' job — the
   // backend PATCH gate allows lead / Sales / admin, so the editor must too.
-  const canEditDescription = isAdmin || isChangeLead || isSalesMember;
+  // Project Management writes it where it captures (spec §14: a mother-plant
+  // change the PM started) or while nobody leads the change yet, the
+  // backend's "pm_capture" right.
+  const canEditDescription = isAdmin || isChangeLead || isSalesMember
+    || (isPmMember && (change?.origin === 'mother_plant'
+      || (['captured', 'scoping'].includes(change?.status ?? '') && change?.lead_id == null)));
   // Sales (plus lead/admin) publishes the plan and acknowledges the weight delta.
   const canPublishPlan = isAdmin || isChangeLead || isSalesMember;
   // Timing (spec 2026-09-25): plan editors and who publishes to the customer.
@@ -493,6 +500,7 @@ export default function ChangeDetailPage() {
     // releasing and closing are asked once more.
     if ((change.status === 'costing' && to === 'quoting')
       || ((change.status === 'quoted' || change.status === 'costing') && to === 'approved' && !motherPlant)
+      || (motherPlant && change.status === 'scoping' && to === 'approved')
       || ['in_validation', 'released', 'closed'].includes(to)) { setConfirmTo(to); return; }
     transition.mutate({ to });
   };
@@ -687,9 +695,10 @@ export default function ChangeDetailPage() {
     if (confirmTo === 'approved') {
       return {
         to: confirmTo, title: transitionLabel('approved'),
-        consequence: t('confirm.approveBody'),
+        consequence: motherPlant ? plantText('mp.approveBody', change.mother_plant_name) : t('confirm.approveBody'),
         open: [],
-        allClear: t(change.customer_relevant ? 'confirm.approveClear' : 'confirm.approveClearInternal'),
+        allClear: motherPlant ? t('mp.approveClear')
+          : t(change.customer_relevant ? 'confirm.approveClear' : 'confirm.approveClearInternal'),
         confirmLabel: transitionLabel('approved'),
       };
     }
@@ -1075,6 +1084,7 @@ export default function ChangeDetailPage() {
           canSendRejection={!myActions ? true : isSalesMember}
           canAnswerConcerns={isSalesMember} isPm={isPmMember}
           canRecordMeeting={canRecordMeeting}
+          onInformTeam={motherPlant ? () => setTab('mother') : undefined}
           myDepartmentIds={myActions?.memberships ?? []} />
       )}
 

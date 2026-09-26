@@ -59,6 +59,9 @@ describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
     const create = screen.getByRole('button', { name: /Create change/ }) as HTMLButtonElement
     expect(create.disabled).toBe(true)
     expect(screen.getByText(/SOP date/, { selector: 'p' })).toBeDefined()
+    // The description is required: the hand-over to scoping needs it.
+    expect(screen.getByText(/description/, { selector: 'p' })).toBeDefined()
+    fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'New insert per WUG ECR' } })
     fireEvent.change(plant, { target: { value: 'KTX Solingen' } })
     fireEvent.change(screen.getByLabelText('Their reference'), { target: { value: 'SOL-17' } })
     const sop = screen.getByLabelText('SOP date')
@@ -72,7 +75,7 @@ describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
     fireEvent.click(create)
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(expect.objectContaining({
       origin: 'mother_plant', customer_relevant: false, mother_plant_name: 'KTX Solingen',
-      mother_plant_ref: 'SOL-17', mother_plant_sop: '2026-12-01',
+      mother_plant_ref: 'SOL-17', mother_plant_sop: '2026-12-01', description: 'New insert per WUG ECR',
     })))
     await waitFor(() => expect(changesApi.uploadAttachment).toHaveBeenCalledTimes(2))
     expect(changesApi.uploadAttachment).toHaveBeenCalledWith(42, doc, { kind: 'general' })
@@ -101,6 +104,7 @@ describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
     const fields = screen.getByTestId('mother-plant-fields')
     const sop = screen.getByLabelText('SOP date')
     // A two-digit year is not committed while typing, only when the field is left.
+    fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'd' } })
     fireEvent.change(sop, { target: { value: '01.12.26' } })
     expect(create.disabled).toBe(true)
     const calBtn = fields.querySelector('button[aria-label="Open calendar"]') as HTMLButtonElement

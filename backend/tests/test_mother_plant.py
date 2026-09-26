@@ -542,3 +542,28 @@ async def test_migration_093_backfills_origin(db_engine, session_factory, seed):
     assert got == {"C-093-0": "customer", "C-093-1": "internal"}
     assert "change_info_receipts" in tables
     assert ChangeInfoReceipt.__tablename__ == "change_info_receipts"
+
+
+async def test_scoping_record_informs_and_waits_on_no_cost_carrier(
+        client, session_factory, mp):
+    """The scoping record of a mother-plant change says who is informed: no
+    cost carrier is owed and none is waited on (final walk P2-4)."""
+    cid = await _to_scoping(client, session_factory, mp)
+    auth = await _auth(client, "pm")
+    r = await client.post(f"{URL}/{cid}/meetings", headers=auth, json={
+        "department_rasic": {str(mp["depts"]["Tool Engineer"]): "I"}})
+    assert r.status_code == 200, r.text
+    st = (await client.get(f"{URL}/{cid}/stage-state", headers=auth)).json()
+    assert not any(w["kind"] == "cost_carrier_unconfirmed" for w in st["waits"])
+
+
+async def test_pm_writes_the_description_the_kickoff_needs(client, session_factory, mp):
+    """The PM who starts a mother-plant change writes its description even
+    when somebody else leads it (final walk P2-5)."""
+    r = await _create(client, mp)
+    cid = r.json()["id"]
+    await _set(session_factory, cid, lead_id=mp["users"]["sales"], description=None)
+    r = await client.patch(f"{URL}/{cid}", headers=await _auth(client, "pm"),
+                           json={"description": "New insert as WUG ECR 4711"})
+    assert r.status_code == 200, r.text
+    assert r.json()["description"] == "New insert as WUG ECR 4711"

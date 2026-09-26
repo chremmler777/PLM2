@@ -11,7 +11,10 @@ const api = vi.hoisted(() => ({
 vi.mock('../../../api/motherPlant', async (orig) => ({
   ...(await orig<typeof import('../../../api/motherPlant')>()), motherPlantApi: api,
 }))
-vi.mock('../../../api/changes', () => ({ changesApi: { uploadAttachment: vi.fn().mockResolvedValue({}) } }))
+const changes = vi.hoisted(() => ({
+  uploadAttachment: vi.fn().mockResolvedValue({}), listMeetings: vi.fn().mockResolvedValue([]),
+}))
+vi.mock('../../../api/changes', () => ({ changesApi: changes }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const departments = [
@@ -51,6 +54,17 @@ describe('MotherPlantTab', () => {
     expect(box('Tool Engineer').checked).toBe(true)
     expect(box('Quality').checked).toBe(false)
     expect(screen.queryByRole('checkbox', { name: 'Old dept' })).toBeNull()
+  })
+
+  it('preselects the departments the scoping record names, over the routing', async () => {
+    changes.listMeetings.mockResolvedValueOnce([{ id: 1, selected_department_ids: [6], department_rasic: { '6': 'I' } }])
+    api.get.mockResolvedValue(state())
+    wrap()
+    const box = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement
+    await screen.findByTestId('mother-plant-send')
+    await waitFor(() => expect(box('Quality').checked).toBe(true))
+    expect(box('Development').checked).toBe(false)
+    expect(screen.getByText(/preselected: the scoping record/)).toBeDefined()
   })
 
   it('sends the information to the picked departments with the message', async () => {

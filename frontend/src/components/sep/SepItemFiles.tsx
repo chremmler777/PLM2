@@ -96,7 +96,7 @@ export default function SepItemFiles({ itemId, projectId, fileCount = 0, locked 
               setDragging(false);
               const dropped = Array.from(e.dataTransfer?.files ?? []);
               if (dropped.length === 0) {
-                toast.error('That drop carried no file — save it to disk first, then drop it.');
+                toast.error('That drop carried no file. Save it to disk first, then drop it.');
                 return;
               }
               take(dropped);

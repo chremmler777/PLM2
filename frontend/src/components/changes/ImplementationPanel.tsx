@@ -166,7 +166,7 @@ export default function ImplementationPanel({ changeId }: Props) {
       <ReasonDialog
         open={signTarget !== null}
         title={t('impl.signNoGeometry')}
-        label={t('impl.signNoGeometry')}
+        label={t('impl.noGeometryReason')}
         submitLabel="Confirm"
         onSubmit={(reason: string) =>
           signTarget && sign.mutate({ item: signTarget, reason })

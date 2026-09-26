@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { toast } from 'sonner'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import CostSheetPage from './CostSheetPage'
@@ -14,7 +15,7 @@ import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, addDaysIso, formatDate, todayI
 vi.mock('../api/costSheet', () => ({
   costSheetApi: {
     overview: vi.fn(), version: vi.fn(), diff: vi.fn(), deleteDraft: vi.fn(),
-    exportUrl: () => '#',
+    createDraft: vi.fn(), exportUrl: () => '#',
   },
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -51,6 +52,29 @@ describe('CostSheetPage', () => {
     expect(screen.getByText('boom')).toBeDefined()
     fireEvent.click(screen.getAllByRole('button', { name: 'Discard draft' })[0])
     expect(await screen.findByText('Discard draft version 2?')).toBeDefined()
+  })
+})
+
+describe('CostSheetPage new draft', () => {
+  afterEach(cleanup)
+
+  it('says which version the draft was copied from, not "the current rates"', async () => {
+    // The latest published version (v3) is valid only from next month: the
+    // draft copies it, so the toast names it.
+    const published = [
+      { id: 5, version: 3, status: 'published', valid_from: addDaysIso(todayIso(), 30), valid_to: null, note: null,
+        based_on_version_id: null, created_at: null, published_at: null, published_by: null },
+      { id: 4, version: 2, status: 'published', valid_from: '2026-01-01', valid_to: null, note: null,
+        based_on_version_id: null, created_at: null, published_at: null, published_by: null },
+    ]
+    vi.mocked(costSheetApi.overview).mockResolvedValue({ ...overview, versions: published,
+      current_version_id: 4, draft_version_id: null } as never)
+    vi.mocked(costSheetApi.version).mockResolvedValue({ id: 4, version: 2, status: 'published', rates: [], machine_rates: [], sampling_rates: [], overheads: [] } as never)
+    vi.mocked(costSheetApi.createDraft).mockResolvedValue({ id: 6, version: 4, status: 'draft',
+      based_on_version_id: 5, rates: [], machine_rates: [], sampling_rates: [], overheads: [] } as never)
+    wrap(<CostSheetPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'New draft' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Draft version 4 started from v3'))
   })
 })
 

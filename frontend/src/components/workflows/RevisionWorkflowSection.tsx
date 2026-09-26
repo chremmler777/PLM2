@@ -71,7 +71,7 @@ export default function RevisionWorkflowSection({ revisionId, revisionName, onCh
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 className="text-sm font-semibold text-slate-200 mb-3">
-        Workflow{revisionName ? <span className="text-slate-400 font-normal"> — {revisionName}</span> : null}
+        Workflow{revisionName ? <span className="text-slate-400 font-normal">: {revisionName}</span> : null}
       </h3>
 
       {isLoading ? (

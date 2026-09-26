@@ -920,3 +920,45 @@ describe('CockpitSummary late assessment flag', () => {
     expect(screen.queryByTestId('action-late-takeoff-41')).toBeNull()
   })
 })
+
+describe('CockpitSummary blockers are one list (final walk P3)', () => {
+  afterEach(cleanup)
+
+  it('during the loop back an open L3 issue is worth knowing, not a blocker: Finish implementation stays the primary', async () => {
+    const { resolveWaitStates } = await import('../../lib/waitStates')
+    const c = change({ status: 'in_implementation', customer_relevant: true })
+    const issue = {
+      id: 21, number: 1, title: 'Tool cannot run', status: 'fixing' as const, severity: 3,
+      escalation_level: 3 as const, customer_decided_at: '2026-09-25T09:00:00', attachments: [],
+      escalations: [{ id: 1, level: 3, created_at: '2026-09-24T09:00:00', acknowledged_at: '2026-09-24T10:00:00' }],
+    }
+    const waits = resolveWaitStates(c as never, [], (id) => `#${id}`, [], {}, null, null,
+      { validationIssues: [issue] as never })
+    expect(waits.length).toBeGreaterThan(0)
+    expect(waits.every((w) => w.info)).toBe(true)
+    render(wrap(<CockpitSummary change={c} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} waits={waits} onGo={() => {}} />))
+    expect(screen.queryByTestId('next-resolve-blockers')).toBeNull()
+    expect(screen.getByTestId('next-to-in_validation')).toBeDefined()
+    expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+    expect(screen.getByTestId('cockpit-worth-knowing').textContent).toContain('Tool cannot run')
+  })
+
+  it('the compact count and the Blocked-by card count the same rows', () => {
+    const waits = [
+      { key: 'checks', text: 'Validation checks open', tab: 'release' as const },
+      { key: 'receipts', text: 'Read and understood open: Paint', tab: 'mother' as const, info: true },
+    ]
+    const props = { change: change({ status: 'in_validation' }), gates: [], pendingDeviations: 0,
+      onAdvance: () => {}, advancing: false, waits, onGo: () => {} }
+    render(wrap(<CockpitSummary {...props} variant="compact" />))
+    expect(screen.getByTestId('compact-blockers').textContent).toContain('1 blocker')
+    cleanup()
+    render(wrap(<CockpitSummary {...props} />))
+    const blocked = screen.getByText(t('cockpit.blocking')).parentElement!
+    const listed = blocked.querySelectorAll('li[data-testid^="wait-"]')
+    const worth = screen.getByTestId('cockpit-worth-knowing').querySelectorAll('li')
+    expect(listed.length - worth.length).toBe(1)
+    expect(screen.getByTestId('cockpit-worth-knowing').textContent).toContain('Read and understood')
+  })
+})

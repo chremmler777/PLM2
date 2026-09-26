@@ -37,7 +37,7 @@ export function DescriptionEditor({ change, canEdit = true }:
         </p>
         {/* Why there is no editor: say it, so nobody hunts for one. */}
         <p data-testid="description-state" className="text-xs text-slate-500">
-          {!EDITABLE_STATUSES.includes(change.status) ? t('description.frozen') : t('description.readOnly')}
+          {!EDITABLE_STATUSES.includes(change.status) ? t('description.frozen') : t(change.origin === 'mother_plant' ? 'description.readOnlyPlant' : 'description.readOnly')}
         </p>
       </div>
     )

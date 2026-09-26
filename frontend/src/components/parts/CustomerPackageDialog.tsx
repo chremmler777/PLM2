@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import client from '../../api/client';
 import { revisionLabel } from './RevisionBadge';
+import DateInput from '../gantt/DateInput'
 
 export interface PackageRow {
   filename: string; part_id: number | null; part_number: string | null; customer_part_number: string | null;
@@ -143,7 +144,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
           ))}
         </fieldset>
         <label className="block text-sm text-slate-400">Received on
-          <input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)}
+          <DateInput aria-label="Received on" value={receivedAt} onChange={setReceivedAt}
             className="mt-1 w-full p-2 rounded bg-slate-900 border border-slate-700 text-slate-100" />
         </label>
         <label className="block text-sm text-slate-400">Customer index (optional)
@@ -170,33 +171,33 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                 <tr key={r.filename} data-testid={`row-${r.filename}`} className={r.action === 'error' ? 'bg-red-900/20' : ''}>
                   <td className="font-mono text-slate-100 truncate max-w-[12rem]" title={r.filename}>{r.filename}</td>
                   <td>
-                    <select data-testid={`part-${r.filename}`} value={r.part_id ?? ''} className="w-full max-w-[14rem] bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
+                    <select data-testid={`part-${r.filename}`} aria-label={`Part for ${r.filename}`} value={r.part_id ?? ''} className="w-full max-w-[14rem] bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
                       onChange={(e) => { const id = e.target.value ? parseInt(e.target.value, 10) : null;
                         const p = projectParts.find((x) => x.id === id);
                         patch(r.filename, { part_id: id, part_number: p?.part_number ?? null, action: id == null ? 'unmatched' : ((r.action === 'unmatched' || r.action === 'error') ? 'new_major' : r.action) }); }}>
-                      <option value="">— not in project —</option>
+                      <option value="">Not in project</option>
                       {(r.part_id != null && !projectParts.some((p) => p.id === r.part_id)) && <option value={r.part_id}>{r.part_number}</option>}
                       {projectParts.map((p) => <option key={p.id} value={p.id}>{p.part_number} {p.name}</option>)}
                     </select>
                   </td>
-                  <td className="font-mono text-slate-300 whitespace-nowrap">{revisionLabel(r.current_revision, r.current_index) || '—'}</td>
-                  <td><input data-testid={`index-${r.filename}`} value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
+                  <td className="font-mono text-slate-300 whitespace-nowrap">{revisionLabel(r.current_revision, r.current_index) || '-'}</td>
+                  <td><input data-testid={`index-${r.filename}`} aria-label={`Customer index for ${r.filename}`} value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100" /></td>
                   <td>
-                    <select data-testid={`action-${r.filename}`} value={r.action === 'error' ? 'new_major' : r.action}
+                    <select data-testid={`action-${r.filename}`} aria-label={`Action for ${r.filename}`} value={r.action === 'error' ? 'new_major' : r.action}
                       onChange={(e) => patch(r.filename, { action: e.target.value as PackageRow['action'] })}
                       className="bg-slate-900 border border-slate-700 rounded px-1 text-slate-100">
                       {ACTIONS.map((a) => <option key={a} value={a}>{a === 'new_major' ? 'new major' : a}</option>)}
                     </select>
                   </td>
-                  <td><input data-testid={`major-${r.filename}`} type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
+                  <td><input data-testid={`major-${r.filename}`} aria-label={`Revision number for ${r.filename}`} type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
                     disabled={r.action !== 'new_major' && r.action !== 'error'} onChange={(e) => patch(r.filename, { major: e.target.value ? parseInt(e.target.value, 10) : null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100 disabled:opacity-40" /></td>
                   <td data-testid={`result-${r.filename}`} className="text-xs min-w-[12rem]">
                     {r.action === 'error' && <span className="text-red-300">{r.error}</span>}
                     {r.action === 'new_major' && <span className="text-blue-300">→ {r.major ? `${effective === 'review' ? 'E' : ''}${r.major}` : (r.suggested_name ?? '?')}<span className="block text-amber-300">pending triage</span></span>}
                     {r.pending_note && <span className="block text-amber-300">{r.pending_note}</span>}
-                    {r.action === 'unchanged' && <span className="text-slate-400">kept {r.current_revision ?? '—'}</span>}
+                    {r.action === 'unchanged' && <span className="text-slate-400">kept {r.current_revision ?? '-'}</span>}
                     {r.action === 'unmatched' && <span className="text-slate-500">skipped</span>}
                   </td>
                 </tr>

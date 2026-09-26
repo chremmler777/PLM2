@@ -77,6 +77,17 @@ describe('LifecycleStepper engineering review track', () => {
   })
 })
 
+describe('LifecycleStepper mother-plant track', () => {
+  afterEach(cleanup)
+
+  it('gives the capture to Project Management, who starts it, not Sales', () => {
+    render(<LifecycleStepper status="captured" origin="mother_plant" />)
+    const tag = screen.getByTestId('stage-responsible')
+    expect(tag.textContent).toContain('PM')
+    expect(tag.textContent).not.toContain('Sales')
+  })
+})
+
 describe('LifecycleStepper scoping handoff note', () => {
   afterEach(cleanup)
 

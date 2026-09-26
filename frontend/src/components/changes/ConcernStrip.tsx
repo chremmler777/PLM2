@@ -7,9 +7,10 @@ import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
-import { plural } from '../../lib/humanLabels'
+import { humanize, plural } from '../../lib/humanLabels'
 import { defaultFlagDepartment, settledLine } from '../../lib/scopingRules'
 import AttachmentDropzone from './AttachmentDropzone'
+import { useConcernLabels } from './useConcernLabels'
 import { AttachmentRow } from './AttachmentRow'
 import type {
   Attachment, ChangeConcern, ConcernKind, RiskSeverity, RiskType, RiskTemplateIn,
@@ -154,7 +155,7 @@ export default function ConcernStrip({
   // only for the legacy keys when the reference is unreachable.
   const servedLabel = (k: string) => riskTypeData?.items?.find((i) => i.key === k)?.label_en
   const riskTypeLabel = (k?: string | null) =>
-    k ? (servedLabel(k) ?? (t(`risktype.${k}`) !== `risktype.${k}` ? t(`risktype.${k}`) : k))
+    k ? (servedLabel(k) ?? (t(`risktype.${k}`) !== `risktype.${k}` ? t(`risktype.${k}`) : humanize(k)))
       : t('risk.kind')
 
   // The department's own additions to the dropdown: "+ Add own risk type…"
@@ -282,15 +283,11 @@ export default function ConcernStrip({
 
   // A risk raised from a checklist row says which row: the checklist is the
   // department's own list, served per department.
-  const originDept = onlyDepartmentId ?? effectiveDept
-  const { data: checklistDefs = [] } = useQuery({
-    queryKey: ['assessment-checklist', originDept],
-    queryFn: () => changesApi.assessmentChecklist(originDept as number),
-    enabled: scoped && originDept != null
-      && concerns.some((c: ChangeConcern) => !!c.checklist_key),
-  })
-  const originLabel = (key: string) => key.startsWith('free:') ? key.slice(5)
-    : checklistDefs.find((d) => d.key === key)?.label_en ?? key
+  // A row carries its own department's words (not the viewer's).
+  const rowLabels = useConcernLabels(concerns, scoped)
+  const rowRiskTypeLabel = (c: ChangeConcern) =>
+    c.department_id != null ? rowLabels.riskTypeLabel(c) : riskTypeLabel(c.risk_type)
+  const originLabel = (c: ChangeConcern) => rowLabels.originLabel(c)
 
   // A risk raised by mistake: its raiser may delete it while nothing hangs off
   // it yet. Acting-as does not matter here — the raise carried their own id.
@@ -379,7 +376,7 @@ export default function ConcernStrip({
               <span className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
                 <SeverityBadge value={c.severity} testId={`risk-severity-${c.id}`} />
                 <span className="text-xs font-semibold" data-testid={`risk-type-${c.id}`}>
-                  {riskTypeLabel(c.risk_type)}
+                  {rowRiskTypeLabel(c)}
                 </span>
               </span>
             ) : (
@@ -396,7 +393,7 @@ export default function ConcernStrip({
               {c.checklist_key && (
                 <span data-testid={`risk-origin-${c.id}`}
                   className="mr-1.5 rounded border border-slate-600 px-1 py-0 text-[11px] leading-tight align-middle">
-                  {t('risk.from')}: {originLabel(c.checklist_key)}
+                  {t('risk.from')}: {originLabel(c)}
                 </span>
               )}
               <span className={c.is_open ? '' : 'line-through'}>{c.note}</span>

@@ -20,6 +20,20 @@ from app.models.change_cost import AssessmentCostLine
 from app.models.entities import Project, User
 from app.services.report_service import _org_scope
 
+
+def _last_day(t) -> date:
+    """The inclusive last day a plan block occupies, a milestone on its start
+    (change_plan_service._last_day; kept here, that module imports late)."""
+    return t.end_date - timedelta(days=1) if int(t.duration_days or 0) > 0 else t.start_date
+
+
+def _baseline_last_day(t) -> date:
+    """The same for the block's baseline (baseline_finish is exclusive)."""
+    start = t.baseline_start or t.baseline_finish
+    return (t.baseline_finish - timedelta(days=1)
+            if t.baseline_finish > start else start)
+
+
 PNL_STATUSES = ("costing", "quoting", "quoted", "approved", "in_implementation",
                 "in_validation", "released", "closed")
 # Sliced by name, not by index: inserting a status into the tuple must not
@@ -499,15 +513,16 @@ class PnlService:
             detailed = plan_tasks.get((c.id, "detailed"), [])
             cal = ChangePlanService.calendar(c, "detailed")
             ChangePlanService._attach(detailed, cal)
-            baseline = max((t.baseline_finish for t in detailed if t.baseline_finish),
+            # the same date rule as PnlService.timing (inclusive last days)
+            baseline = max((_baseline_last_day(t) for t in detailed if t.baseline_finish),
                            default=None)
             if baseline is None and snap and snap.get("quote_finish"):
-                baseline = date.fromisoformat(snap["quote_finish"])
+                baseline = date.fromisoformat(snap["quote_finish"]) - timedelta(days=1)
             if baseline is None:
                 quote = plan_tasks.get((c.id, "quote"), [])
                 ChangePlanService._attach(quote, ChangePlanService.calendar(c, "quote"))
-                baseline = max((t.end_date for t in quote), default=None)
-            forecast = max((t.end_date for t in detailed), default=None)
+                baseline = max((_last_day(t) for t in quote if not t.is_idea), default=None)
+            forecast = max((_last_day(t) for t in detailed if not t.is_idea), default=None)
             slip = (cal.idx(forecast) - cal.idx(baseline)
                     if baseline is not None and forecast is not None else None)
             warnings = []
@@ -935,6 +950,12 @@ class PnlService:
         return out
 
     @staticmethod
+    async def _plan_last_day(session, change, plan: str) -> Optional[date]:
+        """The plan's inclusive last day (_last_day: a milestone on its start)."""
+        from app.services.change_plan_service import ChangePlanService, plan_finish
+        return plan_finish(await ChangePlanService.tasks(session, change, plan))
+
+    @staticmethod
     async def _plan_finish(session, change, plan: str) -> Optional[date]:
         from app.services.change_plan_service import ChangePlanService
         tasks = [t for t in await ChangePlanService.tasks(session, change, plan)
@@ -1042,30 +1063,35 @@ class PnlService:
                  if not t.is_idea]
         parents = {t.parent_id for t in tasks if t.parent_id is not None}
         leaves = [t for t in tasks if t.id not in parents]
-        baseline = max((t.baseline_finish for t in tasks if t.baseline_finish),
+        # One date rule for every finish here, the plan's own (_last_day): the
+        # inclusive last day a block occupies, a milestone on its start. The
+        # Release tab's closing card and the Timing grid read it the same way,
+        # so "baseline 13 Jan" is 13 Jan on every panel.
+        baseline = max((_baseline_last_day(t) for t in tasks if t.baseline_finish),
                        default=None)
         source = "detailed_baseline"
         if baseline is None and quote_finish:
-            baseline = date.fromisoformat(quote_finish)
+            # the frozen offer finish is the quote plan's exclusive end
+            baseline = date.fromisoformat(quote_finish) - timedelta(days=1)
             source = "offer"
         if baseline is None:
-            quote = await PnlService._plan_finish(session, change, "quote")
+            quote = await PnlService._plan_last_day(session, change, "quote")
             if quote is not None:
                 baseline, source = quote, "quote_plan"
-        forecast = max((t.end_date for t in tasks), default=None)
+        forecast = max((_last_day(t) for t in tasks), default=None)
         actual = None
         if leaves and all(t.actual_finish for t in leaves):
-            # actual_finish is the last worked day: exclusive like the rest
-            actual = max(t.actual_finish for t in leaves) + timedelta(days=1)
+            # actual_finish is the last worked day already
+            actual = max(t.actual_finish for t in leaves)
         against = actual or forecast
         slip = (cal.idx(against) - cal.idx(baseline)
                 if baseline is not None and against is not None else None)
 
-        def last(d):
-            return (d - timedelta(days=1)).isoformat() if d else None
+        def iso(d):
+            return d.isoformat() if d else None
         return {
-            "baseline_finish": last(baseline), "forecast_finish": last(forecast),
-            "actual_finish": last(actual), "slip_days": slip,
+            "baseline_finish": iso(baseline), "forecast_finish": iso(forecast),
+            "actual_finish": iso(actual), "slip_days": slip,
             "unit": "working days" if cal.working else "calendar days",
             "baseline_source": source if baseline is not None else None,
         }

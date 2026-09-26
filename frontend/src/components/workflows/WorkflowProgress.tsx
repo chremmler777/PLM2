@@ -120,7 +120,7 @@ export default function WorkflowProgress({
       {instance.status === 'active' && currentTasks.length > 0 && (
         <div className="space-y-2">
           <div className="text-sm font-medium text-slate-300">
-            Stage {instance.current_stage_order} — Tasks
+            Stage {instance.current_stage_order}: Tasks
           </div>
           {currentTasks.map((task) => (
             <TaskRow
@@ -128,6 +128,8 @@ export default function WorkflowProgress({
               task={task}
               isCompletingTask={isCompletingTask}
               onApprove={() => onCompleteTask(task.id, 'approved')}
+              approveBlocked={task.requires_cad_evidence && instance.has_3d_evidence === false
+                ? NO_3D_EVIDENCE : null}
               onReject={() => setNotesModal({ taskId: task.id, mode: 'rejected', notes: '' })}
               onWaive={() => setNotesModal({ taskId: task.id, mode: 'waived', notes: '' })}
             />
@@ -204,10 +206,16 @@ export default function WorkflowProgress({
 // TaskRow — individual task within the current stage
 // ---------------------------------------------------------------------------
 
+/** Why Approve is held on a CAD-evidence step (the backend's own rule,
+ *  WorkflowService.complete_task). */
+const NO_3D_EVIDENCE = 'Needs 3D evidence first: upload a CAD file to this revision or sign "no geometry change".';
+
 interface TaskRowProps {
   task: WfInstanceTask;
   isCompletingTask: boolean;
   onApprove: () => void;
+  /** Approve would be refused: disabled, with this reason. */
+  approveBlocked?: string | null;
   onReject: () => void;
   onWaive: () => void;
 }
@@ -216,6 +224,7 @@ function TaskRow({
   task,
   isCompletingTask,
   onApprove,
+  approveBlocked = null,
   onReject,
   onWaive,
 }: TaskRowProps) {
@@ -286,7 +295,8 @@ function TaskRow({
 
   // Active actionable task
   return (
-    <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
+    <div className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
+    <div className="flex items-center gap-3">
       <span
         className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
       >
@@ -314,8 +324,11 @@ function TaskRow({
       <div className="flex gap-2">
         <button
           onClick={onApprove}
-          disabled={isCompletingTask}
-          className="px-3 py-1 text-xs bg-green-700 text-green-100 rounded hover:bg-green-600 disabled:opacity-50 font-medium"
+          disabled={isCompletingTask || !!approveBlocked}
+          title={approveBlocked ?? undefined}
+          aria-describedby={approveBlocked ? `wf-approve-why-${task.id}` : undefined}
+          data-testid={`wf-approve-${task.id}`}
+          className="px-3 py-1 text-xs bg-green-700 text-green-100 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
         >
           Approve
         </button>
@@ -334,6 +347,11 @@ function TaskRow({
           {t('wf.waive')}
         </button>
       </div>
+    </div>
+    {approveBlocked && (
+      <p id={`wf-approve-why-${task.id}`} data-testid={`wf-approve-why-${task.id}`}
+        className="mt-1.5 text-xs text-amber-300">{approveBlocked}</p>
+    )}
     </div>
   );
 }

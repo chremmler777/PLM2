@@ -59,7 +59,10 @@ const wrap = (ui: React.ReactElement) => (
 // Minimal change stand-in — only the fields ScopingPanel / DeadlineEditor read.
 const change = (over: Record<string, unknown> = {}) => ({
   id: 7, status: 'scoping', required_by_date: null, required_by_reason: null,
-  deadline_state: null, customer_relevant: true, ...over,
+  deadline_state: null, customer_relevant: true,
+  // The impacted set is locked unless a test says otherwise: Proceed holds
+  // on an unlocked set.
+  impact_confirmed_at: '2026-07-03T09:00:00Z', ...over,
 }) as never
 
 describe('ScopingPanel', () => {
@@ -155,6 +158,9 @@ describe('ScopingPanel keeps the discussion out of the record', () => {
     // The fixture meeting carries notes; they are not shown any more.
     expect(screen.queryByText('scope ok')).toBeNull()
     expect(document.querySelector('textarea')).toBeNull()
+    // The mail-thread hint belongs to an email discussion only.
+    expect(screen.queryByText(t('scoping.discussionByEmail'))).toBeNull()
+    fireEvent.change(screen.getByTestId('meeting-channel'), { target: { value: 'email' } })
     expect(screen.getByText(t('scoping.discussionByEmail'))).toBeTruthy()
   })
 
@@ -831,5 +837,55 @@ describe('ScopingPanel §16 meeting record', () => {
     expect((await screen.findByTestId('rejection-title')).textContent).toBe(t('reject.sendTitle'))
     expect(screen.getByTestId('rejection-sent').className).toContain(btnVariants.primary.split(' ')[0])
     expect(screen.getByTestId('rejection-sent-why').textContent).toBe(t('reject.needLetter'))
+  })
+  it('holds Proceed with the reason while the impacted set is not locked', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
+    render(wrap(<ScopingPanel change={change({ impact_confirmed_at: null })} />))
+    const proceed = await screen.findByTestId('meeting-proceed-21') as HTMLButtonElement
+    expect(proceed.disabled).toBe(true)
+    expect(proceed.getAttribute('title')).toBe(t('meeting.impactNotLocked'))
+    expect(screen.getByTestId('meeting-proceed-why-21').textContent).toBe(t('meeting.impactNotLocked'))
+  })
+
+  it('a change from KTX Weissenburg records who is informed, with no carrier and no assessment', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)
+    render(wrap(<ScopingPanel change={change({
+      origin: 'mother_plant', customer_relevant: false, mother_plant_name: 'KTX Weissenburg (WUG)',
+    })} />))
+    const form = await screen.findByTestId('meeting-form')
+    expect(screen.queryByTestId('meeting-carrier')).toBeNull()
+    expect(form.textContent).not.toContain(t('rasic.assessNote'))
+    expect(screen.getByTestId('meeting-mother-plant-hint').textContent).toContain('KTX Weissenburg did the assessment')
+    // Informing is a tick per department, no letters.
+    expect(screen.queryByTestId('rasic-2-R')).toBeNull()
+    fireEvent.click(screen.getByTestId('inform-4'))
+    const save = screen.getByTestId('meeting-save') as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1] as Record<string, unknown>
+    expect(body).not.toHaveProperty('cost_carrier')
+    expect(Object.values(body.department_rasic as Record<string, string>).every((l) => l === 'I')).toBe(true)
+    expect(body.department_rasic).toHaveProperty('4', 'I')
+  })
+
+  it('a recorded Weissenburg scoping leads to "Send information to the team", never to the assessment', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({
+      department_rasic: { '2': 'I', '4': 'I' }, cost_carrier: null,
+    })] as never)
+    const onInformTeam = vi.fn()
+    render(wrap(<ScopingPanel onInformTeam={onInformTeam} change={change({
+      origin: 'mother_plant', customer_relevant: false, mother_plant_name: 'KTX Weissenburg (WUG)',
+    })} />))
+    const inform = await screen.findByTestId('meeting-inform-21')
+    expect(inform.textContent).toBe('Send information to the team')
+    expect(screen.queryByTestId('meeting-proceed-21')).toBeNull()
+    expect(screen.queryByTestId('meeting-carrier-21')).toBeNull()
+    expect(screen.queryByTestId('meeting-carrier-line-21')).toBeNull()
+    expect(screen.queryByText(t('meeting.awaitingDecision'))).toBeNull()
+    expect(screen.getByTestId('meeting-depts-21').textContent).toContain(t('mp.informDepartments'))
+    fireEvent.click(inform)
+    expect(onInformTeam).toHaveBeenCalled()
   })
 })

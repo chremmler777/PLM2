@@ -154,9 +154,12 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
           baseline {formatCalendarDate(t.baseline_finish)}
           {t.actual_finish ? `, finished ${formatCalendarDate(t.actual_finish)}` : `, forecast ${formatCalendarDate(t.forecast_finish)}`}
           {slip !== null && (
-            <span className={`ml-2 rounded px-1.5 py-0.5 ${slip > 0 ? TONE_CLASS.rose : TONE_CLASS.green}`}>
+            <>
+            {' · '}
+            <span className={`rounded px-1.5 py-0.5 ${slip > 0 ? TONE_CLASS.rose : TONE_CLASS.green}`}>
               {slip > 0 ? `${slip} ${t.unit} late` : slip < 0 ? `${-slip} ${t.unit} early` : 'on time'}
             </span>
+            </>
           )}
         </div>
         {data.piece_price && (

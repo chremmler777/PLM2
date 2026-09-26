@@ -95,7 +95,8 @@ describe('CostingBuckets', () => {
   })
 
   it('shows a department member their own bucket and nobody else’s', async () => {
-    buckets({ myDepartmentIds: [2] })
+    buckets({ myDepartmentIds: [2],
+      change: change({ costing_pending_department_ids: [2, 4] }) })
     // No summation is even requested without the privilege.
     expect(changesApi.getSummation).not.toHaveBeenCalled()
     expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
@@ -104,7 +105,24 @@ describe('CostingBuckets', () => {
     expect(screen.queryByTestId('costing-state-4')).toBeNull()
     // Just a line saying the change does not sit on them alone.
     expect(screen.getByTestId('costing-others').textContent)
-      .toBe(t('costing.others').replace('{n}', '1'))
+      .toBe(t('costing.others').replace('{n}', '1').replace('{s}', ''))
+  })
+
+  it('counts the others from the backend pending list, the same as the cockpit', () => {
+    // Four departments routed, two of them already done: only the one still
+    // owing (not the viewer's) is "still costing".
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment(), assessment({ id: 2, department_id: 4 }),
+        assessment({ id: 3, department_id: 6 }), assessment({ id: 4, department_id: 8 })],
+      costing_pending_department_ids: [2, 6],
+    }) })
+    expect(screen.getByTestId('costing-others').textContent)
+      .toBe(t('costing.others').replace('{n}', '1').replace('{s}', ''))
+  })
+
+  it('says nothing about others once nobody else is costing', () => {
+    buckets({ myDepartmentIds: [2], change: change({ costing_pending_department_ids: [2] }) })
+    expect(screen.queryByTestId('costing-others')).toBeNull()
   })
 
   it('opens the member’s bucket onto their cost positions', async () => {

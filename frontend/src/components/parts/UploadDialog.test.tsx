@@ -58,7 +58,7 @@ describe('UploadDialog', () => {
     expect(idx.value).toBe('004')
     expect(screen.getByText(/current 003/)).toBeTruthy()
     expect(screen.getByText(/detected 004/)).toBeTruthy()
-    expect((screen.getByLabelText('Received on') as HTMLInputElement).value).toBe('2026-05-28')
+    expect((screen.getByLabelText('Received on') as HTMLInputElement).value).toBe('28 May 2026')
   })
 
   it('warns on mixed indexes and leaves the index empty', async () => {

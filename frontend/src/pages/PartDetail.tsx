@@ -34,6 +34,7 @@ import { useFieldFocus } from '../hooks/useFieldFocus';
 import IntakePanel from '../components/intake/IntakePanel';
 import { usePartIntakes } from '../hooks/queries/useIntakes';
 import { pendingChipText } from '../api/intakes';
+import { formatCalendarDate } from '../lib/format';
 
 interface Part extends Partial<PartMaterial> {
   id: number;
@@ -307,7 +308,7 @@ export default function PartDetail() {
                 </span>
                 <span data-field-key="part.lifecycle_phase" className="inline-flex items-center">
                   <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
-                    {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
+                    {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${formatCalendarDate(part.nominated_at)}` : ''}{part.sop_at ? ` · SOP ${formatCalendarDate(part.sop_at)}` : ''}
                   </span>
                   {marker('part.lifecycle_phase', 'Phase')}
                 </span>

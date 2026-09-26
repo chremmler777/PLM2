@@ -750,7 +750,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           label="origin" lx={LX + LW + 8} ly={mid(Y.captured, NH) - 7} />
         <Box x={LX} y={Y.captured} w={LW} h={NH} stroke={MP} dashed
           name="KTX Weissenburg / Solingen" sub="PM starts it; lane M, below"
-          task="skips assessment to offer" testId="procmap-node-mp-origin" />
+          task="skips assessment, costing, offer" testId="procmap-node-mp-origin" />
 
         {/* --- scoping: the meeting decides ----------------------------- */}
         <Edge testId="procmap-edge-meeting-rejected" color={LOOP}

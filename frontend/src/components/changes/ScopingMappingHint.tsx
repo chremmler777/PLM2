@@ -71,7 +71,11 @@ export function ScopingMappingHint({ changeId, assessments, departments }: {
       })}
       {matched.length > 0 && missing.length > 0 && <span aria-hidden="true"> · </span>}
       {missing
-        .map((id) => `${deptName(id)} has no blocking role in the routing template, so no assessment task`)
+        // Informed by the room's call: that is why there is no task, not
+        // the routing template.
+        .map((id) => (proceedMeeting.department_rasic?.[String(id)] === 'I'
+          ? `${deptName(id)}: Informed (notified only)`
+          : `${deptName(id)} has no blocking role in the routing template, so no assessment task`))
         .join('; ')}
     </p>
   )

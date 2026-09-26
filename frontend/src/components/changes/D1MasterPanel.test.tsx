@@ -64,7 +64,7 @@ vi.mock('../../api/plants', () => ({
 
 function makeWrapper(preloadGates?: boolean, preloadSummation?: boolean, preloadChange?: boolean, preloadPlants?: boolean) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  if (preloadGates) qc.setQueryData(['change-gates', 1], GATES);
+  if (preloadGates) qc.setQueryData(['change', 1, 'gates'], GATES);
   if (preloadSummation) qc.setQueryData(['change-summation', 1], SUMMATION);
   if (preloadChange) qc.setQueryData(['change', 1], CHANGE);
   if (preloadPlants) qc.setQueryData(['plants'], PLANTS);
@@ -214,7 +214,7 @@ describe('D1MasterPanel', () => {
     const { changesApi } = await import('../../api/changes');
     (changesApi.getGates as ReturnType<typeof vi.fn>).mockResolvedValue(gatesWithMeta);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(['change-gates', 1], gatesWithMeta);
+    qc.setQueryData(['change', 1, 'gates'], gatesWithMeta);
     qc.setQueryData(['change', 1], CHANGE);
     qc.setQueryData(['plants'], PLANTS);
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -237,7 +237,7 @@ describe('D1MasterPanel', () => {
 
   it('is a read-only record once the change is closed', async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(['change-gates', 1], GATES);
+    qc.setQueryData(['change', 1, 'gates'], GATES);
     qc.setQueryData(['change', 1], { ...CHANGE, status: 'closed' });
     qc.setQueryData(['plants'], PLANTS);
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -253,7 +253,7 @@ describe('D1MasterPanel', () => {
 
   function renderWith(change: Record<string, unknown>) {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(['change-gates', 1], GATES);
+    qc.setQueryData(['change', 1, 'gates'], GATES);
     qc.setQueryData(['change', 1], change);
     qc.setQueryData(['plants'], PLANTS);
     const wrapper = ({ children }: { children: React.ReactNode }) => (

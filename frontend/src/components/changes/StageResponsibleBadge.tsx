@@ -35,8 +35,20 @@ export const REVIEW_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   released: 'role.development',
 }
 
+/**
+ * A change from KTX Weissenburg / Solingen (origin mother_plant, spec §14) is
+ * started by Project Management, not Sales: the capture is theirs, and so
+ * is the scoping (informing the team). The rest is the standard track.
+ */
+export const MOTHER_PLANT_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
+  ...STAGE_RESPONSIBLE,
+  captured: 'role.pmShort',
+}
+
 export function stageResponsibleKey(status: ChangeStatus, origin?: string | null): string | undefined {
-  return (origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE)[status]
+  const table = origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE
+    : origin === 'mother_plant' ? MOTHER_PLANT_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE
+  return table[status]
 }
 
 export function StageResponsibleBadge({ status, origin }: { status: ChangeStatus; origin?: string | null }) {

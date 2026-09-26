@@ -110,3 +110,29 @@ describe('RoutingDeviationPanel pending removal', () => {
     expect(screen.queryByTestId('routing-deviation-removals')).toBeNull()
   })
 })
+
+describe('RoutingDeviationPanel: the lead acting as a department', () => {
+  afterEach(() => { cleanup(); sessionStorage.clear() })
+
+  it('says "you are acting as" with a way back, not "waiting for the change lead"', () => {
+    auth.current = { userId: 9 }
+    sessionStorage.setItem('plm2.actsAsDepartmentId', '4')
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RoutingDeviationPanel changeId={7} routing={routing({ deviation_proposed_by: 3 })}
+          departments={[{ id: 4, name: 'Tool Engineer' }]} routedIds={[]}
+          stageOrder={1} canAdd={false} canDecide={false} leadId={9} />
+      </QueryClientProvider>)
+    expect(screen.queryByTestId('routing-deviation-waiting')).toBeNull()
+    expect(screen.getByTestId('routing-deviation-acting-lead').textContent)
+      .toContain('You are acting as Tool Engineer: switch back to decide as change lead')
+    expect(screen.getByTestId('routing-deviation-switch-back')).toBeDefined()
+  })
+
+  it('someone else acting as a department still reads the lead wait', () => {
+    auth.current = { userId: 5 }
+    sessionStorage.setItem('plm2.actsAsDepartmentId', '4')
+    panel(routing({ deviation_proposed_by: 3 }), 9)
+    expect(screen.getByTestId('routing-deviation-waiting').textContent).toBe(t('routingDev.waitingForLead'))
+  })
+})

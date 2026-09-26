@@ -102,7 +102,7 @@ export default function PPAPSection({ revisionId, revisionName, revisionFiles }:
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-200">
           Quality / PPAP
-          {revisionName ? <span className="text-slate-400 font-normal"> — {revisionName}</span> : null}
+          {revisionName ? <span className="text-slate-400 font-normal"> · {revisionName}</span> : null}
         </h3>
         {!ppap ? (
           <div className="flex items-center gap-2">

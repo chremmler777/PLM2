@@ -54,7 +54,7 @@ function GateStepper({ gates, selected, onSelect, controls }: {
             onClick={() => onSelect(g.id)}
             aria-expanded={controls ? isSel : undefined}
             aria-controls={controls}
-            title={`${g.phase_en} — ${g.progress.pct}% (${g.progress.done}/${g.progress.total - g.progress.not_applicable} done)`}
+            title={`${g.phase_en}: ${g.progress.pct}% (${g.progress.done}/${g.progress.total - g.progress.not_applicable} done)`}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs ${
               isSel ? 'border-blue-400 bg-slate-700' : 'border-slate-600 bg-slate-800 hover:border-slate-400'
             } ${g.status === 'closed' ? 'opacity-80' : ''}`}
@@ -212,7 +212,7 @@ function GateDetail({ gate, users, unbounded = false }: {
     <div className={`${unbounded ? '' : 'mt-3 '}space-y-3`}>
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[200px]">
-          <div className="text-sm text-slate-200 font-semibold">{gate.code} — {gate.phase_en}</div>
+          <div className="text-sm text-slate-200 font-semibold">{gate.code}: {gate.phase_en}</div>
           <div className="text-xs text-slate-500">{gate.phase_de} · target {formatCalendarDate(gate.target_date)}</div>
         </div>
         <div className="w-40 bg-slate-700 rounded-full h-2 overflow-hidden">
@@ -247,10 +247,10 @@ function GateDetail({ gate, users, unbounded = false }: {
           );
         })}
         {gate.color === 'yellow' && !locked && (
-          <span className="text-amber-300">⚠ open items — sign-off needs a risk entry with action plan (≤14 days)</span>
+          <span className="text-amber-300">⚠ open items: sign-off needs a risk entry with action plan (≤14 days)</span>
         )}
         {gate.color === 'red' && !locked && (
-          <span className="text-red-300">⛔ high risk live — see risk assessment form</span>
+          <span className="text-red-300">⛔ high risk live: see risk assessment form</span>
         )}
       </div>
 

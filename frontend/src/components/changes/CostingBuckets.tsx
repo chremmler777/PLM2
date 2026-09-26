@@ -148,7 +148,11 @@ export default function CostingBuckets({
   // collapsed row for a department whose figures they may not read. The full
   // board belongs to PM, Sales, the lead and admins, exactly as in assessment.
   const visible = canSeeAll ? rows : rows.filter((r) => myDepartmentIds.includes(r.department_id))
-  const others = rows.length - visible.length
+  // Who is still costing: the backend's own list (costing_pending_department_ids),
+  // the one the cockpit's "waiting on" reads, less the viewer's departments.
+  const others = change.status !== 'costing' ? 0
+    : (change.costing_pending_department_ids ?? [])
+      .filter((id) => !myDepartmentIds.includes(id)).length
 
   return (
     <div className="space-y-2">
@@ -281,7 +285,7 @@ export default function CostingBuckets({
           this department alone, without showing figures they may not read. */}
       {!canSeeAll && others > 0 && (
         <p data-testid="costing-others" className="text-xs text-slate-400 px-1 py-1">
-          {t('costing.others').replace('{n}', String(others))}
+          {t('costing.others').replace('{n}', String(others)).replace('{s}', others === 1 ? '' : 's')}
         </p>
       )}
     </div>

@@ -428,7 +428,8 @@ class ChangeGate(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
     gate_key: Mapped[str] = mapped_column(String(20))  # feasibility|budget|release
-    decision: Mapped[str] = mapped_column(String(10), default="na")  # yes|no|na
+    # yes|no|na, None until someone decides it (a seeded gate is undecided)
+    decision: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -63,7 +63,22 @@ def _serialize_task(t: WfInstanceTask) -> dict:
         "accepted_at": t.accepted_at,
         "due_date": t.due_date,
         "overdue": t.overdue,
+        # the step refuses "approved" without 3D evidence on the revision
+        "requires_cad_evidence": bool(t.step.requires_cad_evidence) if t.step else False,
     }
+
+
+async def _instance_out(db: AsyncSession, instance: WfInstance) -> dict:
+    """The instance as the screens read it, plus whether its revision has
+    the 3D evidence a CAD-evidence step needs to be approved (the same
+    WorkflowService.has_3d_evidence the complete endpoint checks), so an
+    Approve button the backend would refuse is shown disabled with why."""
+    out = _serialize_instance(instance)
+    needs = any(t.get("requires_cad_evidence") for t in out["tasks"])
+    out["has_3d_evidence"] = (
+        await WorkflowService.has_3d_evidence(db, instance.part_revision_id)
+        if needs and instance.part_revision_id is not None else None)
+    return out
 
 
 def _serialize_instance(instance: WfInstance) -> dict:
@@ -183,7 +198,7 @@ async def start_workflow(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return _serialize_instance(full)
+        return await _instance_out(db, full)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -199,7 +214,7 @@ async def get_current_workflow(
     instance = await WorkflowService.get_revision_workflow(db, revision_id)
     if instance is None:
         return {"instance": None}
-    return {"instance": _serialize_instance(instance)}
+    return {"instance": await _instance_out(db, instance)}
 
 
 @router.get("/{instance_id}")
@@ -212,7 +227,7 @@ async def get_workflow_instance(
     full = await _load_instance_full(db, instance_id)
     if not full:
         raise HTTPException(status_code=404, detail="Workflow instance not found")
-    return _serialize_instance(full)
+    return await _instance_out(db, full)
 
 
 @router.post("/{instance_id}/tasks/{task_id}/complete")
@@ -249,7 +264,7 @@ async def complete_task(
                 await ChangeRoutingService.repair_stage_tasks(db, change, None)
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return _serialize_instance(full)
+        return await _instance_out(db, full)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -327,7 +342,7 @@ async def cancel_workflow(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return _serialize_instance(full)
+        return await _instance_out(db, full)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

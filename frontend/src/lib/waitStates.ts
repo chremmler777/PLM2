@@ -298,6 +298,8 @@ export function resolveWaitStates(
         key: 'implementation-reports',
         text: t('wait.onProgressReports').replace('{n}', String(owing)),
         tab: 'timing',
+        // Nothing the move to validation checks: chased, not a blocker.
+        info: true,
       })
     }
     // An escalation is a change-level act, so the pairing is change-level too:
@@ -308,6 +310,7 @@ export function resolveWaitStates(
         key: 'implementation-escalation',
         text: t('wait.onRiskEscalation'),
         tab: 'timing',
+        info: true,
       })
     }
   }
@@ -348,8 +351,14 @@ export function resolveWaitStates(
 
   // Validation issues: open ones hold the release, and the loop back keeps
   // them alive while the fix is implemented.
+  // Only the release guard counts them (ValidationIssueService.release_blocker):
+  // during the loop back "Finish implementation" is not refused on an open
+  // issue (fixing_info is a note, never a guard), so there they are worth
+  // knowing, not blockers.
   const issueLines = ['in_validation', 'in_implementation'].includes(change.status)
-    ? issueWaits(more.validationIssues ?? [], change.status) : []
+    ? issueWaits(more.validationIssues ?? [], change.status)
+      .map((w) => (change.status === 'in_implementation' ? { ...w, info: true } : w))
+    : []
   waits.push(...issueLines)
 
   // Open plan deviations: PM/Sales lock or escalate them. Worth knowing while

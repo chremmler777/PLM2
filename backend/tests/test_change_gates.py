@@ -66,7 +66,8 @@ async def test_gates_exist_from_creation_and_block_by_default(client, eng_auth, 
     cid = res.json()["id"]
     gates = (await client.get(f"/api/v1/changes/{cid}/gates", headers=eng_auth)).json()
     assert {g["gate_key"] for g in gates} == {"release"}
-    assert all(g["decision"] == "na" for g in gates)
+    # seeded undecided, not 'n/a': nobody has answered it yet
+    assert all(g["decision"] is None and g["decided_at"] is None for g in gates)
     # feasibility is no longer pre-seeded; explicitly create the row (still 'na')
     # to exercise the same default-blocks behaviour
     await client.put(f"/api/v1/changes/{cid}/gates/feasibility",

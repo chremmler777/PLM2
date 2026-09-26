@@ -47,7 +47,7 @@ describe('SepDocumentsTab', () => {
 
     expect(await screen.findByTestId('sep-doc-gate-1')).toBeTruthy()
     expect(clientMocks.get).toHaveBeenCalledWith('/v1/sep/projects/2/files')
-    expect(screen.getByTestId('sep-doc-gate-1').textContent).toContain('QG1 — Concept')
+    expect(screen.getByTestId('sep-doc-gate-1').textContent).toContain('QG1: Concept')
     expect(screen.getByTestId('sep-doc-item-7').textContent).toContain('Feasibility study')
     expect(screen.getByTestId('sep-doc-item-20').textContent).toContain('DFMEA')
 

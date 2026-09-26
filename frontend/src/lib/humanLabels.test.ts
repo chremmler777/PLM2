@@ -16,7 +16,7 @@ describe('humanLabels (spec §16 P2)', () => {
     expect(auditValueLabel('status', '"in_assessment"')).toBe('In Assessment')
     expect(auditValueLabel('verdict', 'pending')).toBe('Not answered yet')
     expect(auditValueLabel('customer_relevant', 'true')).toBe('Yes')
-    expect(auditValueLabel('required_by_date', '2026-10-05')).toBe('05.10.2026')
+    expect(auditValueLabel('required_by_date', '2026-10-05')).toBe('5 Oct 2026')
     expect(auditValueLabel('note', 'Wall 2.5 to 1.8 mm')).toBe('Wall 2.5 to 1.8 mm')
     expect(auditValueLabel(null, 'some_code_here')).toBe('Some code here')
   })

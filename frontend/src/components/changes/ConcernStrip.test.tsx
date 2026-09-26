@@ -761,4 +761,28 @@ describe('ConcernStrip risks that came from a checklist row', () => {
     strip()
     expect(await screen.findByText('+ ' + t('risk.raiseOffChecklist'))).toBeTruthy()
   })
+
+  it("reads a team concern in its raising department's words, not the viewer's", async () => {
+    // Tooling (4) raised it from its own checklist; the viewer is Quality (2).
+    vi.mocked(changesApi.riskTypes).mockImplementation(async (d?: number) => (d === 4
+      ? { items: [{ key: 'not_steel_safe', label_en: 'Not steel safe' }] }
+      : { items: [] }) as never)
+    vi.mocked(changesApi.assessmentChecklist).mockImplementation(async (d: number) => (d === 4
+      ? [{ key: 'tool_modification', label_de: 'W', label_en: 'Tool modification needed', extra: false }]
+      : []) as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({
+      id: 31, kind: 'risk', severity: 2, risk_type: 'not_steel_safe', department_id: 4,
+      checklist_key: 'tool_modification', note: 'Core pin too thin' }),
+    concern({ id: 32, kind: 'risk', severity: 1, risk_type: 'some_unknown_key', department_id: 6,
+      checklist_key: 'odd_row', note: 'x' })] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped myDepartmentIds={[2]}
+      departments={[{ id: 2, name: 'Quality' }, { id: 4, name: 'Tooling' }, { id: 6, name: 'Paint' }]} />)
+    await waitFor(() => expect(screen.getByTestId('risk-type-31').textContent).toBe('Not steel safe'))
+    await waitFor(() => expect(screen.getByTestId('risk-origin-31').textContent)
+      .toBe(`${t('risk.from')}: Tool modification needed`))
+    expect(changesApi.riskTypes).toHaveBeenCalledWith(4)
+    // Nothing served for the key: a readable fallback, never the raw key.
+    expect(screen.getByTestId('risk-type-32').textContent).toBe('Some unknown key')
+    expect(screen.getByTestId('risk-origin-32').textContent).toBe(`${t('risk.from')}: Odd row`)
+  })
 })

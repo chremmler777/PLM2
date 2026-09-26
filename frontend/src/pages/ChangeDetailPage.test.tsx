@@ -1407,6 +1407,28 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     expect(screen.getByTestId('confirm-go').textContent).toBe('Record approval')
   })
 
+  it('asks once more before recording the approval of a change from KTX Weissenburg', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    const c = change as unknown as Record<string, unknown>
+    change.status = 'scoping' as ChangeDetail['status']
+    c.origin = 'mother_plant'
+    c.mother_plant_name = 'KTX Weissenburg (WUG)'
+    vi.mocked(changesApi.transition).mockClear()
+    try {
+      wrap('/changes/1?tab=overview')
+      await screen.findByText('mock-cockpit-summary')
+      fireEvent.click(screen.getByText('mock-advance-approved'))
+      const dialog = await screen.findByTestId('confirm-approved')
+      expect(dialog.textContent).toContain('the SOP from KTX Weissenburg becomes the release deadline')
+      expect(dialog.textContent).toContain(t('mp.approveClear'))
+      expect(changesApi.transition).not.toHaveBeenCalled()
+    } finally {
+      delete c.origin
+      delete c.mother_plant_name
+      authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    }
+  })
+
   it('never holds "Close costing" on the costing total: a zero total is a warning beside the step and in the confirm', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'costing' as ChangeDetail['status']

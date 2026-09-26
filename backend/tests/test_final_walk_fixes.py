@@ -413,6 +413,8 @@ async def test_gate_message_is_readable():
     from app.services.change_service import ChangeService
     assert ChangeService.gate_message("release", "na") == (
         "D1 gate 'Technical release?' is not answered Yes (it is n/a)")
+    assert ChangeService.gate_message("release", None) == (
+        "D1 gate 'Technical release?' is not decided yet")
 
 
 # ------------------------------------------------------------------ P2-6

@@ -192,6 +192,7 @@ describe('ProcessMapPage', () => {
     expect(lane).toContain('Never: assessment, costing, offer, quote deadline')
     expect(lane).toContain('Started by Project Management only')
     expect(screen.getByTestId('procmap-node-mp-origin').textContent).toContain('PM starts it')
+    expect(screen.getByTestId('procmap-node-mp-origin').textContent).toContain('skips assessment, costing, offer')
     expect(screen.getByTestId('procmap-mp-gate').querySelector('polygon')?.getAttribute('stroke'))
       .toBe('#f87171')
     expect(screen.getByTestId('procmap-edge-mp-origin').getAttribute('marker-end'))

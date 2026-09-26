@@ -5,7 +5,7 @@
  */
 import { t } from '../i18n/cmLabels'
 import { STATUS_LABELS } from './changeStatus'
-import { formatDateTime } from './format'
+import { formatCalendarDate, formatDateTime } from './format'
 import type { ChangeStatus } from '../types/change'
 
 /** "some_code_value" -> "Some code value": the last resort for an unknown code. */
@@ -87,7 +87,9 @@ export function auditValueLabel(field: string | null | undefined, value: string 
   // stores it as naive UTC. A deadline is wall-clock (end of the day as set)
   // and a bare day is a day wherever it is read: both stay as written.
   if (iso && iso[4] && f.endsWith('_at')) return formatDateTime(v)
-  if (iso) return iso[4] ? `${iso[3]}.${iso[2]}.${iso[1]} ${iso[4]}:${iso[5]}` : `${iso[3]}.${iso[2]}.${iso[1]}`
+  if (iso) return iso[4]
+    ? `${formatCalendarDate(v.slice(0, 10))}, ${iso[4]}:${iso[5]}`
+    : formatCalendarDate(v)
   if (STATUS_LABELS[v as ChangeStatus]) return STATUS_LABELS[v as ChangeStatus]
   if (VERDICT_LABELS[v]) return VERDICT_LABELS[v]
   // snake_case codes read as words; free text stays as typed.

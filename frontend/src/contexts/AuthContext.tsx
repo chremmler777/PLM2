@@ -17,6 +17,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** One /auth/me in flight at a time: StrictMode's double effect (and any
+ *  remount while it runs) shares the request instead of sending another. */
+type MeResponse = { username?: string | null; user_id?: number | null; plm2_roles?: string[] };
+let meInFlight: Promise<{ data: MeResponse }> | null = null;
+function fetchMe(): Promise<{ data: MeResponse }> {
+  if (!meInFlight) {
+    const p = client.get<MeResponse>('/v1/auth/me');
+    meInFlight = p;
+    const release = () => { if (meInFlight === p) meInFlight = null; };
+    p.then(release, release);
+  }
+  return meInFlight;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
@@ -26,8 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    client
-      .get('/v1/auth/me')
+    fetchMe()
       .then((res) => {
         if (!active) return;
         setUsername(res.data.username ?? null);

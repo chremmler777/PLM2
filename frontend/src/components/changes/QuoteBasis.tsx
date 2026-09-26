@@ -10,6 +10,7 @@ import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import { formatDays, formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeConcern, Summation } from '../../types/change'
+import { useConcernLabels } from './useConcernLabels'
 
 export default function QuoteBasis({
   changeId, plants = [], concerns = [], departments = [],
@@ -25,6 +26,8 @@ export default function QuoteBasis({
     queryKey: ['change-summation', changeId],
     queryFn: () => changesApi.getSummation(changeId),
   })
+  const { riskTypeLabel } = useConcernLabels(
+    concerns.filter((c) => c.is_open && c.kind === 'risk' && c.severity === 3))
   if (!data) return null
   const plantName = (id: number) => plants.find((p) => p.id === id)?.name ?? `Plant #${id}`
   const deptName = (id?: number | null) =>
@@ -107,7 +110,7 @@ export default function QuoteBasis({
                     <span className="text-slate-400">{deptName(c.department_id)}: </span>
                   )}
                   <span className="text-slate-200">
-                    {c.risk_type ? t(`risktype.${c.risk_type}`) : t('risk.kind')}
+                    {riskTypeLabel(c)}
                   </span>
                   <span className="block text-slate-400">{c.note}</span>
                 </span>

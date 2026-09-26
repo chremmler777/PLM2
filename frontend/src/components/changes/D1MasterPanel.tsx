@@ -74,7 +74,7 @@ export default function D1MasterPanel({
   });
 
   const { data: gates = [] } = useQuery({
-    queryKey: ['change-gates', changeId],
+    queryKey: ['change', changeId, 'gates'],
     queryFn: () => changesApi.getGates(changeId),
   });
   // Part numbers and names for the impacted items, from the impact tree the
@@ -146,7 +146,7 @@ export default function D1MasterPanel({
   const decide = useMutation({
     mutationFn: ({ key, decision }: { key: GateKey; decision: string }) =>
       changesApi.putGate(changeId, key, { decision }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change-gates', changeId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId, 'gates'] }),
     onError: (e: unknown) => { toastError(e, 'Could not record the gate decision'); },
   });
 

@@ -256,6 +256,33 @@ async def test_slip_against_the_offered_finish(client, admin_auth, session_facto
     assert summ["totals"]["offer_revenue"] >= 3000.0
 
 
+async def test_timing_dates_follow_the_plans_last_day_rule(client, admin_auth, session_factory, world):
+    """A milestone sits on its start (change_plan_service._last_day), as the
+    Release tab's closing card reads it: the SOP baselined on 13 Jan reads
+    13 Jan here too, not 12 Jan."""
+    await _status(session_factory, world["change_id"], "in_implementation")
+    async with session_factory() as s:
+        s.add(ChangePlanTask(change_id=world["change_id"], plan="detailed",
+                             name="Tool", kind="work", start_date=date(2027, 1, 1),
+                             duration_days=5, baseline_start=date(2027, 1, 1),
+                             baseline_finish=date(2027, 1, 6),
+                             created_by=world["admin_id"]))
+        s.add(ChangePlanTask(change_id=world["change_id"], plan="detailed",
+                             name="SOP", kind="milestone", start_date=date(2027, 1, 30),
+                             duration_days=0, baseline_start=date(2027, 1, 13),
+                             baseline_finish=date(2027, 1, 13),
+                             created_by=world["admin_id"]))
+        await s.commit()
+    t = (await client.get(
+        f"/api/v1/pnl/changes/{world['change_id']}/offer-vs-actual",
+        headers=admin_auth)).json()["timing"]
+    assert t["baseline_finish"] == "2027-01-13"
+    assert t["forecast_finish"] == "2027-01-30"
+    assert t["slip_days"] == 17
+    rows = (await client.get("/api/v1/pnl/changes", headers=admin_auth)).json()["rows"]
+    assert next(r for r in rows if r["change_id"] == world["change_id"])["slip_days"] == 17
+
+
 async def test_changes_without_frozen_plan_fall_back_to_costing(session_factory, seed):
     async with session_factory() as s:
         c = ChangeRequest(

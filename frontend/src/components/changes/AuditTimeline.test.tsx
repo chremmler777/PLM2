@@ -82,7 +82,7 @@ describe('AuditTimeline', () => {
     expect(screen.getByText(/part: 3457-10/)).toBeDefined()
     expect(screen.queryByText(/2267/)).toBeNull()
     expect(screen.getByText(/meeting: #27, channel: E-?mail/i)).toBeDefined()
-    expect(screen.getByText(/30\.09\.2026 23:59/)).toBeDefined()
+    expect(screen.getByText(/30 Sep 2026, 23:59/)).toBeDefined()
   })
 
   it('falls back to "System" when there is no actor', async () => {

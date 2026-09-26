@@ -175,7 +175,7 @@ export default function Dashboard() {
               Overdue actions: <span className={`font-bold ${lessonKpis.overdue_actions ? 'text-red-400' : 'text-emerald-400'}`}>{lessonKpis.overdue_actions}</span>
             </span>
             <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
-              Implementation: <span className="font-bold text-slate-100">{lessonKpis.implementation_rate === null ? '—' : `${Math.round(lessonKpis.implementation_rate * 100)}%`}</span>
+              Implementation: <span className="font-bold text-slate-100">{lessonKpis.implementation_rate === null ? '-' : `${Math.round(lessonKpis.implementation_rate * 100)}%`}</span>
             </span>
             <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
               Unlinked: <span className={`font-bold ${lessonKpis.unlinked ? 'text-amber-300' : 'text-emerald-400'}`}>{lessonKpis.unlinked}</span>
@@ -244,7 +244,7 @@ export default function Dashboard() {
                 <span className="text-slate-100">{m.name}</span>
                 <span className="text-slate-400 text-xs ml-2">{m.project_name}</span>
                 <span className={`block text-xs mt-0.5 ${m.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
-                  {m.overdue ? 'OVERDUE — ' : 'due '}
+                  {m.overdue ? 'OVERDUE: ' : 'due '}
                   {formatCalendarDate(m.due_date)}
                 </span>
               </button>
@@ -273,7 +273,7 @@ export default function Dashboard() {
                 <span className="text-slate-100">{g.name}</span>
                 <span className="text-slate-400 text-xs font-mono ml-2">{g.part_number}</span>
                 <span className={`block text-xs mt-0.5 ${g.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
-                  {g.overdue ? 'OVERDUE — ' : 'due '}
+                  {g.overdue ? 'OVERDUE: ' : 'due '}
                   {formatCalendarDate(g.next_calibration_due)}
                 </span>
               </button>
@@ -305,7 +305,7 @@ export default function Dashboard() {
                       <span className="text-slate-400 text-xs ml-2">· {wf.revision_name}</span>
                     </div>
                     <span className="text-xs text-slate-400 flex-shrink-0">
-                      {wf.template_name} — stage {wf.current_stage}/{wf.total_stages}
+                      {wf.template_name} · stage {wf.current_stage}/{wf.total_stages}
                     </span>
                   </div>
                   <div className="flex items-center gap-3">

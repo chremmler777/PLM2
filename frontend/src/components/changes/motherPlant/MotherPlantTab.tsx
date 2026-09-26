@@ -157,11 +157,20 @@ function InformTeam({ change, state, departments, onDone }: {
   const informed = useMemo(() => new Set(state.receipts.map((r) => r.department_id)), [state.receipts])
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [message, setMessage] = useState('')
-  // Pre-pick the default list (physical-part routing) once, minus the
-  // departments already informed.
-  const defaultsKey = state.default_department_ids.join(',')
+  // The scoping record says who is informed: its departments are the
+  // default. Without one, the physical-part routing is.
+  const { data: meetings = [] } = useQuery({
+    queryKey: ['change-meetings', change.id],
+    queryFn: () => changesApi.listMeetings(change.id),
+    enabled: change.status === 'scoping',
+  })
+  const scoped = meetings[meetings.length - 1]?.selected_department_ids ?? []
+  const fromScoping = scoped.length > 0
+  const defaults = fromScoping ? scoped : state.default_department_ids
+  // Pre-pick the default list once, minus the departments already informed.
+  const defaultsKey = defaults.join(',')
   useEffect(() => {
-    setPicked(new Set(state.default_department_ids.filter((d) => !informed.has(d))))
+    setPicked(new Set(defaults.filter((d) => !informed.has(d))))
   }, [defaultsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = useMutation({
@@ -217,7 +226,9 @@ function InformTeam({ change, state, departments, onDone }: {
       {state.can_send && active.length > 0 && (
         <div className="mt-4 border-t border-slate-700 pt-3 space-y-2" data-testid="mother-plant-send">
           <p className="text-xs text-slate-400">
-            {state.receipts.length === 0 ? 'Departments to inform (preselected: the physical-part routing)' : 'Inform another department'}
+            {state.receipts.length > 0 ? 'Inform another department'
+              : fromScoping ? 'Departments to inform (preselected: the scoping record)'
+                : 'Departments to inform (preselected: the physical-part routing)'}
           </p>
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
             {active.map((d) => (

@@ -50,6 +50,14 @@ export const changesApi = {
   stageState: (id: number) =>
     client.get<StageStateResponse>(`/v1/changes/${id}/stage-state`).then((r) => r.data),
 
+  /** The cockpit in one request: stage-state, my-actions, gates, transition
+   *  deviations and concerns, each exactly as its own endpoint returns it. */
+  cockpit: (id: number) =>
+    client.get<{
+      change_id: number; stage_state: StageStateResponse; my_actions: MyActionsResponse
+      gates: Gate[]; deviations: TransitionDeviation[]; concerns: ChangeConcern[]
+    }>(`/v1/changes/${id}/cockpit`).then((r) => r.data),
+
   /** Make an impacted item the lead; the composed title follows it. */
   makeLead: (id: number, itemId: number) =>
     client.post(`/v1/changes/${id}/impacted-items/${itemId}/make-lead`).then((r) => r.data),

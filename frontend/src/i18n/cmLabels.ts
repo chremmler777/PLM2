@@ -60,6 +60,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl.evidenceOk': { de: '3D-Nachweis vorhanden', en: '3D evidence present' },
   'impl.evidenceMissing': { de: '3D-Nachweis fehlt', en: '3D evidence missing' },
   'impl.noGeometry': { de: 'Keine Geometrieänderung', en: 'No geometry change' },
+  'impl.noGeometryReason': { de: 'Warum ändert diese Revision die Geometrie nicht? (Pflicht, protokolliert)', en: 'Why does this revision not change the geometry? (required, audited)' },
   'impl.signNoGeometry': { de: 'Keine Geometrieänderung bestätigen', en: 'Sign no geometry change' },
   'impl.stage': { de: 'Stufe', en: 'Stage' },
   'impl.noRevision': { de: 'Noch keine ECN-Revision (Kickoff ausstehend)', en: 'No ECN revision yet (kickoff pending)' },
@@ -154,6 +155,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'mp.addDocument': { de: 'Dokument von {p} hinzufügen', en: 'Add a document from {p}' },
   'mp.attachTiming': { de: 'Terminplan von {p} anhängen', en: 'Attach the timing from {p}' },
   'mp.infoHint': { de: 'Jedem Team, das handeln muss, sagen, was {p} geändert hat. Die Freigabe wartet, bis die Information verschickt ist.', en: 'Tell every team that has to act what {p} changed. Approval waits until the information is sent.' },
+  'mp.approveBody': { de: 'Die Go-Entscheidung wird festgehalten: der SOP von {p} wird der Freigabetermin, und die Detailplanung beginnt auf dem Timing-Tab mit deren Terminplan.', en: 'The go decision is recorded: the SOP from {p} becomes the release deadline, and the detailed timing starts on the Timing tab from their timing.' },
+  'mp.approveClear': { de: 'Der betroffene Umfang ist bestätigt und das Team ist informiert.', en: 'The impacted set is locked and the team is informed.' },
+  'mp.sendInfo': { de: 'Information an das Team senden', en: 'Send information to the team' },
+  'mp.sendInfoHint': { de: 'Auf dem Tab {p}: jede Abteilung bestätigt "Gelesen und verstanden". Die Freigabe wartet, bis die Information verschickt ist.', en: 'On the {p} tab: each department confirms "Read and understood". Approval waits until the information is sent.' },
+  'mp.scopingHint': { de: '{p} hat Bewertung und Angebot gemacht: hier steht, welche Abteilungen informiert werden. Keine Bewertung, kein Kostenträger.', en: '{p} did the assessment and the offer: this record says which departments are informed. No assessment, no cost carrier.' },
+  'mp.informDepartments': { de: 'Zu informierende Abteilungen', en: 'Departments to inform' },
+  'mp.informSummary': { de: '{n} zu informieren', en: '{n} to inform' },
   'mp.attachFailed': { de: '{x} konnte nicht angehängt werden. Im Tab {p} hinzufügen.', en: 'Could not attach {x}. Add it on the {p} tab.' },
   'kickoff.title': {
     de: 'Für den Start ins Scoping fehlt noch:',
@@ -185,6 +193,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.blocking': { de: 'Blockiert durch', en: 'Blocked by' },
   'cockpit.next': { de: 'Nächster Schritt', en: 'Next step' },
   'cockpit.nothingBlocking': { de: 'Nichts blockiert', en: 'Nothing blocking' },
+  'cockpit.worthKnowing': { de: 'Gut zu wissen', en: 'Worth knowing' },
   'cockpit.lead': { de: 'Verantwortlich (Lead)', en: 'Lead' },
   'cockpit.pendingDeviations': { de: 'Offene Abweichungen', en: 'Pending deviations' },
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
@@ -580,8 +589,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'costing.yourBucket': { de: 'Ihr Fachbereich', en: 'Your department' },
   'costing.others': {
-    de: '{n} weitere Fachbereiche erfassen ihre Kosten.',
-    en: '{n} other departments are costing their part.',
+    de: '{n} weitere(r) Fachbereich(e) erfassen noch ihre Kosten.',
+    en: '{n} other department{s} still costing their part.',
   },
   // Cost positions — what a department books against the change, one row each.
   'costpos.title': { de: 'Kostenpositionen', en: 'Cost positions' },
@@ -1048,6 +1057,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Bis zur Entscheidung gilt die bisherige Zuordnung: hinzugefügte Abteilungen sehen ihre Aufgabe bereits, zu entfernende bleiben eingebunden. Die Änderung kann bis dahin nicht in die Kalkulation.',
     en: 'Until this is decided, added departments already see their task and departments up for removal stay on the hook. The change cannot move to costing until then.',
   },
+  'routingDev.leadActingAs': { de: 'Sie agieren als {x}: zurückwechseln, um als Change Lead zu entscheiden', en: 'You are acting as {x}: switch back to decide as change lead' },
+  'routingDev.switchBack': { de: 'Zurückwechseln', en: 'Switch back' },
   'routingDev.waitingForLead': { de: 'Entscheidung liegt beim Change Lead.', en: 'Waiting for the change lead to decide.' },
   'routingDev.addBlocked': {
     de: 'Erst die offene Routing-Änderung entscheiden.',
@@ -1711,6 +1722,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'What changes, why, and what did the customer send?',
   },
   'start.optional': { de: '(optional)', en: '(optional)' },
+  'start.required': { de: '(Pflicht)', en: '(required)' },
+  'start.descriptionPlaceholderPlant': {
+    de: 'Was ändert sich und warum, wie vom Werk beschrieben?',
+    en: 'What changes and why, as the plant described it?',
+  },
+  'start.descriptionPlantHint': {
+    de: 'Die Übergabe an die Klärung braucht sie.',
+    en: 'The hand-over to scoping needs it.',
+  },
   'start.quoteDeadlineHint': {
     de: 'Bis wann der Kunde das Angebot erwartet. Später im Status änderbar.',
     en: 'When the customer expects the offer. Can be changed later on the Status card.',
@@ -1784,6 +1804,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'meeting.costCarrierFlip': {
     de: 'Das ändert den Kostenträger von {from} auf {to}. Die Änderung wird protokolliert und der Vertrieb benachrichtigt.',
     en: 'This changes the cost carrier from {from} to {to}. The change is audited and Sales is notified.',
+  },
+  'meeting.impactNotLocked': {
+    de: 'Erst den betroffenen Umfang bestätigen',
+    en: 'Lock the impacted set first, on the Impacted tab',
   },
   'meeting.costCarrierMissing': {
     de: 'Erst den Kostenträger festlegen',
@@ -1970,6 +1994,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'description.none': { de: "Keine Beschreibung", en: "No description" },
   'description.frozen': { de: "Bei der Übergabe ins Scoping festgeschrieben; weitere Überlegungen gehören in den Mailverlauf.", en: "Fixed at the hand-over to scoping; later thinking goes in the mail thread." },
   'description.readOnly': { de: "Vertrieb, die Änderungsleitung oder ein Admin schreiben die Beschreibung.", en: "Sales, the change lead or an admin write the description." },
+  'description.readOnlyPlant': { de: "Projektmanagement, die Änderungsleitung oder ein Admin schreiben die Beschreibung.", en: "Project Management, the change lead or an admin write the description." },
   'description.discard': { de: "Verwerfen", en: "Discard" },
   'description.unsaved': { de: "Nicht gespeichert", en: "Unsaved changes" },
   'description.savedState': { de: "Gespeichert", en: "Saved" },

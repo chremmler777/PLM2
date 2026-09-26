@@ -339,7 +339,7 @@ export default function PaintsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Paint Catalog</h1>
-          <p className="text-slate-400 text-sm mt-1">Master data for paints — link from any part's paint setup</p>
+          <p className="text-slate-400 text-sm mt-1">Master data for paints: link from any part's paint setup</p>
         </div>
         <button
           onClick={() => setShowNewModal(true)}
@@ -411,11 +411,11 @@ export default function PaintsPage() {
                       <td className="px-4 py-3 text-slate-300">
                         <div className="flex items-center gap-2">
                           <ColourSwatch hex={paint.colour_hex} code={paint.colour_code} />
-                          {paint.colour_code || '—'}
+                          {paint.colour_code || '-'}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-300">{paint.supplier_text || '—'}</td>
-                      <td className="px-4 py-3 text-slate-300">{paint.spec_reference || '—'}</td>
+                      <td className="px-4 py-3 text-slate-300">{paint.supplier_text || '-'}</td>
+                      <td className="px-4 py-3 text-slate-300">{paint.spec_reference || '-'}</td>
                       <td className="px-4 py-3">
                         {paint.is_active ? (
                           <span className="text-green-400 text-xs">Active</span>

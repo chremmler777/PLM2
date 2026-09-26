@@ -144,8 +144,8 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
                     <div className="flex gap-1"><dt className="text-slate-500">Version</dt><dd className="font-mono text-slate-300">v{inst.version}</dd></div>
                     {inst.implements && (
                       <div className="flex gap-1"><dt className="text-slate-500">Implements</dt><dd className="font-mono text-slate-300">{inst.implements}</dd></div>)}
-                    <div className="flex gap-1"><dt className="text-slate-500">Owner</dt><dd className="text-slate-300">{inst.owner_name ?? '—'}</dd></div>
-                    <div className="flex gap-1"><dt className="text-slate-500">Updated</dt><dd className="text-slate-300">{fmtDate(inst.updated_at)} by {inst.updated_by_name ?? '—'}</dd></div>
+                    <div className="flex gap-1"><dt className="text-slate-500">Owner</dt><dd className="text-slate-300">{inst.owner_name ?? '-'}</dd></div>
+                    <div className="flex gap-1"><dt className="text-slate-500">Updated</dt><dd className="text-slate-300">{fmtDate(inst.updated_at)} by {inst.updated_by_name ?? '-'}</dd></div>
                   </dl>
                   {inst.references.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">

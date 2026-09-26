@@ -13,6 +13,7 @@ import {
   defaultLevel, detectedIndex, inferFileType, nextMajorName, nextProposalName,
   type ParsedRow, type UploadLevel,
 } from '../../lib/uploadLevel';
+import DateInput from '../gantt/DateInput'
 
 export interface UploadDialogProps {
   open: boolean;
@@ -262,7 +263,7 @@ export default function UploadDialog(props: UploadDialogProps) {
                 ))}
               </div>
               <label className="block text-sm text-slate-400">Received on
-                <input aria-label="Received on" type="date" value={receivedAt} disabled={busy} onChange={(e) => setReceivedAt(e.target.value)} className={inputCls} />
+                <DateInput aria-label="Received on" value={receivedAt} disabled={busy} onChange={setReceivedAt} className={inputCls} />
               </label>
               <label className="block text-sm text-slate-400">Customer index
                 <input aria-label="Customer index" value={index} disabled={busy} onChange={(e) => setIndex(e.target.value)} placeholder="optional" className={inputCls} />
