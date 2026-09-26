@@ -6,11 +6,17 @@ import { STATUS_LABELS, STATUS_PILL, stepPosition } from '../lib/changeStatus';
 import { projectLabel } from '../lib/project';
 import { changeTypeLabel, priorityLabel } from '../lib/humanLabels';
 import { endLabel, endStateOf, hasEnded } from '../lib/transitionRights';
-import { daysUntil } from '../lib/format';
+import { daysUntil, formatCalendarDate } from '../lib/format';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
-import { StageResponsibleBadge } from '../components/changes/StageResponsibleBadge';
+import { StageResponsibleBadge, stageResponsibleKey } from '../components/changes/StageResponsibleBadge';
+import ColumnHeader from '../components/common/ColumnHeader';
+import TableFilterBar from '../components/common/TableFilterBar';
+import {
+  activeFilterCount, applyTableState, ariaSort, nextSort, readTableState, withFilter, writeTableState,
+  type ColumnFilter, type FilterColumnDef, type TableState,
+} from '../components/common/tableFilters';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import EmptyState from '../components/common/EmptyState';
@@ -52,6 +58,42 @@ const actionRank = (c: ChangeRequest, mine: boolean): number => {
   return overdue ? 2 : 3;
 };
 
+/** Workflow order of the statuses, for sorting the Status column. */
+const STATUS_ORDER = Object.keys(STATUS_LABELS);
+
+const statusText = (c: ChangeRequest): string => endLabel(c) ?? STATUS_LABELS[c.status] ?? c.status;
+
+/** Who holds the change now: the server's word, else the stage's role. */
+const ownerText = (c: ChangeRequest): string => {
+  if (endStateOf(c)) return '';
+  if (c.stage_owner) return c.stage_owner;
+  const key = stageResponsibleKey(c.status, c.origin);
+  return key ? t(key) : '';
+};
+
+/** Excel-like sort and filter per column (spec: the change list). The keys
+ *  are the URL names: f.<key> for a value filter, csort=<key>:asc|desc. */
+const COLUMNS: FilterColumnDef<ChangeRequest>[] = [
+  { key: 'project', label: 'Project', kind: 'values',
+    value: (c) => projectLabel(c.project_number, c.project_name) },
+  { key: 'number', label: 'Number', kind: 'values', value: (c) => c.change_number, filterable: false },
+  { key: 'title', label: 'Title', kind: 'values', value: (c) => c.title, filterable: false },
+  { key: 'type', label: 'Type', kind: 'values', value: (c) => c.change_type,
+    display: (c) => changeTypeLabel(c.change_type) },
+  { key: 'status', label: 'Status', kind: 'values', value: (c) => c.status, display: statusText,
+    // workflow order, ended changes after the running ones
+    sortValue: (c) => (endStateOf(c) ? 100 : 0) + Math.max(0, STATUS_ORDER.indexOf(c.status)) },
+  { key: 'owner', label: t('changes.owner'), kind: 'values', value: ownerText },
+  { key: 'priority', label: 'Priority', kind: 'values', value: (c) => c.priority,
+    display: (c) => priorityLabel(c.priority), sortValue: (c) => PRIORITY_RANK[c.priority] ?? 9 },
+  { key: 'deadline', label: 'Deadline', kind: 'values', value: (c) => activeDue(c),
+    display: (c) => { const d = activeDue(c); return d ? formatCalendarDate(d) : ''; } },
+  { key: 'progress', label: 'Progress', kind: 'number', filterable: false,
+    value: (c) => { const p = stepPosition(c.status, c.customer_relevant, c.origin); return p ? p.index + 1 : null; },
+    sortValue: (c) => { const p = stepPosition(c.status, c.customer_relevant, c.origin); return p ? (p.index + 1) / p.total : null; } },
+];
+const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<string, FilterColumnDef<ChangeRequest>>;
+
 export default function ChangesPage() {
   const [showCreate, setShowCreate] = useState(false);
   // Every filter lives in the URL, so Back and a shared link keep them.
@@ -76,12 +118,21 @@ export default function ChangesPage() {
     }, { replace: true });
   };
 
+  // Column sort and filters, in the URL next to the list's own parameters.
+  const table: TableState = useMemo(() => readTableState(searchParams, COLUMNS), [searchParams]);
+  const setTable = (next: TableState) =>
+    setSearchParams((prev) => writeTableState(prev, next), { replace: true });
+  const toggleSort = (key: string) => setTable({ ...table, sort: nextSort(table.sort, key) });
+  const setFilter = (key: string, f: ColumnFilter | null) => setTable(withFilter(table, key, f));
+  const filterCount = activeFilterCount(table);
+  const sortCol = table.sort ? COL[table.sort.key] : undefined;
+
   const { data, isLoading } = useQuery({
     queryKey: ['changes', statusFilter],
     queryFn: () => changesApi.list(statusFilter ? { status: statusFilter } : {}),
   });
 
-  const shown = useMemo(() => {
+  const listed = useMemo(() => {
     const all = Array.isArray(data) ? data : [];
     const q = query.trim().toLowerCase();
     const mine = (c: ChangeRequest) =>
@@ -102,10 +153,20 @@ export default function ChangesPage() {
     }
     return rows;
   }, [data, query, mineOnly, intakeOnly, sort, userId]);
+  // A column sort reorders the list's order stably: ties keep "needs action first".
+  const shown = useMemo(() => applyTableState(listed, COLUMNS, table), [listed, table]);
 
-  const filtered = statusFilter !== '' || query.trim() !== '' || mineOnly || intakeOnly;
+  const filtered = statusFilter !== '' || query.trim() !== '' || mineOnly || intakeOnly || filterCount > 0;
+  const head = (key: string, extra = '', title?: string) => (
+    <th className={`px-4 py-3 ${extra}`} aria-sort={ariaSort(table, key)}>
+      <ColumnHeader col={COL[key]} rows={listed} cols={COLUMNS} state={table} title={title}
+        onToggleSort={toggleSort} onFilter={setFilter} />
+    </th>
+  );
   // Type only earns a column when the list actually mixes types.
-  const showType = new Set(shown.map((c) => c.change_type)).size > 1;
+  // Counted before the column filters, so filtering by type keeps its column.
+  const showType = new Set(listed.map((c) => c.change_type)).size > 1
+    || !!table.filters.type || table.sort?.key === 'type';
   const cols = showType ? 9 : 8;
 
   return (
@@ -158,14 +219,31 @@ export default function ChangesPage() {
           data-testid="changes-sort"
           aria-label={t('changes.sort')}
           className="border border-slate-700 rounded-lg px-3 py-2 text-sm"
-          value={sort}
-          onChange={(e) => setParam('sort', e.target.value === 'action' ? null : e.target.value)}
+          value={sortCol ? 'column' : sort}
+          onChange={(e) => {
+            // Picking a list order drops the column sort, which otherwise wins.
+            const value = e.target.value;
+            if (value === 'column') return;
+            setSearchParams((prev) => {
+              const next = writeTableState(prev, { ...table, sort: null });
+              if (value === 'action') next.delete('sort'); else next.set('sort', value);
+              return next;
+            }, { replace: true });
+          }}
         >
+          {sortCol && table.sort && (
+            <option value="column">
+              By {sortCol.label}, {table.sort.dir === 'asc' ? 'ascending' : 'descending'}
+            </option>
+          )}
           <option value="action">{t('changes.sortAction')}</option>
           <option value="recent">{t('changes.sortRecent')}</option>
           <option value="overdue">{t('changes.sortOverdue')}</option>
         </select>
       </div>
+
+      <TableFilterBar className="mb-3" count={filterCount} shown={shown.length} total={listed.length}
+        onClear={() => setTable({ ...table, filters: {} })} />
 
       {isLoading ? (
         <p className="text-slate-400">Loading…</p>
@@ -174,15 +252,15 @@ export default function ChangesPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-800 text-left text-slate-400">
               <tr className="whitespace-nowrap">
-                <th className="px-4 py-3">Project</th>
-                <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3 w-full">Title</th>
-                {showType && <th className="px-4 py-3">Type</th>}
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">{t('changes.owner')}</th>
-                <th className="px-4 py-3" title={t('changes.priorityMediumHint')}>Priority</th>
-                <th className="px-4 py-3">Deadline</th>
-                <th className="px-4 py-3">Progress</th>
+                {head('project')}
+                {head('number')}
+                {head('title', 'w-full')}
+                {showType && head('type')}
+                {head('status')}
+                {head('owner')}
+                {head('priority', '', t('changes.priorityMediumHint'))}
+                {head('deadline')}
+                {head('progress')}
               </tr>
             </thead>
             <tbody>

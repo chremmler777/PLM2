@@ -26,8 +26,16 @@ export interface Column {
   render?: (row: CostSheetRow, ctx: SheetContext) => ReactNode
   /** Hidden in the add-row line (derived columns). */
   derived?: boolean
+  /** An empty value is a gap to fill (an empty rate): shown in amber. */
+  emptyWarn?: boolean
   /** Disabled for this row (e.g. flat price on a components row). */
   inactive?: (row: CostSheetRow) => boolean
+  /** The row field naming a money column's currency (default 'currency'). */
+  currencyKey?: string
+  /** A short caption under the cell, with its explanation (title). */
+  hint?: (row: CostSheetRow) => { text: string; title: string } | null
+  /** What an edit of this cell sends (default { [key]: value }). */
+  toChanges?: (value: unknown, row: CostSheetRow) => CostSheetRow
 }
 
 export interface SheetContext {
@@ -38,25 +46,54 @@ export interface SheetContext {
 }
 
 export const SECTION_LABELS: Record<CostSheetSection, string> = {
-  rates: 'Positions',
+  rates: 'Rates',
   machines: 'Machines',
   sampling: 'Sampling',
   overheads: 'Overheads',
 }
 
 export const SECTION_EXPORT: Record<CostSheetSection, string> = {
-  rates: 'Positions',
+  rates: 'Rates',
   machines: 'Machines',
   sampling: 'Sampling',
   overheads: 'Overheads',
 }
 
 export const SECTION_BLURB: Record<CostSheetSection, string> = {
-  rates: 'Hourly rate per department, optionally per position and plant. The most specific row wins: department + position + plant, then department + position, then department + plant, then the department default.',
+  rates: 'One hourly rate per department and plant. A plant row beats the all-plants row. An empty rate means no rate yet: costing shows "No rate in the cost sheet" until it is filled.',
   machines: 'Hourly machine rate per machine class, or for one named press. A named press beats its class; a plant row beats the all-plants row.',
   sampling: 'Price of one sampling trial per machine class: a flat price, or setup and run hours on the machine plus labour hours plus handling.',
   overheads: 'Personnel overhead on top of the position rate. Most specific wins: department + plant, then department, then plant, then the whole organization.',
 }
+
+/** A two-currency plant's row: the rate in the other currency is calculated
+ * at the version's exchange rate; the caption says which one was typed. */
+function calculatedHint(row: CostSheetRow, side: 'quote' | 'local') {
+  const local = row.local_currency as string | null | undefined
+  if (!local || !row.entered_in || row.entered_in === side) return null
+  const from = side === 'quote' ? local : (row.currency as string)
+  return {
+    text: 'calculated',
+    title: `Calculated from the ${from} rate at this version's exchange rate. The ${from} number is kept as typed.`,
+  }
+}
+
+/** The rate in the plant's local currency (Silao: MXN next to USD). Typed
+ * here, the number is kept and the quote rate is calculated from it. Empty
+ * for rows without a second currency. */
+export function localRateColumn(): Column {
+  return {
+    key: 'local_rate', label: 'Local / h', kind: 'money', numeric: true, width: 'w-32',
+    currencyKey: 'local_currency', derived: true,
+    title: 'The rate in the plant\'s local currency, at this version\'s exchange rate. Type in either column.',
+    inactive: (r) => !r.local_currency,
+    hint: (r) => calculatedHint(r, 'local'),
+    toChanges: (value, row) => ({ entered_rate: value, entered_currency: row.local_currency }),
+  }
+}
+
+/** What an empty department rate reads as, everywhere on the sheet. */
+export const NO_RATE = 'No rate'
 
 const MISSING_LABEL: Record<string, string> = {
   machine_rate: 'no machine rate',
@@ -74,14 +111,16 @@ function overheadLabel(kind: string, value: number, currency = 'EUR'): string {
 export const COLUMNS: Record<CostSheetSection, Column[]> = {
   rates: [
     { key: 'department_id', label: 'Department', kind: 'department', width: 'min-w-[11rem]' },
-    { key: 'position', label: 'Position', kind: 'text', empty: 'Default', width: 'min-w-[9rem]',
-      title: 'Empty = the department default' },
     { key: 'plant_id', label: 'Plant', kind: 'plant', empty: 'All plants', width: 'min-w-[9rem]' },
-    { key: 'hourly_rate', label: 'Rate / h', kind: 'money', numeric: true, width: 'w-32' },
+    { key: 'hourly_rate', label: 'Rate / h', kind: 'money', numeric: true, width: 'w-32',
+      empty: NO_RATE, emptyWarn: true, hint: (r) => calculatedHint(r, 'quote') },
     { key: 'effective_rate', label: 'Effective / h', kind: 'computed', numeric: true, derived: true, width: 'min-w-[8.5rem]',
       title: 'Rate plus the most specific personnel overhead at this row\'s plant',
       render: (row) => {
         const r = row as unknown as PositionRate
+        if (r.hourly_rate === null || r.hourly_rate === undefined) {
+          return <span className="text-slate-500">-</span>
+        }
         return (
           <span className="inline-flex flex-col items-end leading-tight">
             <span className="whitespace-nowrap text-slate-100 tabular-nums">{formatMoney(r.effective_rate, r.currency)}</span>
@@ -106,7 +145,8 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
     { key: 'plant_id', label: 'Plant', kind: 'plant', empty: 'All plants', width: 'min-w-[9rem]' },
     { key: 'tonnage_min', label: 'From t', kind: 'number', numeric: true, width: 'w-20' },
     { key: 'tonnage_max', label: 'To t', kind: 'number', numeric: true, width: 'w-20' },
-    { key: 'hourly_rate', label: 'Rate / h', kind: 'money', numeric: true, width: 'w-32' },
+    { key: 'hourly_rate', label: 'Rate / h', kind: 'money', numeric: true, width: 'w-32',
+      hint: (r) => calculatedHint(r, 'quote') },
     { key: 'currency', label: 'Cur.', kind: 'currency', width: 'w-20 min-w-[4.75rem]' },
     { key: 'note', label: 'Note', kind: 'text', width: 'min-w-[10rem]' },
   ],
@@ -126,9 +166,6 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
       title: 'Labour hours per trial', inactive: (r) => r.mode !== 'components' },
     { key: 'labour_department_id', label: 'Labour dept.', kind: 'department_optional', empty: '-',
       width: 'min-w-[8rem]', inactive: (r) => r.mode !== 'components' },
-    { key: 'labour_position', label: 'Position', kind: 'text', empty: 'Default',
-      width: 'min-w-[6rem]', title: 'Which position rate prices the labour hours',
-      inactive: (r) => r.mode !== 'components' },
     { key: 'handling_cost', label: 'Handling', kind: 'money', numeric: true, width: 'min-w-[5.75rem]',
       inactive: (r) => r.mode !== 'components' },
     { key: 'computed_price', label: 'Per trial', kind: 'computed', numeric: true, derived: true, width: 'min-w-[7.5rem]',
@@ -171,7 +208,7 @@ export function blankRow(section: CostSheetSection, ctx: SheetContext): CostShee
   const firstClass = ctx.machineClasses.find((c) => c.is_active)?.id ?? null
   switch (section) {
     case 'rates':
-      return { department_id: firstDept, position: null, plant_id: null, hourly_rate: null }
+      return { department_id: firstDept, plant_id: null, hourly_rate: null }
     case 'machines':
       return { machine_class_id: firstClass, plant_id: null, hourly_rate: null }
     case 'sampling':
@@ -192,14 +229,14 @@ export function plantName(ctx: SheetContext, id: unknown): string {
 }
 
 /** Stable reading order for a tab: department (their sort order), then
- * position (default first), then plant (all plants first). */
+ * machine class, then the named press, then plant (all plants first). */
 export function sortRows(rows: CostSheetRow[], ctx: SheetContext): CostSheetRow[] {
   const dIdx = new Map(ctx.departments.map((d, i) => [d.id, i]))
   const cIdx = new Map(ctx.machineClasses.map((c, i) => [c.id, i]))
   const key = (r: CostSheetRow): (string | number)[] => [
     r.department_id == null ? -1 : (dIdx.get(r.department_id as number) ?? 999),
     r.machine_class_id == null ? -1 : (cIdx.get(r.machine_class_id as number) ?? 999),
-    String(r.position ?? r.machine_ref ?? ''),
+    String(r.machine_ref ?? ''),
     r.plant_id == null ? '' : plantName(ctx, r.plant_id),
     r.id as number,
   ]

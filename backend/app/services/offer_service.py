@@ -1284,10 +1284,9 @@ class OfferService:
                 costing_issues.append(_issue(w["code"], w["message"]))
         outdated = None
         if old_versions:
-            outdated = (_issue(
-                "cost_sheet_outdated",
-                f"Costing used cost sheet {', '.join(f'v{v}' for v in old_versions)}, "
-                f"current is v{current_v}"))
+            from app.services.costing_rates import outdated_message
+            outdated = _issue("cost_sheet_outdated",
+                              outdated_message(old_versions, current_v))
         quote_empty = not await ChangePlanService.tasks(session, change, "quote")
         users = await ChangePlanService._user_names(
             session, [o.created_by for o in offers] + [o.sent_by for o in offers])

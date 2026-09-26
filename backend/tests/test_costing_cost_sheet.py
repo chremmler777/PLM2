@@ -109,17 +109,19 @@ async def _summation(session_factory, world):
 async def test_own_time_priced_from_the_cost_sheet_with_snapshot(
         client, admin_auth, world, session_factory):
     vid = await _version(session_factory, world["org_id"], rates=[
-        dict(department_id=world["tool"], hourly_rate=20, currency="USD"),
-        dict(department_id=world["tool"], position="Engineer", plant_id=world["home"],
+        dict(department_id=world["tool"], hourly_rate=10, currency="USD"),
+        dict(department_id=world["tool"], plant_id=world["home"],
              hourly_rate=20, currency="USD")],
         overheads=[dict(kind="percent", value=7.5)])
+    # a labour position (an older client) no longer picks a rate: the
+    # department's row at the costing plant does
     line = await _add(client, admin_auth, world, hours=5, labour_position="Engineer")
     assert line["rate"] == 21.5 and line["currency"] == "USD"
     assert line["cost_sheet_version_id"] == vid and line["cost_sheet_version"] == 1
     assert line["rate_source"] == "cost_sheet" and line["rate_is_snapshot"]
-    assert line["rate_label"] == "Cost sheet v1, Tool Engineer, Engineer, 21.50 USD/h"
+    assert line["rate_label"] == "Cost sheet v1, Tool Engineer, 21.50 USD/h"
     assert line["line_value"] == 107.5 and line["rate_missing"] is False
-    assert line["rate_match"] == "department+position+plant"
+    assert line["rate_match"] == "department+plant"
 
     summ = await _summation(session_factory, world)
     assert summ["currency"] == "USD"
@@ -127,11 +129,11 @@ async def test_own_time_priced_from_the_cost_sheet_with_snapshot(
     assert summ["cost_sheet_versions_used"] == [1]
     assert summ["warnings"] == [] and summ["unpriced_lines"] == []
 
-    # Finance publishes v2: the costed line keeps its snapshot ...
+    # v2 is published backdated over the change's creation date: the costed
+    # line keeps its snapshot ...
     await _version(session_factory, world["org_id"], version=2,
                    valid_from=date(2026, 2, 1), rates=[
-                       dict(department_id=world["tool"], position="Engineer",
-                            hourly_rate=30, currency="USD")])
+                       dict(department_id=world["tool"], hourly_rate=30, currency="USD")])
     summ = await _summation(session_factory, world)
     assert summ["totals"]["one_time_internal"] == 107.5
     assert summ["cost_sheet_current_version"] == 2
@@ -139,7 +141,8 @@ async def test_own_time_priced_from_the_cost_sheet_with_snapshot(
     res = await client.put(_url(world, f"/costing/positions/{line['id']}"),
                            json={"label": "Renamed"}, headers=admin_auth)
     assert res.json()["cost_sheet_version"] == 1
-    # ... changing the hours does, from the version valid today
+    # ... changing the hours does, from the version valid on the change's
+    # creation date
     res = await client.put(_url(world, f"/costing/positions/{line['id']}"),
                            json={"hours": 2}, headers=admin_auth)
     body = res.json()
@@ -319,10 +322,12 @@ async def test_offer_and_pnl_warn_on_an_outdated_cost_sheet(
         await s.flush()
         out = (await OfferService.serialize(s, change, [offer]))[0]
         msgs = [w["message"] for w in out["warnings"] if w["code"] == "cost_sheet_outdated"]
-        assert msgs == ["Costing used cost sheet v1, current is v2"]
+        outdated = ("Costing used cost sheet v1; this change is priced with v2 "
+                    "(valid on its creation date)")
+        assert msgs == [outdated]
         assert not any(w["code"] == "currency_mismatch" for w in out["warnings"])
         pnl = await PnlService.offer_vs_actual(s, change)
-        assert "Costing used cost sheet v1, current is v2" in pnl["warnings"]
+        assert outdated in pnl["warnings"]
         assert pnl["costing_currency"] == "USD"
 
 
@@ -331,9 +336,7 @@ async def test_offer_and_pnl_warn_on_an_outdated_cost_sheet(
 async def test_actuals_priced_on_the_booking_date(client, admin_auth, world,
                                                   session_factory):
     await _version(session_factory, world["org_id"], rates=[
-        dict(department_id=world["tool"], hourly_rate=50, currency="USD"),
-        dict(department_id=world["tool"], position="Toolmaker", hourly_rate=40,
-             currency="USD")],
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")],
         machines=[dict(machine_class="200-450 t", machine_class_id=world["big"],
                        hourly_rate=80, currency="USD")])
     await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 6, 1),
@@ -346,7 +349,8 @@ async def test_actuals_priced_on_the_booking_date(client, admin_auth, world,
             ImplementationBooking(change_id=change.id, department_id=world["tool"],
                                   hours=2, booked_by=world["admin_id"],
                                   booked_at=datetime(2026, 3, 10, 12)),
-            # v1 period, position rate + machine hours: 1 h x 40 + 2 mh x 80
+            # v1 period, a labour position (priced as its department) plus
+            # machine hours: 1 h x 50 + 2 mh x 80
             ImplementationBooking(change_id=change.id, department_id=world["tool"],
                                   hours=1, labour_position="Toolmaker",
                                   machine_class_id=world["big"], machine_hours=2,
@@ -366,9 +370,9 @@ async def test_actuals_priced_on_the_booking_date(client, admin_auth, world,
         change = await s.get(ChangeRequest, world["change_id"])
         act = await PnlService.change_actuals(s, change)
         tool = next(d for d in act["departments"] if d["department_id"] == world["tool"])
-        assert tool["actual_cost"] == 100 + 40 + 160 + 60
+        assert tool["actual_cost"] == 100 + 50 + 160 + 60
         assert tool["machine_hours"] == 2 and tool["machine_cost"] == 160
-        assert tool["rates"] == [40, 50, 60] and tool["hourly_rate"] is None
+        assert tool["rates"] == [50, 60] and tool["hourly_rate"] is None
         qa = next(d for d in act["departments"] if d["department_id"] == world["qa"])
         assert qa["unrated"] and qa["actual_cost"] == 0
         assert act["unrated_hours"] and act["currency"] == "USD"
@@ -414,7 +418,8 @@ async def test_review_task_for_finance_only(client, admin_auth, world, session_f
     body = (await client.get("/api/v1/cost-sheet/review-task", headers=admin_auth)).json()
     assert body["due"] is False and body["is_finance"] is False
     # a fresh version: not due; costing context carries the stale state
-    await _version(session_factory, world["org_id"], valid_from=date.today(),
+    # valid a few days back: the change (created now) is priced with it
+    await _version(session_factory, world["org_id"], valid_from=date.today() - timedelta(days=3),
                    rates=[dict(department_id=world["tool"], hourly_rate=1, currency="USD")])
     async with session_factory() as s:
         v = (await s.execute(select(CostSheetVersion))).scalars().one()
@@ -427,15 +432,94 @@ async def test_review_task_for_finance_only(client, admin_auth, world, session_f
     assert ctx["rate_source"] == "cost_sheet"
 
 
-async def test_context_lists_positions_with_rates(client, admin_auth, world, session_factory):
+async def test_context_offers_no_labour_positions(client, admin_auth, world, session_factory):
+    """One rate per department per plant (104): nothing to pick a position
+    from any more; the key stays, empty, for older clients."""
     await _version(session_factory, world["org_id"], rates=[
-        dict(department_id=world["tool"], position="Engineer", hourly_rate=1, currency="USD"),
-        dict(department_id=world["tool"], position="Technician", plant_id=world["home"],
-             hourly_rate=1, currency="USD"),
-        dict(department_id=world["tool"], position="Other plant", plant_id=world["eur"],
-             hourly_rate=1, currency="EUR")])
+        dict(department_id=world["tool"], hourly_rate=1, currency="USD"),
+        dict(department_id=world["tool"], plant_id=world["home"],
+             hourly_rate=1, currency="USD")])
     ctx = (await client.get(_url(world, "/costing/context"), headers=admin_auth)).json()
-    assert ctx["positions_by_department"][str(world["tool"])] == ["Engineer", "Technician"]
+    assert ctx["positions_by_department"] == {}
+
+
+# ---------------------------------------------------------------- pricing date
+
+async def _created_on(session_factory, world, when: datetime):
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        change.created_at = when
+        await s.commit()
+
+
+async def test_change_priced_with_the_version_valid_on_its_creation_date(
+        client, admin_auth, world, session_factory, monkeypatch):
+    """An ECR is priced with the rates valid on the day it was CREATED, never
+    the day a line is entered; later versions never move it."""
+    monkeypatch.setenv("PLM_BUSINESS_TZ", "America/New_York")
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD"),
+                          dict(department_id=world["qa"], hourly_rate=70, currency="USD")])
+    # 03:00 UTC on 1 March is still 28 February in the business timezone
+    await _created_on(session_factory, world, datetime(2026, 3, 1, 3, 0))
+    line = await _add(client, admin_auth, world, hours=2)
+    assert (line["rate"], line["cost_sheet_version"]) == (50, 1)
+    assert line["rate_on"] == "2026-02-28"
+    # v2 is in force today, but not for this change: Quality has no rate in
+    # v1, so its line stays unpriced
+    qa = await _add(client, admin_auth, world, department_id=world["qa"], hours=1)
+    assert qa["rate"] is None and qa["rate_missing"]
+    ctx = (await client.get(_url(world, "/costing/context"), headers=admin_auth)).json()
+    assert ctx["current_version"]["version"] == 1 and ctx["pricing_date"] == "2026-02-28"
+    summ = await _summation(session_factory, world)
+    assert summ["cost_sheet_current_version"] == 1
+    assert not any(w["code"] == "cost_sheet_outdated" for w in summ["warnings"])
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        assert await costing_rates.version_warning(s, change) is None
+    # a version published later for later dates never re-prices it
+    await _version(session_factory, world["org_id"], version=3, valid_from=date(2026, 5, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=99, currency="USD")])
+    res = await client.put(_url(world, f"/costing/positions/{line['id']}"),
+                           json={"hours": 3}, headers=admin_auth)
+    assert (res.json()["rate"], res.json()["cost_sheet_version"]) == (50, 1)
+    # a change created on 1 March (business time) takes v2
+    await _created_on(session_factory, world, datetime(2026, 3, 1, 15, 0))
+    res = await client.put(_url(world, f"/costing/positions/{line['id']}"),
+                           json={"hours": 4}, headers=admin_auth)
+    assert (res.json()["rate"], res.json()["cost_sheet_version"]) == (60, 2)
+
+
+async def test_booking_basis_switch_prices_actuals_on_the_creation_date(
+        world, session_factory, monkeypatch):
+    """Actuals follow the booking date by default; one constant moves them to
+    the change's creation date."""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 6, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 1, 12))
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        change.status = "in_implementation"
+        s.add(ImplementationBooking(change_id=change.id, department_id=world["tool"],
+                                    hours=2, booked_by=world["admin_id"],
+                                    booked_at=datetime(2026, 7, 1, 12)))
+        await s.commit()
+    assert costing_rates.BOOKING_PRICING_BASIS == "booking_date"
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        act = await PnlService.change_actuals(s, change)
+        tool = next(d for d in act["departments"] if d["department_id"] == world["tool"])
+        assert tool["actual_cost"] == 120
+    monkeypatch.setattr(costing_rates, "BOOKING_PRICING_BASIS", "change_created")
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, world["change_id"])
+        act = await PnlService.change_actuals(s, change)
+        tool = next(d for d in act["departments"] if d["department_id"] == world["tool"])
+        assert tool["actual_cost"] == 100
 
 
 # ---------------------------------------------------------------- 098 data fix

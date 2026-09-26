@@ -63,6 +63,7 @@ from app.api.v1.audit import router as audit_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.pnl import router as pnl_router
 from app.api.v1.cost_sheet import router as cost_sheet_router
+from app.api.v1.cost_sheet_machines import router as cost_sheet_machines_router
 
 # Module: training (ECR training record; the gate below is off by default)
 from app.api.v1.training import router as training_router, enforce_training_gate
@@ -118,6 +119,7 @@ api_router.include_router(catalog_parts_router)
 api_router.include_router(paints_router)
 api_router.include_router(reports_router)
 api_router.include_router(pnl_router)
+api_router.include_router(cost_sheet_machines_router)
 api_router.include_router(cost_sheet_router)
 api_router.include_router(training_router)
 

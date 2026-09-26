@@ -64,6 +64,8 @@ fails, nothing of 087..head stays.
 | 101 | Three steps, in this order. (1) Toccoa plant currency set to `USD`: whole-word, any-case match on `toccoa` in `plants.name` or `plants.location` (094's `US` / `USA` match misses `Toccoa, GA`); relabel only, no rate converted; not scoped by organisation (one Toccoa plant today). (2) `change_actual_costs.currency` (String(3), nullable), backfilled for every row with the change's costing currency: the plant of the change's only affected plant, else the project's plant, `EUR` when that plant has none (NULL or empty). (3) Standing effort rows (`costing_positions` of kind `internal_effort` / `support_effort`): duplicates per change, department and kind are merged, the most recently updated row kept whole (else the highest id), `costing_offers.position_id` and `change_plan_tasks.source_position_id` re-pointed to it, the others DELETED; then partial unique index `uq_costing_positions_standing`. | Yes (UPDATE plants, UPDATE change_actual_costs, UPDATE + DELETE costing_positions duplicates) | Drops the index and the currency column. Toccoa stays `USD`; merged duplicates are not restored (harmless). |
 | 102 | Plan deviation groups: new `change_plan_deviation_groups` (root block, reason, status, decision, escalation), `change_plan_deviations.group_id` (nullable, FK on Postgres, index). Backfill: every OPEN deviation is grouped with the own move that pushed it (the grouping the Timing tab already showed); rows that fit nowhere stay ungrouped. | Yes, only rows of the 087 deviation table (none on prod: plans are new) | Drops `group_id` and the groups table: group decisions and their escalation links lost; the deviations stay. |
 | 103 | `change_gate.decision` becomes nullable without a server default; seeded gates nobody touched (`decision = 'na'`, no decider, no decision time) set to NULL (undecided). A gate without `yes` still holds its transition. | Yes (UPDATE change_gate, prod rows included) | Sets every NULL back to `na`, NOT NULL again with default `na`. |
+| 105 | MachineDB presses: new `cost_sheet_machines` (synced copy, unique per org and MachineDB id), new `cost_sheet_machine_item_rates` (one rate per machine per version), `costing_positions.machine_id` (nullable FK). Guarded (skips what exists). See "MachineDB machines in the cost sheet". | No (schema only; filled by the sync) | Drops both tables and the column: per-machine rates and machine choices on lines lost; lines fall back to class pricing. |
+| 107 | `cost_sheet_machine_item_rates.entered_rate` / `entered_currency` (nullable): a per-machine rate typed in the plant's local currency (Silao: MXN), like 106 did for the rate and machine class rows. Guarded. | No (schema only) | Drops the two columns: typed local numbers lost, the rates in the quote currency stay. |
 
 Summary: nothing drops or rewrites existing business data except 093
 (origin backfill), 094 (plant currencies, cost sheet rebuild), 095
@@ -172,6 +174,100 @@ new cycle time 38.5 s", "Cm 1.85") and into the changelog as data.
 
 Future, not built: process engineering tasks will later be forwarded from
 the PDB to PLM.
+
+## MachineDB machines in the cost sheet (migration 105)
+
+**DECISION / INFRA item for the owner.** The cost sheet's Machines tab lists
+the presses from MachineDB and each can carry its own hourly rate per
+version; a costing line (machine time, sampling) that names a machine is
+priced on that rate, else on the class rate of the machine's plant.
+plm2 reads MachineDB through a sync (`POST /api/v1/cost-sheet/machines/sync`,
+button "Sync from MachineDB" for Sales, Finance, admins) into its own table
+`cost_sheet_machines`; costing only reads that copy. Without a MachineDB
+connection nothing breaks: the sync button is disabled with "Sync is off",
+the tab shows the last synced copy (empty before the first sync), and
+costing keeps pricing on class rates.
+
+Environment of `plm2-backend` (all optional; unset = sync off):
+
+| Variable | Value | Note |
+|---|---|---|
+| `MACHINEDB_API_URL` | `http://<machinedb host>:3001/v1` | the service API (`/v1`), NOT the MachineDB web UI; nginx does not expose `/v1` |
+| `MACHINEDB_SERVICE_TOKEN` | MachineDB's service token (the one TWOS and RFQ2 use) | secret: compose `.env`, never in git; never logged |
+| `MACHINEDB_TIMEOUT_S` | `10` (default) | request timeout |
+| `MACHINEDB_SYNC_ON_STARTUP` | `1` (default) | a background sync at backend start when configured; `0` turns it off. It only syncs organisations with the org setting `machinedb_enabled` = `true`, or, when no organisation has that setting, the single organisation with plants (a multi-org install syncs nothing until one is switched on). It never forces (see the guard below). |
+
+**The token travels in a header on every sync: never send it over plain
+http across a network.** Use one of:
+
+- the docker-internal network, when plm2 and MachineDB share a compose
+  project or an attached network (`http://machinedb-backend:3001/v1`: the
+  traffic never leaves the host); or
+- https: a TLS-terminating reverse-proxy route on the MachineDB host that
+  forwards `/v1` to port 3001 (`MACHINEDB_API_URL=https://<machinedb host>/v1`).
+
+A published `http://<host>:3001/v1` between two hosts is a fallback only
+for a short test, firewalled to the plm2 host, with the token rotated
+afterwards.
+
+Network route (the infra part): on prod, plm2 and MachineDB run on
+DIFFERENT hosts. MachineDB is on `10.105.205.55` (MIGRATION-PLAN.md). The
+plm2 host must reach MachineDB's `/v1` there. Recommended: an https route
+on the MachineDB host (reverse proxy with TLS, forwarding `/v1` with the
+bearer header to port 3001), `MACHINEDB_API_URL=https://<machinedb host>/v1`.
+Plain `http://10.105.205.55:3001/v1` sends the token readable on the LAN:
+only as a firewalled stopgap (see above). Check from the plm2 host before
+the go:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $MACHINEDB_SERVICE_TOKEN" \
+  https://<machinedb host>/v1/machines     # 200 = reachable and token accepted
+```
+
+Locally (dev compose) the route is the docker network: `http://machinedb-backend:3001/v1`
+with `${MACHINEDB_SERVICE_TOKEN}`, as TWOS uses it. The ecr dev container
+(`plm2-ecr-backend`) does not have these variables yet.
+
+First sync, after the recreate (step 4) and the smoke checks:
+
+1. Open Cost sheet > Machines as Sales, Finance or an admin, click "Sync from
+   MachineDB" (or wait for the startup sync) and read the report: new,
+   changed, retired or scrapped, and machines without a plant.
+2. Plant mapping: MachineDB `usa` maps to the plant named Toccoa / USA,
+   `mexico` to Silao Mexico, `weissenburg` to Weissenburg (by name, only when
+   exactly one plant matches). `solingen` and `serbia` stay unmapped until
+   someone maps them on the tab (org setting `machinedb_plant_map`); nothing
+   is guessed. The tab's "Plant mapping" lists every MachineDB plant in use
+   with its plm2 plant and why (by plant name, mapped by hand, kept
+   unmapped by hand). Saving sends only the plants changed and is merged
+   into the stored mapping; "Use default" drops one hand mapping.
+3. Finance enters per-machine rates in the next draft only where a machine
+   differs from its class; the class rates stay the fallback. A rate
+   defaults to the currency of the machine's plant; an unmapped machine
+   needs its currency chosen. At a two-currency plant (Silao) the rate can
+   be typed in the local currency (Local / h, migration 107); the other one
+   is calculated at the version's exchange rate, like the rates tab. The
+   XLSX export has a "Machine rates" sheet (CSV: `section=MachineRates`).
+
+Currency in costing: a machine's own rate, or the class rate at the
+machine's plant, in another currency than the costing plant is converted
+at the version's exchange rate and the rate label says so ("converted from
+100.00 EUR at ..."); without that exchange rate the line shows "No rate"
+(machine rate in other currency) and the P&L flags the change as not fully
+priced. Nothing is added across currencies.
+
+Sync guard: a MachineDB answer that looks broken is refused (409) and
+recorded as the last sync attempt, the local copy untouched: an empty list
+while machines are on record, more than half of the rows unreadable, or
+more than half of the machines on record retired at once. The tab then
+offers "Sync anyway" to Sales, Finance and admins (a forced sync,
+`POST .../sync?force=true`); the startup sync never forces. A manual sync
+only ever touches the caller's organisation. Two syncs (or two saves of
+the same machine rate) at the same time: the second gets 409 and keeps
+nothing.
+
+Local dry run (2026-09-26, rolled back): 53 machines (usa 26, mexico 27),
+all mapped, a second sync reports nothing new or changed.
 
 ## Preflight (local, before the go)
 

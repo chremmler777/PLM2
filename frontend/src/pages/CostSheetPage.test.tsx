@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -7,7 +7,7 @@ import CostSheetPage from './CostSheetPage'
 import PublishDialog from '../components/costSheet/PublishDialog'
 import PlantCurrencies from '../components/costSheet/PlantCurrencies'
 import SheetCell from '../components/costSheet/SheetCell'
-import { COLUMNS, sortRows, type SheetContext } from '../components/costSheet/columns'
+import { COLUMNS, SECTION_LABELS, sortRows, type SheetContext } from '../components/costSheet/columns'
 import { diffCount } from '../components/costSheet/DiffPanel'
 import { costSheetApi } from '../api/costSheet'
 import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, addDaysIso, formatDate, todayIso } from '../lib/format'
@@ -15,7 +15,7 @@ import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, addDaysIso, formatDate, todayI
 vi.mock('../api/costSheet', () => ({
   costSheetApi: {
     overview: vi.fn(), version: vi.fn(), diff: vi.fn(), deleteDraft: vi.fn(),
-    createDraft: vi.fn(), exportUrl: () => '#',
+    createDraft: vi.fn(), addMissingDepartments: vi.fn(), addRow: vi.fn(), exportUrl: () => '#',
   },
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -52,6 +52,74 @@ describe('CostSheetPage', () => {
     expect(screen.getByText('boom')).toBeDefined()
     fireEvent.click(screen.getAllByRole('button', { name: 'Discard draft' })[0])
     expect(await screen.findByText('Discard draft version 2?')).toBeDefined()
+  })
+})
+
+describe('CostSheetPage rates tab (one rate per department and plant)', () => {
+  afterEach(cleanup)
+  const depts = [...ctx.departments, { id: 5, name: 'Logistics', is_active: false }]
+  const rate = (id: number, department_id: number, plant_id: number | null, hourly_rate: number | null) => ({
+    id, department_id, plant_id, hourly_rate, position: null, currency: 'USD', min_factor: null, note: null,
+    effective_rate: hourly_rate, overhead: null,
+  })
+  const draft = {
+    id: 9, version: 2, status: 'draft', valid_from: null, valid_to: null, note: null,
+    based_on_version_id: null, created_at: null, published_at: null, published_by: null,
+    rates: [rate(1, 1, null, 50), rate(2, 2, 7, null), rate(3, 5, 7, 40), rate(4, 1, 7, null)],
+    machine_rates: [], sampling_rates: [], overheads: [],
+  }
+  const open = async () => {
+    vi.mocked(costSheetApi.overview).mockResolvedValue({ ...overview, departments: depts } as never)
+    vi.mocked(costSheetApi.version).mockResolvedValue(draft as never)
+    wrap(<CostSheetPage />)
+    await screen.findByTestId('missing-rate-count')
+  }
+  const rowCount = () => screen.getAllByRole('row').length - 1     // minus the header
+
+  it('hides retired departments until asked, and counts the rows without a rate', async () => {
+    await open()
+    expect(screen.getByRole('tab', { name: /Rates/ })).toBeDefined()
+    expect(rowCount()).toBe(3)
+    expect(screen.getByTestId('missing-rate-count').textContent).toContain('2 rows have no rate yet')
+    fireEvent.click(within(screen.getByTestId('show-retired')).getByRole('checkbox'))
+    expect(rowCount()).toBe(4)
+    expect(screen.getAllByText('Retired').length).toBe(1)
+    // Only the rows still to fill.
+    fireEvent.click(within(screen.getByTestId('missing-rate-count')).getByRole('checkbox'))
+    expect(rowCount()).toBe(2)
+  })
+
+  it('adds the missing departments with empty rates', async () => {
+    await open()
+    vi.mocked(costSheetApi.addMissingDepartments).mockResolvedValue({ ...draft, added: 2 } as never)
+    fireEvent.click(screen.getByTestId('add-missing-departments'))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('2 rows added, rates empty'))
+    expect(costSheetApi.addMissingDepartments).toHaveBeenCalledWith(9)
+  })
+
+  it('says a department and plant already has a row before sending the add', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: '+ Add row' }))
+    // The blank line starts at the first active department (Tooling), all plants: taken.
+    expect(screen.getByTestId('sheet-add-error').textContent)
+      .toBe('Tooling already has a rate for all plants. Edit that row instead.')
+    expect((screen.getByRole('button', { name: 'Add row' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(costSheetApi.addRow).not.toHaveBeenCalled()
+  })
+
+  it('filters by department and sorts by rate like a spreadsheet', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Department' }))
+    const d = screen.getByRole('dialog')
+    fireEvent.change(within(d).getByRole('searchbox'), { target: { value: 'Quality' } })
+    fireEvent.click(within(d).getByRole('button', { name: 'Apply' }))
+    expect(rowCount()).toBe(1)
+    expect(screen.getByTestId('table-filter-bar').textContent).toContain('1 filter active')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(rowCount()).toBe(3)
+    const sortBtn = screen.getByRole('button', { name: 'Rate / h' })
+    fireEvent.click(sortBtn)
+    expect(sortBtn.closest('th')!.getAttribute('aria-sort')).toBe('ascending')
   })
 })
 
@@ -118,6 +186,7 @@ describe('PublishDialog', () => {
     expect(screen.getByTestId('publish-ends-on').textContent).toContain(formatDate(addDaysIso(past, -1)))
     const warn = screen.getByTestId('publish-backdated').textContent ?? ''
     expect(warn).toContain('already priced keep the rate')
+    expect(warn).toContain('Changes created since then are priced with this version')
     expect(warn).not.toMatch(/will be priced with this version\.$/)
   })
 })
@@ -190,20 +259,22 @@ describe('cost sheet pieces', () => {
   it('flags plant currencies Finance has not confirmed', () => {
     const onSet = vi.fn()
     render(<PlantCurrencies plants={ctx.plants} currencies={ctx.currencies} canEdit onSet={onSet} />)
-    expect(screen.getByText(/set by location; Finance to confirm/)).toBeDefined()
+    expect(screen.getByText(/set by location; Sales or Finance to confirm/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
     expect(onSet).toHaveBeenCalledWith(7, 'USD')
   })
 
-  it('labels sampling labour position as editable', () => {
-    expect(COLUMNS.sampling.some((c) => c.key === 'labour_position' && c.kind === 'text')).toBe(true)
+  it('offers no positions: one rate per department and plant', () => {
+    expect(COLUMNS.rates.map((c) => c.key)).not.toContain('position')
+    expect(COLUMNS.sampling.map((c) => c.key)).not.toContain('labour_position')
+    expect(SECTION_LABELS.rates).toBe('Rates')
   })
 
-  it('sorts rows by department order, then position, then plant', () => {
+  it('sorts rows by department order, then plant (all plants first)', () => {
     const rows = [
-      { id: 1, department_id: 2, position: null, plant_id: null },
-      { id: 2, department_id: 1, position: 'Engineer', plant_id: null },
-      { id: 3, department_id: 1, position: null, plant_id: 7 },
+      { id: 1, department_id: 2, plant_id: null },
+      { id: 2, department_id: 1, plant_id: 7 },
+      { id: 3, department_id: 1, plant_id: null },
     ]
     expect(sortRows(rows, ctx).map((r) => r.id)).toEqual([3, 2, 1])
   })

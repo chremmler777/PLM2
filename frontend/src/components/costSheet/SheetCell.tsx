@@ -45,7 +45,8 @@ export function displayValue(col: Column, row: CostSheetRow, ctx: SheetContext):
   const v = row[col.key]
   switch (col.kind) {
     case 'money':
-      return v === null || v === undefined ? '-' : formatMoney(v as number, (row.currency as string) || 'EUR')
+      return v === null || v === undefined ? (col.empty ?? '-')
+        : formatMoney(v as number, (row[col.currencyKey ?? 'currency'] as string) || 'EUR')
     case 'number':
       return v === null || v === undefined ? '-' : formatNumber(v as number)
     case 'department':
@@ -84,6 +85,11 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
   const msgId = useId()
   useEffect(() => { setDraft(toInput(value, money)); setRefused(null) }, [value, money])
   const inactive = col.inactive?.(row) ?? false
+  const hint = inactive ? null : col.hint?.(row) ?? null
+  const caption = hint && (
+    <span data-testid={`sheet-cell-hint-${col.key}`} title={hint.title}
+      className="block text-[10px] leading-tight text-slate-500">{hint.text}</span>
+  )
 
   if (col.kind === 'computed') {
     return <>{col.render?.(row, ctx)}</>
@@ -92,10 +98,15 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
   if (!editable) {
     const text = displayValue(col, row, ctx)
     const muted = value === null || value === undefined || value === ''
+    const warn = muted && !inactive && col.emptyWarn
     return (
-      <span className={`${muted || inactive ? 'text-slate-500' : 'text-slate-200'} ${col.numeric ? 'tabular-nums' : ''}`}>
-        {inactive && muted ? '' : text}
-      </span>
+      <>
+        <span data-empty={warn ? 'true' : undefined}
+          className={`${warn ? 'text-amber-300/90' : muted || inactive ? 'text-slate-500' : hint ? 'text-slate-300' : 'text-slate-200'} ${col.numeric ? 'tabular-nums' : ''}`}>
+          {inactive && muted ? '' : text}
+        </span>
+        {caption}
+      </>
     )
   }
 
@@ -165,7 +176,7 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
     <>
       <input
         aria-label={label}
-        className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''} ${refused ? '!border-rose-500' : ''}`}
+        className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''} ${col.emptyWarn ? 'placeholder:text-amber-400/70' : ''} ${refused ? '!border-rose-500' : ''}`}
         inputMode={col.kind === 'money' || col.kind === 'number' ? 'decimal' : undefined}
         value={draft}
         disabled={inactive}
@@ -189,6 +200,7 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
           if (e.key === 'Escape') { setDraft(toInput(value, money)); setRefused(null) }
         }}
       />
+      {!message && caption}
       {message && (
         <p id={msgId} role="alert" data-testid="sheet-cell-refused"
            className="mt-0.5 text-left text-[11px] leading-tight text-rose-300">

@@ -1,13 +1,14 @@
 """Cost sheet API (spec §15 / §15a): Finance's versioned rates.
 
-Read: everyone in the org (rates are public by design). Write: Finance
-members or admins, acts-as aware (cost_sheet_service.can_edit). Thin routes
-over cost_sheet_service; every write commits here.
+Read: everyone in the org (rates are public by design). Write: Sales or
+Finance members, or admins, acts-as aware (cost_sheet_service.can_edit). Thin
+routes over cost_sheet_service; every write commits here.
 """
 from datetime import date
 from typing import Literal, Optional
 
 import json
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -97,6 +98,10 @@ class RowBody(BaseModel):
     machine_ref: Optional[str] = Field(None, max_length=80)
     tonnage_min: Optional[int] = Field(None, ge=0, lt=1_000_000)
     tonnage_max: Optional[int] = Field(None, ge=0, lt=1_000_000)
+    # A rate typed in the plant's local currency (106): hourly_rate is then
+    # computed with the version's exchange rate.
+    entered_rate: Optional[float] = _num(1e10)
+    entered_currency: Optional[str] = Field(None, max_length=3)
     mode: Optional[Literal["flat", "components"]] = None
     flat_price: Optional[float] = _num(1e10)
     setup_hours: Optional[float] = _num(1e6)
@@ -124,6 +129,16 @@ class SettingsBody(BaseModel):
 
 class PlantCurrencyBody(BaseModel):
     currency: str = Field(..., min_length=3, max_length=3)
+    # left out: unchanged; null: one currency only
+    local_currency: Optional[str] = Field(None, max_length=3)
+
+
+class FxBody(BaseModel):
+    base: str = Field(..., min_length=3, max_length=3)
+    quote: str = Field(..., min_length=3, max_length=3)
+    # units of quote per one base, e.g. 17.30 (MXN per USD); null removes.
+    # Text or number: the decimal is kept as typed.
+    rate: Optional[str | float] = None
 
 
 def _class_dict(c: CostSheetMachineClass) -> dict:
@@ -152,6 +167,8 @@ async def overview(current_user: User = Depends(get_current_user),
         "draft_version_id": draft.id if draft else None,
         "can_edit": await svc.can_edit(db, current_user),
         "stale": await svc.stale_status(db, org),
+        # is_active false = retired: its rows stay, the page hides them by
+        # default ("Show retired").
         "departments": [{"id": d.id, "name": d.name, "is_active": d.is_active} for d in deps],
         # Inactive plants too: migrated rows may still name one.
         "plants": await svc.plant_currencies(db, org),
@@ -164,16 +181,19 @@ async def overview(current_user: User = Depends(get_current_user),
 async def review_task(current_user: User = Depends(get_current_user),
                       db: AsyncSession = Depends(get_db)):
     """The My Tasks item "Review the cost sheet" (spec §15): due for members
-    of Finance (acts-as aware) when stale_status says the latest published
-    version is older than the review period, or nothing is published."""
+    of Sales and Finance, who keep the rates (acts-as aware), when
+    stale_status says the latest published version is older than the review
+    period, or nothing is published. is_finance is kept for older clients
+    and means "keeps the rates"."""
     from app.services.workflow_service import WorkflowService
-    fin = await svc.finance_department_id(db)
-    is_finance = fin is not None and fin in await WorkflowService.effective_department_ids(
-        db, current_user)
-    if not is_finance:
-        return {"due": False, "is_finance": False, "stale": None}
+    editors = await svc.editor_department_ids(db)
+    keeps_rates = bool(editors & set(await WorkflowService.effective_department_ids(
+        db, current_user)))
+    if not keeps_rates:
+        return {"due": False, "is_finance": False, "is_editor": False, "stale": None}
     stale = await svc.stale_status(db, current_user.organization_id)
-    return {"due": bool(stale["stale"]), "is_finance": True, "stale": stale}
+    return {"due": bool(stale["stale"]), "is_finance": True, "is_editor": True,
+            "stale": stale}
 
 
 @router.get("/versions/{version_id}")
@@ -184,7 +204,7 @@ async def get_version(version_id: int, current_user: User = Depends(get_current_
     except CostSheetError as e:
         _raise(e)
     valid = svc.validity(await svc.list_versions(db, current_user.organization_id))
-    return svc.version_detail(v, valid)
+    return await svc.version_detail_full(db, v, valid)
 
 
 @router.get("/versions/{version_id}/diff")
@@ -205,7 +225,8 @@ async def diff(version_id: int, against: Optional[int] = None,
 
 @router.get("/versions/{version_id}/export")
 async def export(version_id: int, format: Literal["csv", "xlsx"] = "xlsx",
-                 section: Literal["Positions", "Machines", "Sampling", "Overheads"] = "Positions",
+                 section: Literal["Rates", "Positions", "Machines", "Sampling",
+                                  "Overheads", "MachineRates"] = "Rates",
                  current_user: User = Depends(get_current_user),
                  db: AsyncSession = Depends(get_db)):
     try:
@@ -215,9 +236,11 @@ async def export(version_id: int, format: Literal["csv", "xlsx"] = "xlsx",
     stem = f"cost-sheet-v{v.version}"
     if format == "csv":
         body = await svc.export_csv(db, v, section)
+        name = {"Positions": "rates", "MachineRates": "machine-rates"}.get(
+            section, section.lower())
         return Response(content=body.encode("utf-8-sig"), media_type="text/csv",
                         headers={"Content-Disposition":
-                                 f'attachment; filename="{stem}-{section.lower()}.csv"'})
+                                 f'attachment; filename="{stem}-{name}.csv"'})
     return Response(
         content=await svc.export_xlsx(db, v),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -268,7 +291,7 @@ async def _detail(db, v):
     await db.commit()
     await db.refresh(v)
     valid = svc.validity(await svc.list_versions(db, v.organization_id))
-    return svc.version_detail(v, valid)
+    return await svc.version_detail_full(db, v, valid)
 
 
 @router.post("/drafts", status_code=201)
@@ -321,15 +344,62 @@ async def publish(version_id: int, body: PublishBody,
     return await _detail(db, v)
 
 
+@router.put("/versions/{version_id}/fx")
+async def put_fx(version_id: int, body: FxBody,
+                 current_user: User = Depends(get_current_user),
+                 db: AsyncSession = Depends(get_db)):
+    """Set one exchange rate of a draft (1 base = rate quote); rows typed in
+    the other currency are re-priced from their typed number. Frozen on
+    publish."""
+    if isinstance(body.rate, float) and not math.isfinite(body.rate):
+        raise HTTPException(status_code=422, detail="Numbers must be finite")
+    try:
+        v = await _editable(db, current_user, version_id)
+        await svc.set_fx_rate(db, v, body.base, body.quote, body.rate)
+    except CostSheetError as e:
+        _raise(e)
+    return await _detail(db, v)
+
+
+@router.post("/versions/{version_id}/missing-departments")
+async def add_missing_departments(version_id: int,
+                                  current_user: User = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    """"Add missing departments": one row with an EMPTY rate per routable
+    department and active plant the draft does not cover yet. Never a
+    guessed number: costing shows "No rate in the cost sheet" until the row
+    is filled. Drafts only (published versions are frozen)."""
+    try:
+        v = await _editable(db, current_user, version_id)
+        added = await svc.seed_missing_departments(db, v)
+    except CostSheetError as e:
+        _raise(e)
+    return {**await _detail(db, v), "added": len(added)}
+
+
+async def _row_write(db, fn):
+    """Run a row write; the unique index is the last guard against a second
+    row for the same department and plant (a concurrent add)."""
+    try:
+        await fn()
+    except CostSheetError as e:
+        _raise(e)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=(
+            "This department already has a rate for this plant in this version. "
+            "Edit that row instead."))
+
+
 @router.post("/versions/{version_id}/{section}", status_code=201)
 async def add_row(version_id: int, section: Section, body: RowBody,
                   current_user: User = Depends(get_current_user),
                   db: AsyncSession = Depends(get_db)):
     try:
         v = await _editable(db, current_user, version_id)
-        await svc.add_row(db, v, section, body.model_dump(exclude_unset=True))
     except CostSheetError as e:
         _raise(e)
+    await _row_write(db, lambda: svc.add_row(db, v, section, body.model_dump(exclude_unset=True)))
     return await _detail(db, v)
 
 
@@ -339,9 +409,10 @@ async def update_row(version_id: int, section: Section, row_id: int, body: RowBo
                      db: AsyncSession = Depends(get_db)):
     try:
         v = await _editable(db, current_user, version_id)
-        await svc.update_row(db, v, section, row_id, body.model_dump(exclude_unset=True))
     except CostSheetError as e:
         _raise(e)
+    await _row_write(db, lambda: svc.update_row(db, v, section, row_id,
+                                                body.model_dump(exclude_unset=True)))
     return await _detail(db, v)
 
 
@@ -445,11 +516,14 @@ async def put_settings(body: SettingsBody, current_user: User = Depends(get_curr
 async def put_plant_currency(plant_id: int, body: PlantCurrencyBody,
                              current_user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
-    """Finance sets or confirms the currency a plant's rows are priced in."""
+    """Sales or Finance sets or confirms the currency a plant's rows are
+    priced in (the quote currency) and its local currency, if any."""
     try:
         await svc.require_edit(db, current_user)
+        extra = ({"local_currency": body.local_currency}
+                 if "local_currency" in body.model_fields_set else {})
         await svc.set_plant_currency(db, current_user.organization_id, plant_id,
-                                     body.currency, current_user.id)
+                                     body.currency, current_user.id, **extra)
     except CostSheetError as e:
         _raise(e)
     await db.commit()

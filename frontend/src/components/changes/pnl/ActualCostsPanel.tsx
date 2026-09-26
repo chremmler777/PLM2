@@ -61,6 +61,9 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   const [vendor, setVendor] = useState('')
   const [dept, setDept] = useState<number | ''>('')
   const [note, setNote] = useState('')
+  // A two-currency plant (Silao: USD and MXN): the entry names its currency;
+  // the P&L converts it at the change's cost sheet exchange rate.
+  const [entryCur, setEntryCur] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = () => {
@@ -76,6 +79,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
       cost_date: costDate,
       vendor_name: vendor || null, department_id: dept === '' ? null : dept,
       note: note || null,
+      ...(entryCur ? { currency: entryCur } : {}),
     }),
     onSuccess: () => {
       setAmount(''); setVendor(''); setNote(''); setError(null); setOpen(false)
@@ -97,6 +101,8 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   const deptOptions = allowed === null ? departments : departments.filter((d) => allowed.includes(d.id))
   const currency = data.currency ?? ctx?.currency ?? data.items.find((c) => c.currency)?.currency ?? 'EUR'
   const curOf = (c: { currency?: string | null }) => c.currency ?? currency
+  const localCur = ctx?.local_currency && ctx.local_currency !== currency ? ctx.local_currency : null
+  const shownCur = entryCur ?? currency
   // Never added across currencies: one total per currency.
   const totals = data.totals_by_currency && Object.keys(data.totals_by_currency).length > 0
     ? Object.entries(data.totals_by_currency)
@@ -141,7 +147,18 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Amount ({currency})
+          {localCur && (
+            <label className="flex flex-col gap-0.5 text-[11px] text-slate-400"
+              title={`Amounts in ${localCur} are converted to ${currency} at the exchange rate of the change's cost sheet version`}>
+              Currency
+              <select data-testid="actual-cost-currency" aria-label="Currency" className={input}
+                value={shownCur} onChange={(e) => setEntryCur(e.target.value === currency ? null : e.target.value)}>
+                <option value={currency}>{currency}</option>
+                <option value={localCur}>{localCur}</option>
+              </select>
+            </label>
+          )}
+          <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Amount ({shownCur})
             <input aria-label="Amount" className={input} inputMode="decimal" value={amount}
               aria-invalid={amountHint ? true : undefined}
               aria-describedby={amountHint ? `actual-cost-amount-hint-${changeId}` : undefined}

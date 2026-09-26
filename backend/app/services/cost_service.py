@@ -50,8 +50,8 @@ class CostService:
         assessment: ChangeAssessment, user_id: int,
     ) -> list:
         """Turn the department's assessment checklist into its starting cost
-        grid: one zero-hour line per item it marked impacted, at the current
-        rate.
+        grid: one zero-hour line per item it marked impacted, at the rate
+        valid on the change's creation date.
 
         A department that has already said WHICH items the change touches
         should not then face an empty grid and retype them. Seeded once —
@@ -70,8 +70,9 @@ class CostService:
         plant_id = await CostService._costing_plant(session, change)
         if plant_id is None:
             return []      # nothing to price against yet; try again later
+        from app.services.costing_rates import change_pricing_date
         price = await CostService.price_for(
-            session, assessment.department_id, plant_id)
+            session, assessment.department_id, plant_id, change_pricing_date(change))
         # No rate in the cost sheet: the line says so (None), it is not 0,
         # and it names no source it did not come from.
         rate = price.rate
@@ -148,8 +149,10 @@ class CostService:
         (same plant, activity, kind and hours) keeps its rate snapshot, its
         currency and its cost sheet version: saving the grid never re-prices
         what nobody touched. New or changed lines are priced from the cost
-        sheet valid today; a line with hours and no rate is refused."""
+        sheet valid on the change's creation date; a line with hours and no
+        rate is refused."""
         from app.services.change_service import ChangeService  # local import avoids cycle
+        from app.services.costing_rates import change_pricing_date
         await session.refresh(assessment, ["cost_lines"])
         kept: dict[tuple, list[AssessmentCostLine]] = {}
         for old in assessment.cost_lines:
@@ -180,7 +183,8 @@ class CostService:
                 rate, currency, source, version_id = snapshots[key].pop(0)
             else:
                 price = await CostService.price_for(
-                    session, assessment.department_id, plant_id)
+                    session, assessment.department_id, plant_id,
+                    change_pricing_date(change))
                 if price.rate is None and demand_hours > 0:
                     # Cannot price: refused, never valued at 0.
                     raise CostError(
@@ -430,7 +434,10 @@ class CostService:
             versions_used = {v for (v,) in (await session.execute(
                 select(CostSheetVersion.version).where(
                     CostSheetVersion.id.in_(version_ids_used)))).all()}
-        current = await cs.version_on(session, org_id) if org_id is not None else None
+        # the version that prices this change: valid on its creation date
+        current = (await cs.version_on(session, org_id,
+                                       costing_rates.change_pricing_date(change))
+                   if org_id is not None else None)
 
         # Lead time is the slowest department, not the sum of them: they wait in
         # parallel. Reported per department too, so the long pole is visible

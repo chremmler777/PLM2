@@ -470,7 +470,14 @@ async def lifespan(app: FastAPI):
 
     reminder_task = asyncio.create_task(_reminder_loop())
 
+    # MachineDB presses for the cost sheet: one background sync when
+    # MACHINEDB_API_URL and MACHINEDB_SERVICE_TOKEN are set (never blocks
+    # startup; the sheet runs on the last synced copy otherwise).
+    from app.services.cost_sheet_machines_service import sync_on_startup
+    machinedb_task = asyncio.create_task(sync_on_startup())
+
     yield
+    machinedb_task.cancel()
     # Shutdown
     reminder_task.cancel()
     logger.info("Shutting down PLM application...")

@@ -1,5 +1,5 @@
 /**
- * Amber banner when Finance owes a review: nothing published yet, or the
+ * Amber banner when the rate owners (Sales, with Finance) owe a review: nothing published yet, or the
  * latest version is older than the org's review cycle. Reused by costing.
  */
 import { TriangleAlert } from 'lucide-react'
@@ -18,7 +18,7 @@ export default function StaleBanner({ stale, canEdit }: { stale: StaleStatus; ca
       <div>
         <p className="font-medium">Cost sheet review due</p>
         <p className="text-amber-200/80">
-          {text}{canEdit ? ' Start a new draft, check the rates and publish it.' : ' Finance has been asked to review it.'}
+          {text}{canEdit ? ' Start a new draft, check the rates and publish it.' : ' Sales has been asked to review it.'}
         </p>
       </div>
     </div>

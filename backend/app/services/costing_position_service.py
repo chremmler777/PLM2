@@ -35,7 +35,7 @@ class CostingPositionError(ValueError):
 # no record of it — delete and re-add instead.
 _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
                     "hours", "lead_time_days", "lead_time_unit", "notes",
-                    "labour_position", "machine_class_id", "trials")
+                    "labour_position", "machine_class_id", "trials", "machine_id")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
                  "lead_time_days", "lead_time_unit", "favorite", "is_partial")
 
@@ -231,6 +231,7 @@ class CostingPositionService:
                 "est_cost": p.est_cost, "vendor_name": p.vendor_name, "hours": p.hours,
                 "labour_position": p.labour_position,
                 "machine_class_id": p.machine_class_id, "trials": p.trials,
+                "machine_id": p.machine_id,
                 **pricing.get(p.id, {}),
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,
@@ -345,22 +346,30 @@ class CostingPositionService:
             position.labour_position = None
         else:
             position.machine_class_id = None
+            position.machine_id = None
         if position.kind != "sampling":
             position.trials = None
 
     @staticmethod
     async def _check_machine_class(session: AsyncSession, change: ChangeRequest,
                                    position: CostingPosition) -> None:
-        """A named machine class must be one of the org's classes."""
-        if position.machine_class_id is None:
+        """A named machine class must be one of the org's classes, a named
+        machine one of the org's synced MachineDB machines."""
+        if position.machine_class_id is None and position.machine_id is None:
             return
         from app.models.cost_sheet import CostSheetMachineClass
+        from app.models.cost_sheet_machines import CostSheetMachine
         from app.services import costing_rates
-        c = await session.get(CostSheetMachineClass, position.machine_class_id)
         org_id = await costing_rates.change_org_id(session, change)
-        if c is None or c.organization_id != org_id:
-            raise CostingPositionError(
-                f"Unknown machine class {position.machine_class_id}")
+        if position.machine_class_id is not None:
+            c = await session.get(CostSheetMachineClass, position.machine_class_id)
+            if c is None or c.organization_id != org_id:
+                raise CostingPositionError(
+                    f"Unknown machine class {position.machine_class_id}")
+        if position.machine_id is not None:
+            m = await session.get(CostSheetMachine, position.machine_id)
+            if m is None or m.organization_id != org_id:
+                raise CostingPositionError(f"Unknown machine {position.machine_id}")
 
     @staticmethod
     def _validate_offer(offer: CostingOffer, position: CostingPosition) -> None:
@@ -437,6 +446,7 @@ class CostingPositionService:
             notes=spec.get("notes"), created_by=actor.id,
             labour_position=spec.get("labour_position"),
             machine_class_id=spec.get("machine_class_id"),
+            machine_id=spec.get("machine_id"),
             trials=spec.get("trials"),
         )
         CostingPositionService._validate(position)

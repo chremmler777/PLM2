@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import ChangesPage from './ChangesPage'
 import { changesApi } from '../api/changes'
 import { t } from '../i18n/cmLabels'
@@ -220,5 +220,90 @@ describe('ChangesPage list polish (spec §16)', () => {
       row({ active_deadline: 'quote', required_by_date: '2099-01-01', deadline_state: 'on_track' })] as never)
     wrap()
     expect(await screen.findByTestId('deadline-chip')).toBeDefined()
+  })
+})
+
+describe('ChangesPage column sort and filter', () => {
+  afterEach(cleanup)
+  const rows = () => screen.getAllByTestId(/^change-row-/)
+  const numbers = () => rows().map((r) => within(r).getByRole('link').textContent)
+  let search = ''
+  function Loc() { search = useLocation().search; return null }
+  const view = (url = '/changes') => render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={[url]}><ChangesPage /><Loc /></MemoryRouter>
+    </QueryClientProvider>)
+  const data = () => [
+    row({ id: 1, priority: 'low', status: 'scoping' }),
+    row({ id: 2, change_number: 'GB-CM-0002', priority: 'critical', status: 'costing',
+      project_number: '1539', project_name: 'BMW G05' }),
+    row({ id: 3, change_number: 'GB-CM-0003', priority: 'high', status: 'captured' }),
+  ]
+
+  it('sorts by a column over the list order, in the URL; the sort dropdown takes it back', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue(data() as never)
+    view()
+    await screen.findByText('GB-CM-0003')
+    const priority = screen.getByRole('button', { name: 'Priority' })
+    fireEvent.click(priority)
+    expect(numbers()).toEqual(['GB-CM-0002', 'GB-CM-0003', 'GB-CM-0001'])
+    expect(priority.closest('th')?.getAttribute('aria-sort')).toBe('ascending')
+    expect(new URLSearchParams(search).get('csort')).toBe('priority:asc')
+    const sortSelect = screen.getByTestId('changes-sort') as HTMLSelectElement
+    expect(sortSelect.value).toBe('column')
+    expect(sortSelect.selectedOptions[0].textContent).toBe('By Priority, ascending')
+    fireEvent.click(priority)
+    expect(numbers()).toEqual(['GB-CM-0001', 'GB-CM-0003', 'GB-CM-0002'])
+    // picking a list order drops the column sort
+    fireEvent.change(sortSelect, { target: { value: 'recent' } })
+    expect(new URLSearchParams(search).get('csort')).toBeNull()
+    expect(new URLSearchParams(search).get('sort')).toBe('recent')
+    expect(numbers()).toEqual(['GB-CM-0001', 'GB-CM-0002', 'GB-CM-0003'])
+  })
+
+  it('filters by the shown status label and project, keeps it in the URL, clears', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue(data() as never)
+    view('/changes?q=gb-cm')
+    await screen.findByText('GB-CM-0003')
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Status' }))
+    const d = screen.getByRole('dialog', { name: 'Filter Status' })
+    fireEvent.click(within(d).getByRole('checkbox', { name: 'Select all' }))
+    fireEvent.click(within(d).getByRole('checkbox', { name: 'Costing' }))
+    fireEvent.click(within(d).getByRole('checkbox', { name: 'Scoping' }))
+    fireEvent.click(within(d).getByRole('button', { name: 'Apply' }))
+    expect(numbers()).toEqual(['GB-CM-0001', 'GB-CM-0002'])
+    const params = new URLSearchParams(search)
+    expect(params.getAll('f.status').sort()).toEqual(['Costing', 'Scoping'])
+    expect(params.get('q')).toBe('gb-cm')
+    expect(screen.getByTestId('table-filter-bar').textContent).toContain('2 of 3 rows')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Project' }))
+    const p = screen.getByRole('dialog', { name: 'Filter Project' })
+    // only the values the status filter leaves: both projects are still there
+    fireEvent.change(within(p).getByRole('searchbox'), { target: { value: 'bmw' } })
+    fireEvent.click(within(p).getByRole('button', { name: 'Apply' }))
+    expect(numbers()).toEqual(['GB-CM-0002'])
+    expect(screen.getByTestId('table-filter-bar').textContent).toContain('2 filters active')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(rows()).toHaveLength(3)
+    expect([...new URLSearchParams(search).keys()]).toEqual(['q'])
+  })
+
+  it('restores column filters and sort from a shared link, next to the old parameters', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue(data() as never)
+    view('/changes?f.priority=High&f.priority=Critical&csort=number:desc&sort=recent&f.bogus=1')
+    await screen.findByText('GB-CM-0003')
+    expect(numbers()).toEqual(['GB-CM-0003', 'GB-CM-0002'])
+    expect(screen.getByRole('button', { name: 'Filter Priority' }).getAttribute('data-active')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Number' }).closest('th')?.getAttribute('aria-sort'))
+      .toBe('descending')
+    expect(screen.getByText(/1 filter active/)).toBeDefined()
+  })
+
+  it('says no match when the column filters leave nothing', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue(data() as never)
+    view('/changes?f.owner=Nobody')
+    expect(await screen.findByText(t('changes.noMatch'))).toBeDefined()
   })
 })

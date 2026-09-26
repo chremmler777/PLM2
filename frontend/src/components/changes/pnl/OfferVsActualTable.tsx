@@ -176,6 +176,13 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
         </div>
       </div>
 
+      {(data.fx_notes ?? []).length > 0 && (
+        <ul data-testid="ova-fx-notes" className="mt-2 space-y-0.5">
+          {(data.fx_notes ?? []).map((n) => (
+            <li key={n} className="text-[11px] text-slate-400">{n}</li>
+          ))}
+        </ul>
+      )}
       {data.warnings.length > 0 && (
         <ul data-testid="ova-warnings" className="mt-2 space-y-0.5">
           {data.warnings.map((w) => (

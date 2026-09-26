@@ -193,6 +193,9 @@ export interface OfferVsActual {
   timing: OvaTiming;
   piece_price: { delta_per_piece: number; annual_volume: number | null; annual_effect: number | null } | null;
   warnings: string[];
+  /** Conversions made (money entered in the plant's other currency), each
+   *  with its rate and cost sheet version. */
+  fx_notes?: string[];
 }
 
 export type ActualCostCategory = 'external' | 'scrap' | 'other';
@@ -238,4 +241,6 @@ export interface ActualCostIn {
   department_id?: number | null;
   vendor_name?: string | null;
   note?: string | null;
+  /** ISO code; left out = the change's costing currency. */
+  currency?: string | null;
 }

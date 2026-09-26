@@ -15,9 +15,10 @@ when the class list is edited later.
 from datetime import date, datetime
 
 from sqlalchemy import (
-    Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text,
+    JSON, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text,
     UniqueConstraint, Boolean, Index,
 )
+from sqlalchemy import func
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +28,10 @@ VERSION_STATUSES = ("draft", "published")
 SAMPLING_MODES = ("flat", "components")
 OVERHEAD_KINDS = ("percent", "per_hour")
 FINANCE_DEPARTMENT = "Finance"
+# Sales changes the rates (it prices the changes for the customer); Finance
+# and admins may too.
+SALES_DEPARTMENT = "Sales"
+EDITOR_DEPARTMENTS = (SALES_DEPARTMENT, FINANCE_DEPARTMENT)
 DEFAULT_REVIEW_MONTHS = 12
 SETTING_REVIEW_MONTHS = "cost_sheet_review_months"
 # org_settings key prefix: Finance confirmed plant <id>'s currency (094 set
@@ -63,6 +68,9 @@ class CostSheetVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     published_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # The exchange rates this version uses (106): {"USD/MXN": "17.30"} = one
+    # USD is 17.30 MXN, decimal text as typed. Frozen with the version.
+    fx_rates: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     rates: Mapped[list["CostSheetRate"]] = relationship(
         cascade="all, delete-orphan", lazy="selectin", order_by="CostSheetRate.id")
@@ -75,8 +83,13 @@ class CostSheetVersion(Base):
 
 
 class CostSheetRate(Base):
-    """Hourly rate of a department, optionally narrowed to a position and a
-    plant. position None = the department's default; plant None = all plants."""
+    """Hourly rate of a department at a plant (plant None = all plants).
+    Exactly one row per department per plant in a version (migration 104,
+    uq_cost_sheet_rate_dept_plant). hourly_rate None = no rate entered yet:
+    costing shows "No rate in the cost sheet", never 0.
+
+    position is no longer used (104 merged the position rows into their
+    department's row); the column stays for the downgrade."""
     __tablename__ = "cost_sheet_rates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -85,12 +98,25 @@ class CostSheetRate(Base):
     department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
     position: Mapped[str | None] = mapped_column(String(80), nullable=True)
     plant_id: Mapped[int | None] = mapped_column(ForeignKey("plants.id"), nullable=True)
-    hourly_rate: Mapped[float] = mapped_column(Numeric(10, 2, asdecimal=False))
+    hourly_rate: Mapped[float | None] = mapped_column(
+        Numeric(10, 2, asdecimal=False), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), default="EUR", server_default="EUR")
+    # The rate as typed when it was typed in the plant's local currency (106):
+    # hourly_rate is then computed from it with the version's exchange rate,
+    # so the typed number never drifts. None = typed as hourly_rate.
+    entered_rate: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    entered_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     # Carried over from department_rate (the Std.-Saetze sheet's factor) so
     # /changes/reference/rates keeps its shape. Not used by the lookups.
     min_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+# One row per department per plant; plant NULL (all plants) collides with
+# plant NULL too (plain NULLs never collide in a unique index).
+Index("uq_cost_sheet_rate_dept_plant", CostSheetRate.version_id, CostSheetRate.department_id,
+      func.coalesce(CostSheetRate.plant_id, 0), unique=True)
 
 
 class CostSheetMachineClass(Base):
@@ -127,6 +153,10 @@ class CostSheetMachineRate(Base):
     tonnage_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hourly_rate: Mapped[float] = mapped_column(Numeric(10, 2, asdecimal=False))
     currency: Mapped[str] = mapped_column(String(3), default="EUR", server_default="EUR")
+    # As on CostSheetRate (106): the rate typed in the plant's local currency.
+    entered_rate: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    entered_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

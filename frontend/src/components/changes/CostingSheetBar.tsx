@@ -1,6 +1,7 @@
 /**
  * The strip above the costing buckets (spec §15 phase 2): which cost sheet
- * prices this change (version, plant, currency), a banner when Finance owes
+ * prices this change (the version valid on the day the change was created,
+ * plant, currency), a banner when Sales owes
  * a review of the sheet, the change's machine class (machine time and
  * sampling lines are priced on it; default from the impacted tool's tonnage),
  * and the totals per currency when the costing mixes currencies. The
@@ -41,9 +42,10 @@ export default function CostingSheetBar({ changeId, summation, editable }: {
     .replace('{v}', String(ctx.current_version?.version ?? ctx.latest_version ?? '-'))
     .replace('{plant}', ctx.plant_name ?? '-')
     .replace('{cur}', ctx.currency)
+    .replace('{date}', ctx.pricing_date ? formatCalendarDate(ctx.pricing_date) : '-')
   const source = ctx.rate_source === 'department_rate'
     ? vars(t('costing.sheetLegacy'))
-    : ctx.current_version ? vars(t('costing.sheetInfo')) : t('costing.sheetNone')
+    : ctx.current_version ? vars(t('costing.sheetInfo')) : vars(t('costing.sheetNone'))
   const stale = ctx.stale?.stale ? ctx.stale : null
   const defaultClass = ctx.machine_classes.find((c) => c.id === ctx.default_machine_class_id)
   const byCurrency = Object.entries(summation?.totals_by_currency ?? {})

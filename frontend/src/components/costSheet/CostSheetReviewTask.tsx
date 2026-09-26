@@ -1,5 +1,6 @@
 /**
- * My Tasks item "Review the cost sheet" (spec §15): shown to Finance when the
+ * My Tasks item "Review the cost sheet" (spec §15): shown to Sales and Finance
+ * (the rate owners; is_editor, is_finance on older servers) when the
  * latest published version is older than the review period (or nothing is
  * published). Opens the cost sheet page; publishing a new version clears it.
  */
@@ -17,12 +18,12 @@ export default function CostSheetReviewTask() {
     retry: false,
     staleTime: 5 * 60 * 1000,
   })
-  if (!data?.due) return null
+  if (!data?.due || !(data.is_editor ?? data.is_finance)) return null
   const s = data.stale
   return (
     <div data-testid="cost-sheet-review-task">
       <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        Finance (1)
+        Cost sheet (1)
       </h2>
       <div className="flex flex-wrap items-center gap-3 bg-slate-800 border border-amber-800/60 rounded-lg px-4 py-3">
         <div className="min-w-0 flex-1">

@@ -43,6 +43,7 @@ from app.models.cost_sheet import (
     CostSheetVersion, CostSheetRate, CostSheetMachineClass, CostSheetMachineRate,
     CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
 )
+from app.models.cost_sheet_machines import CostSheetMachine, CostSheetMachineItemRate
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard, ProjectResponsible,

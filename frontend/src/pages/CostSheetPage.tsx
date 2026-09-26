@@ -1,10 +1,12 @@
 /**
- * CostSheetPage - Finance's versioned rates (spec §15 / §15a).
+ * CostSheetPage - the versioned rates (spec §15 / §15a), kept by Sales.
  *
- * Everyone reads; Finance (or an admin) edits drafts in place and publishes
- * them with a valid-from date. Tabs: Positions, Machines, Sampling, Overheads.
+ * Everyone reads; Sales (Finance and admins too) edits drafts in place and
+ * publishes them with a valid-from date. Tabs: Rates (one per department and
+ * plant), Machines, Sampling, Overheads; every table sorts and filters.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { EMPTY_TABLE_STATE, type TableState } from '../components/common/tableFilters'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { costSheetApi } from '../api/costSheet'
@@ -19,7 +21,10 @@ import DiffPanel, { diffCount } from '../components/costSheet/DiffPanel'
 import StaleBanner from '../components/costSheet/StaleBanner'
 import MachineClassStrip from '../components/costSheet/MachineClassStrip'
 import PlantCurrencies from '../components/costSheet/PlantCurrencies'
+import FxRates from '../components/costSheet/FxRates'
+import MachinesPanel from '../components/costSheet/MachinesPanel'
 import {
+  localRateColumn, type Column,
   SECTION_BLURB, SECTION_EXPORT, SECTION_LABELS, sortRows, type SheetContext,
 } from '../components/costSheet/columns'
 import type {
@@ -65,6 +70,12 @@ export default function CostSheetPage() {
   const [publishOpen, setPublishOpen] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [editingCycle, setEditingCycle] = useState(false)
+  // Sort and column filters per tab; a new version starts clean.
+  const [tableStates, setTableStates] = useState<Partial<Record<CostSheetSection, TableState>>>({})
+  useEffect(() => { setTableStates({}) }, [selectedId])
+  // Retired departments keep their rows; hidden unless asked for.
+  const [showRetired, setShowRetired] = useState(false)
+  const [onlyMissing, setOnlyMissing] = useState(false)
   const [cycle, setCycle] = useState('')
 
   // Default selection: an editor lands on the open draft, everyone else on
@@ -97,6 +108,12 @@ export default function CostSheetPage() {
     machineClasses: ov?.machine_classes ?? [],
     currencies: ov?.currencies ?? ['EUR'],
   }), [ov])
+  // A plant with a second currency (Silao: USD and MXN): rates and machine
+  // rows get the local-currency column. Stable per plant list.
+  const dualColumns = useMemo((): Partial<Record<CostSheetSection, Column[]>> => {
+    if (!(ov?.plants ?? []).some((p) => p.local_currency)) return {}
+    return { rates: [localRateColumn()], machines: [localRateColumn()] }
+  }, [ov])
 
   const latestPublished = useMemo(() => {
     const pub = (ov?.versions ?? []).filter((x) => x.status === 'published' && x.valid_from)
@@ -168,6 +185,17 @@ export default function CostSheetPage() {
     onError: fail,
   })
 
+  const missingMut = useMutation({
+    mutationFn: () => costSheetApi.addMissingDepartments(selectedId as number),
+    onSuccess: (d) => {
+      onDetail(d)
+      toast.success(d.added > 0
+        ? `${d.added} ${d.added === 1 ? 'row' : 'rows'} added, rates empty`
+        : 'Every department already has a row')
+    },
+    onError: fail,
+  })
+
   const cycleMut = useMutation({
     mutationFn: (m: number) => costSheetApi.setReviewMonths(m),
     onSuccess: () => {
@@ -188,8 +216,16 @@ export default function CostSheetPage() {
     }
   }
 
+  const fxMut = useMutation({
+    mutationFn: (a: { base: string; quote: string; rate: string | null }) =>
+      costSheetApi.setFx(selectedId as number, a),
+    onSuccess: onDetail,
+    onError: fail,
+  })
+
   const plantCurrencyMut = useMutation({
-    mutationFn: (a: { plantId: number; currency: string }) => costSheetApi.setPlantCurrency(a.plantId, a.currency),
+    mutationFn: (a: { plantId: number; currency: string; local?: string | null }) =>
+      costSheetApi.setPlantCurrency(a.plantId, a.currency, a.local),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cost-sheet'], exact: true }),
     onError: fail,
   })
@@ -218,7 +254,17 @@ export default function CostSheetPage() {
     return <div className="mx-auto max-w-7xl p-6 text-red-300">{apiErrorMessage(overview.error, 'Could not load the cost sheet')}</div>
   }
 
-  const rows = v ? sortRows(v[ROWS_KEY[tab]] as unknown as CostSheetRow[], ctx) : []
+  const retiredIds = new Set(ov.departments.filter((d) => !d.is_active).map((d) => d.id))
+  const tabRows = v ? sortRows(v[ROWS_KEY[tab]] as unknown as CostSheetRow[], ctx) : []
+  const hasDept = tab === 'rates' || tab === 'overheads'
+  const retiredCount = hasDept
+    ? tabRows.filter((r) => retiredIds.has(r.department_id as number)).length : 0
+  const noRate = (r: CostSheetRow) => r.hourly_rate === null || r.hourly_rate === undefined
+  const missingCount = tab === 'rates'
+    ? tabRows.filter((r) => noRate(r) && !retiredIds.has(r.department_id as number)).length : 0
+  const rows = tabRows
+    .filter((r) => !hasDept || showRetired || !retiredIds.has(r.department_id as number))
+    .filter((r) => tab !== 'rates' || !onlyMissing || noRate(r))
   const counts = v ? Object.fromEntries(SECTIONS.map((s) => [s, (v[ROWS_KEY[s]] as unknown[]).length])) : {}
 
   return (
@@ -228,8 +274,8 @@ export default function CostSheetPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-100">Cost sheet</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Hourly rates per position, machine and sampling prices and personnel overhead, maintained by Finance.
-            Costing and the P&amp;L read the version valid on the day.
+            Hourly rates per department and plant, machine and sampling prices and personnel overhead, kept by Sales.
+            A change is priced with the version valid on the day it was created; booked hours with the version valid on the booking day.
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -262,7 +308,7 @@ export default function CostSheetPage() {
 
       <StaleBanner stale={ov.stale} canEdit={ov.can_edit} />
       <PlantCurrencies plants={ov.plants} currencies={ov.currencies} canEdit={ov.can_edit}
-                       onSet={(plantId, currency) => plantCurrencyMut.mutate({ plantId, currency })} />
+                       onSet={(plantId, currency, local) => plantCurrencyMut.mutate({ plantId, currency, local })} />
 
       {/* Version bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3">
@@ -340,7 +386,7 @@ export default function CostSheetPage() {
         <div className="rounded-lg border border-dashed border-slate-700 px-6 py-12 text-center">
           <p className="text-slate-300">No cost sheet yet.</p>
           <p className="mt-1 text-sm text-slate-500">
-            {ov.can_edit ? 'Start a draft, enter the rates and publish it.' : 'Finance has not published a cost sheet yet.'}
+            {ov.can_edit ? 'Start a draft, enter the rates and publish it.' : 'Sales has not published a cost sheet yet.'}
           </p>
         </div>
       ) : (
@@ -362,6 +408,39 @@ export default function CostSheetPage() {
               <p className="text-xs text-slate-500">Published versions are frozen. Start a draft to change rates.</p>
             )}
           </div>
+          {v && (hasDept && retiredCount > 0 || (tab === 'rates' && (missingCount > 0 || onlyMissing))
+            || (tab === 'rates' && editable)) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+              {tab === 'rates' && editable && (
+                <button type="button" onClick={() => missingMut.mutate()} disabled={missingMut.isPending}
+                        data-testid="add-missing-departments"
+                        title="One row with an empty rate for every department that can be routed on a change, per plant"
+                        className={`${BTN} border border-slate-600 text-slate-200 hover:bg-slate-700/60`}>
+                  Add missing departments
+                </button>
+              )}
+              {tab === 'rates' && (missingCount > 0 || onlyMissing) && (
+                <label className="flex cursor-pointer items-center gap-2 text-amber-300/90" data-testid="missing-rate-count">
+                  <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)}
+                         className="h-4 w-4 accent-amber-500" />
+                  {missingCount} {missingCount === 1 ? 'row has' : 'rows have'} no rate yet
+                  <span className="text-slate-500">(show only these)</span>
+                </label>
+              )}
+              {hasDept && retiredCount > 0 && (
+                <label className="flex cursor-pointer items-center gap-2 text-slate-400" data-testid="show-retired">
+                  <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)}
+                         className="h-4 w-4 accent-sky-500" />
+                  Show retired ({retiredCount})
+                </label>
+              )}
+            </div>
+          )}
+          {v && (tab === 'rates' || tab === 'machines') && (
+            <FxRates rates={v.fx_rates ?? []} needed={v.fx_needed ?? []} editable={editable}
+                     busy={fxMut.isPending} version={v.version}
+                     onSet={(base, quote, rate) => fxMut.mutate({ base, quote, rate })} />
+          )}
           {(tab === 'machines' || tab === 'sampling') && (
             <MachineClassStrip classes={ov.machine_classes} canEdit={ov.can_edit} onAdd={addClass}
                                onRename={renameClass} />
@@ -385,7 +464,11 @@ export default function CostSheetPage() {
             <SectionTable
               section={tab}
               rows={rows}
+              allRows={tabRows}
               ctx={ctx}
+              extraColumns={dualColumns[tab]}
+              tableState={tableStates[tab] ?? EMPTY_TABLE_STATE}
+              onTableState={(st) => setTableStates((m) => ({ ...m, [tab]: st }))}
               editable={editable}
               busy={rowMut.isPending}
               onUpdate={(rowId, changes) => rowMut.mutate({ kind: 'update', rowId, row: changes })}
@@ -393,13 +476,16 @@ export default function CostSheetPage() {
               onAdd={async (row) => {
                 try {
                   await rowMut.mutateAsync({ kind: 'add', row })
-                  return true
-                } catch {
-                  return false
+                  return true as const
+                } catch (e) {
+                  return apiErrorMessage(e, 'The row was not added.')
                 }
               }}
             />
           ) : null}
+          {tab === 'machines' && v && (
+            <MachinesPanel versionId={v.id} editable={editable} plants={ov.plants} />
+          )}
         </div>
       )}
 

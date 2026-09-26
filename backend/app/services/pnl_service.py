@@ -268,7 +268,9 @@ class PnlService:
         no FX): quoted/estimated cost by kind, plus the position's own hours
         priced live from `ctx["book"]` where there is no stored snapshot.
         Returns (pos_cost, no_rate) - no_rate is the set of change ids that
-        have a position whose hours could not be priced at all."""
+        have a position whose hours could not be priced at all, or were
+        priced in another currency than the costing one (left out, so the
+        cost is flagged as too low rather than silently short)."""
         from app.models.change import ChangeImpactedItem
         from app.models.change_cost import CostingPosition
         from app.models.part import Part
@@ -304,12 +306,18 @@ class PnlService:
             price = costing_rates.stored_price(p)
             if price is None and costing_rates.quantity(p):
                 if p.kind in ("machine_time", "sampling"):
-                    cls = p.machine_class_id or await change_class(by_id[cid])
+                    cls = (p.machine_class_id
+                           or await book.machine_class_of(ctx["org"][cid], p.machine_id)
+                           or await change_class(by_id[cid]))
                     fn = book.machine_price if p.kind == "machine_time" else book.sampling_price
-                    price = await fn(ctx["org"][cid], cls, ctx["plant"][cid])
+                    price = await fn(ctx["org"][cid], cls, ctx["plant"][cid],
+                                     costing_rates.change_pricing_date(by_id[cid]),
+                                     machine_id=p.machine_id)
                 else:
-                    price = await book.labour_price(ctx["org"][cid], p.department_id,
-                                                    ctx["plant"][cid], p.labour_position)
+                    # the version valid on the change's creation date
+                    price = await book.labour_price(
+                        ctx["org"][cid], p.department_id, ctx["plant"][cid],
+                        p.labour_position, costing_rates.change_pricing_date(by_id[cid]))
             if price is None:
                 continue
             value = costing_rates.line_value(p, price)
@@ -317,6 +325,11 @@ class PnlService:
                 no_rate.add(cid)
             elif price.currency == cur:
                 bucket[0] += value
+            elif value:
+                # priced in another currency (a machine rate without the
+                # version's exchange rate): not added, but flagged like a
+                # missing rate so the cost never reads silently too low
+                no_rate.add(cid)
         return pos_cost, no_rate
 
     @staticmethod
@@ -456,7 +469,12 @@ class PnlService:
         # live, from the same book, where there is none)
         pos_cost, no_rate = await PnlService.positions_cost(session, changes, ctx)
 
-        extra = await PnlService.actual_cost_sums(session, ids, ctx["currency"])
+        # money entered in another currency: converted at the exchange rate
+        # of each change's own cost sheet version, and said so
+        fx_of = {c.id: await book.version_on(ctx["org"][c.id],
+                                             costing_rates.change_pricing_date(c))
+                 for c in changes}
+        extra = await PnlService.actual_cost_sums(session, ids, ctx["currency"], fx_of)
         issues = await PnlService.issue_costs(session, ids)
 
         # timing: one query for both plans of every change
@@ -572,6 +590,7 @@ class PnlService:
                 "slip_unit": "working days" if cal.working else "calendar days",
                 "no_rate": c.id in no_rate,
                 "warnings": warnings,
+                "fx_notes": [costing_rates.fx_note(x) for x in e.get("converted") or []],
                 # (internal, external) of the costing positions, for the
                 # row's own cost columns; not a field of the row itself
                 "position_cost": tuple(pos_cost.get(c.id, (0.0, 0.0))),
@@ -807,9 +826,10 @@ class PnlService:
             if len(d["rates"]) == 1:
                 rate = next(iter(d["rates"]))
             elif not d["rates"] and not hours:
-                # nothing booked yet: show the rate that would apply today
+                # nothing booked yet: the rate a booking made today would get
                 rate = (await costing_rates.labour_price(
-                    session, org_id, dept_id, plant_id)).rate
+                    session, org_id, dept_id, plant_id, None,
+                    costing_rates.booking_pricing_date(change, None))).rate
             plan = plan_by_dept.get(dept_id) or {}
             plan_cost = (plan.get("one_time_internal", 0.0)
                          + plan.get("one_time_external", 0.0)
@@ -1042,11 +1062,16 @@ class PnlService:
 
     @staticmethod
     async def actual_cost_sums(session, change_ids: list[int],
-                               currency_of: Optional[dict] = None) -> dict[int, dict]:
+                               currency_of: Optional[dict] = None,
+                               fx_of: Optional[dict] = None) -> dict[int, dict]:
         """Per change: entered actual costs by category. With `currency_of`
         ({change_id: costing currency}) only rows in that currency (or with
-        none, legacy) are summed; the rest go to the bucket's
-        `other_currency` ({currency: amount}), never added (no FX)."""
+        none, legacy) are summed. Rows in another currency are converted
+        when `fx_of` ({change_id: cost sheet version}) gives that version's
+        exchange rate (the change's version: valid on its creation date),
+        each conversion listed in the bucket's `converted`; without a rate
+        they go to `other_currency` ({currency: amount}), never added."""
+        from app.services import cost_sheet_service as cs
         from app.models.change_actual_cost import ChangeActualCost
         out: dict[int, dict] = {}
         if not change_ids:
@@ -1062,6 +1087,21 @@ class PnlService:
             bucket = out.setdefault(cid, {"external": 0.0, "scrap": 0.0, "other": 0.0})
             want = (currency_of or {}).get(cid)
             if want is not None and cur is not None and cur != want:
+                v = (fx_of or {}).get(cid)
+                converted = cs.convert(v, float(amount or 0.0), cur, want) if v else None
+                if converted is not None:
+                    bucket[cat if cat in bucket else "other"] += converted
+                    rate = cs.fx_rate(v, want, cur)
+                    conv = bucket.setdefault("converted", [])
+                    same = next((x for x in conv if x["currency"] == cur), None)
+                    if same is None:
+                        conv.append({"currency": cur, "amount": float(amount or 0.0),
+                                     "to": want, "converted": converted,
+                                     "rate": float(rate), "version": v.version})
+                    else:
+                        same["amount"] += float(amount or 0.0)
+                        same["converted"] = round(same["converted"] + converted, 2)
+                    continue
                 other = bucket.setdefault("other_currency", {})
                 other[cur] = other.get(cur, 0.0) + float(amount or 0.0)
                 continue
@@ -1151,9 +1191,12 @@ class PnlService:
                             "counted at zero")
         from app.services import costing_rates as _cr
         cost_cur_now = await _cr.costing_currency(session, change)
+        fx_version = await _cr.change_fx_version(session, change)
         costs = (await PnlService.actual_cost_sums(
-            session, [change.id], {change.id: cost_cur_now})).get(
+            session, [change.id], {change.id: cost_cur_now},
+            {change.id: fx_version} if fx_version is not None else None)).get(
             change.id, {"external": 0.0, "scrap": 0.0, "other": 0.0})
+        fx_notes = [_cr.fx_note(x) for x in costs.get("converted") or []]
         if costs.get("other_currency"):
             warnings.append(
                 "Actual costs entered in "
@@ -1165,8 +1208,9 @@ class PnlService:
         supplement = issues.get("customer_quoted", 0.0)
         if issues["customer"] - supplement > 0.004:
             warnings.append("Customer-borne issue costs are not quoted yet")
-        recorded = bool(actuals["total_booked_hours"] or any(costs.values())
-                        or issues["count"])
+        recorded = bool(actuals["total_booked_hours"]
+                        or any(costs.get(k) for k in ("external", "scrap", "other"))
+                        or costs.get("other_currency") or issues["count"])
         # the list's phase rule (pnl_phase): no actual before anything is
         # recorded, a zero would read as a saving
         phase = pnl_phase(change, recorded)
@@ -1255,6 +1299,9 @@ class PnlService:
             "timing": timing,
             "piece_price": planned.get("piece_price"),
             "warnings": warnings,
+            # conversions made (money entered in the plant's other currency),
+            # each with its rate and version: said, never silent
+            "fx_notes": fx_notes,
         }
 
 

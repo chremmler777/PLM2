@@ -33,6 +33,10 @@ class Plant(Base):
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # ISO 4217; the cost sheet prices this plant's rows in it (migration 094).
     currency: Mapped[str] = mapped_column(String(3), default="EUR", server_default="EUR")
+    # A second currency the plant works in (106): Silao quotes in USD
+    # (currency, used by costing and offers) and pays in MXN (local_currency).
+    # None = one currency only.
+    local_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

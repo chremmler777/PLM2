@@ -32,6 +32,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Star, X } from 'lucide-react'
 import { changesApi } from '../../api/changes'
+import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import ConfirmDialog from '../common/ConfirmDialog'
 import { btnIcon, btnSm } from '../common/buttonStyles'
 import { toastError } from '../../lib/apiError'
@@ -544,23 +545,6 @@ function LineValue({ p }: { p: CostPosition }) {
   )
 }
 
-/** The cost sheet positions a department has a rate for, or its default rate. */
-function PositionSelect({ testId, value, options, onChange }: {
-  testId: string; value: string; options: string[]; onChange: (v: string) => void
-}) {
-  if (options.length === 0 && !value) return null
-  return (
-    <select data-testid={testId} value={value} aria-label={t('costpos.labourPosition')}
-      title={t('costpos.labourPosition')}
-      onChange={(e) => onChange(e.target.value)} className={`${fieldCls} w-32 text-xs`}>
-      <option value="">{t('costpos.labourDefault')}</option>
-      {[...options, ...(value && !options.includes(value) ? [value] : [])].map((o) => (
-        <option key={o} value={o}>{o}</option>
-      ))}
-    </select>
-  )
-}
-
 /** The org's machine classes; the change's class is the default. */
 function MachineClassSelect({ testId, value, ctx, onChange }: {
   testId: string; value: number | null; ctx?: CostingContext; onChange: (v: number | null) => void
@@ -577,6 +561,49 @@ function MachineClassSelect({ testId, value, ctx, onChange }: {
   )
 }
 
+/** A named MachineDB press at the costing plant, narrowed to the class's
+ * tonnage band when a class is picked. Its own cost sheet rate beats the
+ * class rate; "Any machine" prices on the class. Hidden when the plant has
+ * no synced machines. */
+function MachineSelect({ testId, value, classId, ctx, onChange }: {
+  testId: string; value: number | null; classId: number | null; ctx?: CostingContext
+  onChange: (v: number | null) => void
+}) {
+  const plantId = ctx?.plant_id ?? null
+  // the version that prices this change (valid on its creation date), so
+  // "own rate" means an own rate there, not in today's version
+  const versionId = ctx?.current_version?.id ?? null
+  const q = useQuery({
+    queryKey: ['cost-sheet', 'machines', 'pick', versionId],
+    // all of the org's machines: the line's own machine stays listed even
+    // when it is inactive now or sits at another plant
+    queryFn: () => costSheetMachinesApi.list({ version_id: versionId }),
+    enabled: plantId != null, staleTime: 60_000, retry: false,
+  })
+  const cls = ctx?.machine_classes.find((c) => c.id === classId)
+  const inBand = (t: number | null) => !cls || (t != null
+    && (cls.tonnage_min == null || t > cls.tonnage_min)
+    && (cls.tonnage_max == null || t <= cls.tonnage_max))
+  const machines = (q.data?.machines ?? []).filter((m) => m.id === value
+    || (m.plant_id === plantId && m.active && inBand(m.clamping_force_t)))
+  if (plantId == null || (machines.length === 0 && value == null)) return null
+  return (
+    <select data-testid={testId} value={value ?? ''} aria-label={t('costpos.machine')}
+      title={t('costpos.machine')}
+      onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+      className={`${fieldCls} w-44 text-xs`}>
+      <option value="">{t('costpos.machineAny')}</option>
+      {machines.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.internal_name}{m.clamping_force_t != null ? ` · ${formatNumber(m.clamping_force_t, { max: 0 })} t` : ''}
+          {m.hourly_rate != null ? ` · ${t('costpos.ownRate')}` : ''}
+          {m.active ? '' : ` (${t('costpos.machineInactive')})`}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 /** A position row: reads as one line; edits in place; a quoted line opens its vendors. */
 function PositionRow({ changeId, position, editable, index, categories, onChanged, ctx }: {
   changeId: number; position: CostPosition; editable: boolean; index: number
@@ -584,8 +611,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
 }) {
   const p = position
   const [editing, setEditing] = useState(false)
-  const [labourPos, setLabourPos] = useState(p.labour_position ?? '')
   const [classId, setClassId] = useState<number | null>(p.machine_class_id ?? null)
+  const [machineId, setMachineId] = useState<number | null>(p.machine_id ?? null)
   const [trials, setTrials] = useState(p.trials != null ? String(p.trials) : '')
   const [label, setLabel] = useState(p.label)
   const [hours, setHours] = useState(p.hours != null ? String(p.hours) : '')
@@ -600,7 +627,6 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const isExternal = p.kind === 'external'
   const isQuote = type === 'quote'
   const isMachine = type === 'machine' || type === 'sampling'
-  const positions = ctx?.positions_by_department?.[String(p.department_id)] ?? []
   const cost = effectiveOf(p)
   const time = leadTimeOf(p)
   // With several offers and no vote the line has no price; a single offer
@@ -622,8 +648,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
         lead_time_days: num(lead), lead_time_unit: unit,
         notes: notes.trim() || null,
         ...(isMachine
-          ? { machine_class_id: classId, trials: type === 'sampling' ? num(trials) : null }
-          : { labour_position: labourPos || null }),
+          ? { machine_class_id: classId, machine_id: machineId,
+              trials: type === 'sampling' ? num(trials) : null }
+          : {}),
       })
     },
     onSuccess: () => { toast.success(t('costpos.saved')); setEditing(false); onChanged() },
@@ -698,6 +725,11 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
                 {p.machine_class}{p.machine_class_from_change ? ` (${t('costpos.classFromChange')})` : ''}
               </span>
             )}
+            {isMachine && p.machine_name && (
+              <span data-testid={`costpos-machine-${p.id}`} className="block text-[11px] text-slate-400">
+                {p.machine_name}{p.machine_rate_own ? ` (${t('costpos.ownRate')})` : ''}
+              </span>
+            )}
             <span className="sr-only"> · {t(`costpos.kind.${p.kind}`)}{isExternal && p.pricing ? ` · ${t(`costpos.pricing.${p.pricing}`)}` : ''}</span>
           </span>
           {isQuote && offerCount > 0 && (
@@ -728,12 +760,14 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
                   onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
               )}
               {isMachine ? (
-                <MachineClassSelect testId={`costpos-edit-class-${p.id}`} value={classId} ctx={ctx}
-                  onChange={setClassId} />
-              ) : (
-                <PositionSelect testId={`costpos-edit-position-${p.id}`} value={labourPos}
-                  options={positions} onChange={setLabourPos} />
-              )}
+                <>
+                  <MachineClassSelect testId={`costpos-edit-class-${p.id}`} value={classId} ctx={ctx}
+                    onChange={setClassId} />
+                  <MachineSelect testId={`costpos-edit-machine-${p.id}`} value={machineId}
+                    classId={classId ?? ctx?.effective_machine_class_id ?? null} ctx={ctx}
+                    onChange={setMachineId} />
+                </>
+              ) : null}
             </span>
           ) : (
             <>
@@ -850,7 +884,6 @@ const EFFORT_FIELDS: { kind: CostPositionKind; labelKey: string; rowKey: string;
  */
 function EffortRow({
   changeId, departmentId, kind, labelKey, rowKey, descKey, position, editable, index, onChanged,
-  ctx,
 }: {
   changeId: number; departmentId: number
   kind: CostPositionKind; labelKey: string; rowKey: string; descKey: string
@@ -858,8 +891,6 @@ function EffortRow({
   editable: boolean; index: number; onChanged: () => void; ctx?: CostingContext
 }) {
   const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
-  const [labourPos, setLabourPos] = useState(position?.labour_position ?? '')
-  const positions = ctx?.positions_by_department?.[String(departmentId)] ?? []
   // Blur and the Save click (or Enter, then blur) arrive in the same moment,
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is
@@ -890,7 +921,6 @@ function EffortRow({
         ? changesApi.updateCostPosition(changeId, id, body(p))
         : changesApi.createCostPosition(changeId, {
           department_id: departmentId, label: t(labelKey), kind, hours: num(hoursRef.current),
-          labour_position: ('labour_position' in p ? p.labour_position : labourPos) || null,
         })
     },
     onSuccess: (res: unknown) => {
@@ -937,12 +967,6 @@ function EffortRow({
   const commit = () => {
     if (inFlight.current || num(hoursRef.current) !== savedHours.current) run({ hours: true })
   }
-  // The position re-prices a saved row at once; before the first save it
-  // rides along with the hours (or, while the create is out, follows it).
-  const pickPosition = (v: string) => {
-    setLabourPos(v)
-    if (targetId() != null || inFlight.current) run({ labour_position: v || null })
-  }
   return (
     <tr className="border-t border-slate-700/70">
       <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
@@ -960,8 +984,6 @@ function EffortRow({
       <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
         {editable ? (
           <span className="inline-flex items-center gap-1.5">
-            <PositionSelect testId={`costpos-effort-position-${kind}-${departmentId}`}
-              value={labourPos} options={positions} onChange={pickPosition} />
             <label htmlFor={`effort-${kind}-${departmentId}`} className="sr-only">{t(labelKey)}</label>
             <input id={`effort-${kind}-${departmentId}`}
               data-testid={`costpos-effort-${kind}-${departmentId}`}
@@ -1075,8 +1097,8 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   const [newCat, setNewCat] = useState<{ label: string; type: CostEntryType } | null>(null)
 
   const [trials, setTrials] = useState('')
-  const [labourPos, setLabourPos] = useState('')
   const [classId, setClassId] = useState<number | null>(null)
+  const [machineId, setMachineId] = useState<number | null>(null)
   const isMachine = tag === MACHINE_TIME
   const isSampling = tag === SAMPLING
   const isSheetKind = isMachine || isSampling
@@ -1085,7 +1107,6 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   const isTime = !isSheetKind && entryType === 'time'
   const isQuote = !isTime && !isSheetKind && pricing === 'quote'
   const lineType: LineType = isMachine ? 'machine' : isSampling ? 'sampling' : isTime ? 'time' : pricing
-  const positions = ctx?.positions_by_department?.[String(departmentId)] ?? []
   // A machine line defaults to the change's class (own or from the tool's tonnage).
   const effectiveClass = classId ?? ctx?.effective_machine_class_id ?? null
 
@@ -1101,7 +1122,9 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
           kind: isMachine ? 'machine_time' : 'sampling', pricing: 'estimate',
           hours: isMachine ? num(hours) : null,
           trials: isSampling ? num(trials) : null,
-          machine_class_id: effectiveClass,
+          // A named machine brings its own class unless one was picked.
+          machine_class_id: machineId != null ? classId : effectiveClass,
+          machine_id: machineId,
           lead_time_days: num(lead), lead_time_unit: unit,
         })
       }
@@ -1115,7 +1138,6 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
         est_cost: lineType === 'estimate' ? num(est) : null,
         vendor_name: lineType === 'estimate' ? (vendor.trim() || null) : null,
         lead_time_days: num(lead), lead_time_unit: unit,
-        labour_position: labourPos || null,
       })
     },
     onSuccess: () => { reset(); onAdded() },
@@ -1214,12 +1236,12 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               <span className="text-xs text-slate-400">{t(`costpos.type.${lineType}`)}</span>
               <MachineClassSelect testId={`costpos-new-class-${departmentId}`} value={effectiveClass}
                 ctx={ctx} onChange={setClassId} />
+              <MachineSelect testId={`costpos-new-machine-${departmentId}`} value={machineId}
+                classId={effectiveClass} ctx={ctx} onChange={setMachineId} />
             </span>
           ) : isTime ? (
             <span className="inline-flex flex-col gap-1">
               <span className="text-xs text-slate-400">{t('costpos.type.time')}</span>
-              <PositionSelect testId={`costpos-new-position-${departmentId}`} value={labourPos}
-                options={positions} onChange={setLabourPos} />
             </span>
           ) : (
             // Two buttons, not a dropdown: a house number or a vendor's written

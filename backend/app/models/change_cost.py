@@ -169,6 +169,10 @@ class CostingPosition(Base):
     machine_class_id: Mapped[int | None] = mapped_column(
         ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
     trials: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # A named press of a machine_time / sampling line (105): its own rate in
+    # the cost sheet beats the class rate; None = priced on the class.
+    machine_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machines.id"), nullable=True)
     # The rate snapshot, written when the line is priced (created, or its
     # pricing inputs changed) and read by the summation from then on, so a
     # later cost sheet version never moves a costed line under its owner.

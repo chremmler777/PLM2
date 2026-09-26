@@ -890,6 +890,9 @@ class CostingPositionCreate(BaseModel):
     labour_position: Optional[str] = Field(default=None, max_length=80)
     machine_class_id: Optional[int] = None
     trials: Optional[int] = Field(default=None, ge=0, le=10000)
+    # A named MachineDB press (machine_time, sampling): its own cost sheet
+    # rate beats the class rate.
+    machine_id: Optional[int] = None
 
 
 class CostingPositionUpdate(BaseModel):
@@ -908,6 +911,9 @@ class CostingPositionUpdate(BaseModel):
     labour_position: Optional[str] = Field(default=None, max_length=80)
     machine_class_id: Optional[int] = None
     trials: Optional[int] = Field(default=None, ge=0, le=10000)
+    # A named MachineDB press (machine_time, sampling): its own cost sheet
+    # rate beats the class rate.
+    machine_id: Optional[int] = None
 
 
 class CostingPositionResponse(BaseModel):
@@ -932,6 +938,9 @@ class CostingPositionResponse(BaseModel):
     machine_class_used_id: Optional[int] = None
     machine_class_from_change: bool = False
     trials: Optional[int] = None
+    machine_id: Optional[int] = None
+    machine_name: Optional[str] = None
+    machine_rate_own: bool = False
     # The rate the line is priced with (spec §15 phase 2): the snapshot taken
     # when it was costed. rate None + rate_missing = "No rate in the cost
     # sheet" (not counted, never 0). rate_label reads e.g. "Cost sheet v2,

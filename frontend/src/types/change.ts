@@ -837,6 +837,11 @@ export interface CostPosition {
   machine_class?: string | null;
   machine_class_used_id?: number | null;
   machine_class_from_change?: boolean;
+  /** A named MachineDB press: its own cost sheet rate beats the class rate. */
+  machine_id?: number | null;
+  machine_name?: string | null;
+  /** True when the line is priced on the machine's own rate. */
+  machine_rate_own?: boolean;
   trials?: number | null;
   /** The rate snapshot the line is priced with; null = no rate (not 0). */
   rate?: number | null;
@@ -866,7 +871,14 @@ export interface CostingContext {
   plant_name: string | null;
   currency: string;
   rate_source: 'cost_sheet' | 'department_rate';
+  /** The version that prices this change: valid on its creation date. */
   current_version: { id: number; version: number; valid_from: string } | null;
+  /** The change's creation date (business date): the day its rates come from. */
+  pricing_date?: string | null;
+  /** The costing plant's second currency (Silao: MXN); null = one currency. */
+  local_currency?: string | null;
+  /** The change's version's exchange rates. */
+  fx_rates?: { pair: string; base: string; quote: string; rate: string }[];
   latest_version: number | null;
   stale: {
     stale: boolean; review_months: number; latest_version: number | null;
@@ -877,6 +889,7 @@ export interface CostingContext {
   default_machine_class_id: number | null;
   effective_machine_class_id: number | null;
   tonnage: number | null;
+  /** Always {} since the cost sheet has one rate per department and plant. */
   positions_by_department: Record<string, string[]>;
   can_set_machine_class?: boolean;
 }
@@ -895,6 +908,7 @@ export interface CostPositionIn {
   notes?: string | null;
   labour_position?: string | null;
   machine_class_id?: number | null;
+  machine_id?: number | null;
   trials?: number | null;
 }
 

@@ -3,6 +3,7 @@ import { render, screen, within, fireEvent, waitFor, cleanup } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CostPositions from './CostPositions'
 import { changesApi } from '../../api/changes'
+import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import { t } from '../../i18n/cmLabels'
 import { formatHours } from '../../lib/format'
 
@@ -32,6 +33,10 @@ vi.mock('../../api/changes', () => ({
       tonnage: 350, positions_by_department: { '2': ['Engineer', 'Technician'] },
     }),
   },
+}))
+
+vi.mock('../../api/costSheetMachines', () => ({
+  costSheetMachinesApi: { list: vi.fn().mockResolvedValue({ machines: [] }) },
 }))
 
 const TAGS = {
@@ -108,7 +113,7 @@ describe('CostPositions', () => {
     fireEvent.blur(support)
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7, {
       department_id: 2, label: t('costpos.supportEffortField'),
-      kind: 'support_effort', hours: 16, labour_position: null,
+      kind: 'support_effort', hours: 16,
     }))
     expect(changesApi.updateCostPosition).not.toHaveBeenCalled()
   })
@@ -137,7 +142,7 @@ describe('CostPositions', () => {
     expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1)
   })
 
-  it('a labour position picked while an hours save is in flight is sent when it settles (review M2)', async () => {
+  it('an hours change made while an hours save is in flight is sent when it settles (review M2)', async () => {
     let resolve!: (v: unknown) => void
     vi.mocked(changesApi.updateCostPosition).mockImplementationOnce(
       () => new Promise((r) => { resolve = r }) as never)
@@ -149,65 +154,34 @@ describe('CostPositions', () => {
     fireEvent.change(internal, { target: { value: '14' } })
     fireEvent.click(screen.getByTestId('costpos-effort-save-internal_effort-2'))
     await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1))
-    fireEvent.change(screen.getByTestId('costpos-effort-position-internal_effort-2'),
-      { target: { value: 'Engineer' } })
-    // Held while the hours save is out, not dropped.
+    fireEvent.change(internal, { target: { value: '15' } })
+    fireEvent.blur(internal)
+    // Held while the first save is out, not dropped.
     expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1)
     resolve({})
     await waitFor(() => expect(changesApi.updateCostPosition)
-      .toHaveBeenLastCalledWith(7, 10, { labour_position: 'Engineer' }))
+      .toHaveBeenLastCalledWith(7, 10, { hours: 15 }))
     expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(2)
   })
 
-  it('an unchanged hours commit during a position-only save sends nothing more (review)', async () => {
-    let resolve!: (v: unknown) => void
-    vi.mocked(changesApi.updateCostPosition).mockImplementationOnce(
-      () => new Promise((r) => { resolve = r }) as never)
-    positions()
-    await waitFor(() => expect(
-      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
-    ).toBe('12'))
-    fireEvent.change(screen.getByTestId('costpos-effort-position-internal_effort-2'),
-      { target: { value: 'Engineer' } })
-    await waitFor(() => expect(changesApi.updateCostPosition)
-      .toHaveBeenCalledWith(7, 10, { labour_position: 'Engineer' }))
-    // Leaving the untouched hours field while that save is out.
-    fireEvent.blur(screen.getByTestId('costpos-effort-internal_effort-2'))
-    const listed = vi.mocked(changesApi.listCostPositions).mock.calls.length
-    resolve({})
-    await waitFor(() => expect(vi.mocked(changesApi.listCostPositions).mock.calls.length).toBeGreaterThan(listed))
-    expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1)
-  })
-
-  it('after a create, queued and later changes go out as edits of the new position (review)', async () => {
+  it('after a create, a queued change goes out as an edit of the new position (review)', async () => {
     let resolveCreate!: (v: unknown) => void
-    let resolveEdit!: (v: unknown) => void
     vi.mocked(changesApi.createCostPosition).mockImplementationOnce(
       () => new Promise((r) => { resolveCreate = r }) as never)
-    vi.mocked(changesApi.updateCostPosition).mockImplementationOnce(
-      () => new Promise((r) => { resolveEdit = r }) as never)
     positions()
     await screen.findByTestId('costpos-row-11')
     const support = screen.getByTestId('costpos-effort-support_effort-2')
     fireEvent.change(support, { target: { value: '16' } })
     fireEvent.blur(support)
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1))
-    // Picked while the create is out: queued, not dropped.
-    fireEvent.change(screen.getByTestId('costpos-effort-position-support_effort-2'),
-      { target: { value: 'Engineer' } })
-    resolveCreate({ id: 77 })
-    await waitFor(() => expect(changesApi.updateCostPosition)
-      .toHaveBeenCalledWith(7, 77, { labour_position: 'Engineer' }))
-    // An hours commit while that edit is out is sent after it, to the same id.
+    // Changed while the create is out: queued, not dropped, not a second create.
     fireEvent.change(support, { target: { value: '18' } })
     fireEvent.blur(support)
-    expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1)
     const listed = vi.mocked(changesApi.listCostPositions).mock.calls.length
-    resolveEdit({})
+    resolveCreate({ id: 77 })
     await waitFor(() => expect(changesApi.updateCostPosition)
       .toHaveBeenLastCalledWith(7, 77, { hours: 18 }))
     expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1)
-    // Once nothing is queued the row reloads.
     await waitFor(() => expect(vi.mocked(changesApi.listCostPositions).mock.calls.length).toBeGreaterThan(listed))
   })
 
@@ -222,11 +196,11 @@ describe('CostPositions', () => {
     fireEvent.change(support, { target: { value: '16' } })
     fireEvent.blur(support)
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1))
-    fireEvent.change(screen.getByTestId('costpos-effort-position-support_effort-2'),
-      { target: { value: 'Engineer' } })
+    fireEvent.change(support, { target: { value: '18' } })
+    fireEvent.blur(support)
     const listed = vi.mocked(changesApi.listCostPositions).mock.calls.length
     resolveCreate({ id: 77 })
-    await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledWith(7, 77, { labour_position: 'Engineer' }))
+    await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledWith(7, 77, { hours: 18 }))
     await waitFor(() => expect(vi.mocked(changesApi.listCostPositions).mock.calls.length).toBeGreaterThan(listed))
   })
 
@@ -739,17 +713,42 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
       expect.objectContaining({ kind: 'sampling', trials: 2, machine_class_id: 4, hours: null })))
   })
 
-  it('offers the department’s cost sheet positions on an own-time line', async () => {
+  it('picks machines from the change\'s pricing version and keeps an inactive one on its line', async () => {
+    const press = (over: Record<string, unknown>) => ({
+      id: 1, internal_name: 'P-350', plant_id: 1, clamping_force_t: 350, active: true,
+      hourly_rate: null, ...over })
+    vi.mocked(costSheetMachinesApi.list).mockResolvedValue({ machines: [
+      press({}),
+      press({ id: 2, internal_name: 'P-300 old', active: false }),
+      press({ id: 3, internal_name: 'P-400 other plant', plant_id: 8 }),
+      press({ id: 4, internal_name: 'P-900 other class', clamping_force_t: 900 }),
+    ] } as never)
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(
+      [{ ...machine, machine_id: 2, machine_name: 'P-300 old' }] as never)
+    positions()
+    fireEvent.click(await screen.findByTestId('costpos-edit-21'))
+    const pick = await screen.findByTestId('costpos-edit-machine-21') as HTMLSelectElement
+    // the version valid on the change's creation date, not today's
+    expect(costSheetMachinesApi.list).toHaveBeenCalledWith({ version_id: 9 })
+    await waitFor(() => expect(pick.options).toHaveLength(3))
+    expect(pick.value).toBe('2')
+    const names = [...pick.options].map((o) => o.textContent)
+    expect(names).toEqual([t('costpos.machineAny'), 'P-350 · 350 t',
+      `P-300 old · 350 t (${t('costpos.machineInactive')})`])
+  })
+
+  it('offers no labour position on an own-time line: one rate per department', async () => {
     positions()
     await screen.findByTestId('costpos-row-20')
     fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'trial_support' } })
-    const pick = await screen.findByTestId('costpos-new-position-2') as HTMLSelectElement
-    expect([...pick.options].map((o) => o.value)).toEqual(['', 'Engineer', 'Technician'])
-    fireEvent.change(pick, { target: { value: 'Technician' } })
+    expect(screen.queryByTestId('costpos-new-position-2')).toBeNull()
     fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Check' } })
     fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '2' } })
     fireEvent.click(screen.getByTestId('costpos-add-2'))
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
-      expect.objectContaining({ kind: 'own_time', labour_position: 'Technician', hours: 2 })))
+      expect.objectContaining({ kind: 'own_time', hours: 2 })))
+    const calls = vi.mocked(changesApi.createCostPosition).mock.calls
+    const body = calls[calls.length - 1][1] as unknown as Record<string, unknown>
+    expect('labour_position' in body).toBe(false)
   })
 })

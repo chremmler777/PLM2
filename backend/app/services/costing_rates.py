@@ -4,9 +4,12 @@ One place that answers "what is an hour (a machine hour, a trial) of this
 worth on this change, and where does the number come from":
 
 - labour hours: `cost_sheet_service.effective_labour_rate` (department +
-  optional position + the costing plant, on the costing date);
+  the costing plant; one rate per department per plant since 104), with the
+  version valid on the change's creation date (change_pricing_date);
 - machine_time lines: the machine class rate; sampling lines: the price of
-  one trial of the class;
+  one trial of the class. A line that names a MachineDB machine (105) is
+  priced on that machine's own rate when the version has one, else on the
+  class rate at the machine's plant;
 - the legacy `department_rate` table only when the organisation has no
   published cost sheet version at all.
 
@@ -29,9 +32,38 @@ from app.models.cost_sheet import CostSheetMachineClass, CostSheetVersion
 from app.models.entities import Plant, Project
 from app.core.display import fmt_number
 from app.services import cost_sheet_service as cs
-from app.utils.clock import business_today
+from app.services import cost_sheet_machines_service as msvc
+from app.utils.clock import business_date_of, business_today
 
 NO_RATE = "No rate in the cost sheet"
+
+# ---------------------------------------------------------------- pricing date
+#
+# A change is priced with the cost sheet version valid on the day it was
+# CREATED (change_requests.created_at, as a business date), never the day a
+# line was entered: a later rate update never moves an existing change. Lines
+# keep their snapshot; a line without one is priced on the creation date.
+#
+# Booked actual hours (the P&L's actuals) are priced on the booking date for
+# now. BOOKING_PRICING_BASIS switches them to the change's creation date
+# ("change_created") in one place: booking_pricing_date.
+BOOKING_PRICING_BASIS = "booking_date"      # "booking_date" | "change_created"
+
+
+def change_pricing_date(change) -> date:
+    """The day whose cost sheet version prices this change: its creation
+    date in the business timezone (today for a change not saved yet)."""
+    return business_date_of(getattr(change, "created_at", None)) or business_today()
+
+
+def booking_pricing_date(change, booked_at) -> date:
+    """The day whose version prices a booking (or a booking made now, when
+    booked_at is None): the booking date, or the change's creation date when
+    BOOKING_PRICING_BASIS says so."""
+    if BOOKING_PRICING_BASIS == "change_created":
+        return change_pricing_date(change)
+    return booked_at.date() if booked_at else business_today()
+
 def unpriced_department_messages(unpriced: list[dict],
                                  names: dict) -> list[tuple[str, int]]:
     """One "No cost sheet rate for <department>: hours unpriced" per
@@ -106,7 +138,8 @@ def fmt_amount(value: float) -> str:
 
 def rate_label(price: Optional[Price], *, department: Optional[str] = None,
                position: Optional[str] = None, machine_class: Optional[str] = None) -> str:
-    """'Cost sheet v2, Tool Engineer, Engineer, 21.50 USD/h'."""
+    """'Cost sheet v2, Tool Engineer, 21.50 USD/h'. position is kept for
+    callers but no longer shown: rates are per department (104)."""
     if price is None or price.rate is None:
         return NO_RATE
     head = (f"Cost sheet v{price.version}" if price.source == "cost_sheet"
@@ -117,9 +150,12 @@ def rate_label(price: Optional[Price], *, department: Optional[str] = None,
     else:
         if department:
             parts.append(department)
-        if position:
-            parts.append(position)
     parts.append(f"{fmt_amount(price.rate)} {price.currency}/{price.unit}")
+    fx = (price.detail or {}).get("fx")
+    if fx:
+        # a machine rate in another currency, converted at the version's rate
+        parts.append(f"converted from {fmt_amount(fx['from_rate'])} {fx['from_currency']} "
+                     f"at {fx['rate']} {fx['from_currency']}/{price.currency}")
     return ", ".join(parts)
 
 
@@ -171,6 +207,24 @@ class RateBook:
         self._plant_cur: Optional[dict[int, str]] = None
         self._legacy: Optional[dict[tuple[int, int], tuple]] = None
         self._classes: dict[int, list] = {}
+        self._machines: dict[int, object] = {}
+
+    async def machine(self, machine_id: Optional[int]):
+        """The synced MachineDB machine (cost_sheet_machines row), cached."""
+        if machine_id is None:
+            return None
+        if machine_id not in self._machines:
+            from app.models.cost_sheet_machines import CostSheetMachine
+            self._machines[machine_id] = await self.db.get(CostSheetMachine, machine_id)
+        return self._machines[machine_id]
+
+    async def machine_class_of(self, org_id: Optional[int],
+                               machine_id: Optional[int]) -> Optional[int]:
+        """The cost sheet class the named machine's tonnage falls in."""
+        m = await self.machine(machine_id)
+        if m is None or m.clamping_force_t is None:
+            return None
+        return await self.class_for_tonnage(org_id, float(m.clamping_force_t))
 
     async def versions(self, org_id: Optional[int]) -> list[CostSheetVersion]:
         if org_id is None:
@@ -253,8 +307,22 @@ class RateBook:
                      detail={} if rate is not None else {"missing": ["labour_rate"]})
 
     async def machine_price(self, org_id: Optional[int], machine_class_id: Optional[int],
-                            plant_id: Optional[int], on_date: Optional[date] = None) -> Price:
+                            plant_id: Optional[int], on_date: Optional[date] = None,
+                            machine_id: Optional[int] = None) -> Price:
+        """A named machine's own rate beats the class rate; without one the
+        class rate of the machine's plant (the costing plant when the machine
+        maps to none) applies."""
         on_date = on_date or business_today()
+        m = await self.machine(machine_id)
+        costing_cur = await self.plant_currency(plant_id)
+        if m is not None:
+            v = await self.version_on(org_id, on_date)
+            own = msvc.machine_rate_in_version(v, m.id) if v else None
+            if own is not None:
+                price = _from_hit(own)
+                price.detail = {**price.detail, "machine_id": m.id}
+                return in_costing_currency(price, v, costing_cur)
+            plant_id = m.plant_id or plant_id
         if machine_class_id is None:
             return Price(rate=None, currency=await self.plant_currency(plant_id),
                          source=None, detail={"missing": ["machine_class"]})
@@ -262,19 +330,31 @@ class RateBook:
         hit = cs.machine_rate_in_version(v, machine_class_id, plant_id) if v else None
         if hit is None:
             return await self._no_hit(org_id, plant_id, on_date, "h", "machine_rate")
-        return _from_hit(hit)
+        # a named machine's plant may quote in another currency than the costing plant
+        return in_costing_currency(_from_hit(hit), v, costing_cur) if m is not None \
+            else _from_hit(hit)
 
     async def sampling_price(self, org_id: Optional[int], machine_class_id: Optional[int],
-                             plant_id: Optional[int], on_date: Optional[date] = None) -> Price:
+                             plant_id: Optional[int], on_date: Optional[date] = None,
+                             machine_id: Optional[int] = None) -> Price:
+        """The class's price of a trial; a named machine prices the machine
+        hours of a components row at its own rate."""
         on_date = on_date or business_today()
+        m = await self.machine(machine_id)
+        costing_cur = await self.plant_currency(plant_id)
+        if m is not None:
+            plant_id = m.plant_id or plant_id
         if machine_class_id is None:
             return Price(rate=None, currency=await self.plant_currency(plant_id),
                          source=None, unit="trial", detail={"missing": ["machine_class"]})
         v = await self.version_on(org_id, on_date)
         hit = cs.sampling_in_version(v, machine_class_id, plant_id) if v else None
+        if hit is not None and m is not None:
+            hit = msvc.sampling_with_machine(hit, msvc.machine_rate_in_version(v, m.id), v)
         if hit is None:
             return await self._no_hit(org_id, plant_id, on_date, "trial", "sampling_rate")
-        return _from_hit(hit, unit="trial")
+        return in_costing_currency(_from_hit(hit, unit="trial"), v, costing_cur) \
+            if m is not None else _from_hit(hit, unit="trial")
 
 
 async def has_cost_sheet(db: AsyncSession, org_id: Optional[int],
@@ -297,6 +377,27 @@ async def labour_price(db: AsyncSession, org_id: Optional[int], department_id: i
                        book: Optional[RateBook] = None) -> Price:
     return await (book or RateBook(db)).labour_price(
         org_id, department_id, plant_id, position, on_date)
+
+
+def in_costing_currency(price: Price, v: Optional[CostSheetVersion], target: str) -> Price:
+    """A named machine's rate (its own, or the class rate at its plant) in
+    the costing plant's currency: converted at the version's exchange rate
+    and labelled (detail["fx"]); without that rate it is not priced
+    (missing machine_rate_currency), never added across currencies."""
+    if price.rate is None or price.currency == target:
+        return price
+    converted = cs.convert(v, price.rate, price.currency, target)
+    if converted is None:
+        return Price(rate=None, currency=price.currency, source=price.source,
+                     unit=price.unit, version_id=price.version_id, version=price.version,
+                     match=price.match,
+                     detail={**price.detail, "missing": [
+                         *(price.detail.get("missing") or []), "machine_rate_currency"]})
+    return Price(rate=converted, currency=target, source=price.source, unit=price.unit,
+                 version_id=price.version_id, version=price.version, match=price.match,
+                 detail={**price.detail, "fx": {
+                     "from_currency": price.currency, "from_rate": price.rate,
+                     "rate": str(cs.fx_rate(v, target, price.currency))}})
 
 
 async def machine_price(db: AsyncSession, org_id: Optional[int],
@@ -365,18 +466,25 @@ async def price_for_position(db: AsyncSession, change, p: CostingPosition, *,
                              org_id: Optional[int] = None, plant_id: Optional[int] = None,
                              on_date: Optional[date] = None,
                              book: Optional[RateBook] = None) -> Price:
-    """The line's price now. A machine_time / sampling line without its own
+    """The line's price with the version valid on on_date (default: the
+    change's creation date). A machine_time / sampling line without its own
     class is priced on the change's class (own or tonnage default); the class
     used is recorded in detail["machine_class_id"]."""
     book = book or RateBook(db)
+    on_date = on_date or change_pricing_date(change)
     if plant_id is None:
         plant_id = await costing_plant_id(db, change)
     if org_id is None:
         org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
     if p.kind in ("machine_time", "sampling"):
-        cls_id = p.machine_class_id or await change_machine_class_id(db, change, org_id)
+        # the line's own class, else the named machine's, else the change's
+        machine_id = getattr(p, "machine_id", None)
+        cls_id = (p.machine_class_id or await book.machine_class_of(org_id, machine_id)
+                  or await change_machine_class_id(db, change, org_id))
         fn = book.machine_price if p.kind == "machine_time" else book.sampling_price
-        price = await fn(org_id, cls_id, plant_id, on_date)
+        price = await fn(org_id, cls_id, plant_id, on_date, machine_id=machine_id)
+        if machine_id is not None:
+            price.detail = {**price.detail, "machine_id": machine_id}
         if cls_id is not None:
             price.detail = {**price.detail, "machine_class_id": cls_id}
         return price
@@ -386,8 +494,11 @@ async def price_for_position(db: AsyncSession, change, p: CostingPosition, *,
 
 async def snapshot_position(db: AsyncSession, change, p: CostingPosition,
                             on_date: Optional[date] = None) -> Price:
-    """Price the line now and store the snapshot on it (rate, rate currency,
+    """Price the line and store the snapshot on it (rate, rate currency,
     version). Called when a line is created or its pricing inputs change.
+    Priced with the version valid on the change's creation date
+    (change_pricing_date), whatever day the line is entered; rate_on is that
+    date.
 
     A line with a class of its own keeps it; a line priced on the change's
     class keeps machine_class_id None (so a later change of the class moves
@@ -395,7 +506,7 @@ async def snapshot_position(db: AsyncSession, change, p: CostingPosition,
     stores no snapshot (rate_on None): it is priced live until a rate exists.
     The money currency (p.currency, of est_cost and offers) is the costing
     plant's and is not the rate's business."""
-    on_date = on_date or business_today()
+    on_date = on_date or change_pricing_date(change)
     price = await price_for_position(db, change, p, on_date=on_date)
     p.rate = price.rate
     p.rate_currency = price.currency
@@ -425,8 +536,8 @@ def stored_price(p: CostingPosition) -> Optional[Price]:
 async def position_price(db: AsyncSession, change, p: CostingPosition, *,
                          org_id=None, plant_id=None,
                          book: Optional[RateBook] = None) -> Price:
-    """The snapshot, or for a line without one, the rate valid today (read
-    only: GETs never write)."""
+    """The snapshot, or for a line without one, the rate valid on the
+    change's creation date (read only: GETs never write)."""
     return stored_price(p) or await price_for_position(
         db, change, p, org_id=org_id, plant_id=plant_id, book=book)
 
@@ -466,6 +577,8 @@ async def describe_positions(db: AsyncSession, change, positions) -> dict[int, d
         price = await position_price(db, change, p, org_id=org_id, plant_id=plant_id,
                                      book=book)
         value = line_value(p, price)
+        machine = await book.machine(getattr(p, "machine_id", None))
+        machine_name = machine.internal_name if machine is not None else None
         # the line's own class, else the change's class it was priced on
         used_cls = p.machine_class_id or price.detail.get("machine_class_id")
         cls = classes.get(used_cls) if used_cls else None
@@ -475,7 +588,11 @@ async def describe_positions(db: AsyncSession, change, positions) -> dict[int, d
             "machine_class_used_id": used_cls,
             "machine_class_from_change": bool(
                 p.kind in ("machine_time", "sampling") and used_cls
-                and not p.machine_class_id),
+                and not p.machine_class_id and machine is None),
+            "machine_id": getattr(p, "machine_id", None),
+            "machine_name": machine_name,
+            # priced on the machine's own rate (else its class rate)
+            "machine_rate_own": price.match == "machine",
             "rate_unit": price.unit, "rate_source": price.source,
             "cost_sheet_version_id": price.version_id,
             "cost_sheet_version": price.version,
@@ -483,7 +600,8 @@ async def describe_positions(db: AsyncSession, change, positions) -> dict[int, d
             "rate_label": rate_label(
                 price, department=names.get(p.department_id),
                 position=p.labour_position,
-                machine_class=cls if p.kind in ("machine_time", "sampling") else None),
+                machine_class=((machine_name if price.match == "machine" else cls)
+                               if p.kind in ("machine_time", "sampling") else None)),
             "rate_missing": price.rate is None and quantity(p) > 0,
             "rate_missing_reason": (price.detail.get("missing") or [None])[0]
             if price.rate is None else None,
@@ -494,7 +612,8 @@ async def describe_positions(db: AsyncSession, change, positions) -> dict[int, d
     return out
 
 
-PRICING_FIELDS = ("kind", "hours", "labour_position", "machine_class_id", "trials")
+PRICING_FIELDS = ("kind", "hours", "labour_position", "machine_class_id", "trials",
+                  "machine_id")
 
 
 def is_labour(kind: str) -> bool:
@@ -505,33 +624,36 @@ def is_labour(kind: str) -> bool:
 
 async def costing_context(db: AsyncSession, change) -> dict:
     """What the costing table needs besides the lines: the costing plant and
-    its currency, the cost sheet version in force today and whether Finance
-    owes a review, the machine classes with the change's class (own or the
+    its currency, the cost sheet version that prices the change (valid on
+    its creation date, pricing_date) and whether the sheet owes a review, the machine classes with the change's class (own or the
     tonnage default), and the positions each department has a rate for."""
     plant_id = await costing_plant_id(db, change)
     org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
     plant = await db.get(Plant, plant_id) if plant_id is not None else None
     sheet = await has_cost_sheet(db, org_id)
-    current = await cs.version_on(db, org_id) if org_id is not None else None
+    pricing_date = change_pricing_date(change)
+    # the version that prices this change: valid on its creation date
+    current = await cs.version_on(db, org_id, pricing_date) if org_id is not None else None
     latest = await cs.latest_published(db, org_id) if org_id is not None else None
     classes = await cs.list_machine_classes(db, org_id) if org_id is not None else []
     default_cls, tonnage = await default_machine_class(db, org_id, change)
     effective = change.machine_class_id or (default_cls.id if default_cls else None)
+    # Rates are one per department per plant (104): no labour positions to
+    # offer any more. The key stays (empty) for older clients.
     positions: dict[int, list[str]] = {}
-    if current is not None:
-        for r in current.rates:
-            if r.position and (r.plant_id is None or r.plant_id == plant_id):
-                names = positions.setdefault(r.department_id, [])
-                if r.position not in names:
-                    names.append(r.position)
     stale = await cs.stale_status(db, org_id) if (org_id is not None and sheet) else None
     return {
         "plant_id": plant_id,
         "plant_name": plant.name if plant else None,
         "currency": await cs.plant_currency(db, plant_id),
+        # the plant's second currency (Silao: MXN) and the change's version's
+        # exchange rates: money entered in it is converted at that rate
+        "local_currency": plant.local_currency if plant is not None else None,
+        "fx_rates": cs.fx_list(current),
         "rate_source": "cost_sheet" if sheet else "department_rate",
         "current_version": ({"id": current.id, "version": current.version,
                              "valid_from": current.valid_from} if current else None),
+        "pricing_date": pricing_date,
         "latest_version": latest.version if latest else None,
         "stale": stale,
         "machine_classes": [{"id": c.id, "name": c.name, "tonnage_min": c.tonnage_min,
@@ -625,10 +747,11 @@ async def price_bookings(db: AsyncSession, change, bookings, *,
                          org_id: Optional[int] = None,
                          plant_id: Optional[int] = None,
                          book: Optional[RateBook] = None) -> list[dict]:
-    """Each implementation booking priced on its booking date: hours x the
-    effective labour rate (department, the booking's position if it names
-    one, the costing plant) valid that day, plus machine hours x the machine
-    class rate valid that day. A value None = cannot price (never 0)."""
+    """Each implementation booking priced on booking_pricing_date (the
+    booking date for now, see BOOKING_PRICING_BASIS): hours x the effective
+    labour rate (department, the costing plant) valid that day, plus machine
+    hours x the machine class rate valid that day. A value None = cannot
+    price (never 0)."""
     if plant_id is None:
         plant_id = await costing_plant_id(db, change)
     if org_id is None:
@@ -638,7 +761,7 @@ async def price_bookings(db: AsyncSession, change, bookings, *,
     machine: dict[tuple, Price] = {}
     out = []
     for b in bookings:
-        on = (b.booked_at.date() if b.booked_at else business_today())
+        on = booking_pricing_date(change, b.booked_at)
         key = (b.department_id, getattr(b, "labour_position", None), on)
         if key not in labour:
             labour[key] = await book.labour_price(org_id, b.department_id, plant_id,
@@ -688,22 +811,53 @@ async def costing_versions(db: AsyncSession, change) -> list[int]:
     return sorted(nums)
 
 
+# ---------------------------------------------------------------- exchange
+
+async def change_fx_version(db: AsyncSession, change, *, org_id: Optional[int] = None,
+                            book: Optional["RateBook"] = None) -> Optional[CostSheetVersion]:
+    """The version whose exchange rates convert this change's money: the one
+    valid on its creation date, like its rates."""
+    if org_id is None:
+        plant_id = await costing_plant_id(db, change)
+        org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
+    return await (book or RateBook(db)).version_on(org_id, change_pricing_date(change))
+
+
+def fx_note(conv: dict) -> str:
+    """'1,730.00 MXN of actual costs converted to 100.00 USD at 17.30 MXN per
+    USD (cost sheet v3)': every conversion is said, with its rate."""
+    rate = conv["rate"]
+    text = fmt_number(rate, 2) if round(rate, 2) == round(rate, 6) else fmt_number(rate, 4)
+    return (f"{fmt_number(conv['amount'], 2)} {conv['currency']} of actual costs converted "
+            f"to {fmt_number(conv['converted'], 2)} {conv['to']} at {text} "
+            f"{conv['currency']} per {conv['to']} (cost sheet v{conv['version']})")
+
+
+def outdated_message(old: list[int], current: int) -> str:
+    """The one wording for "a line was priced with another version than the
+    change's own" (costing, P&L, offers)."""
+    return (f"Costing used cost sheet {', '.join(f'v{v}' for v in old)}; this change "
+            f"is priced with v{current} (valid on its creation date)")
+
+
 async def version_warning(db: AsyncSession, change, used: Optional[list[int]] = None
                           ) -> Optional[str]:
-    """'Costing used cost sheet v1, current is v2' when a costing line was
-    priced with another version than the one valid today."""
+    """outdated_message when a costing line was priced with another version
+    than the one valid on the change's creation date (a line priced before
+    that rule, or before a backdated version was published). A version
+    published later for later dates is no reason to warn: it never applies
+    to this change."""
     org_id = await change_org_id(db, change)
     if org_id is None:
         return None
-    current = await cs.version_on(db, org_id)
+    current = await cs.version_on(db, org_id, change_pricing_date(change))
     if current is None:
         return None
     used = used if used is not None else await costing_versions(db, change)
     old = [v for v in used if v != current.version]
     if not old:
         return None
-    return (f"Costing used cost sheet {', '.join(f'v{v}' for v in old)}, "
-            f"current is v{current.version}")
+    return outdated_message(old, current.version)
 
 
 async def costing_currency(db: AsyncSession, change) -> str:

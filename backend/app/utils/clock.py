@@ -39,3 +39,18 @@ def business_today(tz: Optional[str] = None) -> date:
     if zone is not None:
         return datetime.now(zone).date()
     return date.today()
+
+
+def business_date_of(moment: Optional[datetime], tz: Optional[str] = None) -> Optional[date]:
+    """The business date of a stored timestamp. Timestamps are stored naive
+    in UTC (datetime.utcnow()); an aware one is converted as it is."""
+    if moment is None:
+        return None
+    if not isinstance(moment, datetime):
+        return moment                                 # already a date
+    zone = _zone(tz) or _zone(os.environ.get(ENV_TZ)) or _zone(DEFAULT_TZ)
+    if zone is None:
+        return moment.date()
+    from datetime import timezone
+    aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+    return aware.astimezone(zone).date()

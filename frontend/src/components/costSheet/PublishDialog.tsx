@@ -1,10 +1,11 @@
 /**
  * Publish a draft: valid-from date and a note. The previous version then ends
  * the day before. The date must lie after the latest published version's; a
- * date in the past needs an explicit confirmation. Backdating does not
- * re-price what is already priced: costing lines keep the rate snapshot they
- * were costed with; hours booked since that date and lines without a rate
- * yet are priced with this version (costing_rates.py).
+ * date in the past needs an explicit confirmation. A change is priced with
+ * the version valid on the day it was created, and lines keep the rate they
+ * were costed with; backdating prices the changes created since that date
+ * where a line has no rate yet, and the hours booked since then
+ * (costing_rates.change_pricing_date / booking_pricing_date).
  */
 import { useEffect, useId, useState } from 'react'
 import Dialog from '../common/Dialog'
@@ -54,7 +55,7 @@ export default function PublishDialog({
   return (
     <Dialog open={open} onClose={onCancel} busy={busy} closeOnBackdrop={false} size="md"
       title={`Publish version ${version}`}
-      description={<>Publishing freezes the version. Costing and the P&amp;L use it from the valid-from date on.</>}
+      description={<>Publishing freezes the version. Changes created from the valid-from date on are priced with it; changes created before keep their rates.</>}
       footer={(
         <>
           <Button onClick={onCancel} disabled={busy}>Cancel</Button>
@@ -85,9 +86,9 @@ export default function PublishDialog({
         {backdated && !tooEarly && (
           <div data-testid="publish-backdated" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
             <p>
-              {formatCalendarDate(validFrom)} lies in the past. Costing lines already priced keep the rate they
-              were costed with. Hours booked since then, and lines that have no rate yet, are priced with this
-              version.
+              {formatCalendarDate(validFrom)} lies in the past. Changes created since then are priced with this
+              version where a line has no rate yet, and so are the hours booked since then. Lines already priced
+              keep the rate they were costed with.
             </p>
             <label className="mt-2 flex items-center gap-2">
               <input type="checkbox" checked={backdatedOk} onChange={(e) => setBackdatedOk(e.target.checked)}

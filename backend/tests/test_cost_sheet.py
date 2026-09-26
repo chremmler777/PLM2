@@ -1,5 +1,6 @@
 """Cost sheet (spec §15 / §15a): versions and validity chain, rights
-(Finance or admin, acts-as aware), most-specific rate lookup, overheads,
+(Sales, Finance or admin, acts-as aware), one rate per department per plant
+(104) with empty rows seeded for every routable department, overheads,
 machine and sampling prices, stale check, diff, export and the legacy
 /changes/reference/rates shape."""
 import io
@@ -66,26 +67,29 @@ async def _load(session_factory, vid):
 
 # ---------------------------------------------------------------- lookups
 
-async def test_rate_for_most_specific_match(session_factory, world):
-    t, p1, p2 = world["tool"], world["p1"], world["p2"]
+async def test_rate_is_the_department_row_at_the_plant(session_factory, world):
+    t, q, p1, p2 = world["tool"], world["qa"], world["p1"], world["p2"]
     await _published(session_factory, world["org_id"], rates=[
         dict(department_id=t, hourly_rate=50),
         dict(department_id=t, plant_id=p1, hourly_rate=55),
-        dict(department_id=t, position="Engineer", hourly_rate=70),
-        dict(department_id=t, position="Engineer", plant_id=p1, hourly_rate=75),
+        # an empty rate is no rate: Quality's all-plants row stands in at p1
+        dict(department_id=q, plant_id=p1, hourly_rate=None),
+        dict(department_id=q, hourly_rate=30),
+        dict(department_id=world["fin"], plant_id=p1, hourly_rate=None),
     ])
     async with session_factory() as s:
         org = world["org_id"]
+        # a position (older callers) is ignored: one rate per department
         hit = await svc.rate_for(s, org, t, "engineer", p1, date(2026, 5, 1))
-        assert (hit.rate, hit.match) == (75, "department+position+plant")
-        hit = await svc.rate_for(s, org, t, "Engineer", p2, date(2026, 5, 1))
-        assert (hit.rate, hit.match) == (70, "department+position")
-        hit = await svc.rate_for(s, org, t, "Toolmaker", p1, date(2026, 5, 1))
         assert (hit.rate, hit.match) == (55, "department+plant")
         hit = await svc.rate_for(s, org, t, None, p2, date(2026, 5, 1))
         assert (hit.rate, hit.match) == (50, "department")
         assert hit.version == 1
-        assert await svc.rate_for(s, org, world["qa"], None, p1) is None
+        hit = await svc.rate_for(s, org, q, None, p1, date(2026, 5, 1))
+        assert (hit.rate, hit.match) == (30, "department")
+        # only an empty row: no rate, never 0
+        assert await svc.rate_for(s, org, world["fin"], None, p1) is None
+        assert await svc.effective_labour_rate(s, org, world["fin"], None, p1) is None
         # before the first version there is no rate at all
         assert await svc.rate_for(s, org, t, None, p1, date(2025, 12, 31)) is None
 
@@ -219,6 +223,40 @@ async def test_read_is_open_write_needs_finance(client, eng_auth, admin_auth, wo
     assert (await client.post(f"{API}/drafts", json={}, headers=eng_auth)).status_code == 201
 
 
+async def test_sales_keeps_the_rates(client, eng_auth, admin_auth, world, session_factory):
+    """Sales changes the rates: drafts, rows and publish; Finance and admins
+    may too; anyone else reads."""
+    res = await client.post(f"{API}/drafts", json={}, headers=eng_auth)
+    assert res.status_code == 403
+    assert res.json()["detail"] == "Only Sales, Finance or an admin may edit the cost sheet"
+    async with session_factory() as s:
+        sales = Department(name="Sales", flow_type="action")
+        s.add(sales)
+        await s.flush()
+        s.add(UserDepartment(user_id=world["engineer_id"], department_id=sales.id))
+        await s.commit()
+        sales_id = sales.id
+    assert (await client.get(API, headers=eng_auth)).json()["can_edit"] is True
+    d = (await client.post(f"{API}/drafts", json={}, headers=eng_auth)).json()
+    row = _row(d["rates"], world["tool"], None) or _row(d["rates"], world["tool"], world["p1"])
+    res = await client.patch(f"{API}/versions/{d['id']}/rates/{row['id']}",
+                             json={"hourly_rate": 42}, headers=eng_auth)
+    assert res.status_code == 200
+    res = await client.post(f"{API}/versions/{d['id']}/publish", json={
+        "valid_from": "2026-01-01", "confirm_backdated": True}, headers=eng_auth)
+    assert res.status_code == 200 and res.json()["status"] == "published"
+    # the review task goes to Sales too
+    body = (await client.get(f"{API}/review-task", headers=eng_auth)).json()
+    assert body["is_editor"] is True
+    as_sales = {**admin_auth, HEADER: str(sales_id)}
+    assert (await client.get(API, headers=as_sales)).json()["can_edit"] is True
+
+
+def _row(rows, department_id, plant_id):
+    return next((r for r in rows if r["department_id"] == department_id
+                 and r["plant_id"] == plant_id), None)
+
+
 async def test_admin_acting_as_is_that_department_only(client, admin_auth, world):
     assert (await client.get(API, headers=admin_auth)).json()["can_edit"] is True
     as_tool = {**admin_auth, HEADER: str(world["tool"])}
@@ -229,12 +267,16 @@ async def test_admin_acting_as_is_that_department_only(client, admin_auth, world
 
 
 async def test_draft_edit_publish_freeze_and_chain(client, admin_auth, world):
-    t, p1 = world["tool"], world["p1"]
+    t, q, p1, p2 = world["tool"], world["qa"], world["p1"], world["p2"]
     d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
     assert d["version"] == 1 and d["status"] == "draft"
+    # every routable department x plant starts with an EMPTY rate
+    assert {(r["department_id"], r["plant_id"]) for r in d["rates"]} == {
+        (dep, pl) for dep in (world["fin"], t, q) for pl in (p1, p2)}
+    assert all(r["hourly_rate"] is None and r["effective_rate"] is None for r in d["rates"])
     # one draft at a time
     assert (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).status_code == 409
-    # an empty version cannot be published
+    # a version without a single rate cannot be published
     res = await client.post(f"{API}/versions/{d['id']}/publish",
                             json={"valid_from": "2026-01-01"}, headers=admin_auth)
     assert res.status_code == 422
@@ -242,64 +284,86 @@ async def test_draft_edit_publish_freeze_and_chain(client, admin_auth, world):
     res = await client.post(f"{API}/versions/{d['id']}/rates", json={
         "department_id": t, "hourly_rate": 50}, headers=admin_auth)
     assert res.status_code == 201, res.text
+    # one row per department per plant: the seeded row is the one to fill
     res = await client.post(f"{API}/versions/{d['id']}/rates", json={
-        "department_id": t, "position": "Engineer", "plant_id": p1, "hourly_rate": 70,
-        "currency": "usd"}, headers=admin_auth)
-    rows = res.json()["rates"]
-    assert rows[1]["currency"] == "USD"
-    # duplicate key
+        "department_id": t, "plant_id": p1, "hourly_rate": 70}, headers=admin_auth)
+    assert res.status_code == 409
+    assert res.json()["detail"] == (
+        "Tooling-CS already has a rate at Plant in this version. Edit that row instead.")
     res = await client.post(f"{API}/versions/{d['id']}/rates", json={
-        "department_id": t, "position": "engineer", "plant_id": p1, "hourly_rate": 1},
+        "department_id": t, "hourly_rate": 1}, headers=admin_auth)
+    assert res.status_code == 409 and "for all plants" in res.json()["detail"]
+    # a position no longer makes a second row
+    res = await client.post(f"{API}/versions/{d['id']}/rates", json={
+        "department_id": t, "position": "Engineer", "plant_id": p1, "hourly_rate": 1},
         headers=admin_auth)
     assert res.status_code == 409
+    seeded = _row(res_rates := (await client.get(f"{API}/versions/{d['id']}",
+                                                 headers=admin_auth)).json()["rates"], t, p1)
+    res = await client.patch(f"{API}/versions/{d['id']}/rates/{seeded['id']}", json={
+        "hourly_rate": 70, "currency": "usd", "position": "Engineer"}, headers=admin_auth)
+    row = _row(res.json()["rates"], t, p1)
+    assert (row["hourly_rate"], row["currency"], row["position"]) == (70, "USD", None)
+    # moving a row onto another department's plant is refused the same way
+    other = _row(res_rates, q, p2)
+    res = await client.patch(f"{API}/versions/{d['id']}/rates/{other['id']}",
+                             json={"department_id": t, "plant_id": p1}, headers=admin_auth)
+    assert res.status_code == 409
+    default = _row(res.json() if res.status_code == 200 else
+                   (await client.get(f"{API}/versions/{d['id']}", headers=admin_auth)
+                    ).json()["rates"], t, None)
     # negative
-    res = await client.patch(f"{API}/versions/{d['id']}/rates/{rows[0]['id']}",
+    res = await client.patch(f"{API}/versions/{d['id']}/rates/{default['id']}",
                              json={"hourly_rate": -1}, headers=admin_auth)
     assert res.status_code == 422
-    res = await client.patch(f"{API}/versions/{d['id']}/rates/{rows[0]['id']}",
+    res = await client.patch(f"{API}/versions/{d['id']}/rates/{default['id']}",
                              json={"hourly_rate": 52.5}, headers=admin_auth)
-    assert res.json()["rates"][0]["hourly_rate"] == 52.5
+    assert _row(res.json()["rates"], t, None)["hourly_rate"] == 52.5
     res = await client.post(f"{API}/versions/{d['id']}/overheads", json={
         "kind": "percent", "value": 10}, headers=admin_auth)
-    assert res.json()["rates"][0]["effective_rate"] == 57.75
+    assert _row(res.json()["rates"], t, None)["effective_rate"] == 57.75
 
     res = await client.post(f"{API}/versions/{d['id']}/publish", json={
         "valid_from": "2026-01-01", "note": "Budget 2026", "confirm_backdated": True},
         headers=admin_auth)
     assert res.status_code == 200
     assert res.json()["status"] == "published" and res.json()["valid_to"] is None
-    # frozen
-    res = await client.patch(f"{API}/versions/{d['id']}/rates/{rows[0]['id']}",
+    # frozen: rows, publish and seeding
+    res = await client.patch(f"{API}/versions/{d['id']}/rates/{default['id']}",
                              json={"hourly_rate": 1}, headers=admin_auth)
     assert res.status_code == 409
+    assert (await client.post(f"{API}/versions/{d['id']}/missing-departments",
+                              headers=admin_auth)).status_code == 409
     assert (await client.delete(f"{API}/versions/{d['id']}",
                                 headers=admin_auth)).status_code == 409
 
     # v2 copies v1, must start after it
     d2 = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
-    assert d2["version"] == 2 and len(d2["rates"]) == 2 and len(d2["overheads"]) == 1
+    assert d2["version"] == 2 and len(d2["rates"]) == 7 and len(d2["overheads"]) == 1
     res = await client.post(f"{API}/versions/{d2['id']}/publish",
                             json={"valid_from": "2026-01-01"}, headers=admin_auth)
     assert res.status_code == 422
-    r0 = d2["rates"][0]["id"]
-    await client.patch(f"{API}/versions/{d2['id']}/rates/{r0}", json={"hourly_rate": 60},
-                       headers=admin_auth)
-    await client.delete(f"{API}/versions/{d2['id']}/rates/{d2['rates'][1]['id']}",
+    await client.patch(f"{API}/versions/{d2['id']}/rates/{_row(d2['rates'], t, None)['id']}",
+                       json={"hourly_rate": 60}, headers=admin_auth)
+    await client.delete(f"{API}/versions/{d2['id']}/rates/{_row(d2['rates'], t, p1)['id']}",
                         headers=admin_auth)
     await client.post(f"{API}/versions/{d2['id']}/rates", json={
-        "department_id": world["qa"], "hourly_rate": 45}, headers=admin_auth)
+        "department_id": q, "hourly_rate": 45}, headers=admin_auth)
 
     diff = (await client.get(f"{API}/versions/{d2['id']}/diff", headers=admin_auth)).json()
     assert diff["from_version"] == 1 and diff["to_version"] == 2
     assert diff["rates"]["changed"][0]["changes"]["hourly_rate"] == {"old": 52.5, "new": 60}
     assert diff["rates"]["changed"][0]["pct"] == 14.3
-    assert len(diff["rates"]["added"]) == 1 and len(diff["rates"]["removed"]) == 1
+    assert [(r["department_id"], r["plant_id"]) for r in diff["rates"]["added"]] == [(q, None)]
+    assert [(r["department_id"], r["plant_id"]) for r in diff["rates"]["removed"]] == [(t, p1)]
     assert diff["overheads"] == {"added": [], "removed": [], "changed": []}
 
     res = await client.post(f"{API}/versions/{d2['id']}/publish",
                             json={"valid_from": "2026-07-01", "confirm_backdated": True},
                             headers=admin_auth)
     assert res.status_code == 200
+    # Tooling-CS has an all-plants row: publishing does not bring p1 back
+    assert _row(res.json()["rates"], t, p1) is None
     ov = (await client.get(API, headers=admin_auth)).json()
     v1 = next(v for v in ov["versions"] if v["version"] == 1)
     assert v1["valid_to"] == "2026-06-30"
@@ -307,6 +371,48 @@ async def test_draft_edit_publish_freeze_and_chain(client, admin_auth, world):
     lookup = (await client.get(f"{API}/lookup/rate", params={
         "department_id": t, "on_date": "2026-03-01"}, headers=admin_auth)).json()
     assert lookup["rate"] == 57.75 and lookup["version"] == 1
+
+
+async def test_add_missing_departments(client, admin_auth, eng_auth, world, session_factory):
+    """The explicit action: empty rows for routable departments the draft
+    does not cover, never a number; retired departments are left out; a
+    department activated later is caught on publish too."""
+    async with session_factory() as s:
+        retired = Department(name="Retired-CS", flow_type="action", is_active=False)
+        s.add(retired)
+        await s.commit()
+        retired_id = retired.id
+    d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
+    assert not any(r["department_id"] == retired_id for r in d["rates"])
+    base = f"{API}/versions/{d['id']}"
+    # Quality gets one rate for all plants instead of its two plant rows
+    for pl in (world["p1"], world["p2"]):
+        await client.delete(f"{base}/rates/{_row(d['rates'], world['qa'], pl)['id']}",
+                            headers=admin_auth)
+    await client.post(f"{base}/rates", json={"department_id": world["qa"], "hourly_rate": 40},
+                      headers=admin_auth)
+    await client.delete(f"{base}/rates/{_row(d['rates'], world['tool'], world['p2'])['id']}",
+                        headers=admin_auth)
+    assert (await client.post(f"{base}/missing-departments",
+                              headers=eng_auth)).status_code == 403
+    res = await client.post(f"{base}/missing-departments", headers=admin_auth)
+    assert res.status_code == 200 and res.json()["added"] == 1
+    added = _row(res.json()["rates"], world["tool"], world["p2"])
+    assert added["hourly_rate"] is None and added["currency"] == "EUR"
+    assert _row(res.json()["rates"], world["qa"], world["p1"]) is None
+    assert (await client.post(f"{base}/missing-departments",
+                              headers=admin_auth)).json()["added"] == 0
+    # activated after the draft started: seeded when the version is published
+    async with session_factory() as s:
+        (await s.get(Department, retired_id)).is_active = True
+        await s.commit()
+    await client.patch(f"{base}/rates/{added['id']}", json={"hourly_rate": 10},
+                       headers=admin_auth)
+    res = await client.post(f"{base}/publish", json={
+        "valid_from": "2026-01-01", "confirm_backdated": True}, headers=admin_auth)
+    assert res.status_code == 200
+    assert {r["plant_id"] for r in res.json()["rates"]
+            if r["department_id"] == retired_id} == {world["p1"], world["p2"]}
 
 
 async def test_delete_draft_and_versions_are_org_scoped(client, admin_auth, world,
@@ -381,18 +487,25 @@ async def test_machine_classes_and_settings(client, admin_auth, eng_auth, world)
 
 async def test_export_csv_and_xlsx(client, admin_auth, world, session_factory):
     vid = await _published(session_factory, world["org_id"], rates=[
-        dict(department_id=world["tool"], position="Engineer", hourly_rate=70)])
+        dict(department_id=world["tool"], hourly_rate=70),
+        dict(department_id=world["qa"], plant_id=world["p1"], hourly_rate=None)])
     res = await client.get(f"{API}/versions/{vid}/export", params={"format": "csv"},
                            headers=admin_auth)
     assert res.status_code == 200
+    assert 'filename="cost-sheet-v1-rates.csv"' in res.headers["content-disposition"]
     text = res.content.decode("utf-8-sig")
-    assert text.splitlines()[0].startswith("Department;Position;Plant")
-    assert "Tooling-CS;Engineer;All plants;70,00;70,00;EUR" in text
+    assert text.splitlines()[0].startswith("Department;Plant;Hourly rate")
+    assert "Tooling-CS;All plants;70,00;70,00;EUR" in text
+    assert "Quality-CS;Plant;;;EUR" in text            # an empty rate stays empty
+    # the tab's old name still exports the rates
+    old = await client.get(f"{API}/versions/{vid}/export",
+                           params={"format": "csv", "section": "Positions"}, headers=admin_auth)
+    assert old.content.decode("utf-8-sig") == text
     res = await client.get(f"{API}/versions/{vid}/export", headers=admin_auth)
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(res.content))
-    assert wb.sheetnames == ["Positions", "Machines", "Sampling", "Overheads"]
-    assert wb["Positions"]["B4"].value == "Engineer"
+    assert wb.sheetnames[:4] == ["Rates", "Machines", "Sampling", "Overheads"]
+    assert wb["Rates"]["B4"].value == "All plants"
 
 
 async def test_reference_rates_reads_the_current_version(client, eng_auth, world,
@@ -408,7 +521,7 @@ async def test_reference_rates_reads_the_current_version(client, eng_auth, world
     await _published(session_factory, world["org_id"], valid_from=date(2026, 1, 1), rates=[
         dict(department_id=t, plant_id=p1, hourly_rate=65, min_factor=0.6),
         dict(department_id=t, hourly_rate=50),
-        dict(department_id=t, position="Engineer", hourly_rate=99),
+        dict(department_id=world["qa"], plant_id=p1, hourly_rate=None),   # empty: left out
     ])
     rows = (await client.get("/api/v1/changes/reference/rates", headers=eng_auth)).json()
     by_plant = {r["plant_id"]: r for r in rows}
@@ -471,10 +584,11 @@ async def test_service_refuses_non_finite_numbers(session_factory, world):
 
 async def test_exports_neutralise_formulas(client, admin_auth, world, session_factory):
     vid = await _published(session_factory, world["org_id"], rates=[
-        dict(department_id=world["tool"], position="=HYPERLINK(\"x\")", hourly_rate=70,
+        dict(department_id=world["tool"], hourly_rate=70, note="=HYPERLINK(\"x\")"),
+        dict(department_id=world["tool"], plant_id=world["p1"], hourly_rate=70,
              note="+1+cmd|' /C calc'!A0"),
-        dict(department_id=world["qa"], position="@SUM(A1)", hourly_rate=12.5,
-             note="-2"),
+        dict(department_id=world["qa"], hourly_rate=12.5, note="@SUM(A1)"),
+        dict(department_id=world["qa"], plant_id=world["p1"], hourly_rate=12.5, note="-2"),
     ], overheads=[dict(kind="percent", value=12.345)])
     csv_text = (await client.get(f"{API}/versions/{vid}/export",
                                  params={"format": "csv"}, headers=admin_auth)
@@ -490,7 +604,7 @@ async def test_exports_neutralise_formulas(client, admin_auth, world, session_fa
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO((await client.get(f"{API}/versions/{vid}/export",
                                                     headers=admin_auth)).content))
-    cells = [c.value for row in wb["Positions"].iter_rows(min_row=4) for c in row]
+    cells = [c.value for row in wb["Rates"].iter_rows(min_row=4) for c in row]
     assert "'=HYPERLINK(\"x\")" in cells and "'@SUM(A1)" in cells
     assert not any(isinstance(c, str) and c.startswith("=") for c in cells)
 
@@ -532,17 +646,22 @@ async def test_currency_per_plant_and_no_mixing(client, admin_auth, world, sessi
     assert p2row["currency"] == "USD" and p2row["currency_confirmed"] is False
     d = await _draft(client, admin_auth)
     base = f"{API}/versions/{d['id']}"
+    # the seeded row already carries the plant's currency
+    assert _row(d["rates"], world["tool"], world["p2"])["currency"] == "USD"
+    await client.delete(f"{base}/rates/{_row(d['rates'], world['tool'], world['p2'])['id']}",
+                        headers=admin_auth)
     res = await client.post(f"{base}/rates", json={"department_id": world["tool"],
                                                    "plant_id": world["p2"], "hourly_rate": 30},
                             headers=admin_auth)
-    assert res.json()["rates"][0]["currency"] == "USD"          # from the plant
+    assert _row(res.json()["rates"], world["tool"], world["p2"])["currency"] == "USD"
     assert (await client.post(f"{base}/rates", json={"department_id": world["qa"],
                                                      "hourly_rate": 1, "currency": "XYZ"},
                               headers=admin_auth)).status_code == 422
     # a per-hour overhead in EUR on a USD rate: no effective rate
     await client.post(f"{base}/overheads", json={"kind": "per_hour", "value": 5,
                                                  "currency": "EUR"}, headers=admin_auth)
-    r = (await client.get(base, headers=admin_auth)).json()["rates"][0]
+    r = _row((await client.get(base, headers=admin_auth)).json()["rates"],
+             world["tool"], world["p2"])
     assert r["effective_rate"] is None
     # Finance confirms the plant currency
     res = await client.put(f"{API}/plants/{world['p2']}/currency", json={"currency": "usd"},
@@ -578,8 +697,9 @@ async def test_backdated_publish_needs_confirmation(client, admin_auth, world):
     res = await client.post(f"{API}/versions/{d['id']}/publish", json={"valid_from": past},
                             headers=admin_auth)
     assert res.status_code == 422 and "past" in res.json()["detail"]
-    assert ("Lines already priced keep their rate; hours booked since then and "
-            "lines without a rate use the new version.") in res.json()["detail"]
+    assert ("Changes created since then are priced with this version where a line "
+            "has no rate yet, and hours booked since then use it too; lines already "
+            "priced keep their rate.") in res.json()["detail"]
     res = await client.post(f"{API}/versions/{d['id']}/publish",
                             json={"valid_from": date.today().isoformat()}, headers=admin_auth)
     assert res.status_code == 200

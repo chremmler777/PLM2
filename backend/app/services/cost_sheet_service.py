@@ -17,6 +17,7 @@ import calendar
 import csv
 import io
 import math
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from dataclasses import dataclass, asdict, field
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Optional
@@ -28,9 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.cost_sheet import (
     CostSheetVersion, CostSheetRate, CostSheetMachineRate, CostSheetMachineClass,
     CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
-    OVERHEAD_KINDS, SAMPLING_MODES, FINANCE_DEPARTMENT, DEFAULT_REVIEW_MONTHS,
+    OVERHEAD_KINDS, SAMPLING_MODES, FINANCE_DEPARTMENT, EDITOR_DEPARTMENTS, DEFAULT_REVIEW_MONTHS,
     SETTING_REVIEW_MONTHS, SETTING_PLANT_CURRENCY_CONFIRMED, CURRENCIES,
 )
+from app.models.cost_sheet_machines import CostSheetMachineItemRate
 from app.core.display import fmt_date
 from app.models.entities import Plant
 from app.models.workflow import Department
@@ -73,22 +75,29 @@ async def finance_department_id(db: AsyncSession) -> Optional[int]:
         Department.name == FINANCE_DEPARTMENT))).scalar_one_or_none()
 
 
+async def editor_department_ids(db: AsyncSession) -> set[int]:
+    """Sales and Finance: the departments whose members keep the rates."""
+    return set((await db.execute(select(Department.id).where(
+        Department.name.in_(EDITOR_DEPARTMENTS)))).scalars().all())
+
+
 async def can_edit(db: AsyncSession, user) -> bool:
-    """Finance members or admins. Acts-as aware: an admin acting as a
-    department is that department only (spec D2), so acting as Finance may
-    edit and acting as anything else may not."""
+    """Sales or Finance members, or admins: they start drafts, edit rows and
+    publish. Acts-as aware: an admin acting as a department is that
+    department only (spec D2), so acting as Sales or Finance may edit and
+    acting as anything else may not."""
     from app.services.workflow_service import WorkflowService
     if getattr(user, "acts_as_department_id", None) is None and user.role == "admin":
         return True
-    fin = await finance_department_id(db)
-    if fin is None:
+    editors = await editor_department_ids(db)
+    if not editors:
         return False
-    return fin in await WorkflowService.effective_department_ids(db, user)
+    return bool(editors & set(await WorkflowService.effective_department_ids(db, user)))
 
 
 async def require_edit(db: AsyncSession, user) -> None:
     if not await can_edit(db, user):
-        raise CostSheetError("Only Finance or an admin may edit the cost sheet", 403)
+        raise CostSheetError("Only Sales, Finance or an admin may edit the cost sheet", 403)
 
 
 # ---------------------------------------------------------------- settings
@@ -184,11 +193,13 @@ def _require_draft(v: CostSheetVersion) -> None:
 
 _ROW_COPY = {
     "rates": (CostSheetRate, ("department_id", "position", "plant_id", "hourly_rate",
-                              "currency", "min_factor", "note")),
+                              "currency", "min_factor", "note",
+                              "entered_rate", "entered_currency")),
     "machines": (CostSheetMachineRate, ("plant_id", "machine_class_id", "machine_class",
                                         "machine_ref",
                                         "tonnage_min", "tonnage_max", "hourly_rate",
-                                        "currency", "note")),
+                                        "currency", "note",
+                                        "entered_rate", "entered_currency")),
     "sampling": (CostSheetSamplingRate, ("plant_id", "machine_class_id", "machine_class",
                                          "mode", "flat_price",
                                          "setup_hours", "run_hours_default", "labour_hours",
@@ -196,9 +207,13 @@ _ROW_COPY = {
                                          "handling_cost", "currency", "note")),
     "overheads": (CostSheetOverhead, ("plant_id", "department_id", "kind", "value", "currency",
                                       "note")),
+    # Per-machine rates of MachineDB presses (105); edited through
+    # cost_sheet_machines_service, copied and diffed here like the rest.
+    "machine_items": (CostSheetMachineItemRate, ("machine_id", "hourly_rate", "currency",
+                                                 "note", "entered_rate", "entered_currency")),
 }
 _REL = {"rates": "rates", "machines": "machine_rates", "sampling": "sampling_rates",
-        "overheads": "overheads"}
+        "overheads": "overheads", "machine_items": "machine_item_rates"}
 SECTIONS = tuple(_ROW_COPY)
 
 
@@ -214,6 +229,8 @@ async def create_draft(db: AsyncSession, org_id: int, user_id: Optional[int],
                             .where(CostSheetVersion.organization_id == org_id))).scalar() + 1
     draft = CostSheetVersion(organization_id=org_id, version=nxt, status="draft", draft_lock=1,
                              based_on_version_id=base.id if base else None,
+                             # the exchange rates travel with the rates they priced
+                             fx_rates=dict(base.fx_rates) if base and base.fx_rates else None,
                              created_by=user_id, created_at=datetime.utcnow())
     db.add(draft)
     try:
@@ -225,11 +242,61 @@ async def create_draft(db: AsyncSession, org_id: int, user_id: Optional[int],
         raise CostSheetError("There is already an open draft", 409)
     if base is not None:
         for section, (model, cols) in _ROW_COPY.items():
+            seen: set[tuple] = set()
             for row in getattr(base, _REL[section]):
-                db.add(model(version_id=draft.id, **{c: getattr(row, c) for c in cols}))
+                data = {c: getattr(row, c) for c in cols}
+                if section == "rates":
+                    data["position"] = None      # one row per department per plant
+                    key = _duplicate_key(section, data)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                db.add(model(version_id=draft.id, **data))
         await db.flush()
     await db.refresh(draft)
+    await seed_missing_departments(db, draft)
     return draft
+
+
+async def routable_department_ids(db: AsyncSession) -> list[int]:
+    """The departments an ECR can be routed to as R/A/S/C
+    (models.change.ASSESSMENT_LETTERS), in their sort order: every active
+    department. The routing standards name most of them and a routing
+    deviation can add any active department with any of those letters, so
+    each of them may book hours that need a rate. Retired departments
+    (is_active false) cannot be routed any more."""
+    return list((await db.execute(select(Department.id).where(
+        Department.is_active.is_(True)).order_by(
+        Department.sort_order, Department.id))).scalars().all())
+
+
+async def seed_missing_departments(db: AsyncSession, v: CostSheetVersion) -> list[CostSheetRate]:
+    """Give the draft one row with an EMPTY rate (None, never a guessed
+    number) per routable department and active plant that has none yet. A
+    department's all-plants row covers every plant. Costing then shows "No
+    rate in the cost sheet" for those rows until Sales or Finance fills them.
+    Published versions are frozen: refused."""
+    _require_draft(v)
+    await db.refresh(v, ["rates"])
+    have = {(r.department_id, r.plant_id) for r in v.rates}
+    plants = (await db.execute(select(Plant).where(
+        Plant.organization_id == v.organization_id, Plant.is_active.is_(True))
+        .order_by(Plant.id))).scalars().all()
+    added = []
+    for dep in await routable_department_ids(db):
+        if (dep, None) in have:
+            continue
+        for p in plants:
+            if (dep, p.id) not in have:
+                row = CostSheetRate(version_id=v.id, department_id=dep, plant_id=p.id,
+                                    position=None, hourly_rate=None,
+                                    currency=p.currency or "EUR")
+                db.add(row)
+                added.append(row)
+    if added:
+        await db.flush()
+        await db.refresh(v, ["rates"])
+    return added
 
 
 async def update_draft(db: AsyncSession, v: CostSheetVersion, *,
@@ -255,10 +322,13 @@ async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
                   confirm_backdated: bool = False,
                   today: Optional[date] = None) -> CostSheetVersion:
     """Freeze a draft. valid_from must lie after the latest published
-    version's, which then ends the day before. A valid_from in the past
-    prices the hours booked since then (and lines without a rate) from the
-    new version, so it needs confirm_backdated; lines already priced keep
-    their rate snapshot.
+    version's, which then ends the day before. A change is priced with the
+    version valid on the day it was CREATED (costing_rates.change_pricing_date),
+    so a valid_from in the past prices the changes created since then (their
+    lines without a rate) and the hours booked since then from the new
+    version: it needs confirm_backdated. Lines already priced keep their
+    rate snapshot. Routable departments without a row get their empty rows
+    (seed_missing_departments) before the version freezes.
     A draft identical to the version it was copied from is refused."""
     _require_draft(v)
     latest = await latest_published(db, v.organization_id)
@@ -266,16 +336,26 @@ async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
         raise CostSheetError(
             f"Valid from must be after {fmt_date(latest.valid_from)} "
             f"(version {latest.version})", 422)
-    if not v.rates:
-        raise CostSheetError("A version needs at least one position rate", 422)
+    if not any(r.hourly_rate is not None for r in v.rates):
+        raise CostSheetError("A version needs at least one department rate", 422)
     if valid_from < (today or business_today()) and not confirm_backdated:
         raise CostSheetError(
-            "Valid from lies in the past. Lines already priced keep their rate; "
-            "hours booked since then and lines without a rate use the new version. "
+            "Valid from lies in the past. Changes created since then are priced with "
+            "this version where a line has no rate yet, and hours booked since then "
+            "use it too; lines already priced keep their rate. "
             "Confirm the backdated publish to go ahead", 422)
+    for row in list(v.rates) + list(v.machine_rates) + list(v.machine_item_rates):
+        if (row.entered_currency and row.entered_currency != row.currency
+                and fx_rate(v, row.currency, row.entered_currency) is None):
+            raise CostSheetError(
+                f"A rate is typed in {row.entered_currency} but the version has no "
+                f"{row.currency}/{row.entered_currency} exchange rate", 422)
     prev = await previous_version(db, v)
     if prev is not None and diff_is_empty(diff_versions(prev, v)):
         raise CostSheetError(f"Nothing changed since version {prev.version}", 409)
+    # Departments activated since the draft started get their empty rows
+    # now, so the published version names every routable department.
+    await seed_missing_departments(db, v)
     v.valid_from = valid_from
     if note is not None:
         v.note = note
@@ -371,8 +451,10 @@ async def _validate_row(db: AsyncSession, org_id: int, section: str, data: dict,
     if section == "rates":
         if data.get("department_id") is None:
             raise CostSheetError("A rate needs a department", 422)
-        if data.get("hourly_rate") is None:
-            raise CostSheetError("A rate needs an hourly rate", 422)
+        # One row per department per plant: no positions any more (104). An
+        # empty hourly_rate is allowed: "no rate yet", never a number.
+        if "position" in data:
+            data["position"] = None
     if section in ("machines", "sampling") and class_changed:
         if not data.get("machine_class") and data.get("machine_class_id") is None:
             raise CostSheetError("A machine class is required", 422)
@@ -411,13 +493,32 @@ def _duplicate_key(section: str, data: dict) -> tuple:
 
 def _raw_key(section: str, data: dict) -> tuple:
     if section == "rates":
-        return (data.get("department_id"), data.get("position"), data.get("plant_id"))
+        return (data.get("department_id"), data.get("plant_id"))
     cls = data.get("machine_class_id") or data.get("machine_class")
     if section == "machines":
         return (data.get("plant_id"), cls, data.get("machine_ref"))
     if section == "sampling":
         return (data.get("plant_id"), cls)
     return (data.get("plant_id"), data.get("department_id"))
+
+
+async def _rate_exists_message(db: AsyncSession, data: dict) -> str:
+    dep = await db.get(Department, data.get("department_id"))
+    plant = await db.get(Plant, data["plant_id"]) if data.get("plant_id") else None
+    where = f"at {plant.name}" if plant is not None else "for all plants"
+    return (f"{dep.name if dep else 'This department'} already has a rate {where} "
+            f"in this version. Edit that row instead.")
+
+
+async def _check_unique_row(db: AsyncSession, v: CostSheetVersion, section: str, data: dict,
+                            exclude_id: Optional[int] = None) -> None:
+    """_check_unique, with the department and plant named for a rate."""
+    try:
+        _check_unique(v, section, data, exclude_id)
+    except CostSheetError as e:
+        if section == "rates":
+            raise CostSheetError(await _rate_exists_message(db, data), 409) from None
+        raise e
 
 
 def _check_unique(v: CostSheetVersion, section: str, data: dict,
@@ -441,8 +542,9 @@ async def add_row(db: AsyncSession, v: CostSheetVersion, section: str, data: dic
         data.setdefault("kind", "percent")
     if section != "overheads" and not data.get("currency"):
         data["currency"] = await plant_currency(db, data.get("plant_id"))
+    await _apply_entered(db, v, section, data, set(data))
     await _validate_row(db, v.organization_id, section, data)
-    _check_unique(v, section, data)
+    await _check_unique_row(db, v, section, data)
     # None values are left out so column defaults (currency EUR) apply.
     row = model(version_id=v.id, **{k: val for k, val in data.items() if val is not None})
     db.add(row)
@@ -471,11 +573,12 @@ async def update_row(db: AsyncSession, v: CostSheetVersion, section: str, row_id
     merged.update(changes)
     if section != "overheads" and not merged.get("currency"):
         merged["currency"] = await plant_currency(db, merged.get("plant_id"))
+    await _apply_entered(db, v, section, merged, set(changes))
     await _validate_row(db, v.organization_id, section, merged,
                         class_changed=("machine_class" in changes
                                        or changes.get("machine_class_id") is not None
                                        or merged.get("machine_class_id") is None))
-    _check_unique(v, section, merged, exclude_id=row.id)
+    await _check_unique_row(db, v, section, merged, exclude_id=row.id)
     for c in cols:
         setattr(row, c, merged[c])
     await db.flush()
@@ -596,21 +699,17 @@ class RateHit:
 
 def _pick_rate(rows: Iterable[CostSheetRate], department_id: int, position: Optional[str],
                plant_id: Optional[int]) -> tuple[Optional[CostSheetRate], str]:
-    """dept+position+plant > dept+position > dept+plant > dept."""
-    position = _norm_position(position)
-    pos_key = position.casefold() if position else None
-    order = []
-    if pos_key is not None:
-        order += [(pos_key, plant_id, "department+position+plant"),
-                  (pos_key, None, "department+position")]
-    order += [(None, plant_id, "department+plant"), (None, None, "department")]
-    cands = [r for r in rows if r.department_id == department_id]
-    for pk, pl, label in order:
-        if pl is None and label.endswith("plant"):
-            continue
+    """The department's row at the plant, else its all-plants row. One row
+    per department per plant (104): position is ignored (a costing line
+    that names a labour position is priced from its department's row). A row
+    whose rate is still empty is no rate: the all-plants row may stand in
+    for it, else there is none (never 0)."""
+    cands = [r for r in rows if r.department_id == department_id and r.hourly_rate is not None]
+    order = ([(plant_id, "department+plant")] if plant_id is not None else []) \
+        + [(None, "department")]
+    for pl, label in order:
         for r in cands:
-            rp = r.position.casefold() if r.position else None
-            if rp == pk and r.plant_id == pl:
+            if r.plant_id == pl:
                 return r, label
     return None, ""
 
@@ -649,6 +748,8 @@ def _overhead_dict(oh: Optional[CostSheetOverhead]) -> Optional[dict]:
 
 def rate_in_version(v: CostSheetVersion, department_id: int, position: Optional[str],
                     plant_id: Optional[int], *, with_overhead: bool = False) -> Optional[RateHit]:
+    """The department's rate at the plant in v (position ignored, see
+    _pick_rate); None when the sheet has no rate for it."""
     row, match = _pick_rate(v.rates, department_id, position, plant_id)
     if row is None:
         return None
@@ -812,7 +913,7 @@ def _rows(v: CostSheetVersion, section: str) -> list[dict]:
 
 
 _FLOAT_COLS = {"hourly_rate", "min_factor", "flat_price", "setup_hours", "run_hours_default",
-               "labour_hours", "handling_cost", "value"}
+               "labour_hours", "handling_cost", "value", "entered_rate"}
 
 
 def version_summary(v: CostSheetVersion, valid: dict) -> dict:
@@ -826,13 +927,18 @@ def version_summary(v: CostSheetVersion, valid: dict) -> dict:
             "published_by": v.published_by}
 
 
-def version_detail(v: CostSheetVersion, valid: dict) -> dict:
-    """The whole version. Positions carry their effective rate (overhead
-    applied at the row's own plant); sampling rows their computed price."""
+def version_detail(v: CostSheetVersion, valid: dict,
+                   local_of: Optional[dict[int, str]] = None) -> dict:
+    """The whole version. Department rates carry their effective rate
+    (overhead applied at the row's own plant; None while the rate is empty);
+    sampling rows their computed price. With local_of ({plant id: local
+    currency}) rate and machine rows at a two-currency plant carry the rate
+    in the local currency too (dual_view)."""
     rates = _rows(v, "rates")
     for r, row in zip(rates, v.rates):
         oh = _pick_overhead(v.overheads, row.department_id, row.plant_id)
-        r["effective_rate"] = apply_overhead(float(row.hourly_rate), oh, row.currency)
+        r["effective_rate"] = (None if row.hourly_rate is None
+                               else apply_overhead(float(row.hourly_rate), oh, row.currency))
         r["overhead"] = _overhead_dict(oh)
     sampling = _rows(v, "sampling")
     for s, row in zip(sampling, v.sampling_rates):
@@ -841,25 +947,32 @@ def version_detail(v: CostSheetVersion, valid: dict) -> dict:
             row.plant_id)
         s["computed_price"] = hit.rate if hit and hit.row_id == row.id else None
         s["breakdown"] = hit.breakdown if hit and hit.row_id == row.id else None
+    machines = _rows(v, "machines")
+    for section_rows, models in ((rates, v.rates), (machines, v.machine_rates)):
+        for r, row in zip(section_rows, models):
+            r.update(dual_view(v, row, (local_of or {}).get(row.plant_id)))
     return {**version_summary(v, valid), "rates": rates,
-            "machine_rates": _rows(v, "machines"), "sampling_rates": sampling,
-            "overheads": _rows(v, "overheads")}
+            "machine_rates": machines, "sampling_rates": sampling,
+            "overheads": _rows(v, "overheads"), "fx_rates": fx_list(v)}
 
 
 # ---------------------------------------------------------------- diff
 
 _DIFF_VALUES = {
-    "rates": ("hourly_rate", "currency", "note"),
-    "machines": ("hourly_rate", "currency", "tonnage_min", "tonnage_max", "note"),
+    "rates": ("hourly_rate", "currency", "note", "entered_rate", "entered_currency"),
+    "machines": ("hourly_rate", "currency", "tonnage_min", "tonnage_max", "note",
+                 "entered_rate", "entered_currency"),
     "sampling": ("mode", "flat_price", "setup_hours", "run_hours_default", "labour_hours",
                  "labour_department_id", "labour_position", "handling_cost", "currency", "note"),
     "overheads": ("kind", "value", "currency", "note"),
+    "machine_items": ("hourly_rate", "currency", "note", "entered_rate", "entered_currency"),
 }
 _DIFF_KEYS = {
-    "rates": ("department_id", "position", "plant_id"),
+    "rates": ("department_id", "plant_id"),
     "machines": ("plant_id", "machine_class", "machine_ref"),
     "sampling": ("plant_id", "machine_class"),
     "overheads": ("plant_id", "department_id"),
+    "machine_items": ("machine_id",),
 }
 
 
@@ -903,7 +1016,8 @@ def diff_versions(old: Optional[CostSheetVersion], new: CostSheetVersion) -> dic
                     # rate change reads "65.00 -> 70.00 USD", not a bare number.
                     entry = {**ident(r), "changes": fields_changed,
                              "currency": vb.get("currency")}
-                    if "hourly_rate" in fields_changed and va["hourly_rate"]:
+                    if ("hourly_rate" in fields_changed and va["hourly_rate"]
+                            and vb["hourly_rate"] is not None):
                         entry["pct"] = round((vb["hourly_rate"] - va["hourly_rate"])
                                              / va["hourly_rate"] * 100, 1)
                     changed.append(entry)
@@ -911,11 +1025,17 @@ def diff_versions(old: Optional[CostSheetVersion], new: CostSheetVersion) -> dic
             if k not in b:
                 removed.append({**ident(r), **values(r)})
         out[section] = {"added": added, "removed": removed, "changed": changed}
+    before = {f["pair"]: f["rate"] for f in fx_list(old)} if old else {}
+    after = {f["pair"]: f["rate"] for f in fx_list(new)}
+    out["fx_rates"] = [{"pair": k, "old": before.get(k), "new": after.get(k)}
+                       for k in sorted(set(before) | set(after))
+                       if before.get(k) != after.get(k)]
     return out
 
 
 def diff_is_empty(d: dict) -> bool:
-    return all(not (d[s]["added"] or d[s]["removed"] or d[s]["changed"]) for s in SECTIONS)
+    return (all(not (d[s]["added"] or d[s]["removed"] or d[s]["changed"]) for s in SECTIONS)
+            and not d.get("fx_rates"))
 
 
 async def previous_version(db: AsyncSession, v: CostSheetVersion) -> Optional[CostSheetVersion]:
@@ -951,29 +1071,39 @@ def _safe(value):
     return value
 
 
-def _export_tables(v: CostSheetVersion, deps: dict, plants: dict) -> dict[str, tuple[list, list]]:
+async def _machine_names(db: AsyncSession, org_id: int) -> dict[int, tuple]:
+    """{machine id: (name, plant id, tonnage)} of the synced MachineDB presses."""
+    from app.models.cost_sheet_machines import CostSheetMachine
+    return {mid: (name, pid, t) for mid, name, pid, t in (await db.execute(
+        select(CostSheetMachine.id, CostSheetMachine.internal_name, CostSheetMachine.plant_id,
+               CostSheetMachine.clamping_force_t).where(
+            CostSheetMachine.organization_id == org_id))).all()}
+
+
+def _export_tables(v: CostSheetVersion, deps: dict, plants: dict,
+                   machines: Optional[dict] = None) -> dict[str, tuple[list, list]]:
     """Header and rows per sheet. Text goes through _safe; numbers stay numbers."""
     detail = version_detail(v, {})
     pl = lambda i: plants.get(i, "") if i else "All plants"  # noqa: E731
     dp = lambda i: deps.get(i, "") if i else "All departments"  # noqa: E731
     tables = {
-        "Positions": (["Department", "Position", "Plant", "Hourly rate", "Effective rate",
-                       "Currency", "Note"],
-                      [[dp(r["department_id"]), r["position"] or "Default", pl(r["plant_id"]),
-                        r["hourly_rate"], r["effective_rate"], r["currency"], r["note"] or ""]
-                       for r in detail["rates"]]),
+        "Rates": (["Department", "Plant", "Hourly rate", "Effective rate",
+                   "Currency", "Note"],
+                  [[dp(r["department_id"]), pl(r["plant_id"]),
+                    r["hourly_rate"], r["effective_rate"], r["currency"], r["note"] or ""]
+                   for r in detail["rates"]]),
         "Machines": (["Machine class", "Machine", "Plant", "Tonnage min", "Tonnage max",
                       "Hourly rate", "Currency", "Note"],
                      [[r["machine_class"], r["machine_ref"] or "", pl(r["plant_id"]),
                        r["tonnage_min"], r["tonnage_max"], r["hourly_rate"], r["currency"],
                        r["note"] or ""] for r in detail["machine_rates"]]),
         "Sampling": (["Machine class", "Plant", "Mode", "Flat price", "Setup h", "Run h",
-                      "Labour h", "Labour department", "Labour position", "Handling",
+                      "Labour h", "Labour department", "Handling",
                       "Price per trial", "Currency", "Note"],
                      [[r["machine_class"], pl(r["plant_id"]), r["mode"], r["flat_price"],
                        r["setup_hours"], r["run_hours_default"], r["labour_hours"],
                        deps.get(r["labour_department_id"], "") if r["labour_department_id"] else "",
-                       r["labour_position"] or "", r["handling_cost"], r["computed_price"],
+                       r["handling_cost"], r["computed_price"],
                        r["currency"], r["note"] or ""]
                       for r in detail["sampling_rates"]]),
         "Overheads": (["Department", "Plant", "Kind", "Value", "Currency", "Note"],
@@ -981,6 +1111,20 @@ def _export_tables(v: CostSheetVersion, deps: dict, plants: dict) -> dict[str, t
                         "Percent" if r["kind"] == "percent" else "Per hour", r["value"],
                         r["currency"] or "", r["note"] or ""] for r in detail["overheads"]]),
     }
+    # Own rates of MachineDB presses (105/107), by plant and machine name.
+    machines = machines or {}
+    items = sorted(v.machine_item_rates, key=lambda r: (
+        pl(machines.get(r.machine_id, (None, None, None))[1]),
+        machines.get(r.machine_id, (f"Machine {r.machine_id}",))[0] or ""))
+    tables["Machine rates"] = (
+        ["Machine", "Plant", "Tonnage t", "Hourly rate", "Currency",
+         "Typed rate", "Typed currency", "Note"],
+        [[machines.get(r.machine_id, (f"Machine {r.machine_id}",))[0],
+          pl(machines.get(r.machine_id, (None, None, None))[1]),
+          _f(machines.get(r.machine_id, (None, None, None))[2]),
+          _f(r.hourly_rate), r.currency,
+          _f(r.entered_rate) if r.entered_currency else None,
+          r.entered_currency or "", r.note or ""] for r in items])
     return {k: (head, [[_safe(c) for c in row] for row in rows])
             for k, (head, rows) in tables.items()}
 
@@ -991,10 +1135,12 @@ def _csv_number(value: float, full: bool) -> str:
     return text.replace(".", ",")
 
 
-async def export_csv(db: AsyncSession, v: CostSheetVersion, section: str = "Positions") -> str:
+async def export_csv(db: AsyncSession, v: CostSheetVersion, section: str = "Rates") -> str:
     deps, plants = await _names(db, v.organization_id)
-    tables = _export_tables(v, deps, plants)
-    head, rows = tables.get(section, tables["Positions"])
+    tables = _export_tables(v, deps, plants, await _machine_names(db, v.organization_id))
+    # "Positions" is the tab's old name (links and bookmarks keep working)
+    section = {"Positions": "Rates", "MachineRates": "Machine rates"}.get(section, section)
+    head, rows = tables.get(section, tables["Rates"])
     # overhead values keep their full precision (12.5 %, 0.25 per hour)
     full = {i for i, h in enumerate(head) if section == "Overheads" and h == "Value"}
     buf = io.StringIO()
@@ -1015,7 +1161,8 @@ async def export_xlsx(db: AsyncSession, v: CostSheetVersion) -> bytes:
     wb.remove(wb.active)
     valid = validity(await list_versions(db, v.organization_id))
     vf, vt = valid.get(v.id, (v.valid_from, None))
-    for title, (head, rows) in _export_tables(v, deps, plants).items():
+    for title, (head, rows) in _export_tables(
+            v, deps, plants, await _machine_names(db, v.organization_id)).items():
         ws = wb.create_sheet(title)
         ws.append([f"Cost sheet version {v.version} ({v.status})",
                    f"Valid from {vf.isoformat() if vf else '-'}",
@@ -1040,16 +1187,16 @@ async def reference_rates(db: AsyncSession, org_id: int,
                           on_date: Optional[date] = None) -> Optional[list[dict]]:
     """Rates of the currently valid version in the legacy
     /changes/reference/rates shape ({department_id, plant_id, hourly_rate,
-    min_factor}): department defaults only (position None), plant-wide rows
-    expanded to every active plant that has no own row. None when nothing is
-    published yet (the caller then falls back to department_rate)."""
+    min_factor}): rows with a rate, plant-wide rows expanded to every active
+    plant that has no own rate. None when nothing is published yet (the
+    caller then falls back to department_rate)."""
     v = await version_on(db, org_id, on_date)
     if v is None:
         return None
     plant_ids = [p for (p,) in (await db.execute(select(Plant.id).where(
         Plant.organization_id == org_id, Plant.is_active.is_(True)))).all()]
     out: dict[tuple[int, int], dict] = {}
-    defaults = [r for r in v.rates if r.position is None]
+    defaults = [r for r in v.rates if r.hourly_rate is not None]
     for r in defaults:
         if r.plant_id is not None:
             out[(r.department_id, r.plant_id)] = {
@@ -1066,6 +1213,207 @@ async def reference_rates(db: AsyncSession, org_id: int,
     return list(out.values())
 
 
+# ---------------------------------------------------------------- exchange rates
+#
+# A version carries the exchange rates it uses (106): {"USD/MXN": "17.30"} =
+# one USD is 17.30 MXN, kept as the decimal text typed. A plant with a local
+# currency (Silao: quote USD, local MXN) shows each rate in both; the rate
+# may be typed in either. Typed in the local currency, the typed number is
+# kept (entered_rate, entered_currency) and hourly_rate (the quote currency,
+# which costing reads) is computed from it, so the typed number never drifts.
+
+FX_MAX = Decimal("1000000")
+CENT = Decimal("0.01")
+
+
+def _pair(base: str, quote: str) -> str:
+    return f"{base}/{quote}"
+
+
+def _money(d: Decimal) -> float:
+    return float(d.quantize(CENT, rounding=ROUND_HALF_UP))
+
+
+def fx_rate(v: Optional[CostSheetVersion], base: str, quote: str) -> Optional[Decimal]:
+    """Units of `quote` for one `base` in v (the inverse pair counts too);
+    None when the version has no such rate."""
+    if not base or not quote:
+        return None
+    if base == quote:
+        return Decimal(1)
+    rates = (v.fx_rates or {}) if v is not None else {}
+    raw = rates.get(_pair(base, quote))
+    if raw not in (None, ""):
+        return Decimal(str(raw))
+    inv = rates.get(_pair(quote, base))
+    if inv not in (None, ""):
+        return Decimal(1) / Decimal(str(inv))
+    return None
+
+
+def convert(v: Optional[CostSheetVersion], amount, from_cur: str,
+            to_cur: str) -> Optional[float]:
+    """amount in from_cur expressed in to_cur at v's rate (cents, half up);
+    None without a rate. Never guessed."""
+    if amount is None:
+        return None
+    rate = fx_rate(v, to_cur, from_cur)       # units of from_cur per one to_cur
+    if rate is None or rate == 0:
+        return None
+    return _money(Decimal(str(amount)) / rate)
+
+
+def fx_list(v: Optional[CostSheetVersion]) -> list[dict]:
+    """[{pair, base, quote, rate}] in pair order; rate is the decimal text."""
+    if v is None or not v.fx_rates:
+        return []
+    out = []
+    for pair in sorted(v.fx_rates):
+        base, _, quote = pair.partition("/")
+        out.append({"pair": pair, "base": base, "quote": quote,
+                    "rate": str(v.fx_rates[pair])})
+    return out
+
+
+def _parse_fx(value) -> Decimal:
+    try:
+        d = Decimal(str(value).strip().replace(",", "."))
+    except (InvalidOperation, ValueError):
+        raise CostSheetError("The exchange rate must be a number", 422)
+    if not d.is_finite() or d <= 0 or d >= FX_MAX:
+        raise CostSheetError("The exchange rate must be above 0 and below 1,000,000", 422)
+    return d
+
+
+def _from_entered(v: CostSheetVersion, entered, row_currency: str,
+                  entered_currency: str) -> Optional[float]:
+    """The row's hourly_rate (row currency) for a rate typed in
+    entered_currency; None without the exchange rate."""
+    rate = fx_rate(v, row_currency, entered_currency)
+    if rate is None or rate == 0:
+        return None
+    return _money(Decimal(str(entered)) / rate)
+
+
+async def set_fx_rate(db: AsyncSession, v: CostSheetVersion, base: str, quote: str,
+                      rate) -> CostSheetVersion:
+    """Set (rate None: remove) one exchange rate of a draft, then re-price
+    every row typed in another currency from its typed number."""
+    _require_draft(v)
+    base, quote = normalize_currency(base), normalize_currency(quote)
+    if base == quote:
+        raise CostSheetError("An exchange rate needs two different currencies", 422)
+    rates = dict(v.fx_rates or {})
+    rates.pop(_pair(quote, base), None)        # one direction per pair
+    if rate is None or str(rate).strip() == "":
+        rates.pop(_pair(base, quote), None)
+    else:
+        d = _parse_fx(rate)
+        rates[_pair(base, quote)] = format(d, "f")     # the number as typed
+    v.fx_rates = rates or None
+    await db.flush()
+    await db.refresh(v, ["rates", "machine_rates", "machine_item_rates"])
+    for row in list(v.rates) + list(v.machine_rates) + list(v.machine_item_rates):
+        if row.entered_currency and row.entered_currency != row.currency \
+                and row.entered_rate is not None:
+            hourly = _from_entered(v, row.entered_rate, row.currency,
+                                   row.entered_currency)
+            # machine rows cannot hold an empty rate: without the exchange
+            # rate they keep the last number (publish refuses them anyway)
+            if hourly is not None or isinstance(row, CostSheetRate):
+                row.hourly_rate = hourly
+    await db.flush()
+    return v
+
+
+async def _apply_entered(db: AsyncSession, v: CostSheetVersion, section: str, data: dict,
+                         changed: set) -> None:
+    """Rates and machine rows: a rate typed in the plant's local currency
+    (entered_rate + entered_currency) sets hourly_rate from the version's
+    exchange rate; a rate typed as hourly_rate clears the typed local one; a
+    move to another plant or currency re-prices from the typed number."""
+    if section not in ("rates", "machines"):
+        return
+    cur = normalize_currency(data.get("currency") or "EUR")
+    if "entered_rate" in changed:
+        entered = data.get("entered_rate")
+        ecur = data.get("entered_currency") or cur
+        ecur = normalize_currency(ecur)
+        if entered is None:
+            data["hourly_rate"] = None
+            data["entered_rate"] = data["entered_currency"] = None
+            return
+        entered = _check_number("entered_rate", entered, 0, 1e10)
+        if ecur == cur:
+            data["hourly_rate"] = entered
+            data["entered_rate"] = data["entered_currency"] = None
+            return
+        data["entered_rate"], data["entered_currency"] = entered, ecur
+    elif "hourly_rate" in changed:
+        data["entered_rate"] = data["entered_currency"] = None
+        return
+    ecur = data.get("entered_currency")
+    if not ecur or data.get("entered_rate") is None or ecur == cur:
+        if ecur == cur:
+            data["entered_rate"] = data["entered_currency"] = None
+        return
+    plant = await db.get(Plant, data["plant_id"]) if data.get("plant_id") else None
+    if plant is None or plant.local_currency != ecur:
+        raise CostSheetError(
+            f"{ecur} is not the local currency of this row's plant: type the rate in "
+            f"{cur}", 422)
+    hourly = _from_entered(v, data["entered_rate"], cur, ecur)
+    if hourly is None:
+        raise CostSheetError(
+            f"Enter the {cur}/{ecur} exchange rate of this version first", 422)
+    data["hourly_rate"] = hourly
+
+
+def dual_view(v: CostSheetVersion, row, local: Optional[str]) -> dict:
+    """What a two-currency plant's row shows besides its own rate: the rate
+    in the local currency (the typed number when it was typed there, else
+    converted at the version's rate) and which of the two was typed."""
+    if not local or local == row.currency:
+        return {"local_currency": None, "local_rate": None, "entered_in": None}
+    typed_local = row.entered_currency == local and row.entered_rate is not None
+    if typed_local:
+        local_rate = float(row.entered_rate)
+    elif row.hourly_rate is None:
+        local_rate = None
+    else:
+        rate = fx_rate(v, row.currency, local)
+        local_rate = (None if rate is None
+                      else _money(Decimal(str(row.hourly_rate)) * rate))
+    return {"local_currency": local, "local_rate": local_rate,
+            "entered_in": ("local" if typed_local
+                           else ("quote" if row.hourly_rate is not None else None))}
+
+
+async def local_currencies(db: AsyncSession, org_id: int) -> dict[int, str]:
+    """{plant id: local currency} for the org's plants that have one."""
+    return {pid: cur for pid, cur in (await db.execute(
+        select(Plant.id, Plant.local_currency).where(
+            Plant.organization_id == org_id, Plant.local_currency.is_not(None)))).all()}
+
+
+async def fx_needed(db: AsyncSession, org_id: int) -> list[dict]:
+    """The exchange rates the sheet needs: quote/local of every active plant
+    with a local currency (one per pair)."""
+    rows = (await db.execute(select(Plant.currency, Plant.local_currency).where(
+        Plant.organization_id == org_id, Plant.is_active.is_(True),
+        Plant.local_currency.is_not(None)))).all()
+    pairs = sorted({(q or "EUR", loc) for q, loc in rows if loc and loc != (q or "EUR")})
+    return [{"pair": _pair(b, q), "base": b, "quote": q} for b, q in pairs]
+
+
+async def version_detail_full(db: AsyncSession, v: CostSheetVersion, valid: dict) -> dict:
+    """version_detail with the two-currency view and the exchange rates the
+    org's plants need."""
+    detail = version_detail(v, valid, await local_currencies(db, v.organization_id))
+    detail["fx_needed"] = await fx_needed(db, v.organization_id)
+    return detail
+
+
 # ---------------------------------------------------------------- plant currencies
 
 async def plant_currencies(db: AsyncSession, org_id: int) -> list[dict]:
@@ -1078,18 +1426,22 @@ async def plant_currencies(db: AsyncSession, org_id: int) -> list[dict]:
         OrgSetting.key.like(SETTING_PLANT_CURRENCY_CONFIRMED + "%"),
         OrgSetting.value == "1"))).all()}
     return [{"id": p.id, "name": p.name, "code": p.code, "is_active": p.is_active,
-             "currency": p.currency or "EUR",
+             "currency": p.currency or "EUR", "local_currency": p.local_currency,
              "currency_confirmed": f"{SETTING_PLANT_CURRENCY_CONFIRMED}{p.id}" in confirmed}
             for p in plants]
 
 
 async def set_plant_currency(db: AsyncSession, org_id: int, plant_id: int, currency: str,
-                             user_id: Optional[int]) -> None:
-    """Finance sets (or confirms) a plant's currency. Existing rows keep
-    theirs: a published price does not change its code after the fact."""
+                             user_id: Optional[int], *, local_currency=...) -> None:
+    """Sales or Finance sets (or confirms) a plant's quote currency and,
+    optionally, its local currency (None: one currency only). Existing rows
+    keep theirs: a published price does not change its code after the fact."""
     plant = await db.get(Plant, plant_id)
     if plant is None or plant.organization_id != org_id:
         raise CostSheetError("Unknown plant", 404)
     plant.currency = normalize_currency(currency)
+    if local_currency is not ...:
+        local = normalize_currency(local_currency) if local_currency else None
+        plant.local_currency = None if local == plant.currency else local
     await set_setting(db, org_id, f"{SETTING_PLANT_CURRENCY_CONFIRMED}{plant_id}", "1", user_id)
     await db.flush()

@@ -26,7 +26,7 @@ vi.mock('../../api/costSheet', () => ({
 
 const ctx: CostingContext = {
   plant_id: 1, plant_name: 'Toccoa', currency: 'USD', rate_source: 'cost_sheet',
-  current_version: { id: 9, version: 2, valid_from: '2026-07-01' }, latest_version: 2,
+  current_version: { id: 9, version: 2, valid_from: '2026-07-01' }, pricing_date: '2026-08-03', latest_version: 2,
   stale: { stale: true, review_months: 12, latest_version: 2, reviewed_on: '2025-07-01',
     due_on: '2026-07-01', reason: 'review_due' },
   machine_classes: [{ id: 3, name: '200-450 t', tonnage_min: 200, tonnage_max: 450 },
@@ -50,7 +50,7 @@ describe('CostingSheetBar', () => {
     expect(banner.textContent).toContain('Cost sheet v2 is older than 12 months')
     expect(banner.textContent).toContain('1 Jul 2026')
     expect(screen.getByTestId('costing-sheet-source').textContent)
-      .toBe('Priced from cost sheet v2 (Toccoa, USD)')
+      .toBe('Priced from cost sheet v2 (Toccoa, USD): the version valid when the change was created on 3 Aug 2026')
     const pick = screen.getByTestId('costing-machine-class') as HTMLSelectElement
     expect(pick.options[0].textContent).toBe('Automatic: 200-450 t (from tool 350 t)')
     vi.mocked(changesApi.setMachineClass).mockResolvedValue({ ...ctx, machine_class_id: 4 } as never)
@@ -81,12 +81,12 @@ describe('CostingSheetBar', () => {
       .toContain('120.00 EUR · 100.00 USD')
   })
 
-  it('says so when no version is valid today', async () => {
+  it('says so when no version was valid on the creation date', async () => {
     vi.mocked(changesApi.costingContext).mockResolvedValue(
       { ...ctx, current_version: null, stale: null } as never)
     wrap(<CostingSheetBar changeId={7} editable={false} />)
     expect((await screen.findByTestId('costing-sheet-source')).textContent)
-      .toBe('No cost sheet version is valid today: nothing can be priced')
+      .toBe('No cost sheet version was valid on the day the change was created (3 Aug 2026): nothing can be priced')
     expect((screen.getByTestId('costing-machine-class') as HTMLSelectElement).disabled).toBe(true)
   })
 })
@@ -123,13 +123,17 @@ describe('P&L offer vs actual', () => {
       timing: { baseline_finish: null, forecast_finish: null, actual_finish: null,
         slip_days: null, unit: 'calendar days', baseline_source: null },
       piece_price: null,
-      warnings: ['Costing used cost sheet v1, current is v2'],
+      warnings: ['Costing used cost sheet v1; this change is priced with v2 (valid on its creation date)'],
+      fx_notes: ['1,730.00 MXN of actual costs converted to 100.00 USD at 17.30 MXN per USD (cost sheet v1)'],
     } as unknown as OfferVsActual
     render(<OfferVsActualTable data={data} />)
     expect(screen.getByTestId('ova-currency-mismatch').textContent)
       .toBe('No margin: EUR revenue vs USD costs')
     expect(screen.getByTestId('ova-sheet-outdated').textContent)
-      .toBe('Costing used cost sheet v1, current is v2')
+      .toBe('Costing used cost sheet v1; this change is priced with v2 (valid on its creation date)')
+    // a conversion is said, with its rate and version, not as a warning
+    expect(screen.getByTestId('ova-fx-notes').textContent)
+      .toBe('1,730.00 MXN of actual costs converted to 100.00 USD at 17.30 MXN per USD (cost sheet v1)')
   })
 })
 
