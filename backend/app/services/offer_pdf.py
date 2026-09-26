@@ -216,22 +216,22 @@ def spread_cbd(lines: list[dict], hidden: float,
     return rows
 
 
-DATE_FORMATS = {"de": "%d.%m.%Y", "en": "%m/%d/%Y"}
-SHORT_DATE_FORMATS = {"de": "%d.%m.%y", "en": "%m/%d/%y"}
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
 def _d(v, loc: str = "de") -> str:
-    """A date in the offer's locale (number_locale): de 25.09.2026,
-    en 09/25/2026."""
+    """A date on the offer: "26 Sep 2026" for every customer (decision
+    2026-09-26: we are international, no 09/26/2026 or 26.09.2026).
+    loc is kept for the numbers, which still follow the currency."""
     if v is None or v == "":
         return ""
-    fmt = DATE_FORMATS.get(loc, DATE_FORMATS["de"])
-    if isinstance(v, date):
-        return v.strftime(fmt)
-    try:
-        return date.fromisoformat(str(v)[:10]).strftime(fmt)
-    except ValueError:
-        return _clean(v)
+    if not isinstance(v, date):
+        try:
+            v = date.fromisoformat(str(v)[:10])
+        except ValueError:
+            return _clean(v)
+    return f"{v.day} {_MONTHS[v.month - 1]} {v.year}"
 
 
 def fit_text(text: str, font: str, size: float, width: float) -> str:
@@ -482,7 +482,7 @@ def _axis(start: date, end: date, chart_w: float):
         while d < a1:
             nxt = date.fromordinal(d.toordinal() + 7)
             bottom.append((d, nxt, str(d.isocalendar()[1])))
-            key = d.strftime("%b %Y")
+            key = f"{_MONTHS[d.month - 1]} {d.year}"
             if top and top[-1][2] == key:
                 top[-1] = (top[-1][0], nxt, key)
             else:
@@ -496,7 +496,7 @@ def _axis(start: date, end: date, chart_w: float):
     d = a0
     while d < a1:
         nxt = date(d.year + (d.month == 12), d.month % 12 + 1, 1)
-        bottom.append((d, nxt, d.strftime("%b")[:1]))
+        bottom.append((d, nxt, _MONTHS[d.month - 1][:1]))
         if top and top[-1][2] == str(d.year):
             top[-1] = (top[-1][0], nxt, top[-1][2])
         else:
@@ -506,7 +506,8 @@ def _axis(start: date, end: date, chart_w: float):
 
 
 def _chart_date(d: date | None, loc: str = "de") -> str:
-    return d.strftime(SHORT_DATE_FORMATS.get(loc, SHORT_DATE_FORMATS["de"])) if d else ""
+    """Compact chart date, "26 Sep 26"."""
+    return f"{d.day} {_MONTHS[d.month - 1]} {d:%y}" if d else ""
 
 
 def _plan_charts(tasks: list[dict], width: float, loc: str = "de") -> list[Drawing]:

@@ -128,11 +128,11 @@ def test_issued_by_says_each_place_once():
     assert issued_by(None, None, None) == ""
 
 
-async def test_usd_offer_prints_us_dates_and_numbers():
+async def test_offer_prints_international_dates_and_currency_numbers():
     from app.services.offer_pdf import _chart_date, _d, render_offer_pdf
-    assert _d(date(2026, 9, 25), "en") == "09/25/2026"
-    assert _d("2026-09-25") == "25.09.2026"
-    assert _chart_date(date(2026, 9, 25), "en") == "09/25/26"
+    assert _d(date(2026, 9, 25), "en") == "25 Sep 2026"
+    assert _d("2026-09-25") == "25 Sep 2026"
+    assert _chart_date(date(2026, 9, 25), "en") == "25 Sep 26"
     ctx = _pdf_ctx({"cost_lines": [{"key": "a", "label": "Tooling", "amount": 1234.5}],
                     "timing": {"include": True, "weeks_from_order": 1500,
                                "milestones": [{"label": "M", "date": "2026-12-04"}]}},
@@ -143,9 +143,9 @@ async def test_usd_offer_prints_us_dates_and_numbers():
     ctx["offer"]["sent_at"] = date(2026, 9, 25)
     ctx["offer"]["valid_until"] = date(2026, 10, 25)
     text = _text(render_offer_pdf(ctx))
-    assert "09/25/2026" in text and "10/25/2026" in text and "12/04/2026" in text
-    assert "10/05/26" in text and "1,500 weeks" in text and "1,234.50 USD" in text
-    assert "25.09.2026" not in text
+    assert "25 Sep 2026" in text and "25 Oct 2026" in text and "4 Dec 2026" in text
+    assert "5 Oct 26" in text and "1,500 weeks" in text and "1,234.50 USD" in text
+    assert "25.09.2026" not in text and "09/25/2026" not in text
 
 
 async def test_sent_offer_keeps_its_letterhead(client, offer_world, monkeypatch):
