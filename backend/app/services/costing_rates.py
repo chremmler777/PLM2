@@ -13,6 +13,14 @@ worth on this change, and where does the number come from":
 - the legacy `department_rate` table only when the organisation has no
   published cost sheet version at all.
 
+A change older than the first published version is priced with that first
+version ("priced with v1, the earliest cost sheet"). Where the version
+valid on the creation date has no rate (no row, or an empty one) for the
+department, machine class or sampling at the plant, the earliest LATER
+published version with one prices it, labelled ("no rate in v1 on the
+creation date; taken from v2 valid from ..."); a rate that existed then is
+never replaced by a later one. The snapshot records the version used.
+
 A Price with rate None means "cannot price": the line shows "No rate in the
 cost sheet" and is never counted as 0. The currency is the costing plant's
 (the rate row's own currency when the sheet says otherwise): amounts in
@@ -22,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from sqlalchemy import select
@@ -30,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change_cost import LABOUR_KINDS, CostingPosition, DepartmentRate
 from app.models.cost_sheet import CostSheetMachineClass, CostSheetVersion
 from app.models.entities import Plant, Project
-from app.core.display import fmt_number
+from app.core.display import fmt_date, fmt_number
 from app.services import cost_sheet_service as cs
 from app.services import cost_sheet_machines_service as msvc
 from app.utils.clock import business_date_of, business_today
@@ -155,8 +164,50 @@ def rate_label(price: Optional[Price], *, department: Optional[str] = None,
     if fx:
         # a machine rate in another currency, converted at the version's rate
         parts.append(f"converted from {fmt_amount(fx['from_rate'])} {fx['from_currency']} "
-                     f"at {fx['rate']} {fx['from_currency']}/{price.currency}")
+                     f"at {fx_direction(fx['rate'], price.currency, fx['from_currency'])}")
+    note = pricing_note(price)
+    if note:
+        parts.append(note)
     return ", ".join(parts)
+
+
+def pricing_note(price: Optional[Price]) -> Optional[str]:
+    """Why the price does not come from the version valid on the change's
+    creation date, or None: 'priced with v1, the earliest cost sheet' (the
+    change is older than the first version), or 'no rate in v1 on the
+    creation date; taken from v2 valid from 26 Sep 2026' (gap fill)."""
+    detail = (price.detail or {}) if price is not None else {}
+    gap = detail.get("gap_fill")
+    if gap:
+        where = ("the earliest cost sheet" if detail.get("earliest")
+                 else "on the creation date")
+        return (f"no rate in v{gap['no_rate_in']} {where}; taken from v{gap['version']} "
+                f"valid from {fmt_date(gap.get('valid_from'))}")
+    if detail.get("earliest") and price.version is not None:
+        return f"priced with v{price.version}, the earliest cost sheet"
+    return None
+
+
+def fx_direction(rate, base: str, quote: str) -> str:
+    """'1 USD = 17.30 MXN' for `rate` units of quote per one base, written
+    the way round that reads above 1 (an inverted pair is turned back)."""
+    try:
+        r = Decimal(str(rate))
+    except Exception:
+        return f"{rate} {quote}/{base}"
+    if 0 < r < 1:
+        return f"1 {quote} = {fmt_fx(Decimal(1) / r)} {base}"
+    return f"1 {base} = {fmt_fx(r)} {quote}"
+
+
+def fmt_fx(rate) -> str:
+    """An exchange rate as text: 2 decimals when that is exact (17.30),
+    else 4 (an inverted pair: 1/17.30 = 0.0578)."""
+    try:
+        r = float(rate)
+    except (TypeError, ValueError):
+        return str(rate)
+    return fmt_number(r, 2) if round(r, 2) == round(r, 6) else fmt_number(r, 4)
 
 
 # ---------------------------------------------------------------- context
@@ -258,6 +309,37 @@ class RateBook:
                  if v.valid_from is not None and v.valid_from <= on_date]
         return max(valid, key=lambda v: (v.valid_from, v.version), default=None)
 
+    async def chain(self, org_id: Optional[int]) -> list[CostSheetVersion]:
+        """The published versions in validity order (valid_from, version)."""
+        return sorted((v for v in await self.versions(org_id) if v.valid_from is not None),
+                      key=lambda v: (v.valid_from, v.version))
+
+    async def pricing_version(self, org_id: Optional[int], on_date: Optional[date] = None
+                              ) -> tuple[Optional[CostSheetVersion], bool]:
+        """(version, earliest): the version valid on on_date; a date before
+        the first published version is priced with that first version
+        (earliest True, and the label says so)."""
+        v = await self.version_on(org_id, on_date)
+        if v is not None:
+            return v, False
+        chain = await self.chain(org_id)
+        return (chain[0], True) if chain else (None, False)
+
+    async def gap_fill(self, org_id: Optional[int], v: CostSheetVersion, lookup,
+                       usable=lambda found: found is not None):
+        """(found, later version) from the earliest LATER published version
+        where lookup(version) is usable, else None. Only for a rate that the
+        version valid on the pricing date does not have (no row, or an empty
+        rate): a rate that existed then is never replaced by a later one."""
+        chain = await self.chain(org_id)
+        for later in chain:
+            if (later.valid_from, later.version) <= (v.valid_from, v.version):
+                continue
+            found = lookup(later)
+            if usable(found):
+                return found, later
+        return None
+
     async def plant_currency(self, plant_id: Optional[int]) -> str:
         if plant_id is None:
             return "EUR"
@@ -281,7 +363,7 @@ class RateBook:
         return hit[1] if hit else None
 
     async def _no_hit(self, org_id, plant_id, on_date, unit, reason) -> Price:
-        v = await self.version_on(org_id, on_date)
+        v, earliest = await self.pricing_version(org_id, on_date)
         return Price(rate=None, currency=await self.plant_currency(plant_id),
                      source="cost_sheet", unit=unit,
                      version_id=v.id if v else None, version=v.version if v else None,
@@ -291,16 +373,25 @@ class RateBook:
                            plant_id: Optional[int], position: Optional[str] = None,
                            on_date: Optional[date] = None) -> Price:
         """The effective labour rate (base + personnel overhead) of the
-        version valid on on_date; department_rate only for an org without a
-        cost sheet."""
+        version valid on on_date (the first version for a date before it);
+        when that version has no rate for the department at the plant, the
+        earliest later version that has one (gap fill, labelled).
+        department_rate only for an org without a cost sheet."""
         on_date = on_date or business_today()
         if await self.has_cost_sheet(org_id):
-            v = await self.version_on(org_id, on_date)
-            hit = (cs.rate_in_version(v, department_id, position, plant_id,
-                                      with_overhead=True) if v else None)
+            v, earliest = await self.pricing_version(org_id, on_date)
+
+            def lookup(x):
+                return cs.rate_in_version(x, department_id, position, plant_id,
+                                          with_overhead=True)
+            hit = lookup(v) if v else None
+            filled = None
+            if hit is None and v is not None:
+                filled = await self.gap_fill(org_id, v, lookup)
+                hit = filled[0] if filled else None
             if hit is None:
                 return await self._no_hit(org_id, plant_id, on_date, "h", "labour_rate")
-            return _from_hit(hit)
+            return annotate(_from_hit(hit), v, earliest, filled)
         rate = await self.legacy_rate(department_id, plant_id)
         return Price(rate=rate, currency=await self.plant_currency(plant_id),
                      source="department_rate" if rate is not None else None,
@@ -311,34 +402,49 @@ class RateBook:
                             machine_id: Optional[int] = None) -> Price:
         """A named machine's own rate beats the class rate; without one the
         class rate of the machine's plant (the costing plant when the machine
-        maps to none) applies."""
+        maps to none) applies. Gap fill as labour_price: only when the
+        version valid on the pricing date has neither."""
         on_date = on_date or business_today()
         m = await self.machine(machine_id)
         costing_cur = await self.plant_currency(plant_id)
-        if m is not None:
-            v = await self.version_on(org_id, on_date)
-            own = msvc.machine_rate_in_version(v, m.id) if v else None
-            if own is not None:
-                price = _from_hit(own)
-                price.detail = {**price.detail, "machine_id": m.id}
-                return in_costing_currency(price, v, costing_cur)
-            plant_id = m.plant_id or plant_id
-        if machine_class_id is None:
-            return Price(rate=None, currency=await self.plant_currency(plant_id),
-                         source=None, detail={"missing": ["machine_class"]})
-        v = await self.version_on(org_id, on_date)
-        hit = cs.machine_rate_in_version(v, machine_class_id, plant_id) if v else None
-        if hit is None:
-            return await self._no_hit(org_id, plant_id, on_date, "h", "machine_rate")
+        class_plant = (m.plant_id or plant_id) if m is not None else plant_id
+        v, earliest = await self.pricing_version(org_id, on_date)
+
+        def lookup(x):
+            if m is not None:
+                own = msvc.machine_rate_in_version(x, m.id)
+                if own is not None:
+                    return own, True
+            if machine_class_id is None:
+                return None
+            hit = cs.machine_rate_in_version(x, machine_class_id, class_plant)
+            return (hit, False) if hit is not None else None
+        found = lookup(v) if v else None
+        filled = None
+        if found is None and v is not None:
+            filled = await self.gap_fill(org_id, v, lookup)
+            found = filled[0] if filled else None
+        if found is None:
+            if machine_class_id is None:
+                return Price(rate=None, currency=await self.plant_currency(class_plant),
+                             source=None, detail={"missing": ["machine_class"]})
+            return await self._no_hit(org_id, class_plant, on_date, "h", "machine_rate")
+        hit, own = found
+        used = filled[1] if filled else v
+        price = _from_hit(hit)
+        if own:
+            price.detail = {**price.detail, "machine_id": m.id}
+        price = annotate(price, v, earliest, filled)
         # a named machine's plant may quote in another currency than the costing plant
-        return in_costing_currency(_from_hit(hit), v, costing_cur) if m is not None \
-            else _from_hit(hit)
+        return in_costing_currency(price, used, costing_cur) if m is not None else price
 
     async def sampling_price(self, org_id: Optional[int], machine_class_id: Optional[int],
                              plant_id: Optional[int], on_date: Optional[date] = None,
                              machine_id: Optional[int] = None) -> Price:
         """The class's price of a trial; a named machine prices the machine
-        hours of a components row at its own rate."""
+        hours of a components row at its own rate. Gap fill as labour_price
+        when the version valid on the pricing date has no sampling row for
+        the class, or its price lacks a rate (machine or labour)."""
         on_date = on_date or business_today()
         m = await self.machine(machine_id)
         costing_cur = await self.plant_currency(plant_id)
@@ -347,14 +453,53 @@ class RateBook:
         if machine_class_id is None:
             return Price(rate=None, currency=await self.plant_currency(plant_id),
                          source=None, unit="trial", detail={"missing": ["machine_class"]})
-        v = await self.version_on(org_id, on_date)
-        hit = cs.sampling_in_version(v, machine_class_id, plant_id) if v else None
-        if hit is not None and m is not None:
-            hit = msvc.sampling_with_machine(hit, msvc.machine_rate_in_version(v, m.id), v)
+        v, earliest = await self.pricing_version(org_id, on_date)
+
+        def lookup(x):
+            hit = cs.sampling_in_version(x, machine_class_id, plant_id)
+            if hit is not None and m is not None:
+                hit = msvc.sampling_with_machine(hit, msvc.machine_rate_in_version(x, m.id), x)
+            return hit
+        hit = lookup(v) if v else None
+        filled = None
+        if v is not None and _sampling_gap(hit):
+            filled = await self.gap_fill(org_id, v, lookup,
+                                         usable=lambda h: not _sampling_gap(h))
+            if filled:
+                hit = filled[0]
         if hit is None:
             return await self._no_hit(org_id, plant_id, on_date, "trial", "sampling_rate")
-        return in_costing_currency(_from_hit(hit, unit="trial"), v, costing_cur) \
-            if m is not None else _from_hit(hit, unit="trial")
+        used = filled[1] if filled else v
+        price = annotate(_from_hit(hit, unit="trial"), v, earliest, filled)
+        return in_costing_currency(price, used, costing_cur) if m is not None else price
+
+
+def _sampling_gap(hit) -> bool:
+    """No sampling price in the version: no row for the class, or a price
+    that lacks a machine or labour rate there (a currency mismatch is not a
+    gap: the rate exists)."""
+    if hit is None:
+        return True
+    missing = set((hit.breakdown or {}).get("missing") or [])
+    return hit.rate is None and bool(missing) and missing <= {"machine_rate", "labour_rate"}
+
+
+def annotate(price: Price, v: Optional[CostSheetVersion], earliest: bool, filled) -> Price:
+    """Record why the price is not simply "the version valid on the pricing
+    date": priced with the first version (the date lies before it), or taken
+    from a later version because that one had no rate (gap fill). The
+    snapshot keeps it (rate_detail), rate_label says it."""
+    extra: dict = {}
+    if earliest and v is not None:
+        extra["earliest"] = True
+    if filled:
+        later = filled[1]
+        extra["gap_fill"] = {"no_rate_in": v.version, "version": later.version,
+                             "valid_from": later.valid_from.isoformat()
+                             if later.valid_from else None}
+    if extra:
+        price.detail = {**price.detail, **extra}
+    return price
 
 
 async def has_cost_sheet(db: AsyncSession, org_id: Optional[int],
@@ -545,11 +690,23 @@ async def position_price(db: AsyncSession, change, p: CostingPosition, *,
 def line_value(p: CostingPosition, price: Price) -> Optional[float]:
     """hours x rate / trials x price; None = cannot price (never 0); 0.0
     when there is nothing to price."""
-    q = quantity(p)
+    return amount_of(quantity(p), price)
+
+
+def amount_of(q: float, price: Optional[Price]) -> Optional[float]:
+    """q x the price's rate, rounded to cents once. A rate converted from
+    another currency (detail["fx"]) is multiplied in its own currency first
+    and the product converted, so the cents are not rounded twice."""
     if not q:
         return 0.0
-    if price.rate is None:
+    if price is None or price.rate is None:
         return None
+    fx = (price.detail or {}).get("fx")
+    if fx and fx.get("rate") not in (None, "") and fx.get("from_rate") is not None:
+        rate = Decimal(str(fx["rate"]))
+        if rate:
+            return float((Decimal(str(q)) * Decimal(str(fx["from_rate"])) / rate)
+                         .quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
     return round(q * price.rate, 2)
 
 
@@ -585,6 +742,9 @@ async def describe_positions(db: AsyncSession, change, positions) -> dict[int, d
         out[p.id] = {
             "rate": price.rate, "rate_currency": price.currency,
             "currency": p.currency or money_currency,
+            # an old line without a recorded currency: shown in the costing
+            # plant's currency and flagged, never read as one silently
+            "currency_unrecorded": p.currency is None,
             "machine_class_used_id": used_cls,
             "machine_class_from_change": bool(
                 p.kind in ("machine_time", "sampling") and used_cls
@@ -633,7 +793,10 @@ async def costing_context(db: AsyncSession, change) -> dict:
     sheet = await has_cost_sheet(db, org_id)
     pricing_date = change_pricing_date(change)
     # the version that prices this change: valid on its creation date
-    current = await cs.version_on(db, org_id, pricing_date) if org_id is not None else None
+    current = (await cs.pricing_version(db, org_id, pricing_date)
+               if org_id is not None else None)
+    earliest = (current is not None and current.valid_from is not None
+                and current.valid_from > pricing_date)
     latest = await cs.latest_published(db, org_id) if org_id is not None else None
     classes = await cs.list_machine_classes(db, org_id) if org_id is not None else []
     default_cls, tonnage = await default_machine_class(db, org_id, change)
@@ -654,6 +817,9 @@ async def costing_context(db: AsyncSession, change) -> dict:
         "current_version": ({"id": current.id, "version": current.version,
                              "valid_from": current.valid_from} if current else None),
         "pricing_date": pricing_date,
+        # the change is older than the first version: priced with that one
+        "pricing_note": (f"priced with v{current.version}, the earliest cost sheet"
+                         if earliest else None),
         "latest_version": latest.version if latest else None,
         "stale": stale,
         "machine_classes": [{"id": c.id, "name": c.name, "tonnage_min": c.tonnage_min,
@@ -779,13 +945,11 @@ async def price_bookings(db: AsyncSession, change, bookings, *,
             "booking_id": b.id, "department_id": b.department_id, "on": on,
             "hours": hours, "labour_rate": lp.rate, "labour_currency": lp.currency,
             "labour_version": lp.version,
-            "labour_value": (round(hours * lp.rate, 2) if lp.rate is not None
-                             else (0.0 if not hours else None)),
+            "labour_value": amount_of(hours, lp),
             "machine_hours": mh,
             "machine_rate": mp.rate if mp else None,
             "machine_currency": mp.currency if mp else None,
-            "machine_value": ((round(mh * mp.rate, 2) if mp.rate is not None else None)
-                              if mp else 0.0),
+            "machine_value": amount_of(mh, mp) if mp else 0.0,
         })
     return out
 
@@ -797,18 +961,39 @@ async def costing_versions(db: AsyncSession, change) -> list[int]:
     priced with (position snapshots and cost lines)."""
     from app.models.change import ChangeAssessment
     from app.models.change_cost import AssessmentCostLine
-    nums = set((await db.execute(select(CostingPosition.cost_sheet_version).where(
-        CostingPosition.change_id == change.id,
-        CostingPosition.cost_sheet_version.is_not(None)))).scalars().all())
-    ids = set((await db.execute(
-        select(AssessmentCostLine.cost_sheet_version_id)
+    # a line priced from a later version because the change's own version
+    # had no rate for it (gap fill) is priced as the rule says: not outdated
+    nums = {v for v, detail in (await db.execute(
+        select(CostingPosition.cost_sheet_version, CostingPosition.rate_detail).where(
+            CostingPosition.change_id == change.id,
+            CostingPosition.cost_sheet_version.is_not(None)))).all()
+        if not (detail or {}).get("gap_fill")}
+    rows = (await db.execute(
+        select(AssessmentCostLine.cost_sheet_version_id, ChangeAssessment.department_id,
+               AssessmentCostLine.plant_id)
         .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
         .where(ChangeAssessment.change_id == change.id,
-               AssessmentCostLine.cost_sheet_version_id.is_not(None)))).scalars().all())
+               AssessmentCostLine.cost_sheet_version_id.is_not(None)))).all()
+    current = None
+    if rows:
+        org_id = await change_org_id(db, change)
+        current = (await cs.pricing_version(db, org_id, change_pricing_date(change))
+                   if org_id is not None else None)
+    ids = {vid for vid, dep, plant in rows
+           if not cost_line_gap_filled(current, vid, dep, plant)}
     if ids:
         nums |= set((await db.execute(select(CostSheetVersion.version).where(
             CostSheetVersion.id.in_(ids)))).scalars().all())
     return sorted(nums)
+
+
+def cost_line_gap_filled(current: Optional[CostSheetVersion], version_id: Optional[int],
+                         department_id: int, plant_id: Optional[int]) -> bool:
+    """A cost line priced with another version than the change's own, where
+    the change's own has no rate for the department at the plant: the gap
+    fill priced it from a later version, as the rule says (not outdated)."""
+    return (current is not None and version_id is not None and version_id != current.id
+            and cs.rate_in_version(current, department_id, None, plant_id) is None)
 
 
 # ---------------------------------------------------------------- exchange
@@ -820,14 +1005,15 @@ async def change_fx_version(db: AsyncSession, change, *, org_id: Optional[int] =
     if org_id is None:
         plant_id = await costing_plant_id(db, change)
         org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
-    return await (book or RateBook(db)).version_on(org_id, change_pricing_date(change))
+    v, _ = await (book or RateBook(db)).pricing_version(org_id, change_pricing_date(change))
+    return v
 
 
 def fx_note(conv: dict) -> str:
     """'1,730.00 MXN of actual costs converted to 100.00 USD at 17.30 MXN per
     USD (cost sheet v3)': every conversion is said, with its rate."""
     rate = conv["rate"]
-    text = fmt_number(rate, 2) if round(rate, 2) == round(rate, 6) else fmt_number(rate, 4)
+    text = fmt_fx(rate)
     return (f"{fmt_number(conv['amount'], 2)} {conv['currency']} of actual costs converted "
             f"to {fmt_number(conv['converted'], 2)} {conv['to']} at {text} "
             f"{conv['currency']} per {conv['to']} (cost sheet v{conv['version']})")
@@ -850,7 +1036,7 @@ async def version_warning(db: AsyncSession, change, used: Optional[list[int]] = 
     org_id = await change_org_id(db, change)
     if org_id is None:
         return None
-    current = await cs.version_on(db, org_id, change_pricing_date(change))
+    current = await cs.pricing_version(db, org_id, change_pricing_date(change))
     if current is None:
         return None
     used = used if used is not None else await costing_versions(db, change)

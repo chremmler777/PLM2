@@ -250,6 +250,11 @@ class CostService:
         unpriced: list[dict] = []
         versions_used: set[int] = set()
         version_ids_used: set[int] = set()
+        # the version that prices this change: valid on its creation date
+        # (the first version for a change older than it)
+        current = (await cs.pricing_version(session, org_id,
+                                            costing_rates.change_pricing_date(change))
+                   if org_id is not None else None)
 
         def _book(cur: str, key: str, amount: float, *buckets) -> None:
             """Money into its currency group; into the margins only in the
@@ -274,7 +279,8 @@ class CostService:
         for line, department_id in rows:
             pk = "one_time" if line.cost_kind == "one_time" else "lifecycle"
             cur = line.currency or plant_currency.get(line.plant_id) or "EUR"
-            if line.cost_sheet_version_id:
+            if line.cost_sheet_version_id and not costing_rates.cost_line_gap_filled(
+                    current, line.cost_sheet_version_id, department_id, line.plant_id):
                 version_ids_used.add(line.cost_sheet_version_id)
             cell = by_cell.setdefault(
                 (department_id, line.plant_id),
@@ -310,6 +316,7 @@ class CostService:
         # costed (costing_rates); a line with no rate is NOT counted as 0:
         # it is listed in unpriced_lines and the summation warns.
         pos_by_dep: dict[int, dict] = {}
+        currency_unrecorded = 0
         book = costing_rates.RateBook(session)
         # The time a department spent on its assessment is its standing
         # internal_effort line (the assessment's own effort_hours for a
@@ -327,6 +334,11 @@ class CostService:
             # buyer moved the number and by how much.
             cost = p.quoted_cost or 0.0
             line_cur = p.currency or currency
+            if p.currency is None and cost:
+                # an old line (before 098) never recorded its currency: it is
+                # read in the costing plant's currency and said so, never
+                # silently (Silao's quote currency moved to USD in 106)
+                currency_unrecorded += 1
             bucket = ("one_time_external" if p.kind == "external"
                       else "one_time_internal")
             agg = pos_by_dep.setdefault(
@@ -338,7 +350,7 @@ class CostService:
 
             price = await costing_rates.position_price(
                 session, change, p, org_id=org_id, plant_id=costing_plant, book=book)
-            if price.version_id:
+            if price.version_id and not price.detail.get("gap_fill"):
                 version_ids_used.add(price.version_id)
             value = costing_rates.line_value(p, price)
             if value is None:
@@ -407,6 +419,13 @@ class CostService:
                 "message": (f"Costing has amounts in {', '.join(other_currencies)}: "
                             f"they are not in the {currency} totals (no currency "
                             "conversion). See the totals per currency.")})
+        if currency_unrecorded:
+            n = currency_unrecorded
+            warnings.append({
+                "code": "currency_unrecorded",
+                "message": (f"{'1 costing line has' if n == 1 else f'{n} costing lines have'}"
+                            f" no recorded currency: read as {currency}, the costing "
+                            "plant's currency. Check the amounts")})
         if unpriced:
             n = len(unpriced)
             what = ("1 costing line has" if n == 1 else f"{n} costing lines have")
@@ -434,10 +453,6 @@ class CostService:
             versions_used = {v for (v,) in (await session.execute(
                 select(CostSheetVersion.version).where(
                     CostSheetVersion.id.in_(version_ids_used)))).all()}
-        # the version that prices this change: valid on its creation date
-        current = (await cs.version_on(session, org_id,
-                                       costing_rates.change_pricing_date(change))
-                   if org_id is not None else None)
 
         # Lead time is the slowest department, not the sum of them: they wait in
         # parallel. Reported per department too, so the long pole is visible

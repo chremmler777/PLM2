@@ -58,6 +58,16 @@ describe('CostingSheetBar', () => {
     await waitFor(() => expect(changesApi.setMachineClass).toHaveBeenCalledWith(7, 4))
   })
 
+  it('says when the change is older than the first version', async () => {
+    vi.mocked(changesApi.costingContext).mockResolvedValue({
+      ...ctx, current_version: { id: 8, version: 1, valid_from: '2026-03-01' },
+      pricing_date: '2026-01-15', pricing_note: 'priced with v1, the earliest cost sheet' } as never)
+    wrap(<CostingSheetBar changeId={7} editable />)
+    expect((await screen.findByTestId('costing-sheet-source')).textContent).toBe(
+      'Priced from cost sheet v1 (Toccoa, USD): the change was created on 15 Jan 2026, '
+      + 'before the first version; priced with v1, the earliest cost sheet')
+  })
+
   it('shows the totals per currency, the warnings only once (on the P&L card)', async () => {
     vi.mocked(changesApi.costingContext).mockResolvedValue(
       { ...ctx, stale: { ...ctx.stale!, stale: false } } as never)

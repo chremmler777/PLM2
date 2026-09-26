@@ -15,7 +15,8 @@ import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, addDaysIso, formatDate, todayI
 vi.mock('../api/costSheet', () => ({
   costSheetApi: {
     overview: vi.fn(), version: vi.fn(), diff: vi.fn(), deleteDraft: vi.fn(),
-    createDraft: vi.fn(), addMissingDepartments: vi.fn(), addRow: vi.fn(), exportUrl: () => '#',
+    createDraft: vi.fn(), addMissingDepartments: vi.fn(), addRow: vi.fn(), updateRow: vi.fn(),
+    exportUrl: () => '#',
   },
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -285,5 +286,42 @@ describe('cost sheet pieces', () => {
     expect(diffCount({ from_version: 1, from_version_id: 1, to_version: 2, to_version_id: 2,
       rates: { ...empty, added: [{}] }, machines: empty, sampling: empty,
       overheads: { ...empty, changed: [{ changes: {} }] } })).toBe(2)
+  })
+})
+
+
+describe('CostSheetPage: a Silao row still in another currency', () => {
+  afterEach(cleanup)
+  const silao = { id: 8, name: 'Silao', code: 'SIL', is_active: true, currency: 'USD',
+    local_currency: 'MXN', currency_confirmed: true }
+  const draft = {
+    id: 9, version: 2, status: 'draft', valid_from: null, valid_to: null, note: null,
+    based_on_version_id: null, created_at: null, published_at: null, published_by: null,
+    fx_rates: [{ pair: 'USD/MXN', base: 'USD', quote: 'MXN', rate: '17.30' }],
+    fx_needed: [{ pair: 'USD/MXN', base: 'USD', quote: 'MXN' }],
+    rates: [{ id: 1, department_id: 1, plant_id: 8, hourly_rate: 40, position: null, currency: 'EUR',
+      min_factor: null, note: null, effective_rate: 40, overhead: null,
+      local_currency: 'MXN', local_rate: null, entered_in: 'quote' }],
+    machine_rates: [], sampling_rates: [], overheads: [],
+    currency_mismatch: [{ section: 'rates', row_id: 1, plant_id: 8, plant_name: 'Silao',
+      currency: 'EUR', plant_currency: 'USD' }],
+  }
+
+  it('warns on the draft and asks to switch the row before an MXN rate', async () => {
+    vi.mocked(costSheetApi.overview).mockResolvedValue({ ...overview, plants: [silao] } as never)
+    vi.mocked(costSheetApi.version).mockResolvedValue(draft as never)
+    vi.mocked(costSheetApi.updateRow).mockResolvedValue(draft as never)
+    wrap(<CostSheetPage />)
+    expect((await screen.findByTestId('currency-mismatch')).textContent)
+      .toContain('Silao (quote currency USD): 1 row in EUR')
+    const local = screen.getAllByLabelText('Local / h')[0]
+    fireEvent.focus(local)
+    fireEvent.change(local, { target: { value: '1730' } })
+    fireEvent.blur(local)
+    expect(await screen.findByText('Switch this row to USD?')).toBeDefined()
+    expect(costSheetApi.updateRow).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to USD' }))
+    await waitFor(() => expect(costSheetApi.updateRow).toHaveBeenCalledWith(9, 'rates', 1,
+      { entered_rate: 1730, entered_currency: 'MXN', currency: 'USD' }))
   })
 })

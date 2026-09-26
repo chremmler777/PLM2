@@ -6,6 +6,7 @@
  * (useTableState) or in the URL (writeTableState / readTableState).
  */
 import { useCallback, useMemo, useState } from 'react'
+import { readNumberInput } from '../../lib/format'
 
 export interface FilterColumnDef<Row> {
   key: string
@@ -65,8 +66,10 @@ export function activeFilterCount(state: TableState): number {
   return Object.values(state.filters).filter(isFilterActive).length
 }
 
-function matches<Row>(row: Row, col: FilterColumnDef<Row>, f: ColumnFilter): boolean {
-  if (f.values !== undefined && !f.values.includes(displayOf(row, col))) return false
+function matches<Row>(row: Row, col: FilterColumnDef<Row>, f: ColumnFilter,
+  selected?: Set<string>): boolean {
+  if (f.values !== undefined
+      && !(selected ?? new Set(f.values)).has(displayOf(row, col))) return false
   const hasMin = f.min !== undefined && f.min !== null
   const hasMax = f.max !== undefined && f.max !== null
   if (hasMin || hasMax) {
@@ -85,7 +88,10 @@ export function filterRows<Row>(rows: Row[], cols: FilterColumnDef<Row>[],
   filters: Record<string, ColumnFilter>, exceptKey?: string): Row[] {
   const active = cols.filter((c) => c.key !== exceptKey && isFilterActive(filters[c.key]))
   if (active.length === 0) return rows
-  return rows.filter((r) => active.every((c) => matches(r, c, filters[c.key])))
+  // one Set per column, built once: a lookup per row, not a scan of the list
+  const sets = new Map(active.map((c) => [c.key, filters[c.key].values !== undefined
+    ? new Set(filters[c.key].values) : undefined]))
+  return rows.filter((r) => active.every((c) => matches(r, c, filters[c.key], sets.get(c.key))))
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -137,14 +143,13 @@ export function ariaSort(state: TableState, key: string): 'ascending' | 'descend
   return state.sort.dir === 'asc' ? 'ascending' : 'descending'
 }
 
-/** A typed number with a dot or a comma decimal ("7,5", "1,234.5", "12.5"). */
+/** A typed filter bound, read like every number input in the app
+ * (lib/format readNumberInput, en-US: "1,234.5", "12.5"); an ambiguous
+ * "7,5" or anything else that is not a number is 'invalid'. */
 export function parseLooseNumber(raw: string): number | null | 'invalid' {
-  const t = raw.trim().replace(/\s/g, '')
-  if (!t) return null
-  const norm = t.includes('.') ? t.replace(/,/g, '') : t.replace(',', '.')
-  if (!/^-?\d*\.?\d+$|^-?\d+\.$/.test(norm)) return 'invalid'
-  const n = Number(norm)
-  return Number.isFinite(n) ? n : 'invalid'
+  const r = readNumberInput(raw)
+  if (r.error) return 'invalid'
+  return r.value
 }
 
 // ---------------------------------------------------------------- URL

@@ -295,7 +295,7 @@ describe('ChangesPage column sort and filter', () => {
     view('/changes?f.priority=High&f.priority=Critical&csort=number:desc&sort=recent&f.bogus=1')
     await screen.findByText('GB-CM-0003')
     expect(numbers()).toEqual(['GB-CM-0003', 'GB-CM-0002'])
-    expect(screen.getByRole('button', { name: 'Filter Priority' }).getAttribute('data-active')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Filter Priority, filtered: / }).getAttribute('data-active')).toBe('true')
     expect(screen.getByRole('button', { name: 'Number' }).closest('th')?.getAttribute('aria-sort'))
       .toBe('descending')
     expect(screen.getByText(/1 filter active/)).toBeDefined()

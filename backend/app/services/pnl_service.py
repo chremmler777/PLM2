@@ -471,8 +471,8 @@ class PnlService:
 
         # money entered in another currency: converted at the exchange rate
         # of each change's own cost sheet version, and said so
-        fx_of = {c.id: await book.version_on(ctx["org"][c.id],
-                                             costing_rates.change_pricing_date(c))
+        fx_of = {c.id: (await book.pricing_version(
+                     ctx["org"][c.id], costing_rates.change_pricing_date(c)))[0]
                  for c in changes}
         extra = await PnlService.actual_cost_sums(session, ids, ctx["currency"], fx_of)
         issues = await PnlService.issue_costs(session, ids)

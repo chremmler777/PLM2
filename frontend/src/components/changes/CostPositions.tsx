@@ -531,6 +531,19 @@ function RateNote({ p }: { p: CostPosition }) {
   )
 }
 
+/** An old line (before its currency was recorded): the amount is read in
+ * the costing plant's currency, and that is said, never silently. */
+function CurrencyUnrecorded({ p }: { p: CostPosition }) {
+  if (!p.currency_unrecorded || !p.currency) return null
+  if (!(p.est_cost || p.effective_cost || quantityOf(p) > 0)) return null
+  return (
+    <span data-testid={`costpos-currency-unrecorded-${p.id}`}
+      className="mt-0.5 block text-[11px] text-amber-300">
+      {t('costpos.currencyUnrecorded').replace('{cur}', p.currency)}
+    </span>
+  )
+}
+
 /** hours (trials) x rate, in the line's currency; "not counted" without a rate. */
 function LineValue({ p }: { p: CostPosition }) {
   if (quantityOf(p) <= 0) return null
@@ -698,6 +711,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             <>
               <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{p.label}</span>
               <RateNote p={p} />
+              <CurrencyUnrecorded p={p} />
               {type === 'estimate' && p.vendor_name && (
                 <span data-testid={`costpos-vendor-${p.id}`} className="block text-xs text-slate-400">
                   {t('costpos.vendor')}: {p.vendor_name}

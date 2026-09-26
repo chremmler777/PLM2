@@ -467,10 +467,12 @@ async def test_change_priced_with_the_version_valid_on_its_creation_date(
     line = await _add(client, admin_auth, world, hours=2)
     assert (line["rate"], line["cost_sheet_version"]) == (50, 1)
     assert line["rate_on"] == "2026-02-28"
-    # v2 is in force today, but not for this change: Quality has no rate in
-    # v1, so its line stays unpriced
+    # Quality has no rate in v1 (the change's version): the gap is filled
+    # from the earliest later version that has one, and the label says so
     qa = await _add(client, admin_auth, world, department_id=world["qa"], hours=1)
-    assert qa["rate"] is None and qa["rate_missing"]
+    assert (qa["rate"], qa["cost_sheet_version"]) == (70, 2)
+    assert qa["rate_label"].endswith(
+        "no rate in v1 on the creation date; taken from v2 valid from 1 Mar 2026")
     ctx = (await client.get(_url(world, "/costing/context"), headers=admin_auth)).json()
     assert ctx["current_version"]["version"] == 1 and ctx["pricing_date"] == "2026-02-28"
     summ = await _summation(session_factory, world)
@@ -564,3 +566,83 @@ async def test_098_creates_a_version_for_undated_department_rates(
         v = vs[0]
         assert (v.version, v.status, v.valid_from) == (1, "published", date(2020, 1, 1))
         assert [(r.hourly_rate, r.currency) for r in v.rates] == [(65, "USD")]
+
+
+async def test_gap_fill_takes_a_missing_rate_from_the_next_version_only(
+        client, admin_auth, world, session_factory):
+    """Department with an EMPTY rate in v1 but priced in v2 (and v3): priced
+    from v2, the earliest later version, labelled. A department priced in v1
+    and changed in v2 stays on v1. (A missing row: see the test above.)"""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD"),
+        dict(department_id=world["qa"], hourly_rate=None, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD"),
+                          dict(department_id=world["qa"], hourly_rate=70, currency="USD")])
+    await _version(session_factory, world["org_id"], version=3, valid_from=date(2026, 4, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=61, currency="USD"),
+                          dict(department_id=world["qa"], hourly_rate=71, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    tool = await _add(client, admin_auth, world, hours=2)
+    assert (tool["rate"], tool["cost_sheet_version"]) == (50, 1)
+    assert "taken from" not in tool["rate_label"]
+    qa = await _add(client, admin_auth, world, department_id=world["qa"], hours=1)
+    assert (qa["rate"], qa["cost_sheet_version"]) == (70, 2)
+    assert "no rate in v1 on the creation date; taken from v2" in qa["rate_label"]
+    async with session_factory() as s:
+        p = await s.get(CostingPosition, qa["id"])
+        # the snapshot records the version actually used, and why
+        assert p.cost_sheet_version == 2 and p.rate_detail["gap_fill"]["no_rate_in"] == 1
+        change = await s.get(ChangeRequest, world["change_id"])
+        assert await costing_rates.version_warning(s, change) is None
+    summ = await _summation(session_factory, world)
+    assert summ["cost_sheet_current_version"] == 1
+    assert not any(w["code"] == "cost_sheet_outdated" for w in summ["warnings"])
+
+
+async def test_gap_fill_for_a_machine_class_rate(client, admin_auth, world, session_factory):
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 3, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=50, currency="USD")],
+                   machines=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  hourly_rate=85, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 2, 10, 15))
+    m = await _add(client, admin_auth, world, kind="machine_time", label="Press", hours=2,
+                   machine_class_id=world["big"])
+    assert (m["rate"], m["cost_sheet_version"], m["line_value"]) == (85, 2, 170)
+    assert "no rate in v1 on the creation date; taken from v2" in m["rate_label"]
+
+
+async def test_change_older_than_the_first_version_is_priced_with_it(
+        client, admin_auth, world, session_factory):
+    await _version(session_factory, world["org_id"], valid_from=date(2026, 3, 1), rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 5, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD")])
+    await _created_on(session_factory, world, datetime(2026, 1, 15, 15))
+    line = await _add(client, admin_auth, world, hours=2)
+    assert (line["rate"], line["cost_sheet_version"]) == (50, 1)
+    assert line["rate_label"].endswith("priced with v1, the earliest cost sheet")
+    ctx = (await client.get(_url(world, "/costing/context"), headers=admin_auth)).json()
+    assert ctx["current_version"]["version"] == 1
+    assert ctx["pricing_note"] == "priced with v1, the earliest cost sheet"
+    summ = await _summation(session_factory, world)
+    assert summ["cost_sheet_current_version"] == 1
+    assert not any(w["code"] == "cost_sheet_outdated" for w in summ["warnings"])
+
+
+async def test_old_line_without_currency_is_flagged(client, admin_auth, world, session_factory):
+    """A line from before 098 has no currency: read in the costing plant's
+    currency and said so, never silently."""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    line = await _add(client, admin_auth, world, kind="external", pricing="estimate",
+                      est_cost=100)
+    async with session_factory() as s:
+        p = await s.get(CostingPosition, line["id"])
+        p.currency = None
+        await s.commit()
+    summ = await _summation(session_factory, world)
+    w = next(w for w in summ["warnings"] if w["code"] == "currency_unrecorded")
+    assert "read as USD, the costing plant's currency" in w["message"]

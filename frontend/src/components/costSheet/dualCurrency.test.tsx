@@ -7,7 +7,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import FxRates, { readFxInput } from './FxRates'
+import FxRates, { inverse, readFxInput } from './FxRates'
+import CurrencyMismatch, { mismatchLines } from './CurrencyMismatch'
+import type { CurrencyMismatchRow } from '../../types/costSheet'
 import SectionTable from './SectionTable'
 import PlantCurrencies from './PlantCurrencies'
 import { localRateColumn, type SheetContext } from './columns'
@@ -156,5 +158,30 @@ describe('actual costs at a two-currency plant', () => {
     </QueryClientProvider>)
     fireEvent.click(await screen.findByTestId('actual-cost-open'))
     expect(screen.queryByTestId('actual-cost-currency')).toBeNull()
+  })
+})
+
+
+describe('exchange rate direction and rows off their plant currency', () => {
+  it('shows the rate the other way round, 4 decimals', () => {
+    render(<FxRates rates={[{ pair: 'USD/MXN', base: 'USD', quote: 'MXN', rate: '17.30' }]}
+      needed={[]} editable={false} version={3} onSet={vi.fn()} />)
+    expect(screen.getByTestId('fx-inverse-USD/MXN').textContent).toBe('(1 MXN = 0.0578 USD)')
+    expect(inverse('abc')).toBeNull()
+  })
+
+  it('lists rows not in their plant quote currency, per plant and currency', () => {
+    const rows = [
+      { section: 'rates', row_id: 1, plant_id: 8, plant_name: 'Silao', currency: 'EUR', plant_currency: 'USD' },
+      { section: 'machines', row_id: 2, plant_id: 8, plant_name: 'Silao', currency: 'EUR', plant_currency: 'USD' },
+    ] as CurrencyMismatchRow[]
+    expect(mismatchLines(rows)).toEqual(['Silao (quote currency USD): 2 rows in EUR'])
+    render(<CurrencyMismatch rows={rows} publishing />)
+    const box = screen.getByTestId('currency-mismatch')
+    expect(box.textContent).toContain('2 rows are not in their plant')
+    expect(box.textContent).toContain('published as they are')
+    cleanup()
+    const none = render(<CurrencyMismatch rows={[]} />)
+    expect(none.container.textContent).toBe('')
   })
 })

@@ -776,6 +776,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.labourPosition': { de: 'Funktion', en: 'Position' },
   'costpos.labourDefault': { de: 'Abteilungssatz', en: 'Department rate' },
   'costpos.noRate': { de: 'Kein Satz im Kostenblatt', en: 'No rate in the cost sheet' },
+  'costpos.currencyUnrecorded': {
+    de: 'Keine Währung gespeichert: gelesen in {cur}, der Währung des Kalkulationswerks',
+    en: 'No recorded currency: read as {cur}, the costing plant\'s currency',
+  },
   'costpos.noRateHint': {
     de: 'Nicht in der Summe. Sales (oder Finance) muss den Satz im Kostenblatt pflegen.',
     en: 'Not in the total. Sales (or Finance) has to add the rate to the cost sheet.',
@@ -785,6 +789,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.sheetInfo': {
     de: 'Preise aus Kostenblatt v{v} ({plant}, {cur}): die Version, die bei Anlage der Änderung am {date} galt',
     en: 'Priced from cost sheet v{v} ({plant}, {cur}): the version valid when the change was created on {date}',
+  },
+  'costing.sheetEarliest': {
+    de: 'Preise aus Kostenblatt v{v} ({plant}, {cur}): die Änderung wurde am {date} angelegt, vor der ersten Version; bepreist mit v{v}, dem frühesten Kostenblatt',
+    en: 'Priced from cost sheet v{v} ({plant}, {cur}): the change was created on {date}, before the first version; priced with v{v}, the earliest cost sheet',
   },
   'costing.sheetLegacy': { de: 'Kein Kostenblatt: Abteilungssätze ({plant}, {cur})', en: 'No cost sheet yet: department rates ({plant}, {cur})' },
   'costing.sheetNone': {

@@ -1280,7 +1280,8 @@ class OfferService:
                         if current_v is not None and v != current_v]
         costing_issues = []
         for w in meta.get("warnings") or []:
-            if w.get("code") in ("mixed_currency", "no_rate", "no_rate_department"):
+            if w.get("code") in ("mixed_currency", "no_rate", "no_rate_department",
+                                  "currency_unrecorded"):
                 costing_issues.append(_issue(w["code"], w["message"]))
         outdated = None
         if old_versions:

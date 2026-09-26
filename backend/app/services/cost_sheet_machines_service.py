@@ -186,6 +186,11 @@ async def unmap_plant(db: AsyncSession, org_id: int, key: str,
 
 # ---------------------------------------------------------------- sync
 
+# Clamping force bound (t): Numeric(10, 2) holds less than 1e8; the largest
+# presses are far below this.
+MAX_CLAMPING_FORCE_T = 100_000
+
+
 def machine_active(planned_scrap_from: Optional[date], retired: bool,
                    today: Optional[date] = None) -> bool:
     """Not retired from MachineDB and not scrapped (planned_scrap_from not
@@ -298,6 +303,14 @@ async def sync_machines(db: AsyncSession, org_id: int, user_id: Optional[int] = 
             skipped.append(f"duplicate id {dto.id}")
             continue
         seen.add(dto.id)
+        force_t = dto.clamping_force_t
+        if force_t is not None and not (0 <= force_t < MAX_CLAMPING_FORCE_T):
+            # a number the column cannot hold (or no press has): the row is
+            # reported as skipped and left as it was, never a failed sync;
+            # it stays in `seen`, so a known press is not retired for it
+            skipped.append(f"{dto.internal_name} (id {dto.id}): clamping force "
+                           f"{force_t:g} t out of range")
+            continue
         entry = mapping.get(dto.plant or "")
         plant_id = entry["plant_id"] if entry else None
         if plant_id is None:
@@ -389,15 +402,19 @@ def sampling_with_machine(hit: RateHit, own: Optional[RateHit],
     missing = [x for x in (b.get("missing") or [])
                if x not in ("machine_rate", "machine_rate_currency")]
     own_rate, fx = own.rate, None
+    machine_cost = round(hours * own.rate, 2)
     if own.currency != hit.currency:
+        # the hours are multiplied first and the product converted once,
+        # so the cents are rounded one time only
         own_rate = cs.convert(v, own.rate, own.currency, hit.currency)
-        if own_rate is None:
+        converted = cs.convert(v, hours * own.rate, own.currency, hit.currency)
+        if own_rate is None or converted is None:
             missing.append("machine_rate_currency")
             own_rate = own.rate
         else:
+            machine_cost = converted
             fx = {"from_currency": own.currency, "from_rate": own.rate,
                   "rate": str(cs.fx_rate(v, hit.currency, own.currency))}
-    machine_cost = round(hours * own_rate, 2)
     price = None if missing else round(
         machine_cost + float(b.get("labour_cost") or 0) + float(b.get("handling_cost") or 0), 2)
     return RateHit(rate=price, currency=hit.currency, version_id=hit.version_id,
@@ -461,6 +478,11 @@ async def set_machine_rate(db: AsyncSession, v: CostSheetVersion, machine_id: in
                 raise CostSheetError(
                     f"{ecur} is not the local currency of this machine's plant: type the "
                     f"rate in {cur}", 422)
+            quote = plant.currency or "EUR"
+            if cur != quote:
+                raise CostSheetError(
+                    f"This rate is in {cur}, not {plant.name}'s quote currency {quote}: "
+                    f"switch it to {quote} first, then type the rate in {ecur}", 422)
             conv = cs._from_entered(v, typed, cur, ecur)
             if conv is None:
                 raise CostSheetError(

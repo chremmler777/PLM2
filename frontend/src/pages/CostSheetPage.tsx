@@ -23,6 +23,7 @@ import MachineClassStrip from '../components/costSheet/MachineClassStrip'
 import PlantCurrencies from '../components/costSheet/PlantCurrencies'
 import FxRates from '../components/costSheet/FxRates'
 import MachinesPanel from '../components/costSheet/MachinesPanel'
+import CurrencyMismatch from '../components/costSheet/CurrencyMismatch'
 import {
   localRateColumn, type Column,
   SECTION_BLURB, SECTION_EXPORT, SECTION_LABELS, sortRows, type SheetContext,
@@ -68,6 +69,11 @@ export default function CostSheetPage() {
   const [tab, setTab] = useState<CostSheetSection>('rates')
   const [showDiff, setShowDiff] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
+  // A local-currency rate typed on a row whose currency is not its plant's
+  // quote currency: asks to switch the row to the quote currency first.
+  const [switchAsk, setSwitchAsk] = useState<{
+    rowId: number; changes: CostSheetRow; from: string; to: string; plant: string; local: string
+  } | null>(null)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [editingCycle, setEditingCycle] = useState(false)
   // Sort and column filters per tab; a new version starts clean.
@@ -239,6 +245,18 @@ export default function CostSheetPage() {
       fail(e)
       return false
     }
+  }
+
+  /** A rate typed in the plant's local currency on a row whose currency is
+   * not the plant's quote currency: the conversion only goes into the quote
+   * currency, so the row is switched to it first (asked, never silently). */
+  const switchNeeded = (rowId: number, changes: CostSheetRow) => {
+    const local = changes.entered_currency as string | null | undefined
+    if (!local || changes.entered_rate == null || !v) return null
+    const row = (v[ROWS_KEY[tab]] as unknown as CostSheetRow[]).find((r) => r.id === rowId)
+    const plant = ov?.plants.find((p) => p.id === row?.plant_id)
+    if (!row || !plant || !plant.currency || row.currency === plant.currency) return null
+    return { rowId, changes, from: row.currency as string, to: plant.currency, plant: plant.name, local }
   }
 
   if (overview.isLoading) {
@@ -436,6 +454,7 @@ export default function CostSheetPage() {
               )}
             </div>
           )}
+          {v && isDraft && <CurrencyMismatch rows={v.currency_mismatch} />}
           {v && (tab === 'rates' || tab === 'machines') && (
             <FxRates rates={v.fx_rates ?? []} needed={v.fx_needed ?? []} editable={editable}
                      busy={fxMut.isPending} version={v.version}
@@ -471,7 +490,11 @@ export default function CostSheetPage() {
               onTableState={(st) => setTableStates((m) => ({ ...m, [tab]: st }))}
               editable={editable}
               busy={rowMut.isPending}
-              onUpdate={(rowId, changes) => rowMut.mutate({ kind: 'update', rowId, row: changes })}
+              onUpdate={(rowId, changes) => {
+                const ask = switchNeeded(rowId, changes)
+                if (ask) setSwitchAsk(ask)
+                else rowMut.mutate({ kind: 'update', rowId, row: changes })
+              }}
               onDelete={(rowId) => rowMut.mutate({ kind: 'delete', rowId })}
               onAdd={async (row) => {
                 try {
@@ -498,11 +521,30 @@ export default function CostSheetPage() {
           latestValidFrom={latestPublished?.valid_from ?? null}
           latestVersion={latestPublished?.version ?? null}
           changeCount={diffCount(diff.data)}
+          currencyMismatch={v.currency_mismatch}
           busy={publishMut.isPending}
           onCancel={() => setPublishOpen(false)}
           onPublish={(validFrom, note, confirmBackdated) => publishMut.mutate({ validFrom, note, confirmBackdated })}
         />
       )}
+      <ConfirmModal
+        isOpen={switchAsk !== null}
+        title={switchAsk ? `Switch this row to ${switchAsk.to}?` : ''}
+        message={switchAsk
+          ? `This row is in ${switchAsk.from}, not ${switchAsk.plant}'s quote currency ${switchAsk.to}. `
+            + `A rate typed in ${switchAsk.local} is converted into ${switchAsk.to} only. Switch the row to `
+            + `${switchAsk.to} and save the ${switchAsk.local} rate? The ${switchAsk.from} number is replaced.`
+          : ''}
+        confirmText={switchAsk ? `Switch to ${switchAsk.to}` : 'Switch'}
+        isLoading={rowMut.isPending}
+        onConfirm={() => {
+          if (!switchAsk) return
+          const a = switchAsk
+          rowMut.mutate({ kind: 'update', rowId: a.rowId, row: { ...a.changes, currency: a.to } },
+            { onSettled: () => setSwitchAsk(null) })
+        }}
+        onCancel={() => setSwitchAsk(null)}
+      />
       <ConfirmModal
         isOpen={discardOpen}
         title={`Discard draft version ${v?.version ?? summary?.version ?? ''}?`}

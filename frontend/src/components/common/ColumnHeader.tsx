@@ -66,7 +66,8 @@ export default function ColumnHeader<Row>({
         </button>
       ) : <span title={title}>{col.label}</span>}
       {filterable && (
-        <button ref={btnRef} type="button" aria-label={`Filter ${col.label}`}
+        <button ref={btnRef} type="button"
+          aria-label={active ? `Filter ${col.label}, filtered: ${describe(filter)}` : `Filter ${col.label}`}
           aria-haspopup="dialog" aria-expanded={open}
           data-active={active ? 'true' : undefined}
           title={active ? `Filtered: ${describe(filter)}` : `Filter ${col.label}`}

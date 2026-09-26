@@ -212,6 +212,24 @@ describe('MachinesPanel', () => {
       3, { version_id: 9, entered_rate: 1800, entered_currency: 'MXN' }))
   })
 
+  it('asks to switch a rate off the plant quote currency before an MXN rate', async () => {
+    vi.mocked(costSheetMachinesApi.list).mockResolvedValue(listing({
+      machines: [machine({ id: 3, internal_name: 'M-300', machinedb_plant: 'mexico', plant_id: 5,
+        hourly_rate: 90, currency: 'EUR', local_currency: 'MXN', local_rate: null,
+        entered_in: 'quote' })],
+    }))
+    vi.mocked(costSheetMachinesApi.setRate).mockResolvedValue(null)
+    wrap(<MachinesPanel versionId={9} editable plants={plants} />)
+    const local = await screen.findByLabelText('Hourly rate of M-300 in MXN') as HTMLInputElement
+    fireEvent.change(local, { target: { value: '1800' } })
+    fireEvent.blur(local)
+    expect(await screen.findByText('Switch this rate to USD?')).toBeDefined()
+    expect(costSheetMachinesApi.setRate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to USD' }))
+    await waitFor(() => expect(costSheetMachinesApi.setRate).toHaveBeenCalledWith(
+      3, { version_id: 9, entered_rate: 1800, entered_currency: 'MXN', currency: 'USD' }))
+  })
+
   it('names the status of a machine', () => {
     expect(machineStatus(machine({}))).toBe('Active')
     expect(machineStatus(machine({ active: false }))).toBe('Scrapped')

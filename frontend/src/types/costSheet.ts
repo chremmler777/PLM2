@@ -120,9 +120,21 @@ export interface Overhead {
   note: string | null
 }
 
+/** A row whose currency is not its plant's quote currency (flagged, never relabelled). */
+export interface CurrencyMismatchRow {
+  section: 'rates' | 'machines' | 'sampling' | 'overheads' | 'machine_items'
+  row_id: number
+  plant_id: number
+  plant_name: string
+  currency: string
+  plant_currency: string
+}
+
 export interface CostSheetVersionDetail extends CostSheetVersionSummary {
   /** The exchange rates of this version, frozen on publish. */
   fx_rates?: FxRate[]
+  /** Rows not in their plant's quote currency: a warning on the draft and on publish. */
+  currency_mismatch?: CurrencyMismatchRow[]
   /** The pairs the org's two-currency plants need (quote/local). */
   fx_needed?: { pair: string; base: string; quote: string }[]
   rates: PositionRate[]

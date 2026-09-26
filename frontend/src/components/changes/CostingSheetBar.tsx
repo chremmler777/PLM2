@@ -39,13 +39,16 @@ export default function CostingSheetBar({ changeId, summation, editable }: {
   if (!ctx) return null
 
   const vars = (s: string) => s
-    .replace('{v}', String(ctx.current_version?.version ?? ctx.latest_version ?? '-'))
+    .split('{v}').join(String(ctx.current_version?.version ?? ctx.latest_version ?? '-'))
     .replace('{plant}', ctx.plant_name ?? '-')
     .replace('{cur}', ctx.currency)
     .replace('{date}', ctx.pricing_date ? formatCalendarDate(ctx.pricing_date) : '-')
   const source = ctx.rate_source === 'department_rate'
     ? vars(t('costing.sheetLegacy'))
-    : ctx.current_version ? vars(t('costing.sheetInfo')) : vars(t('costing.sheetNone'))
+    : ctx.current_version
+      // older than the first version: priced with it, and said so
+      ? vars(t(ctx.pricing_note ? 'costing.sheetEarliest' : 'costing.sheetInfo'))
+      : vars(t('costing.sheetNone'))
   const stale = ctx.stale?.stale ? ctx.stale : null
   const defaultClass = ctx.machine_classes.find((c) => c.id === ctx.default_machine_class_id)
   const byCurrency = Object.entries(summation?.totals_by_currency ?? {})

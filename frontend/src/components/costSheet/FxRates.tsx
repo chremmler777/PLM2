@@ -5,7 +5,7 @@
  * of its version. The number is sent as typed (17.30 stays 17.30).
  */
 import { useEffect, useId, useState } from 'react'
-import { NUMBER_INPUT_INVALID } from '../../lib/format'
+import { NUMBER_INPUT_INVALID, formatNumber } from '../../lib/format'
 import type { FxRate } from '../../types/costSheet'
 
 interface Pair { pair: string; base: string; quote: string }
@@ -27,6 +27,13 @@ export function readFxInput(raw: string): { value: string | null } | { refused: 
   if (!/^\d+([.,]\d+)?$/.test(t)) return { refused: true }
   const value = t.replace(',', '.')
   return Number(value) > 0 ? { value } : { refused: true }
+}
+
+/** 1 / rate with 4 decimals ("17.30" -> "0.0578"); null when not a number. */
+export function inverse(rate: string): string | null {
+  const n = Number(rate)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return formatNumber(1 / n, { min: 4, max: 4 })
 }
 
 function FxInput({ p, current, busy, onSet }: {
@@ -88,6 +95,12 @@ export default function FxRates({ rates, needed, editable, busy, version, onSet 
               </span>
             )}
             <span>{p.quote}</span>
+            {current && inverse(current) && (
+              // the other way round, so the direction is never in doubt
+              <span data-testid={`fx-inverse-${p.pair}`} className="text-xs text-slate-500 tabular-nums">
+                (1 {p.quote} = {inverse(current)} {p.base})
+              </span>
+            )}
             {!current && (
               <span className="text-xs text-amber-300/90">
                 Rates typed in {p.quote} cannot be priced until it is set.

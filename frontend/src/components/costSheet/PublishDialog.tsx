@@ -12,6 +12,8 @@ import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 import DateInput from '../gantt/DateInput'
 import { addDaysIso, formatCalendarDate, todayIso } from '../../lib/format'
+import CurrencyMismatch from './CurrencyMismatch'
+import type { CurrencyMismatchRow } from '../../types/costSheet'
 
 interface Props {
   open: boolean
@@ -22,6 +24,8 @@ interface Props {
   latestValidFrom: string | null
   latestVersion: number | null
   changeCount: number | null
+  /** Rows not in their plant's quote currency: warned, published as they are. */
+  currencyMismatch?: CurrencyMismatchRow[]
   busy: boolean
   onCancel: () => void
   onPublish: (validFrom: string, note: string, confirmBackdated: boolean) => void
@@ -29,7 +33,7 @@ interface Props {
 
 export default function PublishDialog({
   open, version, defaultValidFrom, defaultNote, latestValidFrom, latestVersion, changeCount,
-  busy, onCancel, onPublish,
+  currencyMismatch, busy, onCancel, onPublish,
 }: Props) {
   const minDate = latestValidFrom ? addDaysIso(latestValidFrom, 1) : undefined
   const [validFrom, setValidFrom] = useState('')
@@ -103,6 +107,7 @@ export default function PublishDialog({
             placeholder="e.g. Budget 2027, wage agreement from 1 January"
             className="mt-1 w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
         </div>
+        <CurrencyMismatch rows={currencyMismatch} publishing />
         {changeCount !== null && (
           <p className="text-sm text-slate-400">
             {changeCount === 0

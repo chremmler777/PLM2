@@ -17,6 +17,7 @@ import { apiErrorMessage, toastError } from '../../lib/apiError'
 import { formatDateTime, formatMoney, formatNumber } from '../../lib/format'
 import { btnSm } from '../common/buttonStyles'
 import ColumnHeader from '../common/ColumnHeader'
+import ConfirmDialog from '../common/ConfirmDialog'
 import TableFilterBar from '../common/TableFilterBar'
 import {
   applyTableState, ariaSort, useTableState, type FilterColumnDef,
@@ -563,9 +564,13 @@ function LocalRateCell({ m, versionId, editable }: {
 }) {
   const shown = m.local_rate != null ? String(m.local_rate) : ''
   const [value, setValue] = useState(shown)
+  // a typed local rate waiting for "switch the rate to the quote currency first"
+  const [ask, setAsk] = useState<number | null>(null)
   useEffect(() => { setValue(shown) }, [shown])
   const save = useRateSave(m, versionId, () => setValue(shown))
   if (!m.local_currency) return <span className="text-slate-700">-</span>
+  // the local rate converts into the plant's quote currency only
+  const offQuote = !!(m.currency && m.plant_currency && m.currency !== m.plant_currency)
   const hint = m.entered_in === 'quote' && m.currency ? <Calculated from={m.currency} /> : null
   if (!editable || versionId == null) {
     return m.local_rate != null
@@ -580,6 +585,7 @@ function LocalRateCell({ m, versionId, editable }: {
       return
     }
     if (next === m.local_rate) return
+    if (next !== null && offQuote) { setAsk(next); return }
     save.mutate({ entered_rate: next, entered_currency: m.local_currency })
   }
   return (
@@ -598,6 +604,19 @@ function LocalRateCell({ m, versionId, editable }: {
         {hint}
       </span>
       <span className="w-8 text-left text-xs text-slate-500">{m.local_currency}</span>
+      <ConfirmDialog open={ask !== null} title={`Switch this rate to ${m.plant_currency}?`}
+        body={`${m.internal_name}'s rate is in ${m.currency}, not its plant's quote currency ${m.plant_currency}. `
+          + `A rate typed in ${m.local_currency} is converted into ${m.plant_currency} only. Switch the rate to `
+          + `${m.plant_currency} and save the ${m.local_currency} rate? The ${m.currency} number is replaced.`}
+        confirmLabel={`Switch to ${m.plant_currency}`}
+        onConfirm={() => {
+          if (ask !== null) {
+            save.mutate({ entered_rate: ask, entered_currency: m.local_currency,
+              currency: m.plant_currency as string })
+          }
+          setAsk(null)
+        }}
+        onClose={() => { setAsk(null); setValue(shown) }} />
     </span>
   )
 }

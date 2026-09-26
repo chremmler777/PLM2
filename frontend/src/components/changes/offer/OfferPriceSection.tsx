@@ -26,6 +26,8 @@ type Update = <K extends keyof OfferData>(key: K, value: OfferData[K]) => void
     add, lines without a rate, a newer cost sheet than costing used. */
 export const PRICE_WARNING_CODES = [
   'currency_mismatch', 'mixed_currency', 'no_rate', 'cost_sheet_outdated',
+  // an old costing line without a recorded currency, read in the plant's one
+  'currency_unrecorded',
   // a hand-set amount the refresh reduced by the split-out machine-time and
   // sampling lines (so they are not counted twice): Sales re-checks it
   'override_split',

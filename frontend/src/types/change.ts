@@ -849,6 +849,8 @@ export interface CostPosition {
   rate_currency?: string | null;
   /** The money currency of the line (estimate, offers): the costing plant's. */
   currency?: string | null;
+  /** An old line that never recorded its currency: shown in the costing plant's, flagged. */
+  currency_unrecorded?: boolean;
   rate_unit?: 'h' | 'trial' | null;
   rate_source?: 'cost_sheet' | 'department_rate' | null;
   cost_sheet_version_id?: number | null;
@@ -875,6 +877,8 @@ export interface CostingContext {
   current_version: { id: number; version: number; valid_from: string } | null;
   /** The change's creation date (business date): the day its rates come from. */
   pricing_date?: string | null;
+  /** "priced with v1, the earliest cost sheet": the change is older than the first version. */
+  pricing_note?: string | null;
   /** The costing plant's second currency (Silao: MXN); null = one currency. */
   local_currency?: string | null;
   /** The change's version's exchange rates. */

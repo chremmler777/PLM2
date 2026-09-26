@@ -165,6 +165,23 @@ async def version_on(db: AsyncSession, org_id: int,
                CostSheetVersion.version.desc()).limit(1))).scalar_one_or_none()
 
 
+async def earliest_published(db: AsyncSession, org_id: int) -> Optional[CostSheetVersion]:
+    return (await db.execute(select(CostSheetVersion).where(
+        CostSheetVersion.organization_id == org_id,
+        CostSheetVersion.status == "published",
+        CostSheetVersion.valid_from.is_not(None),
+    ).order_by(CostSheetVersion.valid_from.asc(),
+               CostSheetVersion.version.asc()).limit(1))).scalar_one_or_none()
+
+
+async def pricing_version(db: AsyncSession, org_id: int,
+                          on_date: Optional[date] = None) -> Optional[CostSheetVersion]:
+    """The version that prices a change created on on_date: the one valid
+    that day, or the first published version for a date before it (the
+    change is priced, not left without rates; the label says so)."""
+    return (await version_on(db, org_id, on_date)) or await earliest_published(db, org_id)
+
+
 async def latest_published(db: AsyncSession, org_id: int) -> Optional[CostSheetVersion]:
     return (await db.execute(select(CostSheetVersion).where(
         CostSheetVersion.organization_id == org_id,
@@ -1305,14 +1322,19 @@ async def set_fx_rate(db: AsyncSession, v: CostSheetVersion, base: str, quote: s
         raise CostSheetError("An exchange rate needs two different currencies", 422)
     rates = dict(v.fx_rates or {})
     rates.pop(_pair(quote, base), None)        # one direction per pair
+    d = None
     if rate is None or str(rate).strip() == "":
         rates.pop(_pair(base, quote), None)
     else:
         d = _parse_fx(rate)
+        _check_plausible(base, quote, d)
         rates[_pair(base, quote)] = format(d, "f")     # the number as typed
+    old_rates = v.fx_rates
     v.fx_rates = rates or None
-    await db.flush()
     await db.refresh(v, ["rates", "machine_rates", "machine_item_rates"])
+    # re-price first, check every row, and only then write: a rate that
+    # takes a row out of bounds is refused with nothing changed
+    new_hourly = []
     for row in list(v.rates) + list(v.machine_rates) + list(v.machine_item_rates):
         if row.entered_currency and row.entered_currency != row.currency \
                 and row.entered_rate is not None:
@@ -1320,10 +1342,52 @@ async def set_fx_rate(db: AsyncSession, v: CostSheetVersion, base: str, quote: s
                                    row.entered_currency)
             # machine rows cannot hold an empty rate: without the exchange
             # rate they keep the last number (publish refuses them anyway)
-            if hourly is not None or isinstance(row, CostSheetRate):
-                row.hourly_rate = hourly
+            if hourly is None and not isinstance(row, CostSheetRate):
+                continue
+            if hourly is not None:
+                try:
+                    _check_number("hourly_rate", hourly, *BOUNDS["hourly_rate"])
+                except CostSheetError:
+                    v.fx_rates = old_rates
+                    said = (f"At 1 {base} = {format(d, 'f')} {quote}" if d is not None
+                            else "With these exchange rates")
+                    raise CostSheetError(
+                        f"{said} the rate typed as "
+                        f"{row.entered_rate:,.2f} {row.entered_currency} would be "
+                        f"{hourly:,.2f} {row.currency}, out of range. Check the "
+                        "exchange rate and its direction", 422)
+            new_hourly.append((row, hourly))
+    for row, hourly in new_hourly:
+        row.hourly_rate = hourly
     await db.flush()
     return v
+
+
+# Plausible exchange rates, as units of the second currency for one of the
+# first (either direction is checked). A rate outside is refused: it is
+# most likely typed the wrong way round (1 MXN = 17.30 USD) or a typo.
+FX_PLAUSIBLE = {
+    ("USD", "MXN"): (Decimal("5"), Decimal("50")),
+    ("EUR", "MXN"): (Decimal("5"), Decimal("50")),
+    ("EUR", "USD"): (Decimal("0.5"), Decimal("2")),
+}
+
+
+def _check_plausible(base: str, quote: str, rate: Decimal) -> None:
+    """Refuse an implausible rate for a known pair, naming the direction."""
+    if (base, quote) in FX_PLAUSIBLE:
+        lo, hi = FX_PLAUSIBLE[(base, quote)]
+        per, one, r = quote, base, rate
+    elif (quote, base) in FX_PLAUSIBLE:
+        lo, hi = FX_PLAUSIBLE[(quote, base)]
+        per, one, r = base, quote, Decimal(1) / rate
+    else:
+        return
+    if not lo <= r <= hi:
+        raise CostSheetError(
+            f"1 {base} = {format(rate, 'f')} {quote} is not a plausible exchange rate: "
+            f"1 {one} is expected to be between {lo} and {hi} {per}. "
+            "Check the direction", 422)
 
 
 async def _apply_entered(db: AsyncSession, v: CostSheetVersion, section: str, data: dict,
@@ -1362,6 +1426,13 @@ async def _apply_entered(db: AsyncSession, v: CostSheetVersion, section: str, da
         raise CostSheetError(
             f"{ecur} is not the local currency of this row's plant: type the rate in "
             f"{cur}", 422)
+    quote = plant.currency or "EUR"
+    if cur != quote:
+        # the local rate converts into the plant's quote currency only: a
+        # row still in another currency is switched first (by the user)
+        raise CostSheetError(
+            f"This row is in {cur}, not {plant.name}'s quote currency {quote}: switch "
+            f"the row to {quote} first, then type the rate in {ecur}", 422)
     hourly = _from_entered(v, data["entered_rate"], cur, ecur)
     if hourly is None:
         raise CostSheetError(
@@ -1407,11 +1478,48 @@ async def fx_needed(db: AsyncSession, org_id: int) -> list[dict]:
 
 
 async def version_detail_full(db: AsyncSession, v: CostSheetVersion, valid: dict) -> dict:
-    """version_detail with the two-currency view and the exchange rates the
-    org's plants need."""
+    """version_detail with the two-currency view, the exchange rates the
+    org's plants need and the rows whose currency is not their plant's
+    quote currency (currency_mismatch)."""
     detail = version_detail(v, valid, await local_currencies(db, v.organization_id))
     detail["fx_needed"] = await fx_needed(db, v.organization_id)
+    detail["currency_mismatch"] = await currency_mismatch(db, v)
     return detail
+
+
+async def currency_mismatch(db: AsyncSession, v: CostSheetVersion) -> list[dict]:
+    """Rows with a rate at one plant whose currency is not that plant's
+    quote currency (a row copied before the plant's currency changed, e.g.
+    Silao before its currency decision). Flagged in the draft and the
+    publish dialog, never relabelled: the number was typed in the row's
+    currency. [{section, row_id, plant_id, plant_name, currency,
+    plant_currency}]"""
+    from app.models.cost_sheet_machines import CostSheetMachine
+    plants = {p.id: p for p in (await db.execute(select(Plant).where(
+        Plant.organization_id == v.organization_id))).scalars().all()}
+    machine_plant = {}
+    if v.machine_item_rates:
+        machine_plant = dict((await db.execute(select(
+            CostSheetMachine.id, CostSheetMachine.plant_id).where(CostSheetMachine.id.in_(
+                {r.machine_id for r in v.machine_item_rates})))).all())
+    out = []
+    checks = [("rates", r, r.plant_id, r.hourly_rate) for r in v.rates] \
+        + [("machines", r, r.plant_id, r.hourly_rate) for r in v.machine_rates] \
+        + [("sampling", r, r.plant_id, True) for r in v.sampling_rates] \
+        + [("overheads", r, r.plant_id, True) for r in v.overheads
+           if r.kind != "percent"] \
+        + [("machine_items", r, machine_plant.get(r.machine_id), r.hourly_rate)
+           for r in v.machine_item_rates]
+    for section, row, plant_id, value in checks:
+        plant = plants.get(plant_id) if plant_id is not None else None
+        if plant is None or value is None or not row.currency:
+            continue
+        quote = plant.currency or "EUR"
+        if row.currency != quote:
+            out.append({"section": section, "row_id": row.id, "plant_id": plant_id,
+                        "plant_name": plant.name, "currency": row.currency,
+                        "plant_currency": quote})
+    return out
 
 
 # ---------------------------------------------------------------- plant currencies

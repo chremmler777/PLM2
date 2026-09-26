@@ -56,9 +56,11 @@ describe('tableFilters', () => {
     expect(nextSort(sort, 'rate')).toEqual({ key: 'rate', dir: 'asc' })
   })
 
-  it('reads dot and comma decimals', () => {
-    expect(parseLooseNumber('7,5')).toBe(7.5)
+  it('reads numbers like every input (en-US), an ambiguous comma is invalid', () => {
+    expect(parseLooseNumber('7,5')).toBe('invalid')
     expect(parseLooseNumber('1,234.5')).toBe(1234.5)
+    expect(parseLooseNumber('12.5')).toBe(12.5)
+    expect(parseLooseNumber('-3')).toBe(-3)
     expect(parseLooseNumber(' 12 ')).toBe(12)
     expect(parseLooseNumber('')).toBeNull()
     expect(parseLooseNumber('abc')).toBe('invalid')

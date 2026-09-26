@@ -681,6 +681,15 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
     expect(screen.getByTestId('costpos-value-22').textContent).toBe('2,500.00 USD')
   })
 
+  it('flags an old line without a recorded currency instead of reading it silently', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(
+      [{ ...priced, currency_unrecorded: true }, machine] as never)
+    positions()
+    expect((await screen.findByTestId('costpos-currency-unrecorded-20')).textContent)
+      .toBe(t('costpos.currencyUnrecorded').replace('{cur}', 'USD'))
+    expect(screen.queryByTestId('costpos-currency-unrecorded-21')).toBeNull()
+  })
+
   it('says "No rate in the cost sheet" and keeps the line out of the total', async () => {
     positions()
     expect((await screen.findByTestId('costpos-norate-23')).textContent).toBe(t('costpos.noRate'))

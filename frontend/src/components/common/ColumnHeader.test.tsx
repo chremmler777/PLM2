@@ -96,19 +96,25 @@ describe('ColumnHeader', () => {
     expect(screen.queryByTestId('table-filter-bar')).toBeNull()
   })
 
-  it('filters a number range with a comma decimal and refuses nonsense', () => {
+  it('filters a number range read like every number input and refuses nonsense', () => {
     render(<Table />)
     fireEvent.click(screen.getByRole('button', { name: 'Filter Rate' }))
     const d = dialog()
     fireEvent.change(within(d).getByLabelText('From'), { target: { value: 'abc' } })
     expect(within(d).getByRole('alert').textContent).toContain('Enter a number')
     expect((within(d).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    // "21,5" is ambiguous in en-US (lib/format readNumberInput): refused
     fireEvent.change(within(d).getByLabelText('From'), { target: { value: '21,5' } })
+    expect((within(d).getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(within(d).getByLabelText('From'), { target: { value: '21.5' } })
     fireEvent.change(within(d).getByLabelText('To'), { target: { value: '50' } })
     fireEvent.submit(within(d).getByLabelText('To').closest('form')!)
     expect(ids()).toEqual(['Quality45', 'Quality21.5'])
+    // the button's accessible name says the column is filtered, and how
+    const funnel = screen.getByRole('button', { name: /^Filter Rate, filtered: / })
+    expect(funnel.getAttribute('aria-label')).toBe('Filter Rate, filtered: 21.5 to 50')
     // Clear in the popover removes the range
-    fireEvent.click(screen.getByRole('button', { name: 'Filter Rate' }))
+    fireEvent.click(funnel)
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Clear' }))
     expect(ids()).toHaveLength(4)
   })

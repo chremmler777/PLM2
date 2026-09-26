@@ -2,14 +2,15 @@
 
 Status: PREPARED, NOT EXECUTED. Run only on the project owner's explicit
 "deploy". Written 2026-09-25, refreshed 2026-09-26 against the final branch
-state in the worktree `/home/nitrolinux/claude/plm2-ecr`: head `76e257f1`,
-114 commits on top of main `f4b354e5`, alembic head `103`. If commits land
-after `76e257f1`, re-check `git log --oneline 76e257f1..HEAD` and
-`backend/alembic/versions` before the deploy.
+state in the worktree `/home/nitrolinux/claude/plm2-ecr`: head `c8af38a2`
+(cost sheet: one rate per department and plant, MachineDB presses, Silao in
+USD and MXN) plus its review fixes, on top of main `f4b354e5`, alembic head
+`107`. If commits land after `c8af38a2`, re-check `git log --oneline
+c8af38a2..HEAD` and `backend/alembic/versions` before the deploy.
 
 Prod as of 2026-09-25: `/data/compose/plm2` at `f4b354e5`, alembic `086`
 (see the adminpanel runbook `docs/plm2-prod-deploy-runbook.md` §11, row
-2026-09-25). This rollout takes prod from `086` to `103`. Procedure and names follow that runbook §10 and the release note
+2026-09-25). This rollout takes prod from `086` to `107`. Procedure and names follow that runbook §10 and the release note
 `docs/handoff/project-worksheet-dfm-release.md` (main repo).
 
 Spec: `docs/superpowers/specs/2026-09-25-ecr-costing-to-close.md`.
@@ -36,7 +37,7 @@ No new Python or npm dependencies (requirements.txt and package.json are
 unchanged against main). The image rebuild is still mandatory: code and
 migrations are baked into it.
 
-## Migrations 085 to 103
+## Migrations 085 to 107
 
 085 and 086 are already on prod (deployed 2026-09-25) and are listed for
 completeness. On Postgres the whole `alembic upgrade head` run is ONE
@@ -64,14 +65,17 @@ fails, nothing of 087..head stays.
 | 101 | Three steps, in this order. (1) Toccoa plant currency set to `USD`: whole-word, any-case match on `toccoa` in `plants.name` or `plants.location` (094's `US` / `USA` match misses `Toccoa, GA`); relabel only, no rate converted; not scoped by organisation (one Toccoa plant today). (2) `change_actual_costs.currency` (String(3), nullable), backfilled for every row with the change's costing currency: the plant of the change's only affected plant, else the project's plant, `EUR` when that plant has none (NULL or empty). (3) Standing effort rows (`costing_positions` of kind `internal_effort` / `support_effort`): duplicates per change, department and kind are merged, the most recently updated row kept whole (else the highest id), `costing_offers.position_id` and `change_plan_tasks.source_position_id` re-pointed to it, the others DELETED; then partial unique index `uq_costing_positions_standing`. | Yes (UPDATE plants, UPDATE change_actual_costs, UPDATE + DELETE costing_positions duplicates) | Drops the index and the currency column. Toccoa stays `USD`; merged duplicates are not restored (harmless). |
 | 102 | Plan deviation groups: new `change_plan_deviation_groups` (root block, reason, status, decision, escalation), `change_plan_deviations.group_id` (nullable, FK on Postgres, index). Backfill: every OPEN deviation is grouped with the own move that pushed it (the grouping the Timing tab already showed); rows that fit nowhere stay ungrouped. | Yes, only rows of the 087 deviation table (none on prod: plans are new) | Drops `group_id` and the groups table: group decisions and their escalation links lost; the deviations stay. |
 | 103 | `change_gate.decision` becomes nullable without a server default; seeded gates nobody touched (`decision = 'na'`, no decider, no decision time) set to NULL (undecided). A gate without `yes` still holds its transition. | Yes (UPDATE change_gate, prod rows included) | Sets every NULL back to `na`, NOT NULL again with default `na`. |
+| 104 | One rate per department per plant. `cost_sheet_rates`: duplicates of (version, department, plant) are MERGED in every version, published ones included (plant NULL counts as a plant of its own): the department default row (position NULL) is kept, else the highest id; the kept row loses its position (positions are gone; a line naming one is priced from its department's row). `hourly_rate` becomes NULLABLE (an empty rate = "no rate yet", never 0). Unique index `uq_cost_sheet_rate_dept_plant` on (version_id, department_id, coalesce(plant_id, 0)). Seeds: the open draft of each organisation gets an EMPTY-rate row for every active department and active plant without one; published versions are not seeded. | Yes (DELETE duplicate rate rows, UPDATE position, INSERT empty draft rows) | Drops the index, DELETES the rows without a rate and makes `hourly_rate` NOT NULL again. Merged duplicates and dropped positions are not restored. |
 | 105 | MachineDB presses: new `cost_sheet_machines` (synced copy, unique per org and MachineDB id), new `cost_sheet_machine_item_rates` (one rate per machine per version), `costing_positions.machine_id` (nullable FK). Guarded (skips what exists). See "MachineDB machines in the cost sheet". | No (schema only; filled by the sync) | Drops both tables and the column: per-machine rates and machine choices on lines lost; lines fall back to class pricing. |
+| 106 | Two currencies per plant. `plants.local_currency` (nullable), `cost_sheet_versions.fx_rates` (JSON, e.g. `{"USD/MXN": "17.30"}` = 1 USD is 17.30 MXN, frozen on publish), `entered_rate` / `entered_currency` on `cost_sheet_rates` and `cost_sheet_machine_rates` (a rate typed in the local currency). DATA CHANGE: a plant named, coded or located Silao (code `SIL`) without a local currency gets quote currency `USD` and local currency `MXN`, once; the EMPTY rows of an open draft at Silao follow it to `USD`. Published versions keep their rows and currencies (frozen); rows with a rate are not relabelled. Pending the Silao currency decision (Finance to-do 4). | Yes (UPDATE plants for Silao; UPDATE empty draft rows) | Drops the columns (exchange rates and typed local numbers lost). Silao's quote currency stays `USD`. |
 | 107 | `cost_sheet_machine_item_rates.entered_rate` / `entered_currency` (nullable): a per-machine rate typed in the plant's local currency (Silao: MXN), like 106 did for the rate and machine class rows. Guarded. | No (schema only) | Drops the two columns: typed local numbers lost, the rates in the quote currency stay. |
 
 Summary: nothing drops or rewrites existing business data except 093
 (origin backfill), 094 (plant currencies, cost sheet rebuild), 095
 (settled_as backfill), 099 (costing position cleanup), 101 (Toccoa
-currency, duplicate standing effort rows merged) and 103 (untouched D1
-gates read undecided). A downgrade is
+currency, duplicate standing effort rows merged), 103 (untouched D1
+gates read undecided), 104 (duplicate department rates merged, empty draft
+rows) and 106 (Silao quote currency `USD`, local `MXN`). A downgrade is
 lossy for everything created after deploy; the real rollback is the backup.
 
 ## Environment
@@ -273,7 +277,7 @@ all mapped, a second sync reports nothing new or changed.
 
 1. Branch merged to main on the owner's go (no merge is part of this
    document). Check the tree is complete: `alembic heads` shows one head,
-   `103`.
+   `107`.
 2. Full suites on a clean checkout of the merge commit: backend
    `python -m pytest -q` (xdist), frontend `npx vitest run`, `npx tsc
    --noEmit`. Record the counts in the deploy log.
@@ -284,7 +288,9 @@ all mapped, a second sync reports nothing new or changed.
    snapshot backfill). The sweep itself runs on prod in step 5a.
 5. Migration tests on SQLite: `python -m pytest
    tests/test_migration_101_sqlite.py tests/test_migration_102_sqlite.py
-   tests/test_migration_103_sqlite.py -n 2 -q`.
+   tests/test_migration_103_sqlite.py tests/test_migration_104_sqlite.py
+   tests/test_migration_105_sqlite.py tests/test_migration_106_sqlite.py
+   tests/test_migration_107_sqlite.py -n 2 -q`.
 
 ## Prod steps
 
@@ -302,6 +308,9 @@ docker exec compose-plm2-db-1 psql -U plm -d plm -c "select d.name, p.name as pl
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select id, name, is_active from wf_departments order by sort_order;"
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) filter (where customer_relevant) as customer, count(*) filter (where not customer_relevant or customer_relevant is null) as internal from change_requests;"
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) from parts; select count(*) from part_revisions; select count(*) from projects; select count(*) from change_requests; select count(*) from lessons_learned;"
+# pricing date: the first cost sheet version starts at the earliest department rate
+docker exec compose-plm2-db-1 psql -U plm -d plm -c "select min(effective_from) from department_rate;"
+docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) from change_requests where created_at < (select min(effective_from) from department_rate);"
 ```
 
 What to look for:
@@ -316,7 +325,14 @@ What to look for:
   by id;`: Toccoa must read `USD`. If it does not, stop and check that 101
   is in the build and what the row's name and location read (rates keep
   their numbers either way; nothing is converted).
-  Silao (Mexico) becomes EUR: Finance decides the currency.
+  Silao (Mexico): 094 sets it by location; 106 then sets quote currency
+  `USD` and local currency `MXN`. This is pending the Silao currency
+  decision (Finance to-do 4): no rate is relabelled.
+- Pricing date: a change is priced with the version valid on its creation
+  date. Note `min(effective_from)` (the first version's valid-from, 2020-01-01
+  when no rate is dated) and how many changes were created before it: they
+  are priced with that first version, and each line says "priced with v1,
+  the earliest cost sheet".
 - Department rates: note which departments have a Toccoa rate. There is no
   Project Manager rate today (see the Finance to-do).
 - Departments: `Project Manager`, `Manufacturing Engineer`, `Tool Engineer`,
@@ -361,7 +377,7 @@ time docker run --rm --network compose_ktx-net \
   <new plm2-backend image> alembic upgrade head
 ```
 
-Then on `plm_scratch`: `alembic_version` = `103`, the counts from
+Then on `plm_scratch`: `alembic_version` = `107`, the counts from
 step 0 unchanged (except the two counts 101 and 103 touch, noted above), `select id, name, currency from plants;` with Toccoa `USD`,
 `select organization_id, version, status, valid_from, note from
 cost_sheet_versions order by 1, 2;` shows a published chain,
@@ -375,7 +391,7 @@ migration (next step explains why).
 ### 4. Migrate, then recreate
 
 `app/main.py` runs `alembic upgrade head` at startup with a 30 second
-timeout, in every uvicorn worker. Seventeen migrations (087..103) with the 094 data
+timeout, in every uvicorn worker. Twenty-one migrations (087..107) with the 094 data
 rebuild must not race two workers or be cut off by the timeout. So migrate
 explicitly while the backend is stopped (short outage, announce it):
 
@@ -389,7 +405,7 @@ docker exec compose-plm2-db-1 pg_dump -U plm -d plm | gzip \
   && echo BACKUP OK
 ls -l /data/compose/db-backups/ | tail -3; zcat /data/compose/db-backups/plm2-before-ecr-costing-to-close-*.sql.gz | head -5
 docker compose run --rm --no-deps plm2-backend alembic upgrade head
-docker compose run --rm --no-deps plm2-backend alembic current     # must show 103 (head)
+docker compose run --rm --no-deps plm2-backend alembic current     # must show 107 (head)
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select id, name, code, location, currency from plants order by id;"   # Toccoa = USD
 ```
 
@@ -401,7 +417,7 @@ now, then:
 
 ```bash
 docker compose up -d plm2-backend plm2-frontend
-docker exec compose-plm2-backend-1 alembic current                 # again: 103
+docker exec compose-plm2-backend-1 alembic current                 # again: 107
 docker exec compose-plm2-backend-1 printenv PLM_BUSINESS_TZ
 docker exec compose-plm2-backend-1 printenv PLM_RELEASE_ROWS_SINCE     # the deploy moment, UTC
 docker compose exec nginx nginx -s reload                          # new container IP
@@ -567,8 +583,28 @@ card on the three projects.
 3. Toccoa plant currency: migration 101 sets it to USD explicitly,
    because 094's `US` / `USA` word match may miss `Toccoa, GA`. Confirm
    with the plants query (step 4) that Toccoa reads `USD`.
-4. Decide the Silao (Mexico) currency if Silao rates are used.
-5. Actual costs: 101 gave every existing row the costing plant's currency.
+4. Silao (Mexico) currency: pending the Silao currency decision. 106 set
+   Silao to quote `USD` and local `MXN`; published rows keep the currency
+   they were typed in and nothing is relabelled. A draft flags every row
+   whose currency is not its plant's quote currency (warning in the draft
+   and in the publish dialog); typing an MXN rate on such a row asks to
+   switch the row to the quote currency first. Old costing lines without a
+   recorded currency are read in the costing plant's currency and flagged
+   ("no recorded currency"), never silently.
+5. Publish version 2 (backdated if needed). The migrated version 1 holds
+   only what `department_rate` had. Put the missing department rates (and
+   machine class and sampling rates) into a new draft and publish it with
+   the valid-from they apply from; a valid-from in the past needs the
+   backdated confirmation. How it prices old changes (gap fill): a change
+   keeps the rates of its creation date. Where the version valid on that
+   date has NO rate (no row, or an empty one) for a department, machine
+   class or sampling at the plant, the earliest LATER published version
+   that has one prices it, and the line says so ("no rate in v1 on the
+   creation date; taken from v2 valid from 26 Sep 2026"). A rate that
+   existed on the creation date is never replaced by a later version: a v2
+   that changes a v1 rate does not move changes created under v1. Lines
+   record the version actually used.
+6. Actual costs: 101 gave every existing row the costing plant's currency.
    Prod has none before the deploy (the table arrives with 091), so this
    only matters for rows entered on a staging copy.
 
@@ -607,7 +643,7 @@ Decide by what broke.
 
   Then `cd /data/compose/plm2 && git checkout f4b354e5`, `docker compose
   up -d --build plm2-backend plm2-frontend`, nginx reload.
-  Every other column 087..103 added to an existing table is nullable or has
+  Every other column 087..107 added to an existing table is nullable or has
   a server default, so the old code runs on the new schema; its startup
   `alembic upgrade head` only logs a warning about the unknown revision. New tables sit unused. Revisions received since deploy
   may be `in_review`; set them active by hand if needed. Return to main

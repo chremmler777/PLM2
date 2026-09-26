@@ -207,3 +207,94 @@ async def test_pnl_converts_mxn_actual_costs_at_the_change_version(
         # EUR has no rate in the version: left out and warned, never added
         assert any("EUR" in w and "no conversion" in w for w in card["warnings"])
         assert not any("MXN" in w for w in card["warnings"])
+
+
+async def test_implausible_or_inverted_exchange_rate_is_refused(client, admin_auth, world):
+    d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
+    base = f"{API}/versions/{d['id']}"
+    # typed the wrong way round (MXN per USD expected 5..50)
+    res = await client.put(f"{base}/fx", json={"base": "USD", "quote": "MXN", "rate": "0.058"},
+                           headers=admin_auth)
+    assert res.status_code == 422
+    assert "1 USD is expected to be between 5 and 50 MXN" in res.json()["detail"]
+    res = await client.put(f"{base}/fx", json={"base": "USD", "quote": "MXN", "rate": "173"},
+                           headers=admin_auth)
+    assert res.status_code == 422
+    # the inverse pair is checked the other way round
+    res = await client.put(f"{base}/fx", json={"base": "MXN", "quote": "USD", "rate": "17.3"},
+                           headers=admin_auth)
+    assert res.status_code == 422
+    res = await client.put(f"{base}/fx", json={"base": "MXN", "quote": "USD", "rate": "0.0578"},
+                           headers=admin_auth)
+    assert res.status_code == 200
+
+
+async def test_fx_rate_that_takes_a_row_out_of_bounds_is_refused(
+        client, admin_auth, world, session_factory):
+    t, silao = world["tool"], world["silao"]
+    d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
+    base = f"{API}/versions/{d['id']}"
+    await client.put(f"{base}/fx", json={"base": "USD", "quote": "MXN", "rate": "20"},
+                     headers=admin_auth)
+    row = _row(d["rates"], t, silao)
+    await client.patch(f"{base}/rates/{row['id']}", json={
+        "entered_rate": 1000, "entered_currency": "MXN"}, headers=admin_auth)
+    # a typed MXN rate near the column's bound, then a rate that overflows it
+    async with session_factory() as s:
+        r = await s.get(CostSheetRate, row["id"])
+        r.entered_rate = 9_000_000_000
+        await s.commit()
+    res = await client.put(f"{base}/fx", json={"base": "USD", "quote": "MXN", "rate": "5"},
+                           headers=admin_auth)
+    assert res.status_code == 422 and "out of range" in res.json()["detail"]
+    async with session_factory() as s:
+        v = await s.get(CostSheetVersion, d["id"])
+        assert v.fx_rates == {"USD/MXN": "20"}        # nothing changed
+
+
+async def test_rows_off_their_plant_currency_are_flagged_and_mxn_typing_asks_to_switch(
+        client, admin_auth, world, session_factory):
+    t, silao = world["tool"], world["silao"]
+    d = (await client.post(f"{API}/drafts", json={}, headers=admin_auth)).json()
+    base = f"{API}/versions/{d['id']}"
+    await client.put(f"{base}/fx", json={"base": "USD", "quote": "MXN", "rate": "17.30"},
+                     headers=admin_auth)
+    row = _row(d["rates"], t, silao)
+    # a Silao row still in EUR (copied from before the currency decision)
+    async with session_factory() as s:
+        r = await s.get(CostSheetRate, row["id"])
+        r.currency, r.hourly_rate = "EUR", 40
+        await s.commit()
+    detail = (await client.get(f"{base}", headers=admin_auth)).json()
+    assert {"section": "rates", "row_id": row["id"], "plant_id": silao,
+            "plant_name": "Silao Mexico", "currency": "EUR",
+            "plant_currency": "USD"} in detail["currency_mismatch"]
+    # MXN typed on it: switch the row to USD first
+    res = await client.patch(f"{base}/rates/{row['id']}", json={
+        "entered_rate": 1000, "entered_currency": "MXN"}, headers=admin_auth)
+    assert res.status_code == 422
+    assert "switch the row to USD first" in res.json()["detail"]
+    res = await client.patch(f"{base}/rates/{row['id']}", json={"currency": "USD"},
+                             headers=admin_auth)
+    assert res.status_code == 200, res.text
+    res = await client.patch(f"{base}/rates/{row['id']}", json={
+        "entered_rate": 1000, "entered_currency": "MXN"}, headers=admin_auth)
+    assert res.status_code == 200 and not res.json()["currency_mismatch"]
+
+
+def test_fx_labels_read_the_direction_and_four_decimals():
+    from app.services.costing_rates import fx_direction, fmt_fx
+    assert fx_direction("17.30", "USD", "MXN") == "1 USD = 17.30 MXN"
+    # an inverted pair is turned back instead of 0.0578...
+    assert fx_direction("0.05780346820809248554913294798", "MXN", "USD") \
+        == "1 USD = 17.30 MXN"
+    assert fmt_fx("0.05780346820809248554913294798") == "0.0578"
+
+
+def test_converted_line_is_rounded_once():
+    from app.services.costing_rates import Price, amount_of
+    # 3 h at 1,000 MXN at 17.30: 3,000 / 17.30 = 173.41 (not 3 x 57.80 = 173.40)
+    p = Price(rate=57.80, currency="USD", source="cost_sheet",
+              detail={"fx": {"from_currency": "MXN", "from_rate": 1000, "rate": "17.30"}})
+    assert amount_of(3, p) == 173.41
+    assert amount_of(3, Price(rate=57.80, currency="USD", source="cost_sheet")) == 173.40

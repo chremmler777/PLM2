@@ -707,3 +707,34 @@ async def test_machine_rate_typed_in_the_local_currency(client, admin_auth, worl
     assert "Machine rates" in wb.sheetnames
     assert [c.value for c in wb["Machine rates"][4]][:5] == ["M-300", "Silao Mexico", 300,
                                                             90, "USD"]
+    # a rate in EUR at Silao: MXN typing asks to switch it to USD first
+    res = await client.put(url, json={"version_id": draft["id"], "hourly_rate": 80,
+                                      "currency": "EUR"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    res = await client.put(url, json=body, headers=admin_auth)
+    assert res.status_code == 422 and "switch it to USD first" in res.json()["detail"]
+    res = await client.put(url, json={**body, "currency": "USD"}, headers=admin_auth)
+    assert res.status_code == 200 and res.json()["currency"] == "USD"
+    detail = (await client.get(f"/api/v1/cost-sheet/versions/{draft['id']}",
+                               headers=admin_auth)).json()
+    assert not [x for x in detail["currency_mismatch"] if x["section"] == "machine_items"]
+
+
+async def test_sync_skips_an_out_of_range_clamping_force(session_factory, world):
+    """A clamping force the column cannot hold is a skipped row in the
+    report, never a failed sync; a known press is left as it was, not
+    retired."""
+    await _sync(session_factory, world["org_id"], FLEET)
+    rows = [r for r in FLEET if r["id"] != 11] + [
+        _row(11, "P-350", "usa", 1e9), _row(60, "X-neg", "usa", -5)]
+    res = await _sync(session_factory, world["org_id"], rows)
+    skipped = res["report"]["skipped"]
+    assert any("P-350 (id 11)" in x and "out of range" in x for x in skipped)
+    assert any("X-neg (id 60)" in x for x in skipped)
+    assert not res["report"]["retired"] and not res["report"]["new"]
+    async with session_factory() as s:
+        p350 = (await s.execute(select(CostSheetMachine).where(
+            CostSheetMachine.machinedb_id == 11))).scalar_one()
+        assert p350.clamping_force_t == 350 and p350.retired_at is None
+        assert (await s.execute(select(CostSheetMachine).where(
+            CostSheetMachine.machinedb_id == 60))).scalar_one_or_none() is None
