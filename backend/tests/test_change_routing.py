@@ -1928,3 +1928,119 @@ async def test_take_off_routing_waits_for_the_decision(
     async with session_factory() as s:
         assert await s.get(WfInstanceTask, task_id) is None
     assert await _snap_entries(session_factory, c["id"], te) == []
+
+
+async def test_decisions_lock_a_completed_instance_before_the_routing(
+        client, seed, ecr_template, departments, departments_member, session_factory,
+        monkeypatch):
+    """No active instance (every stage passed): approve, reject and the
+    snapshot backfill lock the completed instance (lock_task_instance)
+    BEFORE the routing, as apply_deviation does, so the repair that re-locks
+    that instance afterwards never inverts the order."""
+    from app.models.change import ChangeRequest
+    from app.models.workflow import WfInstance
+    from app.services.change_routing_service import ChangeRoutingService
+    auth = await _login(client)
+    c = await _in_costing_at_stage2(client, auth, seed, session_factory, departments)
+    inst_id = await _complete_apqp(client, auth, session_factory, c["id"], departments["APQP"])
+    calls: list[tuple[str, object]] = []
+    orig_inst = ChangeRoutingService.lock_instance
+    orig_task = ChangeRoutingService.lock_task_instance
+    orig_routing = ChangeRoutingService._lock_routing
+
+    async def rec_inst(session, change_id):
+        r = await orig_inst(session, change_id)
+        calls.append(("instance", r.id if r else None))
+        return r
+
+    async def rec_task(session, change_id):
+        r = await orig_task(session, change_id)
+        calls.append(("task_instance", r.id if r else None))
+        return r
+
+    async def rec_routing(session, change):
+        calls.append(("routing", None))
+        return await orig_routing(session, change)
+
+    monkeypatch.setattr(ChangeRoutingService, "lock_instance", staticmethod(rec_inst))
+    monkeypatch.setattr(ChangeRoutingService, "lock_task_instance", staticmethod(rec_task))
+    monkeypatch.setattr(ChangeRoutingService, "_lock_routing", staticmethod(rec_routing))
+
+    url = f"/api/v1/changes/{c['id']}/routing/deviation"
+    for decide in ("approve", "reject"):
+        dept = departments["Manufacturing Engineer" if decide == "approve" else "Sales"]
+        assert (await client.post(url, json={
+            "op": "add", "department_id": dept, "rasic_letter": "R", "stage_order": 2,
+            "reason": "late find"}, headers=auth)).status_code == 200
+        calls.clear()
+        async with session_factory() as s:
+            assert (await s.get(WfInstance, inst_id)).status == "completed"
+            change = await s.get(ChangeRequest, c["id"])
+            if decide == "approve":
+                await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
+            else:
+                await ChangeRoutingService.reject_deviation(s, change, seed["admin_id"], "no")
+            await s.commit()
+        first_routing = calls.index(("routing", None))
+        assert calls[:first_routing] == [("instance", None), ("instance", None),
+                                         ("task_instance", inst_id)], decide
+
+    calls.clear()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, c["id"])
+        await ChangeRoutingService.backfill_deviation_snapshot(s, change)
+    assert calls[:3] == [("instance", None), ("instance", None),
+                         ("task_instance", inst_id)]
+
+
+async def test_legacy_relettered_text_keeps_the_approved_reletter_on_reject(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Prod text from before declines waited ("re-lettered dept N to X", no
+    stage, the row re-lettered at request time, the snapshot untouched):
+    the approved re-letter protects the row's letter in every stage of the
+    department, so rejecting a later old-format deviation leaves it."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.change import ChangeChangelog, ChangeRouting
+    from app.services.change_routing_service import _deviation_record
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    quality, sales = departments["Quality"], departments["Sales"]
+    url = f"/api/v1/changes/{c['id']}/routing/deviation"
+    assert (await client.post(url, json={"op": "reletter", "department_id": quality,
+        "rasic_letter": "S", "reason": "support only"}, headers=auth)).status_code == 200
+    assert (await client.post(url + "/approve", headers=admin_auth)).status_code == 200
+    (row,) = await _rows_of(session_factory, c["id"], quality)
+    assert row.rasic_letter == "S"
+    async with session_factory() as s:
+        # As written then: the snapshot kept the template's C, the entry
+        # only the text.
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == c["id"]))).scalar_one()
+        snap = dict(routing.standard_snapshot)
+        snap["stages"] = [{**st, "departments": [
+            {**d, "rasic_letter": "C"} if d["department_id"] == quality else d
+            for d in st["departments"]]} for st in snap["stages"]]
+        routing.standard_snapshot = snap
+        flag_modified(routing, "standard_snapshot")
+        (entry,) = await _deviation_entries(session_factory, c["id"])
+        e = await s.get(ChangeChangelog, entry.id)
+        e.new_value = None
+        e.action_description = f"Routing deviation: re-lettered dept {quality} to S"
+        await s.commit()
+        assert _deviation_record(e) == {
+            "op": "reletter", "department_id": quality, "rasic_letter": "S",
+            "stage_order": None, "legacy": True}
+    assert (await client.post(url, json={"op": "add", "department_id": sales,
+        "rasic_letter": "R", "stage_order": 1, "reason": "maybe"}, headers=auth)).status_code == 200
+    async with session_factory() as s:
+        entry = (await _deviation_entries(session_factory, c["id"]))[-1]
+        e = await s.get(ChangeChangelog, entry.id)
+        e.new_value = None
+        e.action_description = f"Routing deviation: added dept {sales} as R in stage 1"
+        await s.commit()
+    res = await client.post(url + "/reject", json={"reason": "no"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    (row,) = await _rows_of(session_factory, c["id"], quality)
+    assert row.rasic_letter == "S"
+    assert await _rows_of(session_factory, c["id"], sales) == []

@@ -495,7 +495,7 @@ class EarlyStageService:
             await WorkflowService._maybe_advance_stage(session, inst)
             # The stage that just started may carry a deviation-added row
             # the engine did not create a task for.
-            from app.services.change_routing_service import ChangeRoutingService, _pending_proposers
+            from app.services.change_routing_service import ChangeRoutingService
             await ChangeRoutingService.repair_stage_tasks(session, change, None)
 
     @staticmethod
@@ -642,21 +642,24 @@ class EarlyStageService:
                                       change: ChangeRequest,
                                       user: User) -> Optional[dict]:
         """Who decides the pending routing deviation, in words the wait row
-        can use: a non-lead's proposal is the lead's call, the lead's own
-        proposal is Project Management's (anyone but the proposer)."""
+        can use: a bundle the lead filed none of is the lead's call; once the
+        lead filed any request of it, Project Management's (anyone who filed
+        none). The same rule as user_can_decide_deviation, over the same
+        proposers."""
         routing = change.routing
         if routing is None or routing.deviation_status != "pending_approval":
             return None
         from app.services.change_routing_service import ChangeRoutingService, _pending_proposers
         proposer = routing.deviation_proposed_by
+        proposers = await _pending_proposers(session, routing)
         names = await EarlyStageService._user_names(session, [proposer, change.lead_id])
-        proposer_is_lead = change.lead_id is not None and proposer == change.lead_id
+        proposer_is_lead = change.lead_id is not None and change.lead_id in proposers
         if change.lead_id is None:
             decider, decider_id = "anyone_but_proposer", None
             text = "Routing change pending: anyone but the proposer decides"
         elif proposer_is_lead:
             decider, decider_id = "pm", None
-            text = ("Routing change proposed by the change lead: waiting for "
+            text = ("Routing change includes a request by the change lead: waiting for "
                     "Project Management to decide")
         else:
             decider, decider_id = "lead", change.lead_id
@@ -673,8 +676,7 @@ class EarlyStageService:
             "decider_name": names.get(decider_id) if decider_id else None,
             "can_decide": ChangeRoutingService.user_can_decide_deviation(
                 change, routing, user.id,
-                acting=is_acting(user),
-                proposers=await _pending_proposers(session, routing)),
+                acting=is_acting(user), proposers=proposers),
             "text": text,
         }
 

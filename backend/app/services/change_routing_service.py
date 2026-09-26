@@ -21,7 +21,7 @@ from app.models.change import (
 )
 from app.models.workflow import (
     Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
-    WfInstance, WfInstanceTask,
+    WfInstance, WfInstanceTask, UserDepartment,
 )
 from app.services.notification_service import NotificationService
 from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS, WorkflowService
@@ -116,6 +116,9 @@ _DEVIATION_ACTIONS = ("routing_deviation", "routing_deviation_approved",
 _LEGACY_ADD = re.compile(r"added dept (\d+) as ([A-Z]) in stage (\d+)")
 _LEGACY_REMOVE = re.compile(r"removed dept (\d+)")
 _LEGACY_RELETTER = re.compile(r"dept (\d+) declined: ([A-Z]) to ([A-Z])")
+# The re-letter text before declines waited for a decision (c3f6b082 to
+# aa1460f9): the row was re-lettered at request time, stage not recorded.
+_LEGACY_RELETTERED = re.compile(r"re-lettered dept (\d+) to ([A-Z])")
 
 
 def _deviation_record(entry: ChangeChangelog) -> Optional[dict]:
@@ -139,6 +142,10 @@ def _deviation_record(entry: ChangeChangelog) -> Optional[dict]:
     if m:
         return {"op": "reletter", "department_id": int(m.group(1)),
                 "rasic_letter": m.group(3), "stage_order": None, "legacy": True}
+    m = _LEGACY_RELETTERED.search(text)
+    if m:
+        return {"op": "reletter", "department_id": int(m.group(1)),
+                "rasic_letter": m.group(2), "stage_order": None, "legacy": True}
     m = _LEGACY_REMOVE.search(text)
     if m:
         return {"op": "remove", "department_id": int(m.group(1)),
@@ -1019,11 +1026,24 @@ class ChangeRoutingService:
         await ChangeService.append_changelog(
             session, change, "routing_deviation", f"Routing deviation: {desc}", user_id,
             notes=(reason.strip() if reason else None), new_value=record)
-        # The decision sits with the lead (4-eyes: the proposer cannot take
-        # it). Tell them, once per pending deviation.
-        if change.lead_id is not None and change.lead_id != user_id:
+        # The decision sits with the lead (4-eyes: nobody who filed a request
+        # of the pending bundle takes it). If the lead filed one, Project
+        # Management decides (user_can_decide_deviation): tell its members
+        # who filed none. Once per pending deviation.
+        if change.lead_id is not None:
+            proposers = await _pending_proposers(session, routing)
+            if change.lead_id not in proposers:
+                recipients = [change.lead_id]
+            else:
+                pm_id = (await session.execute(
+                    select(Department.id).where(Department.name == "Project Manager")
+                )).scalar_one_or_none()
+                members = [] if pm_id is None else (await session.execute(
+                    select(UserDepartment.user_id).where(
+                        UserDepartment.department_id == pm_id))).scalars().all()
+                recipients = [u for u in members if u not in proposers]
             await NotificationService.notify_once(
-                session, [change.lead_id], kind="routing_deviation_pending",
+                session, recipients, kind="routing_deviation_pending",
                 subject_key=f"routing-dev:{change.id}:{routing.deviation_proposed_by}:{desc}",
                 title=f"Routing change pending: {change.change_number}",
                 body=f"{desc.capitalize()}: needs your approval.",
@@ -1071,7 +1091,9 @@ class ChangeRoutingService:
         Returns the entries written, each with its stage_order."""
         # Lock order (see _lock_routing): the instance, then the routing, so
         # a decision running meanwhile is either fully seen or waits.
-        await ChangeRoutingService.lock_instance(session, change.id)
+        # No active instance: the completed one, as apply_deviation locks it.
+        if await ChangeRoutingService.lock_instance(session, change.id) is None:
+            await ChangeRoutingService.lock_task_instance(session, change.id)
         routing = (await session.execute(
             select(ChangeRouting).where(ChangeRouting.change_id == change.id)
             .with_for_update()
@@ -1216,6 +1238,10 @@ class ChangeRoutingService:
         from app.services.change_service import ChangeService
         # Lock order (see _lock_routing): the instance, then the routing.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
+        # No active instance: the completed one, locked as apply_deviation
+        # does, so the repair below re-locks it without inverting the order.
+        if inst is None:
+            await ChangeRoutingService.lock_task_instance(session, change.id)
         routing = await ChangeRoutingService._lock_routing(session, change)
         proposers = await _pending_proposers(session, routing)
         ChangeRoutingService._check_decide(change, routing, user_id, "reject", acting,
@@ -1363,6 +1389,10 @@ class ChangeRoutingService:
         from app.services.change_service import ChangeService
         # Lock order (see _lock_routing): the instance, then the routing.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
+        # No active instance: the completed one, locked as apply_deviation
+        # does, so the repair below re-locks it without inverting the order.
+        if inst is None:
+            await ChangeRoutingService.lock_task_instance(session, change.id)
         routing = await ChangeRoutingService._lock_routing(session, change)
         proposers = await _pending_proposers(session, routing)
         ChangeRoutingService._check_decide(change, routing, user_id, "approve", acting,

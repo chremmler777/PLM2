@@ -849,3 +849,58 @@ async def test_approved_removal_of_an_informed_department_leaves_the_snapshot(
             ChangeChangelog.change_id == cid,
             ChangeChangelog.action == "routing_deviation_approved"))).scalar_one()
         assert str(sales) in entry.new_value and "uninformed" in entry.new_value
+
+
+async def test_lead_in_the_bundle_hands_the_decision_to_pm_on_plate_and_endpoint(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """The lead files request 1, somebody else request 2 (the latest
+    proposer). The lead is in the bundle, so Project Management decides: the
+    plate names PM, the lead is not notified (PM members are), the lead is
+    refused and a PM member may decide."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.early_stage_service import EarlyStageService
+    from app.models.change import ChangeRequest
+    from app.models.entities import User
+    from app.models.notification import Notification
+    from app.models.workflow import Department, UserDepartment
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+    pm = await _third_user(session_factory, seed)
+    async with session_factory() as s:
+        d = Department(name="Project Manager", flow_type="action", is_active=True,
+                       sort_order=99)
+        s.add(d); await s.flush()
+        s.add(UserDepartment(user_id=pm, department_id=d.id))
+        await s.commit()
+    lead, admin = seed["engineer_id"], seed["admin_id"]
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, lead, op="add", department_id=dev_departments["Manufacturing Engineer"],
+            rasic_letter="R", stage_order=1, reason="lead asks")
+        await ChangeRoutingService.apply_deviation(
+            s, change, admin, op="remove", department_id=dev_departments["Quality"],
+            reason="admin asks")
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await s.refresh(change, ["routing"])
+        as_lead = await EarlyStageService.routing_deviation_state(
+            s, change, await s.get(User, lead))
+        assert as_lead["proposed_by"] == admin
+        assert (as_lead["decider"], as_lead["decider_user_id"]) == ("pm", None)
+        assert as_lead["proposer_is_lead"] is True
+        assert "Project Management" in as_lead["text"]
+        assert as_lead["can_decide"] is False
+        as_pm = await EarlyStageService.routing_deviation_state(
+            s, change, await s.get(User, pm))
+        assert as_pm["can_decide"] is True
+        told = set((await s.execute(select(Notification.user_id).where(
+            Notification.kind == "routing_deviation_pending"))).scalars().all())
+        assert lead not in told and pm in told
+        with pytest.raises(ValueError, match="includes a request you filed"):
+            await ChangeRoutingService.approve_deviation(s, change, lead)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.approve_deviation(s, change, pm)
+        await s.commit()

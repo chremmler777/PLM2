@@ -2534,6 +2534,7 @@ class ChangeService:
                 select(ChangeRouting).where(ChangeRouting.change_id == change.id)
             )).scalar_one_or_none()
             if (routing is not None
+                    and routing.deviation_status == "pending_approval"
                     and ChangeRoutingService.user_can_decide_deviation(
                         change, routing, user.id,
                         acting=is_acting(user),
