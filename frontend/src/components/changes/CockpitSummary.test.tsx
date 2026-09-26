@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CockpitSummary, { nextStepFor, pluralizeLabel } from './CockpitSummary'
 import type { ChangeDetail, MyAction } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
+import { changesApi } from '../../api/changes'
 
 const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
   id: 7, change_number: 'CR-2026-0007', project_id: 1, title: 'Housing fix',
@@ -860,5 +861,42 @@ describe('CockpitSummary gate held step and deviations (review M1)', () => {
     expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByTestId('next-ask-deviation-in_implementation')).toBeNull()
     expect(screen.getByTestId('next-gate-release').textContent).toContain('waits for its decision')
+  })
+})
+
+describe('CockpitSummary late assessment flag', () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+  const late: MyAction = {
+    kind: 'late_assessment', label: 'Chase Purchasing: assessment owed on stage 1, added after the stage had passed',
+    target_tab: 'assessments', assessment_id: 41, department_id: 9,
+    department_name: 'Purchasing', stage_order: 1,
+  }
+
+  it('offers Take off routing beside Chase and files a remove deviation with the reason', async () => {
+    const post = vi.spyOn(changesApi, 'postDeviation').mockResolvedValue({} as never)
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'costing' })} gates={[]}
+      pendingDeviations={0} onAdvance={vi.fn()} advancing={false}
+      actions={[late]} onAction={onAction} />))
+    fireEvent.click(screen.getByTestId('action-late_assessment'))
+    expect(onAction).toHaveBeenCalledWith('assessments')
+    fireEvent.click(screen.getByTestId('action-late-takeoff-41'))
+    expect(screen.getByText('Take Purchasing off the routing')).toBeDefined()
+    const submit = screen.getByTestId('take-off-routing-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)                 // a reason is required
+    fireEvent.change(screen.getByTestId('take-off-routing-reason'),
+      { target: { value: 'not impacted after all' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(post).toHaveBeenCalledWith(7, {
+      op: 'remove', department_id: 9, stage_order: 1, reason: 'not impacted after all',
+    }))
+  })
+
+  it('offers no Take off routing on other actions', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'costing' })} gates={[]}
+      pendingDeviations={0} onAdvance={vi.fn()} advancing={false}
+      actions={[{ ...late, kind: 'assessment', label: 'Submit assessment for Purchasing' }]} />))
+    expect(screen.queryByTestId('action-late-takeoff-41')).toBeNull()
   })
 })

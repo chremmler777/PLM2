@@ -1,5 +1,11 @@
-import type { ReactNode } from 'react'
-import { AlertTriangle, ArrowRight, Ban, Check, Hourglass, Info } from 'lucide-react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { AlertTriangle, ArrowRight, Ban, Check, Hourglass, Info, TriangleAlert } from 'lucide-react'
+import { changesApi } from '../../api/changes'
+import Dialog from '../common/Dialog'
+import Button from '../common/Button'
+import { toastError } from '../../lib/apiError'
 import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, StageAssessment } from '../../types/change'
 import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
@@ -300,6 +306,8 @@ interface Blocker { key: string; text: string; go?: () => void }
 
 export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview }: Props) {
   const motherPlant = change.origin === 'mother_plant'
+  /** The late flag whose "Take off routing" dialog is open. */
+  const [takeOff, setTakeOff] = useState<MyAction | null>(null)
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
     // internal one is approved outright and never sees either quoting step.
@@ -565,21 +573,43 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
 
   return (
     <div className="my-4">
+      {takeOff && takeOff.department_id != null && (
+        <TakeOffRoutingDialog changeId={change.id} departmentId={takeOff.department_id}
+          departmentName={takeOff.department_name ?? String(takeOff.department_id)}
+          stageOrder={takeOff.stage_order ?? undefined}
+          onClose={() => setTakeOff(null)} />
+      )}
       {mainActions.length > 0 && (
         <div data-testid="your-actions" className="bg-sky-950 border border-sky-700 rounded-lg p-4 mb-3">
           <h3 className="text-xs uppercase tracking-wide text-sky-300 mb-2">{t('actions.title')}</h3>
           <div className="flex flex-wrap gap-2">
-            {mainActions.map((a, i) => (
-              <button
-                key={actionKey(a, i)}
-                type="button"
-                data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : `action-${a.kind}`}
-                title={a.hint ?? undefined}
-                className={actionCls}
-                onClick={() => runAction(a)}>
-                {pluralizeLabel(a.label)}
-              </button>
-            ))}
+            {mainActions.map((a, i) => {
+              const chase = (
+                <button
+                  key={actionKey(a, i)}
+                  type="button"
+                  data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : `action-${a.kind}`}
+                  title={a.hint ?? undefined}
+                  className={actionCls}
+                  onClick={() => runAction(a)}>
+                  {pluralizeLabel(a.label)}
+                </button>
+              )
+              // The lead's late flag has two ways out: chase the department,
+              // or take it off the routing (a remove deviation, with a reason).
+              if (a.kind !== 'late_assessment' || a.department_id == null) return chase
+              return (
+                <span key={actionKey(a, i)} className="inline-flex flex-wrap items-stretch gap-1">
+                  {chase}
+                  <button type="button" data-testid={`action-late-takeoff-${a.assessment_id ?? a.department_id}`}
+                    title={t('lateAssess.takeOffHint')}
+                    className={`${btnSm.secondary} h-auto min-h-9`}
+                    onClick={() => setTakeOff(a)}>
+                    {t('lateAssess.takeOff')}
+                  </button>
+                </span>
+              )
+            })}
           </div>
           {backupActions.length > 0 && <div className="mt-3 pt-3 border-t border-sky-900">{backupGroup}</div>}
         </div>
@@ -824,5 +854,63 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       </div>
       </div>
     </div>
+  )
+}
+
+const fieldCls =
+  'mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none'
+
+/** "Take off routing" on the lead's late flag: a routing deviation that
+ *  removes the department's row (op remove), with the reason on record. */
+function TakeOffRoutingDialog({ changeId, departmentId, departmentName, stageOrder, onClose }: {
+  changeId: number
+  departmentId: number
+  departmentName: string
+  stageOrder?: number
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [reason, setReason] = useState('')
+  const reasonId = useId()
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
+  const remove = useMutation({
+    mutationFn: () => changesApi.postDeviation(changeId, {
+      op: 'remove', department_id: departmentId, stage_order: stageOrder, reason: reason.trim(),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['change-routing', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      toast.success(t('lateAssess.done'))
+      onClose()
+    },
+    onError: (e: unknown) => { toastError(e, t('routingDev.failed')) },
+  })
+  return (
+    <Dialog open onClose={onClose} busy={remove.isPending} closeOnBackdrop={false}
+      title={t('lateAssess.title').replace('{x}', departmentName)}
+      data-testid="take-off-routing-dialog"
+      initialFocus={reasonRef as React.RefObject<HTMLElement>}
+      footer={(
+        <>
+          <Button onClick={onClose} disabled={remove.isPending}>{t('common.cancel')}</Button>
+          <Button variant="danger" data-testid="take-off-routing-submit"
+            disabled={!reason.trim()} loading={remove.isPending}
+            onClick={() => remove.mutate()}>{t('lateAssess.submit')}</Button>
+        </>
+      )}>
+      <div className="space-y-3">
+        <p className="flex items-start gap-2 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+          <TriangleAlert aria-hidden="true" size={14} className="mt-0.5 shrink-0 text-amber-300" />
+          <span>{t('lateAssess.effect')}</span>
+        </p>
+        <div>
+          <label htmlFor={reasonId} className="block text-sm text-slate-300">{t('lateAssess.reason')}</label>
+          <textarea id={reasonId} ref={reasonRef} data-testid="take-off-routing-reason"
+            className={`${fieldCls} min-h-[70px]`}
+            value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+      </div>
+    </Dialog>
   )
 }

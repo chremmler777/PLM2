@@ -178,6 +178,9 @@ class WorkflowService:
         actionable_departments: set[int] = set()
         fyi_departments: set[int] = set()
         tasks_created: list[WfInstanceTask] = []
+        # Departments owing a step-less (deviation-added) task: told with a
+        # link to the change's assessments, where their row is listed.
+        added_departments: set[int] = set()
 
         # Change-scoped instances execute the change's routing *snapshot*, which
         # may be scoped down from the template (scoping-meeting department
@@ -255,7 +258,11 @@ class WorkflowService:
         # task is created here, with the stage's others, BEFORE the caller
         # decides whether the stage has a gate: otherwise a stage whose
         # template rows are all C/I cascades straight through and the added
-        # Responsible department is never asked.
+        # Responsible department is never asked. Such a row is outside the
+        # template and the snapshot: its task carries NO step (never the
+        # stage's first step), the mark is_assessment_row, blocking_complete,
+        # My Tasks and the cockpit read as "a department somebody added to
+        # the assessment", whatever stage it landed on.
         if instance.change_id is not None:
             from app.models.change import ChangeAssessment, ASSESSMENT_LETTERS
             extra = (await db.execute(
@@ -270,13 +277,9 @@ class WorkflowService:
                 if pair in produced:
                     continue
                 produced.add(pair)
-                step_id = next(
-                    (s.id for s in steps
-                     if any(r.department_id == department_id
-                            and r.rasic_letter == letter
-                            for r in s.rasic_assignments)),
-                    steps[0].id if steps else None)
-                _add_task(step_id, department_id, letter)
+                _add_task(None, department_id, letter)
+                if letter in ACTIONABLE_LETTERS:
+                    added_departments.add(department_id)
         await db.flush()
 
         # Change-scoped instances: link this stage's assessment payload rows to the
@@ -311,7 +314,8 @@ class WorkflowService:
                                 t.accepted_at = a.accepted_at or a.submitted_at
             await db.flush()
 
-        if actionable_departments:
+        standard_departments = actionable_departments - added_departments
+        if standard_departments:
             from app.services.notification_service import NotificationService
 
             part, revision = await WorkflowService._instance_part_context(db, instance)
@@ -319,10 +323,22 @@ class WorkflowService:
             # Project team (spec §18): the responsible first, backups as info.
             await NotificationService.notify_team(
                 db, part.project_id,
-                list(actionable_departments),
+                list(standard_departments),
                 title=f"Workflow task: {part.name} {revision.revision_name}",
                 body=f"Your department has a new task in '{stage_label}'.",
                 link="/my-tasks",
+            )
+        if added_departments:
+            from app.services.notification_service import NotificationService
+
+            part, revision = await WorkflowService._instance_part_context(db, instance)
+            await NotificationService.notify_team(
+                db, part.project_id,
+                sorted(added_departments),
+                title=f"Assessment task: {revision.revision_name}",
+                body=(f"Your department was added to the assessment of "
+                      f"'{part.name}' and has an assessment to give."),
+                link=f"/changes/{instance.change_id}?tab=assessments",
             )
 
         if fyi_departments:

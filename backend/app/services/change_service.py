@@ -743,8 +743,12 @@ class ChangeService:
         # work nobody has agreed to do.
         if to_status in ("costing", "quoting"):
             from app.services.change_routing_service import ChangeRoutingService
-            if not await ChangeRoutingService.blocking_complete(session, change):
+            waiting = await ChangeRoutingService.blocking_waiting(session, change)
+            if waiting is None:
                 return "Not all responsible/accountable assessments are submitted"
+            if waiting:
+                return ("Not all responsible/accountable assessments are "
+                        f"submitted: waiting on {', '.join(waiting)}")
             submitted = [a for a in change.assessments if a.verdict != "pending"]
             if any(a.verdict == "not_feasible" for a in submitted):
                 return ("An assessment is 'not feasible': reject, go back to "
@@ -2397,18 +2401,28 @@ class ChangeService:
         from app.services.early_stage_service import EarlyStageService
         from app.services.change_routing_service import ChangeRoutingService
         first_stage = EarlyStageService.first_stage(change)
-        # R/A rows added after their stage passed stay owed whatever the
-        # change status (the routing repair never waives them): the
-        # department still answers, the lead is flagged below.
-        live_inst = (await session.execute(
-            select(WfInstance).where(WfInstance.change_id == change.id,
-                                     WfInstance.status == "active"))).scalar_one_or_none()
-        late = (ChangeRoutingService.late_rows(change, live_inst)
-                if change.status not in ("released", "closed", "rejected", "cancelled")
-                else [])
-        late_ids = {a.id for a in late}
+        # R/A rows owed outside the assessment phase stay owed whatever the
+        # change status: a deviation add (step-less task) of a later stage,
+        # or a row added after its stage passed (the routing repair never
+        # waives them), also once the instance has completed. The
+        # department still answers; the lead is flagged below for the late
+        # ones. Judged on the row's task, not on the instance being live.
+        live = change.status not in ("released", "closed", "rejected", "cancelled")
+        task_insts = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.change_id == change.id,
+                WfInstance.status.in_(("active", "completed"))))).scalars().all()
+        owed = (ChangeRoutingService.owed_stepless_rows(change, task_insts)
+                if live else [])
+        late = ChangeRoutingService.late_rows(change, task_insts) if live else []
+        # A row no task was ever made for that carries its own "active"
+        # (a routing add with no instance to hang a task off) is owed too.
+        owed_ids = {a.id for a in owed} | {
+            a.id for a in change.assessments
+            if live and a.task is None and a.status == "active"
+            and a.rasic_letter in BLOCKING_LETTERS}
         for a in change.assessments:
-            if a.id not in late_ids and (
+            if a.id not in owed_ids and (
                     change.status != "in_assessment"
                     or not EarlyStageService.is_assessment_row(a, first_stage)):
                 continue
@@ -2453,6 +2467,10 @@ class ChangeService:
                     "target_tab": "assessments",
                     "assessment_id": a.id,
                     "department_id": a.department_id,
+                    # The other way out: take the department off the routing
+                    # (op remove, the lead / PM / admin), offered beside Chase.
+                    "stage_order": a.stage_order,
+                    "department_name": late_names.get(a.department_id),
                 })
 
         # kind "wf_task": active ECN (part-revision-scoped) tasks spawned by
@@ -3108,9 +3126,12 @@ class ChangeService:
             # or resubmit carrying a key only that set had is complete when
             # that set is answered. Derived from the keys, no stored version:
             # the new checklist never asks a legacy-only key, so its answers
-            # can never carry one.
+            # can never carry one. Only what is ALREADY on the row counts
+            # (its stored answer or kept draft): a legacy key in the
+            # incoming payload alone must not let a new assessment skip the
+            # current checklist.
             if missing and ChangeService._started_on_legacy_checklist(
-                    dept_name, impacts, stored):
+                    dept_name, stored):
                 missing = [i["label_en"]
                            for i in ChangeService._legacy_checklist(dept_name)
                            if i["key"] not in answered]
@@ -3138,10 +3159,11 @@ class ChangeService:
         return items
 
     @staticmethod
-    def _started_on_legacy_checklist(dept_name: Optional[str], impacts: list,
+    def _started_on_legacy_checklist(dept_name: Optional[str],
                                      stored: Optional[dict]) -> bool:
-        """True when the submitted answers, or the ones stored on the row
-        (answer or draft), carry a key only the earlier checklist asked."""
+        """True when the answers already stored on the row (its answer or
+        its kept draft) carry a key only the earlier checklist asked. The
+        incoming payload is not read: it is what is being judged."""
         legacy_only = ({i[0] for i in checklist.LEGACY_ITEMS}
                        - checklist.keys_for(dept_name))
 
@@ -3149,9 +3171,8 @@ class ChangeService:
             return {e.get("key") for e in entries or []
                     if isinstance(e, dict) and e.get("key")}
 
-        found = keys(impacts)
         stored = stored or {}
-        found |= keys(stored.get("impacts"))
+        found = keys(stored.get("impacts"))
         # A kept draft: details["draft"]["data"]["details"]["impacts"].
         data = (stored.get("draft") or {}).get("data") \
             if isinstance(stored.get("draft"), dict) else None

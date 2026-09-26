@@ -293,12 +293,21 @@ async def my_change_tasks(
     tasks = []
     if dep_ids:
         from app.models.workflow import WfInstance as _WfI, WfInstanceTask as _WfT
-        # Also outside assessment: an R/A row added to a stage after it had
-        # passed is still owed (its task active behind the instance's stage).
-        late = ((_WfT.status == "active") & (_WfT.is_actionable.is_(True))
-                & _WfT.step_id.is_(None)
-                & (_WfI.status == "active")
-                & (_WfT.stage_order < _WfI.current_stage_order)
+        # Also outside assessment, on a live change: an R/A row somebody
+        # added to the routing is still owed. Judged on the row's own task:
+        # active, actionable and step-less (a deviation add outside the
+        # template and the snapshot, or one added after its stage passed),
+        # on an ACTIVE or COMPLETED instance: a late row does not vanish
+        # when the instance finishes (it still holds costing -> quoting).
+        # A row no task was ever made for carrying its own "active" counts
+        # too (ChangeRoutingService.owed_stepless_rows, the cockpit).
+        owed_task = ((_WfT.status == "active") & (_WfT.is_actionable.is_(True))
+                     & _WfT.step_id.is_(None)
+                     & _WfI.status.in_(("active", "completed")))
+        unlinked_active = (ChangeAssessment.wf_instance_task_id.is_(None)
+                           & (ChangeAssessment.status == "active")
+                           & ChangeAssessment.rasic_letter.in_(BLOCKING_LETTERS))
+        late = ((owed_task | unlinked_active)
                 & ChangeRequest.status.notin_(
                     ("released", "closed", "rejected", "cancelled")))
         rows = await db.execute(
@@ -1112,11 +1121,60 @@ async def _deviation_refusal(db: AsyncSession, change, user: User,
         return None
     if body.op == "add":
         mine = set(await WorkflowService.effective_department_ids(db, user))
-        if any(a.pending_rasic_letter and a.department_id in mine
-               for a in change.assessments):
-            return None
+        declined = [a for a in change.assessments
+                    if a.pending_rasic_letter and a.department_id in mine]
+        if declined:
+            # While its decline is pending, a department names ONE
+            # department (R or A) to take over, in the declined row's stage.
+            first = min((a.stage_order for a in change.assessments), default=1)
+            target = body.stage_order or first
+            if body.rasic_letter in BLOCKING_LETTERS:
+                for d in declined:
+                    if d.stage_order == target and not await _named_since_decline(
+                            db, change.id, user.id, d.department_id):
+                        return None
+            return ("While your decline is pending you may name one department "
+                    "to take over, as R or A, in the declined stage")
     return ("Only the change lead, Project Management, an admin or a member "
             "of the department concerned may request this routing change")
+
+
+async def _named_since_decline(db: AsyncSession, change_id: int, user_id: int,
+                               department_id: int) -> bool:
+    """Did ``user_id`` already add a department by deviation since the
+    latest decline of ``department_id``? Read off the changelog (the
+    routing_deviation entries carry op + department; older entries only
+    their text)."""
+    import json as _json
+    entries = (await db.execute(
+        select(ChangeChangelog).where(
+            ChangeChangelog.change_id == change_id,
+            ChangeChangelog.action == "routing_deviation")
+        .order_by(ChangeChangelog.id))).scalars().all()
+
+    def rec(e) -> dict:
+        try:
+            v = _json.loads(e.new_value) if e.new_value else None
+        except ValueError:
+            v = None
+        return v if isinstance(v, dict) else {}
+
+    def is_decline(e) -> bool:
+        r = rec(e)
+        if r:
+            return r.get("op") == "reletter" and r.get("department_id") == department_id
+        return f"dept {department_id} declined:" in (e.action_description or "")
+
+    def is_add(e) -> bool:
+        r = rec(e)
+        if r:
+            return r.get("op") == "add"
+        return "added dept" in (e.action_description or "")
+
+    last = max((i for i, e in enumerate(entries) if is_decline(e)), default=None)
+    if last is None:
+        return False
+    return any(e.performed_by == user_id and is_add(e) for e in entries[last + 1:])
 
 
 @router.post("/{change_id}/routing/deviation", response_model=RoutingResponse)

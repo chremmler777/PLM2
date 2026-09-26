@@ -640,6 +640,9 @@ export type MyActionKind =
   | 'send_rejection' | 'costing_input' | 'costing_update' | 'create_quote'
   | 'bank_build' | 'publish_plan' | 'progress_report' | 'escalate_risk'
   | 'update_quote' | 'obtain_info' | 'deadline'
+  /** The lead's flag: a department added after its stage passed still owes
+   *  its answer. Chase it, or take it off the routing (op remove). */
+  | 'late_assessment'
   /** A kind added later still renders from its label and target_tab. */
   | (string & NonNullable<unknown>);
 
@@ -657,6 +660,9 @@ export interface MyAction {
   level?: number | null;
   /** Stage tasks: the department the task is owed by, the offer it is on. */
   department_id?: number | null;
+  /** late_assessment: the department's name and the stage of its row. */
+  department_name?: string | null;
+  stage_order?: number | null;
   offer_id?: number | null;
   count?: number | null;
   /** Extra context beyond the label (shown as the button's tooltip). */

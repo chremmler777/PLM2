@@ -1132,3 +1132,323 @@ async def test_generic_task_complete_on_a_change_task_repairs_the_next_stage(
         assert inst.current_stage_order == 2
         t = await s.get(WfInstanceTask, row.wf_instance_task_id)
         assert (t.stage_order, t.status) == (2, "active")
+
+
+# --- Review findings on 11a1e990 -------------------------------------------
+
+async def _in_costing_at_stage2(client, auth, seed, session_factory, departments):
+    """ecr_template change past assessment: Tool Engineer answered, the
+    change in costing, the instance on stage 2 (APQP A active)."""
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"],
+                            "verdict": "feasible"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+    return c
+
+
+async def _complete_apqp(client, auth, session_factory, cid, apqp):
+    from app.models.workflow import WfInstance, WfInstanceTask
+    async with session_factory() as s:
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid))).scalar_one()
+        task = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.department_id == apqp))).scalar_one()
+        inst_id, task_id = inst.id, task.id
+    res = await client.post(f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
+                            json={"decision": "approved", "notes": "ok"}, headers=auth)
+    assert res.status_code == 200, res.text
+    return inst_id
+
+
+async def test_late_row_stays_owed_after_the_instance_completes(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Finding 1: a department added to a passed stage stays on My Tasks,
+    in the cockpit (Chase, with the stage to take it off) and in the
+    costing -> quoting message, by name, after the instance completed."""
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.models.workflow import WfInstance, WfInstanceTask
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_service import ChangeService
+    auth = await _login(client)
+    c = await _in_costing_at_stage2(client, auth, seed, session_factory, departments)
+    mfg = departments["Manufacturing Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
+        "reason": "forgotten"}, headers=auth)
+    assert res.status_code == 200, res.text
+    inst_id = await _complete_apqp(client, auth, session_factory, c["id"], departments["APQP"])
+    async with session_factory() as s:
+        inst = await s.get(WfInstance, inst_id)
+        assert inst.status == "completed"
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == mfg))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert (task.status, task.step_id) == ("active", None)
+        change = await ChangeService.get_change(s, c["id"])
+        assert await ChangeRoutingService.blocking_waiting(s, change) == ["Manufacturing Engineer"]
+        why = await ChangeService._guard(s, change, "quoting")
+        assert "waiting on Manufacturing Engineer" in why
+    mine = (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+    assert row.id in [t.get("assessment_id") for t in mine if t["kind"] == "assessment"]
+    acts = (await client.get(f"/api/v1/changes/{c['id']}/my-actions",
+                             headers=auth)).json()["actions"]
+    late = [a for a in acts if a["kind"] == "late_assessment"]
+    assert [(a["assessment_id"], a["stage_order"]) for a in late] == [(row.id, 1)]
+    assert any(a["kind"] == "assessment" and a["assessment_id"] == row.id for a in acts)
+
+
+async def test_add_after_the_instance_completed_gets_a_stepless_task(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Finding 1: no active instance (every stage passed) is no reason to
+    leave an added R department without a task: it goes onto the completed
+    instance, step-less and active, and is listed and waited on."""
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import WfInstance, WfInstanceTask
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_service import ChangeService
+    auth = await _login(client)
+    c = await _in_costing_at_stage2(client, auth, seed, session_factory, departments)
+    inst_id = await _complete_apqp(client, auth, session_factory, c["id"], departments["APQP"])
+    mfg = departments["Manufacturing Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 2,
+        "reason": "late find"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == mfg))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert task.instance_id == inst_id
+        assert (task.status, task.step_id, task.is_actionable) == ("active", None, True)
+        assert (await s.get(WfInstance, inst_id)).status == "completed"
+        change = await ChangeService.get_change(s, c["id"])
+        assert await ChangeRoutingService.blocking_waiting(s, change) == ["Manufacturing Engineer"]
+    mine = (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+    assert row.id in [t.get("assessment_id") for t in mine if t["kind"] == "assessment"]
+
+
+async def test_stage_start_task_of_a_row_outside_template_and_snapshot_has_no_step(
+        client, seed, ecr_template_3stage, departments, departments_member, session_factory):
+    """Finding 2: the engine creates the task of a deviation-added later
+    row with NO step (not the stage's first), so My Tasks lists it after the
+    change left assessment, and the department is told with a link to the
+    change's assessments."""
+    from app.models.change import ChangeAssessment
+    from app.models.notification import Notification
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    body = {"project_id": seed["project_id"], "title": "stepless", "change_type": "tooling",
+            "reason": "x", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    await approve_gates(client, auth, c["id"])
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-SL",
+         "name": "ART-SL", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
+    await advance_to_assessment(client, auth, session_factory, c["id"])
+    mfg = departments["Manufacturing Engineer"]
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 2,
+        "reason": "needed"}, headers=auth)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == mfg))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert (task.stage_order, task.status, task.step_id) == (2, "active", None)
+        links = (await s.execute(select(Notification.link).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.title.like("Assessment task:%")))).scalars().all()
+    assert f"/changes/{c['id']}?tab=assessments" in links
+    mine = (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+    assert row.id in [t.get("assessment_id") for t in mine if t["kind"] == "assessment"]
+
+
+async def test_approved_reletter_moves_the_snapshot_so_the_stage_starts_clean(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Finding 7: APQP (A, stage 2) declines to C before stage 2 starts;
+    approved, the snapshot says C, so the stage starts with a C task for
+    the row and no orphan A task."""
+    from app.models.change import ChangeAssessment, ChangeRouting
+    from app.models.workflow import WfInstance, WfInstanceTask
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    apqp = departments["APQP"]
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": apqp, "rasic_letter": "C", "stage_order": 2,
+        "reason": "not ours"}, headers=auth)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    async with session_factory() as s:
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == c["id"]))).scalar_one()
+        st2 = next(st for st in routing.standard_snapshot["stages"] if st["stage_order"] == 2)
+        assert [d["rasic_letter"] for d in st2["departments"]
+                if d["department_id"] == apqp] == ["C"]
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == c["id"]))).scalar_one()
+        tasks = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.department_id == apqp))).scalars().all()
+        assert [(t.rasic_letter, t.status) for t in tasks] == [("C", "noted")]
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == apqp))).scalar_one()
+        assert row.wf_instance_task_id == tasks[0].id
+
+
+async def test_approved_reletter_to_informed_keeps_the_rows_documents(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Finding 4: the row goes, its documents stay on the change, unlinked."""
+    from app.models.change import ChangeAssessment, ChangeAttachment
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    q = departments["Quality"]
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == q))).scalar_one()
+        att = ChangeAttachment(change_id=c["id"], filename="q.pdf", stored_path="x/q.pdf",
+                               content_type="application/pdf", size_bytes=1, sha256="0" * 64,
+                               assessment_id=row.id, uploaded_by=seed["engineer_id"])
+        s.add(att)
+        await s.commit()
+        att_id = att.id
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": q, "rasic_letter": "I", "stage_order": 1,
+        "reason": "keep us posted"}, headers=auth)).status_code == 200
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        att = await s.get(ChangeAttachment, att_id)
+        assert att is not None and att.assessment_id is None
+        assert (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == q))).scalars().all() == []
+
+
+async def test_pending_decline_allows_one_R_or_A_add_in_its_stage(
+        client, seed, departments, session_factory):
+    """Finding 6: while its decline is pending, a department names ONE
+    department to take over, as R or A, in the declined row's stage."""
+    from app.models.workflow import UserDepartment
+    admin_auth = await _login_admin(client)
+    async with session_factory() as s:
+        t = WfTemplate(name="ECRd", description="x", version=1, is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        for order in (1, 2):
+            st = WfStage(template_id=t.id, stage_order=order, name=f"S{order}")
+            s.add(st); await s.flush()
+            sp = WfStep(stage_id=st.id, step_name=f"S{order}", position_in_stage=1)
+            s.add(sp); await s.flush()
+            s.add(WfStepRasic(step_id=sp.id, rasic_letter="R" if order == 1 else "A",
+                              department_id=departments["Tool Engineer" if order == 1 else "Sales"]))
+        s.add(ChangeRoutingStandard(change_type="physical_part", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        await s.commit()
+    body = {"project_id": seed["project_id"], "title": "decl", "change_type": "physical_part",
+            "reason": "r", "lead_id": seed["admin_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=admin_auth)).json()
+    await approve_gates(client, admin_auth, c["id"])
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-DC",
+         "name": "ART-DC", "part_type": "internal_mfg", "item_category": "article"},
+         headers=admin_auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]},
+                      headers=admin_auth)
+    await advance_to_assessment(client, admin_auth, session_factory, c["id"])
+    te = departments["Tool Engineer"]
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=te))
+        await s.commit()
+    member = await _login(client)
+    url = f"/api/v1/changes/{c['id']}/routing/deviation"
+    assert (await client.post(url, json={
+        "op": "reletter", "department_id": te, "rasic_letter": "C", "reason": "not ours"},
+        headers=member)).status_code == 200
+    # Not R/A, or another stage: refused.
+    res = await client.post(url, json={"op": "add", "department_id": departments["Quality"],
+                                       "rasic_letter": "C", "stage_order": 1, "reason": "x"},
+                            headers=member)
+    assert res.status_code == 403, res.text
+    res = await client.post(url, json={"op": "add", "department_id": departments["Quality"],
+                                       "rasic_letter": "R", "stage_order": 2, "reason": "x"},
+                            headers=member)
+    assert res.status_code == 403, res.text
+    # One R in the declined stage: allowed.
+    res = await client.post(url, json={"op": "add", "department_id": departments["Quality"],
+                                       "rasic_letter": "R", "reason": "theirs"},
+                            headers=member)
+    assert res.status_code == 200, res.text
+    # A second one: refused.
+    res = await client.post(url, json={"op": "add", "department_id": departments["APQP"],
+                                       "rasic_letter": "A", "stage_order": 1, "reason": "x"},
+                            headers=member)
+    assert res.status_code == 403, res.text
+    assert "one department" in res.json()["detail"]
+
+
+async def test_sweep_lists_late_rows_even_when_the_repair_completes_the_instance(
+        client, seed, ecr_template, departments, departments_member,
+        session_factory, monkeypatch, capsys):
+    """Findings 3 and 9: the dry run prints each late row on its own line,
+    also when the repair's advance completes the instance; only a row in
+    neither the snapshot nor the template is flagged late."""
+    import scripts.repair_routing_tasks as sweep_mod
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import WfInstance, WfInstanceTask
+    auth = await _login(client)
+    c = await _in_costing_at_stage2(client, auth, seed, session_factory, departments)
+    mfg = departments["Manufacturing Engineer"]
+    async with session_factory() as s:
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == c["id"]))).scalar_one()
+        # APQP's stage-2 task answered: the repair's advance re-check then
+        # completes the instance.
+        apqp_task = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.department_id == departments["APQP"]))).scalar_one()
+        apqp_task.status = "approved"
+        # A true deviation add of stage 1, never given its task.
+        s.add(ChangeAssessment(change_id=c["id"], department_id=mfg, verdict="pending",
+                               stage_order=1, rasic_letter="R", status="pending"))
+        await s.commit()
+    monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    capsys.readouterr()
+    assert await sweep_mod.sweep(apply=False) == 1
+    out = capsys.readouterr().out
+    late_lines = [ln for ln in out.splitlines() if "LATE" in ln]
+    assert len(late_lines) == 1 and "Manufacturing Engineer R stage 1" in late_lines[0]
+    assert await sweep_mod.sweep(apply=True) == 1
+    async with session_factory() as s:
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == c["id"]))).scalar_one()
+        assert inst.status == "completed"
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == mfg))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert (task.status, task.step_id) == ("active", None)

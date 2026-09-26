@@ -158,21 +158,44 @@ async def test_an_answer_stored_on_the_old_checklist_resubmits_as_it_is(
     assert {e["key"] for e in stored["impacts"]} >= {"cycle_time_change", "threed_change"}
 
 
+async def _store_on_row(session_factory, tab, details):
+    """What an assessment started on the earlier checklist left on its row."""
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, tab["assessment_id"])
+        a.details = json.dumps(details)
+        await s.commit()
+
+
 async def test_an_in_flight_resubmit_on_the_full_legacy_set_passes(
-        client, admin_auth, tab):
-    """Review finding 3: a draft or resubmit carrying exactly the earlier
-    13-item checklist is not refused for the rows the new checklist added."""
+        client, admin_auth, tab, session_factory):
+    """Review finding 3: a resubmit carrying exactly the earlier 13-item
+    checklist, on a row started on that checklist, is not refused for the
+    rows the new checklist added."""
     from app.services import assessment_checklist as checklist
     old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS]
+    await _store_on_row(session_factory, tab, {"impacts": old})
     res = await _submit(client, admin_auth, tab, {"impacts": old})
     assert res.status_code == 200, res.text
 
 
-async def test_a_partial_legacy_set_names_the_legacy_rows_still_open(
+async def test_a_legacy_key_only_in_the_payload_does_not_skip_the_new_checklist(
         client, admin_auth, tab):
+    """Review finding 8: detection reads what is already on the row. A new
+    assessment sending one legacy-only key still owes the current rows."""
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS]
+    res = await _submit(client, admin_auth, tab, {"impacts": old})
+    assert res.status_code == 400
+    assert "Moldflow simulation" in res.json()["detail"]
+
+
+async def test_a_partial_legacy_set_names_the_legacy_rows_still_open(
+        client, admin_auth, tab, session_factory):
     from app.services import assessment_checklist as checklist
     old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS
            if k[0] != "matching_required"]
+    await _store_on_row(session_factory, tab, {"draft": {"data": {"details": {
+        "impacts": old}}}})
     res = await _submit(client, admin_auth, tab, {"impacts": old})
     assert res.status_code == 400
     assert "Matching/sampling required" in res.json()["detail"]
@@ -186,9 +209,10 @@ async def test_a_legacy_draft_on_the_row_marks_the_assessment_as_legacy():
     from app.services.change_service import ChangeService
     stored = {"draft": {"data": {"details": {"impacts": [
         {"key": "threed_change", "answer": "no"}]}}}}
-    assert ChangeService._started_on_legacy_checklist("Tool Engineer", [], stored)
+    assert ChangeService._started_on_legacy_checklist("Tool Engineer", stored)
+    assert not ChangeService._started_on_legacy_checklist("Tool Engineer", {})
     assert not ChangeService._started_on_legacy_checklist(
-        "Tool Engineer", answered(DEPT), {})
+        "Tool Engineer", {"impacts": answered(DEPT)})
 
 
 async def test_a_new_assessment_owes_the_new_checklist(client, admin_auth, tab):

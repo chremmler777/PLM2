@@ -1287,6 +1287,22 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'assess and gate costing; S/C are looped in but owe no assessment; I is notified only.',
   },
   'meeting.rasicSummary': { de: '{a} bewerten · {n} beteiligt', en: '{a} assess · {n} involved' },
+  'lateAssess.takeOff': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
+  'lateAssess.takeOffHint': {
+    de: 'Die Abteilung schuldet keine Bewertung mehr (Routing-Abweichung, mit Begründung)',
+    en: 'The department no longer owes an assessment (a routing deviation, with a reason)',
+  },
+  'lateAssess.title': { de: '{x} aus dem Routing nehmen', en: 'Take {x} off the routing' },
+  'lateAssess.reason': {
+    de: 'Warum muss diese Abteilung nicht mehr bewerten?',
+    en: 'Why does this department no longer need to assess?',
+  },
+  'lateAssess.effect': {
+    de: 'Die Bewertungszeile und ihre Aufgabe werden entfernt; die Änderung wartet nicht mehr darauf. Festgehalten als Routing-Abweichung.',
+    en: 'The assessment row and its task are removed; the change no longer waits on it. Recorded as a routing deviation.',
+  },
+  'lateAssess.submit': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
+  'lateAssess.done': { de: 'Abteilung aus dem Routing genommen', en: 'Department taken off the routing' },
   'notResp.button': { de: 'Nicht unsere Zuständigkeit', en: 'Not our responsibility' },
   'notResp.title': { de: 'Zuständigkeit ablehnen', en: 'Decline responsibility' },
   'notResp.reason': { de: 'Warum ist diese Änderung nicht Sache Ihrer Abteilung?', en: 'Why is this change not your department’s to assess?' },

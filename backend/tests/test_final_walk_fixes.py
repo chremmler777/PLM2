@@ -510,21 +510,35 @@ async def test_escalated_review_gets_the_ecr_title_and_the_pm_lead(
 
 async def test_repair_flags_owed_rows_of_a_passed_stage_and_logs_as_system(
         client, admin_auth, seed, part, session_factory):
-    """An unanswered R row of a stage the instance has already left is never
-    waived on the department's behalf: its task is active, carries no step
-    and a note, and the lead is flagged (notification + cockpit action).
-    The repair from a write path is a system entry."""
-    from app.models.change import ChangeChangelog
+    """An unanswered R row a deviation added (in neither the snapshot nor
+    the template) to a stage the instance has already left is never waived
+    on the department's behalf: its task is active, carries no step and a
+    note, and the lead is flagged (notification + cockpit action). A row
+    the snapshot gave that stage keeps the earlier behaviour: waived. The
+    repair from a write path is a system entry."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.change import ChangeChangelog, ChangeRouting
     from app.services.change_routing_service import ChangeRoutingService
     cid, ids = await _room_scoped_change(client, admin_auth, seed, part, session_factory)
     async with session_factory() as s:
-        row = (await s.execute(select(ChangeAssessment).where(
-            ChangeAssessment.change_id == cid,
-            ChangeAssessment.department_id == ids["Purchasing"]))).scalar_one()
-        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
-        row.wf_instance_task_id = None
-        await s.flush()
-        await s.delete(task)
+        for name in ("Purchasing", "Development"):
+            row = (await s.execute(select(ChangeAssessment).where(
+                ChangeAssessment.change_id == cid,
+                ChangeAssessment.stage_order == 1,
+                ChangeAssessment.department_id == ids[name]))).scalar_one()
+            task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+            row.wf_instance_task_id = None
+            await s.flush()
+            await s.delete(task)
+        # Purchasing as a deviation add: off the snapshot (the room's list).
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == cid))).scalar_one()
+        snap = routing.standard_snapshot
+        for st in snap["stages"]:
+            st["departments"] = [d for d in st["departments"]
+                                 if d["department_id"] != ids["Purchasing"]]
+        routing.standard_snapshot = snap
+        flag_modified(routing, "standard_snapshot")
         inst = (await s.execute(select(WfInstance).where(
             WfInstance.change_id == cid))).scalar_one()
         inst.current_stage_order = 2
@@ -541,6 +555,10 @@ async def test_repair_flags_owed_rows_of_a_passed_stage_and_logs_as_system(
     t = next(t for t in tasks if t.id == fixed.wf_instance_task_id)
     assert t.status == "active" and t.is_actionable and t.due_date is not None
     assert t.step_id is None and "flagged for the change lead" in (t.notes or "")
+    std = next(r for r in rows if r.department_id == ids["Development"])
+    assert std.id in repaired
+    ts = next(t for t in tasks if t.id == std.wf_instance_task_id)
+    assert ts.status == "waived" and "had passed; nothing owed" in (ts.notes or "")
     async with session_factory() as s:
         log = (await s.execute(select(ChangeChangelog).where(
             ChangeChangelog.change_id == cid,
@@ -552,7 +570,8 @@ async def test_repair_flags_owed_rows_of_a_passed_stage_and_logs_as_system(
     assert len(log) == 1 and "(automatic)" in log[0].action_description
     assert '"system": true' in log[0].new_value
     assert f'"late_assessment_ids": [{fixed.id}]' in log[0].new_value
-    assert len(flagged) == 1
+    assert f'"waived_passed_assessment_ids": [{std.id}]' in log[0].new_value
+    assert len(flagged) == 1 and "Purchasing" in flagged[0].body
     # The lead's cockpit carries the flag.
     acts = (await client.get(f"/api/v1/changes/{cid}/my-actions",
                              headers=admin_auth)).json()["actions"]
