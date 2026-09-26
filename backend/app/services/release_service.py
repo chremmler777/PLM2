@@ -143,7 +143,7 @@ class ReleaseService:
         """`outcome` / `value`: only on a 'done' answer of an item that
         carries a value (release_checklist.value_kind): the cycle time
         ('changed' with the new seconds, or 'unchanged') and the optional
-        measured Cm of the process-stable rows."""
+        measured Cm of the process-stable row."""
         if key in catalog.RETIRED:
             raise ChangeError(
                 f"'{catalog.label_for(key)}' is no longer on the release "
@@ -158,6 +158,8 @@ class ReleaseService:
         if status == "done":
             try:
                 note = catalog.answer_note(key, outcome, value, note)
+                # the changelog carries the value exactly as the note states it
+                value = catalog.rounded_value(key, value)
             except ValueError as e:
                 raise ChangeError(str(e))
         elif outcome is not None or value is not None:
@@ -353,11 +355,11 @@ class ReleaseService:
             hints["weight_measured"] = f"Validated part weight on file: {float(weight):g} g"
         hints.update(await ReleaseService.revision_hints(session, change))
         hints.update(await ReleaseService.cycle_time_hint(session, change, names))
-        hints.update(ReleaseService.process_stable_hints(rows, names))
         blockers = await ReleaseService.blockers(session, change)
         return {
             "checks": [{
-                "key": r.check_key, "label": catalog.label_for(r.check_key),
+                "key": r.check_key,
+                "label": catalog.label_for(r.check_key, change),
                 "department_id": r.department_id,
                 "department_name": names.get(r.department_id)
                 or catalog.owner_for(r.check_key),
@@ -382,38 +384,29 @@ class ReleaseService:
     @staticmethod
     async def cycle_time_hint(session: AsyncSession, change: ChangeRequest,
                               names: dict) -> dict:
-        """The cycle times measured in validation (stage 9), next to the one
-        release row that asks whether the cycle time changed."""
+        """The cycle time the Tool Engineer measured in validation (stage 9),
+        next to the release row that asks whether the cycle time changed.
+        Measurements other departments recorded under an older catalog stay
+        on the validation tab, read-only; the release row reads the Tool
+        Engineer's."""
         from app.models.change_validation import ValidationCheck
         from app.services import validation_checklist
+        tool_ids = {i for i, n in names.items()
+                    if n == validation_checklist.CYCLE_TIME_DEPARTMENT}
+        if not tool_ids:
+            return {}
         rows = (await session.execute(select(ValidationCheck).where(
             ValidationCheck.change_id == change.id,
             ValidationCheck.check_key == validation_checklist.CYCLE_TIME_KEY,
+            ValidationCheck.department_id.in_(tool_ids),
             ValidationCheck.status == "passed",
             ValidationCheck.value.is_not(None)))).scalars().all()
         if not rows:
             return {}
-        parts = [f"{names.get(r.department_id, r.department_id)} {float(r.value):g} s"
-                 for r in sorted(rows, key=lambda r: r.department_id)]
-        return {catalog.CYCLE_TIME_KEY: "Measured in validation: " + "; ".join(parts)}
-
-    @staticmethod
-    def process_stable_hints(rows, names: dict) -> dict:
-        """The two process-stable rows are one confirmation owed by two
-        departments: each shows where the other half stands."""
-        by_key = {r.check_key: r for r in rows}
-        out = {}
-        for key in catalog.CM_KEYS:
-            other_key = next(k for k in catalog.CM_KEYS if k != key)
-            other = by_key.get(other_key)
-            if key not in by_key or other is None:
-                continue
-            who = names.get(other.department_id) or catalog.owner_for(other_key)
-            state = {"done": "confirmed", "na": "not applicable"}.get(
-                other.status, "not confirmed yet")
-            out[key] = (f"{who}: {state}. Stable once Process Engineer and "
-                        "APQP both confirmed")
-        return out
+        values = "; ".join(f"{float(r.value):g} s"
+                           for r in sorted(rows, key=lambda r: r.department_id))
+        return {catalog.CYCLE_TIME_KEY:
+                f"Measured in validation by the Tool Engineer: {values}"}
 
     @staticmethod
     async def revision_hints(session: AsyncSession, change: ChangeRequest) -> dict:

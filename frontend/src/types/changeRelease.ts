@@ -2,9 +2,9 @@
 
 export type ReleaseCheckStatus = 'open' | 'done' | 'na'
 
-/** Items whose "done" carries a value: the cycle time (changed with the new
- *  seconds, or confirmed unchanged) and the optional Cm of the two
- *  process-stable rows. */
+/** Items whose "done" carries a value: the cycle time (Tool Engineer;
+ *  changed with the new seconds, or confirmed unchanged) and the optional
+ *  Cm of the process-stable row (APQP). */
 export type ReleaseValueKind = 'cycle_time' | 'cm'
 
 export interface ReleaseCheckAnswer {

@@ -1009,3 +1009,51 @@ async def test_the_sweep_reevaluates_escalations(client, vi, session_factory):
         counts = await run_notification_sweep(s)
         await s.commit()
     assert counts["validation_issue_escalated"] == 1
+
+
+async def test_issue_on_a_check_no_longer_asked_closes_with_a_note(
+        client, vi, session_factory):
+    """A failed check its department no longer owes (the cycle time of
+    Manufacturing / Process Engineer, Development's 'sampled') can never pass
+    again: no new issue is linked to it, and an issue already linked closes
+    with a note, whatever step it is at."""
+    issue = await _raised(client, vi)
+    async with session_factory() as s:
+        chk = await s.get(ValidationCheck, vi["check_id"])
+        chk.department_id = vi["dept"]["Development"]   # sampled: not Development's
+        await s.commit()
+    pm = await _auth(client, vi, "pm")
+    async with session_factory() as s:
+        s.add(ValidationCheck(change_id=vi["change_id"],
+                              department_id=vi["dept"]["Development"],
+                              check_key="measured", status="failed", note="x"))
+        await s.commit()
+        other = (await s.execute(select(ValidationCheck.id).where(
+            ValidationCheck.change_id == vi["change_id"],
+            ValidationCheck.department_id == vi["dept"]["Development"],
+            ValidationCheck.check_key == "measured"))).scalar_one()
+    res = await _raise(client, pm, vi, check_id=other)
+    assert res.status_code == 400 and "no longer asked" in res.json()["detail"]
+    r = await client.post(_url(vi, f"/{issue['id']}/close"), headers=pm,
+                          json={"note": "No longer asked of the department"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "closed"
+
+
+async def test_extra_cost_is_in_the_costing_currency(client, vi, session_factory, seed):
+    """The extra cost is stated in the change's costing currency (its
+    costing plant's), like the actual costs: USD at a USD plant, not EUR."""
+    from app.models.entities import Plant, Project
+    async with session_factory() as s:
+        project = await s.get(Project, seed["project_id"])
+        plant = await s.get(Plant, project.plant_id)
+        plant.currency = "USD"
+        await s.commit()
+    issue = await _raised(client, vi)
+    pm = await _auth(client, vi, "pm")
+    r = await client.post(_url(vi, f"/{issue['id']}/cost"), headers=pm,
+                          json={"extra_cost": 5000, "cost_bearer": "internal"})
+    assert r.status_code == 200, r.text
+    assert r.json()["currency"] == "USD"
+    seen = (await client.get(_url(vi), headers=pm)).json()[0]
+    assert seen["currency"] == "USD" and seen["extra_cost"] == 5000

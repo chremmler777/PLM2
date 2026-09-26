@@ -2,10 +2,11 @@
  * The release checklist: what has to be true before a change is live, each
  * point owned by a department. Members of the owner department (and PM, the
  * change lead, admins) tick it done or not applicable; n.a. needs a note.
- * The cycle time is answered changed (with the new seconds) or unchanged;
- * the two process-stable rows (Process Engineer and APQP) take an optional
- * Cm above 1.67. Rows answered before an item left the checklist show
- * read-only as "No longer asked".
+ * The cycle time (Tool Engineer) is answered changed (with the new seconds)
+ * or unchanged; the process-stable row (APQP) takes an optional Cm above
+ * 1.67. Numbers are typed en-US ("." decimals); an unreadable number is
+ * named and blocks the answer instead of being dropped. Rows answered
+ * before an item left the checklist show read-only as "No longer asked".
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -16,6 +17,7 @@ import { releaseKey } from './releaseKeys'
 import { Check } from 'lucide-react'
 import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
+import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, readNumberInput } from '../../../lib/format'
 
 const CHIP: Record<ReleaseCheckStatus, { label: string; on: string }> = {
   open: { label: 'Open', on: 'bg-slate-700 text-slate-100' },
@@ -25,19 +27,25 @@ const CHIP: Record<ReleaseCheckStatus, { label: string; on: string }> = {
 
 const CM_MIN = 1.67
 
+/** Kept as the backend keeps them: Cm to 2 decimals, seconds to 1. The
+ *  limit is checked on the rounded Cm, like the backend does. */
+const round = (n: number, decimals: number) => Math.round(n * 10 ** decimals) / 10 ** decimals
+
 /** The value half of a "done" answer, per value kind. Returns null while
- *  the answer is not complete yet. */
+ *  the answer is not complete yet, or the typed number cannot be read. */
 function valueAnswer(kind: ReleaseCheck['value_kind'], outcome: '' | 'changed' | 'unchanged', raw: string):
   null | Pick<ReleaseCheckAnswer, 'outcome' | 'value'> {
-  const num = raw.trim() === '' ? null : Number(raw)
+  const read = readNumberInput(raw)
+  const num = read.value
   if (kind === 'cycle_time') {
     if (outcome === 'unchanged') return { outcome }
-    if (outcome === 'changed' && num != null && Number.isFinite(num) && num > 0) return { outcome, value: num }
+    if (outcome === 'changed' && num != null && round(num, 1) > 0) return { outcome, value: num }
     return null
   }
   if (kind === 'cm') {
+    if (read.error) return null
     if (num == null) return {}
-    return Number.isFinite(num) && num > CM_MIN ? { value: num } : null
+    return round(num, 2) > CM_MIN ? { value: num } : null
   }
   return {}
 }
@@ -69,7 +77,13 @@ function CheckRow({ changeId, check, canEdit }: {
 
   const kind = editing === 'done' ? check.value_kind ?? null : null
   const extra = kind ? valueAnswer(kind, outcome, value) : {}
-  const cmLow = kind === 'cm' && value.trim() !== '' && extra === null
+  const numberUsed = (kind === 'cycle_time' && outcome === 'changed') || kind === 'cm'
+  const read = readNumberInput(value)
+  const numberHint = !numberUsed ? null
+    : read.error === 'invalid' ? NUMBER_INPUT_INVALID
+    : read.error === 'ambiguous' ? NUMBER_INPUT_HINT
+    : null
+  const cmLow = kind === 'cm' && read.value !== null && extra === null
   const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim() : extra !== null)
   const confirmLabel = editing === 'na' ? 'Mark not applicable'
     : kind === 'cycle_time' ? (outcome === 'changed' ? 'Save new cycle time' : 'Confirm unchanged')
@@ -85,6 +99,7 @@ function CheckRow({ changeId, check, canEdit }: {
         <div className="min-w-0 flex-1">
           <div className={`text-sm ${check.status === 'open' && !retired ? 'text-slate-100' : 'text-slate-400'}`}>
             {check.label}
+            {retired && ' '}
             {retired && (
               <span data-testid={`release-check-${check.key}-retired`}
                 className="ml-2 rounded border border-slate-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-slate-400">
@@ -131,17 +146,22 @@ function CheckRow({ changeId, check, canEdit }: {
               ))}
             </div>
           )}
-          {((kind === 'cycle_time' && outcome === 'changed') || kind === 'cm') && (
+          {numberUsed && (
             <label className="inline-flex items-center gap-1 text-xs text-slate-400">
               {kind === 'cm' ? 'Cm' : 'New cycle time'}
-              <input type="number" inputMode="decimal" step="any" min={0}
+              <input type="text" inputMode="decimal"
                 data-testid={`release-check-${check.key}-value`} value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={kind === 'cm' ? 'optional' : 'required'}
-                aria-invalid={cmLow || undefined}
+                aria-invalid={cmLow || !!numberHint || undefined}
                 className={`${inputCls} w-24`} />
               {kind === 'cycle_time' && 's'}
             </label>
+          )}
+          {numberHint && (
+            <span data-testid={`release-check-${check.key}-value-hint`} className="text-[11px] text-amber-300">
+              {numberHint}
+            </span>
           )}
           {cmLow && <span className="text-[11px] text-amber-300">Cm must be above {CM_MIN}</span>}
           <input autoFocus={!kind} data-testid={`release-check-${check.key}-note`} value={note}

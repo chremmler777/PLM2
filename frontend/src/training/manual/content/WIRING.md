@@ -269,25 +269,29 @@ The app and the content follow these; the chapters and handouts say them.
   chapter ("you own the rates, not the offers") and the Quality chapter
   ("your sign-off is on the process record, not the price") state it as
   the rule. (Was question 2.)
-- **Release checklist rows reworked (decision 2026-09-26, replaces the
-  2026-09-25 Quality / Process Engineer rows; was questions 4, 5 and 6).**
-  The Process Engineer confirms the process in the process database (PDB)
-  and owes the release two rows: "Cycle time: changed (new value entered)
-  or confirmed unchanged" (`cycle_time`, merged from the Manufacturing
-  Engineer's "Cycle time confirmed in series production") and "Process
-  stable: SPC Cm > 1.67 (Process Engineer)". APQP owns "Process stable:
-  SPC Cm > 1.67 (APQP)" (the stability counts only when both halves are
-  done), "Surface quality confirmed", "Technical quality confirmed",
-  "Measurements confirmed, measurement report on file", "PPAP / initial
-  sample documentation complete, customer approval received (ISIR / PSW)"
-  (PPAP asked once) and "Control plan / inspection plan updated". Quality
-  owns no release row; its escalation audience is unchanged. Retired rows
-  (`process_parameters`, `process_fmea`, `quality_samples`,
-  `quality_control_plan`, `documents_updated`, `cycle_time_confirmed`)
-  keep their answers readable ("No longer asked"). The new rows reach every
-  change not yet finished; a change released before the cutoff
-  (`PLM_RELEASE_ROWS_SINCE`), or ended without a release, keeps its old
-  checklist. The Process Engineer still assesses only when the scoping
+- **Release checklist rows reworked (decision 2026-09-26, corrected the
+  same day; replaces the 2026-09-25 Quality / Process Engineer rows; was
+  questions 4, 5 and 6).** APQP confirms "Process stable: SPC Cm > 1.67"
+  alone (`process_stable_apqp`, Cm optional, above 1.67) and owns "Surface
+  quality confirmed", "Technical quality confirmed", "Measurements
+  confirmed, measurement report on file", "PPAP / initial sample
+  documentation complete, customer approval received (ISIR / PSW)" (PPAP
+  asked once) and "Control plan / inspection plan updated". The Tool
+  Engineer answers "Cycle time: changed (new value entered) or confirmed
+  unchanged" (`cycle_time_tool`, merged from the Manufacturing Engineer's
+  "Cycle time confirmed in series production"), next to its tool data and
+  part weight rows, and alone measures the cycle time in validation. The
+  Process Engineer confirms the process in the process database (PDB) and
+  owns no release row. Quality owns no release row; its escalation
+  audience is unchanged. Retired rows (`process_parameters`,
+  `process_fmea`, `quality_samples`, `quality_control_plan`,
+  `documents_updated`, `cycle_time_confirmed`, and the first version's
+  `cycle_time` and `process_stable_pe` of the Process Engineer) keep their
+  answers readable ("No longer asked"), as do cycle times Manufacturing or
+  Process Engineer measured in validation. The new rows reach every change
+  not yet finished; a change that ended (released, rejected or cancelled)
+  before the cutoff (`PLM_RELEASE_ROWS_SINCE`) keeps its old checklist and
+  wording. The Process Engineer still assesses only when the scoping
   meeting gives it a letter.
 - **Future, not built:** process engineering tasks will later be forwarded
   from the PDB to PLM.

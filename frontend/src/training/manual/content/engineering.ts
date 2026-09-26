@@ -214,7 +214,9 @@ export const engineeringChapter: ContentChapter = {
             'example "Tool sampled", "Part measured", "Measured cycle time", "Part weight ' +
             'validated", "Packaging validated with the changed part". "Pass", or "Fail" with what ' +
             'is not in order. A fail without a reason is not a check. "Measured cycle time" and ' +
-            '"Part weight validated" pass only with the measured value entered.',
+            '"Part weight validated" pass only with the measured value entered; both are the ' +
+            'Tool Engineer\'s. A cycle time another department measured earlier stays readable, ' +
+            'marked "No longer asked". Type numbers with a dot for decimals (41.5, not 41,5).',
         },
         {
           p:
@@ -247,21 +249,20 @@ export const engineeringChapter: ContentChapter = {
             'Each row of the release checklist is owned by one department. Mark it "Done", or ' +
             '"N.a." with a note that says why it does not apply. The Process Engineer keeps the ' +
             'process details (parameters, PFMEA, work instructions) in the process database (PDB) ' +
-            'and confirms them there; the release asks only the cycle time and process stability.',
+            'and confirms them there, so the Process Engineer owns no release row.',
         },
         {
           table: {
             head: ['Department', 'Rows'],
             rows: [
               ['Development', '"Part index / revision level updated in drawing and PLM", "Drawing and 3D data released and distributed", "Spare and service parts considered".'],
-              ['Tool Engineer', '"Tool and equipment data updated (tool card, equipment list)", "Part weight measured and recorded".'],
-              ['Process Engineer', '"Cycle time: changed (new value entered) or confirmed unchanged": pick "Changed" and enter the new seconds, or "Unchanged". "Process stable: SPC Cm > 1.67 (Process Engineer)", Cm optional.'],
-              ['APQP', '"Process stable: SPC Cm > 1.67 (APQP)", "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".'],
+              ['Tool Engineer', '"Tool and equipment data updated (tool card, equipment list)", "Part weight measured and recorded", "Cycle time: changed (new value entered) or confirmed unchanged": pick "Changed" and enter the new seconds, or "Unchanged". The row shows the cycle time you measured in validation.'],
+              ['APQP', '"Process stable: SPC Cm > 1.67" (Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".'],
               ['Packaging Engineer', '"Packaging instruction updated".'],
             ],
           },
         },
-        { callout: 'Process stability is one confirmation owed by two departments: it counts only when the Process Engineer row and the APQP row are both "Done". Each row shows where the other half stands.', tone: 'rule' },
+        { callout: 'APQP confirms the process stable (SPC Cm > 1.67); the Tool Engineer answers the cycle time. The Process Engineer has no release row.', tone: 'rule' },
         { shot: 'eng-release-checklist', alt: 'The release checklist grouped by department with "Done" and "N.a." chips and one note.' },
       ],
     },

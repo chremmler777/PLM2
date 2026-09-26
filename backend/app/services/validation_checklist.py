@@ -6,9 +6,12 @@ cycle time did you measure?"), so they live in code where a diff shows the
 change, rather than in rows somebody can quietly edit for one department.
 
 The departments working on the tool and the line (Tool Engineer,
-Manufacturing Engineer, Process Engineer) answer the COMMON checks. APQP
-answers for the measured parts, Packaging for the packaging with the changed
-part, and two checks are the reason stage 9 exists at all:
+Manufacturing Engineer, Process Engineer) answer the COMMON checks. The
+cycle time is measured by the Tool Engineer alone (decision 2026-09-26): a
+cycle time Manufacturing or Process Engineer recorded under the older
+catalog stays on the record, read-only and not counted. APQP answers for
+the measured parts, Packaging for the packaging with the changed part, and
+two checks are the reason stage 9 exists at all:
 
   Tool Engineer  weight — the sampled part goes on a scale and the number is
                  compared to the weight the QUOTE was built on. The delta is a
@@ -33,12 +36,10 @@ what tells a reader what the number means.
 COMMON_CHECKS = [
     ("sampled", "Werkzeug abgemustert", "Tool sampled", False, None),
     ("measured", "Teil vermessen", "Part measured", False, None),
-    ("cycle_time", "Zykluszeit gemessen", "Measured cycle time", True,
-     "seconds"),
 ]
 
-# The departments whose work is on the tool and the line: they sample,
-# measure and time it. Everyone else answers only for their own scope below
+# The departments whose work is on the tool and the line: they sample and
+# measure it (the Tool Engineer also times it, below). Everyone else answers only for their own scope below
 # (or owes no validation check at all).
 COMMON_DEPARTMENTS = ("Tool Engineer", "Manufacturing Engineer",
                       "Process Engineer")
@@ -46,6 +47,8 @@ COMMON_DEPARTMENTS = ("Tool Engineer", "Manufacturing Engineer",
 # Department name -> its own checks, same tuple shape.
 DEPARTMENT_CHECKS = {
     "Tool Engineer": [
+        ("cycle_time", "Zykluszeit gemessen", "Measured cycle time", True,
+         "seconds"),
         ("weight", "Teilegewicht validiert", "Part weight validated", True,
          "grams"),
     ],
@@ -67,8 +70,9 @@ DEPARTMENT_CHECKS = {
 # one: it stamps the change's validated weight and can raise a Sales task.
 WEIGHT_KEY = "weight"
 # The check compared against the costing's lifecycle assumption (the
-# minutes-per-part the change was priced on).
+# minutes-per-part the change was priced on). Measured by one department.
 CYCLE_TIME_KEY = "cycle_time"
+CYCLE_TIME_DEPARTMENT = "Tool Engineer"
 
 
 def _entry(item: tuple, extra: bool) -> dict:

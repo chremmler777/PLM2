@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ValidationPanel, { departmentOpenChecks, weightAckOutstanding } from './ValidationPanel'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID } from '../../lib/format'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -74,6 +75,47 @@ describe('ValidationPanel', () => {
     await waitFor(() => expect(changesApi.setValidationCheck).toHaveBeenCalledWith(7, {
       department_id: 4, check_key: 'sampled', status: 'passed',
     }))
+  })
+
+  it('refuses an unreadable measurement instead of passing without it', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({ check_key: 'cycle_time' })] }],
+    }) as never)
+    render_()
+    const input = await screen.findByTestId('validation-value-4-cycle_time') as HTMLInputElement
+    expect(input.type).toBe('text')
+    const pass = screen.getByTestId('validation-pass-4-cycle_time') as HTMLButtonElement
+    fireEvent.change(input, { target: { value: '41,5' } })
+    expect(pass.disabled).toBe(true)
+    expect(screen.getByTestId('validation-value-hint-4-cycle_time').textContent).toBe(NUMBER_INPUT_HINT)
+    // a fail would drop the typed number too: blocked until it reads
+    fireEvent.click(screen.getByTestId('validation-fail-4-cycle_time'))
+    fireEvent.change(screen.getByTestId('validation-note-4-cycle_time'), { target: { value: 'slow' } })
+    expect((screen.getByTestId('validation-fail-confirm-4-cycle_time') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(input, { target: { value: 'x1' } })
+    expect(screen.getByTestId('validation-value-hint-4-cycle_time').textContent).toBe(NUMBER_INPUT_INVALID)
+    fireEvent.change(input, { target: { value: '1,041.5' } })
+    expect(screen.queryByTestId('validation-value-hint-4-cycle_time')).toBeNull()
+    fireEvent.click(screen.getByTestId('validation-fail-confirm-4-cycle_time'))
+    await waitFor(() => expect(changesApi.setValidationCheck).toHaveBeenCalledWith(7, {
+      department_id: 4, check_key: 'cycle_time', status: 'failed', value: 1041.5, note: 'slow',
+    }))
+  })
+
+  it('shows a cycle time measured under the older catalog read-only', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({
+        check_key: 'cycle_time', label_en: 'Measured cycle time', status: 'failed',
+        value: 41, note: 'slow', retired: true,
+      })] }],
+    }) as never)
+    render_({ canRaiseAny: true })
+    expect((await screen.findByTestId('validation-retired-4-cycle_time')).textContent)
+      .toBe('No longer asked')
+    expect(screen.queryByTestId('validation-pass-4-cycle_time')).toBeNull()
+    expect(screen.queryByTestId('validation-value-4-cycle_time')).toBeNull()
+    expect(screen.queryByTestId('validation-raise-4-cycle_time')).toBeNull()
+    expect(screen.getByText('41 s')).toBeDefined()
   })
 
   it('will not take a fail without a reason', async () => {

@@ -4,8 +4,8 @@
  * Implementation says the work was done. Validation says it holds: every
  * implementing department answers a fixed, small list of checks, and two of
  * them carry a number the rest of the system already assumed something about.
- * The cycle time sits next to what costing planned; the weight sits next to
- * what the Tool Engineer estimated, and the difference between the two is a
+ * The cycle time (measured by the Tool Engineer) sits next to what costing
+ * planned; the weight sits next to what the Tool Engineer estimated, and the difference between the two is a
  * commercial event, not a footnote — a part that came out heavier than quoted
  * means the price is wrong until Sales says otherwise.
  *
@@ -17,6 +17,10 @@
  * The one way out that is not forward: checks that did not pass send the change
  * back to implementation, with a written reason, because that move costs
  * somebody a replanned date and possibly a renegotiated price.
+ *
+ * A check its department no longer owes (e.g. a cycle time Manufacturing or
+ * Process Engineer measured before the Tool Engineer alone measured it) stays
+ * readable, marked "No longer asked", and cannot be answered or raised on.
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -27,7 +31,9 @@ import ReasonDialog from './ReasonDialog'
 import type {
   ValidationCheck, ValidationDepartmentState, ValidationState,
 } from '../../types/change'
-import { formatDate } from '../../lib/format'
+import {
+  NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, formatDate, numberEditText, readNumberInput,
+} from '../../lib/format'
 import type { IssueOut } from '../../types/validationIssue'
 import { isIssueOpen, issueCode } from '../../types/validationIssue'
 import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDialog'
@@ -100,14 +106,15 @@ function CheckRow({
   const id = `${deptId}-${key}`
   const [failing, setFailing] = useState(false)
   const [note, setNote] = useState('')
-  const [value, setValue] = useState(check.value != null ? String(check.value) : '')
+  const [value, setValue] = useState(numberEditText(check.value))
   const needsValue = VALUE_CHECKS.has(key)
+  const retired = !!check.retired
 
   const post = useMutation({
     mutationFn: (vars: { status: 'passed' | 'failed' }) => changesApi.setValidationCheck(
       changeId, {
         department_id: deptId, check_key: key, status: vars.status,
-        ...(needsValue && value.trim() !== '' ? { value: Number(value) } : {}),
+        ...(needsValue && valueRead.value !== null ? { value: valueRead.value } : {}),
         ...(note.trim() !== '' ? { note: note.trim() } : {}),
       }),
     onSuccess: () => {
@@ -121,12 +128,19 @@ function CheckRow({
     onError: (e: unknown) => toastError(e, 'Could not record the check'),
   })
 
-  const valueNumber = Number(value)
-  const valueOk = value.trim() !== '' && !Number.isNaN(valueNumber) && valueNumber >= 0
+  // Read en-US like it is shown: "12,5" is refused as ambiguous, never
+  // silently dropped from the answer.
+  const valueRead = readNumberInput(value)
+  const valueOk = valueRead.value !== null && valueRead.value >= 0
+  const valueHint = !needsValue ? null
+    : valueRead.error === 'invalid' ? NUMBER_INPUT_INVALID
+    : valueRead.error === 'ambiguous' ? NUMBER_INPUT_HINT
+    : null
   // A measurement without the measurement is not a pass; a fail without a
-  // reason is not a check.
+  // reason is not a check; a typed number nobody can read is neither.
   const mayPass = !needsValue || valueOk
-  const mayWrite = editable && mine
+  const mayFail = !valueHint
+  const mayWrite = editable && mine && !retired
 
   const chip = check.status === 'passed'
     ? 'bg-emerald-900/70 text-emerald-200'
@@ -138,7 +152,13 @@ function CheckRow({
     <li data-testid={`validation-check-${id}`}
       className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5 space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-slate-200 text-sm">{checkLabel(key, check.label_en)}</span>
+        <span className={`text-sm ${retired ? 'text-slate-400' : 'text-slate-200'}`}>{checkLabel(key, check.label_en)}</span>
+        {retired && (
+          <span data-testid={`validation-retired-${id}`}
+            className="rounded border border-slate-700 px-1.5 py-px text-[10px] uppercase tracking-wide text-slate-400">
+            No longer asked
+          </span>
+        )}
         <span data-testid={`validation-status-${id}`}
           className={`rounded px-1.5 py-0 text-[11px] leading-tight font-semibold ${chip}`}>
           {t(`validation.status.${check.status}`)}
@@ -160,7 +180,7 @@ function CheckRow({
             {issueCode(openIssue)} open
           </a>
         )}
-        {check.status === 'failed' && !openIssue && onRaise && (
+        {check.status === 'failed' && !openIssue && onRaise && !retired && (
           <button type="button" data-testid={`validation-raise-${id}`} onClick={onRaise}
             className="ml-auto rounded border border-rose-800 px-2 py-0.5 text-[11px] text-rose-200 hover:bg-rose-950/50">
             Raise issue
@@ -181,7 +201,7 @@ function CheckRow({
       {key === 'cycle_time' && (
         <div className="flex items-center gap-2 flex-wrap">
           {mayWrite && (
-            <input type="number" min={0} step="0.1" value={value}
+            <input type="text" inputMode="decimal" value={value} aria-invalid={!!valueHint || undefined}
               data-testid={`validation-value-${id}`} aria-label={t('validation.cycleValue')}
               placeholder={t('validation.cycleValue')}
               onChange={(e) => setValue(e.target.value)} className={`w-32 ${fieldCls}`} />
@@ -191,7 +211,7 @@ function CheckRow({
               {num(check.value)} s
             </span>
           )}
-          {(hasCosting || plannedCycleMin != null) && (
+          {!retired && (hasCosting || plannedCycleMin != null) && (
             <span data-testid={`validation-assumption-${id}`} className="text-xs text-slate-400">
               {plannedCycleMin != null
                 ? t('validation.cycleAssumption').replace('{x}', num(plannedCycleMin))
@@ -203,7 +223,7 @@ function CheckRow({
       {key === 'weight' && (
         <div className="flex items-center gap-2 flex-wrap">
           {mayWrite && (
-            <input type="number" min={0} step="1" value={value}
+            <input type="text" inputMode="decimal" value={value} aria-invalid={!!valueHint || undefined}
               data-testid={`validation-value-${id}`} aria-label={t('validation.weightValue')}
               placeholder={t('validation.weightValue')}
               onChange={(e) => setValue(e.target.value)} className={`w-32 ${fieldCls}`} />
@@ -219,6 +239,12 @@ function CheckRow({
             </span>
           )}
         </div>
+      )}
+
+      {mayWrite && valueHint && (
+        <p data-testid={`validation-value-hint-${id}`} className="text-[11px] text-amber-300">
+          {valueHint}
+        </p>
       )}
 
       {/* The note says why a check failed; once it passes the old reason is history. */}
@@ -240,7 +266,7 @@ function CheckRow({
           )}
           <div className="flex items-center gap-2">
             <button type="button" data-testid={`validation-fail-confirm-${id}`}
-              disabled={note.trim() === '' || post.isPending}
+              disabled={note.trim() === '' || !mayFail || post.isPending}
               onClick={() => post.mutate({ status: 'failed' })}
               className={btnSm.danger}>
               {t('validation.fail')}

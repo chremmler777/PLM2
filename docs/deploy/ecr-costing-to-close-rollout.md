@@ -81,7 +81,7 @@ prod block. All are optional: unset or empty keeps the default.
 | `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs. On send the sender is frozen as signer when they are a Sales member; otherwise (PM lead, admin) the project's Sales responsible, else the "Sales" role line with no name. A draft previews exactly that for the viewer, labelled "Signed by (preview)". Set only to force one fixed name on every offer |
 | `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | not needed, leave unset (set only to force one fixed title) |
 | `PLM_BUSINESS_TZ` | `America/New_York` (IANA name; drives the business date of deadlines, plan dates, offers) | set explicitly to `America/New_York` |
-| `PLM_RELEASE_ROWS_SINCE` | `2026-09-26T04:00:00Z` (midnight New York on 26 Sep; backend/app/services/release_checklist.py) | set to the deploy moment in UTC (ISO 8601, e.g. `2026-09-27T14:30:00Z`; no offset means UTC). Changes released before it keep their old 13-row checklist; every change not yet released gets the reworked 17-row one |
+| `PLM_RELEASE_ROWS_SINCE` | `2026-09-26T04:00:00Z` (midnight New York on 26 Sep; backend/app/services/release_checklist.py) | set to the deploy moment in UTC (ISO 8601, e.g. `2026-09-27T14:30:00Z`; no offset means UTC). Changes that ended before it (released, or rejected / cancelled) keep their old 13-row checklist and wording; every other change gets the reworked 16-row one |
 
 Lists are separated by `|`. Not needed: `TRAINING_GATE` (training is
 recorded, not blocking; the gate stays off, and it is also an org setting).
@@ -99,33 +99,49 @@ nothing released on the old code falls after it.
 
 ### New release rows for changes in flight
 
-The release checklist is reworked, 13 to 17 rows (decision 2026-09-26):
+The release checklist is reworked, 13 to 16 rows (decision 2026-09-26,
+corrected the same day: APQP confirms SPC, the cycle time comes from the
+Tool Engineer):
 
-- Process Engineer (the process details stay in the process database,
-  PDB, where the Process Engineer confirms them): "Cycle time: changed (new
-  value entered) or confirmed unchanged" (replaces the Manufacturing
-  Engineer's "Cycle time confirmed in series production"; "changed" needs
-  the new seconds) and "Process stable: SPC Cm > 1.67 (Process Engineer)".
-- APQP: "Process stable: SPC Cm > 1.67 (APQP)" (stability counts only when
-  both process-stable rows are done), "Surface quality confirmed",
-  "Technical quality confirmed", "Measurements confirmed, measurement
-  report on file" (relabelled), "PPAP / initial sample documentation
-  complete, customer approval received (ISIR / PSW)" (PPAP asked once) and
-  "Control plan / inspection plan updated".
+- Tool Engineer: "Cycle time: changed (new value entered) or confirmed
+  unchanged" (replaces the Manufacturing Engineer's "Cycle time confirmed
+  in series production"; "changed" needs the new seconds; the row shows
+  the Tool Engineer's cycle time measured in validation), next to "Tool
+  and equipment data updated" and "Part weight measured and recorded".
+- APQP: "Process stable: SPC Cm > 1.67" (one row, APQP alone; Cm optional,
+  above 1.67), "Surface quality confirmed", "Technical quality confirmed",
+  "Measurements confirmed, measurement report on file" (relabelled),
+  "PPAP / initial sample documentation complete, customer approval
+  received (ISIR / PSW)" (PPAP asked once) and "Control plan / inspection
+  plan updated".
+- Process Engineer: no release row (the process details stay in the
+  process database, PDB, where the Process Engineer confirms them).
 - Quality: no release row.
 - Retired: "PFMEA, control plan and work instructions updated" (APQP) and
   "Cycle time confirmed in series production" (Manufacturing Engineer). An
   answer given to a retired row stays on the change, shown read-only as "No
-  longer asked" and not counted.
+  longer asked" and not counted. Same for answers to the Process Engineer
+  rows of the first version of this rework ("Cycle time ..." and "Process
+  stable: SPC Cm > 1.67 (Process Engineer)"), should any exist on a test or
+  staging database; a change that was released there with them keeps them
+  and gains no Tool Engineer cycle-time row.
 
-Every change not yet released at the deploy moment (in validation or
-earlier) gets the six new rows open and cannot be released until they are
-answered done, or n/a with a note (PM, the change lead or an admin may also
-answer). Changes released before `PLM_RELEASE_ROWS_SINCE` are left as they
-were, retired rows included. Tell APQP and Process Engineer (step 7) and the
-leads of changes in validation. No migration: the cycle time and the
-optional Cm are written into the row's note ("Changed: new cycle time 38.5
-s", "Cm 1.85") and into the changelog as data.
+Validation (stage 9): "Measured cycle time" is now measured by the Tool
+Engineer only (before: Tool Engineer, Manufacturing Engineer and Process
+Engineer each). A cycle time Manufacturing or Process Engineer already
+recorded stays readable, marked "No longer asked", and no longer blocks the
+release; an open validation issue linked to such a check can be closed by
+PM, the lead or an admin with a note.
+
+Every change not yet ended at the deploy moment (in validation or earlier)
+gets the five new rows open and cannot be released until they are answered
+done, or n/a with a note (PM, the change lead or an admin may also answer).
+Changes that ended before `PLM_RELEASE_ROWS_SINCE` (released, rejected or
+cancelled) are left as they were, retired rows and old wording included.
+Tell APQP and Tool Engineer (step 7) and the leads of changes in
+validation. No migration: the cycle time and the optional Cm are rounded
+(seconds to 1 decimal, Cm to 2) and written into the row's note ("Changed:
+new cycle time 38.5 s", "Cm 1.85") and into the changelog as data.
 
 Future, not built: process engineering tasks will later be forwarded from
 the PDB to PLM.
@@ -282,7 +298,8 @@ In the browser (as the owner, hub login):
 - `/plm2/changes` list, then one open change `/plm2/changes/<id>`: cockpit, stages, costing tab shows rates from the cost sheet (or "No rate" where none), process flow Detailed and Overview.
 - `/plm2/changes/<id>/plan/quote` and `/plan/detailed`: Gantt renders, links draw.
 - Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address. A sent version is signed by the Sales member who sent it (sent by a PM lead or an admin: the project's Sales responsible, else the "Sales" line with no name). A draft shows "Signed by (preview)" with who would sign if you sent it now: you when you are in Sales, otherwise the project's Sales responsible, else the "Sales" line.
-- Release tab of a change in validation: 17 rows, Process Engineer and APQP groups as listed above, no Quality or Manufacturing Engineer group. A change released before the deploy: 13 rows, with "Cycle time confirmed in series production" and "PFMEA, control plan and work instructions updated".
+- Release tab of a change in validation: 16 rows, Tool Engineer (3) and APQP (6) groups as listed above, no Process Engineer, Quality or Manufacturing Engineer group. A change released before the deploy: 13 rows, with "Cycle time confirmed in series production", "PFMEA, control plan and work instructions updated", "Parts measured, measurement report on file" and "Customer approval received (PPAP / ISIR / PSW)".
+- Validation block of a change in validation: "Measured cycle time" only under Tool Engineer.
 - `/plm2/cost-sheet`: published version chain, Toccoa rows in USD, one draft at most.
 - `/plm2/pnl` and `/plm2/reports`: cost report per currency.
 - `/plm2/my-tasks`: counts plausible, backup markers after the prefill.
@@ -362,12 +379,14 @@ card on the three projects.
   triaged (full ECR, attach, engineering review, administrative).
 - Finance: the to-do below.
 - Everyone: training record is live but not blocking.
-- APQP and Process Engineer: changes in validation now carry the reworked
-  release rows (Process Engineer: cycle time changed or unchanged, process
-  stable Cm > 1.67; APQP: process stable, surface quality, technical
-  quality, measurements, PPAP with customer approval, control plan) to
-  answer done or mark n/a with a note before the change can be released.
-  Quality and Manufacturing Engineer no longer own release rows.
+- APQP and Tool Engineer: changes in validation now carry the reworked
+  release rows (Tool Engineer: cycle time changed or unchanged, next to
+  tool data and part weight; APQP: process stable SPC Cm > 1.67, surface
+  quality, technical quality, measurements, PPAP with customer approval,
+  control plan) to answer done or mark n/a with a note before the change
+  can be released. The Tool Engineer alone measures the cycle time in
+  validation. Process Engineer, Quality and Manufacturing Engineer no
+  longer own release rows.
 
 ## Finance to-do (open after deploy)
 

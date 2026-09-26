@@ -13,6 +13,7 @@ import type { IssueOut } from '../../../types/validationIssue'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import { changesApi } from '../../../api/changes'
 import IssueCard from './IssueCard'
+import CostForm, { CostLine } from './CostForm'
 import IssuesPanel from './IssuesPanel'
 import EscalationBadge from './EscalationBadge'
 import { customerDecisionBlocked } from './CustomerDecisionForm'
@@ -35,7 +36,7 @@ vi.mock('../../../api/validationIssues', () => ({
   },
 }))
 vi.mock('../../../api/changes', () => ({
-  changesApi: { uploadAttachment: vi.fn(), deleteAttachment: vi.fn() },
+  changesApi: { uploadAttachment: vi.fn(), deleteAttachment: vi.fn(), costingContext: vi.fn() },
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
@@ -399,5 +400,21 @@ describe('follow-ups: recheck, add_action, acts after close', () => {
   it('the new My Actions kinds are issue acts', () => {
     expect(isIssueActionKind('validation_issue_recheck')).toBe(true)
     expect(isIssueActionKind('validation_issue_add_action')).toBe(true)
+  })
+})
+
+describe('extra cost currency', () => {
+  it('states the cost in the change\'s costing currency, not EUR', () => {
+    qcWrap(<CostForm changeId={7} issue={issue({ currency: 'USD', extra_cost: 250 })} />)
+    expect(screen.getByTestId('issue-cost-currency-11').textContent).toBe('USD')
+    cleanup()
+    render(<CostLine issue={issue({ currency: 'USD', extra_cost: 250, cost_set: true })} canSeeCosts />)
+    expect(screen.getByTestId('issue-cost-11').textContent).toContain('250.00 USD')
+  })
+
+  it('falls back to the costing context, never to a guessed EUR', async () => {
+    vi.mocked(changesApi.costingContext).mockResolvedValue({ currency: 'USD' } as never)
+    qcWrap(<CostForm changeId={7} issue={issue({ currency: null })} />)
+    expect((await screen.findByTestId('issue-cost-currency-11')).textContent).toBe('USD')
   })
 })

@@ -544,8 +544,13 @@ async def test_actuals_extras_carry_the_scrap_quote_and_the_weight_delta(
 async def test_catalog_departments():
     from app.services import validation_checklist as cat
     for name in ("Tool Engineer", "Manufacturing Engineer", "Process Engineer"):
-        assert cat.keys_for(name)[:3] == ["sampled", "measured", "cycle_time"]
-    assert cat.keys_for("Tool Engineer")[3:] == ["weight"]
+        assert cat.keys_for(name)[:2] == ["sampled", "measured"]
+    # the cycle time is measured by the Tool Engineer only (2026-09-26)
+    assert cat.keys_for("Tool Engineer")[2:] == ["cycle_time", "weight"]
+    assert cat.keys_for("Manufacturing Engineer") == ["sampled", "measured"]
+    assert cat.keys_for("Process Engineer") == ["sampled", "measured"]
+    assert cat.CYCLE_TIME_DEPARTMENT == "Tool Engineer"
+    assert cat.label_for("cycle_time", "Process Engineer") == "Measured cycle time"
     assert cat.keys_for("APQP") == ["measured"]
     assert cat.items_for("APQP")[0]["label_en"] == "Parts measured"
     assert [i["label_en"] for i in cat.items_for("Packaging Engineer")] == [
@@ -584,3 +589,60 @@ async def test_retired_rows_are_kept_but_never_block(
         n = len((await s.execute(select(ValidationCheck).where(
             ValidationCheck.change_id == val["change_id"]))).scalars().all())
     assert n == 7
+
+
+async def test_cycle_time_measured_by_other_departments_stays_readable(
+        client, admin_auth, val, session_factory):
+    """Manufacturing and Process Engineer measured the cycle time under the
+    older catalog: their answers stay on the record, read-only and never
+    owed; only the Tool Engineer's counts."""
+    async with session_factory() as s:
+        depts = {}
+        for name in ("Manufacturing Engineer", "Process Engineer"):
+            d = Department(name=name, flow_type="action", is_active=True)
+            s.add(d)
+            await s.flush()
+            depts[name] = d.id
+        s.add(ValidationCheck(change_id=val["change_id"],
+                              department_id=depts["Process Engineer"],
+                              check_key="cycle_time", status="passed", value=41.0))
+        s.add(ValidationCheck(change_id=val["change_id"],
+                              department_id=depts["Manufacturing Engineer"],
+                              check_key="cycle_time", status="open"))
+        await s.commit()
+    state = await _state(client, admin_auth, val)
+    by_name = {d["department_name"]: d for d in state["departments"]}
+    pe = by_name["Process Engineer"]
+    # the current catalog first (sampled, measured), the retired answer last
+    assert [(c["check_key"], c["retired"], c["value"]) for c in pe["checks"]] == [
+        ("sampled", False, None), ("measured", False, None),
+        ("cycle_time", True, 41.0)]
+    assert pe["checks"][-1]["label_en"] == "Measured cycle time"
+    assert pe["open_count"] == 2          # the retired cycle time is not owed
+    # an unanswered one is not owed and not shown
+    assert "cycle_time" not in {
+        c["check_key"] for c in by_name["Manufacturing Engineer"]["checks"]}
+    tool = next(c for c in by_name["Tool Engineer"]["checks"]
+                if c["check_key"] == "cycle_time")
+    assert tool["retired"] is False and tool["expects_value"] is True
+    # the retired answer cannot be written any more
+    res = await client.post(_url(val, "/checks"), headers=admin_auth, json={
+        "department_id": depts["Process Engineer"], "check_key": "cycle_time",
+        "status": "passed", "value": 40.0})
+    assert res.status_code == 400, res.text
+    # only the Tool Engineer's measurement is owed for the release
+    for dept in state["departments"]:
+        if dept["department_name"] not in val["dept"]:
+            continue      # not implementing here: nothing seeded, nothing owed
+        for check in dept["checks"]:
+            if check["retired"]:
+                continue
+            value = {"cycle_time": 41.5, "weight": 510.0}.get(check["check_key"])
+            res = await _check(client, admin_auth, val, dept["department_name"],
+                               check["check_key"], value=value)
+            assert res.status_code == 201, res.text
+    state = await _state(client, admin_auth, val)
+    by_name = {d["department_name"]: d for d in state["departments"]}
+    assert by_name["Tool Engineer"]["all_passed"] is True
+    assert state["release_blocker"] is None
+

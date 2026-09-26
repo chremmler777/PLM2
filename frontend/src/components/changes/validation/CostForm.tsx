@@ -1,8 +1,12 @@
 /**
  * The extra cost of the fix and who carries it. Cost roles only; everyone
- * else sees that a cost is set, never the amount.
+ * else sees that a cost is set, never the amount. Stated in the change's
+ * costing currency (its costing plant's), like the actual costs: the issue
+ * payload carries it, the costing context is the fallback, never a guess.
  */
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { changesApi } from '../../../api/changes'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { CostBearer, IssueOut } from '../../../types/validationIssue'
 import { formatMoney } from '../../../lib/format'
@@ -32,6 +36,14 @@ export default function CostForm({ changeId, issue, onDone, late = false }: {
   late?: boolean
 }) {
   const [amount, setAmount] = useState<number | null>(issue.extra_cost ?? null)
+  // Same cache as the costing tab and the actual costs.
+  const { data: ctx } = useQuery({
+    queryKey: ['costing-context', changeId],
+    queryFn: () => changesApi.costingContext(changeId),
+    retry: false,
+    enabled: !issue.currency,
+  })
+  const currency = issue.currency || ctx?.currency || null
   const [bearer, setBearer] = useState<CostBearer>(issue.cost_bearer
     ?? (issue.route === 'supplier_rework' && issue.chargeback ? 'supplier' : 'internal'))
   const save = useIssueMutation(changeId,
@@ -42,7 +54,9 @@ export default function CostForm({ changeId, issue, onDone, late = false }: {
       <div className="flex flex-wrap items-center gap-2">
         <NumField value={amount} onChange={setAmount} ariaLabel="Extra cost" testId="cost-amount"
           placeholder="Extra cost" className="w-36" />
-        <span className="text-xs text-slate-400">{issue.currency ?? 'EUR'}</span>
+        {currency && (
+          <span data-testid={`issue-cost-currency-${issue.id}`} className="text-xs text-slate-400">{currency}</span>
+        )}
         <Segmented<CostBearer> value={bearer} onChange={setBearer} testId="cost-bearer"
           options={(['internal', 'supplier', 'customer'] as CostBearer[]).map((b) => ({ value: b, label: BEARER_LABEL[b] }))} />
       </div>

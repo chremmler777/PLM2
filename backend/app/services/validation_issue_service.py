@@ -171,6 +171,20 @@ class ValidationIssueService:
             select(Department.id, Department.name))).all())
 
     @staticmethod
+    async def check_retired(session: AsyncSession,
+                            check: Optional[ValidationCheck]) -> bool:
+        """A check its department no longer owes under the current catalog
+        (e.g. a cycle time Manufacturing or Process Engineer measured before
+        the Tool Engineer alone measured it): read-only, it can no longer be
+        answered 'passed' again."""
+        if check is None:
+            return False
+        from app.services import validation_checklist as catalog
+        name = (await ValidationIssueService._dept_names(session)).get(
+            check.department_id)
+        return check.check_key not in catalog.keys_for(name)
+
+    @staticmethod
     async def _dept_id(session: AsyncSession, name: str) -> Optional[int]:
         return (await session.execute(
             select(Department.id).where(Department.name == name).limit(1)
@@ -885,6 +899,10 @@ class ValidationIssueService:
                 raise ChangeError("That validation check is not on this change")
             if check.status != "failed":
                 raise ChangeError("An issue is raised from a FAILED validation check")
+            if await svc.check_retired(session, check):
+                raise ChangeError(
+                    "That validation check is no longer asked of its "
+                    "department: raise the issue without linking it")
             dup = (await session.execute(
                 select(ValidationIssue).where(
                     ValidationIssue.check_id == check.id,
@@ -1750,11 +1768,15 @@ class ValidationIssueService:
         issue = await svc.get_issue(session, change, iid)
         svc._require_open(issue)
         note = _txt(note, "A closure note")
-        if issue.check_id is not None:
+        # A check no longer asked can never pass again: its issue closes
+        # with a note, like an unlinked one, whatever step it is at.
+        retired = issue.check_id is not None and await svc.check_retired(
+            session, await session.get(ValidationCheck, issue.check_id))
+        if issue.check_id is not None and not retired:
             raise ChangeError(
                 f"{issue.ref} is linked to a validation check: it closes when "
                 "that check is answered 'passed' again")
-        if issue.status not in ("revalidation", "open", "contained"):
+        if not retired and issue.status not in ("revalidation", "open", "contained"):
             raise ChangeError(
                 f"{issue.ref} is {issue.status}: finish the fix actions first "
                 "(an issue closes from re-validation, or before a route when "
@@ -1925,6 +1947,10 @@ class ValidationIssueService:
                 .where(ChangeRequest.id.in_(fids)))).all())
         ctx = await svc.plan_context(session, change)
         today = business_today()
+        # The extra cost is stated in the change's costing currency (its
+        # costing plant's), the same one the actual costs are booked in.
+        from app.services import costing_rates
+        currency = await costing_rates.costing_currency(session, change)
         out = []
         for i in issues:
             c = checks.get(i.check_id)
@@ -1987,7 +2013,7 @@ class ValidationIssueService:
                 "cost_visible": v.cost_role,
                 "extra_cost": i.extra_cost if v.cost_role else None,
                 "cost_set": i.extra_cost is not None,
-                "currency": "EUR",
+                "currency": currency,
                 "cost_bearer": i.cost_bearer,
                 "fix_quoted_at": i.fix_quoted_at,
                 "fix_quoted_by_name": users.get(i.fix_quoted_by),

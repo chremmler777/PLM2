@@ -1,8 +1,9 @@
 """Stage 10: the release checklist and the lessons-learned step.
 
-Pinned here: the 17 catalog items show with their owner
-departments (Quality owns none; PE and APQP per decision 2026-09-26), retired
-answers stay readable and uncounted; 'na' needs a note; only the owner department, PM, the lead or
+Pinned here: the 16 catalog items show with their owner
+departments (decision 2026-09-26: APQP confirms the process stable alone, the
+Tool Engineer answers the cycle time, Quality and Process Engineer own none),
+retired answers stay readable and uncounted; 'na' needs a note; only the owner department, PM, the lead or
 an admin answer an item; lessons are added by anyone on the change and the
 step is completed by PM/lead/admin with at least one lesson or a reason; and
 in_validation -> released refuses, in this order, on the checklist and then
@@ -74,13 +75,13 @@ async def _check(client, auth, cid, key, status, note=None, **extra):
 
 def _answer(key):
     """The extra fields a plain 'done' needs on this item."""
-    return {"outcome": "unchanged"} if key == "cycle_time" else {}
+    return {"outcome": "unchanged"} if key == "cycle_time_tool" else {}
 
 
-async def test_seventeen_checks_seeded_with_owners(client, rel_world):
+async def test_sixteen_checks_seeded_with_owners(client, rel_world):
     pm = await _auth(client, "pm")
     st = await _state(client, pm, rel_world["change_id"])
-    assert len(st["checks"]) == 17 and st["open_count"] == 17
+    assert len(st["checks"]) == 16 and st["open_count"] == 16
     by_key = {c["key"]: c for c in st["checks"]}
     assert by_key["index_updated"]["department_name"] == "Development"
     assert by_key["index_updated"]["department_id"] == rel_world["depts"]["Development"]
@@ -90,7 +91,7 @@ async def test_seventeen_checks_seeded_with_owners(client, rel_world):
     assert by_key["packaging_updated"]["department_name"] == "Packaging Engineer"
     assert "41.5" in by_key["weight_measured"]["hint"]
     assert st["can_release"] is False
-    assert "Release checklist incomplete: 17 open" in st["blockers"]
+    assert "Release checklist incomplete: 16 open" in st["blockers"]
     assert "Lessons learned step not done" in st["blockers"]
 
 
@@ -110,7 +111,7 @@ async def test_na_needs_a_note_and_owner_rights(client, rel_world, session_facto
     # PM answers anything, also items nobody owns here
     res = await _check(client, pm, cid, "packaging_updated", "done")
     assert res.status_code == 200
-    assert res.json()["open_count"] == 15
+    assert res.json()["open_count"] == 14
     # reopening clears the signature
     res = await _check(client, pm, cid, "packaging_updated", "open")
     assert next(c for c in res.json()["checks"]
@@ -177,7 +178,7 @@ async def test_release_guard_messages(client, rel_world, monkeypatch):
 
     res = await release()
     assert res.status_code == 400
-    assert "Release checklist incomplete: 17 open" in res.json()["detail"]
+    assert "Release checklist incomplete: 16 open" in res.json()["detail"]
     st = await _state(client, pm, cid)
     for c in st["checks"]:
         res = await _check(client, pm, cid, c["key"], "done", **_answer(c["key"]))
@@ -230,7 +231,7 @@ async def test_get_release_writes_nothing(client, rel_world, session_factory):
     assert [(r.check_key, r.status) for r in rows] == [("index_updated", "done")]
     assert rows[0].department_id == rel_world["depts"]["Development"]
     st = await _state(client, pm, cid)
-    assert st["open_count"] == 16
+    assert st["open_count"] == 15
 
 
 async def test_timing_guard_cannot_be_bypassed_through_on_hold(session_factory, rel_world):
@@ -339,34 +340,39 @@ async def test_release_and_close_are_pm_lead_or_admin(client, rel_world, session
     assert (await move(admin_auth, "closed")).status_code == 200
 
 
-async def test_process_engineer_and_apqp_rows(client, rel_world):
-    """Decision 2026-09-26: the Process Engineer confirms the process in the
-    PDB and owes the release only the cycle time and process stability;
-    APQP owns surface, technical quality, measurements, PPAP with the
-    customer approval and the control plan, and co-confirms stability.
-    Quality owns no release row."""
+async def test_apqp_tool_engineer_and_process_engineer_rows(client, rel_world):
+    """Decision 2026-09-26 (corrected the same day): APQP confirms the
+    process stable, alone, and owns surface, technical quality,
+    measurements, PPAP with the customer approval and the control plan; the
+    cycle time comes from the Tool Engineer. The Process Engineer works in
+    the PDB and owns no release row; neither do Quality and Manufacturing
+    Engineer."""
     cid = rel_world["change_id"]
-    process, apqp = await _auth(client, "process"), await _auth(client, "apqp")
+    process, apqp, tool = (await _auth(client, "process"), await _auth(client, "apqp"),
+                           await _auth(client, "tool"))
     st = await _state(client, process, cid)
     by_key = {c["key"]: c for c in st["checks"]}
     owners = {}
     for c in st["checks"]:
         owners.setdefault(c["department_name"], []).append(c["key"])
-    assert owners["Process Engineer"] == [
-        "cycle_time", "process_stable_pe"]
+    assert owners["Tool Engineer"] == [
+        "equipment_updated", "weight_measured", "cycle_time_tool"]
     assert owners["APQP"] == [
         "process_stable_apqp", "surface_quality", "technical_quality",
         "parts_measured", "customer_approval", "control_plan"]
-    assert "Quality" not in owners and "Manufacturing Engineer" not in owners
+    for nobody in ("Process Engineer", "Quality", "Manufacturing Engineer"):
+        assert nobody not in owners
     for gone in ("process_parameters", "process_fmea", "documents_updated",
-                 "cycle_time_confirmed", "quality_samples", "quality_control_plan"):
+                 "cycle_time_confirmed", "quality_samples", "quality_control_plan",
+                 "cycle_time", "process_stable_pe"):
         assert gone not in by_key
-    assert by_key["cycle_time"]["label"] == (
+    assert by_key["cycle_time_tool"]["label"] == (
         "Cycle time: changed (new value entered) or confirmed unchanged")
-    assert by_key["cycle_time"]["value_kind"] == "cycle_time"
-    assert by_key["process_stable_pe"]["label"] == (
-        "Process stable: SPC Cm > 1.67 (Process Engineer)")
+    assert by_key["cycle_time_tool"]["value_kind"] == "cycle_time"
+    assert by_key["cycle_time_tool"]["department_id"] == rel_world["depts"]["Tool Engineer"]
+    assert by_key["process_stable_apqp"]["label"] == "Process stable: SPC Cm > 1.67"
     assert by_key["process_stable_apqp"]["value_kind"] == "cm"
+    assert by_key["process_stable_apqp"]["hint"] is None
     assert by_key["parts_measured"]["label"] == (
         "Measurements confirmed, measurement report on file")
     assert by_key["customer_approval"]["label"] == (
@@ -375,41 +381,52 @@ async def test_process_engineer_and_apqp_rows(client, rel_world):
     assert by_key["control_plan"]["label"] == "Control plan / inspection plan updated"
     assert by_key["surface_quality"]["department_id"] == rel_world["depts"]["APQP"]
     assert not any(c["retired"] for c in st["checks"])
-    # each owner answers its own half only
+    # the Process Engineer answers nothing; the first version's keys are gone
     assert (await _check(client, process, cid, "process_stable_apqp", "done")).status_code == 403
-    assert (await _check(client, apqp, cid, "process_stable_pe", "done")).status_code == 403
-    res = await _check(client, process, cid, "process_stable_pe", "done", value=1.85)
+    assert (await _check(client, process, cid, "cycle_time_tool", "done",
+                         outcome="unchanged")).status_code == 403
+    for old in ("cycle_time", "process_stable_pe"):
+        res = await _check(client, process, cid, old, "done")
+        assert res.status_code == 400 and "no longer" in res.json()["detail"]
+    # APQP alone makes the process stable
+    res = await _check(client, apqp, cid, "process_stable_apqp", "done", value=1.85)
     assert res.status_code == 200, res.text
-    by_key = {c["key"]: c for c in res.json()["checks"]}
-    assert by_key["process_stable_pe"]["note"] == "Cm 1.85"
-    # the stability is complete only when both halves are
-    assert by_key["process_stable_apqp"]["status"] == "open"
-    assert by_key["process_stable_apqp"]["hint"].startswith("Process Engineer: confirmed")
-    assert by_key["process_stable_pe"]["hint"].startswith("APQP: not confirmed yet")
-    assert res.json()["open_count"] == 16
-    res = await _check(client, apqp, cid, "process_stable_apqp", "done")
-    assert res.status_code == 200, res.text
+    assert next(c for c in res.json()["checks"]
+                if c["key"] == "process_stable_apqp")["note"] == "Cm 1.85"
     assert res.json()["open_count"] == 15
+    # the Tool Engineer answers the cycle time
+    assert (await _check(client, apqp, cid, "cycle_time_tool", "done",
+                         outcome="unchanged")).status_code == 403
+    res = await _check(client, tool, cid, "cycle_time_tool", "done", outcome="unchanged")
+    assert res.status_code == 200, res.text
+    assert res.json()["open_count"] == 14
 
 
 async def test_cycle_time_answer_carries_the_value(client, rel_world):
     cid = rel_world["change_id"]
-    process = await _auth(client, "process")
+    tool = await _auth(client, "tool")
+    key = "cycle_time_tool"
     for extra in ({}, {"outcome": "maybe"}, {"outcome": "changed"},
                   {"outcome": "changed", "value": 0},
+                  {"outcome": "changed", "value": 0.04},   # rounds to 0.0 s
                   {"outcome": "unchanged", "value": 40}):
-        res = await _check(client, process, cid, "cycle_time", "done", **extra)
+        res = await _check(client, tool, cid, key, "done", **extra)
         assert res.status_code == 400, (extra, res.text)
-    res = await _check(client, process, cid, "cycle_time", "done", "new gripper",
-                       outcome="changed", value=38.5)
+    res = await _check(client, tool, cid, key, "done", "new gripper",
+                       outcome="changed", value=38.46)
     assert res.status_code == 200, res.text
-    row = next(c for c in res.json()["checks"] if c["key"] == "cycle_time")
+    row = next(c for c in res.json()["checks"] if c["key"] == key)
+    # seconds are kept to one decimal: the note says what was stored
     assert row["note"] == "Changed: new cycle time 38.5 s. new gripper"
-    res = await _check(client, process, cid, "cycle_time", "done", outcome="unchanged")
-    row = next(c for c in res.json()["checks"] if c["key"] == "cycle_time")
+    res = await _check(client, tool, cid, key, "done", outcome="changed",
+                       value=1234567.0)
+    row = next(c for c in res.json()["checks"] if c["key"] == key)
+    assert row["note"] == "Changed: new cycle time 1234567 s"
+    res = await _check(client, tool, cid, key, "done", outcome="unchanged")
+    row = next(c for c in res.json()["checks"] if c["key"] == key)
     assert row["note"] == "Confirmed unchanged"
     # n.a. takes a reason, not a value; plain items take no value
-    assert (await _check(client, process, cid, "cycle_time", "na", "x",
+    assert (await _check(client, tool, cid, key, "na", "x",
                          value=3)).status_code == 400
     pm = await _auth(client, "pm")
     assert (await _check(client, pm, cid, "erp_updated", "done",
@@ -417,8 +434,8 @@ async def test_cycle_time_answer_carries_the_value(client, rel_world):
     log = [e for e in (await client.get(f"/api/v1/changes/{cid}/changelog",
                                         headers=pm)).json()
            if e["action"] == "release_check"]
-    assert any("38.5" in str(e.get("new_value")) and "changed" in str(e.get("new_value"))
-               for e in log)
+    assert any("38.5" in str(e.get("new_value")) and "38.46" not in str(e.get("new_value"))
+               and "changed" in str(e.get("new_value")) for e in log)
 
 
 async def test_cm_must_be_above_the_limit(client, rel_world):
@@ -426,24 +443,41 @@ async def test_cm_must_be_above_the_limit(client, rel_world):
     apqp = await _auth(client, "apqp")
     res = await _check(client, apqp, cid, "process_stable_apqp", "done", value=1.67)
     assert res.status_code == 400 and "1.67" in res.json()["detail"]
+    # checked as stored: 1.6700001 is kept as 1.67, which is not above 1.67
+    res = await _check(client, apqp, cid, "process_stable_apqp", "done", value=1.6700001)
+    assert res.status_code == 400 and "Cm 1.67 is not above" in res.json()["detail"]
     assert (await _check(client, apqp, cid, "process_stable_apqp", "done",
                          outcome="changed")).status_code == 400
+    res = await _check(client, apqp, cid, "process_stable_apqp", "done", value=1.854)
+    assert res.status_code == 200, res.text
+    row = next(c for c in res.json()["checks"] if c["key"] == "process_stable_apqp")
+    assert row["note"] == "Cm 1.85"
     res = await _check(client, apqp, cid, "process_stable_apqp", "done", "SPC chart on file")
     assert res.status_code == 200
     row = next(c for c in res.json()["checks"] if c["key"] == "process_stable_apqp")
     assert row["note"] == "SPC chart on file"
 
 
-async def test_cycle_time_hint_reads_validation(client, rel_world, session_factory):
+async def test_cycle_time_hint_reads_the_tool_engineers_validation(
+        client, rel_world, session_factory):
     from app.models.change_validation import ValidationCheck
     cid = rel_world["change_id"]
+    pm = await _auth(client, "pm")
     async with session_factory() as s:
+        # measured under the older catalog by the Process Engineer: not shown
         s.add(ValidationCheck(change_id=cid, check_key="cycle_time", status="passed",
                               value=41.0, department_id=rel_world["depts"]["Process Engineer"]))
         await s.commit()
-    st = await _state(client, await _auth(client, "pm"), cid)
-    row = next(c for c in st["checks"] if c["key"] == "cycle_time")
-    assert row["hint"] == "Measured in validation: Process Engineer 41 s"
+    row = next(c for c in (await _state(client, pm, cid))["checks"]
+               if c["key"] == "cycle_time_tool")
+    assert row["hint"] is None
+    async with session_factory() as s:
+        s.add(ValidationCheck(change_id=cid, check_key="cycle_time", status="passed",
+                              value=39.5, department_id=rel_world["depts"]["Tool Engineer"]))
+        await s.commit()
+    row = next(c for c in (await _state(client, pm, cid))["checks"]
+               if c["key"] == "cycle_time_tool")
+    assert row["hint"] == "Measured in validation by the Tool Engineer: 39.5 s"
 
 
 async def test_retired_answers_stay_readable(client, rel_world, session_factory):
@@ -456,7 +490,10 @@ async def test_retired_answers_stay_readable(client, rel_world, session_factory)
         for key, status, dept in (("process_fmea", "done", "Process Engineer"),
                                   ("quality_samples", "na", "Quality"),
                                   ("cycle_time_confirmed", "done", None),
-                                  ("documents_updated", "open", "APQP")):
+                                  ("documents_updated", "open", "APQP"),
+                                  # the first version of the 2026-09-26 rework
+                                  ("cycle_time", "done", "Process Engineer"),
+                                  ("process_stable_pe", "done", "Process Engineer")):
             s.add(ChangeReleaseCheck(
                 change_id=cid, check_key=key, status=status,
                 note="kept" if status == "na" else None,
@@ -468,17 +505,25 @@ async def test_retired_answers_stay_readable(client, rel_world, session_factory)
     st = await _state(client, pm, cid)
     retired = [c for c in st["checks"] if c["retired"]]
     assert [c["key"] for c in retired] == [
-        "cycle_time_confirmed", "process_fmea", "quality_samples"]
+        "cycle_time_confirmed", "cycle_time", "process_stable_pe",
+        "process_fmea", "quality_samples"]
     by_key = {c["key"]: c for c in retired}
     assert by_key["process_fmea"]["label"] == "Process FMEA updated"
     assert by_key["process_fmea"]["by_name"] == "Rel pm"
     assert by_key["quality_samples"]["department_name"] == "Quality"
     assert by_key["quality_samples"]["note"] == "kept"
     assert by_key["cycle_time_confirmed"]["department_name"] == "Manufacturing Engineer"
-    assert len(st["checks"]) == 20 and st["open_count"] == 17
-    assert "Release checklist incomplete: 17 open" in st["blockers"]
+    assert by_key["cycle_time"]["department_name"] == "Process Engineer"
+    assert by_key["process_stable_pe"]["label"] == (
+        "Process stable: SPC Cm > 1.67 (Process Engineer)")
+    assert by_key["process_stable_pe"]["hint"] is None
+    assert len(st["checks"]) == 21 and st["open_count"] == 16
+    assert "Release checklist incomplete: 16 open" in st["blockers"]
     res = await _check(client, pm, cid, "process_fmea", "open")
     assert res.status_code == 400 and "no longer" in res.json()["detail"]
+    # the Tool Engineer's cycle-time row is open next to the retired one
+    open_row = next(c for c in st["checks"] if c["key"] == "cycle_time_tool")
+    assert open_row["status"] == "open" and not open_row["retired"]
 
 
 async def test_change_released_before_the_cutoff_keeps_its_checklist(
@@ -496,21 +541,39 @@ async def test_change_released_before_the_cutoff_keeps_its_checklist(
     assert set(catalog.RETIRED_ORIGINAL) <= set(by_key)
     assert by_key["cycle_time_confirmed"]["label"] == "Cycle time confirmed in series production"
     assert not any(c["retired"] for c in st["checks"])
-    assert "cycle_time" not in by_key and "process_fmea" not in by_key
+    for key in ("cycle_time", "cycle_time_tool", "process_stable_pe", "process_fmea"):
+        assert key not in by_key
+    # relabelled items read with the words they were asked with
+    assert by_key["parts_measured"]["label"] == "Parts measured, measurement report on file"
+    assert by_key["customer_approval"]["label"] == (
+        "Customer approval received (PPAP / ISIR / PSW)")
 
 
-@pytest.mark.parametrize("status,released_at,shown", [
-    ("released", "2026-06-01", False),    # released before the rows existed
-    ("closed", "2026-06-01", False),
-    ("released", None, False),            # legacy release without a stamp
-    ("cancelled", None, False),           # ended without a release
+async def test_open_change_reads_the_new_labels(client, rel_world):
+    st = await _state(client, await _auth(client, "pm"), rel_world["change_id"])
+    by_key = {c["key"]: c for c in st["checks"]}
+    assert by_key["parts_measured"]["label"] == (
+        "Measurements confirmed, measurement report on file")
+
+
+@pytest.mark.parametrize("status,stamp,ended,shown", [
+    ("released", "released_at", "2026-06-01", False),  # released before the rows existed
+    ("closed", "released_at", "2026-06-01", False),
+    ("released", None, None, False),                    # legacy release without a stamp
+    ("cancelled", None, None, False),                   # legacy end without a stamp
+    ("cancelled", "cancelled_at", "2026-06-01", False),
+    ("rejected", "rejected_at", "2026-06-01", False),
+    # ended without a release AFTER the cutoff: the new checklist
+    ("cancelled", "cancelled_at", "2026-09-27T10:00:00", True),
+    ("rejected", "rejected_at", "2026-09-27T10:00:00", True),
+    ("closed", "closed_at", "2026-09-27T10:00:00", True),  # closed, never released
     # the default cutoff is 2026-09-26 04:00 UTC (midnight New York)
-    ("released", "2026-09-26T03:59:59", False),  # 23:59 EDT on the 25th
-    ("released", "2026-09-26T04:00:00", True),   # released after: they belong
-    ("in_implementation", None, True),    # still open: they belong
+    ("released", "released_at", "2026-09-26T03:59:59", False),  # 23:59 EDT on the 25th
+    ("released", "released_at", "2026-09-26T04:00:00", True),   # released after: they belong
+    ("in_implementation", None, None, True),            # still open: they belong
 ])
 async def test_new_rows_do_not_reach_back_into_finished_changes(
-        client, rel_world, session_factory, monkeypatch, status, released_at, shown):
+        client, rel_world, session_factory, monkeypatch, status, stamp, ended, shown):
     from datetime import datetime
     from app.services import release_checklist as catalog
     from app.services.release_service import ReleaseService
@@ -519,18 +582,20 @@ async def test_new_rows_do_not_reach_back_into_finished_changes(
     async with session_factory() as s:
         c = await s.get(ChangeRequest, cid)
         c.status = status
-        c.released_at = datetime.fromisoformat(released_at) if released_at else None
+        c.released_at = None
+        if stamp:
+            setattr(c, stamp, datetime.fromisoformat(ended))
         await s.commit()
     st = await _state(client, await _auth(client, "pm"), cid)
     keys = {c["key"] for c in st["checks"]}
     assert (set(catalog.ADDED_LATER) <= keys) is shown
     assert not (set(catalog.ADDED_LATER) & keys) or shown
-    assert len(st["checks"]) == (17 if shown else 13)
+    assert len(st["checks"]) == (16 if shown else 13)
     # the retired items of the first catalog belong to the old changes only
     assert (set(catalog.RETIRED_ORIGINAL) <= keys) is (not shown)
     async with session_factory() as s:
         n = await ReleaseService.open_count(s, await s.get(ChangeRequest, cid))
-    assert n == (17 if shown else 13)
+    assert n == (16 if shown else 13)
 
 
 async def test_answered_new_row_stays_on_a_finished_change(client, rel_world, session_factory):
@@ -596,6 +661,56 @@ async def test_env_cutoff_reaches_the_release_state(
         await s.commit()
     pm = await _auth(client, "pm")
     monkeypatch.delenv("PLM_RELEASE_ROWS_SINCE", raising=False)
-    assert len((await _state(client, pm, cid))["checks"]) == 17
+    assert len((await _state(client, pm, cid))["checks"]) == 16
     monkeypatch.setenv("PLM_RELEASE_ROWS_SINCE", "2026-10-01T12:00:00Z")
     assert len((await _state(client, pm, cid))["checks"]) == 13
+
+
+async def test_change_finished_on_the_first_version_keeps_its_rows(
+        client, rel_world, session_factory, monkeypatch):
+    """A change released (and closed) while the first version of the
+    2026-09-26 rework was live answered the Process Engineer's cycle time
+    and process-stable rows. It keeps that checklist: those rows stay
+    counted as answered, and the Tool Engineer's cycle-time row that
+    replaced them is never added, so no open row appears on it."""
+    from datetime import datetime
+    from app.models.change_validation import ChangeReleaseCheck
+    from app.services import release_checklist as catalog
+    from app.services.release_service import ReleaseService
+    monkeypatch.delenv(catalog.RELEASE_ROWS_SINCE_ENV, raising=False)
+    cid = rel_world["change_id"]
+    async with session_factory() as s:
+        for key in catalog.CHECK_KEYS + ["cycle_time", "process_stable_pe"]:
+            if key == "cycle_time_tool":
+                continue
+            dept = catalog.owner_for(key)
+            s.add(ChangeReleaseCheck(
+                change_id=cid, check_key=key, status="done",
+                department_id=rel_world["depts"].get(dept),
+                checked_by=rel_world["users"]["pm"],
+                checked_at=datetime(2026, 9, 26, 10, 0)))
+        c = await s.get(ChangeRequest, cid)
+        c.status = "closed"
+        c.released_at = datetime(2026, 9, 26, 11, 0)     # after the cutoff
+        c.closed_at = datetime(2026, 9, 26, 12, 0)
+        await s.commit()
+    st = await _state(client, await _auth(client, "pm"), cid)
+    by_key = {c["key"]: c for c in st["checks"]}
+    assert "cycle_time_tool" not in by_key
+    assert by_key["cycle_time"]["retired"] is False
+    assert by_key["cycle_time"]["department_name"] == "Process Engineer"
+    assert by_key["process_stable_pe"]["retired"] is False
+    assert st["open_count"] == 0 and len(st["checks"]) == 17
+    async with session_factory() as s:
+        assert await ReleaseService.open_count(s, await s.get(ChangeRequest, cid)) == 0
+    # the same rows on a change still running: read-only, the new row open
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status, c.released_at, c.closed_at = "in_validation", None, None
+        await s.commit()
+    st = await _state(client, await _auth(client, "pm"), cid)
+    by_key = {c["key"]: c for c in st["checks"]}
+    assert by_key["cycle_time"]["retired"] is True
+    assert by_key["process_stable_pe"]["retired"] is True
+    assert by_key["cycle_time_tool"]["status"] == "open"
+    assert st["open_count"] == 1

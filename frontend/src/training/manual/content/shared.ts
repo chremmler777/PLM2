@@ -305,7 +305,7 @@ export const flowChapter: ContentChapter = {
         {
           points: [
             ['Validation checks:', 'each implementing department passes or fails its own checks.'],
-            ['Release checklist:', 'seventeen rows, each owned by a department. "N.a." needs a note.'],
+            ['Release checklist:', 'sixteen rows, each owned by a department. "N.a." needs a note.'],
             ['Lessons learned:', 'anyone adds a lesson. PM completes the step, with at least one lesson or a reason why there is none.'],
             ['Release & close:', 'PM releases once nothing blocks, reads the summary (plan against actual, offer against actual) and closes.'],
           ],

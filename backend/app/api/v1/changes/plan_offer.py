@@ -207,7 +207,7 @@ class ReleaseCheckIn(BaseModel):
     note: Optional[str] = None
     # Only on 'done' of an item that carries a value: the cycle time
     # (outcome changed | unchanged, value = new seconds when changed) and the
-    # process-stable rows (value = measured Cm, optional).
+    # process-stable row (value = measured Cm, optional).
     outcome: Optional[str] = None
     value: Optional[float] = None
 

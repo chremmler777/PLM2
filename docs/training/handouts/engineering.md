@@ -21,12 +21,11 @@ long it takes; then do it, prove it holds and tick your part of the release.
 ## Department specifics
 
 - **Development:** "Confirm impact (Development)" at scoping; extra row "Article design update"; triage every new index ("Full ECR", "Attach to an open change", "Engineering review", "Administrative"). Release: index, drawing and 3D data, spare parts.
-- **Tool Engineer:** tools and molds; "Part weight" estimate at costing. Release: tool and equipment data, part weight.
-- **Manufacturing Engineer:** equipment. No release row (the cycle time is the Process Engineer's).
-- **APQP:** gauges; extra rows "PFMEA update", "Control plan update". Release: "Process stable: SPC Cm > 1.67 (APQP)", surface quality, technical quality, "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".
-- **Process Engineer:** assesses when the scoping meeting gives it a letter. Keeps the process details (parameters, PFMEA, work instructions) in the process database (PDB) and confirms them there. Release: "Cycle time: changed (new value entered) or confirmed unchanged" ("Changed" needs the new seconds), "Process stable: SPC Cm > 1.67 (Process Engineer)" (Cm optional, above 1.67). Process stability counts only when the Process Engineer and APQP rows are both "Done".
+- **Tool Engineer:** tools and molds; "Part weight" estimate at costing. Validation: measures the cycle time ("Measured cycle time", seconds) and the part weight. Release: tool and equipment data, part weight, "Cycle time: changed (new value entered) or confirmed unchanged" ("Changed" needs the new seconds; the row shows your validation measurement).
+- **Manufacturing Engineer:** equipment. No release row, no cycle time (the cycle time is the Tool Engineer's).
+- **APQP:** gauges; extra rows "PFMEA update", "Control plan update". Release: "Process stable: SPC Cm > 1.67" (APQP alone; Cm optional, above 1.67), surface quality, technical quality, "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".
+- **Process Engineer:** assesses when the scoping meeting gives it a letter. Keeps the process details (parameters, PFMEA, work instructions) in the process database (PDB) and confirms them there. No release row and no cycle time measurement. Future: process engineering tasks forwarded from the PDB to PLM.
 - **Packaging Engineer:** "Packaging impacted?" first; No is a complete answer. Release: "Packaging instruction updated".
-- **Process Engineer:** assesses when the scoping meeting gives it a letter.
 
 ## Rules to remember
 
