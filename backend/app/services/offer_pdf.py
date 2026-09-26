@@ -776,8 +776,8 @@ def render_offer_pdf(ctx: dict) -> bytes:
         meta.append(("Issued by", issued))
     if ctx.get("project_name"):
         meta.append(("Project", ctx["project_name"]))
-    fixed = {"Offer no.": 30, "Date": 23, "Valid until": 23, "Change": 24,
-             "Version": 15}
+    fixed = {"Offer no.": 27, "Date": 22, "Valid until": 22, "Change": 20,
+             "Version": 13}
     widths = [fixed.get(k, 0) * mm for k, _ in meta]
     flex = [i for i, (k, _) in enumerate(meta) if k not in fixed]
     rest = width - sum(widths)
