@@ -199,7 +199,11 @@ class WorkflowService:
                     (st for st in routing.standard_snapshot.get("stages", [])
                      if st["stage_order"] == stage.stage_order), None)
                 if snap_stage is not None:
-                    snap_departments = list(snap_stage["departments"])
+                    # An approved deviation add sits on the snapshot
+                    # (added_by_deviation) but is still outside the
+                    # template: its step-less task comes from its row below.
+                    snap_departments = [d for d in snap_stage["departments"]
+                                        if not d.get("added_by_deviation")]
                     allowed_pairs = {(d["department_id"], d["rasic_letter"])
                                      for d in snap_departments}
 
@@ -254,7 +258,8 @@ class WorkflowService:
 
         # A routing deviation that added an R/A/S/C department to this stage
         # before it started left an assessment row, but neither the template
-        # nor the snapshot carries it (the snapshot records only I adds). Its
+        # nor the snapshot's standard entries carry it (an approved add sits
+        # on the snapshot marked added_by_deviation, skipped above). Its
         # task is created here, with the stage's others, BEFORE the caller
         # decides whether the stage has a gate: otherwise a stage whose
         # template rows are all C/I cascades straight through and the added

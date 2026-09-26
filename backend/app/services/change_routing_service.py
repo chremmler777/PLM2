@@ -74,7 +74,9 @@ async def _standard_pairs(session: AsyncSession, routing: Optional[ChangeRouting
     """The (department_id, letter) pairs the change's standard gives a stage,
     by the engine's own rule (WorkflowService._create_stage_tasks): the
     routing snapshot's stage when it carries one, else the template's. A
-    row outside this set is a deviation add: its task carries no step."""
+    row outside this set is a deviation add: its task carries no step. An
+    approved deviation add sits on the snapshot (added_by_deviation) so a
+    later rejection keeps it, but it is still a deviation add here."""
     snap_stage = None
     if routing is not None:
         snap_stage = next(
@@ -82,7 +84,8 @@ async def _standard_pairs(session: AsyncSession, routing: Optional[ChangeRouting
              if st["stage_order"] == stage_order), None)
     if snap_stage is not None:
         return {(d["department_id"], d["rasic_letter"])
-                for d in snap_stage["departments"] if not d.get("pending_deviation")}
+                for d in snap_stage["departments"]
+                if not d.get("pending_deviation") and not d.get("added_by_deviation")}
     return {(d["department_id"], d["rasic_letter"])
             for d in await _template_stage_departments(session, template_id, stage_order)}
 
@@ -930,8 +933,11 @@ class ChangeRoutingService:
         """Reject the pending deviation and undo what it added.
 
         Undo covers the 'add' op, the only one the UI offers: every assessment
-        row outside the standard snapshot that has not been answered is dropped
+        row outside the routing snapshot that has not been answered is dropped
         together with its engine task, so the department is off the hook again.
+        Adds of earlier, APPROVED deviations are on the snapshot
+        (added_by_deviation, written by approve_deviation) and stay: a
+        rejection undoes only what is still pending.
         A row that was already answered is NOT erased — the rejection is refused
         instead; by then the department's work is a fact of the record."""
         from app.services.change_service import ChangeService
@@ -940,9 +946,19 @@ class ChangeRoutingService:
         ChangeRoutingService._check_decide(change, routing, user_id, "reject", acting)
         if not (reason and reason.strip()):
             raise ValueError("A reason is required to reject a routing deviation")
-        standard = {(d["department_id"], st["stage_order"]): d["rasic_letter"]
-                    for st in routing.standard_snapshot.get("stages", [])
-                    for d in st["departments"] if not d.get("pending_deviation")}
+        # What the routing stands at: the snapshot, with the adds and
+        # re-letters approved so far. One letter per department and stage;
+        # an assessment letter wins over an Informed entry of the same
+        # department (a row is never "re-lettered back" to I).
+        standard: dict[tuple[int, int], str] = {}
+        for st in routing.standard_snapshot.get("stages", []):
+            for d in st["departments"]:
+                if d.get("pending_deviation"):
+                    continue
+                key = (d["department_id"], st["stage_order"])
+                if key in standard and d["rasic_letter"] not in ASSESSMENT_LETTERS:
+                    continue
+                standard[key] = d["rasic_letter"]
         # An Informed department the deviation put on the routing comes off
         # again (it never had a row or a task).
         uninformed = ChangeRoutingService._settle_pending_informed(routing, keep=False)
@@ -1061,8 +1077,49 @@ class ChangeRoutingService:
                 if task is not None:
                     _retarget_task(task, letter)
         await session.flush()
-        if informed or moved:
+        # The routing rows as they stand after the re-letters: the approved
+        # adds and removes are written into the snapshot below.
+        current = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+            .order_by(ChangeAssessment.stage_order, ChangeAssessment.id)
+        )).scalars().all()
+        row_keys = {(a.department_id, a.stage_order) for a in current}
+        on_snap = {(d["department_id"], st["stage_order"])
+                   for st in (routing.standard_snapshot or {}).get("stages", [])
+                   for d in st["departments"]
+                   if not d.get("pending_deviation")
+                   and d["rasic_letter"] in ASSESSMENT_LETTERS}
+        # An R/A/S/C row outside the snapshot is an add of this deviation.
+        added = [a for a in current
+                 if a.rasic_letter in ASSESSMENT_LETTERS
+                 and (a.department_id, a.stage_order) not in on_snap]
+        # An R/A/S/C snapshot entry without its row: the row was removed.
+        removed_entries = bool(on_snap - row_keys)
+        if informed or moved or added or removed_entries:
             snap = copy.deepcopy(routing.standard_snapshot or {"stages": []})
+            # Approved adds join the snapshot, so a later rejection of
+            # another deviation (which undoes every row outside the
+            # snapshot) keeps them. Marked added_by_deviation: for the
+            # engine and the repair they stay deviation adds (task without
+            # a step, never waived as a standard row of a passed stage).
+            for a in added:
+                st = await _snapshot_stage(session, routing, snap, a.stage_order)
+                st["departments"] = [
+                    d for d in st["departments"]
+                    if not (d["department_id"] == a.department_id
+                            and d["rasic_letter"] in ASSESSMENT_LETTERS)]
+                st["departments"].append({"department_id": a.department_id,
+                                          "rasic_letter": a.rasic_letter,
+                                          "added_by_deviation": True})
+            # Approved removes leave the snapshot: a later stage start must
+            # not create a task for a department taken off the routing.
+            if removed_entries:
+                for st in snap.get("stages", []):
+                    st["departments"] = [
+                        d for d in st["departments"]
+                        if d.get("pending_deviation")
+                        or d["rasic_letter"] not in ASSESSMENT_LETTERS
+                        or (d["department_id"], st["stage_order"]) in row_keys]
             for dept_id, order in informed:
                 st = await _snapshot_stage(session, routing, snap, order)
                 st["departments"] = [d for d in st["departments"]
@@ -1071,9 +1128,8 @@ class ChangeRoutingService:
                                           "rasic_letter": "I"})
             for dept_id, order, old, new in moved:
                 st = await _snapshot_stage(session, routing, snap, order)
-                # Only an entry the standard gave the department moves; a
-                # deviation-added row was never on the snapshot and its
-                # stage-start task follows the row's own letter anyway.
+                # The department's entry follows its row's letter (a
+                # standard entry, or an add approved earlier).
                 for d in st["departments"]:
                     if (d["department_id"] == dept_id and d["rasic_letter"] == old
                             and not d.get("pending_deviation")):
