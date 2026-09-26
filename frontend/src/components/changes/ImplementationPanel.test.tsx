@@ -84,6 +84,17 @@ describe('ImplementationPanel', () => {
       expect(changesApi.signNoGeometryChange).toHaveBeenCalledWith(10, 55, 'label only'))
   })
 
+  it('signing no geometry change refetches the revision workflow so a held Approve unlocks', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByText(/ECR1\.1/)
+    const spy = vi.spyOn(lastQc, 'invalidateQueries')
+    fireEvent.click(screen.getByRole('button', { name: /Sign no geometry change/ }))
+    fireEvent.change(await screen.findByRole('textbox'), { target: { value: 'label only' } })
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['workflow', 'revision', 55, 'instance'] }))
+  })
+
   it('shows the ready banner when all revisions are ready', async () => {
     vi.mocked(changesApi.getImplementation).mockResolvedValue({
       ready_to_go: true,

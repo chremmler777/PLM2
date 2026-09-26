@@ -7,6 +7,7 @@ import ReasonDialog from './ReasonDialog';
 import CADUploader from '../CADUploader';
 import RevisionWorkflowSection from '../workflows/RevisionWorkflowSection';
 import { toastError } from '../../lib/apiError'
+import { invalidateRevisionWorkflow } from '../../hooks/queries/useWorkflows'
 
 interface Props {
   changeId: number;
@@ -29,9 +30,10 @@ export default function ImplementationPanel({ changeId }: Props) {
   const sign = useMutation({
     mutationFn: ({ item, reason }: { item: ImplementationItem; reason: string }) =>
       changesApi.signNoGeometryChange(item.part_id, item.revision_id!, reason),
-    onSuccess: () => {
+    onSuccess: (_data, { item }) => {
       setSignTarget(null);
       invalidate();
+      invalidateRevisionWorkflow(qc, item.revision_id);
     },
     onError: (e: unknown) => toastError(e, 'Could not sign off the revision'),
   });

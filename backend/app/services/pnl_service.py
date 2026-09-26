@@ -34,6 +34,18 @@ def _baseline_last_day(t) -> date:
             if t.baseline_finish > start else start)
 
 
+def _offered_last_day(snap: dict) -> Optional[date]:
+    """The offered finish as an inclusive last day. A snapshot frozen since
+    quote_last_day existed carries it (a milestone on its start). An older
+    one has only quote_finish, the max end_date of the quote plan: one day
+    early when that plan ends on a milestone, the best there is."""
+    if snap.get("quote_last_day"):
+        return date.fromisoformat(snap["quote_last_day"])
+    if snap.get("quote_finish"):
+        return date.fromisoformat(snap["quote_finish"]) - timedelta(days=1)
+    return None
+
+
 PNL_STATUSES = ("costing", "quoting", "quoted", "approved", "in_implementation",
                 "in_validation", "released", "closed")
 # Sliced by name, not by index: inserting a status into the tuple must not
@@ -516,8 +528,8 @@ class PnlService:
             # the same date rule as PnlService.timing (inclusive last days)
             baseline = max((_baseline_last_day(t) for t in detailed if t.baseline_finish),
                            default=None)
-            if baseline is None and snap and snap.get("quote_finish"):
-                baseline = date.fromisoformat(snap["quote_finish"]) - timedelta(days=1)
+            if baseline is None and snap:
+                baseline = _offered_last_day(snap)
             if baseline is None:
                 quote = plan_tasks.get((c.id, "quote"), [])
                 ChangePlanService._attach(quote, ChangePlanService.calendar(c, "quote"))
@@ -908,6 +920,7 @@ class PnlService:
                      if change.bank_build_mode == "planned_scrap"
                      and change.scrap_quote_price is not None else 0.0)
         quote_finish = await PnlService._plan_finish(session, change, "quote")
+        quote_last_day = await PnlService._plan_last_day(session, change, "quote")
         return {
             "taken_at": datetime.utcnow().isoformat(),
             "currency": currency,
@@ -924,6 +937,10 @@ class PnlService:
             # the finish the customer was offered: the timing baseline until
             # the detailed plan has its own
             "quote_finish": quote_finish.isoformat() if quote_finish else None,
+            # the same finish as the inclusive last day (plan_finish: a
+            # milestone on its start), the slip baseline; quote_finish stays
+            # for the snapshots and readers that already know it
+            "quote_last_day": quote_last_day.isoformat() if quote_last_day else None,
         }
 
     @staticmethod
@@ -1052,7 +1069,8 @@ class PnlService:
         return out
 
     @staticmethod
-    async def timing(session, change, quote_finish: Optional[str] = None) -> dict:
+    async def timing(session, change, quote_finish: Optional[str] = None,
+                     quote_last_day: Optional[str] = None) -> dict:
         """Baseline against forecast (or actual) finish of the detailed plan,
         the slip counted in the plan's own units (working or calendar days).
         Without a detailed baseline the offered (quote plan) finish is the
@@ -1070,9 +1088,9 @@ class PnlService:
         baseline = max((_baseline_last_day(t) for t in tasks if t.baseline_finish),
                        default=None)
         source = "detailed_baseline"
-        if baseline is None and quote_finish:
-            # the frozen offer finish is the quote plan's exclusive end
-            baseline = date.fromisoformat(quote_finish) - timedelta(days=1)
+        if baseline is None and (quote_last_day or quote_finish):
+            baseline = _offered_last_day({"quote_last_day": quote_last_day,
+                                          "quote_finish": quote_finish})
             source = "offer"
         if baseline is None:
             quote = await PnlService._plan_last_day(session, change, "quote")
@@ -1173,7 +1191,8 @@ class PnlService:
         if planned_revenue is None and basis != "none":
             warnings.append("No price yet: margins cannot be computed")
 
-        timing = await PnlService.timing(session, change, planned.get("quote_finish"))
+        timing = await PnlService.timing(session, change, planned.get("quote_finish"),
+                                         planned.get("quote_last_day"))
         if timing["baseline_finish"] is None:
             warnings.append("No timing baseline")
 

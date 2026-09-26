@@ -283,6 +283,79 @@ async def test_timing_dates_follow_the_plans_last_day_rule(client, admin_auth, s
     assert next(r for r in rows if r["change_id"] == world["change_id"])["slip_days"] == 17
 
 
+async def _refreeze(s, change_id, offer_id, **override):
+    """Re-take the accepted offer's frozen P&L from the plan as it stands
+    (the world fixture froze before any quote plan existed)."""
+    change = await s.get(ChangeRequest, change_id)
+    offer = await s.get(ChangeOffer, offer_id)
+    pnl = await PnlService.planned_figures(s, change, offer)
+    pnl.update(override)
+    data = dict(offer.data)
+    data[SNAPSHOT_KEY] = {**data[SNAPSHOT_KEY], "pnl": pnl}
+    offer.data = data
+    await s.flush()
+    return pnl
+
+
+async def test_slip_from_a_quote_plan_ending_on_a_milestone(client, admin_auth, session_factory, world):
+    """Quote plan ends on a milestone (X), the detailed plan, no baseline yet,
+    ends on a milestone (Y): slip is Y - X, not one day more. The frozen
+    quote_last_day is the baseline, not the live quote plan."""
+    cid = world["change_id"]
+    await _status(session_factory, cid, "in_implementation")
+    async with session_factory() as s:
+        s.add_all([
+            ChangePlanTask(change_id=cid, plan="quote", name="Tool", kind="work",
+                           start_date=date(2026, 8, 1), duration_days=10,
+                           created_by=world["admin_id"]),
+            ChangePlanTask(change_id=cid, plan="quote", name="SOP", kind="milestone",
+                           start_date=date(2026, 8, 20), duration_days=0,
+                           created_by=world["admin_id"]),
+            ChangePlanTask(change_id=cid, plan="detailed", name="SOP", kind="milestone",
+                           start_date=date(2026, 8, 25), duration_days=0,
+                           created_by=world["admin_id"]),
+        ])
+        await s.flush()
+        pnl = await _refreeze(s, cid, world["offer_id"])
+        assert pnl["quote_last_day"] == "2026-08-20"
+        assert pnl["quote_finish"] == "2026-08-20"     # end_date: milestone on its start
+        # the live quote plan moving after acceptance does not move the baseline
+        sop = (await s.execute(select(ChangePlanTask).where(
+            ChangePlanTask.change_id == cid, ChangePlanTask.plan == "quote",
+            ChangePlanTask.name == "SOP"))).scalar_one()
+        sop.start_date = date(2026, 9, 1)
+        await s.commit()
+    t = (await client.get(f"/api/v1/pnl/changes/{cid}/offer-vs-actual",
+                          headers=admin_auth)).json()["timing"]
+    assert t["baseline_finish"] == "2026-08-20"
+    assert t["forecast_finish"] == "2026-08-25"
+    assert t["slip_days"] == 5
+    rows = (await client.get("/api/v1/pnl/changes", headers=admin_auth)).json()["rows"]
+    assert next(r for r in rows if r["change_id"] == cid)["slip_days"] == 5
+
+
+async def test_old_snapshot_without_quote_last_day_keeps_the_exclusive_end_fallback(
+        client, admin_auth, session_factory, world):
+    """A snapshot frozen before quote_last_day existed has only quote_finish
+    (an exclusive end): the baseline is quote_finish - 1 day."""
+    cid = world["change_id"]
+    await _status(session_factory, cid, "in_implementation")
+    async with session_factory() as s:
+        s.add(ChangePlanTask(change_id=cid, plan="detailed", name="SOP", kind="milestone",
+                             start_date=date(2026, 7, 14), duration_days=0,
+                             created_by=world["admin_id"]))
+        await s.flush()
+        await _refreeze(s, cid, world["offer_id"], quote_finish="2026-07-11",
+                        quote_last_day=None)
+        await s.commit()
+    t = (await client.get(f"/api/v1/pnl/changes/{cid}/offer-vs-actual",
+                          headers=admin_auth)).json()["timing"]
+    assert t["baseline_finish"] == "2026-07-10"
+    assert t["slip_days"] == 4
+    rows = (await client.get("/api/v1/pnl/changes", headers=admin_auth)).json()["rows"]
+    assert next(r for r in rows if r["change_id"] == cid)["slip_days"] == 4
+
+
 async def test_changes_without_frozen_plan_fall_back_to_costing(session_factory, seed):
     async with session_factory() as s:
         c = ChangeRequest(

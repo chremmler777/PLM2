@@ -70,6 +70,8 @@ services:
       # The business date's timezone (deadlines, plan dates, offers): an IANA
       # name. Empty = America/New_York (Toccoa), see backend/app/utils/clock.py.
       PLM_BUSINESS_TZ: ${PLM_BUSINESS_TZ:-}
+      # Release checklist rows added by this rollout apply from this UTC instant (set to the deploy moment).
+      PLM_RELEASE_ROWS_SINCE: ${PLM_RELEASE_ROWS_SINCE:-}
     volumes:
       - upload_data:/app/storage/uploads
       - gltf_data:/app/storage/gltf

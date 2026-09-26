@@ -1,13 +1,15 @@
 # Rollout: ECR costing to close (feature/ecr-costing-to-close)
 
 Status: PREPARED, NOT EXECUTED. Run only on the project owner's explicit
-"deploy". Written 2026-09-25 against the branch head in the worktree
-`/home/nitrolinux/claude/plm2-ecr` (66 commits on top of main `f4b354e5`).
+"deploy". Written 2026-09-25, refreshed 2026-09-26 against the final branch
+state in the worktree `/home/nitrolinux/claude/plm2-ecr`: head `76e257f1`,
+114 commits on top of main `f4b354e5`, alembic head `103`. If commits land
+after `76e257f1`, re-check `git log --oneline 76e257f1..HEAD` and
+`backend/alembic/versions` before the deploy.
 
 Prod as of 2026-09-25: `/data/compose/plm2` at `f4b354e5`, alembic `086`
 (see the adminpanel runbook `docs/plm2-prod-deploy-runbook.md` §11, row
-2026-09-25). This rollout takes prod from `086` to the branch head (`101` or `102`,
-see below). Procedure and names follow that runbook §10 and the release note
+2026-09-25). This rollout takes prod from `086` to `103`. Procedure and names follow that runbook §10 and the release note
 `docs/handoff/project-worksheet-dfm-release.md` (main repo).
 
 Spec: `docs/superpowers/specs/2026-09-25-ecr-costing-to-close.md`.
@@ -19,16 +21,22 @@ links and calendar), customer offer with PDF, release checklist, lessons
 step, validation issues (failure branch of stage 9), actual costs and P&L
 (offer versus doing), the Finance cost sheet (rates per department and plant,
 machine classes by tonnage, sampling, overheads) with costing priced from it,
-KTX Weissenburg / Solingen (mother plant) changes, early-stage polish,
+KTX Weissenburg / Solingen (mother plant) changes (started by the Project
+Manager only; scoping records who is informed, no cost carrier), early-stage
+polish,
 revision intake (every new customer index is triaged by Development), the
 project team (one responsible per role per project), ECR training record
-(recorded, not blocking).
+(recorded, not blocking). Final-walk fixes on top: routing tasks for every
+R/A department (sweep script), plan deviation groups, actual costs with a
+currency, undecided D1 gates, Sales signs the offer, offer PDF dates in the
+form "26 Sep 2026", the reworked 16-row release checklist, Approve on a
+3D-evidence step waits for a CAD file or a signed "no geometry change".
 
 No new Python or npm dependencies (requirements.txt and package.json are
 unchanged against main). The image rebuild is still mandatory: code and
 migrations are baked into it.
 
-## Migrations 085 to 102
+## Migrations 085 to 103
 
 085 and 086 are already on prod (deployed 2026-09-25) and are listed for
 completeness. On Postgres the whole `alembic upgrade head` run is ONE
@@ -53,21 +61,27 @@ fails, nothing of 087..head stays.
 | 098 | Rate snapshot on `costing_positions` (rate, currency, source, cost sheet version, match, date, detail, `labour_position`, `trials`, `machine_class_id`); on `assessment_cost_line` (currency, version, source); `change_requests.machine_class_id`; on `implementation_bookings` (`labour_position`, `machine_class_id`, `machine_hours`). Data fix: an org with `department_rate` rows but no cost sheet version gets version 1 (valid from its earliest rate, 2020-01-01 when undated), in the plant currency. | Yes (INSERT version and rates only where an org has none) | Drops the columns: priced snapshots lost (lines go back to live pricing). The version created by the fix stays. |
 | 099 | `costing_positions.rate_currency` (backfilled from `currency` where a snapshot exists); clears `rate_on` where `rate` is NULL; `assessment_cost_line.rate_snapshot` becomes nullable. | Yes (UPDATE costing_positions; raw SQL, but no booleans, so dialect-safe) | Sets NULL `rate_snapshot` to 0 and makes it NOT NULL again (rate-less lines then read as priced at 0); drops `rate_currency`. |
 | 100 | Training: `training_versions`, `training_signoffs`, `training_attempts`. | No | Drops the three tables: all sign-offs and attempts lost. |
-| 101 | ONLY IF PRESENT at deploy time (another agent may add "actual cost currency"): expected to add a currency to `change_actual_costs`. Read it before the deploy: check whether it backfills existing rows (from the plant currency?) and whether its downgrade drops the column. Adjust the expected head below. | Read it | Read it |
-| 101 or 102 | Toccoa plant currency set to USD explicitly (094's `US` / `USA` word match may miss `Toccoa, GA`). Takes the next free number after the actual cost currency migration, if that ships. | Yes (UPDATE the Toccoa `plants` row) | Read it: a downgrade may leave the currency as set. |
+| 101 | Three steps, in this order. (1) Toccoa plant currency set to `USD`: whole-word, any-case match on `toccoa` in `plants.name` or `plants.location` (094's `US` / `USA` match misses `Toccoa, GA`); relabel only, no rate converted; not scoped by organisation (one Toccoa plant today). (2) `change_actual_costs.currency` (String(3), nullable), backfilled for every row with the change's costing currency: the plant of the change's only affected plant, else the project's plant, `EUR` when that plant has none (NULL or empty). (3) Standing effort rows (`costing_positions` of kind `internal_effort` / `support_effort`): duplicates per change, department and kind are merged, the most recently updated row kept whole (else the highest id), `costing_offers.position_id` and `change_plan_tasks.source_position_id` re-pointed to it, the others DELETED; then partial unique index `uq_costing_positions_standing`. | Yes (UPDATE plants, UPDATE change_actual_costs, UPDATE + DELETE costing_positions duplicates) | Drops the index and the currency column. Toccoa stays `USD`; merged duplicates are not restored (harmless). |
+| 102 | Plan deviation groups: new `change_plan_deviation_groups` (root block, reason, status, decision, escalation), `change_plan_deviations.group_id` (nullable, FK on Postgres, index). Backfill: every OPEN deviation is grouped with the own move that pushed it (the grouping the Timing tab already showed); rows that fit nowhere stay ungrouped. | Yes, only rows of the 087 deviation table (none on prod: plans are new) | Drops `group_id` and the groups table: group decisions and their escalation links lost; the deviations stay. |
+| 103 | `change_gate.decision` becomes nullable without a server default; seeded gates nobody touched (`decision = 'na'`, no decider, no decision time) set to NULL (undecided). A gate without `yes` still holds its transition. | Yes (UPDATE change_gate, prod rows included) | Sets every NULL back to `na`, NOT NULL again with default `na`. |
 
 Summary: nothing drops or rewrites existing business data except 093
 (origin backfill), 094 (plant currencies, cost sheet rebuild), 095
-(settled_as backfill) and 099 (costing position cleanup). A downgrade is
+(settled_as backfill), 099 (costing position cleanup), 101 (Toccoa
+currency, duplicate standing effort rows merged) and 103 (untouched D1
+gates read undecided). A downgrade is
 lossy for everything created after deploy; the real rollback is the backup.
 
 ## Environment
 
 The prod backend is defined in the PARENT compose file
 `/data/compose/docker-compose.yml`, block `plm2-backend`, NOT in the repo's
-`docker/docker-compose.prod.yml`. The repo file now passes these variables
-(commit on this branch), but prod only sees them if they are added to the
-prod block. All are optional: unset or empty keeps the default.
+`docker/docker-compose.prod.yml`. The repo file passes the `KTX_COMPANY_*`
+variables and `PLM_BUSINESS_TZ`, but NOT `PLM_RELEASE_ROWS_SINCE`
+(DECISION for the owner: add `PLM_RELEASE_ROWS_SINCE:
+${PLM_RELEASE_ROWS_SINCE:-}` to the repo file too, or leave it prod-only).
+Prod only sees any of them if they are added to the prod block. All are
+optional: unset or empty keeps the default.
 
 | Variable | Default (backend/app/services/company_profile.py, app/utils/clock.py) | Recommendation |
 |---|---|---|
@@ -78,10 +92,17 @@ prod block. All are optional: unset or empty keeps the default.
 | `KTX_COMPANY_EMAIL` | `ktx_info@us.ktx.group` | keep default |
 | `KTX_COMPANY_WEBSITE` | `ktx.group` | keep default |
 | `KTX_COMPANY_FOOTER` | `IATF 16949:2016 certified site|A company of the KTX Group` | keep default |
-| `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs. On send the sender is frozen as signer when they are a Sales member; otherwise (PM lead, admin) the project's Sales responsible, else the "Sales" role line with no name. A draft previews exactly that for the viewer, labelled "Signed by (preview)". Set only to force one fixed name on every offer |
-| `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | not needed, leave unset (set only to force one fixed title) |
+| `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs (rule below). Set only to force one fixed name on every offer; it overrides the person |
+| `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | not needed, leave unset (set only to force one fixed title; otherwise the person's own title, else `Sales`) |
 | `PLM_BUSINESS_TZ` | `America/New_York` (IANA name; drives the business date of deadlines, plan dates, offers) | set explicitly to `America/New_York` |
 | `PLM_RELEASE_ROWS_SINCE` | `2026-09-26T04:00:00Z` (midnight New York on 26 Sep; backend/app/services/release_checklist.py) | set to the deploy moment in UTC (ISO 8601, e.g. `2026-09-27T14:30:00Z`; no offset means UTC). Changes that ended before it (released, or rejected / cancelled) keep their old 13-row checklist and wording; every other change gets the reworked 16-row one |
+
+Offer signature rule (code, not configuration): on send the sender is
+frozen into the sent version as signer when they are a member of Sales;
+otherwise (PM lead, admin) the project's Sales responsible (project team),
+else the "Sales" role line with no name. A draft previews exactly that for
+the viewer, labelled "Signed by (preview)". Offer PDF dates read "26 Sep
+2026" for every customer; amounts still follow the offer currency.
 
 Lists are separated by `|`. Not needed: `TRAINING_GATE` (training is
 recorded, not blocking; the gate stays off, and it is also an org setting).
@@ -114,6 +135,12 @@ Tool Engineer):
   "PPAP / initial sample documentation complete, customer approval
   received (ISIR / PSW)" (PPAP asked once) and "Control plan / inspection
   plan updated".
+- Unchanged: Development (index / revision level, drawing and 3D data
+  released, spare and service parts), Packaging Engineer (packaging
+  instruction), Scheduling (ERP / BOM / routing, old stock), Sales
+  (customer informed). The 16 rows: Development 3, Tool Engineer 3, APQP 6,
+  Packaging Engineer 1, Scheduling 2, Sales 1
+  (`backend/app/services/release_checklist.py`, `RELEASE_CHECKS`).
 - Process Engineer: no release row (the process details stay in the
   process database, PDB, where the Process Engineer confirms them).
 - Quality: no release row.
@@ -149,16 +176,19 @@ the PDB to PLM.
 ## Preflight (local, before the go)
 
 1. Branch merged to main on the owner's go (no merge is part of this
-   document). Check the tree is complete: `alembic heads` shows one head
-   (`101` or `102`, see the migration table).
+   document). Check the tree is complete: `alembic heads` shows one head,
+   `103`.
 2. Full suites on a clean checkout of the merge commit: backend
    `python -m pytest -q` (xdist), frontend `npx vitest run`, `npx tsc
    --noEmit`. Record the counts in the deploy log.
 3. Prefill script test: `python -m pytest tests/test_prefill_project_team.py
    -n 0 -q` (11 tests).
 4. Routing sweep test: `python -m pytest tests/test_change_routing.py -n 2 -q
-   -k sweep` (dry run writes nothing, `--apply` is idempotent). The sweep
-   itself runs on prod in step 5a.
+   -k "sweep or backfill"` (dry run writes nothing, `--apply` is idempotent,
+   snapshot backfill). The sweep itself runs on prod in step 5a.
+5. Migration tests on SQLite: `python -m pytest
+   tests/test_migration_101_sqlite.py tests/test_migration_102_sqlite.py
+   tests/test_migration_103_sqlite.py -n 2 -q`.
 
 ## Prod steps
 
@@ -182,19 +212,25 @@ What to look for:
 
 - Plants: 094 sets USD only when location, name or code contains the word
   `US` / `USA` or `UNITED STATES`, so a Toccoa row that reads e.g.
-  `Toccoa, GA` would become EUR. A new migration on this branch (101 or
-  102, whichever number is free) sets the Toccoa plant currency to USD
-  explicitly, so this no longer depends on the word match. Verify after the
-  migration (step 3 on `plm_scratch`, step 4 on prod) with
-  `select id, name, code, location, currency from plants order by id;`:
-  Toccoa must read `USD`. If it does not, stop and check that migration is
-  in the build (rates keep their numbers either way; nothing is converted).
+  `Toccoa, GA` would become EUR. Migration 101 then sets it to USD when
+  `toccoa` is a whole word of the plant's name or location (the code is
+  not matched). Check here that the Toccoa row's name or location contains
+  `Toccoa`. Verify after the migration (step 3 on `plm_scratch`, step 4 on
+  prod) with `select id, name, code, location, currency from plants order
+  by id;`: Toccoa must read `USD`. If it does not, stop and check that 101
+  is in the build and what the row's name and location read (rates keep
+  their numbers either way; nothing is converted).
   Silao (Mexico) becomes EUR: Finance decides the currency.
 - Department rates: note which departments have a Toccoa rate. There is no
   Project Manager rate today (see the Finance to-do).
 - Departments: `Project Manager`, `Manufacturing Engineer`, `Tool Engineer`,
   `APQP`, `Development` must exist and be active for the team prefill.
   `Finance` is created by 092 if missing.
+- Also note `select count(*) from change_gate where decision = 'na' and
+  decided_by is null and decided_at is null;` (the rows 103 turns undecided)
+  and `select count(*) from costing_positions where kind in
+  ('internal_effort', 'support_effort');` (101 may merge duplicates, so this
+  count can drop by the duplicates merged).
 - Keep the counts for the post-deploy comparison.
 
 ### 1. Back up the compose file (and optionally an early DB copy)
@@ -229,8 +265,8 @@ time docker run --rm --network compose_ktx-net \
   <new plm2-backend image> alembic upgrade head
 ```
 
-Then on `plm_scratch`: `alembic_version` = the head (`101` or `102`), the counts from
-step 0 unchanged, `select id, name, currency from plants;` with Toccoa `USD`,
+Then on `plm_scratch`: `alembic_version` = `103`, the counts from
+step 0 unchanged (except the two counts 101 and 103 touch, noted above), `select id, name, currency from plants;` with Toccoa `USD`,
 `select organization_id, version, status, valid_from, note from
 cost_sheet_versions order by 1, 2;` shows a published chain,
 `select count(*) from cost_sheet_rates;` greater than 0. Run the prefill dry
@@ -243,7 +279,7 @@ migration (next step explains why).
 ### 4. Migrate, then recreate
 
 `app/main.py` runs `alembic upgrade head` at startup with a 30 second
-timeout, in every uvicorn worker. Fourteen migrations with the 094 data
+timeout, in every uvicorn worker. Seventeen migrations (087..103) with the 094 data
 rebuild must not race two workers or be cut off by the timeout. So migrate
 explicitly while the backend is stopped (short outage, announce it):
 
@@ -257,7 +293,7 @@ docker exec compose-plm2-db-1 pg_dump -U plm -d plm | gzip \
   && echo BACKUP OK
 ls -l /data/compose/db-backups/ | tail -3; zcat /data/compose/db-backups/plm2-before-ecr-costing-to-close-*.sql.gz | head -5
 docker compose run --rm --no-deps plm2-backend alembic upgrade head
-docker compose run --rm --no-deps plm2-backend alembic current     # must show the head (100, 101 or 102)
+docker compose run --rm --no-deps plm2-backend alembic current     # must show 103 (head)
 docker exec compose-plm2-db-1 psql -U plm -d plm -c "select id, name, code, location, currency from plants order by id;"   # Toccoa = USD
 ```
 
@@ -269,7 +305,7 @@ now, then:
 
 ```bash
 docker compose up -d plm2-backend plm2-frontend
-docker exec compose-plm2-backend-1 alembic current                 # again: the head
+docker exec compose-plm2-backend-1 alembic current                 # again: 103
 docker exec compose-plm2-backend-1 printenv PLM_BUSINESS_TZ
 docker exec compose-plm2-backend-1 printenv PLM_RELEASE_ROWS_SINCE     # the deploy moment, UTC
 docker compose exec nginx nginx -s reload                          # new container IP
@@ -297,7 +333,12 @@ In the browser (as the owner, hub login):
 
 - `/plm2/changes` list, then one open change `/plm2/changes/<id>`: cockpit, stages, costing tab shows rates from the cost sheet (or "No rate" where none), process flow Detailed and Overview.
 - `/plm2/changes/<id>/plan/quote` and `/plan/detailed`: Gantt renders, links draw.
-- Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address. A sent version is signed by the Sales member who sent it (sent by a PM lead or an admin: the project's Sales responsible, else the "Sales" line with no name). A draft shows "Signed by (preview)" with who would sign if you sent it now: you when you are in Sales, otherwise the project's Sales responsible, else the "Sales" line.
+- Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address. Dates read like "26 Sep 2026" on one line in the header (every customer); amounts in the offer currency. A sent version is signed by the Sales member who sent it (sent by a PM lead or an admin: the project's Sales responsible, else the "Sales" line with no name). A draft shows "Signed by (preview)" with who would sign if you sent it now: you when you are in Sales, otherwise the project's Sales responsible, else the "Sales" line.
+- D1 of an open change nobody has decided: the gates read undecided (not "n/a"), and the release still waits for a `yes`.
+- Timing tab of a change with a validated plan and open deviations: one decision per group (the moved block with what it pushed).
+- Actual costs of a change in implementation: each row shows its currency (the costing plant's; Toccoa `USD`).
+- Start change: the KTX Weissenburg / Solingen origin is offered only to a Project Manager (and admin); such a change goes from scoping (who is informed, no cost carrier) straight to informing the team, the PM writes the description.
+- Implementation tab, a revision with a check workflow on a 3D-evidence step: Approve is held with "3D evidence" as the reason until a CAD file is uploaded or "no geometry change" is signed, then enabled without a page reload.
 - Release tab of a change in validation: 16 rows, Tool Engineer (3) and APQP (6) groups as listed above, no Process Engineer, Quality or Manufacturing Engineer group. A change released before the deploy: 13 rows, with "Cycle time confirmed in series production", "PFMEA, control plan and work instructions updated", "Parts measured, measurement report on file" and "Customer approval received (PPAP / ISIR / PSW)".
 - Validation block of a change in validation: "Measured cycle time" only under Tool Engineer.
 - `/plm2/cost-sheet`: published version chain, Toccoa rows in USD, one draft at most.
@@ -310,7 +351,29 @@ In the browser (as the owner, hub login):
 Counts from step 0 identical; `docker logs compose-plm2-backend-1 --since
 10m | grep -c " 500 "` = 0; container restarts = 0.
 
-### 5a. Routing task sweep (after the migration and the smoke checks)
+### 5a. Scripts after the migration, in this order, dry run first
+
+1. `scripts/repair_routing_tasks.py` (below): routing tasks and snapshot
+   backfill. Required.
+2. `scripts/prefill_project_team.py` (step 6). Required (owner decision
+   2026-09-25).
+3. `scripts/repair_final_walk.py`: NOT part of the prod run by default. It
+   repaired the dev database after the final walk (2026-09-25). It has NO
+   dry run (it commits directly) and runs as the first admin user. Its
+   three steps against prod: (1) routing tasks, fully covered by
+   `repair_routing_tasks.py`; (2) closes the workflows still open on
+   released or closed changes (`close_engine_work`: check flows canceled,
+   the change flow completed, open tasks waived); (3) title and lead of
+   escalated engineering reviews, which prod cannot have (reviews arrive
+   with this deploy). DECISION for the owner: step (2) may apply to prod
+   changes released on the old code with a workflow still open. Check
+   first, read-only: `select cr.change_number, cr.status, wi.id, wi.status
+   from change_requests cr join wf_instances wi on wi.change_id = cr.id
+   where cr.status in ('released', 'closed') and wi.status = 'active';`.
+   Zero rows: skip the script. Otherwise run it once after a fresh backup,
+   on the owner's word, and keep its output in the deploy log.
+
+#### Routing task sweep
 
 Changes in flight may carry assessment rows of a started routing stage
 without their workflow task (a department a deviation added to a later
@@ -328,6 +391,12 @@ docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
 docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
   python scripts/repair_routing_tasks.py                        # must report 0 row(s)
 ```
+
+The same run backfills the routing snapshot: a department added by a
+routing deviation approved before approvals wrote their adds into the
+snapshot gets its entry (`added_by_deviation`), replayed from the changelog
+of the current routing. A change whose deviation is still pending is listed
+`SKIPPED, deviation pending`: run the sweep again after that decision.
 
 Read the dry run: one line per change with the repaired assessment ids.
 Lines marked `late, flagged for the lead` are R/A departments added to a
@@ -399,11 +468,13 @@ card on the three projects.
    the P&L. Add the rate in a new draft version and publish it with the
    right valid-from date (lines priced earlier keep their snapshot; lines
    without a rate price live once the rate exists).
-3. Toccoa plant currency: the new migration (101 or 102) sets it to USD
-   explicitly, because 094's `US` / `USA` word match may miss `Toccoa, GA`.
-   Confirm with the plants query (step 4) that Toccoa reads `USD`.
+3. Toccoa plant currency: migration 101 sets it to USD explicitly,
+   because 094's `US` / `USA` word match may miss `Toccoa, GA`. Confirm
+   with the plants query (step 4) that Toccoa reads `USD`.
 4. Decide the Silao (Mexico) currency if Silao rates are used.
-5. If 101 ships: check the currency of any actual costs already entered.
+5. Actual costs: 101 gave every existing row the costing plant's currency.
+   Prod has none before the deploy (the table arrives with 091), so this
+   only matters for rows entered on a staging copy.
 
 ## Rollback
 
@@ -420,9 +491,27 @@ Decide by what broke.
   ```
 
   Those lines then read as priced at 0 (not "No rate"); note the count the
-  UPDATE prints. Then `cd /data/compose/plm2 && git checkout f4b354e5`,
-  `docker compose up -d --build plm2-backend plm2-frontend`, nginx reload.
-  Every other column 087..102 added to an existing table is nullable or has
+  UPDATE prints. Also for 103: the old code's gate response requires a
+  decision string (`GateResponse.decision: str`), so an undecided gate
+  (NULL) would make `/changes/<id>/gates` fail with 500. Set them back
+  first (the old code inserts new gates with the ORM default `na`, so the
+  nullable column itself is harmless):
+
+  ```bash
+  docker exec compose-plm2-db-1 psql -v ON_ERROR_STOP=1 -U plm -d plm \
+    -c "UPDATE change_gate SET decision = 'na' WHERE decision IS NULL;"
+  ```
+
+  101 and 102 need nothing for a code-only rollback: the old code does not
+  know `change_actual_costs` or the plan deviation tables at all, and the
+  Toccoa `USD` label is not read by it. One side effect of 101: the partial
+  unique index `uq_costing_positions_standing` stays, so a double save of a
+  standing effort row on the old code fails with an error instead of
+  writing a duplicate (the duplicate was the bug; leave the index).
+
+  Then `cd /data/compose/plm2 && git checkout f4b354e5`, `docker compose
+  up -d --build plm2-backend plm2-frontend`, nginx reload.
+  Every other column 087..103 added to an existing table is nullable or has
   a server default, so the old code runs on the new schema; its startup
   `alembic upgrade head` only logs a warning about the unknown revision. New tables sit unused. Revisions received since deploy
   may be `in_review`; set them active by hand if needed. Return to main

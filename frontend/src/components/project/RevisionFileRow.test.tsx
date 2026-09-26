@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RevisionFileRow } from './RevisionFileRow'
 import { formatDate } from '../../lib/format'
@@ -49,5 +49,17 @@ describe('RevisionFileRow provenance', () => {
     wrap(<RevisionFileRow file={file({ file_type: 'drawing', mime_type: 'application/pdf', filename: 'd.pdf' })} isViewing={false} locked={false} onOpen={onOpen} />)
     fireEvent.click(screen.getByText('Open'))
     expect(onOpen).toHaveBeenCalled()
+  })
+
+  it('deleting a file refetches the revision workflow (3D evidence may be gone)', async () => {
+    clientMocks.delete.mockResolvedValue({})
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    render(<QueryClientProvider client={qc}>
+      <RevisionFileRow file={file()} isViewing={false} locked={false} />
+    </QueryClientProvider>)
+    fireEvent.click(screen.getByText('Delete'))
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['workflow', 'revision', 9, 'instance'] }))
   })
 })
