@@ -70,7 +70,7 @@ After the polish:
 | `basics-sidebar` | `basics-access` | Any page, sidebar expanded | A user who sees "Changes", "Process Flow", "P&L", "My Tasks" and "Training" |
 | `basics-project-team` | `basics-team` | Project page, "Project team" card | A project with a responsible for every department but one ("Unassigned") |
 | `basics-backup-row` | `basics-team` | "My Tasks" | Viewer is a backup (not the responsible) of a department with an open task |
-| `basics-my-tasks` | `basics-finding` | "My Tasks" | Viewer with own open tasks, two backup tasks ("+2 as backup") and a pending index under "New indexes" (a Development member) |
+| `basics-my-tasks` | `basics-finding` | "My Tasks" | Viewer with own open tasks and backup tasks ("+N as backup"), cropped to the "Open tasks" header, the first rows and the first muted backup row; one image per slot, so the "New indexes" section (a Development member) is named in the alt text only |
 | `basics-cockpit` | `basics-finding` | Change page, cockpit | A change in assessment where the viewer owes an action and one department blocks |
 | `flow-stepper` | `flow-overview` | Change page, lifecycle stepper | A change in "Quoted" (offer v1 sent) |
 | `flow-gantt-baseline` | `flow-implementation` | "Timing" tab, detailed plan in tracking mode | In implementation, baseline set, one block slipped past its ghost |
@@ -101,7 +101,7 @@ After the polish:
 | `eng-failed-check` | `eng-validation` | "Release" tab, "Validation checks" | In validation, one check failed with its reason, no issue raised yet |
 | `eng-release-checklist` | `eng-release` | "Release" tab, "Release checklist" | In validation, the 16 rows, some "Done", one "N.a." with a note |
 | `eng-intake-route` | `eng-development` | "My Tasks", "New indexes", triage dialog | A pending index C of part 20-9001-001-0, viewer a Development member |
-| `sch-assessment-checklist` | `sch-assessment` | "Assessments" tab, Scheduling bucket | Scoping routed Scheduling (R); "Cycle time change" answered Yes with a remark |
+| `sch-assessment-checklist` | `sch-assessment` | "Assessments" tab, Scheduling bucket | Scoping routed Scheduling (R); "Finished-part stock affected" and "Bank build needed" answered Yes with a remark, the rest No |
 | `sch-bank-build-card` | `sch-bankbuild` | "Timing" tab, "Bank build plan" card | Approved; "Planned scrap" with a scrap quote price and a plan note |
 | `sch-bank-build-idea` | `sch-bankbuild` | "Timing" tab, Gantt | A plan with a "Tool downtime" block and the dashed "Bank build (idea)" ending at its start |
 | `sch-team-confirmation` | `sch-plan` | "Timing" tab, "Team confirmation" | Scheduling confirmed before the last plan edit (the stale chip shows) |

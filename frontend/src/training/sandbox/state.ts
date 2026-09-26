@@ -136,7 +136,7 @@ function daysFromNow(n: number): string {
 const CHECKLIST: ChecklistItemDef[] = [
   { key: 'threed_change', label_en: '3D change necessary', label_de: '3D-Änderung notwendig', extra: false },
   { key: 'modification_internal', label_en: 'Internal modification', label_de: 'Interne Änderung', extra: false },
-  { key: 'cycle_time_change', label_en: 'Cycle time change', label_de: 'Zykluszeitänderung', extra: false },
+  { key: 'bank_build_needed', label_en: 'Bank build needed', label_de: 'Vorproduktion (Bank Build) nötig', extra: false },
   { key: 'dimensional_risk', label_en: 'Dimensional risk', label_de: 'Maßliches Risiko', extra: false },
   { key: 'work_instruction_update', label_en: 'Work instruction update', label_de: 'Arbeitsanweisung aktualisieren', extra: false },
 ]

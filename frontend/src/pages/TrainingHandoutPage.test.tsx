@@ -65,6 +65,8 @@ describe('TrainingHandoutPage', () => {
     mount('/training/handout/engineering?full=1')
     await screen.findByTestId('one-page-handout')
     expect(document.getElementById('eng-checklist')).not.toBeNull()
-    expect(screen.getAllByText('Screenshot follows').length).toBeGreaterThan(0)
+    // Every slot has its screenshot now: the chapters print the pictures.
+    const imgs = [...document.querySelectorAll('img')].map((i) => i.getAttribute('src') ?? '')
+    expect(imgs.some((src) => src.endsWith('manual/eng-checklist.png'))).toBe(true)
   })
 })

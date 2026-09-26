@@ -128,7 +128,7 @@ describe('pm_set_priority', () => {
 describe('checklist rows', () => {
   const cases: [string, string, string][] = [
     ['eng_answer_checklist_row', 'Tool Engineer', 'modification_internal'],
-    ['sch_answer_checklist_row', 'Scheduling', 'cycle_time_change'],
+    ['sch_answer_checklist_row', 'Scheduling', 'bank_build_needed'],
     ['qa_answer_checklist_row', 'Quality', 'dimensional_risk'],
     ['fin_answer_checklist_row', 'Finance', 'modification_internal'],
   ]

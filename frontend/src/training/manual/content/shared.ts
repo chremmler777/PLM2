@@ -109,7 +109,7 @@ export const basicsChapter: ContentChapter = {
             '"My Tasks" in the sidebar is everything waiting on you, in one list. The number at the ' +
             'top counts only the tasks you lead. Backup tasks follow underneath, muted.',
         },
-        { shot: 'basics-my-tasks', alt: '"My Tasks" with "Open tasks", a "+2 as backup" note and a "New indexes" section.' },
+        { shot: 'basics-my-tasks', alt: '"My Tasks" with "Open tasks (6)", the "+6 as backup" note and a muted backup row marked "Backup" with "Main:" and a name. Below the list, not in the picture, a "New indexes" section lists index triage for a Development member.' },
         { h3: 'The change page' },
         {
           p:

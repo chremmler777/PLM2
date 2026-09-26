@@ -46,17 +46,18 @@ export const schedulingChapter: ContentChapter = {
         {
           p:
             'Sometimes the scoping meeting gives Scheduling a letter R or A, for example ' +
-            'when a cycle time change eats press capacity. Then an assessment task appears in ' +
+            'when the tool leaves for rework and stock has to carry the line. Then an assessment task appears in ' +
             '"My Tasks" and your bucket opens on the "Assessments" tab.',
         },
         {
           points: [
             ['Every row gets Yes or No.', 'A Yes says what has to be done. That text becomes your costing line.'],
-            ['"Cycle time change" is yours to judge.', 'A longer cycle is lost press capacity. Say how many shots and which press.'],
+            ['The stock rows are yours to judge.', '"Finished-part stock affected", "Semi-finished stock affected" and "Component stock affected": say what is on hand and whether it can still be used.'],
+            ['"Bank build needed" is yours as well.', 'A tool at the toolmaker makes no parts. Say how many parts to build ahead and on which press.'],
             ['"Rest to No"', 'fills only the rows you have not answered. Use it after you looked at them, not instead.'],
           ],
         },
-        { shot: 'sch-assessment-checklist', alt: 'The Scheduling bucket on the Assessments tab with "Cycle time change" answered Yes and a remark.' },
+        { shot: 'sch-assessment-checklist', alt: 'The Scheduling bucket on the Assessments tab: "Finished-part stock affected" and "Bank build needed" answered Yes, each with what has to be done, every other row No.' },
       ],
     },
     {

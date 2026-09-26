@@ -273,16 +273,16 @@ const scheduling: TrainingTask[] = [
   answerRowTask({
     key: 'sch_answer_checklist_row',
     department: 'Scheduling',
-    rowKey: 'cycle_time_change',
-    rowLabel: 'Cycle time change',
+    rowKey: 'bank_build_needed',
+    rowLabel: 'Bank build needed',
     title: 'Answer a checklist row',
     brief:
       'CR-TRAIN-0002 is waiting for the Scheduling assessment. The reinforced clip ' +
-      'tower adds cooling time to every shot. Answer the row "Cycle time change" and ' +
-      'say what it means for the press plan.',
+      'tower means the mold goes to the toolmaker for about two weeks. Answer the row ' +
+      '"Bank build needed" and say how many parts have to be built ahead, and on which press.',
     why:
-      'A longer cycle is lost press capacity. Said here, it reaches the plan; found ' +
-      'after release, it is a shortage.',
+      'A tool at the toolmaker makes no parts. Said here, the bank build reaches the ' +
+      'costing and the plan; found after release, it is a shortage at the customer.',
   }),
 ]
 
