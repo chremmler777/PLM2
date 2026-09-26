@@ -1,4 +1,5 @@
 """Shared test fixtures: isolated SQLite DB per test, app client, seeded users."""
+import logging
 import re
 from datetime import datetime, timedelta
 
@@ -14,6 +15,13 @@ from app.models.database import Base
 from app.models.entities import Organization, Plant, Project, User
 from app.auth.security import get_password_hash
 
+# app.main runs logging.basicConfig(level=DEBUG) on import, so every aiosqlite
+# operation logs a DEBUG line to stderr (~0.8 MB per test). pytest captures it
+# and keeps it on each passed test's report for the whole session, so an xdist
+# worker grew by ~1-2 MB per test until the machine ran out of memory. Tests
+# only need warnings and errors.
+logging.getLogger().setLevel(logging.WARNING)
+
 ADMIN_PASSWORD = "admin-secret-1"
 ENGINEER_PASSWORD = "eng-secret-12"
 
@@ -25,6 +33,13 @@ async def db_engine(tmp_path):
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()
+    # Each mapper keeps an LRU of compiled INSERT/UPDATE/DELETE statements
+    # keyed by the engine's dialect. A new engine per test means a new dialect
+    # per test, so the old entries (and the dialect they pin) are never hit
+    # again but stay in memory until the LRU fills (~150 per mapper, ~100
+    # mappers). Drop them with the engine.
+    for mapper in Base.registry.mappers:
+        mapper._compiled_cache.clear()
 
 
 @pytest_asyncio.fixture
