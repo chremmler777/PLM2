@@ -61,13 +61,13 @@ export const basicsChapter: ContentChapter = {
           table: {
             head: ['Role', 'Owns'],
             rows: [
-              ['Sales', 'Starting the request, the offer (Sales signs it), every contact with the customer, the customer\'s answer.'],
+              ['Sales', 'Starting the request, the offer (Sales signs it), every contact with the customer, the customer\'s answer, and the rates on the cost sheet.'],
               ['Project Management', 'Leading the change: scoping, deadlines, closing costing, the plan, the route of a validation issue, closing the change. Starting a change from KTX Weissenburg or KTX Solingen.'],
               ['Development', 'Locking what is impacted, deciding the route of every new customer index, the drawing and 3D data.'],
               ['Tool, Manufacturing, Process, APQP, Packaging', 'Assessing, costing and doing their own part of the work, and their own release checks.'],
               ['Scheduling', 'How the change reaches the line (bank build), the plan with PM and Sales, ERP and old stock.'],
               ['Quality', 'The Quality sign-off before approval, the governance view (D1, Audit), the training record.'],
-              ['Finance', 'The cost sheet: every rate that prices a change.'],
+              ['Finance', 'Checks the cost sheet Sales keeps, and may change it: every rate that prices a change.'],
             ],
           },
         },
@@ -182,7 +182,9 @@ export const flowChapter: ContentChapter = {
         {
           p:
             'Sales starts the request with "New Change Request" on the "Changes" page, or "Start ' +
-            'change request" on a part. Project Management may start one too.',
+            'change request" on a part. Project Management may start one too. A change from KTX ' +
+            'Weissenburg or KTX Solingen is started by Project Management only; everybody else reads ' +
+            '"Changes from KTX Weissenburg / Solingen are started by Project Management (PM)."',
         },
         {
           points: [
@@ -215,8 +217,25 @@ export const flowChapter: ContentChapter = {
           steps: [
             { title: 'The impacted set', body: 'PM or the lead picks the impacted items on the "Impacted" tab. Development confirms it with "Confirm impact (Development)". Nothing is assessed until it is confirmed.' },
             { title: 'Questions and cancel votes', body: 'Anyone on the team can raise a question for the customer or vote to reject. Sales answers questions; the asker or PM closes them. Open ones block "Proceed".' },
-            { title: 'The scoping meeting', body: 'PM records it with the departments and their letters (R, A, S, C) and the cost carrier. The decision is "Proceed & start assessment", "Needs more info" or "Reject".' },
+            { title: 'The scoping meeting', body: 'PM records it with the departments and their letters (R, A, S, C, I) and the cost carrier. The decision is "Proceed & start assessment", "Needs more info" or "Reject".' },
           ],
+        },
+        {
+          table: {
+            head: ['Letter', 'Means'],
+            rows: [
+              ['R, A', 'Assesses. The change waits for their answer before costing.'],
+              ['S, C', 'Looped in, owes no assessment.'],
+              ['I', '"Informed (notified only)": gets the notification, no task.'],
+            ],
+          },
+        },
+        {
+          p:
+            'After the meeting the routing changes only as a routing deviation, with a reason, ' +
+            'decided by somebody other than the person who asked. A department added that way sees ' +
+            'its task at once. A department taken off stays on the hook until the removal is decided ' +
+            '("Removal requested, awaiting decision"), and the change cannot move to costing until then.',
         },
         {
           callout:
@@ -255,7 +274,8 @@ export const flowChapter: ContentChapter = {
         {
           p:
             'Each department prices its own part on the "Costing" tab: its own time, estimates or ' +
-            'vendor quotes, and a lead time on every line. Rates come from Finance\'s cost sheet. ' +
+            'vendor quotes, and a lead time on every line. Rates come from the cost sheet Sales keeps: ' +
+            'a change is priced with the rates valid on the day it was created. ' +
             'A department sees only its own numbers; PM and Sales see all.',
         },
         {
@@ -288,7 +308,8 @@ export const flowChapter: ContentChapter = {
           p:
             'From "Start implementation" on, each department updates progress and actual dates on ' +
             'its own blocks. A date move after the baseline asks for a reason and is listed as a ' +
-            'deviation. PM or Sales lock it (accepted internally) or escalate it to the customer.',
+            'deviation. The block you moved and the blocks it pushed along form one group with one ' +
+            'decision: PM, Sales or the lead lock it (accepted internally) or escalate it to the customer.',
         },
         { shot: 'flow-gantt-baseline', alt: 'The detailed plan in tracking mode with baseline ghosts and one slipped block.' },
       ],
@@ -368,8 +389,9 @@ export const flowChapter: ContentChapter = {
         {
           steps: [
             { title: 'Start', body: 'PM starts it: the start form offers "Change from" followed by the plant to Project Management only. Their reference, the SOP date and their documents go in. Their MS Project file is optional.' },
-            { title: 'Scoping, short', body: 'Development locks the impacted set. PM sends the information to every team that has to act. Each confirms "Read and understood".' },
-            { title: 'Straight to timing', body: 'No assessment, costing or offer. The SOP becomes the release deadline. The detailed plan comes from their file, or starts from the SOP milestone.' },
+            { title: 'Scoping, short', body: 'Development locks the impacted set. PM writes the description. The scoping record says which departments are informed: no assessment, no cost carrier.' },
+            { title: 'Inform the team', body: '"Send information to the team": PM tells every department that has to act what the mother plant changed. Each confirms "Read and understood". Approval waits until the information is sent.' },
+            { title: 'Straight to timing', body: 'No assessment, costing or offer. The go decision makes the SOP the release deadline. The detailed plan comes from their file, or starts from the SOP milestone.' },
             { title: 'Then as usual', body: 'Team confirmation, "Validate timing", implementation, validation and release. PM informs the mother plant of the baseline instead of a customer publish.' },
           ],
         },

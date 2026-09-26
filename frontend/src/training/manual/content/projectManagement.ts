@@ -99,7 +99,7 @@ export const pmChapter: ContentChapter = {
         {
           steps: [
             { title: 'Record it', body: '"+ Record a meeting" on the "Scoping" tab: channel, "Meeting date", "Participants". Attendance only, not responsibility.' },
-            { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supportive", "Consulted", "Informed (notified only)" or "Not involved". The standard routing is pre-selected; the room overrules it.' },
+            { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supportive", "Consulted", "Informed (notified only)" or "Not involved". The standard routing is pre-selected; the room overrules it. An "Informed" department gets the notification and no task.' },
             { title: 'Confirm the cost carrier', body: '"Cost carrier" is required before the assessment can start. Flipping it is audited and Sales is notified.' },
             { title: 'Decide', body: '"Proceed & start assessment", "Needs more info" or "Reject". Proceed starts the assessment for every R and A department.' },
           ],
@@ -122,12 +122,14 @@ export const pmChapter: ContentChapter = {
         {
           points: [
             ['Who is still owed:', '"Blocked by" lists the departments that have not submitted.'],
-            ['A forgotten department:', '"Add a department to the assessment" with a letter and a reason. It takes effect once somebody other than you approves it: the change lead, or another Project Manager if you are the lead (four eyes).'],
+            ['A forgotten department:', '"Add a department to the assessment" with a letter and a reason. The department sees its task at once; the request is decided by somebody other than you: the change lead, or another Project Manager if you are the lead (four eyes).'],
+            ['A department that should not assess:', 'as the lead, "Take off routing" on its late flag in the cockpit, with a reason. It is a routing deviation too and waits for approval: until it is decided the department stays on the hook ("Removal requested, awaiting decision") and the change cannot move to costing.'],
             ['"Not our responsibility":', 'a department can decline. The lead decides; if rejected, the assessment stays with them.'],
             ['"Not feasible":', 'the "Next step" card offers "Reject change", "Back to scoping" or "Override with a reason". An override is a deviation somebody else approves.'],
             ['All answered:', '"Close assessment → Costing". The confirm dialog lists every verdict and open risk.'],
           ],
         },
+        { shot: 'pm-routing-pending', alt: 'The "Routing change awaiting approval" banner on "Assessments" with one department marked "Removal requested, awaiting decision".' },
       ],
     },
     {
@@ -179,27 +181,32 @@ export const pmChapter: ContentChapter = {
         {
           p:
             'After the baseline every date move is listed under "Deviations from the baseline" with ' +
-            'its reason, slip and effect on the finish. Each one needs your decision. Open ' +
-            'deviations do not stop the work, but the change cannot be released while one is open.',
+            'its reason, slip and effect on the finish. The block somebody moved and the blocks it ' +
+            'pushed along are one group, and a group takes one decision: its pushed rows follow the ' +
+            'move. Open deviations do not stop the work, but the change cannot be released while ' +
+            'one is open. PM, Sales, the change lead and admins decide.',
         },
         {
           table: {
             head: ['Button', 'Means'],
             rows: [
-              ['"Lock"', 'Accepted internally. No customer impact, for example a slip the buffer absorbs.'],
-              ['"Escalate to customer"', 'Sales tells the customer. This opens a customer escalation.'],
+              ['"Lock", or "Lock all {n}" on a group', 'Accepted internally, every open row of the group at once. No customer impact, for example a slip the buffer absorbs.'],
+              ['"Escalate to customer"', 'Sales tells the customer. The whole group goes under one customer escalation.'],
             ],
           },
         },
-        { shot: 'pm-deviations', alt: '"Deviations from the baseline" with one open row, its reason, "+3 d" slip, "Lock" and "Escalate to customer".' },
+        { shot: 'pm-deviations', alt: '"Deviations from the baseline" with one open group: the moved block, one block it pushed indented under it, the reason, a "+3" slip, "Lock all 2" and "Escalate to customer".' },
         { h3: 'Changes from KTX Weissenburg or KTX Solingen' },
         {
           p:
             'You start these changes: only Project Management (and admins) see "Change from" ' +
             'followed by the plant on the start form. Everybody else reads that PM starts them. ' +
-            'At scoping, send the information to every team that has to act ("Send information to" ' +
-            'the chosen departments). Approval waits until it is sent. After "Validate timing" press ' +
-            '"Inform" followed by the plant to record that you sent them the baseline.',
+            'You write the description. The scoping record says which departments are informed ' +
+            '("Departments to inform"): no assessment and no cost carrier. From the meeting, "Send ' +
+            'information to the team" opens the plant\'s tab, where you tell every team that has to ' +
+            'act what changed ("Send information to" the chosen departments). Approval waits until ' +
+            'it is sent. After "Validate timing" press "Inform" followed by the plant to record that ' +
+            'you sent them the baseline.',
         },
       ],
     },
@@ -253,7 +260,7 @@ export const pmChapter: ContentChapter = {
             ['Proceeding with nobody on R or A.', 'Refused: the dialog shows "No department is marked R or A: nobody assesses".'],
             ['Editing the impacted set after Development confirmed it.', 'The confirmation is cleared and the change waits for Development again.'],
             ['Validating the timing with a stale confirmation.', 'The button stays disabled. Ask the team to confirm the current plan.'],
-            ['Leaving deviations open.', 'They do not stop the work, which is why they get forgotten, but the change cannot be released while one is open. Decide each one.'],
+            ['Leaving deviations open.', 'They do not stop the work, which is why they get forgotten, but the change cannot be released while one is open. Decide each group.'],
             ['Deciding the route of an issue you raised.', 'Refused. Ask the lead or another PM.'],
             ['No project team named.', 'Then the whole department counts every task and nobody feels it is theirs.'],
           ],

@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react'
+import { ImageIcon } from 'lucide-react'
 import { Callout, Figure, H3, Lede, P, Points, Steps } from '../kit'
-import type { Block, ContentSection } from './types'
+import type { Block, ContentSection, ShotSlot } from './types'
 
-//: Renders the content blocks onto the manual kit. Not used by the app yet:
-//: WIRING.md describes the one-line swap in ../chapters.tsx.
+//: Renders the content blocks onto the manual kit. ../chapters.tsx builds
+//: chapters 01 to 08 with it (WIRING.md, section 1).
 //:
-//: A screenshot slot renders as a labelled placeholder until its file is in
-//: frontend/public/manual/ and its stem is listed in `available`. That keeps
-//: an unfinished picture visible to the writer and neutral to a trainee.
+//: A screenshot slot renders as a named "Screenshot follows" frame until its
+//: file is in frontend/public/manual/ and its stem is listed in `available`.
+//: The frame says what the picture will show, so the text around it still
+//: reads, on screen and on paper.
 
 export function renderBlocks(blocks: Block[], available: ReadonlySet<string> = new Set()): ReactNode {
   return (
@@ -62,12 +64,28 @@ function BlockView({ block, available }: { block: Block; available: ReadonlySet<
   if (available.has(block.shot)) {
     return <Figure src={`${block.shot}.png`} alt={block.alt} caption={block.caption} />
   }
+  return <ShotPlaceholder slot={block} />
+}
+
+/** The frame a screenshot slot shows until its picture exists. */
+export function ShotPlaceholder({ slot }: { slot: ShotSlot }) {
   return (
-    <p
-      data-shot={block.shot}
-      className="rounded-lg border border-dashed border-slate-700 px-3.5 py-2.5 text-[13px] text-slate-500 print:border-slate-300"
+    <figure
+      data-shot={slot.shot}
+      data-testid={`shot-${slot.shot}`}
+      className="break-inside-avoid rounded-lg border border-dashed border-slate-600 bg-slate-800/40 px-4 py-3.5 print:border-slate-400 print:bg-white"
     >
-      Screenshot follows with the final screens.
-    </p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <ImageIcon aria-hidden="true" size={14} className="shrink-0 text-slate-400 print:text-slate-600" />
+        <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400 print:text-slate-600">
+          Screenshot follows
+        </span>
+        <code className="ml-auto font-mono text-[11px] text-slate-500 print:text-slate-600">{slot.shot}</code>
+      </div>
+      <figcaption className="mt-1.5 text-[13px] leading-relaxed text-slate-300 print:text-black">
+        {slot.alt}
+        {slot.caption ? <span className="mt-1 block text-[11px] text-slate-400">{slot.caption}</span> : null}
+      </figcaption>
+    </figure>
   )
 }

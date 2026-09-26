@@ -138,17 +138,20 @@ export const schedulingChapter: ContentChapter = {
           p:
             'Once the timing is validated, moving a block opens "Record a deviation" and asks "Why ' +
             'does this move?". The move is saved with your reason and listed under "Deviations from ' +
-            'the baseline". PM or Sales then lock it or escalate it to the customer.',
+            'the baseline", with the blocks it pushed along under it as one group. PM, Sales or the ' +
+            'lead then decide the group once: lock it or escalate it to the customer.',
         },
         { shot: 'sch-deviation-dialog', alt: 'The "Record a deviation" dialog with a reason typed and "Save move".' },
         { h3: 'Changes from KTX Weissenburg or KTX Solingen' },
         {
           p:
-            'A change engineered by the mother plant has no assessment and no offer. It goes from ' +
-            'scoping straight to approved, with the mother plant\'s SOP as the release deadline. ' +
-            'Your bank build planning is the first real work on it. Their MS Project file, if ' +
-            'they sent one at the start, seeds the detailed plan at approval. A later file is ' +
-            'loaded with "Import MS Project".',
+            'Project Management starts a change engineered by the mother plant. It has no ' +
+            'assessment and no offer. Scoping only records which departments are informed; PM ' +
+            'sends the information and each informed department confirms "Read and understood". ' +
+            'Then it is approved, with the mother plant\'s SOP as the release deadline. Your bank ' +
+            'build planning is the first real work on it. Their MS Project file, if they sent one ' +
+            'at the start, seeds the detailed plan at approval. A later file is loaded with ' +
+            '"Import MS Project".',
         },
       ],
     },

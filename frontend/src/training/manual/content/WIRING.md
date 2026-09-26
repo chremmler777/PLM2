@@ -1,9 +1,10 @@
-# ECR training content: how to wire it in
+# ECR training content: how it is wired in
 
-Draft of 2026-09-25. Nothing in the app imports this directory yet. The
-content was written before the UI polish; screenshots and a final label check
-come after it. This file says how to plug it in, what is still open, and
-which labels must be re-checked.
+Written 2026-09-25, wired into the app 2026-09-26. Chapters 01 to 08 of the
+in-app manual ("Training", "Manual") and the printable handout pages are
+rendered from this directory. The training is documentation only: recorded,
+never blocking a change action. Screenshots and a final label check come after
+the UI polish.
 
 ## What is here
 
@@ -13,98 +14,139 @@ which labels must be re-checked.
 | `shared.ts` | Chapter 01 (basics) and 02 (flow, with the three side tracks) |
 | `projectManagement.ts`, `sales.ts`, `engineering.ts`, `scheduling.ts`, `quality.ts`, `finance.ts` | Chapters 03 to 08, each with its practice task specs |
 | `index.ts` | `CONTENT_CHAPTERS`, `PRACTICE_TASKS_BY_ROLE`, `PRACTICE_TASKS`, `SHOT_SLOTS`, `contentFor(id)` |
-| `render.tsx` | `renderBlocks(blocks, available?)`: blocks onto `../kit.tsx`; a shot renders as a placeholder until its file exists |
-| `content.test.ts` | House rules: no dashes or placeholder words, unique ids and shots, 2 to 4 tasks per role, every stub in `../chapters.tsx` written |
+| `render.tsx` | `renderBlocks(blocks, available?)`: blocks onto `../kit.tsx`; a shot renders as a named "Screenshot follows" frame (`ShotPlaceholder`) until its file exists |
+| `handouts.ts` | The one-page handout per role (`HANDOUTS`), `practiceOf(role)` (tasks this build runs, and the ones coming), `handoutMarkdown(h)` |
+| `content.test.ts` | House rules: no dashes or placeholder words, unique ids and shots, 2 to 4 tasks per role, every chapter wired, every shot slot listed in section 2 below |
+| `handouts.test.ts` | The handouts follow the house rules and `docs/training/handouts/*.md` equal `handoutMarkdown` |
 
-Outside the code: `docs/training/handouts/*.md` (one page per role),
-`docs/training/rollout-announcement.md`, `docs/training/roster-template.md` (both parked, see section 8).
+Outside the code: `docs/training/handouts/*.md` (one page per role, generated
+from `handouts.ts`), `docs/training/rollout-announcement.md`,
+`docs/training/roster-template.md` (both parked, see section 8).
 
-Run the test: from `frontend/`,
-`npx vitest run src/training/manual/content/content.test.ts --maxWorkers=2 --minWorkers=1`
+Run the tests: from `frontend/`,
+`npx vitest run src/training/manual/content --maxWorkers=2 --minWorkers=1`
 (`--minWorkers=1` is needed: `--maxWorkers=2` alone collides with the default
 minimum thread count on a many-core machine).
 
-## 1. Plugging the chapters in
+## 1. How the chapters are wired
 
-Chapter ids, numbers and roles are the same as in `../chapters.tsx`, and every
-stub section id there has a written section here (the test checks it). Chapter
-09 (`record`) is already written in `../chapters.tsx` and is not repeated.
+`../chapters.tsx` builds chapters 01 to 08 with `written(id, number, roles)`:
+title, summary and sections come from `contentFor(id)`, each section body is
+`renderBlocks(section.blocks, SHOTS_AVAILABLE)`. Chapter 09 (`record`) is
+written in `../chapters.tsx` itself. Section ids are the anchors of the
+Manual tab (prefixed with the chapter id, unique across the manual).
 
-In `../chapters.tsx`, replace each chapter's `sections` with the content's:
+The printable handout (`/training/handout/<role>`, `pages/TrainingHandoutPage.tsx`)
+prints the role's one-page handout from `handouts.ts`, the practical check
+(the tasks the server's curriculum asks, then the ones coming, see section 3)
+and the record block. "With the full chapters" (`?full=1`) appends the role's
+chapters on a new page.
 
-```tsx
-import { contentFor } from './content'
-import { renderBlocks } from './content/render'
+To change a handout, edit `handouts.ts`, then rewrite the markdown files:
+`WRITE_HANDOUTS=1 npx vitest run src/training/manual/content/handouts.test.ts --maxWorkers=2 --minWorkers=1`.
+Without the variable the test fails when a file differs.
 
-/** Shot stems that have a file in public/manual/. Grows as screenshots land. */
-const SHOTS_AVAILABLE = new Set<string>([])
-
-function sectionsOf(chapterId: string): ManualSection[] {
-  const c = contentFor(chapterId)
-  if (!c) return []
-  return c.sections.map((s) => ({
-    id: s.id,
-    title: s.title,
-    body: renderBlocks(s.blocks, SHOTS_AVAILABLE),
-  }))
-}
-
-// in CHAPTERS, e.g.:
-{ id: 'pm', number: '03', title: 'Project Management', summary: ..., roles: ['project_management'],
-  sections: sectionsOf('pm') },
-```
-
-Take `title` and `summary` from the content too (`contentFor(id)!.title`) if
-the wording here is preferred; some summaries were sharpened.
-
-The content adds sections the stubs did not have (for example `pm-role`,
-`pm-issues`, `sales-versions`, `eng-validation`, `eng-development`,
-`fin-review`, `flow-issues`, `flow-mother-plant`, `flow-intake`). Their ids are
-prefixed like the rest, so the Manual tab's anchors keep working.
-
-Then bump `code_version` for every role in `backend/app/services/training.py`
-(the material changed) and publish from "Training", "Records", "Publish a new
-version" when the plant is ready.
+When the material changes what a role has to know, bump `code_version` for
+that role in `backend/app/services/training.py` and publish from "Training",
+"Records", "Publish a new version" when the plant is ready. Not done for this
+wiring: no role has been trained on version 1 yet (the training record
+arrives with the costing-to-close rollout), so version 1 is this material.
 
 ## 2. Screenshots
 
-47 slots, listed in manual order by `SHOT_SLOTS` (each with chapter, section,
-what the picture must show in `alt`). After the polish:
+49 slots, in manual order (`SHOT_SLOTS` holds the same list with the
+chapter, the section and in `alt` what the picture must show; the frame in the
+manual shows the slot name and that text until the picture exists).
+`content.test.ts` checks this table names every slot once and nothing else.
+After the polish:
 
-1. Take each shot on a seeded demo change, save it as
-   `frontend/public/manual/<shot>.png` (the stem is the slot name).
-2. Add the stem to `SHOTS_AVAILABLE`. The placeholder becomes a `Figure`.
+1. Take each shot on a seeded demo change in the state below, save it as
+   `frontend/public/manual/<slot>.png`.
+2. Add the slot name to `SHOTS_AVAILABLE` in `../chapters.tsx`. The frame
+   becomes a `Figure`.
 
-Slots: basics-sidebar, basics-project-team, basics-backup-row, basics-my-tasks,
-basics-cockpit, flow-stepper, flow-gantt-baseline, flow-issue-card,
-pm-next-step-capture, pm-status-card, pm-impact-tree, pm-scoping-meeting,
-pm-cost-summary, pm-signoff, pm-validate-timing, pm-deviations,
-pm-route-dialog, sales-start-form, sales-question-card, sales-offer-price,
-sales-offer-pdf, sales-offer-versions, sales-customer-response,
-sales-issue-decision, eng-bucket, eng-checklist, eng-risk-on-row,
-eng-cost-positions, eng-team-confirmation, eng-tracker, eng-failed-check,
-eng-release-checklist, eng-intake-route, sch-assessment-checklist,
-sch-bank-build-card, sch-bank-build-idea, sch-team-confirmation,
-sch-deviation-dialog, sch-release-checklist, qa-signoff, qa-audit-tab,
-qa-lessons, qa-records-tab, fin-cost-sheet, fin-publish-dialog,
-fin-no-rate-line, fin-review-banner.
+| Slot | Section | Screen | State it needs |
+|---|---|---|---|
+| `basics-sidebar` | `basics-access` | Any page, sidebar expanded | A user who sees "Changes", "Process Flow", "P&L", "My Tasks" and "Training" |
+| `basics-project-team` | `basics-team` | Project page, "Project team" card | A project with a responsible for every department but one ("Unassigned") |
+| `basics-backup-row` | `basics-team` | "My Tasks" | Viewer is a backup (not the responsible) of a department with an open task |
+| `basics-my-tasks` | `basics-finding` | "My Tasks" | Viewer with own open tasks, two backup tasks ("+2 as backup") and a pending index under "New indexes" (a Development member) |
+| `basics-cockpit` | `basics-finding` | Change page, cockpit | A change in assessment where the viewer owes an action and one department blocks |
+| `flow-stepper` | `flow-overview` | Change page, lifecycle stepper | A change in "Quoted" (offer v1 sent) |
+| `flow-gantt-baseline` | `flow-implementation` | "Timing" tab, detailed plan in tracking mode | In implementation, baseline set, one block slipped past its ghost |
+| `flow-issue-card` | `flow-issues` | "Release" tab, validation issue card | In validation, VI-1 at level L2 with a severity chip |
+| `pm-next-step-capture` | `pm-takeover` | Change cockpit, "Next step" card | A captured change without a lead or without an attachment |
+| `pm-status-card` | `pm-priority` | Change cockpit, "Status" card | Priority set, a lead, a quote deadline 6 days out |
+| `pm-impact-tree` | `pm-scoping` | "Impacted" tab, impact tree | Scoping, lead item picked, two suggested parent assemblies, not yet confirmed |
+| `pm-scoping-meeting` | `pm-scoping` | "Scoping" tab, "+ Record a meeting" form | Scoping, impacted set confirmed, letters set per department (one "Informed"), cost carrier chosen |
+| `pm-routing-pending` | `pm-assessment` | "Assessments" tab, routing banner | In assessment, the lead asked to take one department off routing ("Take off routing"), not yet decided |
+| `pm-cost-summary` | `pm-costing` | "Costing" tab, "Cost summary" | Costing, at least two departments priced, viewer PM |
+| `pm-signoff` | `pm-signoff` | "Offer" tab, customer response | Quoted, customer accepted, PM signed, Quality still open |
+| `pm-validate-timing` | `pm-plan` | "Timing" tab, the three steps | Approved, detailed plan created, every team confirmed, no idea block |
+| `pm-deviations` | `pm-plan` | "Timing" tab, "Deviations from the baseline" | In implementation, one open group: a block moved +3 d and one successor it pushed |
+| `pm-route-dialog` | `pm-issues` | "Release" tab, validation issue, "Decide the route" dialog | VI-1 raised by another user, contained, root cause recorded; "Internal rework" with one fix action typed |
+| `sales-start-form` | `sales-start` | "Changes", "New Change Request" form | Sales viewer; a project with two parts from one tool, both picked, a short description and a quote deadline |
+| `sales-question-card` | `sales-documents` | "Scoping" tab, open question | Scoping, one open question asked by an engineer, not answered |
+| `sales-offer-price` | `sales-quote` | "Offer" tab, "Price" step | Quote creation, costing closed, draft offer v1 with one factor switched on |
+| `sales-offer-pdf` | `sales-quote` | Offer PDF, page 1 | A sent version with a receipt date (dates read like "26 Sep 2026", signed by the Sales sender) |
+| `sales-offer-versions` | `sales-versions` | "Offer" tab, "Negotiation" timeline | Quoted, v1 superseded, one logged round, v2 sent with a change note |
+| `sales-customer-response` | `sales-answer` | "Offer" tab, "Customer response" | Quoted, v2 sent, no customer response yet |
+| `sales-issue-decision` | `sales-after` | "Release" tab, validation issue, "Record customer decision" | VI-1 routed as "Customer concession", customer to be informed, a mail filed |
+| `eng-bucket` | `eng-assessment` | "Assessments" tab, Tool Engineer bucket | In assessment, viewer a Tool Engineer member, a mold on the impacted set |
+| `eng-checklist` | `eng-checklist` | "Assessments" tab, "Impacted areas" | 8 of 13 rows answered, one Yes with its remark |
+| `eng-risk-on-row` | `eng-risks` | "Assessments" tab, "⚑ Flag risk" on a Yes row | The flag form open with a risk type and a rating chosen |
+| `eng-cost-positions` | `eng-costing` | "Costing" tab, own department's "Cost positions" | Costing, the standing rows, one "External · vendor quote" line with two offers, one starred |
+| `eng-team-confirmation` | `eng-plan` | "Timing" tab, "Team confirmation" | Approved, detailed plan, the viewer's department not yet confirmed |
+| `eng-tracker` | `eng-implementation` | "Timing" tab, "Reports and time booking" | In implementation, a report due, some hours booked |
+| `eng-failed-check` | `eng-validation` | "Release" tab, "Validation checks" | In validation, one check failed with its reason, no issue raised yet |
+| `eng-release-checklist` | `eng-release` | "Release" tab, "Release checklist" | In validation, the 16 rows, some "Done", one "N.a." with a note |
+| `eng-intake-route` | `eng-development` | "My Tasks", "New indexes", triage dialog | A pending index C of part 20-9001-001-0, viewer a Development member |
+| `sch-assessment-checklist` | `sch-assessment` | "Assessments" tab, Scheduling bucket | Scoping routed Scheduling (R); "Cycle time change" answered Yes with a remark |
+| `sch-bank-build-card` | `sch-bankbuild` | "Timing" tab, "Bank build plan" card | Approved; "Planned scrap" with a scrap quote price and a plan note |
+| `sch-bank-build-idea` | `sch-bankbuild` | "Timing" tab, Gantt | A plan with a "Tool downtime" block and the dashed "Bank build (idea)" ending at its start |
+| `sch-team-confirmation` | `sch-plan` | "Timing" tab, "Team confirmation" | Scheduling confirmed before the last plan edit (the stale chip shows) |
+| `sch-deviation-dialog` | `sch-plan` | "Timing" tab, "Record a deviation" dialog | In implementation, baseline set, a block dragged, reason typed |
+| `sch-release-checklist` | `sch-release` | "Release" tab, "Release checklist" | In validation, the two Scheduling rows "Done" |
+| `qa-signoff` | `qa-signoff` | "Offer" tab, customer response | Quoted, customer accepted, PM signed, viewer a Quality member |
+| `qa-audit-tab` | `qa-governance` | Governance, "Audit" tab | A change with a sign-off in its history, viewer a Quality member |
+| `qa-lessons` | `qa-release` | "Release" tab, "Lessons learned" | In validation, one lesson recorded, the "+ Add lesson" form open |
+| `qa-records-tab` | `qa-training` | "Training", "Records" tab | Viewer with manage rights (Quality or PM), several people on the roster in every state |
+| `fin-cost-sheet` | `fin-costsheet` | "Cost sheet", "Rates" tab | A current published version, viewer Sales or Finance |
+| `fin-machines` | `fin-costsheet` | "Cost sheet", "Machines" tab | MachineDB synced (or seeded), one press with its own rate in the version |
+| `fin-publish-dialog` | `fin-costsheet` | "Cost sheet", "Publish version" dialog | A draft (version 3) with two rows that differ from version 2 |
+| `fin-no-rate-line` | `fin-in-costing` | Change "Costing" tab | A costing line of a department without a rate at the change's plant |
+| `fin-review-banner` | `fin-review` | "Cost sheet" page | The current version older than the review period; one plant currency unconfirmed |
 
-## 3. Plugging the practice tasks in
+## 3. Practice tasks: active today, the rest coming
+
+Active means the backend curriculum asks for the key
+(`backend/app/services/training.py` `CURRICULA`) and `../../tasks.ts` can run
+and score it in the sandbox. Only those are in the practical check. Every
+other written task (`PracticeTaskSpec` in the chapter files) is shown as
+"Coming later" on the role card of the Training page and on the printable
+handout, as plain text: no button, not in the record (`practiceOf(role)` in
+`handouts.ts`). Training stays recorded, not blocking.
+
+| Role | Active today (key) | Coming (written spec, needs the sandbox) |
+|---|---|---|
+| project_management | `pm_set_priority` | `pm_scoping_proceed`, `pm_decide_deviation`, `pm_route_issue` |
+| sales | `sales_start_change` | `sales_send_offer`, `sales_new_version`, `sales_issue_customer_decision` |
+| engineering | `eng_answer_checklist_row`, `eng_submit_assessment` | `eng_costing_vendor_quotes`, `eng_contain_issue` |
+| scheduling | `sch_answer_checklist_row` | `sch_bank_build_plan`, `sch_resolve_bank_idea`, `sch_timing_concern`, `sch_release_stock` |
+| quality | `qa_answer_checklist_row` | `qa_quality_signoff`, `qa_flag_row_risk`, `qa_add_lesson` |
+| finance | `fin_answer_checklist_row` | `fin_publish_rate`, `fin_add_missing_rate`, `fin_confirm_currency` |
+
+`qa_flag_row_risk` is the nearest: same screen as `qa_answer_checklist_row`,
+the sandbox already answers `/concerns`; it needs a check in `tasks.ts` and the
+key swap below. The three checklist tasks of Scheduling, Quality and Finance
+stay active until their replacements run (open question 1).
 
 Each `PracticeTaskSpec` carries the fields of `TrainingTask` in
 `../../tasks.ts` (`key`, `title`, `brief`, `why`, `screen`) plus `fixture`
 (what the sandbox must hold) and `pass` (one assertion per line on the
 outcome, with the hint shown on a fail). A check function is written from
-`pass` in order: the first failing assertion returns its hint.
-
-| Role | Task keys (order) | Status |
-|---|---|---|
-| project_management | `pm_set_priority`, `pm_scoping_proceed`, `pm_decide_deviation`, `pm_route_issue` | 1 ready (exists), 3 need sandbox |
-| sales | `sales_start_change`, `sales_send_offer`, `sales_new_version`, `sales_issue_customer_decision` | 1 ready (exists), 3 need sandbox |
-| engineering | `eng_answer_checklist_row`, `eng_submit_assessment`, `eng_costing_vendor_quotes`, `eng_contain_issue` | 2 ready (exist), 2 need sandbox |
-| scheduling | `sch_bank_build_plan`, `sch_resolve_bank_idea`, `sch_timing_concern`, `sch_release_stock` | 4 need sandbox; replaces `sch_answer_checklist_row` |
-| quality | `qa_quality_signoff`, `qa_flag_row_risk`, `qa_add_lesson` | `qa_flag_row_risk` ready (replaces `qa_answer_checklist_row`, same screen, concerns handler exists), 2 need sandbox |
-| finance | `fin_publish_rate`, `fin_add_missing_rate`, `fin_confirm_currency` | 3 need sandbox; replaces `fin_answer_checklist_row` |
+`pass` in order: the first failing assertion returns its hint. When a coming
+task is activated it leaves the "Coming later" list on its own.
 
 Every role stays within `MAX_TASKS_PER_ROLE = 5`.
 
@@ -196,6 +238,12 @@ care. Grep each one again before publishing.
 | Validation check names ("Tool sampled", "Part measured", ...) | fallback names in `cmLabels.ts`; real names come from the backend | Backend may name them differently |
 | Plan warning texts (bank build ends after downtime, idea blocks) | `backend/app/services/change_plan_service.py` | Paraphrased in the copy, not quoted |
 | Offer warning "costing used an older version" | backend `offer_service.py` warning `cost_sheet_outdated` | Paraphrased, not quoted |
+| "Lock all {n}", "Lock", "Escalate to customer" | `timing/DeviationsPanel.tsx` | Group decision labels (2026-09-26); "Lock all {n}" is a template |
+| "Take off routing", "Removal requested, awaiting decision", "Routing change awaiting approval" | `cmLabels.ts` `lateAssess.*`, `routingDev.*` | Routing removal waits for approval (2026-09-26) |
+| "Departments to inform", "Send information to the team" | `cmLabels.ts` `mp.informDepartments`, `mp.sendInfo` | Mother-plant scoping (final walk) |
+| "Signed by (preview)" | backend `offer_pdf.py` | PDF text, not a screen label |
+| "Any machine (class rate)", "Sync from MachineDB", "Machines from MachineDB", "Class rate / h" | `cmLabels.ts` `costpos.machineAny`, `costSheet/MachinesPanel.tsx` | New module, cost sheet work in progress |
+| Silao USD/MXN exchange rate | backend `cost_sheet_service.py` (106), no screen label yet | The chapters describe the behaviour and quote only the backend refusal "Enter the USD/MXN exchange rate of this version first"; quote the screen labels once the cost sheet shows the exchange rate |
 
 Descriptions that are not labels but are claims about behaviour, to confirm
 on the polished build:
@@ -211,13 +259,10 @@ on the polished build:
   it was committed). The Engineers, Quality and Sales chapters and the
   `sales_send_offer` fixture teach it. If that change does not ship, severity
   3 is shown by default again and those sentences change back.
-- `components/costSheet/PublishDialog.tsx` makes the same wrong backdating
-  claim the first draft of the Finance chapter made: "Costing lines and
-  bookings dated since then will be priced with this version." Lines already
-  priced keep their snapshot (`costing_rates.snapshot_position`,
-  `stored_price`); only time booked since then and lines without a rate take
-  the new version. The chapter now says so. The dialog text is fixed in the UI
-  polish, not here.
+- `components/costSheet/PublishDialog.tsx` now says "Changes created from the
+  valid-from date on are priced with it; changes created before keep their
+  rates", which is what the Finance chapter says. Re-read it after the cost
+  sheet work lands.
 - The PDF letterhead defaults (KTX Group US Corp., Toccoa) come from
   `backend/app/services/company_profile.py` and can be overridden by
   `KTX_COMPANY_*` environment variables. If production overrides them, the
@@ -240,9 +285,11 @@ open by nature:
    (`sch_answer_checklist_row`, `qa_answer_checklist_row`,
    `fin_answer_checklist_row` in `tasks.ts`), but on a part change those
    departments are not routed (CHANGE_MANAGEMENT_FLOW.md, "Physical-part
-   changes route exactly five departments"). This draft replaces the
+   changes route exactly five departments"). The content replaces the
    Scheduling and Finance ones with role-true tasks and keeps a Quality one
-   framed as "when the scoping meeting routes Quality". Agree?
+   framed as "when the scoping meeting routes Quality". Until the
+   replacements run in the sandbox the old tasks stay active and the new ones
+   are listed as coming (section 3). Agree?
 2. **Internal changes cannot be started** ("Internal change" is disabled on
    the start form: "Internal changes come later"). The manual teaches the
    customer path only and does not cover "Approve internal costs". Add a
@@ -254,10 +301,10 @@ open by nature:
 4. **Progress report cadence.** The backend expects a report about every 84
    hours; the UI only shows "report due". The copy avoids "twice a week".
    Say it in the manual?
-5. **Two handouts.** The in-app "Printable handout" prints the full chapters
-   for a role. The files in `docs/training/handouts/` are one-page cheat
-   sheets. Keep both, or add the one-pager as a "Quick reference" section of
-   each role chapter?
+5. **Two handouts.** Answered 2026-09-26: the printable handout page prints
+   the one-pager (from `handouts.ts`, the same text as
+   `docs/training/handouts/`), and appends the full chapters on request
+   ("With the full chapters").
 6. **Release rows next to APQP.** Answered 2026-09-26, see section 7.
 
 ## 7. Answered (decisions of 2026-09-25)
@@ -304,6 +351,32 @@ The app and the content follow these; the chapters and handouts say them.
   sent the version, frozen with it; a draft shows the project's Sales
   responsible, else the Sales viewer, else the "Sales" line alone.
   `KTX_COMPANY_SIGNATURE_NAME` is no longer needed (an optional override).
+
+## 7b. Folded in on 2026-09-26
+
+The chapters and handouts now also say (checked against the code that day):
+
+- Release checklist: 16 rows (Development 3, Tool Engineer 3, APQP 6,
+  Packaging Engineer 1, Scheduling 2, Sales 1); Quality, Process Engineer
+  and Manufacturing Engineer own no row.
+- Offer PDF: dates read like "26 Sep 2026" for every customer; Sales signs
+  (the sender, frozen; a PM lead or admin sending: the project's Sales
+  responsible, else the "Sales" line); a draft shows "Signed by (preview)".
+- KTX Weissenburg / Solingen: only PM starts them; PM writes the
+  description; scoping records the departments to inform (no assessment, no
+  cost carrier), then "Send information to the team"; approval waits for it.
+- RASIC "I": "Informed (notified only)", a notification and no task.
+- Routing changes after scoping: an add or a removal is a routing deviation
+  with four eyes; a removal waits for approval, the department stays on the
+  hook and the change cannot move to costing until it is decided.
+- Plan deviations: the moved block and the blocks it pushed are one group,
+  one decision ("Lock all {n}" or "Escalate to customer"), by PM, Sales, the
+  lead or an admin.
+- Cost sheet: kept by Sales, Finance and admins may edit; one rate per
+  department per plant ("Rates"); a change is priced with the rates valid on
+  the day it was created; machines synced from MachineDB with an optional
+  rate per press; Silao quotes in USD and pays in MXN, converted with the
+  version's exchange rate.
 
 ## 8. Rollout: parked
 

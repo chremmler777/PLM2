@@ -7,7 +7,7 @@ export const salesChapter: ContentChapter = {
   id: 'sales',
   number: '04',
   title: 'Sales',
-  summary: 'Starting a change request, the offer, negotiation, the customer\'s answer, and every customer contact after it.',
+  summary: 'Starting a change request, the offer, negotiation, the customer\'s answer, every customer contact after it, and the rates on the cost sheet.',
   roles: ['sales'],
   sections: [
     {
@@ -114,14 +114,17 @@ export const salesChapter: ContentChapter = {
           p:
             'The PDF carries the KTX Group US Corp. letterhead of the Toccoa site, the offer number ' +
             '(change number, Q, version), the scope, the price, changeover, timing with a draft ' +
-            'disclaimer, the risks you chose and the terms. The validity is fixed: 30 days from the ' +
-            'customer\'s receipt. "Preview PDF" shows the draft with a DRAFT watermark.',
+            'disclaimer, the risks you chose and the terms. Every date on it reads like "26 Sep ' +
+            '2026", for every customer; amounts follow the offer currency. The validity is fixed: 30 ' +
+            'days from the customer\'s receipt. "Preview PDF" shows the draft with a DRAFT watermark.',
         },
         {
           p:
-            'Sales signs the offer. The version you send carries your name and "Sales" under the ' +
-            'letterhead, and keeps it for good. A draft preview shows the project\'s Sales ' +
-            'responsible, or you when nobody is set.',
+            'Sales signs the offer. The version you send carries your name and your title (else ' +
+            '"Sales"), and keeps it for good. If a PM lead or an admin sends it, the project\'s Sales ' +
+            'responsible signs, else the "Sales" line alone. A draft shows "Signed by (preview)" ' +
+            'with who would sign if it were sent now: you when you are in Sales, otherwise the ' +
+            'project\'s Sales responsible.',
         },
         { shot: 'sales-offer-pdf', alt: 'Page 1 of an offer PDF: letterhead, "OFFER" with number and valid-until date, recipient and "1. Scope of change".' },
         { h3: 'Sending' },
@@ -180,6 +183,36 @@ export const salesChapter: ContentChapter = {
       ],
     },
     {
+      id: 'sales-rates',
+      title: 'Keeping the rates: the cost sheet',
+      blocks: [
+        {
+          p:
+            'Sales keeps the cost sheet: one hourly rate per department per plant, the machine and ' +
+            'sampling prices and the overhead. Finance and admins may change them too. Everybody ' +
+            'else reads them. The page is "Cost sheet", at the address ending in /cost-sheet.',
+        },
+        {
+          steps: [
+            { title: '"New draft"', body: 'Copies the latest published version. Every department that can be routed on a change gets a row per plant; a new one has an empty rate.' },
+            { title: 'Fill the rates', body: 'On "Rates", one row per department and plant. "Add missing departments" adds rows still missing. The tab says how many rows have no rate yet.' },
+            { title: '"Publish version"', body: 'With "Valid from" and a note. From that day on, new changes are priced with it.' },
+          ],
+        },
+        {
+          points: [
+            ['A change keeps its rates.', 'It is priced with the version valid on the day it was created. A later version never changes a change or an offer already sent.'],
+            ['An empty rate is no rate.', 'Costing shows "No rate in the cost sheet" and leaves the line out of the total: the offer is too low.'],
+            ['Machines come from MachineDB.', 'On "Machines", "Sync from MachineDB" lists the presses. A press may carry its own rate; without one its class rate applies.'],
+            ['Silao works in two currencies.', 'It quotes in USD and pays in MXN. Type the version\'s rate under "Exchange rates" (1 USD = 17.30 MXN) on the draft. A Silao rate may then be typed in the USD or the "Local / h" column: the typed number is kept, the other says "calculated". Publishing freezes the exchange rate with the rates.'],
+            ['MXN actual costs', 'on a Silao change are converted to USD at the exchange rate of the change\'s own version; the P&L says so, with the rate. Money without a rate in the version is never added.'],
+            ['Retired departments', 'keep their rows, hidden until "Show retired".'],
+            ['Sort and filter', 'every table like a spreadsheet: a column heading sorts, its filter button narrows by value or range.'],
+          ],
+        },
+      ],
+    },
+    {
       id: 'sales-mistakes',
       title: 'Common mistakes',
       blocks: [
@@ -190,6 +223,7 @@ export const salesChapter: ContentChapter = {
             ['A new version without saying what changed.', 'Refused. The note is how the next reader understands the negotiation.'],
             ['Accepting by mail and not recording it.', 'Until "Customer accepted" is recorded, the change cannot be approved and the release deadline does not exist.'],
             ['Hiding a severity-3 risk.', 'The customer will not read about it. If it bites, the offer said nothing.'],
+            ['Starting a KTX Weissenburg or Solingen change.', 'Project Management starts those. Send the request to PM.'],
             ['Marking a team question solved yourself.', 'You answer; the asker judges the answer.'],
           ],
         },

@@ -1,10 +1,8 @@
 # ECR handout: Quality
 
-One page for the session and the desk. The full chapter is in PLM2 under
-**Training**, "Manual", chapter 07. Address: https://apps.ad.us.ktx.group/plm2/
+For Quality. One page for the session and the desk; the full chapter is in PLM2 under **Training**, "Manual", chapter 07. Address: https://apps.ad.us.ktx.group/plm2/
 
-**Your job:** the second pair of eyes. No customer change is approved
-without a Quality sign-off, and you see the full record of every change.
+**Your job:** the second pair of eyes. No customer change is approved without a Quality sign-off, and you see the full record of every change.
 
 ## Where you act
 
@@ -28,9 +26,12 @@ without a Quality sign-off, and you see the full record of every change.
 
 ## Your practical check
 
-1. Give the Quality sign-off.
-2. Answer a row and flag its risk.
-3. Record a lesson learned.
+1. Answer a checklist row.
 
-Training is recorded, not blocking. Confirm your session on the Training
-page ("Confirm your training"), then take the check.
+Coming, once the training copy can run them:
+
+- Give the Quality sign-off.
+- Answer a row and flag its risk.
+- Record a lesson learned.
+
+Training is recorded, not blocking. Confirm your session on the Training page ("Confirm your training"), then take the check.

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { CHAPTERS } from '../chapters'
 import { CONTENT_CHAPTERS, PRACTICE_TASKS, PRACTICE_TASKS_BY_ROLE, SHOT_SLOTS } from './index'
 import type { Block } from './types'
+import wiring from './WIRING.md?raw'
 
 //: The draft content's house rules, checked so the next writer cannot drift
 //: from them without noticing. Pure data checks: nothing is rendered.
@@ -88,12 +89,23 @@ describe('the draft training content', () => {
     }
   })
 
-  it('writes every section still pending in ../chapters.tsx, under the same chapter', () => {
-    const written = new Map(CONTENT_CHAPTERS.map((c) => [c.id, new Set(c.sections.map((s) => s.id))]))
-    const missing = CHAPTERS.filter((c) => c.id !== 'record').flatMap((c) =>
-      c.sections.filter((s) => !written.get(c.id)?.has(s.id)).map((s) => `${c.id}/${s.id}`),
-    )
-    expect(missing).toEqual([])
+  it('wires every written chapter into ../chapters.tsx, section by section', () => {
+    for (const c of CONTENT_CHAPTERS) {
+      const live = CHAPTERS.find((x) => x.id === c.id)
+      expect(live, c.id).toBeDefined()
+      expect(live!.title).toBe(c.title)
+      expect(live!.sections.map((s) => s.id)).toEqual(c.sections.map((s) => s.id))
+    }
+    // Chapter 09 is written in chapters.tsx; everything else comes from here.
+    expect(CHAPTERS.filter((c) => !CONTENT_CHAPTERS.some((x) => x.id === c.id)).map((c) => c.id)).toEqual([
+      'record',
+    ])
+  })
+
+  it('lists every screenshot slot once in WIRING.md section 2, and nothing else', () => {
+    const section = wiring.slice(wiring.indexOf('## 2. Screenshots'), wiring.indexOf('## 3. '))
+    const listed = [...section.matchAll(/^\| `([a-z0-9-]+)` \| `([a-z0-9-]+)` \|/gm)].map((m) => [m[1], m[2]])
+    expect(listed).toEqual(SHOT_SLOTS.map((s) => [s.shot, s.section]))
   })
 
   it('keeps the chapter numbers and roles of ../chapters.tsx', () => {

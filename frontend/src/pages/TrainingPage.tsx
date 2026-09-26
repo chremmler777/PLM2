@@ -17,7 +17,8 @@ import ConfirmDialog from '../components/common/ConfirmDialog'
 import DateInput from '../components/gantt/DateInput'
 import { CHAPTERS, type ManualChapter } from '../training/manual/chapters'
 import { TASKS } from '../training/tasks'
-import { Notice, StagePill } from '../training/ui'
+import { practiceOf } from '../training/manual/content/handouts'
+import { ComingTasks, Notice, StagePill } from '../training/ui'
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT, stageOf } from '../training/uiTokens'
 
 //: The Training page: your own record, the manual, and (for admin, Quality and
@@ -233,6 +234,9 @@ function RoleCard({ role, practiceOnly }: { role: RoleState; practiceOnly: boole
           ))}
         </ul>
       </div>
+      <ComingTasks
+        tasks={practiceOf(role.role).coming.filter((c) => !role.tasks.some((t) => t.key === c.key))}
+      />
       <div className="flex flex-wrap items-center gap-2">
         {action && (
           <Link

@@ -44,3 +44,32 @@ export function Notice({
     </div>
   )
 }
+
+/**
+ * Practice tasks written for a role that the training copy cannot run yet.
+ * Listed so the plan is visible; never a button, never part of the record.
+ */
+export function ComingTasks({ tasks }: { tasks: { key: string; title: string }[] }) {
+  if (tasks.length === 0) return null
+  return (
+    <div data-testid="coming-tasks">
+      <div className="mb-1.5 text-[11px] uppercase tracking-wide text-slate-400 print:text-slate-600">
+        Coming later
+      </div>
+      <ul className="space-y-1">
+        {tasks.map((t) => (
+          <li key={t.key} className="flex items-center gap-2 text-sm">
+            <span
+              aria-hidden
+              className="inline-flex h-4 w-4 shrink-0 rounded-full border border-dashed border-slate-600"
+            />
+            <span className="text-slate-400 print:text-slate-700">{t.title}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-[11px] text-slate-400 print:text-slate-600">
+        Not part of the check yet. They join it once the training copy can run them.
+      </p>
+    </div>
+  )
+}

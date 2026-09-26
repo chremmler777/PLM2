@@ -1,19 +1,23 @@
 import type { ReactNode } from 'react'
-import { Callout, P, Pending, Points, Steps } from './kit'
+import { contentFor } from './content'
+import { renderBlocks } from './content/render'
+import { Callout, P, Points, Steps } from './kit'
 
 //: The ECR manual: per-role chapters, versioned with the app so a screen and
 //: its description cannot drift apart (same rule as TWOS content.tsx).
 //:
-//: Format, for when the content is written (after the UI polish):
+//: Chapters 01 to 08 are written as data in ./content (one file per role,
+//: see content/WIRING.md) and rendered onto the kit by content/render.tsx.
+//: Chapter 09 (the training record) is written here.
+//:
+//: Format:
 //:   - A chapter is one entry in CHAPTERS. `roles` lists the training role
 //:     keys it belongs to (backend app/services/training.py CURRICULA);
 //:     leave it out for a chapter everybody reads.
 //:   - A section is { id, title, body }. The id is its anchor, unique across
 //:     the manual, prefixed with the chapter id.
-//:   - A body is composed from kit.tsx (Lede, P, H3, Points, Steps, Callout,
-//:     Figure). Screenshots go in frontend/public/manual/ and are referenced
-//:     by file name: <Figure src="sales-start.png" alt="..." />.
-//:   - Until a section is written its body is <Pending />.
+//:   - Screenshots go in frontend/public/manual/<slot>.png; add the slot name
+//:     to SHOTS_AVAILABLE and its placeholder becomes the picture.
 //:   - No em-dashes in the copy.
 //:   - When a chapter changes what a role has to know, bump code_version for
 //:     that role in the backend curriculum, and publish the new version from
@@ -31,120 +35,40 @@ export type ManualChapter = {
   sections: ManualSection[]
 }
 
-/** A section whose content is still to be written. */
-const stub = (id: string, title: string): ManualSection => ({ id, title, body: <Pending /> })
+/**
+ * Screenshot slots that have a file in public/manual/ (the stem, no ".png").
+ * Grows as the screenshots land; every other slot renders as a named
+ * "Screenshot follows" frame. The slot list is in content/WIRING.md.
+ */
+export const SHOTS_AVAILABLE: ReadonlySet<string> = new Set<string>([])
+
+/** Chapter 01 to 08 from the written content, by the chapter id. */
+function written(id: string, number: string, roles?: string[]): ManualChapter {
+  const c = contentFor(id)
+  if (!c) throw new Error(`No written content for manual chapter ${id}`)
+  return {
+    id,
+    number,
+    title: c.title,
+    summary: c.summary,
+    ...(roles ? { roles } : {}),
+    sections: c.sections.map((s) => ({
+      id: s.id,
+      title: s.title,
+      body: renderBlocks(s.blocks, SHOTS_AVAILABLE),
+    })),
+  }
+}
 
 export const CHAPTERS: ManualChapter[] = [
-  // ------------------------------------------------------------------ 01
-  {
-    id: 'basics',
-    number: '01',
-    title: 'Why the ECR process, and who owns what',
-    summary: 'One place for every engineering change. The same information for everyone.',
-    sections: [
-      stub('basics-why', 'What the change process is for'),
-      stub('basics-owners', 'Who owns which step'),
-      stub('basics-finding', 'Finding your work: My Tasks and the change page'),
-    ],
-  },
-  // ------------------------------------------------------------------ 02
-  {
-    id: 'flow',
-    number: '02',
-    title: 'A change, end to end',
-    summary: 'From the customer\'s request to the released part.',
-    sections: [
-      stub('flow-capture', 'Capture'),
-      stub('flow-scoping', 'Scoping'),
-      stub('flow-assessment', 'Assessment'),
-      stub('flow-costing', 'Costing and the quote'),
-      stub('flow-implementation', 'Approval and implementation'),
-      stub('flow-validation', 'Validation and release'),
-    ],
-  },
-  // ------------------------------------------------------------------ 03
-  {
-    id: 'pm',
-    number: '03',
-    title: 'Project Management',
-    summary: 'Leading a change: priority, deadlines, scoping, the plan.',
-    roles: ['project_management'],
-    sections: [
-      stub('pm-takeover', 'Taking over a captured change'),
-      stub('pm-priority', 'Priority and the deadlines'),
-      stub('pm-scoping', 'The scoping meeting'),
-      stub('pm-plan', 'Timing and the plan'),
-    ],
-  },
-  // ------------------------------------------------------------------ 04
-  {
-    id: 'sales',
-    number: '04',
-    title: 'Sales',
-    summary: 'Starting a change request, the quote, the customer\'s answer.',
-    roles: ['sales'],
-    sections: [
-      stub('sales-start', 'Starting a change request'),
-      stub('sales-documents', 'The customer\'s documents'),
-      stub('sales-quote', 'The quote and the customer\'s answer'),
-    ],
-  },
-  // ------------------------------------------------------------------ 05
-  {
-    id: 'engineering',
-    number: '05',
-    title: 'Engineers',
-    summary:
-      'Development, Tool Engineer, Manufacturing Engineer, Process Engineer, APQP, ' +
-      'Packaging Engineer: assessing, costing and implementing a change.',
-    roles: ['engineering'],
-    sections: [
-      stub('eng-assessment', 'Your assessment'),
-      stub('eng-checklist', 'The checklist, row by row'),
-      stub('eng-risks', 'Flagging a risk on a row'),
-      stub('eng-costing', 'Your costing input'),
-      stub('eng-implementation', 'Implementation and validation'),
-    ],
-  },
-  // ------------------------------------------------------------------ 06
-  {
-    id: 'scheduling',
-    number: '06',
-    title: 'Scheduling',
-    summary: 'Capacity, bank build or running change, the plan.',
-    roles: ['scheduling'],
-    sections: [
-      stub('sch-assessment', 'Your assessment'),
-      stub('sch-bankbuild', 'Bank build or running change'),
-      stub('sch-plan', 'The plan'),
-    ],
-  },
-  // ------------------------------------------------------------------ 07
-  {
-    id: 'quality',
-    number: '07',
-    title: 'Quality',
-    summary: 'Risks, validation issues, release.',
-    roles: ['quality'],
-    sections: [
-      stub('qa-assessment', 'Your assessment'),
-      stub('qa-validation', 'Validation issues'),
-      stub('qa-release', 'Release'),
-    ],
-  },
-  // ------------------------------------------------------------------ 08
-  {
-    id: 'finance',
-    number: '08',
-    title: 'Finance',
-    summary: 'Rates, the cost sheet, the P&L of a change.',
-    roles: ['finance'],
-    sections: [
-      stub('fin-assessment', 'Your assessment'),
-      stub('fin-costsheet', 'The cost sheet and its rates'),
-      stub('fin-pnl', 'The P&L of a change'),
-    ],
-  },
+  written('basics', '01'),
+  written('flow', '02'),
+  written('pm', '03', ['project_management']),
+  written('sales', '04', ['sales']),
+  written('engineering', '05', ['engineering']),
+  written('scheduling', '06', ['scheduling']),
+  written('quality', '07', ['quality']),
+  written('finance', '08', ['finance']),
   // ------------------------------------------------------------------ 09
   {
     id: 'record',
