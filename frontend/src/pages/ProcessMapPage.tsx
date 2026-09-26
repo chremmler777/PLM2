@@ -76,9 +76,9 @@ const STAGES: Stage[] = [
   {
     key: 'captured', name: 'Capture', badge: 'Sales', state: 'built',
     sub: 'Request, attachment, quote-by date', task: 'task: kickoff',
-    responsible: 'Sales (can_start_change); PM may start',
+    responsible: 'Sales (can_start_change); PM may start. A change from KTX Weissenburg / Solingen is started by Project Management only',
     artifacts: 'kickoff gate (soft, deviation-overridable); quote deadline; origin (customer, internal, change from KTX Weissenburg / Solingen)',
-    what: 'The originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. No meetings here. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is captured with its reference and SOP date and runs in its own side track.',
+    what: 'The originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. No meetings here. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is started by Project Management only, captured with its reference and SOP date, and runs in its own side track.',
   },
   {
     key: 'scoping', name: 'Scoping', badge: 'PM', state: 'built',
@@ -578,6 +578,7 @@ function MotherPlantLane() {
       <Terminal x={tx} y={m - TH / 2} w={PNL_X - 16 - tx} name="Timing onward"
         sub="main path at Approved (M)" stroke={MP} dashed testId="procmap-mp-join" />
       {[
+        'Started by Project Management only; other starters see who does it instead of the origin choice.',
         'Never: assessment, costing, offer, quote deadline. Open receipts show in Blocked by as information, not a gate.',
         'Timing as usual (team confirmation, baseline) with an "Inform KTX Weissenburg" (or Solingen) stamp instead of the customer publish. L3 escalation: the PM informs the contact there. P&L: actual local costs only.',
       ].map((l, i) => (
@@ -748,7 +749,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           d={`M ${CX0} ${mid(Y.captured, NH)} L ${LX + LW} ${mid(Y.captured, NH)}`}
           label="origin" lx={LX + LW + 8} ly={mid(Y.captured, NH) - 7} />
         <Box x={LX} y={Y.captured} w={LW} h={NH} stroke={MP} dashed
-          name="KTX Weissenburg / Solingen" sub="continues in lane M, below"
+          name="KTX Weissenburg / Solingen" sub="PM starts it; lane M, below"
           task="skips assessment to offer" testId="procmap-node-mp-origin" />
 
         {/* --- scoping: the meeting decides ----------------------------- */}

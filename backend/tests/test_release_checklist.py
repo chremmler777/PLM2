@@ -365,14 +365,17 @@ async def test_quality_and_process_engineer_rows(client, rel_world):
     ("closed", "2026-06-01", False),
     ("released", None, False),            # legacy release without a stamp
     ("cancelled", None, False),           # ended without a release
-    ("released", "2026-09-26", True),     # released after: they belong
+    # the default cutoff is 2026-09-26 04:00 UTC (midnight New York)
+    ("released", "2026-09-26T03:59:59", False),  # 23:59 EDT on the 25th
+    ("released", "2026-09-26T04:00:00", True),   # released after: they belong
     ("in_implementation", None, True),    # still open: they belong
 ])
 async def test_new_rows_do_not_reach_back_into_finished_changes(
-        client, rel_world, session_factory, status, released_at, shown):
+        client, rel_world, session_factory, monkeypatch, status, released_at, shown):
     from datetime import datetime
     from app.services import release_checklist as catalog
     from app.services.release_service import ReleaseService
+    monkeypatch.delenv(catalog.RELEASE_ROWS_SINCE_ENV, raising=False)
     cid = rel_world["change_id"]
     async with session_factory() as s:
         c = await s.get(ChangeRequest, cid)
@@ -401,3 +404,57 @@ async def test_answered_new_row_stays_on_a_finished_change(client, rel_world, se
     st = await _state(client, await _auth(client, "pm"), cid)
     keys = [c["key"] for c in st["checks"]]
     assert "quality_control_plan" in keys and "quality_samples" not in keys
+
+
+async def test_release_rows_since_default_and_env_override():
+    from datetime import datetime
+    from app.services import release_checklist as catalog
+    assert catalog.release_rows_since({}) == datetime(2026, 9, 26, 4, 0)
+    assert catalog.release_rows_since({"PLM_RELEASE_ROWS_SINCE": " "}) == \
+        datetime(2026, 9, 26, 4, 0)
+    # no offset: UTC
+    assert catalog.release_rows_since(
+        {"PLM_RELEASE_ROWS_SINCE": "2026-09-27T14:30:00"}) == datetime(2026, 9, 27, 14, 30)
+    # Z and offsets are converted to naive UTC
+    assert catalog.release_rows_since(
+        {"PLM_RELEASE_ROWS_SINCE": "2026-09-27T14:30:00Z"}) == datetime(2026, 9, 27, 14, 30)
+    assert catalog.release_rows_since(
+        {"PLM_RELEASE_ROWS_SINCE": "2026-09-27T10:30:00-04:00"}) == \
+        datetime(2026, 9, 27, 14, 30)
+    # garbage: the default stands
+    assert catalog.release_rows_since({"PLM_RELEASE_ROWS_SINCE": "tomorrow"}) == \
+        datetime(2026, 9, 26, 4, 0)
+
+
+async def test_applies_follows_the_env_cutoff(monkeypatch):
+    from datetime import datetime, timezone
+    from app.services import release_checklist as catalog
+    monkeypatch.setenv("PLM_RELEASE_ROWS_SINCE", "2026-10-01T12:00:00Z")
+    key = "quality_samples"
+    # released after the default but before the deploy moment: out
+    assert not catalog.applies(key, "released", datetime(2026, 9, 30))
+    assert catalog.applies(key, "released", datetime(2026, 10, 1, 12, 0))
+    # an aware stamp is compared in UTC
+    assert catalog.applies(key, "closed",
+                           datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc))
+    assert not catalog.applies(key, "closed",
+                               datetime(2026, 10, 1, 11, 59, tzinfo=timezone.utc))
+    # open changes, answered rows and original rows are never cut
+    assert catalog.applies(key, "validation", None)
+    assert catalog.applies(key, "released", datetime(2026, 1, 1), answered=True)
+    assert catalog.applies("index_updated", "released", datetime(2026, 1, 1))
+
+
+async def test_env_cutoff_reaches_the_release_state(
+        client, rel_world, session_factory, monkeypatch):
+    from datetime import datetime
+    cid = rel_world["change_id"]
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status, c.released_at = "released", datetime(2026, 9, 30)
+        await s.commit()
+    pm = await _auth(client, "pm")
+    monkeypatch.delenv("PLM_RELEASE_ROWS_SINCE", raising=False)
+    assert len((await _state(client, pm, cid))["checks"]) == 17
+    monkeypatch.setenv("PLM_RELEASE_ROWS_SINCE", "2026-10-01T12:00:00Z")
+    assert len((await _state(client, pm, cid))["checks"]) == 13

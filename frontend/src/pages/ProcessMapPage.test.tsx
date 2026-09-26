@@ -190,6 +190,8 @@ describe('ProcessMapPage', () => {
     expect(lane).toContain('read and understood')
     expect(lane).toContain('release date = their SOP')
     expect(lane).toContain('Never: assessment, costing, offer, quote deadline')
+    expect(lane).toContain('Started by Project Management only')
+    expect(screen.getByTestId('procmap-node-mp-origin').textContent).toContain('PM starts it')
     expect(screen.getByTestId('procmap-mp-gate').querySelector('polygon')?.getAttribute('stroke'))
       .toBe('#f87171')
     expect(screen.getByTestId('procmap-edge-mp-origin').getAttribute('marker-end'))
@@ -277,6 +279,10 @@ describe('ProcessMapPage', () => {
     wrap()
     expect(screen.getByTestId('procmap-role-in_assessment').textContent)
       .toBe('Routed departments (Sales exempt)')
+    // Who starts a change: Sales (PM may too); the mother-plant origin is PM only.
+    const capture = screen.getByTestId('procmap-role-captured').textContent ?? ''
+    expect(capture).toContain('Sales (can_start_change); PM may start')
+    expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
     expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(8)
     expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
@@ -350,6 +356,8 @@ describe('ProcessMapPage', () => {
       const lanes = screen.getByTestId('procmap-overview-lanes').textContent ?? ''
       expect(lanes).toContain('L1 department, L2 project, L3 management')
       expect(lanes).toContain('Skips assessment, costing, offer')
+      expect(lanes).toContain('Started by Project Management only')
+      expect(lanes).toContain('PM captures: ref + SOP')
       expect(lanes).toContain('Revision intake')
       expect(screen.getByTestId('procmap-overview').textContent).not.toContain('\u2014')
     })

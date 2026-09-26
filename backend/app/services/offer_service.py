@@ -1035,9 +1035,11 @@ class OfferService:
                 "A new offer version needs a note saying what changed")
         if (offer.data or {}).get("timing", {}).get("include"):
             await OfferService._check_quote_plan(session, change)
-        # Sales signs: the sender, frozen with the version.
+        # Sales signs: the sender when in Sales, else the project's Sales
+        # responsible (else the role line only), frozen with the version.
         snapshot = await OfferService._snapshot(
-            session, change, signer=OfferService.signer_for(user))
+            session, change,
+            signer=await OfferService.send_signer(session, change, user))
         if offer.version >= 2:
             prev = await OfferService._previous_sent(session, change, offer)
             if prev is not None:
@@ -1413,26 +1415,41 @@ class OfferService:
                             getattr(user, "job_title", None))
 
     @staticmethod
-    async def draft_signer(session: AsyncSession, change: ChangeRequest,
-                           viewer: Optional[User] = None) -> dict:
-        """Who signs a draft's preview: the project's Sales responsible, else
-        the viewer when they are in Sales, else nobody (the PDF prints the
-        "Sales" role line with no name)."""
-        from app.services.project_team_service import SALES, ProjectTeamService
+    async def _in_sales(session: AsyncSession, user: Optional[User]) -> bool:
+        """Is this person a member of the Sales department (directly or by
+        an effective membership)?"""
+        from app.services.project_team_service import SALES
         from app.services.workflow_service import WorkflowService
+        if user is None:
+            return False
+        sales_id = (await session.execute(
+            select(Department.id).where(Department.name == SALES))
+        ).scalar_one_or_none()
+        return sales_id is not None and sales_id in \
+            await WorkflowService.effective_department_ids(session, user)
+
+    @staticmethod
+    async def draft_signer(session: AsyncSession, change: ChangeRequest) -> dict:
+        """Who signs when the sender is not in Sales: the project's Sales
+        responsible, else nobody (the PDF prints the "Sales" role line with
+        no name)."""
+        from app.services.project_team_service import SALES, ProjectTeamService
         uid = await ProjectTeamService.responsible_user_id(
             session, change.project_id, SALES)
         person = await session.get(User, uid) if uid is not None else None
         if person is not None and person.is_active:
             return OfferService.signer_for(person)
-        if viewer is not None:
-            sales_id = (await session.execute(
-                select(Department.id).where(Department.name == SALES))
-            ).scalar_one_or_none()
-            if sales_id is not None and sales_id in \
-                    await WorkflowService.effective_department_ids(session, viewer):
-                return OfferService.signer_for(viewer)
         return OfferService.signer_for(None)
+
+    @staticmethod
+    async def send_signer(session: AsyncSession, change: ChangeRequest,
+                          user: Optional[User]) -> dict:
+        """Who signs a version this person sends (and so what their draft
+        preview shows): the sender when they are a Sales member, otherwise
+        draft_signer. A PM lead or an admin sending never signs themselves."""
+        if await OfferService._in_sales(session, user):
+            return OfferService.signer_for(user)
+        return await OfferService.draft_signer(session, change)
 
     @staticmethod
     async def _snapshot(session: AsyncSession, change: ChangeRequest,
@@ -1549,13 +1566,15 @@ class OfferService:
         tasks = [{**t, "start": day(t.get("start")), "end": day(t.get("end"))}
                  for t in snap.get("tasks") or [] if isinstance(t, dict)]
         company = snap.get("company") if isinstance(snap.get("company"), dict) else None
-        # Sales signs. A sent version prints the sender frozen with it (one
+        # Sales signs. A sent version prints the signer frozen with it (one
         # sent before the signer was frozen: its letterhead signature, as it
-        # went out); a draft prints who would sign it today.
+        # went out); a draft previews exactly what send would freeze if this
+        # viewer sent it now (send_signer), labelled as a preview.
         if frozen:
             signer = snap.get("signer") if isinstance(snap.get("signer"), dict) else None
         elif offer.status == "draft":
-            signer = await OfferService.draft_signer(session, change, viewer)
+            signer = {**await OfferService.send_signer(session, change, viewer),
+                      "preview": True}
         else:
             signer = None
         ctx = {

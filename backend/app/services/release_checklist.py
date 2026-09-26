@@ -8,12 +8,21 @@ rows are seeded, so a database without one of these departments still gets
 the item (owned by nobody, answerable by PM, lead and admin).
 
 Items added to the catalog later (ADDED_LATER) never reach back into
-finished changes: a change that was released before the item existed, or
+finished changes: a change that was released before the item went live, or
 ended without a release (rejected, cancelled), does not show it and is not
-counted against it. Every change still open, and every change released on
-or after the day the item was added, has it like any other.
+counted against it. Every change still open, and every change released at
+or after the moment the item went live, has it like any other.
+
+"Went live" is a UTC instant compared with ChangeRequest.released_at (naive
+UTC). The default is the planned go-live; the deploy sets
+PLM_RELEASE_ROWS_SINCE to the actual deploy moment (see
+docs/deploy/ecr-costing-to-close-rollout.md).
 """
-from datetime import datetime
+import logging
+import os
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # (key, label, owner department name)
 RELEASE_CHECKS: list[tuple[str, str, str]] = [
@@ -65,14 +74,39 @@ def owner_for(key: str) -> str | None:
     return _BY_KEY.get(key, (None, None))[1]
 
 
-# Quality and Process Engineer rows, added 2026-09-25 (decision: both owe
-# their own release rows). Key -> the day the item was added.
-ADDED_LATER: dict[str, datetime] = {
-    "process_parameters": datetime(2026, 9, 25),
-    "process_fmea": datetime(2026, 9, 25),
-    "quality_samples": datetime(2026, 9, 25),
-    "quality_control_plan": datetime(2026, 9, 25),
-}
+# Quality and Process Engineer rows (decision 2026-09-25: both owe their
+# own release rows). Default go-live: 2026-09-26 04:00 UTC, i.e. midnight
+# New York (EDT) on 26 Sep. Naive, in UTC, like released_at.
+RELEASE_ROWS_SINCE_DEFAULT = datetime(2026, 9, 26, 4, 0)
+RELEASE_ROWS_SINCE_ENV = "PLM_RELEASE_ROWS_SINCE"
+
+
+def release_rows_since(env: dict | None = None) -> datetime:
+    """The UTC instant the Quality / Process Engineer rows went live, as a
+    naive UTC datetime. PLM_RELEASE_ROWS_SINCE (ISO 8601; no offset means
+    UTC, an offset is converted to UTC) overrides the default; an
+    unparseable value is logged and ignored."""
+    env = os.environ if env is None else env
+    raw = (env.get(RELEASE_ROWS_SINCE_ENV) or "").strip()
+    if not raw:
+        return RELEASE_ROWS_SINCE_DEFAULT
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("%s=%r is not an ISO datetime; using %s",
+                       RELEASE_ROWS_SINCE_ENV, raw,
+                       RELEASE_ROWS_SINCE_DEFAULT.isoformat())
+        return RELEASE_ROWS_SINCE_DEFAULT
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+# Keys added after the first catalog: they apply per release_rows_since().
+ADDED_LATER: frozenset[str] = frozenset({
+    "process_parameters", "process_fmea",
+    "quality_samples", "quality_control_plan",
+})
 
 # Terminal change statuses (mirrors app.models.change.TERMINAL_STATUSES; not
 # imported so the catalog stays free of model imports).
@@ -84,11 +118,15 @@ def applies(key: str, status: str | None, released_at: datetime | None,
     """Whether this catalog item belongs to a change in this state. An item
     that was answered always belongs; an item added later is left off a
     change that finished before it existed (released earlier, or never
-    released at all)."""
-    added = ADDED_LATER.get(key)
-    if added is None or answered or status not in _FINISHED:
+    released at all). `released_at` is naive UTC (an aware value is
+    converted)."""
+    if key not in ADDED_LATER or answered or status not in _FINISHED:
         return True
-    return released_at is not None and released_at >= added
+    if released_at is None:
+        return False
+    if released_at.tzinfo is not None:
+        released_at = released_at.astimezone(timezone.utc).replace(tzinfo=None)
+    return released_at >= release_rows_since()
 
 
 def keys_for(change, answered_keys=()) -> list[str]:

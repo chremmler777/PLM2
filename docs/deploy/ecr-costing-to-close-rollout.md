@@ -78,9 +78,10 @@ prod block. All are optional: unset or empty keeps the default.
 | `KTX_COMPANY_EMAIL` | `ktx_info@us.ktx.group` | keep default |
 | `KTX_COMPANY_WEBSITE` | `ktx.group` | keep default |
 | `KTX_COMPANY_FOOTER` | `IATF 16949:2016 certified site|A company of the KTX Group` | keep default |
-| `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs (the sender of a version, frozen with it; on a draft the project's Sales responsible). Set only to force one fixed name on every offer |
+| `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs. On send the sender is frozen as signer when they are a Sales member; otherwise (PM lead, admin) the project's Sales responsible, else the "Sales" role line with no name. A draft previews exactly that for the viewer, labelled "Signed by (preview)". Set only to force one fixed name on every offer |
 | `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | not needed, leave unset (set only to force one fixed title) |
 | `PLM_BUSINESS_TZ` | `America/New_York` (IANA name; drives the business date of deadlines, plan dates, offers) | set explicitly to `America/New_York` |
+| `PLM_RELEASE_ROWS_SINCE` | `2026-09-26T04:00:00Z` (midnight New York on 26 Sep; backend/app/services/release_checklist.py) | set to the deploy moment in UTC (ISO 8601, e.g. `2026-09-27T14:30:00Z`; no offset means UTC). Changes released before it do not get the four new Quality / Process Engineer release rows; every change not yet released does |
 
 Lists are separated by `|`. Not needed: `TRAINING_GATE` (training is
 recorded, not blocking; the gate stays off, and it is also an org setting).
@@ -89,7 +90,28 @@ Add to the prod `plm2-backend` environment (back up the compose file first):
 
 ```yaml
       PLM_BUSINESS_TZ: America/New_York
+      PLM_RELEASE_ROWS_SINCE: "<deploy moment, UTC, e.g. 2026-09-27T14:30:00Z>"
 ```
+
+For `PLM_RELEASE_ROWS_SINCE` take the moment the backend is stopped in step
+4 (`date -u +%Y-%m-%dT%H:%M:%SZ` on the server, noted in the deploy log) so
+nothing released on the old code falls after it.
+
+### New release rows for changes in flight
+
+The release checklist gains four rows, 13 to 17:
+
+- Quality: "Parts measured and PPAP / initial sample documentation
+  complete" (samples / PPAP) and "Control plan / inspection plan updated".
+- Process Engineer: "Process parameters and work instructions updated" and
+  "Process FMEA updated" (PFMEA).
+
+Every change not yet released at the deploy moment (in validation or
+earlier) gets them as open rows and cannot be released until Quality and
+Process Engineer answer each one done, or mark it n/a with a note (PM, the
+change lead or an admin may also answer). Changes released before
+`PLM_RELEASE_ROWS_SINCE` are left as they were. Tell Quality and Process
+Engineer (step 7) and the leads of changes in validation.
 
 ## Preflight (local, before the go)
 
@@ -216,6 +238,7 @@ now, then:
 docker compose up -d plm2-backend plm2-frontend
 docker exec compose-plm2-backend-1 alembic current                 # again: the head
 docker exec compose-plm2-backend-1 printenv PLM_BUSINESS_TZ
+docker exec compose-plm2-backend-1 printenv PLM_RELEASE_ROWS_SINCE     # the deploy moment, UTC
 docker compose exec nginx nginx -s reload                          # new container IP
 docker exec compose-plm2-backend-1 python -c "from OCC.Core.STEPControl import STEPControl_Reader"   # prints nothing
 ```
@@ -241,7 +264,8 @@ In the browser (as the owner, hub login):
 
 - `/plm2/changes` list, then one open change `/plm2/changes/<id>`: cockpit, stages, costing tab shows rates from the cost sheet (or "No rate" where none), process flow Detailed and Overview.
 - `/plm2/changes/<id>/plan/quote` and `/plan/detailed`: Gantt renders, links draw.
-- Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address, signed by the Sales person who sent the version (a draft: the project's Sales responsible, else you when you are in Sales, else the "Sales" line with no name).
+- Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address. A sent version is signed by the Sales member who sent it (sent by a PM lead or an admin: the project's Sales responsible, else the "Sales" line with no name). A draft shows "Signed by (preview)" with who would sign if you sent it now: you when you are in Sales, otherwise the project's Sales responsible, else the "Sales" line.
+- Release tab of a change in validation: 17 rows, the four new Quality / Process Engineer rows open. A change released before the deploy: 13 rows.
 - `/plm2/cost-sheet`: published version chain, Toccoa rows in USD, one draft at most.
 - `/plm2/pnl` and `/plm2/reports`: cost report per currency.
 - `/plm2/my-tasks`: counts plausible, backup markers after the prefill.
@@ -321,6 +345,10 @@ card on the three projects.
   triaged (full ECR, attach, engineering review, administrative).
 - Finance: the to-do below.
 - Everyone: training record is live but not blocking.
+- Quality and Process Engineer: changes in validation now carry four more
+  release rows (Quality: samples / PPAP, control plan; Process Engineer:
+  process parameters / work instructions, PFMEA) to answer done or mark
+  n/a with a note before the change can be released.
 
 ## Finance to-do (open after deploy)
 

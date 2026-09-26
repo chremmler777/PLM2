@@ -212,22 +212,10 @@ async def test_sent_offer_is_signed_by_its_sender_for_good(
     assert "Offer sales" in text and "Somebody Else" not in text
 
 
-async def test_draft_is_signed_by_the_project_sales_responsible_else_the_sales_viewer(
-        client, offer_world, session_factory, seed, monkeypatch):
+async def _add_sales_responsible(session_factory, seed, offer_world):
     from app.auth.security import get_password_hash
     from app.models.entities import User
     from app.models.workflow import ProjectResponsible, UserDepartment
-    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_NAME", raising=False)
-    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_TITLE", raising=False)
-    cid = offer_world["change_id"]
-    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
-    draft = await _create(client, sales, cid)
-    # nobody responsible: the Sales viewer signs; a non-Sales viewer sees the role only
-    assert "Offer sales" in await _pdf(client, sales, cid, draft["id"])
-    text = await _pdf(client, pm, cid, draft["id"])
-    assert "Offer sales" not in text and "Offer pm" not in text
-    assert "KTX Group US Corp. | Sales" in text
-    # the project's Sales responsible signs whoever looks
     async with session_factory() as s:
         u = User(organization_id=seed["org_id"], username="off-sales2",
                  email="off-sales2@test.io", full_name="Resp Sales", role="engineer",
@@ -239,9 +227,102 @@ async def test_draft_is_signed_by_the_project_sales_responsible_else_the_sales_v
         s.add(ProjectResponsible(project_id=seed["project_id"],
                                  department_id=offer_world["depts"]["Sales"], user_id=u.id))
         await s.commit()
-    for who in (sales, pm):
-        text = await _pdf(client, who, cid, draft["id"])
-        assert "Resp Sales" in text and "Offer sales" not in text
+
+
+async def _make_lead(session_factory, cid, user_id):
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).lead_id = user_id
+        await s.commit()
+
+
+async def _send_as(client, auth, cid, oid):
+    await client.patch(_url(cid, f"/{oid}"),
+                       json={"data": {"timing": {"include": False}}}, headers=auth)
+    res = await client.post(_url(cid, f"/{oid}/send"), json={}, headers=auth)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def _frozen_signer(session_factory, oid):
+    from app.models.change_offer import ChangeOffer
+    async with session_factory() as s:
+        return (await s.get(ChangeOffer, oid)).data["_snapshot"]["signer"]
+
+
+def _no_signature_env(monkeypatch):
+    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_NAME", raising=False)
+    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_TITLE", raising=False)
+
+
+async def test_pm_lead_sends_the_project_sales_responsible_signs(
+        client, offer_world, session_factory, seed, monkeypatch):
+    _no_signature_env(monkeypatch)
+    cid = offer_world["change_id"]
+    await _add_sales_responsible(session_factory, seed, offer_world)
+    await _make_lead(session_factory, cid, offer_world["users"]["pm"])
+    pm = await _auth(client, "pm")
+    draft = await _create(client, pm, cid)
+    # the preview shows what sending would freeze, labelled as a preview
+    text = await _pdf(client, pm, cid, draft["id"])
+    assert "Signed by (preview)" in text and "Resp Sales" in text
+    assert "Offer pm" not in text
+    await _send_as(client, pm, cid, draft["id"])
+    assert await _frozen_signer(session_factory, draft["id"]) == \
+        {"name": "Resp Sales", "title": "Sales"}
+    text = await _pdf(client, pm, cid, draft["id"])
+    assert "Resp Sales" in text and "Offer pm" not in text
+    assert "Signed by (preview)" not in text
+
+
+async def test_admin_sends_without_sales_responsible_role_line_only(
+        client, offer_world, session_factory, monkeypatch):
+    from tests.conftest import ADMIN_PASSWORD, login
+    _no_signature_env(monkeypatch)
+    cid = offer_world["change_id"]
+    admin = await login(client, "admin@test.io", ADMIN_PASSWORD)
+    draft = await _create(client, admin, cid)
+    text = await _pdf(client, admin, cid, draft["id"])
+    assert "Signed by (preview)" in text and "KTX Group US Corp. | Sales" in text
+    await _send_as(client, admin, cid, draft["id"])
+    assert await _frozen_signer(session_factory, draft["id"]) == \
+        {"name": "", "title": "Sales"}
+
+
+async def test_sales_member_sends_and_signs_even_with_a_sales_responsible(
+        client, offer_world, session_factory, seed, monkeypatch):
+    _no_signature_env(monkeypatch)
+    cid = offer_world["change_id"]
+    await _add_sales_responsible(session_factory, seed, offer_world)
+    sales = await _auth(client, "sales")
+    draft = await _create(client, sales, cid)
+    text = await _pdf(client, sales, cid, draft["id"])
+    assert "Signed by (preview)" in text
+    assert "Offer sales" in text and "Resp Sales" not in text
+    await _send_as(client, sales, cid, draft["id"])
+    assert await _frozen_signer(session_factory, draft["id"]) == \
+        {"name": "Offer sales", "title": "Sales"}
+
+
+async def test_draft_preview_follows_the_viewer(
+        client, offer_world, session_factory, seed, monkeypatch):
+    _no_signature_env(monkeypatch)
+    cid = offer_world["change_id"]
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    draft = await _create(client, sales, cid)
+    # nobody responsible: the Sales viewer would sign; a non-Sales viewer
+    # sees the role line only
+    assert "Offer sales" in await _pdf(client, sales, cid, draft["id"])
+    text = await _pdf(client, pm, cid, draft["id"])
+    assert "Offer sales" not in text and "Offer pm" not in text
+    assert "KTX Group US Corp. | Sales" in text
+    # with a Sales responsible: a non-Sales viewer sees them, the Sales
+    # viewer still sees themselves (they would sign on send)
+    await _add_sales_responsible(session_factory, seed, offer_world)
+    text = await _pdf(client, pm, cid, draft["id"])
+    assert "Resp Sales" in text and "Offer sales" not in text
+    text = await _pdf(client, sales, cid, draft["id"])
+    assert "Offer sales" in text and "Resp Sales" not in text
     # the fixed-name override still wins when a site sets it
     monkeypatch.setenv("KTX_COMPANY_SIGNATURE_NAME", "Fixed Signer")
     assert "Fixed Signer" in await _pdf(client, pm, cid, draft["id"])

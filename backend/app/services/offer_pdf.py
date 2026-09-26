@@ -1051,9 +1051,10 @@ def render_offer_pdf(ctx: dict) -> bytes:
     story += [Spacer(1, 8 * mm),
               _p("We look forward to your order. For questions on this offer "
                  "please contact us quoting the offer number above.", body)]
-    # Sales signs (ctx["signer"]: the sender frozen with a sent version, the
-    # project's Sales responsible on a draft). A version sent before the
-    # signer was frozen keeps the letterhead's signature as it went out.
+    # Sales signs (ctx["signer"]: the signer frozen with a sent version; on
+    # a draft, what sending it now would freeze, marked "preview"). A version
+    # sent before the signer was frozen keeps the letterhead's signature as
+    # it went out.
     signer = ctx.get("signer")
     if isinstance(signer, dict):
         s_name, s_title = (_clean(v).strip() if isinstance(v, str) else ""
@@ -1065,6 +1066,8 @@ def render_offer_pdf(ctx: dict) -> bytes:
     sign = [_p(s_name, bold)] if s_name else []
     if s_line:
         sign.append(_p(s_line, body if sign else bold))
+    if sign and isinstance(signer, dict) and signer.get("preview"):
+        sign.insert(0, _p("Signed by (preview)", small))
     if sign:
         story += [Spacer(1, 5 * mm), KeepTogether(sign)]
 

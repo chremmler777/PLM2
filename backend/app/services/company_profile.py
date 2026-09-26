@@ -17,9 +17,11 @@ is ever printed.
     KTX_COMPANY_SIGNATURE_TITLE  optional override of the signer's function,
                                  printed as "<legal name> | <title>"
 
-Sales signs the customer offer (decision 2026-09-25): the signer is the Sales
-person who sends the version (frozen with it), or for a draft the project's
-Sales responsible (see OfferService.draft_signer); offer_signer() builds it.
+Sales signs the customer offer (decision 2026-09-25): the sender is frozen as
+signer when they are in Sales; anyone else who sends gets the project's Sales
+responsible, or the Sales role line alone. A draft previews exactly what a send
+by the viewer would freeze (see OfferService.draft_signer); offer_signer()
+builds it.
 The two signature variables are no longer needed; when set they still win
 over the person, for a site that wants one fixed name on every offer.
 

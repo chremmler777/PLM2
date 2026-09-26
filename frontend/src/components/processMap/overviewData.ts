@@ -115,8 +115,8 @@ export const OVERVIEW_LANES: Lane[] = [
   {
     key: 'mother-plant', name: 'Change from KTX Weissenburg / Solingen', joins: 'rejoins at Timing', tone: 'purple',
     target: 'procmap-mother-plant-lane',
-    steps: ['capture: ref + SOP', 'scoping-lite: impact lock', 'inform the team: receipts', 'approved: release date = their SOP'],
-    note: 'Skips assessment, costing, offer and the quote deadline. Hard gate: impact lock and the inform list sent.',
+    steps: ['PM captures: ref + SOP', 'scoping-lite: impact lock', 'inform the team: receipts', 'approved: release date = their SOP'],
+    note: 'Started by Project Management only. Skips assessment, costing, offer and the quote deadline. Hard gate: impact lock and the inform list sent.',
   },
   {
     key: 'revision', name: 'Revision intake', joins: 'from Intake', tone: 'teal',
