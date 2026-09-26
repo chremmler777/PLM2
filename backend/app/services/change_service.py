@@ -106,7 +106,9 @@ IMPACT_LOCKED_STATUSES = ("in_implementation", "in_validation", "released",
 
 
 # my-tasks kinds the cockpit (my_actions) lists under its own name.
-STAGE_TASK_EQUIV = {"create_quote": "offer_build", "obtain_info": "needs_info"}
+# obtain_info (a question to Sales) is NOT the meeting's needs_info (the
+# room could not decide): two different errands, both listed.
+STAGE_TASK_EQUIV = {"create_quote": "offer_build"}
 # Where a stage task is done (mirrors the task list's TASK_TAB).
 STAGE_TASK_TAB = {
     "kickoff": "overview", "scoping_wrapup": "scoping", "impact_confirm": "impacted",
@@ -905,8 +907,8 @@ class ChangeService:
         assessment/costing flow) is closed: open tasks waived with `why` as
         their note; a revision flow is canceled (its checks were not all
         done: the record says so), the change's own flow completed, unless
-        the change was rejected: then its own flow never finished either and
-        is canceled too. Returns the closed instance ids."""
+        the change was rejected or cancelled: then its own flow never
+        finished either and is canceled too. Returns the closed instance ids."""
         from app.models.workflow import WfInstance, WfInstanceTask
         instances = (await session.execute(
             select(WfInstance).where(
@@ -926,7 +928,7 @@ class ChangeService:
             for t in open_tasks:
                 t.status = "waived"
                 t.notes = (f"{t.notes}\n{why}" if t.notes else why)
-            if inst.change_id is not None and change.status != "rejected":
+            if inst.change_id is not None and change.status not in ("rejected", "cancelled"):
                 inst.status = "completed"
                 inst.completed_at = now
             else:
@@ -956,6 +958,13 @@ class ChangeService:
         allowed = ALLOWED_TRANSITIONS.get(change.status, set())
         if to_status not in allowed:
             raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
+        if to_status == "costing":
+            # Entering costing wakes the later routing stages: the engine
+            # advances and the routing repair runs. Take the instance lock
+            # before anything is written, the one lock order every routing
+            # write path keeps.
+            from app.services.change_routing_service import ChangeRoutingService
+            await ChangeRoutingService.lock_instance(session, change.id)
 
         # Mother-plant side track (spec §14): no assessment, costing or
         # quote, ever; scoping -> approved is its own hop, hard-gated on the
@@ -1159,7 +1168,8 @@ class ChangeService:
         change.status = to_status
         await session.flush()
         if to_status == "costing":
-            # Spec §16 P1-2: later routing stages wake only now.
+            # Spec §16 P1-2: later routing stages wake only now (instance
+            # locked at the top of this transition).
             from app.services.early_stage_service import EarlyStageService
             await EarlyStageService.wake_later_stages(session, change)
         if mother_plant and old == "scoping" and to_status == "approved":
@@ -1941,7 +1951,7 @@ class ChangeService:
         of one kind apart."""
         kind = STAGE_TASK_EQUIV.get(a["kind"], a["kind"])
         return (kind, a.get("assessment_id"), a.get("issue_id"),
-                a.get("escalation_id"), a.get("action_id"),
+                a.get("escalation_id"), a.get("action_id"), a.get("concern_id"),
                 a.get("department_id") if kind in (
                     "costing_input", "costing_update", "plan_feedback",
                     "info_ack", "release_check", "progress_report") else None)
@@ -2385,9 +2395,21 @@ class ChangeService:
         # added by deviation). PM/Sales rows of later stages are no
         # assessment, whatever their engine task says.
         from app.services.early_stage_service import EarlyStageService
+        from app.services.change_routing_service import ChangeRoutingService
         first_stage = EarlyStageService.first_stage(change)
+        # R/A rows added after their stage passed stay owed whatever the
+        # change status (the routing repair never waives them): the
+        # department still answers, the lead is flagged below.
+        live_inst = (await session.execute(
+            select(WfInstance).where(WfInstance.change_id == change.id,
+                                     WfInstance.status == "active"))).scalar_one_or_none()
+        late = (ChangeRoutingService.late_rows(change, live_inst)
+                if change.status not in ("released", "closed", "rejected", "cancelled")
+                else [])
+        late_ids = {a.id for a in late}
         for a in change.assessments:
-            if (change.status != "in_assessment"
+            if a.id not in late_ids and (
+                    change.status != "in_assessment"
                     or not EarlyStageService.is_assessment_row(a, first_stage)):
                 continue
             if a.effective_status != "active":
@@ -2411,6 +2433,27 @@ class ChangeService:
                 "department_id": a.department_id,
                 "_owned": a.effective_owner_id == user.id,
             })
+
+        # kind "late_assessment": the lead's flag for a department added to
+        # a stage after it had passed that still owes its answer. Chase it,
+        # or take the department off by routing deviation.
+        from app.services.change_people import holds_lead
+        if late and (holds_lead(change, user)
+                     or (user.effective_role == "admin"
+                         and getattr(user, "acts_as_department_id", None) is None)):
+            late_names = dict((await session.execute(
+                select(Department.id, Department.name).where(
+                    Department.id.in_({a.department_id for a in late})))).all())
+            for a in late:
+                actions.append({
+                    "kind": "late_assessment",
+                    "label": (f"Chase {late_names.get(a.department_id, a.department_id)}: "
+                              f"assessment owed on stage {a.stage_order}, added "
+                              "after the stage had passed"),
+                    "target_tab": "assessments",
+                    "assessment_id": a.id,
+                    "department_id": a.department_id,
+                })
 
         # kind "wf_task": active ECN (part-revision-scoped) tasks spawned by
         # this change, in the user's departments or owned by them. Mirrors
@@ -2555,8 +2598,7 @@ class ChangeService:
         # scoping", "Wrap up scoping", the customer response, bank build,
         # costing input ... Every task-list row of this change is an action
         # here; a kind the cockpit already lists under its own name
-        # (create_quote = offer_build, obtain_info = needs_info) is not
-        # listed twice.
+        # (create_quote = offer_build) is not listed twice.
         if change.status not in ("released", "closed", "cancelled"):
             from app.services import cm_labels
             have = {ChangeService._action_key(a) for a in actions}
@@ -2984,6 +3026,7 @@ class ChangeService:
     @staticmethod
     async def _validate_impacts(
         session: AsyncSession, department_id: int, details: dict,
+        stored: Optional[dict] = None,
     ) -> None:
         """The D-tab checklist: "does the change impact X?" per catalog item.
 
@@ -3060,9 +3103,62 @@ class ChangeService:
         if details.get("impacted") is not False and not legacy_only:
             missing = [i["label_en"] for i in checklist.items_for(dept_name)
                        if i["key"] not in answered]
+            # An assessment started on the earlier checklist (the 13 common
+            # items) is judged against the set it was started with: a draft
+            # or resubmit carrying a key only that set had is complete when
+            # that set is answered. Derived from the keys, no stored version:
+            # the new checklist never asks a legacy-only key, so its answers
+            # can never carry one.
+            if missing and ChangeService._started_on_legacy_checklist(
+                    dept_name, impacts, stored):
+                missing = [i["label_en"]
+                           for i in ChangeService._legacy_checklist(dept_name)
+                           if i["key"] not in answered]
             if missing:
                 raise ChangeError(
                     "Checklist incomplete, unanswered: " + ", ".join(missing))
+
+    # The department extras the checklist carried before 2026-09-25 (on top
+    # of the 13 common LEGACY_ITEMS); their keys live on in the new lists.
+    _LEGACY_DEPARTMENT_KEYS = {
+        "APQP": ("pfmea_update", "control_plan_update"),
+        "Development": ("article_design_update",),
+        "Packaging Engineer": ("layout_change", "packaging_type_change",
+                               "packaging_modification"),
+    }
+
+    @staticmethod
+    def _legacy_checklist(dept_name: Optional[str]) -> list[dict]:
+        """The checklist as it was served before 2026-09-25: the 13 common
+        items, then the department's extras of that time."""
+        items = [{"key": i[0], "label_en": i[2]} for i in checklist.LEGACY_ITEMS]
+        for key in ChangeService._LEGACY_DEPARTMENT_KEYS.get(dept_name or "", ()):
+            items.append({"key": key,
+                          "label_en": checklist.label_for(key, dept_name) or key})
+        return items
+
+    @staticmethod
+    def _started_on_legacy_checklist(dept_name: Optional[str], impacts: list,
+                                     stored: Optional[dict]) -> bool:
+        """True when the submitted answers, or the ones stored on the row
+        (answer or draft), carry a key only the earlier checklist asked."""
+        legacy_only = ({i[0] for i in checklist.LEGACY_ITEMS}
+                       - checklist.keys_for(dept_name))
+
+        def keys(entries) -> set:
+            return {e.get("key") for e in entries or []
+                    if isinstance(e, dict) and e.get("key")}
+
+        found = keys(impacts)
+        stored = stored or {}
+        found |= keys(stored.get("impacts"))
+        # A kept draft: details["draft"]["data"]["details"]["impacts"].
+        data = (stored.get("draft") or {}).get("data") \
+            if isinstance(stored.get("draft"), dict) else None
+        det = data.get("details") if isinstance(data, dict) else None
+        if isinstance(det, dict) and isinstance(det.get("impacts"), list):
+            found |= keys(det["impacts"])
+        return bool(found & legacy_only)
 
     @staticmethod
     async def served_objects(
@@ -3302,6 +3398,11 @@ class ChangeService:
             raise ChangeError(
                 "This department has open concerns on the change: resolve "
                 f"them before submitting its assessment: {points}")
+        # The row write below completes the engine task and may advance the
+        # stage and repair it: take the instance lock first, the one lock
+        # order every routing write path keeps.
+        from app.services.change_routing_service import ChangeRoutingService
+        await ChangeRoutingService.lock_instance(session, change.id)
         result = await session.execute(
             select(ChangeAssessment).where(
                 (ChangeAssessment.change_id == change.id)
@@ -3335,7 +3436,8 @@ class ChangeService:
         if details is not None:
             if not isinstance(details, dict):
                 raise ChangeError("Assessment details must be an object")
-            await ChangeService._validate_impacts(session, department_id, details)
+            await ChangeService._validate_impacts(
+                session, department_id, details, stored=a.details_dict)
             details.pop("draft", None)
             a.details = json.dumps(details)
         elif "draft" in a.details_dict:

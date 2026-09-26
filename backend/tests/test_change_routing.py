@@ -818,3 +818,317 @@ async def test_deviation_added_row_outside_snapshot_is_on_the_routing(
     dep = next(d for st in res.json()["stages"] for d in st["departments"]
                if d["department_id"] == mfg)
     assert dep["rasic_letter"] == "R" and dep["assessment_id"] is not None
+
+
+# --- Review findings on aee06c57 -------------------------------------------
+
+async def test_add_on_an_existing_row_is_refused_not_relettered(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Finding 2: op add on a department that already has a row in the stage
+    must not re-letter it (R -> I dropped the duty unapproved)."""
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": te, "rasic_letter": "I", "stage_order": 1,
+        "reason": "x"}, headers=auth)
+    assert res.status_code == 400
+    assert "reletter" in res.json()["detail"]
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == te))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert row.rasic_letter == "R" and row.pending_rasic_letter is None
+        assert (task.rasic_letter, task.status, task.is_actionable) == ("R", "active", True)
+
+
+async def test_approved_reletter_to_informed_drops_the_row_and_its_task(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Finding 2: I has no row: an approved reletter to I removes the
+    assessment row and its task; the department stays on the routing as I."""
+    from app.models.change import ChangeAssessment, ChangeRouting
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    q = departments["Quality"]   # C in stage 1
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == q))).scalar_one()
+        task_id = row.wf_instance_task_id
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": q, "rasic_letter": "I", "stage_order": 1,
+        "reason": "just keep us posted"}, headers=auth)
+    assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    dep = [d for st in res.json()["stages"] for d in st["departments"]
+           if d["department_id"] == q]
+    assert [(d["rasic_letter"], d["assessment_id"]) for d in dep] == [("I", None)]
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == q))).scalars().all()
+        assert rows == []
+        if task_id is not None:
+            assert await s.get(WfInstanceTask, task_id) is None
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == c["id"]))).scalar_one()
+        st1 = next(st for st in routing.standard_snapshot["stages"] if st["stage_order"] == 1)
+        assert [d["rasic_letter"] for d in st1["departments"]
+                if d["department_id"] == q] == ["I"]
+
+
+async def test_later_stage_deviation_R_is_asked_when_its_stage_starts(
+        client, seed, ecr_template_3stage, departments, departments_member, session_factory):
+    """Finding 1: an R department a deviation added to a later, C-only stage
+    gets its active task when that stage starts; the stage holds on it
+    instead of cascading past it (and the row is never waived)."""
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import WfInstance, WfInstanceTask
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    body = {"project_id": seed["project_id"], "title": "casc", "change_type": "tooling",
+            "reason": "x", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    await approve_gates(client, auth, c["id"])
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-C9",
+         "name": "ART-C9", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
+    await advance_to_assessment(client, auth, session_factory, c["id"])
+    mfg = departments["Manufacturing Engineer"]
+    r = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 2,
+        "reason": "needed"}, headers=auth)
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                          headers=admin_auth)
+    assert r.status_code == 200, r.text
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == c["id"]))).scalar_one()
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == mfg))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert inst.current_stage_order == 2      # held on MFG, no cascade to 3
+        assert (task.stage_order, task.status, task.is_actionable) == (2, "active", True)
+        # One task only for the row (the repair did not add a second one).
+        n = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.department_id == mfg))).scalars().all()
+        assert len(n) == 1
+
+
+async def test_deviation_rights_lead_pm_admin_or_the_department(
+        client, seed, departments, session_factory):
+    """Finding 2: POST /routing/deviation is the lead's, PM's, an admin's, or
+    a member's of the department concerned (its own decline)."""
+    from app.models.change import ChangeRequest
+    from app.models.workflow import UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic
+    admin_auth = await _login_admin(client)
+    async with session_factory() as s:
+        t = WfTemplate(name="ECRx", description="x", version=1, is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        st = WfStage(template_id=t.id, stage_order=1, name="S1"); s.add(st); await s.flush()
+        sp = WfStep(stage_id=st.id, step_name="S1", position_in_stage=1); s.add(sp); await s.flush()
+        s.add(WfStepRasic(step_id=sp.id, department_id=departments["Tool Engineer"], rasic_letter="R"))
+        s.add(ChangeRoutingStandard(change_type="physical_part", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        await s.commit()
+    body = {"project_id": seed["project_id"], "title": "rights", "change_type": "physical_part",
+            "reason": "r", "lead_id": seed["admin_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=admin_auth)).json()
+    await approve_gates(client, admin_auth, c["id"])
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-RR",
+         "name": "ART-RR", "part_type": "internal_mfg", "item_category": "article"},
+         headers=admin_auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]},
+                      headers=admin_auth)
+    await advance_to_assessment(client, admin_auth, session_factory, c["id"])
+    outsider = await _login(client)   # engineer: not lead, not PM, no membership
+    te = departments["Tool Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": te, "rasic_letter": "C", "reason": "not ours"},
+        headers=outsider)
+    assert res.status_code == 403, res.text
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=te))
+        await s.commit()
+    # A member may decline its own row ...
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": te, "rasic_letter": "C", "reason": "not ours"},
+        headers=outsider)
+    assert res.status_code == 200, res.text
+    # ... and right after, name who should take over ...
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Quality"], "rasic_letter": "R",
+        "stage_order": 1, "reason": "not ours"}, headers=outsider)
+    assert res.status_code == 200, res.text
+    # ... but never remove another department.
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "remove", "department_id": departments["Quality"], "reason": "x"},
+        headers=outsider)
+    assert res.status_code == 403, res.text
+
+
+async def test_informed_department_is_told_once_at_routing_start(
+        session_factory, seed, departments):
+    """Finding 10: a stage-1 I department gets the engine's FYI, not also
+    the "entered assessment" broadcast."""
+    from app.models.change import ChangeRequest
+    from app.models.notification import Notification
+    from app.models.workflow import UserDepartment
+    from app.services.change_routing_service import ChangeRoutingService
+    async with session_factory() as s:
+        t = WfTemplate(name="ECRi", description="x", version=1, is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        st = WfStage(template_id=t.id, stage_order=1, name="S1"); s.add(st); await s.flush()
+        sp = WfStep(stage_id=st.id, step_name="S1", position_in_stage=1); s.add(sp); await s.flush()
+        s.add(WfStepRasic(step_id=sp.id, department_id=departments["Tool Engineer"], rasic_letter="R"))
+        s.add(WfStepRasic(step_id=sp.id, department_id=departments["Sales"], rasic_letter="I"))
+        s.add(ChangeRoutingStandard(change_type="physical_part", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=departments["Sales"]))
+        c = ChangeRequest(change_number="CR-I-1", project_id=seed["project_id"], title="i",
+                          change_type="physical_part", status="in_assessment",
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"])
+        s.add(c); await s.flush()
+        await ChangeRoutingService.build_routing(s, c, seed["admin_id"])
+        await s.commit()
+        notes = (await s.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"]))).scalars().all()
+    titles = [n.title for n in notes]
+    assert len(titles) == 1, titles
+    assert titles[0].startswith("FYI")
+
+
+async def test_promotion_keeps_one_role_per_department_and_stage(
+        session_factory, seed, ecr_template, departments):
+    """Finding 10: a department holding a row and an I entry on the snapshot
+    in the same stage is promoted once (its row's letter), not as R and I."""
+    from app.models.change import ChangeRequest, ChangeAssessment, ChangeRouting
+    from app.models.workflow import WfStepRasic as R
+    from app.services.change_routing_service import ChangeRoutingService
+    sales = departments["Sales"]
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="CR-P-1", project_id=seed["project_id"], title="p",
+                          change_type="physical_part", status="released",
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"])
+        s.add(c); await s.flush()
+        s.add(ChangeRouting(
+            change_id=c.id, template_id=ecr_template, template_version=1,
+            deviation_status="approved", has_deviation=True,
+            standard_snapshot={"stages": [
+                {"stage_order": 1, "departments": [
+                    {"department_id": departments["Tool Engineer"], "rasic_letter": "R"}]},
+                {"stage_order": 2, "departments": [
+                    {"department_id": departments["APQP"], "rasic_letter": "A"},
+                    {"department_id": sales, "rasic_letter": "I"}]}]}))
+        for dept, order, letter in ((departments["Tool Engineer"], 1, "R"),
+                                    (departments["APQP"], 2, "A"), (sales, 2, "R")):
+            s.add(ChangeAssessment(change_id=c.id, department_id=dept, verdict="feasible",
+                                   stage_order=order, rasic_letter=letter, status="submitted"))
+        await s.flush()
+        await ChangeRoutingService.promote_to_standard(s, c, seed["admin_id"])
+        await s.commit()
+        rows = (await s.execute(
+            select(R.department_id, R.rasic_letter, WfStage.stage_order)
+            .join(WfStep, WfStep.id == R.step_id)
+            .join(WfStage, WfStage.id == WfStep.stage_id)
+            .where(WfStage.template_id == ecr_template))).all()
+    sales_roles = [(o, l) for d, l, o in rows if d == sales]
+    assert sales_roles == [(2, "R")]
+
+
+async def test_routing_sweep_is_a_dry_run_by_default_and_idempotent(
+        client, seed, ecr_template, departments, departments_member,
+        session_factory, monkeypatch):
+    """Finding 4: scripts/repair_routing_tasks.py rolls back without --apply,
+    writes with it, and finds nothing the second time."""
+    import scripts.repair_routing_tasks as sweep_mod
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == te))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        row.wf_instance_task_id = None
+        await s.flush()
+        await s.delete(task)
+        await s.commit()
+    monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    assert await sweep_mod.sweep(apply=False) == 1
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == te))).scalar_one()
+        assert row.wf_instance_task_id is None          # dry run wrote nothing
+    assert await sweep_mod.sweep(apply=True) == 1
+    assert await sweep_mod.sweep(apply=True) == 0
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == te))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert task.status == "active" and task.rasic_letter == "R"
+
+
+async def test_generic_task_complete_on_a_change_task_repairs_the_next_stage(
+        client, seed, ecr_template_3stage, departments, departments_member, session_factory):
+    """Finding 1: POST /workflow-instances/{id}/tasks/{tid}/complete on a
+    change's task (instance locked, repair after): a row of the stage the
+    engine started that no template/snapshot entry carries gets its active
+    task with the stage, and the stage holds on it."""
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.models.workflow import WfInstance, WfInstanceTask
+    auth = await _login(client)
+    body = {"project_id": seed["project_id"], "title": "gen", "change_type": "tooling",
+            "reason": "x", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    await approve_gates(client, auth, c["id"])
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-G1",
+         "name": "ART-G1", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
+    await advance_to_assessment(client, auth, session_factory, c["id"])
+    mfg = departments["Manufacturing Engineer"]
+    async with session_factory() as s:
+        # A later-stage row placed directly (no deviation), and the change
+        # already past assessment so the engine may advance on complete.
+        s.add(ChangeAssessment(change_id=c["id"], department_id=mfg, verdict="pending",
+                               stage_order=2, rasic_letter="R", status="pending"))
+        ch = await s.get(ChangeRequest, c["id"])
+        ch.status = "costing"
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == c["id"]))).scalar_one()
+        task = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.department_id == departments["Tool Engineer"]))).scalar_one()
+        await s.commit()
+        inst_id, task_id = inst.id, task.id
+    res = await client.post(f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
+                            json={"decision": "approved", "notes": "ok"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        inst = await s.get(WfInstance, inst_id)
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == mfg))).scalar_one()
+        assert inst.current_stage_order == 2
+        t = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert (t.stage_order, t.status) == (2, "active")

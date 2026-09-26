@@ -225,6 +225,17 @@ async def complete_task(
 ):
     """Complete an actionable task with approve/reject decision."""
     try:
+        # A change-scoped instance: lock it before anything is written (the
+        # one lock order every routing write path keeps), and after the
+        # engine moved give the rows of a stage it started their tasks.
+        from app.models.change import ChangeRequest
+        from app.services.change_routing_service import ChangeRoutingService
+        change_id = (await db.execute(
+            select(WfInstance.change_id)
+            .join(WfInstanceTask, WfInstanceTask.instance_id == WfInstance.id)
+            .where(WfInstanceTask.id == task_id))).scalar_one_or_none()
+        if change_id is not None:
+            await ChangeRoutingService.lock_instance(db, change_id)
         instance = await WorkflowService.complete_task(
             db,
             task_id=task_id,
@@ -232,6 +243,10 @@ async def complete_task(
             notes=request.notes,
             completed_by_id=current_user.id,
         )
+        if change_id is not None:
+            change = await db.get(ChangeRequest, change_id)
+            if change is not None:
+                await ChangeRoutingService.repair_stage_tasks(db, change, None)
         await db.commit()
         full = await _load_instance_full(db, instance.id)
         return _serialize_instance(full)

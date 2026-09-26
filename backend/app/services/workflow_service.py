@@ -248,6 +248,35 @@ class WorkflowService:
                         for r in s.rasic_assignments)),
                 steps[0].id if steps else None)
             _add_task(step_id, d["department_id"], d["rasic_letter"])
+
+        # A routing deviation that added an R/A/S/C department to this stage
+        # before it started left an assessment row, but neither the template
+        # nor the snapshot carries it (the snapshot records only I adds). Its
+        # task is created here, with the stage's others, BEFORE the caller
+        # decides whether the stage has a gate: otherwise a stage whose
+        # template rows are all C/I cascades straight through and the added
+        # Responsible department is never asked.
+        if instance.change_id is not None:
+            from app.models.change import ChangeAssessment, ASSESSMENT_LETTERS
+            extra = (await db.execute(
+                select(ChangeAssessment.department_id, ChangeAssessment.rasic_letter)
+                .where(ChangeAssessment.change_id == instance.change_id,
+                       ChangeAssessment.stage_order == stage.stage_order,
+                       ChangeAssessment.wf_instance_task_id.is_(None),
+                       ChangeAssessment.rasic_letter.in_(ASSESSMENT_LETTERS))
+                .order_by(ChangeAssessment.id))).all()
+            for department_id, letter in extra:
+                pair = (department_id, letter)
+                if pair in produced:
+                    continue
+                produced.add(pair)
+                step_id = next(
+                    (s.id for s in steps
+                     if any(r.department_id == department_id
+                            and r.rasic_letter == letter
+                            for r in s.rasic_assignments)),
+                    steps[0].id if steps else None)
+                _add_task(step_id, department_id, letter)
         await db.flush()
 
         # Change-scoped instances: link this stage's assessment payload rows to the

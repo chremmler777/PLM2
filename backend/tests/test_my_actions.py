@@ -227,7 +227,7 @@ async def test_response_carries_memberships(client, eng_auth, seed, session_fact
     assert dept_id in out.json()["memberships"]
 
 
-_EQUIV = {"create_quote": "offer_build", "obtain_info": "needs_info"}
+_EQUIV = {"create_quote": "offer_build"}
 
 
 async def _assert_tasks_in_actions(client, auth, cid):
@@ -288,3 +288,13 @@ async def test_cockpit_bundle_matches_its_parts(client, admin_auth, seed):
         assert b[part] == alone, part
     assert (await client.get("/api/v1/changes/999999/cockpit",
                              headers=admin_auth)).status_code == 404
+
+
+async def test_action_key_keeps_questions_and_the_meeting_request_apart():
+    """Review finding 9: obtain_info (a question to Sales, per concern) is
+    not the meeting's needs_info; two questions are two rows."""
+    from app.services.change_service import ChangeService as CS
+    k = CS._action_key
+    assert k({"kind": "obtain_info", "concern_id": 5}) != k({"kind": "needs_info"})
+    assert k({"kind": "obtain_info", "concern_id": 5}) != k({"kind": "obtain_info", "concern_id": 6})
+    assert k({"kind": "create_quote"}) == k({"kind": "offer_build"})

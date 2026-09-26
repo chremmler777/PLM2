@@ -30,18 +30,35 @@ import { departmentLabel, pickableDepartments } from '../../lib/departments'
 const RASIC_PICK: RasicLetter[] = ['R', 'A', 'S', 'C', 'I']
 
 /** An attendee as picked. A directory person is a colleague (and carries
- *  their user id, username and email as the contacts API sends them); a
- *  typed name that matched nobody is an external guest. `guest` is UI-only
- *  and never sent. */
+ *  their user id and email as the contacts API sends them); a typed name
+ *  that matched nobody is an external guest. `guest` is UI-only and never
+ *  sent. */
 type Attendee = MeetingParticipant & { guest?: boolean }
 /** What the backend gets: the name plus whatever identifies the PLM2 user
- *  (user_id, else username / email for it to resolve). A guest is a name. */
-const toParticipant = ({ name, user_id, username, email }: Attendee): MeetingParticipant => ({
+ *  (user_id, checked against the email; else the email to resolve). A
+ *  guest is a name. */
+const toParticipant = ({ name, user_id, email }: Attendee): MeetingParticipant => ({
   name,
   ...(user_id != null ? { user_id } : {}),
-  ...(username ? { username } : {}),
   ...(email ? { email } : {}),
 })
+/** The picker text for each contact: the name, and for a name two people
+ *  share, the name with their email (else department) so the right one is
+ *  picked and its user id sent. */
+function contactLabels(people: Contact[]): Map<Contact, string> {
+  const count = new Map<string, number>()
+  for (const c of people) {
+    const k = c.name.trim().toLowerCase()
+    count.set(k, (count.get(k) ?? 0) + 1)
+  }
+  const out = new Map<Contact, string>()
+  for (const c of people) {
+    const shared = (count.get(c.name.trim().toLowerCase()) ?? 0) > 1
+    const tag = c.email || c.department
+    out.set(c, shared && tag ? `${c.name} (${tag})` : c.name)
+  }
+  return out
+}
 const attendeeKey = (a: Attendee) => (a.user_id != null ? `u${a.user_id}` : `n${a.name.toLowerCase()}`)
 
 const DECISION_LABEL: Record<string, string> = {
@@ -142,14 +159,18 @@ export default function ScopingPanel(
     staleTime: 60 * 60 * 1000,
   })
   const people = contacts.filter((c) => isPersonContact(c, departments.map((d) => d.name)))
+  const labels = contactLabels(people)
+  const labelOf = (c: Contact) => labels.get(c) ?? c.name
   const fromContact = (c: Contact): Attendee =>
-    ({ name: c.name, user_id: c.user_id ?? null, username: c.username ?? null,
-       email: c.email ?? null, guest: false })
+    ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null, guest: false })
   const appendParticipant = (a: Attendee | null) => {
     if (!a || !a.name.trim()) return
     const next = { ...a, name: a.name.trim() }
+    // Same user id, or the same name where one side is a bare name: two
+    // colleagues who share a name are two attendees.
     if (!participants.some((p) => attendeeKey(p) === attendeeKey(next)
-      || p.name.toLowerCase() === next.name.toLowerCase())) {
+      || ((p.user_id == null || next.user_id == null)
+        && p.name.toLowerCase() === next.name.toLowerCase()))) {
       setParticipants([...participants, next])
     }
     setAddName('')
@@ -159,12 +180,12 @@ export default function ScopingPanel(
   const participantList = participants
 
   // Resolve the typed text to the best contact match so Enter/Tab confirms the
-  // suggestion (exact > prefix > contains, on name, username or mail); falls
+  // suggestion (exact > prefix > contains, on label, name or mail); falls
   // back to the raw text for external attendees not in the directory.
   const bestMatch = (q: string): Attendee | null => {
     const s = q.trim().toLowerCase()
     if (!s) return null
-    const keys = (c: Contact) => [c.name, c.username ?? '', (c.email ?? '').split('@')[0]]
+    const keys = (c: Contact) => [labelOf(c), c.name, (c.email ?? '').split('@')[0], c.email ?? '']
       .map((k) => k.toLowerCase()).filter(Boolean)
     const exact = people.find((c) => keys(c).some((k) => k === s))
     const prefix = people.find((c) => keys(c).some((k) => k.startsWith(s)))
@@ -699,7 +720,7 @@ export default function ScopingPanel(
                     const v = e.target.value
                     setAddName(v)
                     // Picking a suggestion sets the full name in one change event.
-                    const picked = people.find((c) => c.name === v)
+                    const picked = people.find((c) => labelOf(c) === v)
                     if (picked) appendParticipant(fromContact(picked))
                   }}
                   onKeyDown={(e) => {
@@ -715,8 +736,9 @@ export default function ScopingPanel(
               </div>
               <datalist id="sc-contacts">
                 {people.map((c) => (
-                  <option key={c.email ?? c.name} value={c.name}>
-                    {c.email ?? ''}
+                  <option key={c.user_id != null ? `u${c.user_id}` : (c.email ?? c.name)}
+                    value={labelOf(c)}>
+                    {[c.email, c.department].filter(Boolean).join(' · ')}
                   </option>
                 ))}
               </datalist>

@@ -540,11 +540,11 @@ async def test_completing_passed_stage_task_emits_single_completion(
         assert len(completions) == 1
 
 
-async def test_deviation_add_existing_row_updates_task(
+async def test_deviation_add_on_an_existing_row_is_refused(
         session_factory, seed, dev_ecr_template, dev_departments):
     """op=add targeting a dept that ALREADY has a row (Quality C in stage 1)
-    re-letters/re-stages the assessment AND updates its linked task consistently:
-    C(noted) -> R makes the task actionable, active, with a due date."""
+    never re-letters it on the spot (review finding 2): the change of role
+    is a reletter, which waits for the lead. Row and task stay as they were."""
     from app.services.change_routing_service import ChangeRoutingService
     from app.models.change import ChangeRequest, ChangeAssessment
     from app.models.workflow import WfInstanceTask
@@ -553,25 +553,21 @@ async def test_deviation_add_existing_row_updates_task(
 
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
-        await ChangeRoutingService.apply_deviation(
-            s, change, seed["engineer_id"], op="add",
-            department_id=dev_departments["Quality"], rasic_letter="R", stage_order=1, reason="test add")
-        await s.commit()
+        with pytest.raises(ValueError, match="reletter"):
+            await ChangeRoutingService.apply_deviation(
+                s, change, seed["engineer_id"], op="add",
+                department_id=dev_departments["Quality"], rasic_letter="R",
+                stage_order=1, reason="test add")
+        await s.rollback()
 
     async with session_factory() as s:
         row = (await s.execute(select(ChangeAssessment).where(
             (ChangeAssessment.change_id == cid)
             & (ChangeAssessment.department_id == dev_departments["Quality"])
         ))).scalar_one()
-        assert row.rasic_letter == "R"
-        assert row.stage_order == 1
+        assert row.rasic_letter == "C" and row.pending_rasic_letter is None
         task = await s.get(WfInstanceTask, row.wf_instance_task_id)
-        assert task is not None
-        assert task.rasic_letter == "R"
-        assert task.is_actionable is True
-        assert task.status == "active"
-        assert task.due_date is not None
-        assert task.stage_order == 1
+        assert task.rasic_letter == "C" and task.is_actionable is False
 
 
 async def test_deviation_reletter_noted_to_blocking(

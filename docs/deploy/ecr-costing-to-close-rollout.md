@@ -102,6 +102,9 @@ Add to the prod `plm2-backend` environment (back up the compose file first):
    --noEmit`. Record the counts in the deploy log.
 3. Prefill script test: `python -m pytest tests/test_prefill_project_team.py
    -n 0 -q` (11 tests).
+4. Routing sweep test: `python -m pytest tests/test_change_routing.py -n 2 -q
+   -k sweep` (dry run writes nothing, `--apply` is idempotent). The sweep
+   itself runs on prod in step 5a.
 
 ## Prod steps
 
@@ -249,6 +252,33 @@ In the browser (as the owner, hub login):
 
 Counts from step 0 identical; `docker logs compose-plm2-backend-1 --since
 10m | grep -c " 500 "` = 0; container restarts = 0.
+
+### 5a. Routing task sweep (after the migration and the smoke checks)
+
+Changes in flight may carry assessment rows of a started routing stage
+without their workflow task (a department a deviation added to a later
+stage, or one the scoping room pulled in before the snapshot-driven task
+creation). The write paths repair their own change from now on; this sweep
+does it once for every change with an active change-scoped instance. Dry
+run first: it performs the repair per change and rolls it back, so it
+prints exactly what `--apply` would write.
+
+```bash
+docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
+  python scripts/repair_routing_tasks.py                        # dry run
+docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
+  python scripts/repair_routing_tasks.py --apply
+docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
+  python scripts/repair_routing_tasks.py                        # must report 0 row(s)
+```
+
+Read the dry run: one line per change with the repaired assessment ids.
+Lines marked `late, flagged for the lead` are R/A departments added to a
+stage that had already passed: they are NOT waived, their task is active and
+the change lead is notified (cockpit action "Chase ..."). Tell the leads of
+those changes. Lines starting `!!` are errors for that change only (the rest
+still ran); note them in the deploy log. Idempotent: rerunning changes
+nothing.
 
 ### 6. Project team prefill (after the smoke checks)
 

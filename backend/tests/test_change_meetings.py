@@ -237,3 +237,23 @@ async def test_meeting_attendees_resolve_to_users(client, admin_auth, seed):
                              headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["participants"][0]["user_id"] == seed["engineer_id"]
+
+
+@pytest.mark.asyncio
+async def test_a_user_id_that_disagrees_with_the_name_or_email_is_ignored(
+        client, admin_auth, seed):
+    """Review finding 8: a client cannot pin an attendee on another user by
+    id. A mismatching id is dropped and the name/email resolves instead."""
+    change = await create_change(client, admin_auth, seed["project_id"])
+    await to_scoping(client, admin_auth, change["id"])
+    res = await post_meeting(client, admin_auth, change["id"], participants=[
+        # the id is the admin's, the email the engineer's: the email wins
+        {"name": "Engineer", "user_id": seed["admin_id"], "email": "eng@test.io"},
+        # the id is the engineer's, the name somebody else's: free text
+        {"name": "Customer Rep", "user_id": seed["engineer_id"]},
+        # an id with the matching name stands
+        {"name": "engineer", "user_id": seed["engineer_id"]},
+    ])
+    assert res.status_code == 200, res.text
+    assert [p["user_id"] for p in res.json()["participants"]] == [
+        seed["engineer_id"], None, seed["engineer_id"]]

@@ -144,19 +144,59 @@ async def test_rest_to_no_mark_is_kept(client, admin_auth, tab, session_factory)
 
 async def test_an_answer_stored_on_the_old_checklist_resubmits_as_it_is(
         client, admin_auth, tab, session_factory):
-    """Item 4: the 13 common items before 2026-09-25 are legacy keys. A stored
-    answer carrying them is not refused; only the current rows are owed."""
+    """Item 4: the 13 common items before 2026-09-25 are legacy keys. An
+    assessment started on that checklist (its answers carry a key only the
+    old set asked) is complete on the set it was started with; answering the
+    new rows as well is accepted too."""
     from app.services import assessment_checklist as checklist
     old = [{"key": k[0], "answer": "no", "impacted": False}
            for k in checklist.LEGACY_ITEMS]
-    res = await _submit(client, admin_auth, tab, {"impacts": old})
-    assert res.status_code == 400                      # new rows unanswered
-    assert "Tool / tool modification" in res.json()["detail"]
     res = await _submit(client, admin_auth, tab,
                         {"impacts": old + answered(DEPT)})
     assert res.status_code == 200, res.text
     stored = await _stored(session_factory, tab)
     assert {e["key"] for e in stored["impacts"]} >= {"cycle_time_change", "threed_change"}
+
+
+async def test_an_in_flight_resubmit_on_the_full_legacy_set_passes(
+        client, admin_auth, tab):
+    """Review finding 3: a draft or resubmit carrying exactly the earlier
+    13-item checklist is not refused for the rows the new checklist added."""
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS]
+    res = await _submit(client, admin_auth, tab, {"impacts": old})
+    assert res.status_code == 200, res.text
+
+
+async def test_a_partial_legacy_set_names_the_legacy_rows_still_open(
+        client, admin_auth, tab):
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS
+           if k[0] != "matching_required"]
+    res = await _submit(client, admin_auth, tab, {"impacts": old})
+    assert res.status_code == 400
+    assert "Matching/sampling required" in res.json()["detail"]
+    # The new rows are not demanded of an assessment started on the old set.
+    assert "Moldflow simulation" not in res.json()["detail"]
+
+
+async def test_a_legacy_draft_on_the_row_marks_the_assessment_as_legacy():
+    """Detection also reads what is stored on the row: a kept draft with a
+    legacy-only key makes the old set the one the answer is judged by."""
+    from app.services.change_service import ChangeService
+    stored = {"draft": {"data": {"details": {"impacts": [
+        {"key": "threed_change", "answer": "no"}]}}}}
+    assert ChangeService._started_on_legacy_checklist("Tool Engineer", [], stored)
+    assert not ChangeService._started_on_legacy_checklist(
+        "Tool Engineer", answered(DEPT), {})
+
+
+async def test_a_new_assessment_owes_the_new_checklist(client, admin_auth, tab):
+    """No legacy key anywhere: the current department checklist is owed."""
+    res = await _submit(client, admin_auth, tab, {"impacts": [
+        {"key": "work_instruction_update", "answer": "no"}]})
+    assert res.status_code == 400
+    assert "Moldflow simulation" in res.json()["detail"]
 
 
 async def test_every_department_list_is_well_formed():

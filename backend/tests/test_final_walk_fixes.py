@@ -326,11 +326,14 @@ async def test_release_closes_the_revision_check_workflows(
         assert all("deviation #1" in t.notes for t in tasks)
 
 
-async def test_closing_a_rejected_change_cancels_its_own_workflow(
-        client, admin_auth, seed, part, session_factory):
+@pytest.mark.parametrize("dead", ["rejected", "cancelled"])
+async def test_closing_a_dead_change_cancels_its_own_workflow(
+        client, admin_auth, seed, part, session_factory, dead):
+    """A rejected or cancelled change's own flow never finished: canceled,
+    not completed (review finding 11)."""
     from app.models.workflow import WfTemplate
     from app.services.change_service import ChangeService
-    cid = await _bare_change(session_factory, seed, "rejected", n=7)
+    cid = await _bare_change(session_factory, seed, dead, n=7)
     async with session_factory() as s:
         tmpl = WfTemplate(name="Own", is_active=True, created_by=seed["admin_id"])
         s.add(tmpl)
@@ -505,10 +508,12 @@ async def test_escalated_review_gets_the_ecr_title_and_the_pm_lead(
         assert change.lead_id == seed["engineer_id"]
 
 
-async def test_repair_waives_rows_of_a_passed_stage_and_logs_as_system(
+async def test_repair_flags_owed_rows_of_a_passed_stage_and_logs_as_system(
         client, admin_auth, seed, part, session_factory):
-    """A row of a stage the instance has already left gets a waived task,
-    not an active one; the repair from a write path is a system entry."""
+    """An unanswered R row of a stage the instance has already left is never
+    waived on the department's behalf: its task is active, carries no step
+    and a note, and the lead is flagged (notification + cockpit action).
+    The repair from a write path is a system entry."""
     from app.models.change import ChangeChangelog
     from app.services.change_routing_service import ChangeRoutingService
     cid, ids = await _room_scoped_change(client, admin_auth, seed, part, session_factory)
@@ -534,10 +539,49 @@ async def test_repair_waives_rows_of_a_passed_stage_and_logs_as_system(
     fixed = next(r for r in rows if r.department_id == ids["Purchasing"])
     assert fixed.id in repaired
     t = next(t for t in tasks if t.id == fixed.wf_instance_task_id)
-    assert t.status == "waived" and t.due_date is None
+    assert t.status == "active" and t.is_actionable and t.due_date is not None
+    assert t.step_id is None and "flagged for the change lead" in (t.notes or "")
     async with session_factory() as s:
         log = (await s.execute(select(ChangeChangelog).where(
             ChangeChangelog.change_id == cid,
             ChangeChangelog.action == "routing_repaired"))).scalars().all()
+        from app.models.notification import Notification
+        flagged = (await s.execute(select(Notification).where(
+            Notification.user_id == seed["admin_id"],
+            Notification.kind == "routing_late_assessment"))).scalars().all()
     assert len(log) == 1 and "(automatic)" in log[0].action_description
     assert '"system": true' in log[0].new_value
+    assert f'"late_assessment_ids": [{fixed.id}]' in log[0].new_value
+    assert len(flagged) == 1
+    # The lead's cockpit carries the flag.
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions",
+                             headers=admin_auth)).json()["actions"]
+    late = [a for a in acts if a["kind"] == "late_assessment"]
+    assert [a["assessment_id"] for a in late] == [fixed.id]
+
+
+async def test_repair_still_waives_owed_rows_of_a_finished_change(
+        client, admin_auth, seed, part, session_factory):
+    """A dead change owes nothing: an unanswered R row repaired after the
+    change was cancelled/rejected gets a waived task."""
+    from app.services.change_routing_service import ChangeRoutingService
+    cid, ids = await _room_scoped_change(client, admin_auth, seed, part, session_factory)
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid,
+            ChangeAssessment.department_id == ids["Purchasing"]))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        row.wf_instance_task_id = None
+        await s.flush()
+        await s.delete(task)
+        change = await s.get(ChangeRequest, cid)
+        change.status = "rejected"
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.repair_stage_tasks(s, change, None)
+        await s.commit()
+    rows, tasks = await _stage1(session_factory, cid)
+    fixed = next(r for r in rows if r.department_id == ids["Purchasing"])
+    t = next(t for t in tasks if t.id == fixed.wf_instance_task_id)
+    assert t.status == "waived" and t.due_date is None

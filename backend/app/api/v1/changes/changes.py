@@ -292,13 +292,24 @@ async def my_change_tasks(
     dep_ids = set(await WorkflowService.effective_department_ids(db, current_user))
     tasks = []
     if dep_ids:
+        from app.models.workflow import WfInstance as _WfI, WfInstanceTask as _WfT
+        # Also outside assessment: an R/A row added to a stage after it had
+        # passed is still owed (its task active behind the instance's stage).
+        late = ((_WfT.status == "active") & (_WfT.is_actionable.is_(True))
+                & _WfT.step_id.is_(None)
+                & (_WfI.status == "active")
+                & (_WfT.stage_order < _WfI.current_stage_order)
+                & ChangeRequest.status.notin_(
+                    ("released", "closed", "rejected", "cancelled")))
         rows = await db.execute(
             select(ChangeAssessment, ChangeRequest)
             .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
+            .outerjoin(_WfT, _WfT.id == ChangeAssessment.wf_instance_task_id)
+            .outerjoin(_WfI, _WfI.id == _WfT.instance_id)
             .where(
                 ChangeAssessment.department_id.in_(dep_ids)
                 & (ChangeAssessment.verdict == "pending")
-                & (ChangeRequest.status == "in_assessment")
+                & ((ChangeRequest.status == "in_assessment") | late)
             )
         )
         from app.services.early_stage_service import EarlyStageService
@@ -1084,6 +1095,30 @@ async def repair_routing(change_id: int, db: AsyncSession = Depends(get_db),
     return {"change_id": change_id, "repaired_assessment_ids": repaired}
 
 
+async def _deviation_refusal(db: AsyncSession, change, user: User,
+                             body: DeviationRequest) -> Optional[str]:
+    """Who may propose a routing deviation: the change lead, Project
+    Management or an admin (MeetingService.user_is_pm, acts-as aware), for
+    any op. A department member speaks for its own department: it may
+    decline its row ("not our responsibility", a reletter) or add itself;
+    right after its decline it may name the department that should take
+    over (the add of NotResponsibleDialog). Removing a department is never
+    a department's own call."""
+    from app.services.change_people import holds_lead
+    if holds_lead(change, user) or await MeetingService.user_is_pm(db, user):
+        return None
+    if body.op in ("reletter", "add") and await WorkflowService.actor_in_department(
+            db, user, body.department_id):
+        return None
+    if body.op == "add":
+        mine = set(await WorkflowService.effective_department_ids(db, user))
+        if any(a.pending_rasic_letter and a.department_id in mine
+               for a in change.assessments):
+            return None
+    return ("Only the change lead, Project Management, an admin or a member "
+            "of the department concerned may request this routing change")
+
+
 @router.post("/{change_id}/routing/deviation", response_model=RoutingResponse)
 async def post_deviation(change_id: int, body: DeviationRequest,
                          db: AsyncSession = Depends(get_db),
@@ -1091,6 +1126,9 @@ async def post_deviation(change_id: int, body: DeviationRequest,
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
+    refusal = await _deviation_refusal(db, change, current_user, body)
+    if refusal:
+        raise HTTPException(403, refusal)
     from app.services.change_routing_service import ChangeRoutingService
     try:
         await ChangeRoutingService.apply_deviation(

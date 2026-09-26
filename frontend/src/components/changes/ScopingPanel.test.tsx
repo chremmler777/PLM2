@@ -173,12 +173,12 @@ describe('ScopingPanel attendees', () => {
 
   it('stores a picked directory person as the user and a typed guest by name', async () => {
     vi.mocked(contactsApi.list).mockResolvedValue([
-      { name: 'Cody Brown', email: 'cody@ktx.io', user_id: 42, username: 'cody' },
+      { name: 'Cody Brown', email: 'cody@ktx.io', user_id: 42 },
     ])
     vi.mocked(changesApi.createMeeting).mockClear()
     render(wrap(<ScopingPanel change={change()} />))
     const input = await screen.findByLabelText(new RegExp(t('meeting.participants'))) as HTMLInputElement
-    // Typing the username and Enter picks the directory entry, not free text.
+    // Typing the mail name and Enter picks the directory entry, not free text.
     await waitFor(() => expect(document.querySelector('#sc-contacts option')).toBeTruthy())
     fireEvent.change(input, { target: { value: 'cody' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -193,7 +193,38 @@ describe('ScopingPanel attendees', () => {
     fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].participants).toEqual([
-      { name: 'Cody Brown', user_id: 42, username: 'cody', email: 'cody@ktx.io' }, { name: 'Supplier guest' },
+      { name: 'Cody Brown', user_id: 42, email: 'cody@ktx.io' }, { name: 'Supplier guest' },
+    ])
+    vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
+  })
+
+  // Two colleagues with the same name: the picker tells them apart by email
+  // (department when there is no email) and sends the chosen one's user id.
+  it('tells same-name people apart and sends the chosen user id', async () => {
+    vi.mocked(contactsApi.list).mockResolvedValue([
+      { name: 'John Smith', email: 'john.smith@ktx.io', user_id: 7, department: 'Quality' },
+      { name: 'John Smith', email: 'j.smith2@ktx.io', user_id: 8, department: 'Tool Engineer' },
+      { name: 'Dana Lee', email: 'dana@ktx.io', user_id: 9 },
+    ])
+    vi.mocked(changesApi.createMeeting).mockClear()
+    render(wrap(<ScopingPanel change={change()} />))
+    const input = await screen.findByLabelText(new RegExp(t('meeting.participants'))) as HTMLInputElement
+    await waitFor(() => expect(document.querySelectorAll('#sc-contacts option').length).toBe(3))
+    const values = Array.from(document.querySelectorAll('#sc-contacts option'))
+      .map((o) => (o as HTMLOptionElement).value)
+    expect(values).toEqual([
+      'John Smith (john.smith@ktx.io)', 'John Smith (j.smith2@ktx.io)', 'Dana Lee',
+    ])
+    fireEvent.change(input, { target: { value: 'John Smith (j.smith2@ktx.io)' } })
+    fireEvent.change(input, { target: { value: 'John Smith (john.smith@ktx.io)' } })
+    const chips = screen.getAllByTestId('meeting-attendee')
+    expect(chips.map((c) => c.getAttribute('data-user-id'))).toEqual(['8', '7'])
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
+    fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].participants).toEqual([
+      { name: 'John Smith', user_id: 8, email: 'j.smith2@ktx.io' },
+      { name: 'John Smith', user_id: 7, email: 'john.smith@ktx.io' },
     ])
     vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
   })

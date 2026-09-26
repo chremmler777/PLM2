@@ -94,11 +94,30 @@ class MeetingService:
         return out, ids
 
     @staticmethod
+    def _participant_matches(user: User, name: str, username: str,
+                             email: str) -> bool:
+        """Does the id's user agree with what the client sent? A sent
+        email must be that user's; else a sent name (or username) must be
+        that user's full name or username. Nothing sent to compare: the id
+        stands on its own."""
+        u_email = (user.email or "").strip().lower()
+        if email:
+            return email == u_email
+        names = {(user.full_name or "").strip().lower(),
+                 (user.username or "").strip().lower()} - {""}
+        probes = {name.strip().lower(), username} - {""}
+        if not probes:
+            return True
+        return bool(probes & names)
+
+    @staticmethod
     async def resolve_participants(session: AsyncSession,
                                    participants: Optional[list]) -> list[dict]:
         """Attendees as {name, user_id}: a given user_id is kept when that
-        user exists; without one the picker's username, then email, finds
-        the PLM2 user (case-insensitive). Free-text names stay free text."""
+        user exists AND agrees with the name/email sent alongside it (a
+        client cannot pin an attendee on somebody else by id); otherwise
+        the picker's username, then email, finds the PLM2 user
+        (case-insensitive). Free-text names stay free text."""
         out: list[dict] = []
         for p in participants or []:
             if not isinstance(p, dict):
@@ -108,6 +127,9 @@ class MeetingService:
             user = await session.get(User, uid) if uid else None
             username = (p.get("username") or "").strip().lower()
             email = (p.get("email") or "").strip().lower()
+            if user is not None and not MeetingService._participant_matches(
+                    user, name, username, email):
+                user = None
             if user is None and username:
                 user = (await session.execute(select(User).where(
                     func.lower(User.username) == username))).scalars().first()
