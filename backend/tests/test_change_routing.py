@@ -1,4 +1,6 @@
 # backend/tests/test_change_routing.py
+import json
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -1735,7 +1737,9 @@ async def test_sweep_backfills_snapshot_entries_of_approved_adds(
         session_factory, monkeypatch):
     """scripts/repair_routing_tasks.py writes a snapshot entry
     (added_by_deviation) for a row an approved deviation added before
-    approvals did so: not in a dry run, once with --apply."""
+    approvals did so: never while a deviation is pending (the rejection's
+    own fallback keeps the approved row meanwhile), not in a dry run, once
+    with --apply."""
     import scripts.repair_routing_tasks as sweep_mod
     auth = await _login(client)
     admin_auth = await _login_admin(client)
@@ -1747,11 +1751,20 @@ async def test_sweep_backfills_snapshot_entries_of_approved_adds(
     assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
                               headers=admin_auth)).status_code == 200
     await _strip_snapshot_entry(session_factory, c["id"], mfg)
-    # A pending add is not backfilled: it is not approved.
     assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
         "op": "add", "department_id": sales, "rasic_letter": "R", "stage_order": 1,
         "reason": "maybe Sales"}, headers=auth)).status_code == 200
     monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    # A deviation is pending: the change is skipped.
+    assert await sweep_mod.backfill_snapshots(True, [c["id"]]) == 0
+    assert await _snap_entries(session_factory, c["id"], mfg) == []
+    # The rejection keeps the approved add all the same.
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "no"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert len(await _rows_of(session_factory, c["id"], mfg)) == 1
+    assert await _rows_of(session_factory, c["id"], sales) == []
+    # Decided: now it is backfilled.
     assert await sweep_mod.backfill_snapshots(False, [c["id"]]) == 1
     assert await _snap_entries(session_factory, c["id"], mfg) == []
     await sweep_mod.sweep(apply=True)
@@ -1760,12 +1773,128 @@ async def test_sweep_backfills_snapshot_entries_of_approved_adds(
     assert [o for o, _ in await _snap_entries(session_factory, c["id"], sales)] \
         == [2]                                   # the template's I, nothing more
     assert await sweep_mod.backfill_snapshots(True, [c["id"]]) == 0
-    # And the rejection keeps the backfilled add.
+
+
+async def _add_remove_readd(client, auth, admin_auth, session_factory, cid, dept):
+    """An add approved before approvals wrote the snapshot, its approved
+    removal, and a new add of the same department and stage, pending."""
+    url = f"/api/v1/changes/{cid}/routing/deviation"
+    assert (await client.post(url, json={"op": "add", "department_id": dept,
+        "rasic_letter": "R", "stage_order": 1, "reason": "x"}, headers=auth)).status_code == 200
+    assert (await client.post(url + "/approve", headers=admin_auth)).status_code == 200
+    await _strip_snapshot_entry(session_factory, cid, dept)
+    assert (await client.post(url, json={"op": "remove", "department_id": dept,
+        "stage_order": 1, "reason": "y"}, headers=auth)).status_code == 200
+    assert (await client.post(url + "/approve", headers=admin_auth)).status_code == 200
+    assert await _rows_of(session_factory, cid, dept) == []
+    assert (await client.post(url, json={"op": "add", "department_id": dept,
+        "rasic_letter": "R", "stage_order": 1, "reason": "z"}, headers=auth)).status_code == 200
+    assert len(await _rows_of(session_factory, cid, dept)) == 1
+
+
+async def test_backfill_never_promotes_a_pending_readd(
+        client, seed, ecr_template, departments, departments_member,
+        session_factory, monkeypatch):
+    """Added (approved), taken off (approved), added again (pending): the
+    sweep must not take the pending re-add for the first approval, so the
+    rejection still takes it off."""
+    import scripts.repair_routing_tasks as sweep_mod
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    await _add_remove_readd(client, auth, admin_auth, session_factory, c["id"], mfg)
+    monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    assert await sweep_mod.backfill_snapshots(True, [c["id"]]) == 0
+    assert await _snap_entries(session_factory, c["id"], mfg) == []
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
                             json={"reason": "no"}, headers=admin_auth)
     assert res.status_code == 200, res.text
-    assert len(await _rows_of(session_factory, c["id"], mfg)) == 1
-    assert await _rows_of(session_factory, c["id"], sales) == []
+    assert await _rows_of(session_factory, c["id"], mfg) == []
+
+
+async def _to_legacy_text(session_factory, cid):
+    """Every deviation entry as written before records existed: no
+    new_value, the op only in the description (prod data at deploy)."""
+    from app.models.change import ChangeChangelog
+    async with session_factory() as s:
+        for entry in await _deviation_entries(session_factory, cid):
+            e = await s.get(ChangeChangelog, entry.id)
+            rec = json.loads(e.new_value)
+            e.new_value = None
+            if rec["op"] == "add":
+                e.action_description = (f"Routing deviation: added dept {rec['department_id']} "
+                                        f"as {rec['rasic_letter']} in stage {rec['stage_order']}")
+            elif rec["op"] == "remove":
+                e.action_description = f"Routing deviation: removed dept {rec['department_id']}"
+        await s.commit()
+
+
+async def test_legacy_reject_replays_the_approved_history_in_order(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Old-format changelog text only: an add approved, then removed, then
+    asked again by the pending deviation. The first approval no longer
+    protects the re-add (the approved removal released it), so the
+    rejection takes it off."""
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    await _add_remove_readd(client, auth, admin_auth, session_factory, c["id"], mfg)
+    await _to_legacy_text(session_factory, c["id"])
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "no"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert await _rows_of(session_factory, c["id"], mfg) == []
+
+
+async def test_legacy_backfill_replays_add_remove_readd(
+        client, seed, ecr_template, departments, departments_member,
+        session_factory, monkeypatch):
+    """Old-format text: add approved, removal approved, re-add approved. The
+    row of the re-add is backfilled; with the re-add rejected instead there
+    is nothing to backfill."""
+    import scripts.repair_routing_tasks as sweep_mod
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    await _add_remove_readd(client, auth, admin_auth, session_factory, c["id"], mfg)
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    await _strip_snapshot_entry(session_factory, c["id"], mfg)
+    await _to_legacy_text(session_factory, c["id"])
+    monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    assert await sweep_mod.backfill_snapshots(True, [c["id"]]) == 1
+    assert await _snap_entries(session_factory, c["id"], mfg) == [
+        (1, {"department_id": mfg, "rasic_letter": "R", "added_by_deviation": True})]
+
+
+async def test_backfill_reads_only_the_current_routing(
+        client, seed, ecr_template, departments, departments_member,
+        session_factory, monkeypatch):
+    """Entries written before the routing was (re)built belong to a routing
+    torn down on a recall: the backfill ignores them."""
+    import scripts.repair_routing_tasks as sweep_mod
+    from datetime import datetime, timedelta
+    from app.models.change import ChangeRouting
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
+        "reason": "x"}, headers=auth)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                              headers=admin_auth)).status_code == 200
+    await _strip_snapshot_entry(session_factory, c["id"], mfg)
+    async with session_factory() as s:
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == c["id"]))).scalar_one()
+        routing.created_at = datetime.utcnow() + timedelta(seconds=5)
+        await s.commit()
+    monkeypatch.setattr(sweep_mod, "AsyncSessionLocal", session_factory)
+    assert await sweep_mod.backfill_snapshots(True, [c["id"]]) == 0
 
 
 async def test_take_off_routing_waits_for_the_decision(

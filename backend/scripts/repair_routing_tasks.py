@@ -31,8 +31,13 @@ Snapshot backfill (every change with a routing): a row added by a routing
 deviation approved before approvals wrote their adds into the routing
 snapshot gets its snapshot entry now (added_by_deviation: true), read from
 the changelog (ChangeRoutingService.backfill_deviation_snapshot), so a
-later rejection of another deviation keeps it. Printed per entry; the dry
-run rolls it back like the repair.
+later rejection of another deviation keeps it. The changelog of the
+current routing is replayed in order (records, or the older description
+text): an approved add holds its department and stage until a later
+removal or decline to Informed releases it. A change whose deviation is
+still pending is skipped and listed ("SKIPPED, deviation pending"): run the
+sweep again after the decision. Printed per entry; the dry run rolls it
+back like the repair.
 """
 import argparse
 import asyncio
@@ -135,6 +140,16 @@ async def backfill_snapshots(apply: bool, change_ids: list[int]) -> int:
             try:
                 change = await ChangeService.get_change(s, cid)
                 if change is None:
+                    continue
+                status = (await s.execute(
+                    select(ChangeRouting.deviation_status).where(
+                        ChangeRouting.change_id == cid))).scalar_one_or_none()
+                if status == "pending_approval":
+                    # Not backfilled while a deviation waits: a pending
+                    # re-add must not be promoted to approved.
+                    print(f"{change.change_number} (id {cid}): SKIPPED, deviation "
+                          "pending; run the sweep again after the decision")
+                    await s.rollback()
                     continue
                 written = await ChangeRoutingService.backfill_deviation_snapshot(s, change)
                 if written:

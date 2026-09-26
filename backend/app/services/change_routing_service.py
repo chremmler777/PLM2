@@ -146,33 +146,97 @@ def _deviation_record(entry: ChangeChangelog) -> Optional[dict]:
     return None
 
 
+async def _deviation_entries(session: AsyncSession,
+                             routing: ChangeRouting) -> list[ChangeChangelog]:
+    """The change's routing deviation changelog entries of the CURRENT
+    routing, in changelog id order (the hash-chain key, never performed_at).
+
+    A recall to scoping tears the routing down (teardown_routing) and the
+    next submit builds a new one; the entries of the old routing stay in the
+    changelog but belong to rows that are gone. Only entries written at or
+    after routing.created_at are read, so a dangling request of the old
+    routing never joins the pending window of the new one."""
+    q = select(ChangeChangelog).where(
+        ChangeChangelog.change_id == routing.change_id,
+        ChangeChangelog.action.in_(_DEVIATION_ACTIONS))
+    if routing.created_at is not None:
+        q = q.where(ChangeChangelog.performed_at >= routing.created_at)
+    return (await session.execute(q.order_by(ChangeChangelog.id))).scalars().all()
+
+
 async def _deviation_history(session: AsyncSession,
-                             change_id: int) -> tuple[list[tuple[str, list]], list]:
-    """The change's routing deviations read from the changelog, grouped by
+                             routing: ChangeRouting) -> tuple[list[tuple[str, list]], list]:
+    """The current routing's deviations read from the changelog, grouped by
     decision: ([(decision action, [record|None, ...]), ...], pending), where
     pending lists the records requested since the last decision (the
     deviation now awaiting approval). A record is None when the entry
-    carries neither a record nor a readable description."""
-    entries = (await session.execute(
-        select(ChangeChangelog).where(
-            ChangeChangelog.change_id == change_id,
-            ChangeChangelog.action.in_(_DEVIATION_ACTIONS))
-        .order_by(ChangeChangelog.performed_at, ChangeChangelog.id)
-    )).scalars().all()
+    carries neither a record nor a readable description. Each record also
+    carries performed_by (who requested it)."""
     decided: list[tuple[str, list]] = []
     group: list = []
-    for e in entries:
+    for e in await _deviation_entries(session, routing):
         if e.action == "routing_deviation":
-            group.append(_deviation_record(e))
+            rec = _deviation_record(e)
+            group.append(None if rec is None else {**rec, "performed_by": e.performed_by})
         else:
             decided.append((e.action, group))
             group = []
     return decided, group
 
 
+async def _pending_proposers(session: AsyncSession, routing: ChangeRouting) -> set[int]:
+    """Everybody who filed a request in the pending window (since the last
+    decision), readable record or not: none of them may decide the bundle."""
+    proposers: set[int] = set()
+    for e in await _deviation_entries(session, routing):
+        if e.action == "routing_deviation":
+            proposers.add(e.performed_by)
+        else:
+            proposers = set()
+    if routing.deviation_proposed_by is not None:
+        proposers.add(routing.deviation_proposed_by)
+    return proposers
+
+
 def _approved_records(decided: list[tuple[str, list]]) -> list[dict]:
     return [r for action, recs in decided if action == "routing_deviation_approved"
             for r in recs if r is not None]
+
+
+def _replay_held_adds(decided: list[tuple[str, list]],
+                      live_row_ids: set[int]) -> set[tuple[int, int]]:
+    """The (department, stage) pairs an APPROVED add still holds, replayed in
+    changelog order: an approved add of an assessment letter sets its pair;
+    a later removal or a decline to Informed clears it (stage None: every
+    pair of the department). A removal counts when approved and not moot
+    (its row, when named, is gone), or whatever its decision when it carries
+    no assessment_id: removals before 24c51533 deleted the row at request
+    time, and a rejection never put it back. Rejected groups add nothing."""
+    held: set[tuple[int, int]] = set()
+
+    def clear(dept: int, order: Optional[int]) -> None:
+        nonlocal held
+        if order is None:
+            held = {p for p in held if p[0] != dept}
+        else:
+            held.discard((dept, order))
+
+    for action, recs in decided:
+        approved = action == "routing_deviation_approved"
+        for r in recs:
+            if r is None:
+                continue
+            op, dept, order = r.get("op"), r.get("department_id"), r.get("stage_order")
+            if op == "add":
+                if approved and order is not None and r.get("rasic_letter") in ASSESSMENT_LETTERS:
+                    held.add((dept, order))
+            elif op == "remove":
+                aid = r.get("assessment_id")
+                if aid is None or (approved and aid not in live_row_ids):
+                    clear(dept, order)
+            elif op == "reletter" and approved and r.get("rasic_letter") == "I":
+                clear(dept, order)
+    return held
 
 
 def _retarget_task(task: WfInstanceTask, rasic_letter: str,
@@ -742,6 +806,29 @@ class ChangeRoutingService:
         return r
 
     @staticmethod
+    async def _lock_routing(session: AsyncSession, change: ChangeRequest) -> ChangeRouting:
+        """The change's routing, row-locked (SELECT ... FOR UPDATE on
+        Postgres; a no-op on SQLite) and freshly read (populate_existing), so
+        two deviation requests or decisions on one change run one after the
+        other and each sees the other's deviation_status and snapshot.
+
+        Lock order: the engine instance FIRST (lock_instance /
+        lock_task_instance), THEN the routing, then rows and tasks. The
+        instance-first order is the one every routing write path already
+        keeps (the costing transition, repair_stage_tasks, the workflow task
+        API, teardown_routing deletes the instances before the routing), so
+        apply_deviation, approve_deviation and reject_deviation take the
+        routing lock right after the instance lock and before any write."""
+        r = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+        if r is None:
+            raise ValueError("Change has no routing yet")
+        return r
+
+    @staticmethod
     async def apply_deviation(session: AsyncSession, change: ChangeRequest, user_id: int, *,
                               op: str, department_id: int, rasic_letter: Optional[str] = None,
                               stage_order: Optional[int] = None,
@@ -753,7 +840,8 @@ class ChangeRoutingService:
         # takes the task of a department added now.
         task_inst = inst or await ChangeRoutingService.lock_task_instance(
             session, change.id)
-        routing = await ChangeRoutingService._routing(session, change)
+        # Then the routing (see _lock_routing for the order).
+        routing = await ChangeRoutingService._lock_routing(session, change)
         # Adding a department mid-assessment is an audit event: somebody was
         # forgotten, or something turned out to be impacted after all. The
         # reason is the record of which, and the lead reads it to decide.
@@ -957,7 +1045,7 @@ class ChangeRoutingService:
         )).scalar_one_or_none()
         if routing is None or routing.deviation_status != "pending_approval":
             return set()
-        _, pending = await _deviation_history(session, change.id)
+        _, pending = await _deviation_history(session, routing)
         return {r["assessment_id"] for r in pending
                 if r is not None and r.get("op") == "remove"
                 and r.get("assessment_id") is not None}
@@ -967,34 +1055,53 @@ class ChangeRoutingService:
                                           change: ChangeRequest) -> list[dict]:
         """Write the adds of approved deviations into the routing snapshot
         (added_by_deviation), for rows approved before approve_deviation did
-        so itself. Read from the changelog: an add of an approved deviation
-        (record or older description) whose row still exists with an
-        assessment letter and has no assessment entry on the snapshot for
-        its department and stage. Idempotent. Returns the entries written,
-        each with its stage_order."""
+        so itself. Read from the changelog of the current routing (records,
+        or the older description text), replayed in changelog order
+        (_replay_held_adds): an approved add holds its department and stage,
+        a later removal or decline to Informed releases it again. A held row
+        that still exists with an assessment letter and has no assessment
+        entry on the snapshot for its department and stage gets one.
+
+        Never while a deviation is pending: a pending add of a department
+        and stage an earlier approval also named (added, removed, re-added)
+        would be promoted to approved, and a rejection could no longer take
+        it off. Such a change is left for the next sweep, after the decision
+        (the rejection's own fallback protects the approved rows meanwhile);
+        a pair named in the pending window is skipped as well. Idempotent.
+        Returns the entries written, each with its stage_order."""
+        # Lock order (see _lock_routing): the instance, then the routing, so
+        # a decision running meanwhile is either fully seen or waits.
+        await ChangeRoutingService.lock_instance(session, change.id)
         routing = (await session.execute(
             select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )).scalar_one_or_none()
-        if routing is None:
+        if routing is None or routing.deviation_status == "pending_approval":
             return []
-        decided, _ = await _deviation_history(session, change.id)
-        asked = {(r["department_id"], r["stage_order"])
-                 for r in _approved_records(decided)
-                 if r.get("op") == "add" and r.get("stage_order") is not None}
-        if not asked:
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+            .order_by(ChangeAssessment.stage_order, ChangeAssessment.id)
+        )).scalars().all()
+        decided, pending = await _deviation_history(session, routing)
+        held = _replay_held_adds(decided, {a.id for a in rows})
+        for r in pending:
+            if r is None:
+                continue
+            if r.get("stage_order") is None:
+                held = {p for p in held if p[0] != r.get("department_id")}
+            else:
+                held.discard((r.get("department_id"), r.get("stage_order")))
+        if not held:
             return []
         on_snap = {(d["department_id"], st["stage_order"])
                    for st in (routing.standard_snapshot or {}).get("stages", [])
                    for d in st["departments"]
                    if not d.get("pending_deviation")
                    and d["rasic_letter"] in ASSESSMENT_LETTERS}
-        rows = (await session.execute(
-            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
-            .order_by(ChangeAssessment.stage_order, ChangeAssessment.id)
-        )).scalars().all()
         missing = [a for a in rows
                    if a.rasic_letter in ASSESSMENT_LETTERS
-                   and (a.department_id, a.stage_order) in asked
+                   and (a.department_id, a.stage_order) in held
                    and (a.department_id, a.stage_order) not in on_snap]
         if not missing:
             return []
@@ -1027,32 +1134,45 @@ class ChangeRoutingService:
 
     @staticmethod
     def user_can_decide_deviation(change: ChangeRequest, routing: ChangeRouting,
-                                  user_id: int, *, acting: bool = False) -> bool:
+                                  user_id: int, *, acting: bool = False,
+                                  proposers: Optional[set[int]] = None) -> bool:
         """Who may approve or reject a pending routing deviation. No
-        self-decision. If a non-lead proposed it, only the lead decides. If the
-        lead proposed it, anyone-but-the-proposer (i.e. the PM) decides. Shared
-        by the endpoints and my_actions so the plate and the gate agree.
+        self-decision: the decision covers the whole bundle of requests since
+        the last decision, so nobody who filed ANY of them decides it
+        (proposers, from _pending_proposers; None: only the latest proposer,
+        deviation_proposed_by, is known). If the lead filed none of them,
+        only the lead decides. If the lead filed one, anyone who filed none
+        (i.e. the PM) decides. Shared by the endpoints and my_actions so the
+        plate and the gate agree.
         acting: the caller acts as a department, which drops the personal
         lead privilege (change_people.holds_lead)."""
         if routing.deviation_status != "pending_approval":
             return False
-        if routing.deviation_proposed_by == user_id:
+        who = set(proposers or ())
+        if routing.deviation_proposed_by is not None:
+            who.add(routing.deviation_proposed_by)
+        if user_id in who:
             return False
         if (change.lead_id is not None
-                and routing.deviation_proposed_by != change.lead_id
+                and change.lead_id not in who
                 and (acting or user_id != change.lead_id)):
             return False
         return True
 
     @staticmethod
     def _check_decide(change: ChangeRequest, routing: ChangeRouting, user_id: int,
-                      verb: str, acting: bool = False) -> None:
+                      verb: str, acting: bool = False, *,
+                      proposers: Optional[set[int]] = None) -> None:
         if routing.deviation_status != "pending_approval":
             raise ValueError("No deviation pending approval")
         if routing.deviation_proposed_by == user_id:
             raise ValueError(f"Cannot {verb} your own routing deviation")
+        if proposers and user_id in proposers:
+            raise ValueError(
+                f"Cannot {verb} this routing deviation: it includes a request "
+                "you filed")
         if not ChangeRoutingService.user_can_decide_deviation(
-                change, routing, user_id, acting=acting):
+                change, routing, user_id, acting=acting, proposers=proposers):
             raise ValueError(f"Only the change lead may {verb} this deviation")
 
     @staticmethod
@@ -1094,9 +1214,12 @@ class ChangeRoutingService:
         A row that was already answered is NOT erased — the rejection is refused
         instead; by then the department's work is a fact of the record."""
         from app.services.change_service import ChangeService
+        # Lock order (see _lock_routing): the instance, then the routing.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
-        routing = await ChangeRoutingService._routing(session, change)
-        ChangeRoutingService._check_decide(change, routing, user_id, "reject", acting)
+        routing = await ChangeRoutingService._lock_routing(session, change)
+        proposers = await _pending_proposers(session, routing)
+        ChangeRoutingService._check_decide(change, routing, user_id, "reject", acting,
+                                           proposers=proposers)
         if not (reason and reason.strip()):
             raise ValueError("A reason is required to reject a routing deviation")
         # What the routing stands at: the snapshot, with the adds and
@@ -1128,9 +1251,11 @@ class ChangeRoutingService:
         # changelog records since the last decision (department, stage and
         # letter each asked for). An older deviation without such a record
         # falls back to the snapshot, but never touches a row an approved
-        # deviation of that department and stage put there (an add approved
-        # before the snapshot kept approved adds).
-        decided, pending = await _deviation_history(session, change.id)
+        # add still holds (an add approved before the snapshot kept approved
+        # adds): the approved history is replayed in changelog order, so an
+        # add approved, then removed, then asked again by THIS deviation is
+        # not protected by the first approval (_replay_held_adds).
+        decided, pending = await _deviation_history(session, routing)
         own = all(r is not None and not r.get("legacy") for r in pending)
         outside = [a for a in rows if (a.department_id, a.stage_order) not in standard]
         if own:
@@ -1139,12 +1264,21 @@ class ChangeRoutingService:
             added = [a for a in outside
                      if (a.department_id, a.stage_order, a.rasic_letter) in asked]
         else:
-            approved = _approved_records(decided)
+            held = _replay_held_adds(decided, {a.id for a in rows})
+            approved_reletters = [r for r in _approved_records(decided)
+                                  if r.get("op") == "reletter"]
 
             def _approved_here(a: ChangeAssessment) -> bool:
-                return any(r["department_id"] == a.department_id
-                           and r.get("stage_order") in (None, a.stage_order)
-                           for r in approved)
+                return (a.department_id, a.stage_order) in held
+
+            def _approved_letter(a: ChangeAssessment) -> bool:
+                # A re-letter approved before approvals moved the snapshot:
+                # the row carries the letter an approved decline asked for.
+                return _approved_here(a) or any(
+                    r["department_id"] == a.department_id
+                    and r.get("stage_order") in (None, a.stage_order)
+                    and r.get("rasic_letter") == a.rasic_letter
+                    for r in approved_reletters)
             added = [a for a in outside if not _approved_here(a)]
         # A re-lettered standard row ("not our responsibility" -> C) goes back
         # to the letter the routing gave it: only one this deviation
@@ -1158,7 +1292,7 @@ class ChangeRoutingService:
             relettered = [a for a in relettered
                           if (a.department_id, a.stage_order, a.rasic_letter) in moved]
         else:
-            relettered = [a for a in relettered if not _approved_here(a)]
+            relettered = [a for a in relettered if not _approved_letter(a)]
         answered = [a for a in added + relettered
                     if a.submitted_at is not None or (a.verdict and a.verdict != "pending")]
         if answered:
@@ -1173,14 +1307,9 @@ class ChangeRoutingService:
                     _retarget_task(task, a.rasic_letter)
         removed = []
         for a in added:
-            if a.wf_instance_task_id is not None:
-                task = await session.get(WfInstanceTask, a.wf_instance_task_id)
-                a.wf_instance_task_id = None
-                await session.flush()
-                if task is not None:
-                    await session.delete(task)
+            # Documents filed with the row stay on the change (link cut).
             removed.append(a.department_id)
-            await session.delete(a)
+            await ChangeRoutingService._drop_row(session, a)
         await session.flush()
         if inst is not None and (removed or relettered):
             await WorkflowService._maybe_advance_stage(session, inst)
@@ -1195,9 +1324,11 @@ class ChangeRoutingService:
                        "restored_department_ids": [a.department_id for a in relettered],
                        "declines_refused_department_ids": [a.department_id for a in declined],
                        "removals_refused_assessment_ids": sorted(refused_removals)})
-        if routing.deviation_proposed_by is not None and routing.deviation_proposed_by != user_id:
+        # Everybody who filed a request of the rejected bundle is told.
+        told = sorted(p for p in proposers if p is not None and p != user_id)
+        if told:
             await NotificationService.notify_once(
-                session, [routing.deviation_proposed_by], kind="routing_deviation_rejected",
+                session, told, kind="routing_deviation_rejected",
                 subject_key=f"routing-dev-rejected:{change.id}:{datetime.utcnow().isoformat()}",
                 title=f"Routing change rejected: {change.change_number}",
                 body=reason.strip(),
@@ -1230,9 +1361,12 @@ class ChangeRoutingService:
     async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
                                 *, acting: bool = False) -> ChangeRouting:
         from app.services.change_service import ChangeService
+        # Lock order (see _lock_routing): the instance, then the routing.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
-        routing = await ChangeRoutingService._routing(session, change)
-        ChangeRoutingService._check_decide(change, routing, user_id, "approve", acting)
+        routing = await ChangeRoutingService._lock_routing(session, change)
+        proposers = await _pending_proposers(session, routing)
+        ChangeRoutingService._check_decide(change, routing, user_id, "approve", acting,
+                                           proposers=proposers)
         # A pending "not our responsibility" re-letters only now (§16 P1-3),
         # and only if the department has not answered in the meantime (then
         # its answer stands and the decline is moot).
@@ -1282,6 +1416,12 @@ class ChangeRoutingService:
             await ChangeRoutingService._drop_row(session, a)
             removed.append(a.department_id)
         await session.flush()
+        # A removal of a department without an assessment row (Informed:
+        # told, nothing owed) takes its I entry off the snapshot on approval.
+        _, pending = await _deviation_history(session, routing)
+        uninformed_ids = {r["department_id"] for r in pending
+                          if r is not None and r.get("op") == "remove"
+                          and not r.get("legacy") and r.get("assessment_id") is None}
         # The routing rows as they stand after the re-letters: the approved
         # adds and removes are written into the snapshot below.
         current = (await session.execute(
@@ -1300,8 +1440,13 @@ class ChangeRoutingService:
                  and (a.department_id, a.stage_order) not in on_snap]
         # An R/A/S/C snapshot entry without its row: the row was removed.
         removed_entries = bool(on_snap - row_keys)
-        if informed or moved or added or removed_entries:
+        if informed or moved or added or removed_entries or uninformed_ids:
             snap = copy.deepcopy(routing.standard_snapshot or {"stages": []})
+            for st in snap.get("stages", []):
+                st["departments"] = [
+                    d for d in st["departments"]
+                    if not (d["department_id"] in uninformed_ids
+                            and d["rasic_letter"] == "I")]
             # Approved adds join the snapshot, so a later rejection of
             # another deviation (which undoes every row outside the
             # snapshot) keeps them. Marked added_by_deviation: for the
@@ -1355,6 +1500,8 @@ class ChangeRoutingService:
             outcome["relettered_department_ids"] = relettered
         if removed:
             outcome["removed_department_ids"] = removed
+        if uninformed_ids:
+            outcome["uninformed_department_ids"] = sorted(uninformed_ids)
         await ChangeService.append_changelog(
             session, change, "routing_deviation_approved", "Routing deviation approved", user_id,
             new_value=outcome or None)

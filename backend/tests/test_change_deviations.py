@@ -724,3 +724,128 @@ async def test_deviation_reletter_noted_to_blocking(
         assert task.is_actionable is True
         assert task.status == "active"
         assert task.due_date is not None
+
+
+# ---- four-eyes over the bundle; rejected add keeps its documents; Informed removal ----
+
+async def _third_user(session_factory, seed):
+    from app.models.entities import User
+    from app.auth.security import get_password_hash
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username="pm3", email="pm3@test.io",
+                 full_name="PM Three", hashed_password=get_password_hash("pm3-secret-1"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.commit()
+        return u.id
+
+
+async def test_nobody_who_filed_a_request_of_the_bundle_decides_it(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """The decision covers every request since the last decision. The lead
+    filed one, then an admin filed another (the latest proposer): neither
+    decides, a third person does, and a rejection tells both."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeRouting
+    from app.models.notification import Notification
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+    pm = await _third_user(session_factory, seed)
+    lead, admin = seed["engineer_id"], seed["admin_id"]
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, lead, op="add", department_id=dev_departments["Manufacturing Engineer"],
+            rasic_letter="R", stage_order=1, reason="lead asks")
+        await ChangeRoutingService.apply_deviation(
+            s, change, admin, op="remove", department_id=dev_departments["Quality"],
+            reason="admin asks")
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == cid))).scalar_one()
+        assert routing.deviation_proposed_by == admin
+        with pytest.raises(ValueError, match="includes a request you filed"):
+            await ChangeRoutingService.approve_deviation(s, change, lead)
+        with pytest.raises(ValueError, match="your own"):
+            await ChangeRoutingService.reject_deviation(s, change, admin, "no")
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.reject_deviation(s, change, pm, "not now")
+        await s.commit()
+    async with session_factory() as s:
+        told = set((await s.execute(select(Notification.user_id).where(
+            Notification.kind == "routing_deviation_rejected"))).scalars().all())
+        assert told == {lead, admin}
+
+
+async def test_rejected_add_keeps_the_documents_filed_with_its_row(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAttachment
+    from app.models.workflow import WfInstanceTask
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+    mfg = dev_departments["Manufacturing Engineer"]
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="add", department_id=mfg,
+            rasic_letter="R", stage_order=1, reason="needed?")
+        row = await _dev_te_row(s, cid, mfg)
+        task_id = row.wf_instance_task_id
+        att = ChangeAttachment(change_id=cid, filename="study.pdf", stored_path="x",
+                               content_type="application/pdf", size_bytes=1,
+                               sha256="0" * 64, assessment_id=row.id,
+                               uploaded_by=seed["engineer_id"])
+        s.add(att)
+        await s.commit()
+        att_id = att.id
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.reject_deviation(s, change, seed["admin_id"], "no")
+        await s.commit()
+    async with session_factory() as s:
+        assert await _dev_te_row(s, cid, mfg) is None
+        assert await s.get(WfInstanceTask, task_id) is None
+        att = await s.get(ChangeAttachment, att_id)
+        assert att is not None and att.assessment_id is None
+
+
+async def test_approved_removal_of_an_informed_department_leaves_the_snapshot(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """Sales is Informed (stage 2, no assessment row): taking it off the
+    routing takes its I entry off the snapshot once approved, not before."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeRouting, ChangeChangelog
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+    sales = dev_departments["Sales"]
+
+    async def sales_entries(s):
+        routing = (await s.execute(select(ChangeRouting).where(
+            ChangeRouting.change_id == cid).execution_options(
+                populate_existing=True))).scalar_one()
+        return [(st["stage_order"], d["rasic_letter"])
+                for st in routing.standard_snapshot["stages"]
+                for d in st["departments"] if d["department_id"] == sales]
+
+    async with session_factory() as s:
+        assert await sales_entries(s) == [(2, "I")]
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="remove", department_id=sales,
+            reason="not informed")
+        await s.commit()
+    async with session_factory() as s:
+        assert await sales_entries(s) == [(2, "I")]
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
+        await s.commit()
+    async with session_factory() as s:
+        assert await sales_entries(s) == []
+        entry = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "routing_deviation_approved"))).scalar_one()
+        assert str(sales) in entry.new_value and "uninformed" in entry.new_value
