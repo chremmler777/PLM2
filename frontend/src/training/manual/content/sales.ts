@@ -117,6 +117,12 @@ export const salesChapter: ContentChapter = {
             'disclaimer, the risks you chose and the terms. The validity is fixed: 30 days from the ' +
             'customer\'s receipt. "Preview PDF" shows the draft with a DRAFT watermark.',
         },
+        {
+          p:
+            'Sales signs the offer. The version you send carries your name and "Sales" under the ' +
+            'letterhead, and keeps it for good. A draft preview shows the project\'s Sales ' +
+            'responsible, or you when nobody is set.',
+        },
         { shot: 'sales-offer-pdf', alt: 'Page 1 of an offer PDF: letterhead, "OFFER" with number and valid-until date, recipient and "1. Scope of change".' },
         { h3: 'Sending' },
         {

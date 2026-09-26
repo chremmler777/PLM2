@@ -161,3 +161,87 @@ async def test_sent_offer_keeps_its_letterhead(client, offer_world, monkeypatch)
     draft = _text((await client.get(_url(cid, f"/{v2['id']}/pdf"), headers=sales)).content)
     assert "Renamed Corp" in draft and "1 New Street" in draft
     assert "Hammerstone" not in draft
+
+
+# --- Sales signs the offer (decision 2026-09-25) -----------------------------
+
+def test_offer_signer_is_the_person_with_env_as_override_only():
+    from app.services.company_profile import offer_signer
+    assert offer_signer("Jane Sales", env={}) == {"name": "Jane Sales", "title": "Sales"}
+    assert offer_signer("Jane", "Key Account Manager", env={})["title"] == "Key Account Manager"
+    assert offer_signer(None, env={}) == {"name": "", "title": "Sales"}
+    assert offer_signer("Jane", env={"KTX_COMPANY_SIGNATURE_NAME": "Fixed Name",
+                                      "KTX_COMPANY_SIGNATURE_TITLE": "Head of Sales"}) == \
+        {"name": "Fixed Name", "title": "Head of Sales"}
+    assert offer_signer("Jane", env={"KTX_COMPANY_SIGNATURE_NAME": " "})["name"] == "Jane"
+
+
+async def test_pdf_prints_the_signer_or_the_role_line_only():
+    from app.services.offer_pdf import render_offer_pdf
+    ctx = _pdf_ctx({"timing": {"include": False}})
+    ctx["signer"] = {"name": "Jane Sales", "title": "Sales"}
+    text = _text(render_offer_pdf(ctx))
+    assert "Jane Sales" in text and "KTX Group US Corp. | Sales" in text
+    ctx["signer"] = {"name": "", "title": "Sales"}
+    text = _text(render_offer_pdf(ctx))
+    assert "Jane" not in text and "KTX Group US Corp. | Sales" in text
+
+
+async def _pdf(client, auth, cid, oid):
+    res = await client.get(_url(cid, f"/{oid}/pdf"), headers=auth)
+    assert res.status_code == 200, res.text
+    return _text(res.content)
+
+
+async def test_sent_offer_is_signed_by_its_sender_for_good(
+        client, offer_world, session_factory, monkeypatch):
+    from app.models.change_offer import ChangeOffer
+    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_NAME", raising=False)
+    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_TITLE", raising=False)
+    cid = offer_world["change_id"]
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    v1 = await _sent_v1(client, sales, cid)
+    async with session_factory() as s:
+        snap = (await s.get(ChangeOffer, v1["id"])).data["_snapshot"]
+    assert snap["signer"] == {"name": "Offer sales", "title": "Sales"}
+    text = await _pdf(client, pm, cid, v1["id"])
+    assert "Offer sales" in text and "KTX Group US Corp. | Sales" in text
+    # a later override never rewrites what went out
+    monkeypatch.setenv("KTX_COMPANY_SIGNATURE_NAME", "Somebody Else")
+    text = await _pdf(client, pm, cid, v1["id"])
+    assert "Offer sales" in text and "Somebody Else" not in text
+
+
+async def test_draft_is_signed_by_the_project_sales_responsible_else_the_sales_viewer(
+        client, offer_world, session_factory, seed, monkeypatch):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import ProjectResponsible, UserDepartment
+    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_NAME", raising=False)
+    monkeypatch.delenv("KTX_COMPANY_SIGNATURE_TITLE", raising=False)
+    cid = offer_world["change_id"]
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    draft = await _create(client, sales, cid)
+    # nobody responsible: the Sales viewer signs; a non-Sales viewer sees the role only
+    assert "Offer sales" in await _pdf(client, sales, cid, draft["id"])
+    text = await _pdf(client, pm, cid, draft["id"])
+    assert "Offer sales" not in text and "Offer pm" not in text
+    assert "KTX Group US Corp. | Sales" in text
+    # the project's Sales responsible signs whoever looks
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username="off-sales2",
+                 email="off-sales2@test.io", full_name="Resp Sales", role="engineer",
+                 hashed_password=get_password_hash("role-secret-1"),
+                 is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=offer_world["depts"]["Sales"]))
+        s.add(ProjectResponsible(project_id=seed["project_id"],
+                                 department_id=offer_world["depts"]["Sales"], user_id=u.id))
+        await s.commit()
+    for who in (sales, pm):
+        text = await _pdf(client, who, cid, draft["id"])
+        assert "Resp Sales" in text and "Offer sales" not in text
+    # the fixed-name override still wins when a site sets it
+    monkeypatch.setenv("KTX_COMPANY_SIGNATURE_NAME", "Fixed Signer")
+    assert "Fixed Signer" in await _pdf(client, pm, cid, draft["id"])

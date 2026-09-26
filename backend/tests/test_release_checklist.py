@@ -1,6 +1,6 @@
 """Stage 10: the release checklist and the lessons-learned step.
 
-Pinned here: the 13 catalog items show with their owner
+Pinned here: the 17 catalog items show with their owner
 departments; 'na' needs a note; only the owner department, PM, the lead or
 an admin answer an item; lessons are added by anyone on the change and the
 step is completed by PM/lead/admin with at least one lesson or a reason; and
@@ -25,14 +25,15 @@ async def rel_world(session_factory, seed):
     async with session_factory() as s:
         depts = {}
         for name in ("Development", "Tool Engineer", "APQP", "Project Manager",
-                     "Scheduling", "Sales"):
+                     "Scheduling", "Sales", "Quality", "Process Engineer"):
             d = Department(name=name, flow_type="action", is_active=True)
             s.add(d)
             await s.flush()
             depts[name] = d.id
         users = {}
         for key, dept in (("dev", "Development"), ("tool", "Tool Engineer"),
-                          ("pm", "Project Manager")):
+                          ("pm", "Project Manager"), ("quality", "Quality"),
+                          ("process", "Process Engineer")):
             u = User(organization_id=seed["org_id"], username=f"rel-{key}",
                      email=f"rel-{key}@test.io", full_name=f"Rel {key}",
                      role="engineer",
@@ -70,10 +71,10 @@ async def _check(client, auth, cid, key, status, note=None):
                              json=body, headers=auth)
 
 
-async def test_thirteen_checks_seeded_with_owners(client, rel_world):
+async def test_seventeen_checks_seeded_with_owners(client, rel_world):
     pm = await _auth(client, "pm")
     st = await _state(client, pm, rel_world["change_id"])
-    assert len(st["checks"]) == 13 and st["open_count"] == 13
+    assert len(st["checks"]) == 17 and st["open_count"] == 17
     by_key = {c["key"]: c for c in st["checks"]}
     assert by_key["index_updated"]["department_name"] == "Development"
     assert by_key["index_updated"]["department_id"] == rel_world["depts"]["Development"]
@@ -83,7 +84,7 @@ async def test_thirteen_checks_seeded_with_owners(client, rel_world):
     assert by_key["packaging_updated"]["department_name"] == "Packaging Engineer"
     assert "41.5" in by_key["weight_measured"]["hint"]
     assert st["can_release"] is False
-    assert "Release checklist incomplete: 13 open" in st["blockers"]
+    assert "Release checklist incomplete: 17 open" in st["blockers"]
     assert "Lessons learned step not done" in st["blockers"]
 
 
@@ -103,7 +104,7 @@ async def test_na_needs_a_note_and_owner_rights(client, rel_world, session_facto
     # PM answers anything, also items nobody owns here
     res = await _check(client, pm, cid, "packaging_updated", "done")
     assert res.status_code == 200
-    assert res.json()["open_count"] == 11
+    assert res.json()["open_count"] == 15
     # reopening clears the signature
     res = await _check(client, pm, cid, "packaging_updated", "open")
     assert next(c for c in res.json()["checks"]
@@ -170,7 +171,7 @@ async def test_release_guard_messages(client, rel_world, monkeypatch):
 
     res = await release()
     assert res.status_code == 400
-    assert "Release checklist incomplete: 13 open" in res.json()["detail"]
+    assert "Release checklist incomplete: 17 open" in res.json()["detail"]
     st = await _state(client, pm, cid)
     for c in st["checks"]:
         res = await _check(client, pm, cid, c["key"], "done")
@@ -223,7 +224,7 @@ async def test_get_release_writes_nothing(client, rel_world, session_factory):
     assert [(r.check_key, r.status) for r in rows] == [("index_updated", "done")]
     assert rows[0].department_id == rel_world["depts"]["Development"]
     st = await _state(client, pm, cid)
-    assert st["open_count"] == 12
+    assert st["open_count"] == 16
 
 
 async def test_timing_guard_cannot_be_bypassed_through_on_hold(session_factory, rel_world):
@@ -329,3 +330,74 @@ async def test_release_and_close_are_pm_lead_or_admin(client, rel_world, session
         await s.commit()
     assert (await move(dev, "closed")).status_code == 403
     assert (await move(admin_auth, "closed")).status_code == 200
+
+
+async def test_quality_and_process_engineer_rows(client, rel_world):
+    """Decision 2026-09-25: Quality and Process Engineer own release rows,
+    answered by their own members (not by each other)."""
+    cid = rel_world["change_id"]
+    quality, process = await _auth(client, "quality"), await _auth(client, "process")
+    st = await _state(client, quality, cid)
+    by_key = {c["key"]: c for c in st["checks"]}
+    assert by_key["quality_samples"]["label"] == (
+        "Parts measured and PPAP / initial sample documentation complete")
+    assert by_key["quality_control_plan"]["label"] == "Control plan / inspection plan updated"
+    assert by_key["process_parameters"]["label"] == (
+        "Process parameters and work instructions updated")
+    assert by_key["process_fmea"]["label"] == "Process FMEA updated"
+    for key in ("quality_samples", "quality_control_plan"):
+        assert by_key[key]["department_name"] == "Quality"
+        assert by_key[key]["department_id"] == rel_world["depts"]["Quality"]
+    for key in ("process_parameters", "process_fmea"):
+        assert by_key[key]["department_name"] == "Process Engineer"
+        assert by_key[key]["department_id"] == rel_world["depts"]["Process Engineer"]
+    assert (await _check(client, process, cid, "quality_samples", "done")).status_code == 403
+    assert (await _check(client, quality, cid, "process_fmea", "done")).status_code == 403
+    res = await _check(client, quality, cid, "quality_samples", "done")
+    assert res.status_code == 200, res.text
+    res = await _check(client, process, cid, "process_fmea", "na", "no process change")
+    assert res.status_code == 200, res.text
+    assert res.json()["open_count"] == 15
+
+
+@pytest.mark.parametrize("status,released_at,shown", [
+    ("released", "2026-06-01", False),    # released before the rows existed
+    ("closed", "2026-06-01", False),
+    ("released", None, False),            # legacy release without a stamp
+    ("cancelled", None, False),           # ended without a release
+    ("released", "2026-09-26", True),     # released after: they belong
+    ("in_implementation", None, True),    # still open: they belong
+])
+async def test_new_rows_do_not_reach_back_into_finished_changes(
+        client, rel_world, session_factory, status, released_at, shown):
+    from datetime import datetime
+    from app.services import release_checklist as catalog
+    from app.services.release_service import ReleaseService
+    cid = rel_world["change_id"]
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status = status
+        c.released_at = datetime.fromisoformat(released_at) if released_at else None
+        await s.commit()
+    st = await _state(client, await _auth(client, "pm"), cid)
+    keys = {c["key"] for c in st["checks"]}
+    assert (set(catalog.ADDED_LATER) <= keys) is shown
+    assert not (set(catalog.ADDED_LATER) & keys) or shown
+    assert len(st["checks"]) == (17 if shown else 13)
+    async with session_factory() as s:
+        n = await ReleaseService.open_count(s, await s.get(ChangeRequest, cid))
+    assert n == (17 if shown else 13)
+
+
+async def test_answered_new_row_stays_on_a_finished_change(client, rel_world, session_factory):
+    from datetime import datetime
+    cid = rel_world["change_id"]
+    quality = await _auth(client, "quality")
+    assert (await _check(client, quality, cid, "quality_control_plan", "done")).status_code == 200
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status, c.released_at = "released", datetime(2026, 6, 1)
+        await s.commit()
+    st = await _state(client, await _auth(client, "pm"), cid)
+    keys = [c["key"] for c in st["checks"]]
+    assert "quality_control_plan" in keys and "quality_samples" not in keys

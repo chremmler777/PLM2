@@ -33,7 +33,9 @@ the offer, log every round, and tell the customer what they must hear later.
 KTX Group US Corp., Toccoa letterhead; offer number is the change number, Q
 and the version; scope, price (CBD or rough), changeover, draft timing,
 risks you chose, terms; "This offer is valid for 30 days from receipt".
-"Preview PDF" shows a draft with a DRAFT watermark.
+"Preview PDF" shows a draft with a DRAFT watermark. **Sales signs the offer:**
+the version you send carries your name and "Sales" for good; a draft shows
+the project's Sales responsible, or you when nobody is set.
 
 ## Your practical check
 

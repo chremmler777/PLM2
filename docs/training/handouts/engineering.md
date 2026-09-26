@@ -24,6 +24,7 @@ long it takes; then do it, prove it holds and tick your part of the release.
 - **Tool Engineer:** tools and molds; "Part weight" estimate at costing. Release: tool and equipment data, part weight.
 - **Manufacturing Engineer:** equipment. Release: "Cycle time confirmed in series production".
 - **APQP:** gauges; extra rows "PFMEA update", "Control plan update". Release: parts measured, PFMEA and control plan, customer approval (PPAP / ISIR / PSW).
+- **Process Engineer:** assesses when the scoping meeting gives it a letter. Release: "Process parameters and work instructions updated", "Process FMEA updated".
 - **Packaging Engineer:** "Packaging impacted?" first; No is a complete answer. Release: "Packaging instruction updated".
 - **Process Engineer:** assesses when the scoping meeting gives it a letter.
 

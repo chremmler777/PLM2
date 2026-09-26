@@ -255,6 +255,7 @@ export const engineeringChapter: ContentChapter = {
               ['Tool Engineer', '"Tool and equipment data updated (tool card, equipment list)", "Part weight measured and recorded".'],
               ['Manufacturing Engineer', '"Cycle time confirmed in series production".'],
               ['APQP', '"Parts measured, measurement report on file", "PFMEA, control plan and work instructions updated", "Customer approval received (PPAP / ISIR / PSW)".'],
+              ['Process Engineer', '"Process parameters and work instructions updated", "Process FMEA updated".'],
               ['Packaging Engineer', '"Packaging instruction updated".'],
             ],
           },

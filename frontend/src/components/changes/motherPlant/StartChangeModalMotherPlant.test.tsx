@@ -123,10 +123,19 @@ describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
     expect(vi.mocked(changesApi.create).mock.calls[0][0]).not.toHaveProperty('origin')
   })
 
-  it('hides the option from users who may not start one', async () => {
+  it('hides the option from users who may not start one and says PM starts it', async () => {
     perms = { can_start_change: true, can_start_mother_plant: false }
     wrap()
     await screen.findByText('20-3450-001-0 - Clip')
     await waitFor(() => expect(screen.queryByRole('radio', { name: /^Change from KTX Weissenburg \/ Solingen/ })).toBeNull())
+    expect(screen.getByTestId('mother-plant-pm-only').textContent)
+      .toBe('Changes from KTX Weissenburg / Solingen are started by Project Management (PM).')
+  })
+
+  it('shows the option, without the hint, to Project Management', async () => {
+    wrap()
+    await screen.findByText('20-3450-001-0 - Clip')
+    expect(await screen.findByRole('radio', { name: /^Change from KTX Weissenburg \/ Solingen/ })).toBeDefined()
+    expect(screen.queryByTestId('mother-plant-pm-only')).toBeNull()
   })
 })

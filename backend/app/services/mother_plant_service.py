@@ -83,10 +83,9 @@ class MotherPlantService:
 
     @staticmethod
     async def may_start(session: AsyncSession, user: User) -> bool:
-        """can_start_change departments (and admin), plus Project Management
-        whatever its flag says: the PM is who hears from the mother plant."""
-        if await ChangeService.user_can_start_change(session, user):
-            return True
+        """Project Management (and admin) only: the internal PM is who hears
+        from the mother plant and starts its change. Sales and the other
+        can_start_change departments start customer changes, not these."""
         return await ChangeService._user_in_department(session, user, PM_DEPARTMENT)
 
     # ------------------------------------------------------------------

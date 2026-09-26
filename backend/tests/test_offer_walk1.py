@@ -15,6 +15,7 @@ import io
 import json
 import shutil
 import subprocess
+from app.utils.clock import business_today
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -46,7 +47,7 @@ async def _accept(client, auth, cid, **extra):
 # --- B2 / review 6: receipt date --------------------------------------------
 
 async def test_receipt_date_bounds():
-    today = datetime.utcnow().date()
+    today = business_today()                                   # the rule counts in the business timezone
     OfferService._check_received(today + timedelta(days=1))     # local day ahead of UTC
     OfferService._check_received(today - timedelta(days=30))    # recorded after the fact
     with pytest.raises(ChangeError, match="future"):

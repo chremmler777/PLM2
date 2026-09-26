@@ -108,9 +108,8 @@ async def create_change(
     if not allowed:
         raise HTTPException(
             status_code=403,
-            detail=("Only an admin, Project Management or a member of a "
-                    "department allowed to start changes may raise a change "
-                    f"from {mp.plant_name(body)}" if mother_plant else
+            detail=("Only Project Management (or an admin) may raise a "
+                    f"change from {mp.plant_name(body)}" if mother_plant else
                     "Only an admin or a member of a department allowed to start "
                     "changes (e.g. Sales) may raise a change"))
     # The system currently runs the customer (external) change flow only, so
@@ -221,8 +220,8 @@ async def change_permissions(
     from app.services.mother_plant_service import MotherPlantService
     return {
         "can_start_change": await ChangeService.user_can_start_change(db, current_user),
-        # Mother-plant side track (spec §14): starters plus Project
-        # Management, and the configured plants (default first).
+        # Mother-plant side track (spec §14): Project Management (and
+        # admin) only, and the configured plants (default first).
         "can_start_mother_plant": await MotherPlantService.may_start(db, current_user),
         "mother_plants": list(mp.MOTHER_PLANTS),
         "default_mother_plant": mp.DEFAULT_MOTHER_PLANT,

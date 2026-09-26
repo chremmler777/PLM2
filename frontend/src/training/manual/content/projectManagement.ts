@@ -195,6 +195,8 @@ export const pmChapter: ContentChapter = {
         { h3: 'Changes from KTX Weissenburg or KTX Solingen' },
         {
           p:
+            'You start these changes: only Project Management (and admins) see "Change from" ' +
+            'followed by the plant on the start form. Everybody else reads that PM starts them. ' +
             'At scoping, send the information to every team that has to act ("Send information to" ' +
             'the chosen departments). Approval waits until it is sent. After "Validate timing" press ' +
             '"Inform" followed by the plant to record that you sent them the baseline.',

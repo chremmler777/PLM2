@@ -17,7 +17,7 @@ which labels must be re-checked.
 | `content.test.ts` | House rules: no dashes or placeholder words, unique ids and shots, 2 to 4 tasks per role, every stub in `../chapters.tsx` written |
 
 Outside the code: `docs/training/handouts/*.md` (one page per role),
-`docs/training/rollout-announcement.md`, `docs/training/roster-template.md`.
+`docs/training/rollout-announcement.md`, `docs/training/roster-template.md` (both parked, see section 8).
 
 Run the test: from `frontend/`,
 `npx vitest run src/training/manual/content/content.test.ts --maxWorkers=2 --minWorkers=1`
@@ -243,38 +243,60 @@ open by nature:
    changes route exactly five departments"). This draft replaces the
    Scheduling and Finance ones with role-true tasks and keeps a Quality one
    framed as "when the scoping meeting routes Quality". Agree?
-2. **Finance cannot see prices on a change.** The price viewer is admin,
-   lead, Sales and any Project Management member (`ChangeDetailPage.tsx`
-   `canSeeCosts`, `validation_issue_service.cost_role`, `pnl.py` via
-   `NegotiationService.may_read`, `price_redaction.price_scope`). Finance
-   owns the rates but cannot read an offer, and the "P&L" page lists no
-   change for Finance unless they lead it. Quality is in the same position
-   (it signs off without seeing the offer's figures; money is blanked in the
-   audit and its CSV). Intended? The Finance and Quality chapters state the
-   rule as it is.
-3. **Internal changes cannot be started** ("Internal change" is disabled on
+2. **Internal changes cannot be started** ("Internal change" is disabled on
    the start form: "Internal changes come later"). The manual teaches the
    customer path only and does not cover "Approve internal costs". Add a
    section when internal changes open.
-4. **Quality in validation.** Quality owns no release checklist row, is not
-   in the escalation audience (L1 owner and PM, L2 PM, lead, Sales, L3
-   management) and can raise an issue only when routed. The chapter gives
-   Quality a watching role. Should Quality be notified at L2 or own a
-   checklist row?
-5. **Process Engineer** owns no release checklist row and is not in the
-   default part-change routing. The engineering chapter says it assesses when
-   given a letter. Confirm that is the intended role.
-6. **Recording attendance as a practice task** was drafted and dropped:
+3. **Recording attendance as a practice task** was drafted and dropped:
    `/v1/training/*` passes through the sandbox containment
    (`sandbox/containment.ts`), so an attendance recorded in practice would
    reach the live record. Keep it as a live, supervised step instead?
-7. **Progress report cadence.** The backend expects a report about every 84
+4. **Progress report cadence.** The backend expects a report about every 84
    hours; the UI only shows "report due". The copy avoids "twice a week".
    Say it in the manual?
-8. **Two handouts.** The in-app "Printable handout" prints the full chapters
+5. **Two handouts.** The in-app "Printable handout" prints the full chapters
    for a role. The files in `docs/training/handouts/` are one-page cheat
    sheets. Keep both, or add the one-pager as a "Quick reference" section of
    each role chapter?
-9. **Who may start a mother-plant change.** The option shows only with
-   `can_start_mother_plant`; the manual says Sales or PM starts changes.
-   Confirm who holds that permission.
+6. **Release rows next to APQP.** The new Quality and Process Engineer rows
+   overlap in wording with the APQP rows "Parts measured, measurement report
+   on file" and "PFMEA, control plan and work instructions updated". Keep
+   both, or narrow the APQP rows?
+
+## 7. Answered (decisions of 2026-09-25)
+
+The app and the content follow these; the chapters and handouts say them.
+
+- **Finance and Quality do not see prices: intended.** The price viewer
+  stays admin, lead, Sales and any Project Management member. The Finance
+  chapter ("you own the rates, not the offers") and the Quality chapter
+  ("your sign-off is on the process record, not the price") state it as
+  the rule. (Was question 2.)
+- **Quality owns release checklist rows:** "Parts measured and PPAP /
+  initial sample documentation complete" and "Control plan / inspection
+  plan updated" (`quality_samples`, `quality_control_plan` in
+  `backend/app/services/release_checklist.py`). The escalation audience is
+  unchanged. (Was question 4.)
+- **Process Engineer owns release checklist rows:** "Process parameters and
+  work instructions updated" and "Process FMEA updated"
+  (`process_parameters`, `process_fmea`). It still assesses only when the
+  scoping meeting gives it a letter. (Was question 5.) The four rows reach
+  every change not yet finished; a change released before 2026-09-25, or
+  ended without a release, does not show them.
+- **Project Management starts mother-plant changes.** Only PM members (and
+  admins) hold `can_start_mother_plant`; Sales and the other starters no
+  longer do. The start form shows everybody else "Changes from KTX
+  Weissenburg / Solingen are started by Project Management (PM)." (Was
+  question 9.)
+- **Sales signs the offer.** The PDF's signature is the Sales person who
+  sent the version, frozen with it; a draft shows the project's Sales
+  responsible, else the Sales viewer, else the "Sales" line alone.
+  `KTX_COMPANY_SIGNATURE_NAME` is no longer needed (an optional override).
+
+## 8. Rollout: parked
+
+The training is documentation only for now. The rollout announcement
+(`docs/training/rollout-announcement.md`) and the roster
+(`docs/training/roster-template.md`) are parked: nothing is sent and no
+session is scheduled until the owner says go. Their placeholders (section 5)
+stay open until then.

@@ -78,8 +78,8 @@ prod block. All are optional: unset or empty keeps the default.
 | `KTX_COMPANY_EMAIL` | `ktx_info@us.ktx.group` | keep default |
 | `KTX_COMPANY_WEBSITE` | `ktx.group` | keep default |
 | `KTX_COMPANY_FOOTER` | `IATF 16949:2016 certified site|A company of the KTX Group` | keep default |
-| `KTX_COMPANY_SIGNATURE_NAME` | empty (no name above the signature line) | ask Sales who signs customer offers, then set |
-| `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | keep default |
+| `KTX_COMPANY_SIGNATURE_NAME` | empty | not needed, leave unset: Sales signs (the sender of a version, frozen with it; on a draft the project's Sales responsible). Set only to force one fixed name on every offer |
+| `KTX_COMPANY_SIGNATURE_TITLE` | `Sales` | not needed, leave unset (set only to force one fixed title) |
 | `PLM_BUSINESS_TZ` | `America/New_York` (IANA name; drives the business date of deadlines, plan dates, offers) | set explicitly to `America/New_York` |
 
 Lists are separated by `|`. Not needed: `TRAINING_GATE` (training is
@@ -89,7 +89,6 @@ Add to the prod `plm2-backend` environment (back up the compose file first):
 
 ```yaml
       PLM_BUSINESS_TZ: America/New_York
-      # KTX_COMPANY_SIGNATURE_NAME: <name from Sales>
 ```
 
 ## Preflight (local, before the go)
@@ -242,7 +241,7 @@ In the browser (as the owner, hub login):
 
 - `/plm2/changes` list, then one open change `/plm2/changes/<id>`: cockpit, stages, costing tab shows rates from the cost sheet (or "No rate" where none), process flow Detailed and Overview.
 - `/plm2/changes/<id>/plan/quote` and `/plan/detailed`: Gantt renders, links draw.
-- Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address, signature line as configured.
+- Offer PDF from the offer card: letterhead shows KTX Group US Corp., Toccoa address, signed by the Sales person who sent the version (a draft: the project's Sales responsible, else you when you are in Sales, else the "Sales" line with no name).
 - `/plm2/cost-sheet`: published version chain, Toccoa rows in USD, one draft at most.
 - `/plm2/pnl` and `/plm2/reports`: cost report per currency.
 - `/plm2/my-tasks`: counts plausible, backup markers after the prefill.

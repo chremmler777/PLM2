@@ -10,7 +10,9 @@ release a change whose paperwork is knowingly late.
 Rows are written only when an item is first answered; reads show the catalog
 (release_checklist.py) with unsaved 'open' rows for the rest. The guard does
 NOT depend on rows existing: it counts the catalog items without a done/na
-row, so a change nobody looked at has 13 open items rather than none.
+row, so a change nobody looked at has every item open rather than none.
+Items added to the catalog later are left off changes that had finished
+before they existed (release_checklist.keys_for).
 """
 from datetime import datetime
 from typing import Optional
@@ -80,14 +82,15 @@ class ReleaseService:
         nobody answered yet is an unsaved in-memory 'open' row. A GET must
         never write (two readers racing on the unique key would fail)."""
         existing = {r.check_key: r for r in await ReleaseService.rows(session, change)}
-        missing = [k for k in catalog.CHECK_KEYS if k not in existing]
+        keys = catalog.keys_for(change, existing)
+        missing = [k for k in keys if k not in existing]
         if missing:
             ids = await ReleaseService._owner_ids(session)
             for key in missing:
                 existing[key] = ChangeReleaseCheck(
                     change_id=change.id, check_key=key, status="open",
                     department_id=ids.get(catalog.owner_for(key)))
-        return [existing[k] for k in catalog.CHECK_KEYS]
+        return [existing[k] for k in keys]
 
     @staticmethod
     async def _row_for_write(session: AsyncSession, change: ChangeRequest,
@@ -116,9 +119,10 @@ class ReleaseService:
     @staticmethod
     async def open_count(session: AsyncSession, change: ChangeRequest) -> int:
         """Catalog items without a done/na answer. Read-only: never seeds."""
-        answered = {r.check_key for r in await ReleaseService.rows(session, change)
-                    if r.status in ANSWERED}
-        return sum(1 for k in catalog.CHECK_KEYS if k not in answered)
+        rows = await ReleaseService.rows(session, change)
+        answered = {r.check_key for r in rows if r.status in ANSWERED}
+        keys = catalog.keys_for(change, {r.check_key for r in rows})
+        return sum(1 for k in keys if k not in answered)
 
     @staticmethod
     async def set_check(session: AsyncSession, change: ChangeRequest, key: str,
@@ -137,6 +141,8 @@ class ReleaseService:
         # Rights are checked on the unsaved view row: a refused caller writes
         # nothing, not even the seed row.
         view = {r.check_key: r for r in await ReleaseService.view_rows(session, change)}
+        if key not in view:
+            raise PlanConflict(f"Unknown release check '{key}'", not_found=True)
         if not await ReleaseService.may_answer(session, change, view[key], user):
             raise PlanForbidden(
                 "Only the owner department, Project Management, the change "

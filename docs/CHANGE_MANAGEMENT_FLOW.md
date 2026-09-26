@@ -64,7 +64,7 @@ flowchart TD
 
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes") | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
 | `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
@@ -546,8 +546,12 @@ at-risk signal, there is no separate flag.
 `in_validation` opens the Release tab (`ReleaseTab.tsx`), alongside the
 existing per-department validation checks.
 
-- **Release checklist**: 13 fixed items, keyed and department-owned, config
+- **Release checklist**: 17 fixed items, keyed and department-owned, config
   in code (`app/services/release_checklist.py::CHECK_KEYS/label_for/owner_for`),
+  including Quality (`quality_samples`, `quality_control_plan`) and Process
+  Engineer (`process_parameters`, `process_fmea`), added 2026-09-25: those
+  four are left off a change that finished before they existed
+  (`release_checklist.keys_for`),
   e.g. `index_updated` (Development), `equipment_updated` (Tool Engineer),
   `weight_measured` (Tool Engineer, hinted when a validated weight exists),
   `cycle_time_confirmed` (Manufacturing Engineer), `customer_approval`

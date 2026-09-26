@@ -27,7 +27,7 @@ latest published version's) and a note. Published versions are frozen.
 - **Costing** shows "Priced from cost sheet v{v} ({plant}, {cur})" and stores the rate and version on each line.
 - **"No rate in the cost sheet"** on a line: it is not counted. Add the row and publish.
 - **Offers** warn when costing used an older version than the current one.
-- **P&L actuals** use the rate valid on the booking date. Prices on a change are shown to Sales, Project Management, the change lead and admins: unless you lead a change, Finance sees none of them.
+- **P&L actuals** use the rate valid on the booking date. Prices on a change are shown to Sales, Project Management, the change lead and admins: unless you lead a change, Finance sees none of them. That is intended: you own the rates, not the offers.
 - **Currency** comes from the plant. No conversion.
 
 ## Review and currencies

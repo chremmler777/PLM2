@@ -1035,7 +1035,9 @@ class OfferService:
                 "A new offer version needs a note saying what changed")
         if (offer.data or {}).get("timing", {}).get("include"):
             await OfferService._check_quote_plan(session, change)
-        snapshot = await OfferService._snapshot(session, change)
+        # Sales signs: the sender, frozen with the version.
+        snapshot = await OfferService._snapshot(
+            session, change, signer=OfferService.signer_for(user))
         if offer.version >= 2:
             prev = await OfferService._previous_sent(session, change, offer)
             if prev is not None:
@@ -1402,10 +1404,43 @@ class OfferService:
         return issued_by(legal, snap.get("plant_name"), snap.get("plant_location"))
 
     @staticmethod
-    async def _snapshot(session: AsyncSession, change: ChangeRequest) -> dict:
+    def signer_for(user) -> dict:
+        """The signature block for this person (Sales signs the offer). The
+        user model carries no job title: the title is "Sales"."""
+        from app.services.company_profile import offer_signer
+        return offer_signer((user.full_name or user.username or "")
+                            if user is not None else "",
+                            getattr(user, "job_title", None))
+
+    @staticmethod
+    async def draft_signer(session: AsyncSession, change: ChangeRequest,
+                           viewer: Optional[User] = None) -> dict:
+        """Who signs a draft's preview: the project's Sales responsible, else
+        the viewer when they are in Sales, else nobody (the PDF prints the
+        "Sales" role line with no name)."""
+        from app.services.project_team_service import SALES, ProjectTeamService
+        from app.services.workflow_service import WorkflowService
+        uid = await ProjectTeamService.responsible_user_id(
+            session, change.project_id, SALES)
+        person = await session.get(User, uid) if uid is not None else None
+        if person is not None and person.is_active:
+            return OfferService.signer_for(person)
+        if viewer is not None:
+            sales_id = (await session.execute(
+                select(Department.id).where(Department.name == SALES))
+            ).scalar_one_or_none()
+            if sales_id is not None and sales_id in \
+                    await WorkflowService.effective_department_ids(session, viewer):
+                return OfferService.signer_for(viewer)
+        return OfferService.signer_for(None)
+
+    @staticmethod
+    async def _snapshot(session: AsyncSession, change: ChangeRequest,
+                        signer: Optional[dict] = None) -> dict:
         """What the PDF shows besides the offer data, as it is now: the
-        letterhead, the impacted parts and the quote plan. Frozen into a sent
-        version so its PDF never changes afterwards."""
+        letterhead, the impacted parts, the quote plan and (on send) who
+        signs. Frozen into a sent version so its PDF never changes
+        afterwards."""
         from app.models.entities import Organization, Plant, Project
         from app.models.part import Part
         from app.services.company_profile import company_profile
@@ -1445,6 +1480,7 @@ class OfferService:
                        "end": t.end_date.isoformat(),
                        "duration": int(t.duration_days or 0),
                        **({"idea": True} if t.is_idea else {})} for t in tasks],
+            **({"signer": signer} if signer is not None else {}),
         }
 
     @staticmethod
@@ -1490,7 +1526,8 @@ class OfferService:
 
     @staticmethod
     async def pdf_context(session: AsyncSession, change: ChangeRequest,
-                          offer: ChangeOffer) -> tuple[dict, Optional[tuple]]:
+                          offer: ChangeOffer, viewer: Optional[User] = None
+                          ) -> tuple[dict, Optional[tuple]]:
         """What render_offer_pdf needs, and the cache key when the PDF can
         be cached. A draft renders from the change as it is now; a version
         that went out renders from the snapshot taken when it was sent, with
@@ -1512,6 +1549,15 @@ class OfferService:
         tasks = [{**t, "start": day(t.get("start")), "end": day(t.get("end"))}
                  for t in snap.get("tasks") or [] if isinstance(t, dict)]
         company = snap.get("company") if isinstance(snap.get("company"), dict) else None
+        # Sales signs. A sent version prints the sender frozen with it (one
+        # sent before the signer was frozen: its letterhead signature, as it
+        # went out); a draft prints who would sign it today.
+        if frozen:
+            signer = snap.get("signer") if isinstance(snap.get("signer"), dict) else None
+        elif offer.status == "draft":
+            signer = await OfferService.draft_signer(session, change, viewer)
+        else:
+            signer = None
         ctx = {
             "org_name": snap.get("org_name") or "",
             "plant_name": snap.get("plant_name") or "",
@@ -1523,6 +1569,7 @@ class OfferService:
             # A snapshot taken before the letterhead was frozen has none:
             # the renderer then uses the live profile.
             "company": company,
+            "signer": signer,
         }
         # Only a fully frozen version is cached: a draft (or an old snapshot
         # without its letterhead) follows live data the key cannot see.
@@ -1552,11 +1599,11 @@ class OfferService:
 
     @staticmethod
     async def pdf_bytes(session: AsyncSession, change: ChangeRequest,
-                        offer: ChangeOffer) -> bytes:
+                        offer: ChangeOffer, viewer: Optional[User] = None) -> bytes:
         """The offer PDF (see pdf_context), rendered in this thread; the
         route renders in the thread pool instead."""
         from app.services.offer_pdf import render_offer_pdf
-        ctx, key = await OfferService.pdf_context(session, change, offer)
+        ctx, key = await OfferService.pdf_context(session, change, offer, viewer)
         pdf = OfferService.pdf_cache_get(key)
         if pdf is None:
             pdf = render_offer_pdf(ctx)

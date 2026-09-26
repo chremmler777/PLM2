@@ -61,12 +61,12 @@ export const basicsChapter: ContentChapter = {
           table: {
             head: ['Role', 'Owns'],
             rows: [
-              ['Sales', 'Starting the request, the offer, every contact with the customer, the customer\'s answer.'],
-              ['Project Management', 'Leading the change: scoping, deadlines, closing costing, the plan, the route of a validation issue, closing the change.'],
+              ['Sales', 'Starting the request, the offer (Sales signs it), every contact with the customer, the customer\'s answer.'],
+              ['Project Management', 'Leading the change: scoping, deadlines, closing costing, the plan, the route of a validation issue, closing the change. Starting a change from KTX Weissenburg or KTX Solingen.'],
               ['Development', 'Locking what is impacted, deciding the route of every new customer index, the drawing and 3D data.'],
               ['Tool, Manufacturing, Process, APQP, Packaging', 'Assessing, costing and doing their own part of the work, and their own release checks.'],
               ['Scheduling', 'How the change reaches the line (bank build), the plan with PM and Sales, ERP and old stock.'],
-              ['Quality', 'The Quality sign-off before approval, the governance view (D1, Audit), the training record.'],
+              ['Quality', 'The Quality sign-off before approval, its release checks, the governance view (D1, Audit), the training record.'],
               ['Finance', 'The cost sheet: every rate that prices a change.'],
             ],
           },
@@ -367,7 +367,7 @@ export const flowChapter: ContentChapter = {
         },
         {
           steps: [
-            { title: 'Start', body: 'The start form offers "Change from" followed by the plant. Their reference, the SOP date and their documents go in. Their MS Project file is optional.' },
+            { title: 'Start', body: 'PM starts it: the start form offers "Change from" followed by the plant to Project Management only. Their reference, the SOP date and their documents go in. Their MS Project file is optional.' },
             { title: 'Scoping, short', body: 'Development locks the impacted set. PM sends the information to every team that has to act. Each confirms "Read and understood".' },
             { title: 'Straight to timing', body: 'No assessment, costing or offer. The SOP becomes the release deadline. The detailed plan comes from their file, or starts from the SOP milestone.' },
             { title: 'Then as usual', body: 'Team confirmation, "Validate timing", implementation, validation and release. PM informs the mother plant of the baseline instead of a customer publish.' },

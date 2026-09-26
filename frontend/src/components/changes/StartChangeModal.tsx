@@ -624,7 +624,13 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <span className="block text-xs text-amber-300/80">{t('start.internalLater')}</span>
               </span>
             </label>
-            {/* Mother plant (spec §14): starters and Project Management. */}
+            {/* Mother plant (spec §14): started by Project Management (and
+                admins) only; everyone else reads who does it. */}
+            {permissions?.can_start_mother_plant === false && (
+              <p data-testid="mother-plant-pm-only" className="text-xs text-slate-500">
+                {plantText('mp.startPmOnly', null)}
+              </p>
+            )}
             {permissions?.can_start_mother_plant !== false && (
               <label className="flex items-start gap-2 text-sm cursor-pointer">
                 <input

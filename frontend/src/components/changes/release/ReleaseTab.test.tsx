@@ -100,6 +100,26 @@ describe('ReleaseChecklist', () => {
     expect(screen.getByTestId('release-check-erp_updated-done')).toBeDefined()
   })
 
+  it('renders the Quality and Process Engineer rows under their department, for their members', () => {
+    const q = (key: string, label: string) => check({ key, label, department_id: 20, department_name: 'Quality', hint: null })
+    const pe = (key: string, label: string) => check({ key, label, department_id: 21, department_name: 'Process Engineer', hint: null })
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[20]} canManage={false} editable checks={[
+      pe('process_parameters', 'Process parameters and work instructions updated'),
+      pe('process_fmea', 'Process FMEA updated'),
+      q('quality_samples', 'Parts measured and PPAP / initial sample documentation complete'),
+      q('quality_control_plan', 'Control plan / inspection plan updated'),
+    ]} />)
+    expect(screen.getByText('Quality')).toBeDefined()
+    expect(screen.getByText('Process Engineer')).toBeDefined()
+    expect(screen.getByText('Process FMEA updated')).toBeDefined()
+    expect(screen.getByText('Control plan / inspection plan updated')).toBeDefined()
+    expect(screen.getAllByText('2 open')).toHaveLength(2)
+    // a Quality member answers the Quality rows only
+    expect(screen.getByTestId('release-check-quality_samples-done')).toBeDefined()
+    expect(screen.getByTestId('release-check-quality_control_plan-done')).toBeDefined()
+    expect(screen.queryByTestId('release-check-process_fmea-done')).toBeNull()
+  })
+
   it('shows the hint and no controls once the stage has moved on', () => {
     wrap(<ReleaseChecklist changeId={7} checks={[check()]} myDepartmentIds={[4]} canManage editable={false} />)
     expect(screen.getByText('Validated weight exists: 412 g')).toBeDefined()

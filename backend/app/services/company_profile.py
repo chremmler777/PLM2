@@ -13,8 +13,15 @@ is ever printed.
     KTX_COMPANY_EMAIL            e-mail address
     KTX_COMPANY_WEBSITE          website
     KTX_COMPANY_FOOTER           extra footer lines, separated by '|'
-    KTX_COMPANY_SIGNATURE_NAME   name above the signature line
-    KTX_COMPANY_SIGNATURE_TITLE  function, printed as "<legal name> | <title>"
+    KTX_COMPANY_SIGNATURE_NAME   optional override of the signer's name
+    KTX_COMPANY_SIGNATURE_TITLE  optional override of the signer's function,
+                                 printed as "<legal name> | <title>"
+
+Sales signs the customer offer (decision 2026-09-25): the signer is the Sales
+person who sends the version (frozen with it), or for a draft the project's
+Sales responsible (see OfferService.draft_signer); offer_signer() builds it.
+The two signature variables are no longer needed; when set they still win
+over the person, for a site that wants one fixed name on every offer.
 
 When the legal name ends up empty the organisation name from the database
 stands in for it.
@@ -91,3 +98,19 @@ def signature_line(profile: dict) -> str:
     """ "<legal name> | <title>", either part left out when empty."""
     return " | ".join(x for x in ((profile.get("legal_name") or "").strip(),
                                     (profile.get("signature_title") or "").strip()) if x)
+
+
+SIGNER_TITLE = "Sales"
+
+
+def offer_signer(user_name: str | None = None, user_title: str | None = None,
+                 env: dict | None = None) -> dict:
+    """{"name", "title"} printed at the foot of the offer: the Sales person's
+    name and title ("Sales" unless the person carries a title of their own).
+    KTX_COMPANY_SIGNATURE_NAME / _TITLE, when set, override either. A missing
+    person leaves the name empty: the PDF then prints the role line only."""
+    env = os.environ if env is None else env
+    name = (env.get(ENV["signature_name"]) or "").strip() or (user_name or "").strip()
+    title = ((env.get(ENV["signature_title"]) or "").strip()
+             or (user_title or "").strip() or SIGNER_TITLE)
+    return {"name": name, "title": title}

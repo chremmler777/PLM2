@@ -137,6 +137,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // {p} is the plant ("KTX Weissenburg"), or both when none is set.
   'mp.generic': { de: 'KTX Weissenburg / Solingen', en: 'KTX Weissenburg / Solingen' },
   'mp.startOption': { de: 'Änderung von {p}', en: 'Change from {p}' },
+  'mp.startPmOnly': { de: 'Änderungen von {p} startet das Projektmanagement (PM).', en: 'Changes from {p} are started by Project Management (PM).' },
   'mp.startHint': { de: 'Von {p} entwickelt und verkauft; wir informieren das Team und übernehmen deren Terminplan.', en: 'Engineered and sold by {p}; we inform the team and take over their timing.' },
   'mp.plantLabel': { de: 'Werk', en: 'Plant' },
   'mp.plantMissing': { de: 'Werk', en: 'plant' },

@@ -156,7 +156,8 @@ export const financeChapter: ContentChapter = {
             'The "P&L" page lists the changes whose prices you may read, with "Offer revenue", ' +
             '"Planned cost", "Actual cost", the margins, "Variance" and "Slip". Prices on a change ' +
             'are shown to Sales, every Project Management member, the change lead and admins. ' +
-            'Finance is not among them: unless you lead a change, the page lists none for you today.',
+            'Finance is not among them, on purpose: you own the rates, not the offers. Unless you ' +
+            'lead a change, the page lists none for you.',
         },
       ],
     },

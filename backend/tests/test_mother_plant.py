@@ -146,10 +146,14 @@ async def test_create_refuses_unknown_plant_missing_sop_and_customer_flag(client
 
 
 async def test_who_may_start_a_mother_plant_change(client, mp):
-    # PM is not flagged can_start_change here, and still may start it.
+    # The internal PM starts it (not flagged can_start_change here); Sales,
+    # though flagged can_start_change, does not; admins may.
     assert (await _create(client, mp, key="pm")).status_code == 200
-    assert (await _create(client, mp, key="sales")).status_code == 200
+    r = await _create(client, mp, key="sales")
+    assert r.status_code == 403
+    assert "Only Project Management (or an admin)" in r.json()["detail"]
     assert (await _create(client, mp, key="quality")).status_code == 403
+    assert (await _create(client, mp, key="admin")).status_code == 200
     # ...but PM may not start an ordinary customer change without the flag
     r = await client.post(URL, headers=await _auth(client, "pm"), json={
         "project_id": mp["seed"]["project_id"], "title": "x",
@@ -165,6 +169,9 @@ async def test_permissions_carry_the_plant_list(client, mp):
     assert body["can_start_mother_plant"] is True and body["can_start_change"] is False
     q = await client.get(f"{URL}/permissions", headers=await _auth(client, "quality"))
     assert q.json()["can_start_mother_plant"] is False
+    s = await client.get(f"{URL}/permissions", headers=await _auth(client, "sales"))
+    assert s.json()["can_start_mother_plant"] is False
+    assert s.json()["can_start_change"] is True
 
 
 async def test_ordinary_changes_mirror_origin_from_the_flag(client, mp):

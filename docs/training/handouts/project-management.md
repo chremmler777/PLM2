@@ -31,7 +31,7 @@ owner; you make sure nothing waits without a reason.
 
 ## Side tracks
 
-- **KTX Weissenburg / Solingen change:** scoping, send the information to the teams, straight to timing. After "Validate timing" press "Inform" followed by the plant.
+- **KTX Weissenburg / Solingen change:** you start it (only PM and admins see "Change from" followed by the plant on the start form); scoping, send the information to the teams, straight to timing. After "Validate timing" press "Inform" followed by the plant.
 - **Validation issue:** containment first at "Blocks production", root cause before a fix route, at least one fix action.
 
 ## Your practical check

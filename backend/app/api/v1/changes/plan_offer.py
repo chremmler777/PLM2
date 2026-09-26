@@ -801,7 +801,7 @@ async def offer_pdf(
     # the thread pool so it never blocks the event loop. A version that went
     # out is served from the in-process cache after its first render.
     try:
-        ctx, key = await OfferService.pdf_context(db, change, offer)
+        ctx, key = await OfferService.pdf_context(db, change, offer, current_user)
     except _ERRORS as e:
         raise _http(e)
     pdf = OfferService.pdf_cache_get(key)
