@@ -2527,7 +2527,8 @@ class ChangeService:
         # is this user's. Mirrors ChangeRoutingService.user_can_decide_deviation.
         if change.status == "in_assessment":
             from app.models.change import ChangeRouting
-            from app.services.change_routing_service import ChangeRoutingService
+            from app.services.change_routing_service import (
+                ChangeRoutingService, _pending_proposers)
             from app.services.change_people import is_acting
             routing = (await session.execute(
                 select(ChangeRouting).where(ChangeRouting.change_id == change.id)
@@ -2535,7 +2536,8 @@ class ChangeService:
             if (routing is not None
                     and ChangeRoutingService.user_can_decide_deviation(
                         change, routing, user.id,
-                        acting=is_acting(user))):
+                        acting=is_acting(user),
+                        proposers=await _pending_proposers(session, routing))):
                 actions.append({
                     "kind": "routing_deviation_decision",
                     "label": "Decide added department",

@@ -495,7 +495,7 @@ class EarlyStageService:
             await WorkflowService._maybe_advance_stage(session, inst)
             # The stage that just started may carry a deviation-added row
             # the engine did not create a task for.
-            from app.services.change_routing_service import ChangeRoutingService
+            from app.services.change_routing_service import ChangeRoutingService, _pending_proposers
             await ChangeRoutingService.repair_stage_tasks(session, change, None)
 
     @staticmethod
@@ -647,7 +647,7 @@ class EarlyStageService:
         routing = change.routing
         if routing is None or routing.deviation_status != "pending_approval":
             return None
-        from app.services.change_routing_service import ChangeRoutingService
+        from app.services.change_routing_service import ChangeRoutingService, _pending_proposers
         proposer = routing.deviation_proposed_by
         names = await EarlyStageService._user_names(session, [proposer, change.lead_id])
         proposer_is_lead = change.lead_id is not None and proposer == change.lead_id
@@ -673,7 +673,8 @@ class EarlyStageService:
             "decider_name": names.get(decider_id) if decider_id else None,
             "can_decide": ChangeRoutingService.user_can_decide_deviation(
                 change, routing, user.id,
-                acting=is_acting(user)),
+                acting=is_acting(user),
+                proposers=await _pending_proposers(session, routing)),
             "text": text,
         }
 
