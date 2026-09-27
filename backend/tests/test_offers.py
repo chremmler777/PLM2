@@ -708,7 +708,8 @@ async def test_quote_plan_ideas_are_kept_marked_and_drawn_hatched(
     pdf = offer_pdf.render_offer_pdf(ctx)
     assert pdf[:4] == b"%PDF"
     import io
-    from pypdf import PdfReader
+    # pypdf is not a runtime dependency; the text check runs where it is installed.
+    PdfReader = pytest.importorskip("pypdf").PdfReader
     text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
     assert "Option gate (option)" in text
 
