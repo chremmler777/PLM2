@@ -37,7 +37,7 @@ KTX Group US Corp., Toccoa letterhead; offer number is the change number, Q and 
 - **A change keeps the rates of the day it was created.** A later version never changes it, or an offer already sent.
 - **An empty rate is no rate:** costing shows "No rate in the cost sheet" and the offer is too low.
 - **Machines:** "Sync from MachineDB" lists the presses; a press may carry its own rate.
-- **Silao:** quotes in USD, pays in MXN, converted with the exchange rate of the version.
+- **Silao:** quotes in USD, pays in MXN, converted with the exchange rate of the version. Mexico (Silao) is not in use yet. PLM runs for the US plant only for now; access for Mexico will be role based later.
 
 ## Your practical check
 

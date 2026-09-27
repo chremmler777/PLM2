@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { plantsApi } from '../../api/plants';
+import PlantNotInUseNote from '../common/PlantNotInUseNote';
 import type { Gate, GateKey, ChangeDetail, ImpactTreeNode } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
 import { COST_CARRIER_LABELS } from '../../lib/humanLabels';
@@ -292,6 +293,7 @@ export default function D1MasterPanel({
           ))}
           {allPlants.length === 0 && <span className="text-slate-400 text-xs">No active plants</span>}
         </div>
+        <PlantNotInUseNote plants={allPlants} className="mt-1.5" />
       </div>
 
       {/* Impacted items / Leit-Teil */}

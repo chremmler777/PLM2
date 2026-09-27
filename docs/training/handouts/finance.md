@@ -22,7 +22,7 @@ Sidebar, Setup, "Cost sheet" (Setup shows for the admin and engineer roles; ever
 - **A change is priced with the rates valid on the day it was created.** Costing shows the version; each line stores its rate and version. A later version never changes an existing change.
 - **"No rate in the cost sheet"** on a line: it is not counted. Fill the rate in a version valid on the change's creation date.
 - **P&L actuals** use the rate valid on the booking date. Prices on a change are shown to Sales, Project Management, the change lead and admins: unless you lead a change, Finance sees none. That is intended: you check the rates, not the offers.
-- **Currency** comes from the plant. Silao quotes in USD and pays in MXN: the version's USD/MXN exchange rate converts MXN rates and actual costs, and every conversion names its rate. Other currencies are not converted.
+- **Currency** comes from the plant. Silao quotes in USD and pays in MXN: the version's USD/MXN exchange rate converts MXN rates and actual costs, and every conversion names its rate. Other currencies are not converted. Mexico (Silao) is not in use yet. PLM runs for the US plant only for now; access for Mexico will be role based later.
 
 ## Rules to remember
 

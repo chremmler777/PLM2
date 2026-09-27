@@ -23,6 +23,7 @@ import MachineClassStrip from '../components/costSheet/MachineClassStrip'
 import PlantCurrencies from '../components/costSheet/PlantCurrencies'
 import FxRates from '../components/costSheet/FxRates'
 import MachinesPanel from '../components/costSheet/MachinesPanel'
+import PlantNotInUseNote from '../components/common/PlantNotInUseNote'
 import CurrencyMismatch from '../components/costSheet/CurrencyMismatch'
 import {
   localRateColumn, type Column,
@@ -328,6 +329,8 @@ export default function CostSheetPage() {
       <StaleBanner stale={ov.stale} canEdit={ov.can_edit} />
       <PlantCurrencies plants={ov.plants} currencies={ov.currencies} canEdit={ov.can_edit}
                        onSet={(plantId, currency, local) => plantCurrencyMut.mutate({ plantId, currency, local })} />
+      {/* Mexico (Silao) stays in the sheet but is not in use yet: one quiet note for the page. */}
+      <PlantNotInUseNote plants={ov.plants.filter((p) => p.is_active)} className="-mt-3" />
 
       {/* Version bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3">

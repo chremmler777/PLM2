@@ -18,6 +18,7 @@ import { btnSm } from '../common/buttonStyles'
 import CostLineGrid from './CostLineGrid'
 import CostPositions from './CostPositions'
 import CostingSheetBar from './CostingSheetBar'
+import PlantNotInUseNote from '../common/PlantNotInUseNote'
 import { t } from '../../i18n/cmLabels'
 import { formatDays, formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeDetail, DeptRollup, Summation } from '../../types/change'
@@ -65,7 +66,7 @@ export default function CostingBuckets({
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
   myDepartmentIds: number[]
-  plants: { id: number; name: string; is_active?: boolean }[]
+  plants: { id: number; name: string; is_active?: boolean; code?: string | null; location?: string | null }[]
   projectPlantId?: number | null
   /** PM, Sales, the change lead and admins see every figure. */
   canSeeAll: boolean
@@ -157,6 +158,8 @@ export default function CostingBuckets({
   return (
     <div className="space-y-2">
       {sheetBar}
+      {/* Mexico (Silao) among the change's plants: not in use yet, said once. */}
+      <PlantNotInUseNote plants={plants} />
       {change.status === 'costing' && canSeeAll && summation && (nothingCosted || unbooked.length > 0) && (
         <div role="status" data-testid="costing-readiness"
           className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${nothingCosted

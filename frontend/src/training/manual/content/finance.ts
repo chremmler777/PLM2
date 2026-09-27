@@ -1,4 +1,5 @@
 import type { ContentChapter, PracticeTaskSpec } from './types'
+import { MEXICO_NOT_IN_USE_TEXT } from '../../../lib/plantNotInUse'
 
 //: Chapter 08, Finance. fin-assessment, fin-costsheet and fin-pnl replace the
 //: stubs of the same id in ../chapters.tsx.
@@ -104,7 +105,7 @@ export const financeChapter: ContentChapter = {
             ['"No rate in the cost sheet"', 'on a line: the department has no rate at that plant in the version of the change\'s creation date. The line is not counted. Fill the rate in a version valid on that date.'],
             ['Offer warning', '"Costing used cost sheet v1; this change is priced with v2 (valid on its creation date)": a line was priced before a backdated version. Sales decides whether to refresh.'],
             ['P&L actuals', 'price booked hours at the rate valid on the booking date.'],
-            ['Currency', 'comes from the plant: the currency it quotes in. Silao quotes in USD and pays in MXN. The version carries the USD/MXN exchange rate; a Silao rate typed in MXN is converted with it, and MXN actual costs on a change are converted at the rate of the version valid when the change was created. Each conversion says the rate it used. Other currencies are not converted: a change costed in two currencies shows totals per currency.'],
+            ['Currency', 'comes from the plant: the currency it quotes in. Silao quotes in USD and pays in MXN. The version carries the USD/MXN exchange rate; a Silao rate typed in MXN is converted with it, and MXN actual costs on a change are converted at the rate of the version valid when the change was created. Each conversion says the rate it used. Other currencies are not converted: a change costed in two currencies shows totals per currency. ' + MEXICO_NOT_IN_USE_TEXT],
           ],
         },
         { shot: 'fin-no-rate-line', alt: 'A costing line with the chip "No rate in the cost sheet" and "not counted".' },

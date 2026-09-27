@@ -205,6 +205,22 @@ describe('D1MasterPanel', () => {
     });
   });
 
+  it('notes under the affected plants that Mexico (Silao) is not in use yet', async () => {
+    const { plantsApi } = await import('../../api/plants');
+    (plantsApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([...PLANTS, { id: 3, name: 'Silao Mexico', code: 'SIL' }]);
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, false) });
+    await waitFor(() => screen.getByLabelText(/Silao Mexico/i));
+    expect(screen.getByTestId('plant-not-in-use').textContent).toContain('Mexico (Silao) is not in use yet.');
+    // still selectable: nothing is blocked
+    expect((screen.getByLabelText(/Silao Mexico/i) as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('has no Mexico note without Silao among the plants', async () => {
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByLabelText(/Plant B/i));
+    expect(screen.queryByTestId('plant-not-in-use')).toBeNull();
+  });
+
   it('renders decided_at and decided_by for a gate', async () => {
     const gatesWithMeta = [
       { gate_key: 'feasibility', decision: 'yes', decided_by: 42, decided_at: '2026-03-15T10:00:00Z', remark: null },

@@ -54,6 +54,14 @@ describe('CostSheetPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Discard draft' })[0])
     expect(await screen.findByText('Discard draft version 2?')).toBeDefined()
   })
+
+  it('shows no Mexico note when only the US plant is there', async () => {
+    vi.mocked(costSheetApi.overview).mockResolvedValue(overview as never)
+    vi.mocked(costSheetApi.version).mockRejectedValue({ response: { data: { detail: 'boom' } } })
+    wrap(<CostSheetPage />)
+    await screen.findByText('This version could not be loaded.')
+    expect(screen.queryByTestId('plant-not-in-use')).toBeNull()
+  })
 })
 
 describe('CostSheetPage rates tab (one rate per department and plant)', () => {
@@ -306,6 +314,16 @@ describe('CostSheetPage: a Silao row still in another currency', () => {
     currency_mismatch: [{ section: 'rates', row_id: 1, plant_id: 8, plant_name: 'Silao',
       currency: 'EUR', plant_currency: 'USD' }],
   }
+
+  it('says once that Mexico (Silao) is not in use yet, and keeps its rates editable', async () => {
+    vi.mocked(costSheetApi.overview).mockResolvedValue({ ...overview, plants: [ctx.plants[0], silao] } as never)
+    vi.mocked(costSheetApi.version).mockResolvedValue(draft as never)
+    wrap(<CostSheetPage />)
+    const note = await screen.findByTestId('plant-not-in-use')
+    expect(note.textContent).toContain('Mexico (Silao) is not in use yet.')
+    expect(screen.getAllByTestId('plant-not-in-use')).toHaveLength(1)
+    expect((await screen.findAllByLabelText('Local / h (MXN)')).length).toBeGreaterThan(0)
+  })
 
   it('warns on the draft and asks to switch the row before an MXN rate', async () => {
     vi.mocked(costSheetApi.overview).mockResolvedValue({ ...overview, plants: [silao] } as never)

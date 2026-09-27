@@ -1,4 +1,5 @@
 import type { ContentChapter, PracticeTaskSpec } from './types'
+import { MEXICO_NOT_IN_USE_TEXT } from '../../../lib/plantNotInUse'
 
 //: Chapter 04, Sales. sales-start, sales-documents and sales-quote replace
 //: the stubs of the same id in ../chapters.tsx.
@@ -204,7 +205,7 @@ export const salesChapter: ContentChapter = {
             ['A change keeps its rates.', 'It is priced with the version valid on the day it was created. A later version never changes a change or an offer already sent.'],
             ['An empty rate is no rate.', 'Costing shows "No rate in the cost sheet" and leaves the line out of the total: the offer is too low.'],
             ['Machines come from MachineDB.', 'On "Machines", "Sync from MachineDB" lists the presses. A press may carry its own rate; without one its class rate applies.'],
-            ['Silao works in two currencies.', 'It quotes in USD and pays in MXN. Type the version\'s rate under "Exchange rates" (1 USD = 17.30 MXN) on the draft. A Silao rate may then be typed in the USD or the "Local / h" column: the typed number is kept, the other says "calculated". Publishing freezes the exchange rate with the rates.'],
+            ['Silao works in two currencies.', 'It quotes in USD and pays in MXN. Type the version\'s rate under "Exchange rates" (1 USD = 17.30 MXN) on the draft. A Silao rate may then be typed in the USD or the "Local / h" column: the typed number is kept, the other says "calculated". Publishing freezes the exchange rate with the rates. ' + MEXICO_NOT_IN_USE_TEXT],
             ['MXN actual costs', 'on a Silao change are converted to USD at the exchange rate of the change\'s own version; the P&L says so, with the rate. Money without a rate in the version is never added.'],
             ['Retired departments', 'keep their rows, hidden until "Show retired".'],
             ['Sort and filter', 'every table like a spreadsheet: a column heading sorts, its filter button narrows by value or range.'],

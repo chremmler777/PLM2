@@ -8,6 +8,7 @@ import {
 } from '../../../lib/format'
 import { apiErrorMessage } from '../../../lib/apiError'
 import ConfirmDialog from '../../common/ConfirmDialog'
+import PlantNotInUseNote from '../../common/PlantNotInUseNote'
 import { btnIcon, btnSm } from '../../common/buttonStyles'
 import DateInput from '../../gantt/DateInput'
 import type { ActualCost, ActualCostCategory } from '../../../types/pnl'
@@ -194,6 +195,10 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
             <input aria-label="Note" className={input} value={note} placeholder="Invoice number, what it was for"
               onChange={(e) => setNote(e.target.value)} />
           </label>
+          {/* the local currency on offer is Mexico's (Silao: MXN): not in use yet */}
+          {localCur && (
+            <PlantNotInUseNote plants={[{ local_currency: localCur }]} className="col-span-2 md:col-span-6" />
+          )}
           <div className="col-span-2 md:col-span-6 flex items-center gap-2">
             <button type="submit" data-testid="actual-cost-save"
               disabled={!amountOk || !dateOk || !deptOk || add.isPending}

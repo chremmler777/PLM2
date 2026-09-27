@@ -70,6 +70,17 @@ describe('CostingBuckets', () => {
   })
   afterEach(cleanup)
 
+  it('says once that Mexico (Silao) is not in use yet when it is one of the change\'s plants', () => {
+    buckets({ canSeeAll: true, plants: [...PLANTS, { id: 3, name: 'Silao Mexico', code: 'SIL', is_active: true }] })
+    expect(screen.getAllByTestId('plant-not-in-use')).toHaveLength(1)
+    expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
+  })
+
+  it('has no Mexico note for the US plant alone', () => {
+    buckets({ canSeeAll: true })
+    expect(screen.queryByTestId('plant-not-in-use')).toBeNull()
+  })
+
   it('gives every participating department a bucket', () => {
     buckets({ canSeeAll: true })
     expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()

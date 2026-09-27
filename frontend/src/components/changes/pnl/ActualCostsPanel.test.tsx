@@ -62,3 +62,19 @@ describe('ActualCostsPanel currency marks', () => {
     expect((screen.getByTestId('actual-cost-save') as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('ActualCostsPanel on a Silao change', () => {
+  it('offers MXN with a note that Mexico is not in use yet', async () => {
+    vi.mocked(actualCostsApi.list).mockResolvedValue({ ...list, currency: 'USD' } as never)
+    vi.mocked(changesApi.costingContext).mockResolvedValue({ currency: 'USD', local_currency: 'MXN' } as never)
+    wrap(<ActualCostsPanel changeId={21} />)
+    fireEvent.click(await screen.findByTestId('actual-cost-open'))
+    await screen.findByTestId('actual-cost-currency')
+    expect(screen.getByTestId('plant-not-in-use').textContent).toContain('Mexico (Silao) is not in use yet.')
+  })
+
+  it('has no note on a one-currency change', async () => {
+    await openForm()
+    expect(screen.queryByTestId('plant-not-in-use')).toBeNull()
+  })
+})
