@@ -327,6 +327,75 @@ async def test_attach_to_open_change_and_refuse_past_implementation(client, sess
         assert item.eng_level_before == "E1"
 
 
+async def _open_change(session_factory, world, status, *, confirmed=False):
+    from app.services.change_service import ChangeService
+    async with session_factory() as s:
+        change = await ChangeService.create_change(
+            s, project_id=world["seed"]["project_id"], title=f"Open {status}",
+            change_type="physical_part", raised_by=world["seed"]["admin_id"],
+            customer_relevant=True)
+        change.status = status
+        if confirmed:
+            change.impact_confirmed_at = datetime.utcnow()
+            change.impact_confirmed_by = world["users"]["dev"]
+        await s.commit()
+        return change.id
+
+
+async def test_attach_in_scoping_clears_the_impact_confirmation(
+        client, session_factory, world):
+    """Review 760bb129 finding 4: a part the intake adds to a locked set is
+    an impacted-set edit: Development's confirmation is cleared, as for any
+    other edit, so the set is confirmed again before assessment."""
+    cid = await _open_change(session_factory, world, "scoping", confirmed=True)
+    await _receive(client, world["part_id"])
+    i = await _intake(client, world["part_id"])
+    r = await _decide(client, i["id"], "attach_ecr", reason="rides on it", change_id=cid)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        assert change.impact_confirmed_at is None and change.impact_confirmed_by is None
+        kinds = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == cid))).scalars().all()
+        assert "impact_confirmation_reset" in kinds
+
+
+async def test_attach_after_the_quote_flags_the_scope_change(
+        client, session_factory, world):
+    """After the quote the part the intake adds changes the scope the offer
+    covered: flagged like any post-quote edit, the intake's reason on it."""
+    cid = await _open_change(session_factory, world, "quoted", confirmed=True)
+    await _receive(client, world["part_id"])
+    i = await _intake(client, world["part_id"])
+    r = await _decide(client, i["id"], "attach_ecr", reason="customer sent index B",
+                      change_id=cid)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        assert change.scope_changed_after_quote is True
+        assert change.scope_change_reason == "customer sent index B"
+        assert change.impact_confirmed_at is None
+        kinds = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == cid))).scalars().all()
+        assert "scope_changed_after_quote" in kinds
+
+
+async def test_attach_in_implementation_keeps_the_set_frozen(
+        client, session_factory, world):
+    """From implementation on the impacted set is frozen: the intake cannot
+    add a part to it (start a full ECR), and nothing is written."""
+    cid = await _open_change(session_factory, world, "in_implementation")
+    await _receive(client, world["part_id"])
+    i = await _intake(client, world["part_id"])
+    r = await _decide(client, i["id"], "attach_ecr", reason="x", change_id=cid)
+    assert r.status_code == 400, r.text
+    assert "frozen" in r.json()["detail"] and "full ECR" in r.json()["detail"]
+    async with session_factory() as s:
+        items = (await s.execute(select(ChangeImpactedItem).where(
+            ChangeImpactedItem.change_id == cid))).scalars().all()
+        assert items == []
+
+
 # ----------------------------------------------------------------------
 # engineering_review
 # ----------------------------------------------------------------------

@@ -84,7 +84,7 @@ export interface SandboxChange {
     details: Record<string, unknown> | null
     submitted_at: string | null
   }[]
-  attachments: { id: number; filename: string; kind: string }[]
+  attachments: { id: number; filename: string; kind: string; assessment_id?: number | null }[]
   created_at: string
   updated_at: string
   customer_response: 'pending'

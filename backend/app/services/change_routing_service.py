@@ -729,9 +729,19 @@ class ChangeRoutingService:
         ``user_id`` is the actor initiating the recall; reserved for future audit-log
         attribution and intentionally unused here.
         """
+        from app.models.change import ChangeAttachment
         assessments = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
+        # Documents filed with a row stay on the change, their link to the row
+        # cut first (as _drop_row does): a rebuilt row that reused the id
+        # (SQLite reuses rowids) must not inherit another department's files.
+        ids = [a.id for a in assessments]
+        if ids:
+            for att in (await session.execute(
+                    select(ChangeAttachment).where(
+                        ChangeAttachment.assessment_id.in_(ids)))).scalars().all():
+                att.assessment_id = None
         for a in assessments:
             a.wf_instance_task_id = None      # break FK before task rows go
         await session.flush()

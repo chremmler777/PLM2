@@ -213,8 +213,13 @@ on('post', /^\/v1\/changes\/(\d+)\/impacted-items$/, (s, config, m) => {
 
 on('post', /^\/v1\/changes\/(\d+)\/attachments$/, (s, config, m) => {
   const c = changeOr404(s, m[1], config)
-  const b = body<{ file?: string; kind?: string }>(config)
-  const a = { id: s.nextId++, filename: b.file ?? 'file', kind: b.kind ?? 'general' }
+  const b = body<{ file?: string; kind?: string; assessment_id?: string }>(config)
+  // Filed against the assessment it was dropped on, as the backend does: the
+  // form reads a department's documents by that link.
+  const a = {
+    id: s.nextId++, filename: b.file ?? 'file', kind: b.kind ?? 'general',
+    assessment_id: b.assessment_id ? Number(b.assessment_id) : null,
+  }
   c.attachments.push(a)
   return a
 })
@@ -332,8 +337,13 @@ export function createTrainingAdapter(
       throw new SandboxMiss(method, path)
     }
     const match = path.match(route.pattern) as RegExpMatchArray
+    // A copy, as a server response is: handing out the live state object
+    // lets a refetch return the very reference the cache already holds, so
+    // React Query sees nothing new and a screen never shows what a write
+    // (an upload, a submit) changed.
     const data = route.handle(state, config, match)
-    return ok(data, config, method === 'post' ? 201 : 200)
+    return ok(data == null ? data : structuredClone(data), config,
+      method === 'post' ? 201 : 200)
   }
   ;(adapter as unknown as Record<symbol, unknown>)[TRAINING_ADAPTER] = true
   return adapter

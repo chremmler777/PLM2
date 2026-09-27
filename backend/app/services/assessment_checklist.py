@@ -43,7 +43,11 @@ COMMON_ITEMS = [
 # extensions only say which files a slot takes. A draft saves without them:
 # only the submit is held. Rows already submitted are not re-judged.
 PPT_EXTENSIONS = (".ppt", ".pptx", ".pdf")
-RFQ_EXTENSIONS = (".pdf", ".xlsx", ".xls", ".docx", ".msg", ".eml")
+# The frontend mirrors both lists in DOCUMENT_EXTENSIONS (ActivityChecklist.tsx)
+# for the slots that sit outside a checklist row (the not-feasible deck, the
+# bucket's RFQ slot). The change presentation stays PowerPoint or its PDF
+# export: a Word file is not the deck the customer is shown.
+RFQ_EXTENSIONS = (".pdf", ".xlsx", ".xls", ".doc", ".docx", ".msg", ".eml")
 
 # kind -> (label_de, label_en, allowed extensions)
 REQUIRED_DOCUMENTS = {

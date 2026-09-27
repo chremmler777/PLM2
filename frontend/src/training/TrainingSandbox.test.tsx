@@ -48,6 +48,28 @@ describe('TrainingSandbox with a real screen', () => {
     expect(state().misses).toEqual([])
   })
 
+  it('files a document on the assessment and the form sees it (evidence wired)', async () => {
+    // Review 760bb129 finding 7: the training form gets the row's documents
+    // and refetches after an upload, as the live bucket does, so a verdict
+    // that owes a document can be sent here too.
+    const { state } = mount({ kind: 'assessment', department: 'Tool Engineer' })
+    await screen.findByTestId('check-yes-modification_internal')
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
+      { target: { value: 'not_feasible' } })
+    const owed = await screen.findByTestId('assessment-evidence-required')
+    const input = owed.querySelector('input[type="file"]') as HTMLInputElement
+    expect(input.accept).toBe('.ppt,.pptx,.pdf')
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'why-not.pptx', { type: 'application/octet-stream' })] },
+    })
+    await waitFor(() => expect(screen.queryByTestId('assessment-evidence-required')).toBeNull())
+    const filed = state().changes.find((c) => c.id === SEED.changeInAssessment)!.attachments
+    expect(filed).toEqual([expect.objectContaining({
+      filename: 'why-not.pptx', kind: 'change_ppt',
+      assessment_id: SEED.assessmentFor['Tool Engineer'],
+    })])
+  })
+
   it('opens the real start form against the fixture', async () => {
     const { state } = mount({ kind: 'start-change' })
     fireEvent.click(await screen.findByTestId('start-change'))

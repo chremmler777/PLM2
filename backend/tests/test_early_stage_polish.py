@@ -600,6 +600,34 @@ async def test_create_with_items_title_follows_lead(client, auth, seed, depts, s
     assert res.json()["title"] == "Typed" and res.json()["title_auto"] is False
 
 
+async def test_make_lead_clears_the_impact_confirmation(
+        client, auth, seed, depts, session_factory):
+    """Review 760bb129 finding 5: moving the lead changes the set Development
+    confirmed, so the confirmation is cleared like any other edit."""
+    from datetime import datetime
+    p1 = await _part(client, auth, seed, "20-7", customer_part_number="C7")
+    p2 = await _part(client, auth, seed, "20-8", customer_part_number="C8")
+    c = await _change(client, auth, seed, title="anything",
+                      impacted_part_ids=[p1, p2], lead_part_id=p2)
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == c["id"])
+                        .values(status="scoping", impact_confirmed_at=datetime.utcnow(),
+                                impact_confirmed_by=seed["admin_id"]))
+        await s.commit()
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    items = {i["part_id"]: i for i in detail["impacted_items"]}
+    res = await client.post(
+        f"/api/v1/changes/{c['id']}/impacted-items/{items[p1]['id']}/make-lead",
+        headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, c["id"])
+        assert change.impact_confirmed_at is None and change.impact_confirmed_by is None
+        kinds = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == c["id"]))).scalars().all()
+        assert "impact_confirmation_reset" in kinds
+
+
 # ---- P2: impact edits after the quote --------------------------------------------------
 
 async def test_post_quote_impact_edit(client, auth, seed, depts, session_factory):

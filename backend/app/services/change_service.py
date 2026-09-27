@@ -3383,32 +3383,6 @@ class ChangeService:
             raise ChangeError(
                 "Only members of the assessed department (or an admin) may "
                 "submit its assessment")
-        # A "not feasible" is the answer that stops a change dead, and it is
-        # the one the customer will ask to see in writing. So it arrives with
-        # the document that explains it — specifically a change_ppt filed
-        # against THIS assessment, because that is the deck the customer is
-        # actually shown. A moldflow report proves the department did the work;
-        # it is not the thing that gets sent out. Every other verdict is
-        # ungated: evidence stays "if needed".
-        if verdict == "not_feasible":
-            target = (await session.execute(
-                select(ChangeAssessment).where(
-                    ChangeAssessment.change_id == change.id,
-                    ChangeAssessment.department_id == department_id)
-                .order_by(ChangeAssessment.stage_order))).scalars().first()
-            decks = 0
-            if target is not None:
-                decks = (await session.execute(
-                    select(func.count()).select_from(ChangeAttachment).where(
-                        ChangeAttachment.change_id == change.id,
-                        ChangeAttachment.assessment_id == target.id,
-                        ChangeAttachment.kind == "change_ppt"))).scalar() or 0
-            if not decks:
-                raise ChangeError(
-                    "Not feasible requires the explanation document (PPT) for "
-                    "the customer: attach it to this assessment as a "
-                    "'change_ppt'")
-
         # Soft hold: a department that flagged an open concern on this change
         # cannot sign its own answer off until that point is withdrawn with a
         # resolution note. Scoped to this one department — nobody else's
@@ -3460,6 +3434,27 @@ class ChangeService:
             session.add(a)
         else:
             raise ChangeError("no open assessment for this department")
+        # A "not feasible" is the answer that stops a change dead, and it is
+        # the one the customer will ask to see in writing. So it arrives with
+        # the document that explains it: specifically a change_ppt filed
+        # against THIS assessment (the open row being answered, the one the
+        # document check below and the form read), because that is the deck
+        # the customer is actually shown. A moldflow report proves the
+        # department did the work; it is not the thing that gets sent out.
+        # Every other verdict is ungated: evidence stays "if needed".
+        if verdict == "not_feasible":
+            decks = 0
+            if a.id is not None:
+                decks = (await session.execute(
+                    select(func.count()).select_from(ChangeAttachment).where(
+                        ChangeAttachment.change_id == change.id,
+                        ChangeAttachment.assessment_id == a.id,
+                        ChangeAttachment.kind == "change_ppt"))).scalar() or 0
+            if not decks:
+                raise ChangeError(
+                    "Not feasible requires the explanation document (PPT) for "
+                    "the customer: attach it to this assessment as a "
+                    "'change_ppt'")
         # A Yes on a checklist row that owes documents (external modification:
         # the change presentation and the change RFQ) is not a finished answer
         # until they are filed against THIS assessment, told apart by their

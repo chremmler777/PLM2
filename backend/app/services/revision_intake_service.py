@@ -507,7 +507,7 @@ class RevisionIntakeService:
                 session, intake, part, rev, user, reason)
         elif route == "attach_ecr":
             change = await RevisionIntakeService._attach(
-                session, intake, part, rev, user, change_id)
+                session, intake, part, rev, user, change_id, reason)
         elif route == "engineering_review":
             from app.services.engineering_review_service import EngineeringReviewService
             change = await EngineeringReviewService.start(
@@ -559,10 +559,27 @@ class RevisionIntakeService:
 
     @staticmethod
     async def _link_item(session: AsyncSession, change: ChangeRequest, part: Part,
-                         rev: PartRevision, user_id: int, *, lead: bool) -> None:
-        from app.services.change_service import ChangeService
+                         rev: PartRevision, user_id: int, *, lead: bool,
+                         attach: bool = False,
+                         reason: Optional[str] = None) -> None:
+        """Link the new index to the change as the part's resulting revision,
+        adding the part to the impacted set when it is not there yet.
+
+        ``attach``: the change already existed (attach_ecr). A part it gains
+        is an impacted-set edit like any other and gets the same bookkeeping:
+        Development's confirmation is cleared (add_impacted_item), the title
+        follows the set, and from 'quoted' on the scope change is flagged and
+        costing reopened for the departments whose objects moved. A new
+        customer index is its own reason. From implementation on the set is
+        frozen (IMPACT_LOCKED_STATUSES): the index may still be linked to a
+        part the change already carries, never add one."""
+        from app.services.change_service import (
+            IMPACT_LOCKED_STATUSES, ChangeError, ChangeService)
+        from app.services.early_stage_service import EarlyStageService
         await session.refresh(change, ["impacted_items"])
         item = next((i for i in change.impacted_items if i.part_id == part.id), None)
+        before = None
+        edited = False
         if item is not None:
             if item.resulting_revision_id not in (None, rev.id):
                 other = await session.get(PartRevision, item.resulting_revision_id)
@@ -571,19 +588,25 @@ class RevisionIntakeService:
                     f"{other.revision_name if other else item.resulting_revision_id} in "
                     f"{change.change_number}: a second new revision of the same part "
                     f"cannot ride on it")
-        elif change.status in SCOPING_STATUSES:
-            item = await ChangeService.add_impacted_item(
-                session, change, part.id, user_id, is_lead=lead,
-                eng_level_before=None)
+        elif change.status in IMPACT_LOCKED_STATUSES:
+            raise IntakeError(
+                f"{change.change_number} is '{change.status}': its impacted items "
+                f"are frozen, so {part.part_number} cannot join it. Start a full "
+                f"ECR instead")
         else:
-            item = ChangeImpactedItem(change_id=change.id, part_id=part.id,
-                                      created_by=user_id, is_lead=False)
-            session.add(item)
-            await session.flush()
-            await ChangeService.append_changelog(
-                session, change, "impacted_item_added",
-                f"Added impacted item {part.part_number} (new customer index)", user_id,
-                new_value={"part_id": part.id})
+            why = (reason or "").strip() or (
+                f"New customer index {rev.revision_name} of {part.part_number}")
+            try:
+                if attach:
+                    before = await EarlyStageService.begin_impact_edit(
+                        session, change, why)
+                item = await ChangeService.add_impacted_item(
+                    session, change, part.id, user_id,
+                    is_lead=lead and change.status in SCOPING_STATUSES,
+                    eng_level_before=None)
+            except ChangeError as e:
+                raise IntakeError(str(e))
+            edited = attach
         active = (await session.get(PartRevision, part.active_revision_id)
                   if part.active_revision_id else None)
         if item.eng_level_before is None and active is not None:
@@ -591,6 +614,9 @@ class RevisionIntakeService:
         item.resulting_revision_id = rev.id
         rev.originating_change_id = change.id
         await session.flush()
+        if edited:
+            await EarlyStageService.finish_impact_edit(
+                session, change, user_id, why, before, [part.id])
         await ChangeService.append_changelog(
             session, change, "intake_linked",
             f"New customer index {rev.revision_name} of {part.part_number} linked "
@@ -621,7 +647,8 @@ class RevisionIntakeService:
     @staticmethod
     async def _attach(session: AsyncSession, intake: RevisionIntake, part: Part,
                       rev: PartRevision, user: User,
-                      change_id: Optional[int]) -> ChangeRequest:
+                      change_id: Optional[int],
+                      reason: Optional[str] = None) -> ChangeRequest:
         from app.services.change_service import ChangeService
         if change_id is None:
             raise IntakeError("Choose the open change to attach the index to")
@@ -634,7 +661,8 @@ class RevisionIntakeService:
             raise IntakeError(
                 f"{change.change_number} is '{change.status}': a new index can only "
                 f"join a change up to implementation. Start a full ECR instead")
-        await RevisionIntakeService._link_item(session, change, part, rev, user.id, lead=False)
+        await RevisionIntakeService._link_item(session, change, part, rev, user.id,
+                                               lead=False, attach=True, reason=reason)
         await ChangeService.append_changelog(
             session, change, "intake_attached",
             f"Index {rev.revision_name} of {part.part_number} attached from the intake",

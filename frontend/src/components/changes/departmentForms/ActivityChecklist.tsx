@@ -65,6 +65,28 @@ export interface MissingDocument {
   doc: ChecklistRequiredDocument
 }
 
+/** The file types each document slot takes, mirroring REQUIRED_DOCUMENTS in
+ *  the backend (assessment_checklist.py), which refuses any other file. A
+ *  checklist row reads the list from its served definition; the slots
+ *  outside a row (the not-feasible deck, the bucket's RFQ slot) read it here
+ *  so the wrong file is turned away before the upload, not by a server 400. */
+export const DOCUMENT_EXTENSIONS: Record<'change_ppt' | 'rfq', string[]> = {
+  change_ppt: ['.ppt', '.pptx', '.pdf'],
+  rfq: ['.pdf', '.xlsx', '.xls', '.doc', '.docx', '.msg', '.eml'],
+}
+
+/** A slot's file types: from the served definitions when an item declares
+ *  the kind, else the mirrored constant. */
+export function documentExtensions(
+  kind: keyof typeof DOCUMENT_EXTENSIONS, defs: ChecklistItemDef[] = [],
+): string[] {
+  for (const item of defs) {
+    const doc = item.requires_documents?.find((d) => d.kind === kind)
+    if (doc?.extensions?.length) return doc.extensions
+  }
+  return DOCUMENT_EXTENSIONS[kind]
+}
+
 /** The name of a required document, in the sentence it appears in. */
 export const docLabel = (d: ChecklistRequiredDocument, lang: 'de' | 'en' = 'en') =>
   lang === 'de' ? d.label_de : d.label_en

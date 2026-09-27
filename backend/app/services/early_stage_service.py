@@ -416,6 +416,9 @@ class EarlyStageService:
             session, change, "impacted_lead_changed",
             f"Lead item is now {part.part_number if part else item.part_id}",
             user_id, new_value={"part_id": item.part_id})
+        # The lead is part of the set Development confirmed: moving it is an
+        # impacted-set edit and clears the confirmation like any other.
+        await ChangeService._reset_impact_confirmation(session, change, user_id)
         await EarlyStageService.recompose_title(session, change, user_id)
         return item
 

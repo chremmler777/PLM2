@@ -239,18 +239,26 @@ async def complete_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Complete an actionable task with approve/reject decision."""
+    # The task must belong to the instance the URL names.
+    found = (await db.execute(
+        select(WfInstanceTask.instance_id, WfInstance.change_id)
+        .join(WfInstance, WfInstanceTask.instance_id == WfInstance.id)
+        .where(WfInstanceTask.id == task_id))).one_or_none()
+    if found is None or found[0] != instance_id:
+        raise HTTPException(status_code=404,
+                            detail="Task not found on this workflow instance")
+    # Every actionable task on a change-scoped instance is a department's
+    # assessment (its ChangeAssessment row links it). Completing it here would
+    # skip everything the assessment submit checks (documents, the
+    # not-feasible deck, the checklist, open concerns) and record no verdict.
+    # The change's assessment submit is the one way to finish it.
+    if found[1] is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=("This task is a change assessment: submit it from the "
+                    "change's Assessments tab (POST /api/v1/changes/"
+                    f"{found[1]}/assessments), not through the workflow task."))
     try:
-        # A change-scoped instance: lock it before anything is written (the
-        # one lock order every routing write path keeps), and after the
-        # engine moved give the rows of a stage it started their tasks.
-        from app.models.change import ChangeRequest
-        from app.services.change_routing_service import ChangeRoutingService
-        change_id = (await db.execute(
-            select(WfInstance.change_id)
-            .join(WfInstanceTask, WfInstanceTask.instance_id == WfInstance.id)
-            .where(WfInstanceTask.id == task_id))).scalar_one_or_none()
-        if change_id is not None:
-            await ChangeRoutingService.lock_instance(db, change_id)
         instance = await WorkflowService.complete_task(
             db,
             task_id=task_id,
@@ -258,10 +266,6 @@ async def complete_task(
             notes=request.notes,
             completed_by_id=current_user.id,
         )
-        if change_id is not None:
-            change = await db.get(ChangeRequest, change_id)
-            if change is not None:
-                await ChangeRoutingService.repair_stage_tasks(db, change, None)
         await db.commit()
         full = await _load_instance_full(db, instance.id)
         return await _instance_out(db, full)

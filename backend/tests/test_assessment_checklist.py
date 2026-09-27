@@ -234,6 +234,54 @@ async def test_not_feasible_requires_the_explanation_document(
     assert res.status_code == 200, res.text
 
 
+async def test_not_feasible_reads_the_deck_on_the_open_row(
+        client, admin_auth, tab, seed, session_factory):
+    """Review 760bb129 finding 3: a department Responsible in stage 1 (already
+    submitted) and Accountable in stage 2 answers its stage-2 row. The deck
+    that counts is the one filed on THAT row, the row the document check and
+    the form use, not the department's lowest-stage row."""
+    from datetime import datetime
+    from app.models.change import ChangeAttachment
+    async with session_factory() as s:
+        first = await s.get(ChangeAssessment, tab["assessment_id"])
+        first.rasic_letter = "R"
+        first.status = "submitted"
+        first.verdict = "feasible"
+        first.submitted_at = datetime.utcnow()
+        second = ChangeAssessment(change_id=tab["change_id"],
+                                  department_id=tab["department_id"],
+                                  stage_order=2, rasic_letter="A",
+                                  verdict="pending", status="pending")
+        s.add(second)
+        await s.flush()
+        # The deck filed on the stage-1 row does not answer for stage 2.
+        s.add(ChangeAttachment(change_id=tab["change_id"], filename="old.pptx",
+                               stored_path="x", content_type="application/octet-stream",
+                               size_bytes=1, sha256="0" * 64, kind="change_ppt",
+                               assessment_id=first.id, uploaded_by=seed["admin_id"]))
+        await s.commit()
+        second_id = second.id
+
+    async def not_feasible():
+        return await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                                 json={"department_id": tab["department_id"],
+                                       "verdict": "not_feasible"}, headers=admin_auth)
+
+    res = await not_feasible()
+    assert res.status_code == 400, res.text
+    assert "explanation document" in res.json()["detail"]
+
+    up = await _file(client, admin_auth, {**tab, "assessment_id": second_id},
+                     "change_ppt", "why-not.pptx")
+    assert up.status_code in (200, 201), up.text
+    res = await not_feasible()
+    assert res.status_code == 200, res.text
+    assert res.json()["id"] == second_id
+    async with session_factory() as s:
+        assert (await s.get(ChangeAssessment, tab["assessment_id"])).verdict == "feasible"
+        assert (await s.get(ChangeAssessment, second_id)).verdict == "not_feasible"
+
+
 async def test_other_verdicts_need_no_evidence(client, admin_auth, tab):
     res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
                             json={"department_id": tab["department_id"],
@@ -328,7 +376,8 @@ async def test_the_stored_answer_is_judged_when_the_submit_sends_none(
     ("change_ppt", "deck.ppt", True), ("change_ppt", "deck.PPTX", True),
     ("change_ppt", "deck.pdf", True), ("change_ppt", "deck.docx", False),
     ("rfq", "rfq.pdf", True), ("rfq", "rfq.xls", True), ("rfq", "rfq.xlsx", True),
-    ("rfq", "rfq.docx", True), ("rfq", "rfq.msg", True), ("rfq", "rfq.eml", True),
+    ("rfq", "rfq.doc", True), ("rfq", "rfq.docx", True), ("rfq", "rfq.msg", True),
+    ("rfq", "rfq.eml", True),
     ("rfq", "rfq.pptx", False), ("general", "anything.zip", True),
 ])
 async def test_the_document_slots_take_their_file_types(

@@ -8,7 +8,7 @@ import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
 import ActivityChecklist, {
-  checklistProgress, docLabel, impactsOf, missingDocuments, restToNo,
+  checklistProgress, docLabel, documentExtensions, impactsOf, missingDocuments, restToNo,
 } from './departmentForms/ActivityChecklist'
 import AttachmentDropzone from './AttachmentDropzone'
 import TransitionConfirmDialog from './TransitionConfirmDialog'
@@ -260,6 +260,7 @@ export default function AssessmentSubmitForm({
           {assessmentId != null && (
             <AttachmentDropzone changeId={changeId} assessmentId={assessmentId} compact
               kind="change_ppt" label={t('bucket.changePptSlot')}
+              extensions={documentExtensions('change_ppt', defs)}
               onUploaded={() => onUploaded?.()} />
           )}
         </div>

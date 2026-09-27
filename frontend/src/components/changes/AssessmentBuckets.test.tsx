@@ -6,6 +6,7 @@ import type { Assessment } from '../../types/change'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
+import { DOCUMENT_EXTENSIONS } from './departmentForms/ActivityChecklist'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -26,9 +27,9 @@ vi.mock('../../api/changes', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 vi.mock('./AttachmentDropzone', () => ({
-  default: (p: { assessmentId?: number; kind?: string }) => (
+  default: (p: { assessmentId?: number; kind?: string; extensions?: string[] }) => (
     <div data-testid="dropzone" data-assessment={p.assessmentId ?? ''}
-      data-kind={p.kind ?? ''} />
+      data-kind={p.kind ?? ''} data-extensions={(p.extensions ?? []).join(',')} />
   ),
 }))
 
@@ -459,7 +460,7 @@ describe('AssessmentBuckets checklist', () => {
         { kind: 'change_ppt', label_de: 'Änderungspräsentation', label_en: 'Change presentation',
           extensions: ['.ppt', '.pptx', '.pdf'] },
         { kind: 'rfq', label_de: 'Änderungs-RFQ', label_en: 'Change RFQ',
-          extensions: ['.pdf', '.xlsx', '.xls', '.docx', '.msg', '.eml'] },
+          extensions: ['.pdf', '.xlsx', '.xls', '.doc', '.docx', '.msg', '.eml'] },
       ] },
     { key: 'article_design_update', label_de: 'Artikeldesign-Änderung',
       label_en: 'Article design update', extra: true,
@@ -783,6 +784,24 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
     const zone = screen.getAllByTestId('dropzone')
       .find((z) => z.getAttribute('data-kind') === 'change_ppt')
     expect(zone?.getAttribute('data-assessment')).toBe('1')
+  })
+
+  it('tells the file types to every deck and RFQ zone before the upload', async () => {
+    // Review 760bb129 finding 6: the zones outside a checklist row name the
+    // types the backend takes, so a wrong file gets a hint, not a server 400.
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
+    await screen.findByTestId('bucket-2')
+    const kindOf = (k: string) => screen.getAllByTestId('dropzone')
+      .filter((z) => z.dataset.kind === k).map((z) => z.dataset.extensions)
+    // The bucket's own slots, while no verdict is set.
+    expect(kindOf('change_ppt')).toEqual([DOCUMENT_EXTENSIONS.change_ppt.join(',')])
+    expect(kindOf('rfq')).toEqual([DOCUMENT_EXTENSIONS.rfq.join(',')])
+    expect(DOCUMENT_EXTENSIONS.rfq).toContain('.doc')
+    // The deck zone next to Submit, once the verdict owes it.
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
+      { target: { value: 'not_feasible' } })
+    expect(kindOf('change_ppt')).toEqual(['.ppt,.pptx,.pdf'])
   })
 
   it('asks nothing extra of a feasible verdict', async () => {

@@ -21,7 +21,9 @@ import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
-import { impactedCount, impactsOf, choiceLabel, checklistItemLabel } from './departmentForms/ActivityChecklist'
+import {
+  impactedCount, impactsOf, choiceLabel, checklistItemLabel, DOCUMENT_EXTENSIONS,
+} from './departmentForms/ActivityChecklist'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
@@ -548,11 +550,13 @@ export default function AssessmentBuckets({
                               {t('bucket.changePptAtSubmit')}</p>
                           : <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
                               kind="change_ppt" label={t('bucket.changePptSlot')}
+                              extensions={DOCUMENT_EXTENSIONS.change_ppt}
                               onUploaded={invalidate} />, required)}
                       {slot(`bucket-rfq-${row.id}`, t('attach.rfq'),
                         ofKind('rfq'), t('attach.rfqSlot'),
                         <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
                           kind="rfq" label={t('attach.rfqSlot')}
+                          extensions={DOCUMENT_EXTENSIONS.rfq}
                           onUploaded={invalidate} />)}
                       {slot(`bucket-mail-${row.id}`, t('mail.title'),
                         mails, t('mail.none'),

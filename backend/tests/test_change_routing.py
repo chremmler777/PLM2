@@ -1091,12 +1091,12 @@ async def test_routing_sweep_is_a_dry_run_by_default_and_idempotent(
         assert task.status == "active" and task.rasic_letter == "R"
 
 
-async def test_generic_task_complete_on_a_change_task_repairs_the_next_stage(
+async def test_assessment_submit_on_a_change_task_repairs_the_next_stage(
         client, seed, ecr_template_3stage, departments, departments_member, session_factory):
-    """Finding 1: POST /workflow-instances/{id}/tasks/{tid}/complete on a
-    change's task (instance locked, repair after): a row of the stage the
-    engine started that no template/snapshot entry carries gets its active
-    task with the stage, and the stage holds on it."""
+    """Finding 1: the assessment submit completes a change's task (instance
+    locked, repair after): a row of the stage the engine started that no
+    template/snapshot entry carries gets its active task with the stage,
+    and the stage holds on it."""
     from app.models.change import ChangeAssessment, ChangeRequest
     from app.models.workflow import WfInstance, WfInstanceTask
     auth = await _login(client)
@@ -1123,10 +1123,12 @@ async def test_generic_task_complete_on_a_change_task_repairs_the_next_stage(
             WfInstanceTask.department_id == departments["Tool Engineer"]))).scalar_one()
         await s.commit()
         inst_id, task_id = inst.id, task.id
-    res = await client.post(f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
-                            json={"decision": "approved", "notes": "ok"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                            json={"department_id": departments["Tool Engineer"],
+                                  "verdict": "feasible", "notes": "ok"}, headers=auth)
     assert res.status_code == 200, res.text
     async with session_factory() as s:
+        assert (await s.get(WfInstanceTask, task_id)).status == "approved"
         inst = await s.get(WfInstance, inst_id)
         row = (await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == c["id"],
@@ -1134,6 +1136,73 @@ async def test_generic_task_complete_on_a_change_task_repairs_the_next_stage(
         assert inst.current_stage_order == 2
         t = await s.get(WfInstanceTask, row.wf_instance_task_id)
         assert (t.stage_order, t.status) == (2, "active")
+
+
+async def test_generic_task_complete_refuses_a_change_assessment_task(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Review 760bb129 finding 1: POST /workflow-instances/{id}/tasks/{tid}/
+    complete on a change's assessment task is refused (409, pointing to the
+    assessment submit) and writes nothing: no document, deck, checklist or
+    concern check would run and no verdict would be recorded. A task id under
+    another instance's URL is a 404."""
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == te))).scalar_one()
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        inst_id, task_id = task.instance_id, task.id
+    res = await client.post(f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
+                            json={"decision": "approved", "notes": "ok"}, headers=auth)
+    assert res.status_code == 409, res.text
+    assert f"/api/v1/changes/{c['id']}/assessments" in res.json()["detail"]
+    res = await client.post(f"/api/v1/workflow-instances/{inst_id + 999}/tasks/{task_id}/complete",
+                            json={"decision": "approved", "notes": "ok"}, headers=auth)
+    assert res.status_code == 404, res.text
+    async with session_factory() as s:
+        task = await s.get(WfInstanceTask, task_id)
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == te))).scalar_one()
+        assert task.status == "active" and task.completed_at is None
+        assert row.verdict == "pending" and row.submitted_at is None
+
+
+async def test_teardown_cuts_documents_off_the_rows_it_deletes(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Review 760bb129 finding 2: tearing the routing down (recall to
+    scoping) keeps a department's documents on the change but cuts their
+    link to the row first, as _drop_row does, so a rebuilt row that reuses
+    the id cannot inherit them."""
+    from app.models.change import ChangeAssessment, ChangeAttachment, ChangeRequest
+    from app.services.change_routing_service import ChangeRoutingService
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"],
+            ChangeAssessment.department_id == departments["Tool Engineer"]))).scalar_one()
+        att = ChangeAttachment(change_id=c["id"], filename="deck.pptx", stored_path="x",
+                               content_type="application/octet-stream", size_bytes=1,
+                               sha256="0" * 64, kind="change_ppt", assessment_id=row.id,
+                               uploaded_by=seed["engineer_id"])
+        s.add(att)
+        await s.commit()
+        att_id = att.id
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, c["id"])
+        await ChangeRoutingService.teardown_routing(s, change, seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        att = await s.get(ChangeAttachment, att_id)
+        assert att is not None and att.change_id == c["id"]
+        assert att.assessment_id is None
+        assert (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"]))).scalars().all() == []
 
 
 # --- Review findings on 11a1e990 -------------------------------------------
@@ -1152,16 +1221,15 @@ async def _in_costing_at_stage2(client, auth, seed, session_factory, departments
 
 
 async def _complete_apqp(client, auth, session_factory, cid, apqp):
-    from app.models.workflow import WfInstance, WfInstanceTask
+    """APQP answers its stage-2 (A) row through the assessment submit, the
+    one way a change's task is completed."""
+    from app.models.workflow import WfInstance
     async with session_factory() as s:
-        inst = (await s.execute(select(WfInstance).where(
+        inst_id = (await s.execute(select(WfInstance.id).where(
             WfInstance.change_id == cid))).scalar_one()
-        task = (await s.execute(select(WfInstanceTask).where(
-            WfInstanceTask.instance_id == inst.id,
-            WfInstanceTask.department_id == apqp))).scalar_one()
-        inst_id, task_id = inst.id, task.id
-    res = await client.post(f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
-                            json={"decision": "approved", "notes": "ok"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{cid}/assessments",
+                            json={"department_id": apqp, "verdict": "feasible",
+                                  "notes": "ok"}, headers=auth)
     assert res.status_code == 200, res.text
     return inst_id
 

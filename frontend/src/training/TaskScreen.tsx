@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, UNSAFE_LocationContext, useParams } from 'react-router-dom'
 import { changesApi } from '../api/changes'
 import StartChangeButton from '../components/changes/StartChangeButton'
@@ -143,10 +143,18 @@ function ChangeStatusScreen({ changeId }: { changeId: number }) {
 
 function AssessmentScreen({ department }: { department: string }) {
   const { data: change } = useChange(SEED.changeInAssessment)
+  const qc = useQueryClient()
   const [submitted, setSubmitted] = useState(false)
   if (!change) return null
   const departmentId = SEED.departments[department]
   const row = change.assessments.find((a) => a.department_id === departmentId)
+  // The documents filed against this row, as the live bucket passes them: an
+  // External Yes owes its presentation and RFQ, a not feasible its deck, and
+  // the form only lets the submit through once it sees them.
+  const evidence = row == null ? []
+    : (change.attachments ?? []).filter((a) => a.assessment_id === row.id)
+  const decks = evidence.filter((a) => a.kind === 'change_ppt').length
+    + (row?.has_change_ppt ? 1 : 0)
   return (
     <div className="space-y-4">
       <ChangeHeader change={change} />
@@ -164,6 +172,9 @@ function AssessmentScreen({ department }: { department: string }) {
             departmentId={departmentId}
             departmentName={department}
             assessmentId={row?.id}
+            evidence={evidence}
+            changePptCount={decks}
+            onUploaded={() => qc.invalidateQueries({ queryKey: ['change', change.id] })}
             serverDraft={(row?.details as Record<string, unknown> | null) ?? null}
             showEffort={false}
             onDone={() => setSubmitted(true)}
