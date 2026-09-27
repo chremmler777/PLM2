@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({ list: vi.fn(), decide: vi.fn(), my: vi.fn(), rev
 vi.mock('../../api/intakes', async (orig) => ({
   ...(await orig<typeof import('../../api/intakes')>()), intakesApi: api,
 }))
-const changes = vi.hoisted(() => ({ list: vi.fn() }))
+const changes = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }))
 vi.mock('../../api/changes', () => ({ changesApi: changes }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -33,7 +33,7 @@ function wrap() {
 }
 
 describe('IntakePanel', () => {
-  beforeEach(() => { Object.values(api).forEach((f) => f.mockReset()); changes.list.mockReset() })
+  beforeEach(() => { Object.values(api).forEach((f) => f.mockReset()); changes.list.mockReset(); changes.get.mockReset() })
   afterEach(cleanup)
 
   it('shows the pending banner and lets Development decide with the suggested route', async () => {
@@ -74,6 +74,39 @@ describe('IntakePanel', () => {
     fireEvent.change(select, { target: { value: '5' } })
     fireEvent.click(submit)
     await waitFor(() => expect(api.decide).toHaveBeenCalledWith(7, { route: 'attach_ecr', reason: 'title block only', change_id: 5 }))
+  })
+
+  it('attach to a change in implementation: only a part it already carries', async () => {
+    api.list.mockResolvedValue({ can_triage: true, intakes: [intake()] })
+    changes.list.mockResolvedValue([
+      { id: 8, change_number: 'ECR-8', title: 'Running', status: 'in_implementation' },
+      { id: 9, change_number: 'ECR-9', title: 'Carries it', status: 'in_implementation' },
+    ])
+    changes.get.mockImplementation(async (id: number) => ({
+      id, change_number: `ECR-${id}`, status: 'in_implementation', assessments: [], attachments: [],
+      impacted_items: id === 9 ? [{ id: 1, part_id: 3 }] : [{ id: 2, part_id: 99 }],
+    }))
+    wrap()
+    fireEvent.click(await screen.findByTestId('triage-7'))
+    fireEvent.click(screen.getByTestId('route-attach_ecr').querySelector('input')!)
+    fireEvent.change(screen.getByTestId('route-reason'), { target: { value: 'rides along' } })
+    const select = await screen.findByTestId('attach-change')
+    await waitFor(() => expect(select.textContent).toContain('ECR-8'))
+    expect(select.textContent).toContain('existing parts only')
+    const submit = screen.getByTestId('route-submit') as HTMLButtonElement
+    fireEvent.change(select, { target: { value: '8' } })
+    // the part is not on ECR-8: refused with the hint, before the backend says so
+    expect(screen.getByTestId('attach-frozen-hint').textContent).toContain('Start a full ECR instead.')
+    await waitFor(() => expect(screen.getByTestId('attach-frozen-hint').textContent)
+      .toContain('20-1994-001 is not on ECR-8.'))
+    expect(submit.disabled).toBe(true)
+    expect(screen.getByTestId('route-dialog').textContent).not.toContain('\u2014')
+    // ECR-9 carries the part: the index may be linked
+    fireEvent.change(select, { target: { value: '9' } })
+    await waitFor(() => expect(screen.queryByTestId('attach-frozen-hint')).toBeNull())
+    expect(submit.disabled).toBe(false)
+    fireEvent.click(submit)
+    await waitFor(() => expect(api.decide).toHaveBeenCalledWith(7, { route: 'attach_ecr', reason: 'rides along', change_id: 9 }))
   })
 
   it('names the reason field and closes the triage on Escape', async () => {

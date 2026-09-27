@@ -846,7 +846,8 @@ async def price_for_position(db: AsyncSession, change, p: CostingPosition, *,
 
 
 async def snapshot_position(db: AsyncSession, change, p: CostingPosition,
-                            on_date: Optional[date] = None) -> Price:
+                            on_date: Optional[date] = None, *,
+                            freeze: bool = True) -> Price:
     """Price the line and store the snapshot on it (rate, rate currency,
     version). Called when a line is created or its pricing inputs change.
     Priced with the version valid on the change's creation date
@@ -858,10 +859,15 @@ async def snapshot_position(db: AsyncSession, change, p: CostingPosition,
     it) and records the class used in rate_detail. A line that found no rate
     stores no snapshot (rate_on None): it is priced live until a rate exists.
     The money currency (p.currency, of est_cost and offers) is the costing
-    plant's and is not the rate's business."""
+    plant's and is not the rate's business.
+
+    freeze=False drops the frozen tool class (frozen_tool_class): for an
+    explicit move, the line's own class or named machine edited, or the
+    change's hand pick set or cleared."""
     on_date = on_date or change_pricing_date(change)
-    price = await price_for_position(db, change, p, on_date=on_date,
-                                     tool_class=frozen_tool_class(p, change))
+    price = await price_for_position(
+        db, change, p, on_date=on_date,
+        tool_class=frozen_tool_class(p, change) if freeze else None)
     p.rate = price.rate
     p.rate_currency = price.currency
     if p.currency is None:
@@ -1147,7 +1153,10 @@ async def set_machine_class(db: AsyncSession, change, machine_class_id: Optional
         if not _moves_with_change_class(p, new_effective):
             continue
         before = (p.rate, p.cost_sheet_version)
-        await snapshot_position(db, change, p)
+        # The hand pick set or cleared is the explicit move: no line stays
+        # frozen on the class it was priced on (a line priced before 108
+        # would otherwise keep the old pick once it is cleared).
+        await snapshot_position(db, change, p, freeze=False)
         repriced.append({"position_id": p.id, "label": p.label,
                          "old_rate": before[0], "new_rate": p.rate})
     if repriced:
@@ -1167,13 +1176,16 @@ def _moves_with_change_class(p: CostingPosition, new_effective: Optional[int]) -
     """A class-less machine / sampling line set_machine_class re-prices: one
     priced on the change's or the tool's class, or on another class than
     the new effective one (a line never priced, a line priced before 108).
-    A line priced on its named press's class keeps it."""
+    A line priced on its named press's class keeps it, also one priced
+    before 108 (no origin recorded) that names a machine."""
     detail = p.rate_detail or {}
     kind = (detail.get("machine_class_origin") or {}).get("kind")
     if kind == "machine":
         return False
     if kind in ("tool", "change"):
         return True
+    if kind is None and p.machine_id is not None and p.rate_on is not None:
+        return False
     return detail.get("machine_class_id") != new_effective or p.rate_on is None
 
 

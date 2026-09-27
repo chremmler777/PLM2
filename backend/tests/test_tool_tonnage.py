@@ -450,6 +450,120 @@ async def test_line_priced_before_108_keeps_its_class_on_an_hours_edit(
     assert res.json()["rate"] == 85
 
 
+async def _legacy(session_factory, line_id, **fields):
+    """Reshape a priced line as one priced before 108 stored it: the class
+    in its snapshot, no origin."""
+    async with session_factory() as s:
+        p = await s.get(CostingPosition, line_id)
+        detail = dict(p.rate_detail)
+        detail.pop("machine_class_origin", None)
+        for k, v in fields.pop("detail", {}).items():
+            detail[k] = v
+        p.rate_detail = detail
+        for k, v in fields.items():
+            setattr(p, k, v)
+        await s.commit()
+
+
+async def _press(session_factory, world, tonnage=150):
+    from app.models.cost_sheet_machines import CostSheetMachine
+    async with session_factory() as s:
+        m = CostSheetMachine(organization_id=world["org_id"], machinedb_id=4711,
+                             internal_name="KM 150", clamping_force_t=tonnage)
+        s.add(m)
+        await s.commit()
+        return m.id
+
+
+async def _line(client, admin_auth, world, line_id):
+    lines = (await client.get(_url(world, "/costing/positions"), headers=admin_auth)).json()
+    return next(p for p in lines if p["id"] == line_id)
+
+
+async def test_clearing_own_class_of_a_line_priced_before_108_moves_it(
+        client, admin_auth, world, session_factory):
+    """Own class <=200 t, priced before 108; the user clears the class: the
+    line goes to the tool default (200-450 t), not frozen on the class just
+    removed."""
+    await _machine_version(session_factory, world)
+    await _article_with_tool(session_factory, world, "3454")
+    await _sync(session_factory, world, mdb_rows=[mdb("3454", qmin=350)], twos_rows=[])
+    m = await _add(client, admin_auth, world, kind="machine_time", label="Own", hours=2,
+                   machine_class_id=world["small"])
+    assert m["rate"] == 40
+    await _legacy(session_factory, m["id"])
+    res = await client.put(_url(world, f"/costing/positions/{m['id']}"),
+                           json={"machine_class_id": None}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    line = res.json()
+    assert line["rate"] == 85 and line["machine_class_used_id"] == world["big"]
+    assert line["machine_class_origin"]["kind"] == "tool"
+
+
+async def test_clearing_named_machine_of_a_line_priced_before_108_moves_it(
+        client, admin_auth, world, session_factory):
+    await _machine_version(session_factory, world)
+    await _article_with_tool(session_factory, world, "3454")
+    await _sync(session_factory, world, mdb_rows=[mdb("3454", qmin=350)], twos_rows=[])
+    press = await _press(session_factory, world)
+    m = await _add(client, admin_auth, world, kind="machine_time", label="Press", hours=2)
+    assert m["rate"] == 85
+    # priced before 108 on its 150 t press: <=200 t, the press in the snapshot
+    await _legacy(session_factory, m["id"], machine_id=press, rate=40,
+                  detail={"machine_class_id": world["small"], "machine_id": press})
+    res = await client.put(_url(world, f"/costing/positions/{m['id']}"),
+                           json={"machine_id": None}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    line = res.json()
+    assert line["rate"] == 85 and line["machine_class_used_id"] == world["big"]
+    assert line["machine_class_origin"]["kind"] == "tool"
+
+
+async def test_clearing_the_hand_pick_moves_a_line_priced_before_108(
+        client, admin_auth, world, session_factory):
+    """A line priced before 108 on the hand pick <=200 t; the pick is
+    cleared: the line moves to the live tool default 200-450 t."""
+    await _machine_version(session_factory, world)
+    await _article_with_tool(session_factory, world, "3454")
+    await _sync(session_factory, world, mdb_rows=[mdb("3454", qmin=350)], twos_rows=[])
+    res = await client.put(_url(world, "/costing/machine-class"),
+                           json={"machine_class_id": world["small"]}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    m = await _add(client, admin_auth, world, kind="machine_time", label="Press", hours=2)
+    assert m["rate"] == 40
+    await _legacy(session_factory, m["id"])
+    res = await client.put(_url(world, "/costing/machine-class"),
+                           json={"machine_class_id": None}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    line = await _line(client, admin_auth, world, m["id"])
+    assert line["rate"] == 85 and line["machine_class_used_id"] == world["big"]
+    assert line["machine_class_origin"]["kind"] == "tool"
+
+
+async def test_hand_pick_leaves_a_named_machine_line_priced_before_108(
+        client, admin_auth, world, session_factory):
+    await _machine_version(session_factory, world)
+    await _article_with_tool(session_factory, world, "3454")
+    await _sync(session_factory, world, mdb_rows=[mdb("3454", qmin=350)], twos_rows=[])
+    press = await _press(session_factory, world)
+    m = await _add(client, admin_auth, world, kind="machine_time", label="Press", hours=2)
+    await _legacy(session_factory, m["id"], machine_id=press, rate=40,
+                  detail={"machine_class_id": world["small"], "machine_id": press})
+    res = await client.put(_url(world, "/costing/machine-class"),
+                           json={"machine_class_id": world["big"]}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    line = await _line(client, admin_auth, world, m["id"])
+    assert line["rate"] == 40 and line["machine_class_used_id"] == world["small"]
+    async with session_factory() as s:
+        p = await s.get(CostingPosition, m["id"])
+        assert "machine_class_origin" not in p.rate_detail
+    assert costing_rates._moves_with_change_class(
+        CostingPosition(kind="machine_time", machine_id=press, rate=40,
+                        rate_on=datetime(2026, 1, 1).date(),
+                        rate_detail={"machine_class_id": world["small"]}),
+        world["big"]) is False
+
+
 async def test_frozen_tool_class_rules():
     def line(**kw):
         base = dict(kind="machine_time", rate=85, rate_on=datetime(2026, 1, 1).date(),

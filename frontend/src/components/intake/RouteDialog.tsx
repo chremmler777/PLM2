@@ -18,6 +18,9 @@ import type { ChangeStatus } from '../../types/change'
 const ROUTES: IntakeRoute[] = ['engineering_review', 'full_ecr', 'attach_ecr', 'administrative']
 // A change past implementation cannot take a new index (the backend refuses).
 const ATTACH_REFUSED = ['in_validation', 'released', 'closed', 'cancelled', 'rejected']
+// In implementation the impacted set is frozen: the index can only be linked
+// to a part the change already carries (the backend refuses any other).
+const FROZEN_HINT = 'In implementation: only an index of a part already on this change can be linked. Start a full ECR instead.'
 
 export interface RouteDialogProps {
   intake: Intake
@@ -39,8 +42,22 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
     () => (Array.isArray(changes) ? changes : []).filter((c) => !ATTACH_REFUSED.includes(c.status)),
     [changes],
   )
+  const picked = open.find((c) => c.id === changeId)
+  const frozen = route === 'attach_ecr' && picked?.status === 'in_implementation'
+  // The list carries no parts: the picked change's detail says whether it
+  // already has this part. Unknown (loading, failed): hint only, not blocked.
+  const { data: pickedDetail } = useQuery({
+    queryKey: ['change', changeId],
+    queryFn: () => changesApi.get(changeId as number),
+    enabled: frozen,
+  })
+  const carried = frozen && pickedDetail && pickedDetail.id === changeId
+    ? (pickedDetail.impacted_items ?? []).some((i) => i.part_id === intake.part_id)
+    : undefined
+  const frozenRefused = frozen && carried === false
   const reasonNeeded = route === 'administrative' || route !== intake.suggested_route
   const blocked = pending || (reasonNeeded && !reason.trim()) || (route === 'attach_ecr' && changeId === '')
+    || frozenRefused
 
   const reasonId = useId()
   const changeSelectId = useId()
@@ -104,12 +121,20 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
             <option value="">Choose a change</option>
             {open.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.change_number} {c.title} ({STATUS_LABELS[c.status as ChangeStatus] ?? c.status})
+                {c.change_number} {c.title} ({STATUS_LABELS[c.status as ChangeStatus] ?? c.status}
+                {c.status === 'in_implementation' ? ', existing parts only' : ''})
               </option>
             ))}
           </select>
           {open.length === 0 && (
             <span className="mt-1 block text-xs text-slate-400">No open change up to implementation in this project.</span>
+          )}
+          {frozen && carried !== true && (
+            <span data-testid="attach-frozen-hint" role={frozenRefused ? 'alert' : undefined}
+              className={`mt-1 block text-xs ${frozenRefused ? 'text-amber-300' : 'text-slate-400'}`}>
+              {frozenRefused ? `${intake.part_number ?? 'This part'} is not on ${picked?.change_number}. ` : ''}
+              {FROZEN_HINT}
+            </span>
           )}
         </div>
       )}

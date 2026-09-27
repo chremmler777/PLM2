@@ -511,7 +511,12 @@ class CostingPositionService:
         if (position.rate_on is None or position.rate is None
                 or any(getattr(position, f) != before[f]
                        for f in costing_rates.PRICING_FIELDS)):
-            await costing_rates.snapshot_position(session, change, position)
+            # The line's own class or named machine edited is an explicit
+            # move: it is not kept frozen on the class it was priced on.
+            moved = any(getattr(position, f) != before[f]
+                        for f in ("machine_class_id", "machine_id"))
+            await costing_rates.snapshot_position(session, change, position,
+                                                  freeze=not moved)
         position.updated_at = datetime.utcnow()
         await session.flush()
         await CostingPositionService._log(
