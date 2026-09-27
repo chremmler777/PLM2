@@ -65,7 +65,7 @@ flowchart TD
 | Stage | What happens | Who |
 |---|---|---|
 | `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
-| `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
+| `scoping` | Team decides: proceed / needs info / reject. Impacted set picked and locked (first action there: Development picks and confirms; the lead and PM may pick too), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
 | `quoting` | Offer tab (Approval for internal changes): quote plan, price (cost basis, factors, risk weighting, changeover, piece price), document (CBD/rough, free fields, terms, PDF). Sending v1 auto-moves to `quoted` | Sales |
@@ -103,8 +103,9 @@ Run these when discussing any stage's implementation:
   approved deviation. `change_service.py::_guard`.
   Rationale: Sales captures, the project team scopes — kickoff means handing
   over a request someone can actually work on. The impacted set is **no longer**
-  required here: it is defined during scoping (first PM action there) and stays
-  hard-locked before assessment, as before.
+  required here: it is defined during scoping (Development picks and confirms
+  it; the lead and PM may pick too) and stays hard-locked before assessment,
+  as before.
 
 ### Inside `scoping`
 - The onward move is **the meeting's call, not a button**. The cockpit offers no
@@ -206,7 +207,7 @@ Three typed containers, three responsibilities:
 | Artifact | Container | Responsible | Rule |
 |---|---|---|---|
 | **Change PPT** (internal explanation of the change) | per assessing department's bucket (`kind=change_ppt`) | assessing department | required for a `not_feasible` verdict (replaces the generic evidence gate) |
-| **RFQ** (external — supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | expected when "external modification" is ticked; reported, not gated |
+| **RFQ** (external: supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | required at submit when "external modification" is Yes (since 2026-09-27; .pdf, .xlsx, .xls, .docx, .msg, .eml) |
 | **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads, Sales owns the customer relationship | chronological tracked list, visible to all — the customer-communication record of the change |
 
 ### Assessment shape (2026-08-11, in build)
@@ -243,8 +244,16 @@ Three typed containers, three responsibilities:
   part required, internal modification, external modification, prototyping,
   matching/sampling. **Extras**: APQP → PFMEA update, control plan update;
   Development → article design update (internal vs customer-given). External
-  modification expects an **RFQ document** (costs & timing request to the
-  supplier; reported, not gated). **`not_feasible` hard-requires the Change
+  modification = Yes **requires two documents at submit** (2026-09-27): the
+  change presentation (`kind=change_ppt`; .ppt, .pptx, .pdf) and the change
+  RFQ (`kind=rfq`; .pdf, .xlsx, .xls, .docx, .msg, .eml), both filed against
+  the assessment. Declared per item in `REQUIRES_DOCUMENTS`
+  (`assessment_checklist.py`), served as `requires_documents`; the submit is
+  refused with "External modification needs the change presentation (PPT)
+  and the change RFQ attached before you submit" (naming only what is
+  missing), drafts save without them, and the row shows one upload slot per
+  document. Upload refuses other file types for those two kinds. No other
+  item declares a document. **`not_feasible` hard-requires the Change
   PPT** in the department's bucket (see the document table above).
   Checked items seed the department's costing grid (cycle time → lifecycle
   line, rest one-time; remark travels as the line note; deliberate deletions
@@ -837,7 +846,19 @@ only), `scoping` = Project Manager, impact lock = **Development only — no
 admin shortcut**; an admin who needs to lock a set does it through acts-as
 (`X-Acts-As-Department: <Development>`), so the department is on the record
 rather than the admin bypass (`ChangeService.user_can_confirm_impact`),
-`in_assessment` = routed departments per D1. UI shows the responsible role as
+`in_assessment` = routed departments per D1.
+
+**Who edits the impacted set** (`EarlyStageService.impact_edit_refusal`, the
+same rule behind `can_edit_impact` on the stage state and every impacted-items
+endpoint: add, remove, apply the tree selection, seed, make lead):
+Development members (acts-as aware, the same check as the confirm) pick the
+set themselves at `scoping` while it is not locked, then confirm it; they do
+not wait for PM to pick first. The change lead, Project Management and admin
+edit it at any open stage. Once Development has confirmed, only the lead, PM
+or admin can edit, and their edit clears the confirmation (the reopen);
+Development then confirms again. From `in_implementation` on the set is
+frozen for everyone. Every add and remove is in the changelog with the
+user and the part number. UI shows the responsible role as
 a badge on the stage (`StageResponsibleBadge.tsx`).
 
 **Acts-as (admin testing):** an admin can pick any role from a header dropdown

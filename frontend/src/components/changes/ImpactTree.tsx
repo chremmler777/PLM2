@@ -36,7 +36,8 @@ interface Props {
   /** Whether the current user may confirm impact (Development member).
       Defaults to true so existing callers keep prior behaviour. */
   canConfirm?: boolean
-  /** Impact set edits are the change lead's, PM's and admin's (spec §16 P1 5).
+  /** Impact set edits: the change lead, PM and admin, and Development while
+      the set is at scoping and not locked (the backend's can_edit_impact).
       false renders the tree read only: no selection, no Apply. */
   canEdit?: boolean
   /** The title is composed from the lead item and follows it. */

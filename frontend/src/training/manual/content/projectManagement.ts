@@ -25,7 +25,7 @@ export const pmChapter: ContentChapter = {
             head: ['Stage', 'What you do'],
             rows: [
               ['Captured', 'Take over with "Hand over to scoping". Set the lead; as the lead, set the priority and check the quote deadline.'],
-              ['Scoping', 'Build the impacted set, run the scoping meeting, decide.'],
+              ['Scoping', 'Check the impacted set Development picks (you may pick too), run the scoping meeting, decide.'],
               ['In Assessment', 'Chase the open departments, add a forgotten one, decide on "Not our responsibility", then "Close assessment → Costing".'],
               ['Costing', 'Watch every department price its part, then "Close costing".'],
               ['Quoted', 'Give the "PM sign-off". The cockpit asks for it once the customer accepted.'],
@@ -89,10 +89,11 @@ export const pmChapter: ContentChapter = {
         { h3: 'Before the meeting: the impacted set' },
         {
           p:
-            'On the "Impacted" tab pick the impacted items in the impact tree and press "Apply ' +
-            'selection". Suggestions mark parent assemblies that are structurally affected. Then ' +
-            'Development confirms with "Confirm impact (Development)". Nothing is assessed until the ' +
-            'set is confirmed, and a later edit clears the confirmation.',
+            'Development picks the impacted items on the "Impacted" tab and confirms them with ' +
+            '"Confirm impact (Development)". You can pick too: tick items in the impact tree and ' +
+            'press "Apply selection". Suggestions mark parent assemblies that are structurally ' +
+            'affected. Nothing is assessed until the set is confirmed. After that only the lead, ' +
+            'PM or an admin can change it, and the edit clears the confirmation.',
         },
         { shot: 'pm-impact-tree', alt: 'The impact tree with the lead item, two suggested assemblies and "Confirm impact (Development)".' },
         { h3: 'The meeting itself' },

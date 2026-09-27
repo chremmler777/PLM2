@@ -35,18 +35,28 @@ interface Props {
   label?: string;
   /** Inside a card the zone is one quiet line, not a big dashed billboard. */
   compact?: boolean;
+  /** A slot that takes only some file types (e.g. ['.ppt', '.pptx', '.pdf']):
+   *  narrows the browse dialog and turns other drops away before upload. The
+   *  backend enforces the same list. */
+  extensions?: string[];
 }
 
 export default function AttachmentDropzone({
   changeId, onUploaded, kind, respondsToId, concernId, assessmentId,
-  costingOfferId, validationIssueId, label, compact = false,
+  costingOfferId, validationIssueId, label, compact = false, extensions,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const upload = async (files: File[]) => {
-    if (files.length === 0) return;
+  const upload = async (picked: File[]) => {
+    if (picked.length === 0) return;
+    const typed = (f: File) => !extensions?.length
+      || extensions.some((x) => f.name.toLowerCase().endsWith(x.toLowerCase()));
+    picked.filter((f) => !typed(f)).forEach((f) =>
+      toast.error(t('attach.wrongType').replace('{name}', f.name)
+        .replace('{x}', (extensions ?? []).join(', '))));
+    const files = picked.filter(typed);
     const tooBig = files.filter((f) => f.size > MAX_BYTES);
     const ok = files.filter((f) => f.size <= MAX_BYTES);
     tooBig.forEach((f) =>
@@ -134,7 +144,7 @@ export default function AttachmentDropzone({
         ref={inputRef}
         type="file"
         multiple
-        accept={ACCEPT}
+        accept={extensions?.length ? extensions.join(',') : ACCEPT}
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);

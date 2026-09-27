@@ -2,6 +2,7 @@ import { TASKS_BY_ROLE } from '../../tasks'
 import { APP_ADDRESS } from './shared'
 import { PRACTICE_TASKS_BY_ROLE } from './index'
 import type { PracticeTaskSpec, TrainingRole } from './types'
+import { MEXICO_NOT_IN_USE_TEXT } from '../../../lib/plantNotInUse'
 
 //: The one-page handouts, one per role: what the printable handout page
 //: (pages/TrainingHandoutPage.tsx) renders first, and the source of
@@ -131,7 +132,7 @@ export const HANDOUTS: Handout[] = [
           ['A change keeps the rates of the day it was created.', 'A later version never changes it, or an offer already sent.'],
           ['An empty rate is no rate:', 'costing shows "No rate in the cost sheet" and the offer is too low.'],
           ['Machines:', '"Sync from MachineDB" lists the presses; a press may carry its own rate.'],
-          ['Silao:', 'quotes in USD, pays in MXN, converted with the exchange rate of the version.'],
+          ['Silao:', 'quotes in USD, pays in MXN, converted with the exchange rate of the version. ' + MEXICO_NOT_IN_USE_TEXT],
         ],
       },
     ],
@@ -161,7 +162,7 @@ export const HANDOUTS: Handout[] = [
       {
         h2: 'Department specifics',
         points: [
-          ['Development:', '"Confirm impact (Development)" at scoping; extra row "Article design update"; triage every new index ("Full ECR", "Attach to an open change", "Engineering review", "Administrative"). Release: index, drawing and 3D data, spare parts.'],
+          ['Development:', 'Pick the impacted set and "Confirm impact (Development)" at scoping; extra row "Article design update"; triage every new index ("Full ECR", "Attach to an open change", "Engineering review", "Administrative"). Release: index, drawing and 3D data, spare parts.'],
           ['Tool Engineer:', 'tools and molds; "Part weight" estimate at costing. Validation: measures the cycle time ("Measured cycle time", seconds) and the part weight. Release: tool and equipment data, part weight, "Cycle time: changed (new value entered) or confirmed unchanged" ("Changed" needs the new seconds; the row shows your validation measurement).'],
           ['Manufacturing Engineer:', 'equipment. No release row, no cycle time (the cycle time is the Tool Engineer\'s).'],
           ['APQP:', 'gauges; extra rows "PFMEA update", "Control plan update". Release: "Process stable: SPC Cm > 1.67" (APQP alone; Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".'],
@@ -175,6 +176,7 @@ export const HANDOUTS: Handout[] = [
           ['A Yes without a remark cannot be costed or planned.', ''],
           ['"Rest to No" is visible to reviewers.', 'Look at the rows first.'],
           ['"Not feasible" needs the change PPT.', 'Risks never block the submit.'],
+          ['External modification = Yes needs the change presentation and the change RFQ.', 'Upload both on the row before you submit.'],
           ['A line without a rate is not counted.', 'Tell Sales, who keep the cost sheet. A change is priced with the rates valid on the day it was created.'],
           ['A failed check needs a reason.', 'A fail without one is not a check.'],
           ['After the baseline only PM, Sales, Scheduling and the lead move dates.', 'Tell PM when a date will not hold.'],
@@ -294,7 +296,7 @@ export const HANDOUTS: Handout[] = [
           ['A change is priced with the rates valid on the day it was created.', 'Costing shows the version; each line stores its rate and version. A later version never changes an existing change.'],
           ['"No rate in the cost sheet"', 'on a line: it is not counted. Fill the rate in a version valid on the change\'s creation date.'],
           ['P&L actuals', 'use the rate valid on the booking date. Prices on a change are shown to Sales, Project Management, the change lead and admins: unless you lead a change, Finance sees none. That is intended: you check the rates, not the offers.'],
-          ['Currency', 'comes from the plant. Silao quotes in USD and pays in MXN: the version\'s USD/MXN exchange rate converts MXN rates and actual costs, and every conversion names its rate. Other currencies are not converted.'],
+          ['Currency', 'comes from the plant. Silao quotes in USD and pays in MXN: the version\'s USD/MXN exchange rate converts MXN rates and actual costs, and every conversion names its rate. Other currencies are not converted. ' + MEXICO_NOT_IN_USE_TEXT],
         ],
       },
       {

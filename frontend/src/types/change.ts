@@ -614,6 +614,18 @@ export interface ChecklistItemDef {
   /** When present the ticked row must also pick one of these. The backend
    *  serves objects; plain strings are older payloads. */
   choices?: (ChecklistChoice | string)[];
+  /** Documents a Yes owes before the assessment can be submitted (external
+   *  modification: the change presentation and the change RFQ). Told apart
+   *  by attachment kind; the backend refuses the submit without them. */
+  requires_documents?: ChecklistRequiredDocument[];
+}
+
+export interface ChecklistRequiredDocument {
+  kind: AttachmentKind;
+  label_de: string;
+  label_en: string;
+  /** File types the slot takes, e.g. ['.ppt', '.pptx', '.pdf']. */
+  extensions: string[];
 }
 
 export interface ChecklistChoice {

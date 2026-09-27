@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ActivityChecklist, {
-  checklistItemLabel, checklistProgress, earlierAnswers, restToNo, riskKeyOf,
+  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, restToNo, riskKeyOf,
 } from './ActivityChecklist'
 
 const DEFS = [
@@ -238,5 +238,23 @@ describe('ActivityChecklist earlier checklist items', () => {
     expect(checklistItemLabel({ key: 'scrap_increase' }, DEFS, 'de')).toBe('Ausschusserhöhung')
     expect(checklistItemLabel({ key: 'threed_change' }, DEFS)).toBe('3D change necessary')
     expect(checklistItemLabel({ label: 'Free line' }, DEFS)).toBe('Free line')
+  })
+})
+
+describe('missingDocuments', () => {
+  const EXT = { key: 'modification_external', label_de: 'E', label_en: 'External modification (supplier)',
+    extra: false, requires_documents: [
+      { kind: 'change_ppt' as const, label_de: 'P', label_en: 'Change presentation', extensions: ['.pptx'] },
+      { kind: 'rfq' as const, label_de: 'R', label_en: 'Change RFQ', extensions: ['.pdf'] }] }
+  const yes = { impacts: [{ key: 'modification_external', answer: 'yes', impacted: true }] }
+
+  it('owes both documents on a Yes, only what is not filed, nothing on a No', () => {
+    expect(missingDocuments([EXT], yes, []).map((m) => m.doc.kind)).toEqual(['change_ppt', 'rfq'])
+    expect(missingDocuments([EXT], yes, [{ kind: 'rfq' }]).map((m) => m.doc.kind)).toEqual(['change_ppt'])
+    expect(missingDocuments([EXT], yes, [{ kind: 'rfq' }, { kind: 'change_ppt' }])).toEqual([])
+    expect(missingDocuments([EXT], yes, [{ kind: 'general' }]).length).toBe(2)
+    expect(missingDocuments([EXT], { impacts: [{ key: 'modification_external', answer: 'no',
+      impacted: false }] }, [])).toEqual([])
+    expect(missingDocuments([...DEFS, EXT], {}, [])).toEqual([])
   })
 })

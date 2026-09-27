@@ -76,7 +76,8 @@ SETTLED_AS = {
 TASK_KIND = {
     "kickoff": ("Hand over to scoping", "An Klärung übergeben"),
     "scoping_wrapup": ("Wrap up scoping", "Klärung abschließen"),
-    "impact_confirm": ("Confirm impacted items", "Betroffene Teile bestätigen"),
+    "impact_confirm": ("Pick and confirm impacted items",
+                       "Betroffene Teile wählen und bestätigen"),
     "assessment": ("Assessment", "Bewertung"),
     "obtain_info": ("Answer the open question", "Offene Frage beantworten"),
     "close_question": ("Settle the answered question", "Beantwortete Frage abschließen"),

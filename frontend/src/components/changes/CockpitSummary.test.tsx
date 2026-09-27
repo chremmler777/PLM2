@@ -543,7 +543,7 @@ describe('CockpitSummary waits', () => {
     const base = { customer_relevant: false, pm_signed_by: null, quality_signed_by: null, timing_validated_at: null,
       origin: 'engineering_review', status: 'scoping' }
     expect(nextStepFor({ ...base, impact_confirmed_at: null } as never))
-      .toEqual([{ kind: 'go', key: 'lock-impact', label: 'Lock the impacted set (Development)', tab: 'impacted' }])
+      .toEqual([{ kind: 'go', key: 'lock-impact', label: 'Pick and lock the impacted set (Development)', tab: 'impacted' }])
     expect(nextStepFor({ ...base, impact_confirmed_at: '2026-09-25T08:00:00' } as never))
       .toEqual([{ kind: 'go', key: 'review', label: 'Answer the review', tab: 'review' }])
     expect(nextStepFor({ ...base, status: 'closed' } as never)).toEqual([])

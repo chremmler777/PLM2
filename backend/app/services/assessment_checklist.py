@@ -34,11 +34,83 @@ COMMON_ITEMS = [
      "Timing risk (required date at risk)", None),
 ]
 
-# Checking this is a promise to ask a supplier what it costs and how long it
-# takes, so an RFQ document is expected against the assessment. Expected, not
-# enforced: the department may still be writing it when they submit, and a
-# submit gate here would just teach people to attach an empty file.
-RFQ_EXPECTED_KEYS = {"modification_external"}
+# Documents a Yes owes before the assessment can be submitted. Only where
+# the business says a document is part of the answer: external supplier work
+# is presented internally (the change presentation) and priced by the
+# supplier (the change RFQ), so a Yes there is not a finished answer until
+# both are filed against the assessment. Each document is told apart by its
+# attachment kind (the tag chosen at upload), never by its file name; the
+# extensions only say which files a slot takes. A draft saves without them:
+# only the submit is held. Rows already submitted are not re-judged.
+PPT_EXTENSIONS = (".ppt", ".pptx", ".pdf")
+RFQ_EXTENSIONS = (".pdf", ".xlsx", ".xls", ".docx", ".msg", ".eml")
+
+# kind -> (label_de, label_en, allowed extensions)
+REQUIRED_DOCUMENTS = {
+    "change_ppt": ("Änderungspräsentation", "Change presentation", PPT_EXTENSIONS),
+    "rfq": ("Änderungs-RFQ", "Change RFQ", RFQ_EXTENSIONS),
+}
+
+# How a missing document is named in the submit refusal.
+DOCUMENT_PHRASES = {
+    "change_ppt": "the change presentation (PPT)",
+    "rfq": "the change RFQ",
+}
+
+# checklist key -> the document kinds a Yes owes, in the order they are asked.
+REQUIRES_DOCUMENTS = {
+    "modification_external": ("change_ppt", "rfq"),
+}
+
+# Kept for the evidence state the UI reads (rfq_expected): a Yes on these
+# owes the RFQ. Since 2026-09-27 it is also enforced at submit, through
+# REQUIRES_DOCUMENTS.
+RFQ_EXPECTED_KEYS = {k for k, kinds in REQUIRES_DOCUMENTS.items() if "rfq" in kinds}
+
+
+def required_documents(key: str) -> list[dict]:
+    """The documents a Yes on `key` owes, as the frontend renders the slots."""
+    out = []
+    for kind in REQUIRES_DOCUMENTS.get(key, ()):
+        label_de, label_en, exts = REQUIRED_DOCUMENTS[kind]
+        out.append({"kind": kind, "label_de": label_de, "label_en": label_en,
+                    "extensions": list(exts)})
+    return out
+
+
+def allowed_extensions(kind: str) -> tuple | None:
+    """The file types a required-document kind takes, or None (any file)."""
+    doc = REQUIRED_DOCUMENTS.get(kind)
+    return doc[2] if doc else None
+
+
+def missing_documents(impacts, filed_kinds: set,
+                      department_name: str | None = None) -> list[str]:
+    """What a checklist answer still owes, one sentence per Yes row, e.g.
+    "External modification needs the change presentation (PPT) and the
+    change RFQ attached before you submit". Empty when nothing is owed.
+
+    `impacts` is the submitted (or stored) checklist; a row counts as Yes by
+    its answer, or by `impacted` for rows stored before answers existed."""
+    out: list[str] = []
+    seen: set = set()
+    for entry in impacts or []:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("key")
+        yes = (entry.get("answer") == "yes" if entry.get("answer") is not None
+               else bool(entry.get("impacted")))
+        if not key or not yes or key in seen:
+            continue
+        seen.add(key)
+        owed = [DOCUMENT_PHRASES[k] for k in REQUIRES_DOCUMENTS.get(key, ())
+                if k not in filed_kinds]
+        if not owed:
+            continue
+        label = (label_for(key, department_name) or key).split(" (")[0]
+        out.append(f"{label} needs {' and '.join(owed)} attached before you submit")
+    return out
+
 
 _DESIGN_CHOICES = [
     {"value": "internal", "label_de": "Intern", "label_en": "Internal"},
@@ -199,6 +271,9 @@ def _entry(item: tuple, extra: bool) -> dict:
            "extra": extra}
     if choices:
         out["choices"] = choices
+    docs = required_documents(key)
+    if docs:
+        out["requires_documents"] = docs
     return out
 
 

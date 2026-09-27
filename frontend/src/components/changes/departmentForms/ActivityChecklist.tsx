@@ -16,12 +16,12 @@ import { Check, Flag, Minus } from 'lucide-react'
 import { changesApi } from '../../../api/changes'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
-import type { Attachment, ChangeConcern, ChecklistChoice, ChecklistItemDef } from '../../../types/change'
+import type {
+  Attachment, ChangeConcern, ChecklistChoice, ChecklistItemDef, ChecklistRequiredDocument,
+} from '../../../types/change'
+import AttachmentDropzone from '../AttachmentDropzone'
 import ChecklistRiskForm from './ChecklistRiskForm'
 import type { DepartmentFieldsProps } from './types'
-
-/** Ticking this asks a supplier for money and dates — so it asks for the RFQ. */
-const RFQ_ITEM = 'modification_external'
 
 /** A keyed answer, or a free line the department wrote itself. */
 export interface ImpactItem {
@@ -56,6 +56,34 @@ export function checklistProgress(
   const open = defs.filter((d) => !byKey.get(d.key)?.answer)
   return { answered: defs.length - open.length, total: defs.length,
            firstOpen: open[0]?.key ?? null }
+}
+
+/** A document a Yes row still owes: the row's item and the document. */
+export interface MissingDocument {
+  key: string
+  item: ChecklistItemDef
+  doc: ChecklistRequiredDocument
+}
+
+/** The name of a required document, in the sentence it appears in. */
+export const docLabel = (d: ChecklistRequiredDocument, lang: 'de' | 'en' = 'en') =>
+  lang === 'de' ? d.label_de : d.label_en
+
+/**
+ * Documents the answered checklist still owes: every Yes row whose item
+ * declares `requires_documents`, minus the kinds already filed against the
+ * assessment. The same rule the backend refuses the submit on; a draft is
+ * never held by it.
+ */
+export function missingDocuments(
+  defs: ChecklistItemDef[], value: Record<string, unknown> | null | undefined,
+  attachments: Pick<Attachment, 'kind'>[],
+): MissingDocument[] {
+  const filed = new Set(attachments.map((a) => a.kind))
+  const yes = new Set(impactsOf(value).filter((i) => i.key && i.answer === 'yes').map((i) => i.key!))
+  return defs.flatMap((item) => (yes.has(item.key) ? item.requires_documents ?? [] : [])
+    .filter((doc) => !filed.has(doc.kind))
+    .map((doc) => ({ key: item.key, item, doc })))
 }
 
 /** "Rest → No": every keyed row still unanswered becomes a marked No. */
@@ -142,11 +170,12 @@ const idOf = (i: ImpactItem) => i.key ?? `free:${i.label ?? ''}`
 
 export default function ActivityChecklist({
   departmentId, value, onChange, lang = 'en',
-  changeId, assessmentId, attachments = [], highlightOpen = false,
+  changeId, assessmentId, attachments = [], onUploaded, highlightOpen = false,
 }: DepartmentFieldsProps & {
   departmentId: number
   lang?: 'de' | 'en'
-  /** Present when the checklist can collect documents of its own (the RFQ). */
+  /** Present when the checklist can collect the documents a Yes owes
+   *  (external modification: the change presentation and the change RFQ). */
   changeId?: number
   assessmentId?: number
   attachments?: Attachment[]
@@ -208,11 +237,10 @@ export default function ActivityChecklist({
     onChange({ ...value, impacts: kept })
   }
 
-  const rfqs = attachments.filter((a) => a.kind === 'rfq')
-
   const row = (id: string, label: string, def?: ChecklistItemDef) => {
     const item = answerFor(id)
-    const wantsRfq = id === RFQ_ITEM && item.impacted
+    // The documents this Yes owes, each in its own slot on the row.
+    const docs = item.answer === 'yes' ? def?.requires_documents ?? [] : []
     // Answering by hand drops the Rest → No mark: the row was now considered.
     const { bulk: _bulk, ...own } = item
     void _bulk
@@ -301,31 +329,40 @@ export default function ActivityChecklist({
               onChange={(e) => put({ ...item, remark: e.target.value })}
               placeholder={t('check.remarkPlaceholder', lang)} aria-label={t('check.remark', lang)}
               className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-            {/* Supplier work needs a price and a date: the RFQ is asked for
-                right here, where the box was ticked — never gated, only asked. */}
-            {wantsRfq && changeId != null && assessmentId != null && (
-              <div className="space-y-1" data-testid={`check-rfq-${id}`}>
-                {rfqs.length > 0 ? (
-                  <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
-                    {rfqs.map((a) => (
-                      <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-[11px] text-amber-300/80" data-testid="check-rfq-missing">
-                    {t('attach.rfqMissing', lang)}
+            {/* Supplier work is presented (the change presentation) and
+                priced (the change RFQ): each document has its own slot here,
+                where the Yes was given. Submit waits for both. */}
+            {docs.map((doc) => {
+              const filed = attachments.filter((a) => a.kind === doc.kind)
+              const name = docLabel(doc, lang)
+              const inSentence = lang === 'en' ? name.charAt(0).toLowerCase() + name.slice(1) : name
+              return (
+                <div key={doc.kind} data-testid={`check-doc-${id}-${doc.kind}`}
+                  data-state={filed.length > 0 ? 'filed' : 'required'}
+                  className={`space-y-1 rounded border px-2 py-1 ${filed.length > 0
+                    ? 'border-slate-700/60 bg-slate-900/30'
+                    : 'border-amber-700/60 bg-amber-950/20'}`}>
+                  <p className={`text-[11px] font-medium ${filed.length > 0 ? 'text-emerald-300' : 'text-amber-300'}`}
+                    data-testid={`check-doc-state-${id}-${doc.kind}`}>
+                    {t(filed.length > 0 ? 'check.docFiled' : 'check.docRequired', lang).replace('{d}', name)}
                   </p>
-                )}
-                {/* One RFQ drop zone per assessment: the RFQ box under the
-                    form. The row only says whether it is filed and points there. */}
-                <button type="button" data-testid="check-rfq-goto"
-                  onClick={() => document.querySelector(`[data-testid^="bucket-rfq-"]`)
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                  className="text-[11px] text-sky-300 hover:text-sky-200 underline decoration-dotted underline-offset-2">
-                  {t('attach.rfqGoto', lang)}
-                </button>
-              </div>
-            )}
+                  {filed.length > 0 && changeId != null && (
+                    <ul className="text-sm">
+                      {filed.map((a) => (
+                        <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
+                      ))}
+                    </ul>
+                  )}
+                  {changeId != null && assessmentId != null && (
+                    <AttachmentDropzone changeId={changeId} assessmentId={assessmentId} compact
+                      kind={doc.kind} extensions={doc.extensions}
+                      label={t('check.docSlot', lang).replace('{d}', inSentence)
+                        .replace('{x}', doc.extensions.join(', '))}
+                      onUploaded={() => onUploaded?.()} />
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </li>

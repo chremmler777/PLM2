@@ -27,7 +27,7 @@ export const engineeringChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Scoping', 'Development confirms the impacted set. Everyone else can raise a question or a cancel vote.'],
+              ['Scoping', 'Development picks and confirms the impacted set. Everyone else can raise a question or a cancel vote.'],
               ['In Assessment', 'Answer every checklist row, flag risks on the rows, give a verdict.'],
               ['Costing', 'Price your part: your own time, estimates or vendor quotes, a lead time on every line.'],
               ['Timing', 'Confirm the detailed plan for your department, or raise a concern.'],
@@ -82,7 +82,7 @@ export const engineeringChapter: ContentChapter = {
         {
           points: [
             ['"Yes"', 'opens "Remark": what has to be done. That line seeds your costing.'],
-            ['"External modification (supplier)"', 'expects an RFQ to the supplier in your bucket. Reported, not enforced.'],
+            ['"External modification (supplier)"', 'Yes needs two documents on the row before you can submit: "Change presentation" (.ppt, .pptx or its .pdf export) and "Change RFQ" to the supplier (.pdf, .xlsx, .xls, .docx, .msg or .eml). Each has its own slot and reads "required" until filed. Your draft saves without them.'],
             ['"Rest to No"', 'sets only the rows you have not answered to No. Reviewers see how many came from it ("{n} × No ({b} set via Rest to No)"). Use it for rows you really checked.'],
             ['"+ Own item"', 'adds a row the list does not cover. It counts as Yes.'],
           ],
@@ -270,12 +270,14 @@ export const engineeringChapter: ContentChapter = {
       id: 'eng-development',
       title: 'Development only: the impacted set and new indexes',
       blocks: [
-        { h3: 'Confirming the impacted set' },
+        { h3: 'Picking and confirming the impacted set' },
         {
           p:
-            'At scoping PM builds the impacted set. You check it and press "Confirm impact ' +
-            '(Development)". Only Development can. The assessment is routed on this set, and any ' +
-            'later edit clears your confirmation.',
+            'At scoping you pick the impacted set yourself: on the "Impacted" tab tick the items ' +
+            'in the impact tree and press "Apply selection". You do not wait for PM; the lead and ' +
+            'PM may pick too. Then press "Confirm impact (Development)". Only Development can ' +
+            'confirm. The assessment is routed on this set. After you confirm, only the lead, PM ' +
+            'or an admin can change it, and their edit clears your confirmation.',
         },
         { h3: 'Triage of a new customer index' },
         {
@@ -302,7 +304,7 @@ export const engineeringChapter: ContentChapter = {
         { h3: 'Engineering review' },
         {
           p:
-            'On the review, "Lock the impact" takes you to "Impacted", where you lock the set with ' +
+            'On the review, "Lock the impact" takes you to "Impacted", where you pick the set and lock it with ' +
             '"Confirm impact (Development)". The departments serving the part then answer "No ' +
             'impact", or "Impact" with a note (the note is required only for "Impact"). All "No ' +
             'impact": the index goes live and the review closes. Any impact: "Escalate to a full ' +

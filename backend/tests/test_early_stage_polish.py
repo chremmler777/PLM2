@@ -285,6 +285,68 @@ async def test_impact_edits_lead_pm_admin(client, auth, seed, depts, session_fac
     assert res.status_code == 200, res.text
 
 
+async def test_development_picks_then_confirms_impact(client, auth, seed, depts,
+                                                     session_factory):
+    """Development picks the impacted set itself at scoping (no PM pick
+    first), then confirms it; after the lock only the run team edits, and
+    that edit clears the confirmation (the reopen)."""
+    c = await _change(client, auth, seed)
+    cid = c["id"]
+    dev = acting(auth, depts["Development"])
+    pm = acting(auth, depts["Project Manager"])
+    tool = acting(auth, depts["Tool Engineer"])
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid)
+                        .values(status="scoping"))
+        await s.commit()
+    assert (await _state(client, dev, cid))["can_edit_impact"] is True
+    assert (await _state(client, tool, cid))["can_edit_impact"] is False
+    actions = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=dev)).json()
+    row = next(a for a in actions["actions"] if a["kind"] == "impact_confirm")
+    assert row["label"] == "Pick and confirm impacted items"
+
+    p1 = await _part(client, auth, seed)
+    p2 = await _part(client, auth, seed)
+    res = await client.put(f"/api/v1/changes/{cid}/impacted-items",
+                           json={"part_ids": [p1, p2]}, headers=dev)
+    assert res.status_code == 200, res.text
+    res = await client.delete(f"/api/v1/changes/{cid}/impacted-items/0", headers=tool)
+    assert res.status_code == 403
+    assert "Development" in res.json()["detail"]
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=auth)).json()
+    item2 = next(i for i in detail["impacted_items"] if i["part_id"] == p2)
+    res = await client.delete(f"/api/v1/changes/{cid}/impacted-items/{item2['id']}",
+                              headers=dev)
+    assert res.status_code == 204, res.text
+    res = await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                            json={"part_id": p2}, headers=dev)
+    assert res.status_code == 200, res.text
+    # The audit names who picked what, by part number.
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid))).scalars().all()
+    picked = [r for r in rows if r.action in ("impacted_added", "impacted_item_added",
+                                             "impacted_item_removed")]
+    assert picked and all(r.performed_by == seed["admin_id"] for r in picked)
+    assert any("ES-" in r.action_description for r in picked)
+
+    res = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=dev)
+    assert res.status_code == 200, res.text
+    assert res.json()["impact_confirmed_at"]
+    # Locked: Development no longer edits; the run team reopens by editing.
+    assert (await _state(client, dev, cid))["can_edit_impact"] is False
+    res = await client.put(f"/api/v1/changes/{cid}/impacted-items",
+                           json={"part_ids": [p1]}, headers=dev)
+    assert res.status_code == 403
+    assert "locked" in res.json()["detail"]
+    res = await client.put(f"/api/v1/changes/{cid}/impacted-items",
+                           json={"part_ids": [p1]}, headers=pm)
+    assert res.status_code == 200, res.text
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=auth)).json()
+    assert detail["impact_confirmed_at"] is None
+    assert (await _state(client, dev, cid))["can_edit_impact"] is True
+
+
 async def test_kickoff_needs_a_lead(client, auth, seed, depts, session_factory):
     c = await _change(client, auth, seed, lead=False)
     st = await _state(client, auth, c["id"])

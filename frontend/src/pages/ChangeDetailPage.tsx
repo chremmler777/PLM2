@@ -305,8 +305,9 @@ export default function ChangeDetailPage() {
   // confirm acts as Development). Defaults to true until departments/memberships
   // have loaded, so the button doesn't flash-disabled.
   const rdDeptId = departments.find((d) => d.name === 'Development')?.id;
-  const canConfirmImpact = !myActions ? true
-    : rdDeptId !== undefined && myActions.memberships.includes(rdDeptId);
+  const isDevelopmentMember = !!myActions && rdDeptId !== undefined
+    && myActions.memberships.includes(rdDeptId);
+  const canConfirmImpact = !myActions ? true : isDevelopmentMember;
   // Task 6: governance tabs (D1, Audit) are only visible/reachable for admin,
   // the change lead, or Quality/Project Manager department members — reusing
   // the myActions/departments data already fetched for this page (no new
@@ -1093,8 +1094,11 @@ export default function ChangeDetailPage() {
           impactConfirmedByName={change.impact_confirmed_by_name}
           impactConfirmedAt={change.impact_confirmed_at}
           canConfirm={canConfirmImpact}
-          // Spec §16 P1 5: lead, PM and admin edit the set; Development confirms it.
-          canEdit={stage ? stage.can_edit_impact : (isAdmin || isChangeLead || isPmMember)}
+          // Lead, PM and admin edit the set; Development picks it too while it
+          // is at scoping and not locked, then confirms it. The backend's
+          // can_edit_impact is the answer; the fallback mirrors it.
+          canEdit={stage ? stage.can_edit_impact : (isAdmin || isChangeLead || isPmMember
+            || (isDevelopmentMember && change.status === 'scoping' && !change.impact_confirmed_at))}
           titleAuto={stage?.title_auto ?? change.title_auto}
           scopeChangedAfterQuote={change.scope_changed_after_quote
             ?? (stage?.scope_change ? !stage.scope_change.covered : false)}
@@ -1192,7 +1196,7 @@ export default function ChangeDetailPage() {
                 ? allPlants.filter((p) => change.affected_plant_ids!.includes(p.id))
                 : allPlants)
                 .filter((p) => p.is_active !== false)
-                .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))}
+                .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active, code: p.code, location: p.location }))}
               projectPlantId={projectPlantId}
               canSeeAll={canSeeCosts} editable={change.status === 'costing'}
               isPm={isPmMember || isAdmin} />

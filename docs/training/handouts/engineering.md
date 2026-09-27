@@ -17,7 +17,7 @@ For Development, Tool Engineer, Manufacturing Engineer, Process Engineer, APQP a
 
 ## Department specifics
 
-- **Development:** "Confirm impact (Development)" at scoping; extra row "Article design update"; triage every new index ("Full ECR", "Attach to an open change", "Engineering review", "Administrative"). Release: index, drawing and 3D data, spare parts.
+- **Development:** Pick the impacted set and "Confirm impact (Development)" at scoping; extra row "Article design update"; triage every new index ("Full ECR", "Attach to an open change", "Engineering review", "Administrative"). Release: index, drawing and 3D data, spare parts.
 - **Tool Engineer:** tools and molds; "Part weight" estimate at costing. Validation: measures the cycle time ("Measured cycle time", seconds) and the part weight. Release: tool and equipment data, part weight, "Cycle time: changed (new value entered) or confirmed unchanged" ("Changed" needs the new seconds; the row shows your validation measurement).
 - **Manufacturing Engineer:** equipment. No release row, no cycle time (the cycle time is the Tool Engineer's).
 - **APQP:** gauges; extra rows "PFMEA update", "Control plan update". Release: "Process stable: SPC Cm > 1.67" (APQP alone; Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".
@@ -29,6 +29,7 @@ For Development, Tool Engineer, Manufacturing Engineer, Process Engineer, APQP a
 - **A Yes without a remark cannot be costed or planned.**
 - **"Rest to No" is visible to reviewers.** Look at the rows first.
 - **"Not feasible" needs the change PPT.** Risks never block the submit.
+- **External modification = Yes needs the change presentation and the change RFQ.** Upload both on the row before you submit.
 - **A line without a rate is not counted.** Tell Sales, who keep the cost sheet. A change is priced with the rates valid on the day it was created.
 - **A failed check needs a reason.** A fail without one is not a check.
 - **After the baseline only PM, Sales, Scheduling and the lead move dates.** Tell PM when a date will not hold.

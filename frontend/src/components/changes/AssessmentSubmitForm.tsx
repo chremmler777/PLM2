@@ -7,7 +7,9 @@ import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
-import ActivityChecklist, { checklistProgress, impactsOf, restToNo } from './departmentForms/ActivityChecklist'
+import ActivityChecklist, {
+  checklistProgress, docLabel, impactsOf, missingDocuments, restToNo,
+} from './departmentForms/ActivityChecklist'
 import AttachmentDropzone from './AttachmentDropzone'
 import TransitionConfirmDialog from './TransitionConfirmDialog'
 import { verdictLabel, plural } from '../../lib/humanLabels'
@@ -72,7 +74,8 @@ export default function AssessmentSubmitForm({
    *  rule the backend enforces. */
   changePptCount?: number
   onVerdictChange?: (verdict: string) => void
-  /** Lets the checklist collect its own documents (the RFQ) against this row. */
+  /** Lets the checklist collect the documents a Yes owes against this row;
+   *  a missing one holds the submit, the rule the backend enforces. */
   assessmentId?: number
   evidence?: Attachment[]
   onUploaded?: () => void
@@ -144,6 +147,10 @@ export default function AssessmentSubmitForm({
   // has rows, so without them there is nothing to submit against.
   const checklistDone = notImpacted
     || (defsLoaded && defs.length > 0 && progress.answered === progress.total)
+  // A Yes that owes documents (external modification: the change
+  // presentation and the change RFQ) holds the submit until they are filed
+  // against this assessment. The draft keeps saving meanwhile.
+  const missingDocs = notImpacted || questionnaireOpen ? [] : missingDocuments(defs, details, evidence)
   const submit = useMutation({
     mutationFn: () => changesApi.submitAssessment(changeId, {
       department_id: departmentId,
@@ -170,7 +177,7 @@ export default function AssessmentSubmitForm({
       setFailure(toastError(e, 'Could not submit the assessment'))
     },
   })
-  const ready = !needsChangePpt && checklistDone && (notImpacted || (verdict !== ''
+  const ready = !needsChangePpt && missingDocs.length === 0 && checklistDone && (notImpacted || (verdict !== ''
     && (!showEffort || (effort !== '' && parseFloat(effort) >= 0))
     && (!Fields || details.impacted !== undefined)))
   return (
@@ -256,6 +263,17 @@ export default function AssessmentSubmitForm({
               onUploaded={() => onUploaded?.()} />
           )}
         </div>
+      )}
+      {missingDocs.length > 0 && (
+        <p data-testid="assessment-docs-required"
+          className="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-200">
+          <button type="button" className="text-left hover:underline decoration-dotted underline-offset-2"
+            onClick={() => document.getElementById(`check-row-${missingDocs[0].key}`)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>
+            {t('check.docsBlockSubmit').replace('{x}', missingDocs
+              .map((m) => `${docLabel(m.doc)} (${m.item.label_en})`).join(', '))}
+          </button>
+        </p>
       )}
       {failure && (
         <p role="alert" data-testid="assessment-error"

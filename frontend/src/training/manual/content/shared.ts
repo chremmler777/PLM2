@@ -155,7 +155,7 @@ export const flowChapter: ContentChapter = {
             head: ['Stage (as the page shows it)', 'What happens, who acts'],
             rows: [
               ['Captured', 'Sales starts the request with the reason, the parts and the customer\'s documents.'],
-              ['Scoping', 'PM meets the team, Development locks the impacted set, the room decides who assesses.'],
+              ['Scoping', 'PM meets the team, Development picks and locks the impacted set, the room decides who assesses.'],
               ['In Assessment', 'The routed departments answer the checklist, flag risks and give a verdict.'],
               ['Costing', 'The departments price their part with a lead time on every line. PM closes costing.'],
               ['Quote creation', 'Sales builds the offer: rough timing, price, risks, document.'],
@@ -215,7 +215,7 @@ export const flowChapter: ContentChapter = {
         },
         {
           steps: [
-            { title: 'The impacted set', body: 'PM or the lead picks the impacted items on the "Impacted" tab. Development confirms it with "Confirm impact (Development)". Nothing is assessed until it is confirmed.' },
+            { title: 'The impacted set', body: 'Development picks the impacted items on the "Impacted" tab (the lead and PM may pick too) and confirms them with "Confirm impact (Development)". Nothing is assessed until it is confirmed.' },
             { title: 'Questions and cancel votes', body: 'Anyone on the team can raise a question for the customer or vote to reject. Sales answers questions; the asker or PM closes them. Open ones block "Proceed".' },
             { title: 'The scoping meeting', body: 'PM records it with the departments and their letters (R, A, S, C, I) and the cost carrier. The decision is "Proceed & start assessment", "Needs more info" or "Reject".' },
           ],

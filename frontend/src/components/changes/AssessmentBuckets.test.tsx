@@ -454,7 +454,13 @@ describe('AssessmentBuckets checklist', () => {
     { key: 'modification_internal', label_de: 'Interne Änderung/Umbau',
       label_en: 'Internal modification', extra: false },
     { key: 'modification_external', label_de: 'Externe Änderung/Umbau (Lieferant)',
-      label_en: 'External modification (supplier)', extra: false },
+      label_en: 'External modification (supplier)', extra: false,
+      requires_documents: [
+        { kind: 'change_ppt', label_de: 'Änderungspräsentation', label_en: 'Change presentation',
+          extensions: ['.ppt', '.pptx', '.pdf'] },
+        { kind: 'rfq', label_de: 'Änderungs-RFQ', label_en: 'Change RFQ',
+          extensions: ['.pdf', '.xlsx', '.xls', '.docx', '.msg', '.eml'] },
+      ] },
     { key: 'article_design_update', label_de: 'Artikeldesign-Änderung',
       label_en: 'Article design update', extra: true,
       choices: ['internal', 'customer_given'] },
@@ -507,40 +513,78 @@ describe('AssessmentBuckets checklist', () => {
       })))
   })
 
-  it('asks for the RFQ where supplier work was ticked, and files it there', async () => {
+  const doc = (id: number, kind: string, filename: string) => ({
+    id, filename, content_type: 'application/octet-stream', size_bytes: 10,
+    phase: 'baseline', created_at: '2026-08-01T00:00:00', kind,
+    responds_to_id: null, concern_id: null, assessment_id: 1,
+  })
+
+  it('asks for the change presentation and the change RFQ where supplier work was ticked, and holds submit', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
     await screen.findByTestId('check-yes-modification_external')
-    // Nothing asked until the box is ticked.
-    expect(screen.queryByTestId('check-rfq-modification_external')).toBeNull()
+    // Nothing asked until the row says Yes.
+    expect(screen.queryByTestId('check-doc-modification_external-change_ppt')).toBeNull()
     fireEvent.click(screen.getByTestId('check-yes-modification_external'))
-    const slot = screen.getByTestId('check-rfq-modification_external')
-    expect(slot).toBeTruthy()
-    // A hint, not a gate: a feasible verdict still submits without the RFQ.
-    expect(screen.getByTestId('check-rfq-missing')).toBeTruthy()
+    const ppt = screen.getByTestId('check-doc-modification_external-change_ppt')
+    const rfq = screen.getByTestId('check-doc-modification_external-rfq')
+    expect(ppt.dataset.state).toBe('required')
+    expect(rfq.dataset.state).toBe('required')
+    expect(screen.getByTestId('check-doc-state-modification_external-change_ppt').textContent)
+      .toBe('Change presentation required')
+    expect(screen.getByTestId('check-doc-state-modification_external-rfq').textContent)
+      .toBe('Change RFQ required')
+    // Each document uploads from its own slot on the row, against the assessment.
+    const zones = screen.getAllByTestId('dropzone')
+    expect(zones.filter((z) => ppt.contains(z)).map((z) => [z.dataset.kind, z.dataset.assessment]))
+      .toEqual([['change_ppt', '1']])
+    expect(zones.filter((z) => rfq.contains(z)).map((z) => [z.dataset.kind, z.dataset.assessment]))
+      .toEqual([['rfq', '1']])
     answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
-    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
-    const zone = screen.getAllByTestId('dropzone')
-      .find((z) => z.getAttribute('data-kind') === 'rfq')
-    expect(zone?.getAttribute('data-assessment')).toBe('1')
+    // A strict gate, the backend's rule: submit waits, and says why.
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('assessment-docs-required').textContent)
+      .toContain('Change presentation (External modification (supplier)), Change RFQ')
     // Internal modification is tickable on its own and asks for nothing.
     fireEvent.click(screen.getByTestId('check-yes-modification_internal'))
-    expect(screen.queryByTestId('check-rfq-modification_internal')).toBeNull()
+    expect(screen.queryByTestId('check-doc-modification_internal-change_ppt')).toBeNull()
+    // Back to No: nothing owed, submit opens.
+    fireEvent.click(screen.getByTestId('check-no-modification_external'))
+    expect(screen.queryByTestId('assessment-docs-required')).toBeNull()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('shows an RFQ already on file under its row', async () => {
+  it('shows the filed documents under their row and lets the submit through', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })],
-      attachments: [{ id: 60, filename: 'rfq-supplier.pdf', content_type: 'application/pdf',
-        size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
-        kind: 'rfq', responds_to_id: null, concern_id: null, assessment_id: 1 }] }) })
+      attachments: [doc(60, 'rfq', 'rfq-supplier.pdf'), doc(61, 'change_ppt', 'change.pptx')] }) })
     fireEvent.click(await screen.findByTestId('check-yes-modification_external'))
-    expect(screen.getByTestId('check-rfq-modification_external').textContent)
+    expect(screen.getByTestId('check-doc-modification_external-rfq').textContent)
       .toContain('rfq-supplier.pdf')
-    expect(screen.queryByTestId('check-rfq-missing')).toBeNull()
-    // The bucket's own RFQ slot lists it too — same file, its named home.
+    expect(screen.getByTestId('check-doc-modification_external-rfq').dataset.state).toBe('filed')
+    expect(screen.getByTestId('check-doc-state-modification_external-change_ppt').textContent)
+      .toBe('Change presentation attached')
+    // The bucket's own RFQ slot lists it too: same file, its named home.
     expect(screen.getByTestId('bucket-rfq-2').textContent).toContain('rfq-supplier.pdf')
+    answerRestNo()
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    expect(screen.queryByTestId('assessment-docs-required')).toBeNull()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('holds the submit while only one of the two is filed', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })],
+      attachments: [doc(60, 'rfq', 'rfq-supplier.pdf'), doc(62, 'general', 'deck.pptx')] }) })
+    fireEvent.click(await screen.findByTestId('check-yes-modification_external'))
+    answerRestNo()
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    // A general file named like a deck is not the deck: the kind decides.
+    expect(screen.getByTestId('check-doc-modification_external-change_ppt').dataset.state).toBe('required')
+    expect(screen.getByTestId('assessment-docs-required').textContent).toContain('Change presentation')
+    expect(screen.getByTestId('assessment-docs-required').textContent).not.toContain('Change RFQ')
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('makes a choice-bearing item say which kind it is', async () => {

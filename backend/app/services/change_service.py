@@ -1471,6 +1471,10 @@ class ChangeService:
         if unknown:
             raise ChangeError(f"Parts not in this project: {unknown}")
         current = {i.part_id: i for i in change.impacted_items}
+        # The audit names the part by its number, not its row id.
+        numbers = dict((await session.execute(
+            select(Part.id, Part.part_number).where(
+                Part.id.in_(wanted | set(current))))).all())
         changed = False
         # The lead names the change, so it is pinned once the change is out of
         # the door — but while it is still being captured or scoped, picking
@@ -1489,15 +1493,15 @@ class ChangeService:
             await session.delete(item)
             await ChangeService.append_changelog(
                 session, change, "impacted_removed",
-                f"Impacted part {pid} removed via impact tree", user_id,
-                old_value={"part_id": pid})
+                f"Impacted part {numbers.get(pid, pid)} removed via impact tree",
+                user_id, old_value={"part_id": pid})
             changed = True
         for pid in sorted(wanted - set(current)):
             session.add(ChangeImpactedItem(change_id=change.id, part_id=pid,
                                            created_by=user_id))
             await ChangeService.append_changelog(
                 session, change, "impacted_added",
-                f"Impacted part {pid} added via impact tree", user_id,
+                f"Impacted part {numbers.get(pid, pid)} added via impact tree", user_id,
                 new_value={"part_id": pid})
             changed = True
         await session.flush()
@@ -1577,10 +1581,12 @@ class ChangeService:
         item = await session.get(ChangeImpactedItem, item_id)
         if not item or item.change_id != change.id:
             raise ChangeError("Impacted item not found")
+        part = await session.get(Part, item.part_id)
         await session.delete(item)
         await ChangeService.append_changelog(
             session, change, "impacted_item_removed",
-            f"Removed impacted item {item.part_id}", user_id,
+            f"Removed impacted item {part.part_number if part else item.part_id}",
+            user_id,
             old_value={"part_id": item.part_id},
         )
         await ChangeService._reset_impact_confirmation(session, change, user_id)
@@ -2547,9 +2553,10 @@ class ChangeService:
                     "target_tab": "assessments",
                 })
 
-        # kind "impact_confirm": defining and locking the impacted set is the
+        # kind "impact_confirm": picking and locking the impacted set is the
         # first step INSIDE scoping — capture is Sales writing the request
-        # down, the impacted set is the project team's call. So it is offered
+        # down, the impacted set is Development's call (the lead and PM may
+        # pick too; Development confirms). So it is offered
         # in 'scoping' only, and offered even when the set is still empty
         # (that is the work). Locking unblocks assessment (the -> in_assessment
         # hard gate in transition()). Mirrors
@@ -2559,8 +2566,9 @@ class ChangeService:
                 and await ChangeService.user_can_confirm_impact(session, user)):
             actions.append({
                 "kind": "impact_confirm",
-                "label": ("Confirm impacted items" if change.impacted_items
-                          else "Define and confirm impacted items"),
+                # Development picks the set itself (it no longer waits on
+                # PM to pick first) and then confirms it.
+                "label": "Pick and confirm impacted items",
                 "target_tab": "impacted",
             })
 
@@ -3452,6 +3460,25 @@ class ChangeService:
             session.add(a)
         else:
             raise ChangeError("no open assessment for this department")
+        # A Yes on a checklist row that owes documents (external modification:
+        # the change presentation and the change RFQ) is not a finished answer
+        # until they are filed against THIS assessment, told apart by their
+        # attachment kind. Judged on the answer being submitted (else the one
+        # stored); a draft saves without them, only the submit is held. A
+        # department that said "not impacted" answered nothing below it.
+        answer = details if isinstance(details, dict) else a.details_dict
+        if answer.get("impacted") is not False:
+            filed: set = set()
+            if a.id is not None:
+                filed = {k for (k,) in (await session.execute(
+                    select(ChangeAttachment.kind).where(
+                        ChangeAttachment.change_id == change.id,
+                        ChangeAttachment.assessment_id == a.id))).all()}
+            dept = await session.get(Department, department_id)
+            owed = checklist.missing_documents(
+                answer.get("impacts"), filed, dept.name if dept else None)
+            if owed:
+                raise ChangeError("; ".join(owed))
         a.verdict = verdict
         a.cost_impact = cost_impact
         a.lead_time_impact_days = lead_time_impact_days
@@ -3951,6 +3978,13 @@ class ChangeService:
         phase = "baseline" if change.status in SCOPING_STATUSES else "post_scoping"
         if kind not in ATTACHMENT_KINDS:
             raise ChangeError(f"Invalid attachment kind '{kind}'")
+        # The documents a checklist row owes take only the file types they
+        # come in (the change presentation: PowerPoint or its PDF export).
+        exts = checklist.allowed_extensions(kind)
+        if exts and not filename.lower().endswith(exts):
+            raise ChangeError(
+                f"{checklist.DOCUMENT_PHRASES[kind].capitalize()} must be a "
+                f"{', '.join(exts)} file (got '{filename}')")
         # Customer correspondence belongs to the change, not to one department's
         # assessment or one open question. Filing it into a container would hide
         # it from everyone who is not looking in that container — the opposite

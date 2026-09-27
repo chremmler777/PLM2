@@ -52,4 +52,16 @@ describe('AttachmentDropzone', () => {
     await waitFor(() => expect(toastErr).toHaveBeenCalledWith(expect.stringMatching(/larger than 50 MB/i)))
     expect(upload).not.toHaveBeenCalled()
   })
+
+  it('a typed slot turns other file types away and uploads the rest', async () => {
+    render(<AttachmentDropzone changeId={7} onUploaded={vi.fn()} kind="change_ppt"
+      extensions={['.ppt', '.pptx', '.pdf']} label="Drop the deck" />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(input.accept).toBe('.ppt,.pptx,.pdf')
+    fireEvent.drop(screen.getByRole('button', { name: 'Drop the deck' }),
+      { dataTransfer: { files: [file('notes.docx'), file('Deck.PPTX')] } })
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1))
+    expect(upload).toHaveBeenCalledWith(7, expect.objectContaining({ name: 'Deck.PPTX' }))
+    expect(toastErr).toHaveBeenCalledWith('notes.docx: this slot takes .ppt, .pptx, .pdf only')
+  })
 })

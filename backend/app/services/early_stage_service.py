@@ -247,12 +247,22 @@ class EarlyStageService:
     async def impact_edit_refusal(session: AsyncSession, change: ChangeRequest,
                                   user: User) -> Optional[str]:
         """Editing the impacted set: the change lead, Project Management
-        members, admin. Development confirms it (a separate act)."""
+        members, admin, at any open stage (after the lock their edit clears
+        Development's confirmation: that is the reopen). Development members
+        (acts-as aware, the same check as the confirm) pick the set
+        themselves while it is at scoping and not locked, then confirm it."""
         r = await EarlyStageService._roles(session, change, user)
         if r["run_team"]:
             return None
-        return ("Only the change lead, Project Management or an admin may edit "
-                "the impacted items")
+        if (change.status == "scoping"
+                and await ChangeService.user_can_confirm_impact(session, user)):
+            if change.impact_confirmed_at is None:
+                return None
+            return ("The impacted set is locked (confirmed by Development). "
+                    "Only the change lead, Project Management or an admin may "
+                    "reopen it by editing")
+        return ("Only Development (at scoping, before the lock), the change "
+                "lead, Project Management or an admin may edit the impacted items")
 
     @staticmethod
     def post_quote(change: ChangeRequest) -> bool:
