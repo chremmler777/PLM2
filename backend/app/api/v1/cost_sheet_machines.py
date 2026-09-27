@@ -16,7 +16,7 @@ from app.models.cost_sheet import CURRENCIES
 from app.models import get_db, User
 from app.services import cost_sheet_machines_service as msvc
 from app.services import cost_sheet_service as svc
-from app.services import machinedb_client
+from app.services import machinedb_client, twos_client
 from app.services.cost_sheet_service import CostSheetError
 
 router = APIRouter(prefix="/cost-sheet/machines", tags=["cost-sheet"])
@@ -53,6 +53,7 @@ async def _status(db: AsyncSession, user: User) -> dict:
     org = user.organization_id
     return {
         "machinedb": machinedb_client.config_status(),
+        "twos": twos_client.config_status(),
         "last_sync": await msvc.last_sync(db, org),
         "can_sync": await msvc.can_sync(db, user),
         "can_edit_rates": await svc.can_edit(db, user),
@@ -102,6 +103,22 @@ async def sync(force: bool = False, current_user: User = Depends(get_current_use
         await _conflict(db, "Another sync of the machines ran at the same time. "
                             "Reload to see its result.")
     return result
+
+
+@router.post("/tool-tonnage/sync")
+async def sync_tool_tonnage(current_user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """Refresh the press tonnage of every tool in the caller's organisation
+    from MachineDB (first) and TWOS (second): the tonnage costing derives a
+    change's default machine class from. A source that is not configured or
+    fails is reported and leaves the stored values alone; a sync never
+    clears a tonnage. Lines already priced keep their class."""
+    from app.services import tool_tonnage_service as tts
+    if not await msvc.can_sync(db, current_user):
+        raise HTTPException(403, "Only Sales, Finance or an admin may refresh the tool tonnage")
+    report = await tts.sync_org(db, current_user.organization_id, fresh=True)
+    await db.commit()
+    return {**report, "sources": tts.sources_status()}
 
 
 @router.put("/plant-map")

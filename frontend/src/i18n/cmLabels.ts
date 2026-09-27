@@ -809,6 +809,41 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.machineClassNone': { de: 'keine (Tonnage unbekannt)', en: 'none (tonnage unknown)' },
   'costing.machineClassAuto': { de: 'Automatisch', en: 'Automatic' },
   'costing.machineClassSaved': { de: 'Maschinenklasse gespeichert', en: 'Machine class saved' },
+  'costing.classFromTool': { de: 'aus Werkzeug {tool} ({source}, {t} t)', en: 'from tool {tool} ({source}, {t} t)' },
+  'costing.classNoBand': {
+    de: 'keine Maschinenklasse deckt {t} t ab, bitte von Hand wählen',
+    en: 'no machine class covers {t} t, pick one by hand',
+  },
+  'costing.tonnageSource.machinedb': { de: 'MachineDB', en: 'MachineDB' },
+  'costing.tonnageSource.twos': { de: 'TWOS', en: 'TWOS' },
+  'costing.tonnageSource.plm2': { de: 'PLM2-Werkzeugdaten', en: 'PLM2 tool data' },
+  'costing.tonnageAssigned': { de: 'zugeordnete Maschine {machine}', en: 'assigned press {machine}' },
+  'costing.tonnageQualifiedMin': {
+    de: 'kleinste freigegebene Maschine (keine zugeordnet)',
+    en: 'smallest qualified press (none assigned)',
+  },
+  'costing.toolNoTonnage': {
+    de: 'Werkzeug {tools} hat keine Tonnage: Maschinenklasse bitte von Hand wählen',
+    en: 'Tool {tools} has no tonnage: pick a machine class by hand',
+  },
+  'costing.toolsNoTonnage': {
+    de: 'Werkzeuge {tools} haben keine Tonnage: Maschinenklasse bitte von Hand wählen',
+    en: 'Tools {tools} have no tonnage: pick a machine class by hand',
+  },
+  'costing.noToolOnChange': {
+    de: 'Kein Werkzeug an dieser Änderung: Maschinenklasse bitte von Hand wählen',
+    en: 'No tool on this change: pick a machine class by hand',
+  },
+  'costing.refreshTonnage': { de: 'Werkzeugtonnage aktualisieren', en: 'Refresh tool tonnage' },
+  'costing.refreshTonnageDone': { de: 'Werkzeugtonnage aktualisiert', en: 'Tool tonnage refreshed' },
+  'costing.refreshTonnageFailed': {
+    de: '{source} nicht erreichbar, die gespeicherte Tonnage bleibt',
+    en: '{source} could not be reached, the stored tonnage stays',
+  },
+  'costing.refreshTonnageFailedWhy': {
+    de: '{why}. Die gespeicherte Tonnage bleibt',
+    en: '{why}. The stored tonnage stays',
+  },
   'costing.totalsByCurrency': { de: 'Summen je Währung', en: 'Totals per currency' },
   'costpos.standing': { de: 'Pflichtangabe', en: 'standing' },
   'costpos.internalEffortRow': { de: 'Aufwand Bewertung', en: 'Assessment effort' },

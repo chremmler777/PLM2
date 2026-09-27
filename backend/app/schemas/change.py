@@ -950,6 +950,12 @@ class CostingPositionResponse(BaseModel):
     machine_class: Optional[str] = None
     machine_class_used_id: Optional[int] = None
     machine_class_from_change: bool = False
+    # Where the class came from (costing_rates.price_for_position):
+    # {kind: line | machine | change} for a hand pick or a named press;
+    # {kind: tool, tool_number, source: machinedb | twos | plm2, tonnage,
+    # basis, machine, class_found} for the change's tool tonnage; {kind:
+    # none, tools, without} when no tool has one. None before 108.
+    machine_class_origin: Optional[dict] = None
     trials: Optional[int] = None
     machine_id: Optional[int] = None
     machine_name: Optional[str] = None

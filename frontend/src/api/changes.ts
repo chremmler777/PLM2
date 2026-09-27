@@ -226,6 +226,10 @@ export const changesApi = {
   setMachineClass: (id: number, machineClassId: number | null) =>
     client.put<CostingContext>(`/v1/changes/${id}/costing/machine-class`,
       { machine_class_id: machineClassId }).then((r) => r.data),
+  /** Ask MachineDB and TWOS again for the tonnage of the change's tools. */
+  refreshToolTonnage: (id: number) =>
+    client.post<CostingContext>(`/v1/changes/${id}/costing/tool-tonnage/refresh`)
+      .then((r) => r.data),
 
   // Vendor offers under an external position — one row per vendor asked.
   addCostingOffer: (id: number, pid: number, body: CostingOfferIn) =>

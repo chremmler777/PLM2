@@ -39,6 +39,7 @@ import { toastError } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
+import { machineClassOriginDetail, machineClassOriginText } from './machineClassOrigin'
 import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
 import { formatHours, formatMoney, formatNumber } from '../../lib/format'
 import type {
@@ -737,8 +738,18 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           <span data-testid={`costpos-kind-${p.id}`} className="text-xs text-slate-400">
             {t(`costpos.type.${type}`)}
             {isMachine && p.machine_class && (
-              <span className="block text-[11px] text-slate-500">
-                {p.machine_class}{p.machine_class_from_change ? ` (${t('costpos.classFromChange')})` : ''}
+              <span data-testid={`costpos-class-${p.id}`} className="block text-[11px] text-slate-500"
+                title={machineClassOriginDetail(p.machine_class_origin) ?? undefined}>
+                {p.machine_class}
+                {p.machine_class_origin?.kind === 'tool'
+                  ? `, ${machineClassOriginText(p.machine_class_origin)}`
+                  : p.machine_class_from_change ? ` (${t('costpos.classFromChange')})` : ''}
+              </span>
+            )}
+            {isMachine && !p.machine_class && machineClassOriginText(p.machine_class_origin) && (
+              <span data-testid={`costpos-class-${p.id}`} className="block text-[11px] text-amber-300"
+                title={machineClassOriginDetail(p.machine_class_origin) ?? undefined}>
+                {machineClassOriginText(p.machine_class_origin)}
               </span>
             )}
             {isMachine && p.machine_name && (

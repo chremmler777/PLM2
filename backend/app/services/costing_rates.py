@@ -323,6 +323,8 @@ class RateBook:
         self._legacy: Optional[dict[tuple[int, int], tuple]] = None
         self._classes: dict[int, list] = {}
         self._machines: dict[int, object] = {}
+        # change id -> (class, origin, tonnage) of its tools (tool_default_class)
+        self._tool_default: dict[int, tuple] = {}
 
     async def machine(self, machine_id: Optional[int]):
         """The synced MachineDB machine (cost_sheet_machines row), cached."""
@@ -686,38 +688,106 @@ async def sampling_price(db: AsyncSession, org_id: Optional[int],
 # ---------------------------------------------------------------- machine class
 
 async def impacted_tonnage(db: AsyncSession, change) -> Optional[float]:
-    """The largest tool_tonnage_class among the change's impacted items."""
-    from app.models.change import ChangeImpactedItem
-    from app.models.part import Part
-    rows = (await db.execute(
-        select(Part.tool_tonnage_class).join(
-            ChangeImpactedItem, ChangeImpactedItem.part_id == Part.id)
-        .where(ChangeImpactedItem.change_id == change.id,
-               Part.tool_tonnage_class.is_not(None)))).scalars().all()
-    return float(max(rows)) if rows else None
+    """The largest press tonnage over the change's tools (impacted tools and
+    the tools producing an impacted article): MachineDB, else TWOS, else
+    the tonnage typed on the tool (tool_tonnage_service)."""
+    from app.services import tool_tonnage_service as tts
+    return (await tts.change_tonnage(db, change)).tonnage
+
+
+def tool_origin(ct, class_found: bool = True) -> dict:
+    """Where a tool-derived class comes from, for the costing line and the
+    costing strip: the tool, the source and its tonnage; or, when no tool of
+    the change has a tonnage, the tools that lack one ("pick a class by
+    hand")."""
+    if ct.best is None:
+        return {"kind": "none", "tools": list(ct.tools), "without": list(ct.without)}
+    b = ct.best
+    return {"kind": "tool", "tool_number": b.tool_number, "source": b.source,
+            "tonnage": b.tonnage, "basis": b.basis, "machine": b.machine,
+            "class_found": class_found}
+
+
+async def tool_default_class(db: AsyncSession, org_id: Optional[int], change, *,
+                             book: Optional["RateBook"] = None
+                             ) -> tuple[Optional[CostSheetMachineClass], dict, Optional[float]]:
+    """(class, origin, tonnage): the class whose band holds the change's
+    tool tonnage, where that came from, and the tonnage. Cached on the book
+    (one lookup per change for a whole costing table)."""
+    from app.services import tool_tonnage_service as tts
+    key = getattr(change, "id", None)
+    if book is not None and key is not None and key in book._tool_default:
+        return book._tool_default[key]
+    ct = await tts.change_tonnage(db, change)
+    cls = None
+    if ct.tonnage is not None and org_id is not None:
+        classes = await cs.list_machine_classes(db, org_id)
+        name = cs.class_for_tonnage(classes, ct.tonnage)
+        cls = next((c for c in classes if c.name == name), None)
+    out = (cls, tool_origin(ct, class_found=cls is not None), ct.tonnage)
+    if book is not None and key is not None:
+        book._tool_default[key] = out
+    return out
 
 
 async def default_machine_class(db: AsyncSession, org_id: Optional[int], change
                                 ) -> tuple[Optional[CostSheetMachineClass], Optional[float]]:
-    """(class, tonnage): the class whose band holds the impacted tool's
+    """(class, tonnage): the class whose band holds the change's tool
     tonnage, when the tonnage is known."""
-    tonnage = await impacted_tonnage(db, change)
-    if tonnage is None or org_id is None:
-        return None, tonnage
-    classes = await cs.list_machine_classes(db, org_id)
-    name = cs.class_for_tonnage(classes, tonnage)
-    return next((c for c in classes if c.name == name), None), tonnage
+    cls, _, tonnage = await tool_default_class(db, org_id, change)
+    return cls, tonnage
+
+
+async def change_machine_class(db: AsyncSession, change, org_id: Optional[int] = None, *,
+                               book: Optional["RateBook"] = None
+                               ) -> tuple[Optional[int], dict]:
+    """(class id, origin): the class picked by hand on the change, else the
+    class of the change's tool tonnage."""
+    if getattr(change, "machine_class_id", None):
+        return change.machine_class_id, {"kind": "change"}
+    if org_id is None:
+        org_id = await change_org_id(db, change)
+    cls, origin, _ = await tool_default_class(db, org_id, change, book=book)
+    return (cls.id if cls is not None else None), origin
 
 
 async def change_machine_class_id(db: AsyncSession, change,
                                   org_id: Optional[int] = None) -> Optional[int]:
     """The change's own class, else the tonnage default."""
+    return (await change_machine_class(db, change, org_id))[0]
+
+
+async def booking_machine_class_id(db: AsyncSession, change,
+                                   org_id: Optional[int] = None) -> Optional[int]:
+    """The class a machine-hour booking defaults to: the one the change's
+    machine hours were costed on, so actuals compare with the costing. The
+    hand pick on the change; else the class in the snapshot of its priced
+    class-less machine_time lines (sampling lines when it has none) without
+    a named press, a line priced on a tool's class keeping it while the
+    tonnage moves (frozen_tool_class); of several, the one with the most
+    hours. Else the live class (change_machine_class_id)."""
     if getattr(change, "machine_class_id", None):
         return change.machine_class_id
-    if org_id is None:
-        org_id = await change_org_id(db, change)
-    c, _ = await default_machine_class(db, org_id, change)
-    return c.id if c is not None else None
+    rows = (await db.execute(select(
+        CostingPosition.kind, CostingPosition.hours, CostingPosition.trials,
+        CostingPosition.rate_detail).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.kind.in_(("machine_time", "sampling")),
+        CostingPosition.machine_class_id.is_(None),
+        CostingPosition.machine_id.is_(None),
+        CostingPosition.rate_on.is_not(None)).order_by(CostingPosition.id))).all()
+    for kind in ("machine_time", "sampling"):
+        weight: dict[int, float] = {}
+        for k, hours, trials, detail in rows:
+            cls = (detail or {}).get("machine_class_id")
+            if k != kind or not cls:
+                continue
+            q = float((hours if k == "machine_time" else trials) or 0)
+            weight[int(cls)] = weight.get(int(cls), 0.0) + q
+        if weight:
+            # most hours; dict order (the first line priced) breaks a tie
+            return max(weight, key=lambda c: weight[c])
+    return await change_machine_class_id(db, change, org_id)
 
 
 # ---------------------------------------------------------------- lines
@@ -732,11 +802,18 @@ def quantity(p: CostingPosition) -> float:
 async def price_for_position(db: AsyncSession, change, p: CostingPosition, *,
                              org_id: Optional[int] = None, plant_id: Optional[int] = None,
                              on_date: Optional[date] = None,
-                             book: Optional[RateBook] = None) -> Price:
+                             book: Optional[RateBook] = None,
+                             tool_class: Optional[tuple[int, Optional[dict]]] = None
+                             ) -> Price:
     """The line's price with the version valid on on_date (default: the
-    change's creation date). A machine_time / sampling line without its own
-    class is priced on the change's class (own or tonnage default); the class
-    used is recorded in detail["machine_class_id"]."""
+    change's creation date). A machine_time / sampling line's class: its own
+    (picked by hand on the line), else the named machine's, else the one
+    picked by hand on the change, else the class of the change's tool
+    tonnage (MachineDB, TWOS, typed in plm2). The class used is recorded in
+    detail["machine_class_id"], where it came from in
+    detail["machine_class_origin"] ({kind: line | machine | change | tool |
+    none, ...}). `tool_class` (class id, origin) replaces the tool-derived
+    class: a priced line keeps the class it was priced on (snapshot_position)."""
     book = book or RateBook(db)
     on_date = on_date or change_pricing_date(change)
     if plant_id is None:
@@ -744,16 +821,25 @@ async def price_for_position(db: AsyncSession, change, p: CostingPosition, *,
     if org_id is None:
         org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
     if p.kind in ("machine_time", "sampling"):
-        # the line's own class, else the named machine's, else the change's
         machine_id = getattr(p, "machine_id", None)
-        cls_id = (p.machine_class_id or await book.machine_class_of(org_id, machine_id)
-                  or await change_machine_class_id(db, change, org_id))
+        if p.machine_class_id:
+            cls_id, origin = p.machine_class_id, {"kind": "line"}
+        else:
+            cls_id = await book.machine_class_of(org_id, machine_id)
+            origin = {"kind": "machine"}
+            if not cls_id:
+                if tool_class is not None and not getattr(change, "machine_class_id", None):
+                    cls_id, origin = tool_class
+                else:
+                    cls_id, origin = await change_machine_class(db, change, org_id,
+                                                                book=book)
         fn = book.machine_price if p.kind == "machine_time" else book.sampling_price
         price = await fn(org_id, cls_id, plant_id, on_date, machine_id=machine_id)
         if machine_id is not None:
             price.detail = {**price.detail, "machine_id": machine_id}
         if cls_id is not None:
             price.detail = {**price.detail, "machine_class_id": cls_id}
+        price.detail = {**price.detail, "machine_class_origin": origin}
         return price
     return await book.labour_price(org_id, p.department_id, plant_id,
                                    p.labour_position, on_date)
@@ -774,7 +860,8 @@ async def snapshot_position(db: AsyncSession, change, p: CostingPosition,
     The money currency (p.currency, of est_cost and offers) is the costing
     plant's and is not the rate's business."""
     on_date = on_date or change_pricing_date(change)
-    price = await price_for_position(db, change, p, on_date=on_date)
+    price = await price_for_position(db, change, p, on_date=on_date,
+                                     tool_class=frozen_tool_class(p, change))
     p.rate = price.rate
     p.rate_currency = price.currency
     if p.currency is None:
@@ -786,6 +873,37 @@ async def snapshot_position(db: AsyncSession, change, p: CostingPosition,
     p.rate_on = on_date if price.rate is not None else None
     p.rate_detail = {"unit": price.unit, **price.detail} or None
     return price
+
+
+def frozen_tool_class(p: CostingPosition, change=None
+                      ) -> Optional[tuple[int, Optional[dict]]]:
+    """The tool-derived class a priced line was priced on, so re-pricing it
+    (its hours edited) keeps that class: a later tool tonnage (a sync, a
+    tool added to the change) never moves a line already priced, as a later
+    rate never does. None when the line was not priced on a tool's class;
+    picking a class on the change (set_machine_class) still moves it.
+
+    A line priced before 108 has no machine_class_origin (or None, once
+    re-priced here): with no class of its own, no named press and no hand
+    pick on the change, the class in its snapshot was the tonnage default
+    of its day, so it is frozen too (origin None, as before), instead of
+    jumping to today's tool class on its first hours edit."""
+    if p.rate_on is None or p.rate is None:
+        return None
+    if change is not None and getattr(change, "machine_class_id", None):
+        return None
+    detail = p.rate_detail or {}
+    cls_id = detail.get("machine_class_id")
+    if not cls_id:
+        return None
+    if detail.get("machine_class_origin") is None:     # no key, or kept None
+        if p.machine_class_id is None and getattr(p, "machine_id", None) is None:
+            return int(cls_id), None
+        return None
+    origin = detail.get("machine_class_origin") or {}
+    if origin.get("kind") != "tool":
+        return None
+    return int(cls_id), origin
 
 
 def stored_price(p: CostingPosition) -> Optional[Price]:
@@ -871,6 +989,10 @@ async def describe_positions(db: AsyncSession, change, positions) -> dict[int, d
             "machine_class_from_change": bool(
                 p.kind in ("machine_time", "sampling") and used_cls
                 and not p.machine_class_id and machine is None),
+            # where the class came from (priced lines: as it was then);
+            # None on a line priced before 108 or not a machine line
+            "machine_class_origin": (price.detail.get("machine_class_origin")
+                                     if p.kind in ("machine_time", "sampling") else None),
             "machine_id": getattr(p, "machine_id", None),
             "machine_name": machine_name,
             # priced on the machine's own rate (else its class rate)
@@ -909,6 +1031,7 @@ async def costing_context(db: AsyncSession, change) -> dict:
     its currency, the cost sheet version that prices the change (valid on
     its creation date, pricing_date) and whether the sheet owes a review, the machine classes with the change's class (own or the
     tonnage default), and the positions each department has a rate for."""
+    from app.services import tool_tonnage_service as tts
     plant_id = await costing_plant_id(db, change)
     org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
     plant = await db.get(Plant, plant_id) if plant_id is not None else None
@@ -921,7 +1044,7 @@ async def costing_context(db: AsyncSession, change) -> dict:
                 and current.valid_from > pricing_date)
     latest = await cs.latest_published(db, org_id) if org_id is not None else None
     classes = await cs.list_machine_classes(db, org_id) if org_id is not None else []
-    default_cls, tonnage = await default_machine_class(db, org_id, change)
+    default_cls, tool_class_origin, tonnage = await tool_default_class(db, org_id, change)
     effective = change.machine_class_id or (default_cls.id if default_cls else None)
     # Rates are one per department per plant (104): no labour positions to
     # offer any more. The key stays (empty) for older clients.
@@ -950,6 +1073,12 @@ async def costing_context(db: AsyncSession, change) -> dict:
         "default_machine_class_id": default_cls.id if default_cls else None,
         "effective_machine_class_id": effective,
         "tonnage": tonnage,
+        # where the default class comes from: {kind: tool, tool_number,
+        # source: machinedb | twos | plm2, tonnage, basis, machine,
+        # class_found} or {kind: none, tools, without}
+        "tool_class_origin": tool_class_origin,
+        "tonnage_sources": {k: v["configured"] for k, v in
+                            tts.sources_status().items()},
         "positions_by_department": {str(k): sorted(v) for k, v in positions.items()},
     }
 
@@ -1002,21 +1131,26 @@ async def set_machine_class(db: AsyncSession, change, machine_class_id: Optional
     old = change.machine_class_id
     if old == machine_class_id:
         return
-    old_effective = await change_machine_class_id(db, change, org_id)
     change.machine_class_id = machine_class_id
     await db.flush()
     new_effective = await change_machine_class_id(db, change, org_id)
+    # Compared line by line, not old against new effective class: a line
+    # priced on the tool class stays on it (frozen_tool_class) while the
+    # tool's tonnage moves, so a pick equal to today's tool default must
+    # still move a line frozen on a stale tool class.
     repriced = []
-    if new_effective != old_effective:
-        lines = (await db.execute(select(CostingPosition).where(
-            CostingPosition.change_id == change.id,
-            CostingPosition.kind.in_(("machine_time", "sampling")),
-            CostingPosition.machine_class_id.is_(None)))).scalars().all()
-        for p in lines:
-            before = (p.rate, p.cost_sheet_version)
-            await snapshot_position(db, change, p)
-            repriced.append({"position_id": p.id, "label": p.label,
-                             "old_rate": before[0], "new_rate": p.rate})
+    lines = (await db.execute(select(CostingPosition).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.kind.in_(("machine_time", "sampling")),
+        CostingPosition.machine_class_id.is_(None)))).scalars().all()
+    for p in lines:
+        if not _moves_with_change_class(p, new_effective):
+            continue
+        before = (p.rate, p.cost_sheet_version)
+        await snapshot_position(db, change, p)
+        repriced.append({"position_id": p.id, "label": p.label,
+                         "old_rate": before[0], "new_rate": p.rate})
+    if repriced:
         await db.flush()
     from app.services.change_service import ChangeService
     await ChangeService.append_changelog(
@@ -1027,6 +1161,20 @@ async def set_machine_class(db: AsyncSession, change, machine_class_id: Optional
         old_value=names.get(old) if old else None,
         new_value={"machine_class": names.get(machine_class_id) if machine_class_id
                    else None, "repriced": repriced})
+
+
+def _moves_with_change_class(p: CostingPosition, new_effective: Optional[int]) -> bool:
+    """A class-less machine / sampling line set_machine_class re-prices: one
+    priced on the change's or the tool's class, or on another class than
+    the new effective one (a line never priced, a line priced before 108).
+    A line priced on its named press's class keeps it."""
+    detail = p.rate_detail or {}
+    kind = (detail.get("machine_class_origin") or {}).get("kind")
+    if kind == "machine":
+        return False
+    if kind in ("tool", "change"):
+        return True
+    return detail.get("machine_class_id") != new_effective or p.rate_on is None
 
 
 # ---------------------------------------------------------------- actuals

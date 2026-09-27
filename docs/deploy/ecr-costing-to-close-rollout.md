@@ -37,7 +37,7 @@ No new Python or npm dependencies (requirements.txt and package.json are
 unchanged against main). The image rebuild is still mandatory: code and
 migrations are baked into it.
 
-## Migrations 085 to 107
+## Migrations 085 to 108
 
 085 and 086 are already on prod (deployed 2026-09-25) and are listed for
 completeness. On Postgres the whole `alembic upgrade head` run is ONE
@@ -69,6 +69,7 @@ fails, nothing of 087..head stays.
 | 105 | MachineDB presses: new `cost_sheet_machines` (synced copy, unique per org and MachineDB id), new `cost_sheet_machine_item_rates` (one rate per machine per version), `costing_positions.machine_id` (nullable FK). Guarded (skips what exists). See "MachineDB machines in the cost sheet". | No (schema only; filled by the sync) | Drops both tables and the column: per-machine rates and machine choices on lines lost; lines fall back to class pricing. |
 | 106 | Two currencies per plant. `plants.local_currency` (nullable), `cost_sheet_versions.fx_rates` (JSON, e.g. `{"USD/MXN": "17.30"}` = 1 USD is 17.30 MXN, frozen on publish), `entered_rate` / `entered_currency` on `cost_sheet_rates` and `cost_sheet_machine_rates` (a rate typed in the local currency). DATA CHANGE: a plant named, coded or located Silao (code `SIL`) without a local currency gets quote currency `USD` and local currency `MXN`, once; the EMPTY rows of an open draft at Silao follow it to `USD`. Published versions keep their rows and currencies (frozen); rows with a rate are not relabelled. Pending the Silao currency decision (Finance to-do 4). | Yes (UPDATE plants for Silao; UPDATE empty draft rows) | Drops the columns (exchange rates and typed local numbers lost). Silao's quote currency stays `USD`. |
 | 107 | `cost_sheet_machine_item_rates.entered_rate` / `entered_currency` (nullable): a per-machine rate typed in the plant's local currency (Silao: MXN), like 106 did for the rate and machine class rows. Guarded. | No (schema only) | Drops the two columns: typed local numbers lost, the rates in the quote currency stay. |
+| 108 | Tool tonnage from MachineDB and TWOS: six nullable columns on `parts` (`tool_tonnage_mdb_t`, `_mdb_basis`, `_mdb_machine`, `_mdb_at`, `tool_tonnage_twos_t`, `_twos_at`). Guarded. See "Tool tonnage for the machine class". | No (schema only; filled by the sync) | Drops the six columns: the synced tonnage is lost (a new sync refills it); lines already priced keep their class. |
 
 Summary: nothing drops or rewrites existing business data except 093
 (origin backfill), 094 (plant currencies, cost sheet rebuild), 095
@@ -273,11 +274,76 @@ nothing.
 Local dry run (2026-09-26, rolled back): 53 machines (usa 26, mexico 27),
 all mapped, a second sync reports nothing new or changed.
 
+## Tool tonnage for the machine class (migration 108)
+
+Machine time and sampling lines are priced on a machine class. The class
+of a line is, in this order: picked by hand on the line; the class of the
+MachineDB press the line names; picked by hand on the change ("Machine
+class of the change"); else derived from the tonnage of the change's
+tools. The tools of a change are the impacted items that are tools and
+the tools that produce an impacted article (`part_relations`
+`produces`); the largest tonnage over them sets the class.
+
+A tool's tonnage comes from, in this order:
+
+1. MachineDB (`GET /v1/im-tools?tool_number=...`): the clamping force of
+   the press the tool is assigned to; without an assigned press, the
+   smallest press the tool is qualified on (`qualified_min_tonnage_t`),
+   the realistic cost basis since the tool runs on the smallest press that
+   takes it;
+2. TWOS (`GET /v1/tools`, field `press`; `0` or empty = unknown);
+3. the tonnage typed on the tool in PLM2 (tool page, "Tonnage class").
+
+Tool numbers are matched without leading zeros (PLM2 `0745` = TWOS
+`745`). The costing strip and each line say where the class came from
+("200-450 t, from tool 3454 (MachineDB, 450 t)"); when no tool has a
+tonnage they say "Tool 3454 has no tonnage: pick a machine class by hand".
+
+Costing never calls MachineDB or TWOS: a sync copies the tonnage onto the
+tool part (migration 108), at backend start, after a change's impacted
+items grow (in the background), and on "Refresh tool tonnage" in the
+costing strip (whoever may set the change's class) or
+`POST /api/v1/cost-sheet/machines/tool-tonnage/sync` (the whole
+organisation; Sales, Finance, admins). Guarded: a source that is not
+configured, fails or has no tonnage for a tool leaves the stored value; a
+sync never clears one. A costing line already priced keeps its class when
+a tool's tonnage changes later (like it keeps its rate); only picking a
+class on the change re-prices the lines that follow the change.
+
+**Needs the new MachineDB route deployed first:** `GET /v1/im-tools`
+(MachineDB `backend/src/routes/v1-im-tools.ts`, service token). An older
+MachineDB answers 404; the refresh reports "MachineDB has no /v1/im-tools
+route yet" and TWOS still fills in. Check from the plm2 host:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $MACHINEDB_SERVICE_TOKEN" \
+  "https://<machinedb host>/v1/im-tools?tool_number=3454"   # 200 = route deployed
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TWOS_SERVICE_TOKEN" \
+  "$TWOS_API_URL/tools"                                      # 200 = reachable and token accepted
+```
+
+Environment of `plm2-backend` (all optional; unset = that source skipped):
+
+| Variable | Value | Note |
+|---|---|---|
+| `MACHINEDB_API_URL`, `MACHINEDB_SERVICE_TOKEN` | as above | the same connection as the machine sync |
+| `TWOS_API_URL` | `http://twos-backend:8000/v1` (docker-internal) or an https route | the TWOS service API (`/v1`), the one PDB uses |
+| `TWOS_SERVICE_TOKEN` | TWOS's service token (the one PDB uses, `/data/compose/secrets/shared.env`) | secret: compose `.env`, never in git; never logged. Same rule as MachineDB: never plain http across hosts |
+| `TWOS_TIMEOUT_S` | `10` (default) | request timeout |
+| `TOOL_TONNAGE_SYNC_ON_STARTUP` | `1` (default) | a background refresh at backend start when MachineDB or TWOS is configured; `0` turns it off. Same organisations as the machine sync (`machinedb_enabled`, else the single organisation with plants). |
+
+Refresh after the recreate (step 4) and the smoke checks: as an admin,
+`POST /plm2/api/v1/cost-sheet/machines/tool-tonnage/sync` (or wait for the
+startup refresh) and read the report: tools, per source the status
+(`ok`, `failed`, `not_configured`), matched and updated counts, and the
+tools no source has a tonnage for (`without`). Those need a class picked
+by hand on their changes, or a tonnage in MachineDB, TWOS or on the tool.
+
 ## Preflight (local, before the go)
 
 1. Branch merged to main on the owner's go (no merge is part of this
    document). Check the tree is complete: `alembic heads` shows one head,
-   `107`.
+   `108`.
 2. Full suites on a clean checkout of the merge commit: backend
    `python -m pytest -q` (xdist), frontend `npx vitest run`, `npx tsc
    --noEmit`. Record the counts in the deploy log.
@@ -290,7 +356,7 @@ all mapped, a second sync reports nothing new or changed.
    tests/test_migration_101_sqlite.py tests/test_migration_102_sqlite.py
    tests/test_migration_103_sqlite.py tests/test_migration_104_sqlite.py
    tests/test_migration_105_sqlite.py tests/test_migration_106_sqlite.py
-   tests/test_migration_107_sqlite.py -n 2 -q`.
+   tests/test_migration_107_sqlite.py tests/test_migration_108_sqlite.py -n 2 -q`.
 
 ## Prod steps
 

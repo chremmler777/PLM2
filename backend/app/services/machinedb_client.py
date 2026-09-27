@@ -4,6 +4,8 @@ MachineDB owns the press list (name, plant, clamping force, 2K type,
 lifecycle dates). The cost sheet keeps a local copy (cost_sheet_machines)
 that a sync refreshes; costing never calls MachineDB live, so an unreachable
 MachineDB only stops the sync, never a costing.
+/im-tools (list_im_tools) gives an injection tool's press tonnage for the
+tool tonnage sync (tool_tonnage_service), stored on the tool part the same way.
 
 Configuration (environment, never the database):
 - MACHINEDB_API_URL: base URL of the service API, e.g.
@@ -189,3 +191,77 @@ async def get_machine(machine_id: int, *,
                       ) -> Optional[MachineDTO]:
     data = await _get(f"/machines/{int(machine_id)}", transport=transport)
     return from_api(data) if isinstance(data, dict) else None
+
+
+# ---------------------------------------------------------------- injection tools
+
+# Tool numbers per /im-tools request: the list rides the query string.
+IM_TOOLS_BATCH = 50
+
+
+@dataclass(frozen=True)
+class ImToolDTO:
+    """One /v1/im-tools row: what MachineDB knows about an injection tool's
+    press. The tonnage PLM2 costs on is `tonnage_t` (see there)."""
+    tool_number: str
+    qualified_min_tonnage_t: Optional[float]
+    qualified_max_tonnage_t: Optional[float]
+    assigned_machine_name: Optional[str]
+    assigned_machine_plant: Optional[str]
+    assigned_clamping_force_t: Optional[float]
+
+    @property
+    def tonnage_t(self) -> tuple[Optional[float], Optional[str]]:
+        """(tonnage, basis). The press the tool is assigned to, by its
+        clamping force ("assigned"); without one, the smallest press the tool
+        is qualified on ("qualified_min"): the realistic cost basis, since the
+        tool runs on the smallest press that can take it. (None, None) when
+        MachineDB knows neither."""
+        f = self.assigned_clamping_force_t
+        if f is not None and f > 0:
+            return f, "assigned"
+        q = self.qualified_min_tonnage_t
+        if q is not None and q > 0:
+            return q, "qualified_min"
+        return None, None
+
+
+def im_tool_from_api(row: dict) -> ImToolDTO:
+    number = _text(row.get("tool_number"), 100)
+    if not number:
+        raise ValueError("im-tool row without tool_number")
+    m = row.get("assigned_machine") if isinstance(row.get("assigned_machine"), dict) else None
+    return ImToolDTO(
+        tool_number=number,
+        qualified_min_tonnage_t=_parse_float(row.get("qualified_min_tonnage_t")),
+        qualified_max_tonnage_t=_parse_float(row.get("qualified_max_tonnage_t")),
+        assigned_machine_name=_text(m.get("internal_name"), 120) if m else None,
+        assigned_machine_plant=_text(m.get("plant"), 40) if m else None,
+        assigned_clamping_force_t=_parse_float(m.get("clamping_force_t")) if m else None,
+    )
+
+
+async def list_im_tools(tool_numbers: list[str], *,
+                        transport: Optional[httpx.AsyncBaseTransport] = None
+                        ) -> list[ImToolDTO]:
+    """The MachineDB rows for these tool numbers (exact match on MachineDB's
+    side: the caller sends every spelling it accepts). Batched; one failed
+    batch fails the whole call (MachineDBUnavailable), so a caller never
+    mistakes a half answer for a full one. An unreadable row is dropped."""
+    numbers = sorted({n.strip() for n in tool_numbers if n and n.strip() and "," not in n})
+    out: list[ImToolDTO] = []
+    for i in range(0, len(numbers), IM_TOOLS_BATCH):
+        data = await _get("/im-tools",
+                          params={"tool_number": ",".join(numbers[i:i + IM_TOOLS_BATCH])},
+                          transport=transport)
+        if data is None:
+            # 404: a MachineDB without the /v1/im-tools route (not deployed yet)
+            raise MachineDBUnavailable("MachineDB has no /v1/im-tools route yet")
+        if not isinstance(data, list):
+            raise MachineDBUnavailable("MachineDB returned an unexpected tool list")
+        for row in data:
+            try:
+                out.append(im_tool_from_api(row))
+            except (AttributeError, TypeError, ValueError):
+                logger.warning("MachineDB sent an unreadable im-tool row")
+    return out

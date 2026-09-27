@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from fastapi import (
-    APIRouter, Depends, HTTPException, Query, File, Form, UploadFile, status,
+    APIRouter, BackgroundTasks, Depends, HTTPException, Query, File, Form, UploadFile, status,
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
@@ -97,6 +97,7 @@ async def _require_org_user(db: AsyncSession, user_id: int,
 @router.post("", response_model=ChangeResponse)
 async def create_change(
     body: ChangeCreate,
+    background: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -168,6 +169,8 @@ async def create_change(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    if body.impacted_part_ids:
+        _refresh_tool_tonnage(background, change.id)
     await db.refresh(change)
     return await _price_safe(db, change, current_user, ChangeResponse)
 
@@ -1379,9 +1382,18 @@ async def transition_change(
     return await _price_safe(db, change, current_user, ChangeResponse)
 
 
+def _refresh_tool_tonnage(background: BackgroundTasks, change_id: int) -> None:
+    """After the impacted items grew: refresh the new tools' press tonnage
+    from MachineDB / TWOS after the answer is sent (costing's default
+    machine class). Nothing when neither is configured."""
+    from app.services import tool_tonnage_service
+    if tool_tonnage_service.any_source_configured():
+        background.add_task(tool_tonnage_service.refresh_change_in_background, change_id)
+
+
 @router.post("/{change_id}/impacted-items", response_model=ImpactedItemResponse)
 async def add_impacted_item(
-    change_id: int, body: ImpactedItemCreate,
+    change_id: int, body: ImpactedItemCreate, background: BackgroundTasks,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
@@ -1403,6 +1415,7 @@ async def add_impacted_item(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    _refresh_tool_tonnage(background, change_id)
     await db.refresh(item)
     out = ImpactedItemResponse.model_validate(item)
     await fill_part_labels(db, [out])
@@ -1460,7 +1473,7 @@ async def suggest_impact_rollups(
 
 @router.put("/{change_id}/impacted-items")
 async def apply_impact_selection(
-    change_id: int, body: ImpactSelectionIn,
+    change_id: int, body: ImpactSelectionIn, background: BackgroundTasks,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
@@ -1482,6 +1495,7 @@ async def apply_impact_selection(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    _refresh_tool_tonnage(background, change_id)
     # Read impacted parts fresh: with expire_on_commit=False the cached
     # relationship collection would not reflect the just-applied diff.
     rows = await db.execute(
@@ -1492,7 +1506,7 @@ async def apply_impact_selection(
 
 @router.post("/{change_id}/impacted-items/seed")
 async def seed_impacted_items(
-    change_id: int,
+    change_id: int, background: BackgroundTasks,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
@@ -1504,6 +1518,8 @@ async def seed_impacted_items(
         raise HTTPException(status_code=403, detail=refusal)
     added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
     await db.commit()
+    if added:
+        _refresh_tool_tonnage(background, change_id)
     return {"added": added}
 
 

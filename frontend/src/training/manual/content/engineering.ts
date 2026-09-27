@@ -155,7 +155,7 @@ export const engineeringChapter: ContentChapter = {
               ['"Own time"', 'Hours your department spends. Priced at the rate from the cost sheet valid on the day the change was created.'],
               ['"External · estimate"', 'A number you have without a quote. Name who gave it if you can.'],
               ['"External · vendor quote"', 'Supplier offers under the line: "+ offer" per vendor with price, shipping, lead time and the quote document.'],
-              ['Machine time, sampling', 'Hours at the machine class rate, or trials at the sampling price. Pick a press from MachineDB and its own rate applies where the cost sheet has one; "Any machine (class rate)" prices on the class.'],
+              ['Machine time, sampling', 'Hours at the machine class rate, or trials at the sampling price. Pick a press from MachineDB and its own rate applies where the cost sheet has one; "Any machine (class rate)" prices on the class. Without a class on the line, the change\'s class applies: the one picked in "Machine class of the change", else the class of the largest tool tonnage of the impacted articles (MachineDB first, TWOS second), shown as "from tool 3454 (MachineDB, 450 t)". When no tool has a tonnage, the line says so: pick the class by hand. A line already priced keeps its class when the tonnage changes later.'],
             ],
           },
         },

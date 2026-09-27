@@ -342,7 +342,9 @@ class ImplementationService:
         machine_class_id = spec.get("machine_class_id")
         if machine_hours and machine_class_id is None:
             from app.services import costing_rates
-            machine_class_id = await costing_rates.change_machine_class_id(
+            # the class the machine hours were costed on (a priced line
+            # keeps its tool class while the tonnage moves), else live
+            machine_class_id = await costing_rates.booking_machine_class_id(
                 session, change)
             if machine_class_id is None:
                 raise ImplementationError(

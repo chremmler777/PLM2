@@ -271,9 +271,7 @@ class PnlService:
         have a position whose hours could not be priced at all, or were
         priced in another currency than the costing one (left out, so the
         cost is flagged as too low rather than silently short)."""
-        from app.models.change import ChangeImpactedItem
         from app.models.change_cost import CostingPosition
-        from app.models.part import Part
         from app.services import costing_rates
         book = ctx["book"]
         ids = [c.id for c in changes]
@@ -289,12 +287,10 @@ class PnlService:
             if getattr(c, "machine_class_id", None):
                 return c.machine_class_id
             if tonnage is None:
-                tonnage = {cid: t for cid, t in (await session.execute(
-                    select(ChangeImpactedItem.change_id, func.max(Part.tool_tonnage_class))
-                    .join(Part, Part.id == ChangeImpactedItem.part_id)
-                    .where(ChangeImpactedItem.change_id.in_(ids),
-                           Part.tool_tonnage_class.is_not(None))
-                    .group_by(ChangeImpactedItem.change_id))).all()}
+                # the largest tool tonnage per change (MachineDB, TWOS,
+                # typed in plm2), for every change at once
+                from app.services import tool_tonnage_service
+                tonnage = await tool_tonnage_service.tonnage_by_change(session, ids)
             return await book.class_for_tonnage(ctx["org"][c.id], tonnage.get(c.id))
         for p in (await session.execute(select(CostingPosition).where(
                 CostingPosition.change_id.in_(ids)))).scalars().all():

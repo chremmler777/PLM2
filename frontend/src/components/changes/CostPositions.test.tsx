@@ -681,6 +681,21 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
     expect(screen.getByTestId('costpos-value-22').textContent).toBe('2,500.00 USD')
   })
 
+  it('says which tool and source a line’s class came from, or asks for a hand pick', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([
+      { ...machine, machine_class_id: null, machine_class_from_change: true,
+        machine_class_origin: { kind: 'tool', tool_number: '3454', source: 'twos', tonnage: 1300 } },
+      { ...sampling, machine_class_id: null, machine_class: null, rate: null, rate_missing: true,
+        line_value: null,
+        machine_class_origin: { kind: 'none', tools: ['3454'], without: ['3454'] } },
+    ] as never)
+    positions()
+    expect((await screen.findByTestId('costpos-class-21')).textContent)
+      .toBe('200-450 t, from tool 3454 (TWOS, 1,300 t)')
+    expect(screen.getByTestId('costpos-class-22').textContent)
+      .toBe('Tool 3454 has no tonnage: pick a machine class by hand')
+  })
+
   it('flags an old line without a recorded currency instead of reading it silently', async () => {
     vi.mocked(changesApi.listCostPositions).mockResolvedValue(
       [{ ...priced, currency_unrecorded: true, est_cost: 40 },

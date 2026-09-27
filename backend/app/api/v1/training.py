@@ -1046,6 +1046,9 @@ GATE_EXEMPT_WRITES: frozenset[tuple[str, str]] = frozenset({
     # admin data repair (engine tasks missing on a routed row), not a
     # business act of the change
     ("POST", "/changes/{change_id}/routing/repair"),
+    # a refresh of the tools' tonnage from MachineDB / TWOS (external data
+    # copied onto the tool parts), not a business act of the change
+    ("POST", "/changes/{change_id}/costing/tool-tonnage/refresh"),
     # admin reference data, not a change
     ("PUT", "/changes/routing-standards"),
     ("PUT", "/changes/check-standards"),

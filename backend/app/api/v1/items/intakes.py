@@ -11,7 +11,7 @@ IntakeError -> 400, IntakeForbidden -> 403, IntakeNotFound -> 404.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,7 +79,7 @@ async def get_intake(
 
 @router.post("/{intake_id}/decide")
 async def decide_intake(
-    intake_id: int, body: DecideIn,
+    intake_id: int, body: DecideIn, background: BackgroundTasks,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -92,4 +92,11 @@ async def decide_intake(
         await db.rollback()
         raise _http(e)
     await db.refresh(intake)
+    if intake.change_id:
+        # The change's impacted items may have grown: refresh the tools'
+        # press tonnage (costing's default machine class) after the answer.
+        from app.services import tool_tonnage_service
+        if tool_tonnage_service.any_source_configured():
+            background.add_task(
+                tool_tonnage_service.refresh_change_in_background, intake.change_id)
     return await RevisionIntakeService.out(db, intake, True)

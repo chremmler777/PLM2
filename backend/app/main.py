@@ -475,9 +475,15 @@ async def lifespan(app: FastAPI):
     # startup; the sheet runs on the last synced copy otherwise).
     from app.services.cost_sheet_machines_service import sync_on_startup
     machinedb_task = asyncio.create_task(sync_on_startup())
+    # The tools' press tonnage (MachineDB first, TWOS second) that costing
+    # derives a change's default machine class from: one background refresh
+    # when either is configured (TOOL_TONNAGE_SYNC_ON_STARTUP=0 turns it off).
+    from app.services.tool_tonnage_service import sync_on_startup as tool_tonnage_sync
+    tool_tonnage_task = asyncio.create_task(tool_tonnage_sync())
 
     yield
     machinedb_task.cancel()
+    tool_tonnage_task.cancel()
     # Shutdown
     reminder_task.cancel()
     logger.info("Shutting down PLM application...")

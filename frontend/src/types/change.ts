@@ -854,6 +854,8 @@ export interface CostPosition {
   machine_class?: string | null;
   machine_class_used_id?: number | null;
   machine_class_from_change?: boolean;
+  /** Where the class came from; null on a line priced before tool tonnage. */
+  machine_class_origin?: MachineClassOrigin | null;
   /** A named MachineDB press: its own cost sheet rate beats the class rate. */
   machine_id?: number | null;
   machine_name?: string | null;
@@ -884,6 +886,33 @@ export interface CostPosition {
   line_value?: number | null;
 }
 
+/**
+ * Where a machine time / sampling line's class came from: picked by hand on
+ * the line, a named press, picked by hand on the change, the change's tool
+ * tonnage (MachineDB first, TWOS second, typed in PLM2 last), or none.
+ */
+export type MachineClassOrigin =
+  | { kind: 'line' | 'machine' | 'change' }
+  | {
+      kind: 'tool'; tool_number: string; source: 'machinedb' | 'twos' | 'plm2';
+      tonnage: number; basis?: 'assigned' | 'qualified_min' | null;
+      machine?: string | null; class_found?: boolean;
+    }
+  | { kind: 'none'; tools: string[]; without: string[] }
+
+export interface ToolTonnageSourceReport {
+  status: 'ok' | 'failed' | 'not_configured' | 'no_tools';
+  matched: number; updated: number; no_tonnage: string[]; error: string | null;
+}
+
+/** POST /changes/{id}/costing/tool-tonnage/refresh (report part). */
+export interface ToolTonnageRefresh {
+  tools: number;
+  machinedb: ToolTonnageSourceReport;
+  twos: ToolTonnageSourceReport;
+  without: string[];
+}
+
 /** GET /changes/{id}/costing/context */
 export interface CostingContext {
   plant_id: number | null;
@@ -910,9 +939,17 @@ export interface CostingContext {
   default_machine_class_id: number | null;
   effective_machine_class_id: number | null;
   tonnage: number | null;
+  /** Where the default class comes from (the change's tools). */
+  tool_class_origin?: MachineClassOrigin | null;
+  /** Which tonnage sources the backend can ask. */
+  tonnage_sources?: { machinedb: boolean; twos: boolean };
+  /** Only on the answer of a tool tonnage refresh. */
+  tool_tonnage_refresh?: ToolTonnageRefresh;
   /** Always {} since the cost sheet has one rate per department and plant. */
   positions_by_department: Record<string, string[]>;
   can_set_machine_class?: boolean;
+  /** May refresh the tool tonnage: may set the class, or Sales, Finance, admin. */
+  can_refresh_tonnage?: boolean;
 }
 
 export interface CostPositionIn {
