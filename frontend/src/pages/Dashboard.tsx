@@ -3,6 +3,7 @@
  * and recent activity across all parts.
  */
 import { useQuery } from '@tanstack/react-query';
+import { formatCalendarDate, formatTime } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
 import EscalationsCard from '../components/EscalationsCard';
@@ -174,7 +175,7 @@ export default function Dashboard() {
               Overdue actions: <span className={`font-bold ${lessonKpis.overdue_actions ? 'text-red-400' : 'text-emerald-400'}`}>{lessonKpis.overdue_actions}</span>
             </span>
             <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
-              Implementation: <span className="font-bold text-slate-100">{lessonKpis.implementation_rate === null ? '—' : `${Math.round(lessonKpis.implementation_rate * 100)}%`}</span>
+              Implementation: <span className="font-bold text-slate-100">{lessonKpis.implementation_rate === null ? '-' : `${Math.round(lessonKpis.implementation_rate * 100)}%`}</span>
             </span>
             <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
               Unlinked: <span className={`font-bold ${lessonKpis.unlinked ? 'text-amber-300' : 'text-emerald-400'}`}>{lessonKpis.unlinked}</span>
@@ -243,8 +244,8 @@ export default function Dashboard() {
                 <span className="text-slate-100">{m.name}</span>
                 <span className="text-slate-400 text-xs ml-2">{m.project_name}</span>
                 <span className={`block text-xs mt-0.5 ${m.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
-                  {m.overdue ? 'OVERDUE — ' : 'due '}
-                  {new Date(m.due_date).toLocaleDateString()}
+                  {m.overdue ? 'OVERDUE: ' : 'due '}
+                  {formatCalendarDate(m.due_date)}
                 </span>
               </button>
             ))}
@@ -272,8 +273,8 @@ export default function Dashboard() {
                 <span className="text-slate-100">{g.name}</span>
                 <span className="text-slate-400 text-xs font-mono ml-2">{g.part_number}</span>
                 <span className={`block text-xs mt-0.5 ${g.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
-                  {g.overdue ? 'OVERDUE — ' : 'due '}
-                  {new Date(g.next_calibration_due).toLocaleDateString()}
+                  {g.overdue ? 'OVERDUE: ' : 'due '}
+                  {formatCalendarDate(g.next_calibration_due)}
                 </span>
               </button>
             ))}
@@ -304,7 +305,7 @@ export default function Dashboard() {
                       <span className="text-slate-400 text-xs ml-2">· {wf.revision_name}</span>
                     </div>
                     <span className="text-xs text-slate-400 flex-shrink-0">
-                      {wf.template_name} — stage {wf.current_stage}/{wf.total_stages}
+                      {wf.template_name} · stage {wf.current_stage}/{wf.total_stages}
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
@@ -367,7 +368,7 @@ export default function Dashboard() {
                       {entry.action.replace(/_/g, ' ')}
                     </span>
                     <span className="text-slate-500 text-xs flex-shrink-0">
-                      {entry.performed_at ? new Date(entry.performed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      {entry.performed_at ? formatTime(entry.performed_at) : ''}
                     </span>
                   </div>
                   <p className="text-slate-300 text-xs leading-snug">{entry.description}</p>

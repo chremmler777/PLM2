@@ -245,9 +245,13 @@ async def get_assembly_files(
         parts.extend(children)
         frontier = [c.id for c in children]
 
+    from app.models.revision_intake import waiting_revision_ids
+    waiting = set((await db.execute(waiting_revision_ids())).scalars().all())
     entries = []
     for part in parts:
         revisions = await RevisionService.get_part_revisions(db, part.id)
+        # a customer major pending triage is never the viewer's fallback
+        revisions = [r for r in revisions if r.id not in waiting]
         if not revisions:
             continue
         display_rev = next(

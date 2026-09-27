@@ -13,7 +13,7 @@ vi.mock('../../api/changes', () => ({
   },
 }));
 
-function renderBanner() {
+function renderBanner(seq = 1) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -21,6 +21,7 @@ function renderBanner() {
         changeId={7}
         blockedTo="in_assessment"
         blockedReason="No impacted items added yet. An approved deviation is required to proceed."
+        seq={seq}
         onRetry={() => {}}
         onClose={() => {}}
       />
@@ -35,6 +36,50 @@ describe('DeviationBanner', () => {
   it('shows the block reason', async () => {
     renderBanner();
     expect(await screen.findByText(/No impacted items/)).toBeDefined();
+  });
+
+  it('scrolls itself into view and takes focus when a block is reported', async () => {
+    const targets: Element[] = [];
+    const scroll = vi.fn(function (this: Element) { targets.push(this); });
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    try {
+      renderBanner();
+      const banner = await screen.findByTestId('deviation-banner');
+      expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+      expect(targets[0]).toBe(banner);
+      expect(document.activeElement).toBe(banner);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
+  });
+
+  it('scrolls into view again when an identical block is reported a second time (seq bumped)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const scroll = vi.fn();
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    try {
+      const { rerender } = render(
+        <QueryClientProvider client={qc}>
+          <DeviationBanner changeId={7} blockedTo="in_assessment" blockedReason="Same reason"
+            seq={1} onRetry={() => {}} onClose={() => {}} />
+        </QueryClientProvider>
+      );
+      await screen.findByTestId('deviation-banner');
+      expect(scroll).toHaveBeenCalledTimes(1);
+
+      // Same blockedTo/blockedReason, but a new block was reported: seq bumps.
+      rerender(
+        <QueryClientProvider client={qc}>
+          <DeviationBanner changeId={7} blockedTo="in_assessment" blockedReason="Same reason"
+            seq={2} onRetry={() => {}} onClose={() => {}} />
+        </QueryClientProvider>
+      );
+      expect(scroll).toHaveBeenCalledTimes(2);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
   });
 
   it('proposes a deviation with the entered reason', async () => {
@@ -61,5 +106,27 @@ describe('ReasonDialog', () => {
     rerender(<ReasonDialog open={false} title="t" label="l" onSubmit={() => {}} onClose={() => {}} />);
     rerender(<ReasonDialog open title="t" label="l" onSubmit={() => {}} onClose={() => {}} />);
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('offers no deviation for a hard-rule refusal, only for a soft guard', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <DeviationBanner changeId={7} blockedTo="scoping"
+          blockedReason="Cannot recall: assessment work has already started"
+          seq={1} onRetry={() => {}} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    await screen.findByText(/Cannot recall/);
+    await waitFor(() => expect(changesApi.listDeviations).toHaveBeenCalled());
+    expect(screen.queryByText('Request deviation')).toBeNull();
+    rerender(
+      <QueryClientProvider client={qc}>
+        <DeviationBanner changeId={7} blockedTo="in_assessment"
+          blockedReason="No impacted items added yet. An approved deviation is required to proceed."
+          seq={2} onRetry={() => {}} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    expect(await screen.findByText('Request deviation')).toBeDefined();
   });
 });

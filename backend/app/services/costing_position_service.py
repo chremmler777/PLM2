@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeAssessment, ChangeAttachment, ChangeRequest
 from app.models.change_cost import (
-    COSTING_POSITION_KINDS, COSTING_PRICINGS, LEAD_TIME_UNITS,
+    COSTING_POSITION_KINDS, COSTING_PRICINGS, LEAD_TIME_UNITS, STANDING_KINDS,
     CostingOffer, CostingPosition,
 )
 from app.models.entities import User
@@ -34,7 +34,8 @@ class CostingPositionError(ValueError):
 # to another department would move money out of one budget into another with
 # no record of it — delete and re-add instead.
 _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
-                    "hours", "lead_time_days", "lead_time_unit", "notes")
+                    "hours", "lead_time_days", "lead_time_unit", "notes",
+                    "labour_position", "machine_class_id", "trials", "machine_id")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
                  "lead_time_days", "lead_time_unit", "favorite", "is_partial")
 
@@ -59,7 +60,16 @@ class CostingPositionService:
                 or await MeetingService.user_is_pm_member(session, actor)):
             return True
         if change.status != "costing":
-            return False
+            # Spec §16: an impact edit after the quote reopens costing for
+            # the departments it touched, until a newer offer or an
+            # approved deviation covers it.
+            if not (change.scope_changed_after_quote
+                    and department_id in (change.scope_change_department_ids or [])):
+                return False
+            from app.services.early_stage_service import EarlyStageService
+            state = await EarlyStageService.scope_change_state(session, change)
+            if state is None or state["covered"]:
+                return False
         return await WorkflowService.actor_in_department(
             session, actor, department_id)
 
@@ -102,6 +112,46 @@ class CostingPositionService:
                     session, actor, "Sales")):
             return None
         return set(await WorkflowService.effective_department_ids(session, actor))
+
+    @staticmethod
+    async def quote_department_ids(
+        session: AsyncSession, attachments,
+    ) -> dict[int, int | None]:
+        """attachment id -> the department whose costing position the vendor
+        quote belongs to, for every vendor_quote / offer-linked attachment in
+        `attachments`. None when the offer or position is gone (an orphaned
+        quote has no owner, so only the full readers may see it)."""
+        quotes = [a for a in attachments
+                  if a.costing_offer_id is not None or a.kind == "vendor_quote"]
+        if not quotes:
+            return {}
+        offer_ids = {a.costing_offer_id for a in quotes
+                     if a.costing_offer_id is not None}
+        dept_by_offer: dict[int, int] = {}
+        if offer_ids:
+            dept_by_offer = dict((await session.execute(
+                select(CostingOffer.id, CostingPosition.department_id)
+                .join(CostingPosition,
+                      CostingPosition.id == CostingOffer.position_id)
+                .where(CostingOffer.id.in_(offer_ids)))).all())
+        return {a.id: dept_by_offer.get(a.costing_offer_id) for a in quotes}
+
+    @staticmethod
+    async def unreadable_attachment_ids(
+        session: AsyncSession, change: ChangeRequest, actor: User,
+        attachments,
+    ) -> set[int]:
+        """The vendor quotes among `attachments` that `actor` may not read: a
+        quote is its offer's price on paper, so it follows the same rule as
+        the position it belongs to (readable_department_ids)."""
+        visible = await CostingPositionService.readable_department_ids(
+            session, change, actor)
+        if visible is None:
+            return set()
+        owners = await CostingPositionService.quote_department_ids(
+            session, attachments)
+        return {aid for aid, dept in owners.items()
+                if dept is None or dept not in visible}
 
     # ------------------------------------------------------------------
     # Reads
@@ -151,6 +201,19 @@ class CostingPositionService:
             choosers = dict((await session.execute(
                 select(User.id, User.full_name).where(
                     User.id.in_(chooser_ids)))).all())
+        # The rate each line is priced with and where it comes from (cost
+        # sheet version, department, position), or "No rate in the cost
+        # sheet". One lookup per position of the change it belongs to.
+        from app.services import costing_rates
+        pricing: dict[int, dict] = {}
+        by_change: dict[int, list] = {}
+        for p in positions:
+            by_change.setdefault(p.change_id, []).append(p)
+        for change_id, rows in by_change.items():
+            change = await session.get(ChangeRequest, change_id)
+            if change is not None:
+                pricing.update(await costing_rates.describe_positions(
+                    session, change, rows))
         out = []
         for p in positions:
             # Two different questions, two different properties:
@@ -166,6 +229,10 @@ class CostingPositionService:
                 "department_id": p.department_id, "label": p.label,
                 "tag": p.tag, "kind": p.kind, "pricing": p.pricing,
                 "est_cost": p.est_cost, "vendor_name": p.vendor_name, "hours": p.hours,
+                "labour_position": p.labour_position,
+                "machine_class_id": p.machine_class_id, "trials": p.trials,
+                "machine_id": p.machine_id,
+                **pricing.get(p.id, {}),
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,
                 "created_by": p.created_by, "created_at": p.created_at,
@@ -267,6 +334,42 @@ class CostingPositionService:
         # price.
         if position.hours is not None and position.hours < 0:
             raise CostingPositionError("Hours cannot be negative")
+        if position.trials is not None and position.trials < 0:
+            raise CostingPositionError("Trials cannot be negative")
+        if position.labour_position is not None:
+            position.labour_position = position.labour_position.strip()[:80] or None
+        # machine_time and sampling are priced by the cost sheet alone: an
+        # estimate typed next to them would be counted twice.
+        if position.kind in ("machine_time", "sampling"):
+            position.est_cost = None
+            position.vendor_name = None
+            position.labour_position = None
+        else:
+            position.machine_class_id = None
+            position.machine_id = None
+        if position.kind != "sampling":
+            position.trials = None
+
+    @staticmethod
+    async def _check_machine_class(session: AsyncSession, change: ChangeRequest,
+                                   position: CostingPosition) -> None:
+        """A named machine class must be one of the org's classes, a named
+        machine one of the org's synced MachineDB machines."""
+        if position.machine_class_id is None and position.machine_id is None:
+            return
+        from app.models.cost_sheet import CostSheetMachineClass
+        from app.models.cost_sheet_machines import CostSheetMachine
+        from app.services import costing_rates
+        org_id = await costing_rates.change_org_id(session, change)
+        if position.machine_class_id is not None:
+            c = await session.get(CostSheetMachineClass, position.machine_class_id)
+            if c is None or c.organization_id != org_id:
+                raise CostingPositionError(
+                    f"Unknown machine class {position.machine_class_id}")
+        if position.machine_id is not None:
+            m = await session.get(CostSheetMachine, position.machine_id)
+            if m is None or m.organization_id != org_id:
+                raise CostingPositionError(f"Unknown machine {position.machine_id}")
 
     @staticmethod
     def _validate_offer(offer: CostingOffer, position: CostingPosition) -> None:
@@ -294,6 +397,16 @@ class CostingPositionService:
     # Writes
     # ------------------------------------------------------------------
     @staticmethod
+    async def _standing(session: AsyncSession, change_id: int,
+                        department_id: int, kind: str):
+        return (await session.execute(
+            select(CostingPosition).where(
+                CostingPosition.change_id == change_id,
+                CostingPosition.department_id == department_id,
+                CostingPosition.kind == kind)
+            .order_by(CostingPosition.id).limit(1))).scalar_one_or_none()
+
+    @staticmethod
     async def create_position(
         session: AsyncSession, change: ChangeRequest, spec: dict, actor: User,
     ) -> CostingPosition:
@@ -308,6 +421,18 @@ class CostingPositionService:
         if routed is None:
             raise CostingPositionError(
                 f"Department {department_id} has no assessment on this change")
+        kind = spec.get("kind") or "external"
+        if kind in STANDING_KINDS:
+            # One standing answer per department: a second save (the effort
+            # row fires on blur AND on the save click) updates the first
+            # instead of adding a duplicate line (final walk P2-1).
+            existing = await CostingPositionService._standing(
+                session, change.id, department_id, kind)
+            if existing is not None:
+                return await CostingPositionService.update_position(
+                    session, change, existing,
+                    {k: v for k, v in spec.items()
+                     if k in _POSITION_FIELDS and k != "kind"}, actor)
         position = CostingPosition(
             change_id=change.id, department_id=department_id,
             label=(spec.get("label") or "").strip(),
@@ -319,10 +444,37 @@ class CostingPositionService:
             lead_time_days=spec.get("lead_time_days"),
             lead_time_unit=spec.get("lead_time_unit") or "calendar_days",
             notes=spec.get("notes"), created_by=actor.id,
+            labour_position=spec.get("labour_position"),
+            machine_class_id=spec.get("machine_class_id"),
+            machine_id=spec.get("machine_id"),
+            trials=spec.get("trials"),
         )
         CostingPositionService._validate(position)
-        session.add(position)
-        await session.flush()
+        await CostingPositionService._check_machine_class(session, change, position)
+        # Priced now, from the cost sheet valid today: the snapshot stays on
+        # the line until its pricing inputs change.
+        from app.services import costing_rates
+        await costing_rates.snapshot_position(session, change, position)
+        if kind in STANDING_KINDS:
+            # Two saves racing past the lookup above: the unique index
+            # (migration 101) refuses the second insert; it merges then.
+            from sqlalchemy.exc import IntegrityError
+            try:
+                async with session.begin_nested():
+                    session.add(position)
+                    await session.flush()
+            except IntegrityError:
+                existing = await CostingPositionService._standing(
+                    session, change.id, department_id, kind)
+                if existing is None:
+                    raise
+                return await CostingPositionService.update_position(
+                    session, change, existing,
+                    {k: v for k, v in spec.items()
+                     if k in _POSITION_FIELDS and k != "kind"}, actor)
+        else:
+            session.add(position)
+            await session.flush()
         # A just-added row has no loaded `offers` collection, and effective_cost
         # reads it — an async lazy load here would raise MissingGreenlet.
         await session.refresh(position, ["offers"])
@@ -337,12 +489,34 @@ class CostingPositionService:
         session: AsyncSession, change: ChangeRequest,
         position: CostingPosition, spec: dict, actor: User,
     ) -> CostingPosition:
+        from app.services import costing_rates
+        before = {f: getattr(position, f) for f in costing_rates.PRICING_FIELDS}
+        new_kind = spec.get("kind")
+        if (new_kind in STANDING_KINDS and new_kind != position.kind
+                and await CostingPositionService._standing(
+                    session, change.id, position.department_id, new_kind)):
+            raise CostingPositionError(
+                "This department already has that standing effort line: "
+                "edit it instead")
         for field in _POSITION_FIELDS:
             if field in spec:
                 setattr(position, field, spec[field])
         if position.label:
             position.label = position.label.strip()
         CostingPositionService._validate(position)
+        await CostingPositionService._check_machine_class(session, change, position)
+        # Re-priced only when what the rate depends on moved, or the line has
+        # no rate yet (never priced, or none was found: Finance may have added
+        # it since): a typo fixed in the label keeps its snapshot.
+        if (position.rate_on is None or position.rate is None
+                or any(getattr(position, f) != before[f]
+                       for f in costing_rates.PRICING_FIELDS)):
+            # The line's own class or named machine edited is an explicit
+            # move: it is not kept frozen on the class it was priced on.
+            moved = any(getattr(position, f) != before[f]
+                        for f in ("machine_class_id", "machine_id"))
+            await costing_rates.snapshot_position(session, change, position,
+                                                  freeze=not moved)
         position.updated_at = datetime.utcnow()
         await session.flush()
         await CostingPositionService._log(
@@ -368,7 +542,8 @@ class CostingPositionService:
         await ChangeService.append_changelog(
             session, change, "costing_position_deleted",
             f"Costing position '{label}' removed from dept {department_id}",
-            actor.id, old_value={"label": label, "department_id": department_id})
+            actor.id, old_value={"label": label, "department_id": department_id},
+            for_department_id=department_id)
         return paths
 
     @staticmethod
@@ -402,7 +577,8 @@ class CostingPositionService:
             f"{offer.total_cost}", actor.id,
             new_value={"position_id": position.id, "offer_id": offer.id,
                        "vendor_name": offer.vendor_name,
-                       "total_cost": offer.total_cost})
+                       "total_cost": offer.total_cost},
+            for_department_id=position.department_id)
         return offer
 
     @staticmethod
@@ -429,7 +605,8 @@ class CostingPositionService:
             actor.id,
             new_value={"position_id": position.id, "offer_id": offer.id,
                        "favorite": offer.favorite,
-                       "total_cost": offer.total_cost})
+                       "total_cost": offer.total_cost},
+            for_department_id=position.department_id)
         return offer
 
     @staticmethod
@@ -447,7 +624,8 @@ class CostingPositionService:
         await ChangeService.append_changelog(
             session, change, "costing_offer_deleted",
             f"Offer from {vendor} on '{position.label}' removed", actor.id,
-            old_value={"position_id": position.id, "vendor_name": vendor})
+            old_value={"position_id": position.id, "vendor_name": vendor},
+            for_department_id=position.department_id)
         return paths
 
     @staticmethod
@@ -575,4 +753,5 @@ class CostingPositionService:
                        "department_id": position.department_id,
                        "label": position.label, "kind": position.kind,
                        "pricing": position.pricing,
-                       "effective_cost": position.effective_cost})
+                       "effective_cost": position.effective_cost},
+            for_department_id=position.department_id)

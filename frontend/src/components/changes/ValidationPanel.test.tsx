@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ValidationPanel, { departmentOpenChecks, weightAckOutstanding } from './ValidationPanel'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID } from '../../lib/format'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -43,6 +44,12 @@ describe('validation helpers', () => {
     ] } as never)).toBe(2)
   })
 
+  it('never counts a retired row as owed', () => {
+    expect(departmentOpenChecks({ department_id: 4, checks: [
+      check({ status: 'passed' }), check({ check_key: 'old', status: 'open', retired: true }),
+    ] } as never)).toBe(0)
+  })
+
   it('asks for an acknowledgement only on a non-zero, unanswered delta', () => {
     expect(weightAckOutstanding(state({ weight_delta_g: 12 }) as never)).toBe(true)
     expect(weightAckOutstanding(state({ weight_delta_g: 0 }) as never)).toBe(false)
@@ -68,6 +75,47 @@ describe('ValidationPanel', () => {
     await waitFor(() => expect(changesApi.setValidationCheck).toHaveBeenCalledWith(7, {
       department_id: 4, check_key: 'sampled', status: 'passed',
     }))
+  })
+
+  it('refuses an unreadable measurement instead of passing without it', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({ check_key: 'cycle_time' })] }],
+    }) as never)
+    render_()
+    const input = await screen.findByTestId('validation-value-4-cycle_time') as HTMLInputElement
+    expect(input.type).toBe('text')
+    const pass = screen.getByTestId('validation-pass-4-cycle_time') as HTMLButtonElement
+    fireEvent.change(input, { target: { value: '41,5' } })
+    expect(pass.disabled).toBe(true)
+    expect(screen.getByTestId('validation-value-hint-4-cycle_time').textContent).toBe(NUMBER_INPUT_HINT)
+    // a fail would drop the typed number too: blocked until it reads
+    fireEvent.click(screen.getByTestId('validation-fail-4-cycle_time'))
+    fireEvent.change(screen.getByTestId('validation-note-4-cycle_time'), { target: { value: 'slow' } })
+    expect((screen.getByTestId('validation-fail-confirm-4-cycle_time') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(input, { target: { value: 'x1' } })
+    expect(screen.getByTestId('validation-value-hint-4-cycle_time').textContent).toBe(NUMBER_INPUT_INVALID)
+    fireEvent.change(input, { target: { value: '1,041.5' } })
+    expect(screen.queryByTestId('validation-value-hint-4-cycle_time')).toBeNull()
+    fireEvent.click(screen.getByTestId('validation-fail-confirm-4-cycle_time'))
+    await waitFor(() => expect(changesApi.setValidationCheck).toHaveBeenCalledWith(7, {
+      department_id: 4, check_key: 'cycle_time', status: 'failed', value: 1041.5, note: 'slow',
+    }))
+  })
+
+  it('shows a cycle time measured under the older catalog read-only', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({
+        check_key: 'cycle_time', label_en: 'Measured cycle time', status: 'failed',
+        value: 41, note: 'slow', retired: true,
+      })] }],
+    }) as never)
+    render_({ canRaiseAny: true })
+    expect((await screen.findByTestId('validation-retired-4-cycle_time')).textContent)
+      .toBe('No longer asked')
+    expect(screen.queryByTestId('validation-pass-4-cycle_time')).toBeNull()
+    expect(screen.queryByTestId('validation-value-4-cycle_time')).toBeNull()
+    expect(screen.queryByTestId('validation-raise-4-cycle_time')).toBeNull()
+    expect(screen.getByText('41 s')).toBeDefined()
   })
 
   it('will not take a fail without a reason', async () => {
@@ -206,4 +254,51 @@ describe('ValidationPanel', () => {
     expect(screen.queryByTestId('validation-pass-4-sampled')).toBeNull()
     expect(screen.queryByTestId('validation-escalate')).toBeNull()
   })
+
+  it('counts only live checks and offers no escalation when only a retired row is open', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [
+        check({ status: 'passed' }), check({ check_key: 'old', status: 'open', retired: true }),
+      ] }],
+    }) as never)
+    render_({ canEscalate: true })
+    expect((await screen.findByTestId('validation-open-4')).textContent).toBe('1/1')
+    expect(screen.queryByTestId('validation-escalate')).toBeNull()
+  })
+
+  it('F17: uses the backend label and offers no escalation once every check passed', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [
+        check({ status: 'passed', label_en: 'Tool sampled' }),
+      ] }],
+    }) as never)
+    render_({ canEscalate: true })
+    expect(await screen.findByText('Tool sampled')).toBeDefined()
+    expect(screen.queryByTestId('validation-escalate')).toBeNull()
+  })
 })
+
+describe('ValidationPanel: stale notes and missing costing', () => {
+  afterEach(cleanup)
+  it('shows the fail note only while the check is failed', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({ departments: [{ department_id: 4, checks: [
+      check({ status: 'passed', note: 'burr on the edge' }),
+      check({ check_key: 'measured', status: 'failed', note: 'out of tolerance' }),
+    ] }] }) as never)
+    render_({ status: 'released' })
+    await screen.findByTestId('validation-check-4-measured')
+    expect(screen.queryByTestId('validation-note-text-4-sampled')).toBeNull()
+    expect(screen.getByTestId('validation-note-text-4-measured').textContent).toBe('out of tolerance')
+  })
+
+  it('a change without a costing does not claim the costing lacks a cycle time', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({ departments: [{ department_id: 4, checks: [
+      check({ check_key: 'cycle_time' }), check({ check_key: 'weight' }),
+    ] }] }) as never)
+    render_({ hasCosting: false })
+    await screen.findByTestId('validation-check-4-cycle_time')
+    expect(screen.queryByTestId('validation-assumption-4-cycle_time')).toBeNull()
+    expect(screen.queryByTestId('validation-estimate-4-weight')).toBeNull()
+  })
+})
+

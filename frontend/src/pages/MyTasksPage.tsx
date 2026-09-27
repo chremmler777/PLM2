@@ -1,5 +1,5 @@
 /**
- * MyTasksPage - View active workflow tasks for a selected department
+ * MyTasksPage - everything waiting on the caller, in one list
  */
 
 import { useState } from 'react';
@@ -9,6 +9,16 @@ import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
 import { rasicColors } from '../lib/constants';
+import { formatCalendarDate, formatDate } from '../lib/format';
+import { DeadlineChip } from '../components/changes/DeadlineChip';
+import { btnSm } from '../components/common/buttonStyles';
+import EmptyState from '../components/common/EmptyState';
+import { toastError } from '../lib/apiError';
+import { BookOpen, ClipboardList, FileText } from 'lucide-react';
+import { STATUS_LABELS } from '../lib/changeStatus';
+import { humanize, taskKindLabel } from '../lib/humanLabels';
+import { foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
+import BackupChip from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { t } from '../i18n/cmLabels';
@@ -16,9 +26,9 @@ import type { ChangeTask } from '../types/change';
 import { projectLabel } from '../lib/project';
 import { toast } from 'sonner';
 import FormPanel from '../forms/FormPanel';
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+import IntakeSection from '../components/intake/IntakeSection';
+import CostSheetReviewTask from '../components/costSheet/CostSheetReviewTask';
+import { useMyTaskCounts } from '../hooks/queries/useOpenTaskCount';
 
 interface MyLessonAction {
   id: number;
@@ -45,18 +55,18 @@ function LessonActionsSection() {
     mutationFn: async (actionId: number) =>
       client.patch(`/v1/lessons/actions/${actionId}`, { status: 'done' }),
     onSuccess: () => {
-      toast.success('Action completed');
+      toast.success('Lesson action marked done');
       queryClient.invalidateQueries({ queryKey: ['my-lesson-actions'] });
     },
-    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to complete'),
+    onError: (error: unknown) => toastError(error, 'Could not mark the lesson action done'),
   });
 
   if (actions.length === 0) return null;
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        📘 Lesson Actions ({actions.length})
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <BookOpen aria-hidden="true" size={14} className="text-slate-400" />Lesson actions ({actions.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -70,31 +80,23 @@ function LessonActionsSection() {
           </thead>
           <tbody>
             {actions.map((a) => (
-              <tr key={a.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-750">
+              <tr key={a.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
                 <td className="px-4 py-3 text-slate-100">{a.description}</td>
                 <td className="px-4 py-3">
                   <button
                     onClick={() => navigate(`/lessons?lesson=${a.lesson_id}`)}
-                    className="text-blue-400 hover:text-blue-300 underline text-left"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2 text-left"
                   >
                     {a.lesson_title}
                   </button>
                   <span className="text-xs text-slate-500 ml-2">{a.lesson_status.replace(/_/g, ' ')}</span>
                 </td>
-                <td className="px-4 py-3 text-xs">
-                  {a.due_date ? (
-                    <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
-                      {a.due_date.slice(0, 10)}{a.overdue && ' ⚠ overdue'}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500">—</span>
-                  )}
-                </td>
+                <td className="px-4 py-3 text-xs"><DueCell due={a.due_date} overdue={a.overdue} /></td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => complete.mutate(a.id)}
                     disabled={complete.isPending}
-                    className="text-xs px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+                    className={btnSm.secondary}
                   >
                     Mark done
                   </button>
@@ -137,15 +139,15 @@ function SepItemsSection() {
       queryClient.invalidateQueries({ queryKey: ['my-sep-items'] });
       queryClient.invalidateQueries({ queryKey: ['sep'] });
     },
-    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to update'),
+    onError: (error: unknown) => toastError(error, 'Could not mark the work package done'),
   });
 
   if (items.length === 0) return null;
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        🚦 SEP Work Packages ({items.length})
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <ClipboardList aria-hidden="true" size={14} className="text-slate-400" />SEP work packages ({items.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -159,7 +161,7 @@ function SepItemsSection() {
           </thead>
           <tbody>
             {items.map((i) => (
-              <tr key={i.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-750">
+              <tr key={i.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
                 <td className="px-4 py-3 text-slate-100">
                   {i.title_en}
                   <span className="text-xs text-slate-500 ml-2">{i.department}</span>
@@ -167,20 +169,20 @@ function SepItemsSection() {
                 <td className="px-4 py-3">
                   <button
                     onClick={() => navigate(`/projects/${i.project_id}`)}
-                    className="text-blue-400 hover:text-blue-300 underline text-left"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2 text-left"
                   >
                     {i.project_name}
                   </button>
                   <span className="text-xs text-slate-500 ml-2">{i.gate_code}</span>
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-400">
-                  {i.gate_target_date ? i.gate_target_date.slice(0, 10) : '—'}
+                  {formatCalendarDate(i.gate_target_date)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => markDone.mutate(i.id)}
                     disabled={markDone.isPending}
-                    className="text-xs px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+                    className={btnSm.secondary}
                   >
                     Mark done
                   </button>
@@ -220,8 +222,8 @@ function FormsSection() {
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        📝 SEP Forms ({forms.length})
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <FileText aria-hidden="true" size={14} className="text-slate-400" />SEP forms ({forms.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -235,12 +237,12 @@ function FormsSection() {
                 <td className="px-4 py-3">
                   <button
                     onClick={() => navigate(`/projects/${f.project_id}`)}
-                    className="text-blue-400 hover:text-blue-300 underline"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2"
                   >
                     {f.project_name}
                   </button>
                 </td>
-                <td className="px-4 py-3 text-xs text-slate-400">{f.updated_at.slice(0, 10)}</td>
+                <td className="px-4 py-3 text-xs text-slate-400">{formatDate(f.updated_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -323,7 +325,7 @@ const taskHint = (task: ChangeTask): string | null => {
       // say how many so the row does not read as a single job.
       const newest = task.reason?.trim() || t(`tasks.hint.${task.kind}`);
       return (task.question_count ?? 0) > 1
-        ? `${t('tasks.hint.questionsOpen').replace('{n}', String(task.question_count))} — ${newest}`
+        ? `${t('tasks.hint.questionsOpen').replace('{n}', String(task.question_count))} ${newest}`
         : newest;
     }
     case 'customer_response':
@@ -333,238 +335,259 @@ const taskHint = (task: ChangeTask): string | null => {
   }
 };
 
-// An unknown kind from a newer backend still names itself rather than blowing up.
-const taskLabel = (kind: string): string => {
-  const label = t(`tasks.kind.${kind}`);
-  return label === `tasks.kind.${kind}` ? kind : label;
-};
+/** The due cell: the same chip as the changes list ("in 5 d", "2 d overdue"),
+ *  the date ("25 Sep 2026") under it; "-" when undated. The backend's overdue
+ *  flag decides the color. */
+function DueCell({ due, overdue }: { due: string | null; overdue: boolean }) {
+  if (!due) return <span className="text-slate-500">-</span>;
+  return (
+    <span data-testid="task-due" className="inline-flex flex-col items-start gap-0.5">
+      <DeadlineChip date={due} state={overdue ? 'overdue' : 'on_track'} />
+      <span className="text-[11px] tabular-nums text-slate-400">{formatCalendarDate(due)}</span>
+    </span>
+  );
+}
 
-function ChangeTasksSection() {
+const LetterChips = ({ letters }: { letters: string[] }) => (
+  <span className="inline-flex gap-1 align-middle">
+    {letters.map((l) => {
+      const colors = rasicColors[l] ?? rasicColors['R'];
+      return (
+        <span key={l} data-testid="task-rasic"
+          title={t(`rasic.${l}`)}
+          className={`${colors.bg} ${colors.text} text-[11px] font-semibold px-1.5 py-px rounded`}>
+          {l}
+        </span>
+      );
+    })}
+  </span>
+);
+
+type Row =
+  | { source: 'change'; key: string; task: ChangeTask; overdue: boolean; due_date: string | null }
+  | { source: 'workflow'; key: string; task: FoldedWorkflowTask; overdue: boolean; due_date: string | null };
+
+/**
+ * One list for everything owed: change tasks and workflow tasks, each job once
+ * (R and A of the same department fold together), overdue first. The
+ * department filter narrows the workflow rows; change tasks are always the
+ * caller's own.
+ */
+function TaskList() {
   const navigate = useNavigate();
-
-  const { data: tasks = [] } = useQuery({
+  const { data: departments = [], isLoading: loadingDepts } = useDepartments();
+  const [selectedDeptId, setSelectedDeptId] = useState<number>(0);
+  const { data: wfTasks, isLoading: loadingWf } = useMyTasks(selectedDeptId);
+  const { data: changeTasks, isLoading: loadingChange } = useQuery({
     queryKey: ['change-my-tasks'],
     queryFn: () => changesApi.myTasks(),
     refetchInterval: 60_000,
   });
+  const activeDepartments = departments.filter((d) => d.is_active);
 
-  if (tasks.length === 0) return null;
+  const rows: Row[] = [
+    ...foldChangeTasks(changeTasks).map((task): Row => ({
+      source: 'change', key: `c-${task.kind}-${task.change_id}-${task.department_id ?? task.assessment_id ?? 0}`,
+      task, overdue: task.overdue, due_date: task.due_date,
+    })),
+    ...foldWorkflowTasks(wfTasks).map((task): Row => ({
+      source: 'workflow', key: `w-${task.task_id}`, task, overdue: task.overdue, due_date: task.due_date,
+    })),
+  ].sort((a, b) => mainFirst(
+    { ...a, role: a.task.role }, { ...b, role: b.task.role }));
+  // Project team (spec §18): the header counts main rows, the same number as
+  // the sidebar badge; backup rows are listed after them, muted.
+  const backupCount = rows.filter((r) => isBackup(r.task)).length;
+  const mainCount = rows.length - backupCount;
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        🔄 {t('tasks.changeWork')} ({tasks.length})
-      </h2>
-      <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-700 bg-slate-900">
-              <th className="text-left px-4 py-3 text-slate-400 font-medium">Change</th>
-              <th className="text-left px-4 py-3 text-slate-400 font-medium">Title</th>
-              <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.task')}</th>
-              <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((task) => (
-              <tr
-                key={`${task.kind}-${task.change_id}-${task.assessment_id ?? 0}`}
-                className={`border-b border-slate-700 last:border-0 hover:bg-slate-750${
-                  task.mine ? ' border-l-2 border-sky-500' : ''
-                }`}
-              >
-                <td className="px-4 py-3">
-                  <span className="font-mono text-slate-100">{task.change_number}</span>
-                </td>
-                <td className="px-4 py-3 text-slate-100">
-                  {task.title}
-                  {projectLabel(task.project_number, task.project_name) && (
-                    <span data-testid="task-project" className="block text-xs text-slate-400">
-                      {projectLabel(task.project_number, task.project_name)}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {/* The department's task is mandatory — there is no accept
-                      step. A name appears once somebody has submitted. */}
-                  <span className="block">
-                    <span className="text-slate-200">{taskLabel(task.kind)}</span>
-                    {task.kind === 'assessment' && task.owner_name && (
-                      <span className="block text-xs text-slate-400">{task.owner_name}</span>
-                    )}
-                    {taskHint(task) && (
-                      <span className="block text-xs text-slate-400">{taskHint(task)}</span>
-                    )}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs">
-                  {task.due_date ? (
-                    <span className={task.overdue ? 'text-red-400 font-semibold' : 'text-slate-300'}>
-                      {new Date(task.due_date).toLocaleDateString()}
-                      {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => navigate(
-                      `/changes/${task.change_id}${TASK_TAB[task.kind] ?? ''}`)}
-                    className="text-xs px-3 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white"
-                  >
-                    {task.kind === 'assessment' ? 'Assess' : t('tasks.open')}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-2">
+        <h2 data-testid="task-list-title"
+          className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          {t('tasks.openList')} ({mainCount})
+          {backupCount > 0 && (
+            <span data-testid="task-list-backup-count"
+              className="ml-2 normal-case tracking-normal font-normal text-slate-500">
+              {t('tasks.asBackup').replace('{n}', String(backupCount))}
+            </span>
+          )}
+        </h2>
+        <label className="flex items-center gap-2 text-xs text-slate-400">
+          {t('tasks.deptFilter')}
+          {loadingDepts ? (
+            <span className="inline-block h-7 w-40 bg-slate-700 rounded animate-pulse" />
+          ) : (
+            <select
+              data-testid="task-dept-filter"
+              value={selectedDeptId}
+              onChange={(e) => setSelectedDeptId(Number(e.target.value))}
+              className="bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={0}>{t('tasks.myDepartments')}</option>
+              {activeDepartments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          )}
+        </label>
       </div>
+
+      {(loadingWf || loadingChange) && rows.length === 0 ? (
+        <LoadingSkeleton count={4} />
+      ) : rows.length === 0 ? (
+        <EmptyState data-testid="task-list-empty"
+          title={selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')} />
+      ) : (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700 bg-slate-900">
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.what')}</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.task')}</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.stage')}</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (row.source === 'change'
+                ? <ChangeTaskRow key={row.key} task={row.task} navigate={navigate} />
+                : <WorkflowTaskRow key={row.key} task={row.task} navigate={navigate} />))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
 
+/** Mine rows carry a quiet tint; backup rows (spec §18) read muted. */
+const rowClass = (task: { mine?: boolean; role?: string }) =>
+  `border-b border-slate-700 last:border-0 hover:bg-slate-700/30${
+    task.mine ? ' bg-sky-950/30' : ''}${isBackup(task) ? ' opacity-60' : ''}`;
+
+/** The row's stage: the backend's label, else its stage key, else the change status. */
+function taskStageLabel(task: Pick<ChangeTask, 'stage' | 'stage_label' | 'status'>): string {
+  if (task.stage_label) return task.stage_label;
+  const key = task.stage ?? task.status;
+  if (!key) return '-';
+  return STATUS_LABELS[key as keyof typeof STATUS_LABELS] ?? humanize(key);
+}
+
+function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: string) => void }) {
+  const hint = taskHint(task);
+  const letters = task.rasic_letters ?? [];
+  return (
+    <tr data-testid="task-row" data-role={task.role ?? 'main'}
+      className={rowClass(task)}>
+      <td className="px-4 py-3 align-top">
+        <span className="font-mono text-slate-100 whitespace-nowrap">{task.change_number}</span>
+        <span className="block text-slate-200">{task.title}</span>
+        {projectLabel(task.project_number, task.project_name) && (
+          <span data-testid="task-project" className="block text-xs text-slate-400">
+            {projectLabel(task.project_number, task.project_name)}
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-3 align-top">
+        {/* The department's task is mandatory: there is no accept step.
+            A name appears once somebody has submitted. */}
+        <span className="block">
+          <span className="text-slate-200">{taskKindLabel(task.kind, task.kind_label)}</span>
+          {letters.length > 0 && <span className="ml-2"><LetterChips letters={letters} /></span>}
+          {task.kind === 'assessment' && task.owner_name && (
+            <span className="block text-xs text-slate-400">{task.owner_name}</span>
+          )}
+          {isBackup(task) && <BackupChip mainName={task.main_name} className="ml-2" />}
+          {hint && <span className="block text-xs text-slate-400">{hint}</span>}
+        </span>
+      </td>
+      <td data-testid="task-stage" className="px-4 py-3 align-top text-slate-300 whitespace-nowrap">
+        {taskStageLabel(task)}
+      </td>
+      <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} /></td>
+      <td className="px-4 py-3 align-top text-right">
+        <button
+          type="button"
+          onClick={() => navigate(`/changes/${task.change_id}${TASK_TAB[task.kind] ?? ''}`)}
+          className={btnSm.primary}
+        >
+          {task.kind === 'assessment' ? 'Assess' : t('tasks.open')}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigate: (to: string) => void }) {
+  return (
+    <tr data-testid="task-row" data-role={task.role ?? 'main'}
+      className={rowClass(task)}>
+      <td className="px-4 py-3 align-top">
+        <span className="font-mono text-slate-100 whitespace-nowrap">{task.part_number}</span>
+        <span className="block text-slate-200">{task.part_name}</span>
+        <span className="block text-xs text-slate-400">{t('tasks.revision')} {task.revision_name}</span>
+      </td>
+      <td className="px-4 py-3 align-top">
+        <span className="text-slate-200">{task.step_name}</span>
+        <span className="ml-2"><LetterChips letters={task.letters} /></span>
+        {/* Mandatory too: a name appears once somebody has worked the row. */}
+        {task.owner_id !== null && task.owner_name && (
+          <span className="block text-xs text-slate-400">{task.owner_name}</span>
+        )}
+        <span className="block text-xs text-slate-500">{task.department_name}</span>
+        {isBackup(task) && <BackupChip mainName={task.main_name} className="mt-0.5" />}
+      </td>
+      <td className="px-4 py-3 align-top text-slate-300">
+        <span className="whitespace-nowrap">{t('tasks.stageN').replace('{n}', String(task.stage_order))}</span>
+        {task.stage_name && <span className="block text-xs text-slate-400">{task.stage_name}</span>}
+      </td>
+      <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} /></td>
+      <td className="px-4 py-3 align-top text-right">
+        <button
+          type="button"
+          onClick={() => navigate(`/projects/${task.project_id}`)}
+          className={btnSm.secondary}
+        >
+          {t('tasks.viewPart')}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+/** The badge's number: every main row on this page, sections included. */
+function MyTasksTotal() {
+  const { total } = useMyTaskCounts();
+  return (
+    <span data-testid="my-tasks-total" className="text-slate-400 font-normal">({total})</span>
+  );
+}
+
 export default function MyTasksPage() {
-  const navigate = useNavigate();
-  const { data: departments = [], isLoading: loadingDepts } = useDepartments();
-  const [selectedDeptId, setSelectedDeptId] = useState<number>(0);
-
-  const { data: tasks = [], isLoading: loadingTasks } = useMyTasks(selectedDeptId);
-
-  const activeDepartments = departments.filter((d) => d.is_active);
-
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-100">My Tasks</h1>
-        <p className="text-slate-400 text-sm mt-1">Active workflow tasks by department</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-100">
+          My Tasks <MyTasksTotal />
+        </h1>
+        <p className="text-slate-400 text-sm mt-1">{t('tasks.subtitle')}</p>
       </div>
 
       <EscalationsCard />
+
+      <TaskList />
+
+      <IntakeSection />
+
+      <CostSheetReviewTask />
 
       <SepItemsSection />
 
       <FormsSection />
 
-      <ChangeTasksSection />
-
       <LessonActionsSection />
-
-      {/* Department Selector */}
-      <div className="max-w-xs">
-        <label className="block text-sm font-medium text-slate-300 mb-2">Department</label>
-        {loadingDepts ? (
-          <div className="h-9 bg-slate-700 rounded animate-pulse" />
-        ) : (
-          <select
-            value={selectedDeptId}
-            onChange={(e) => setSelectedDeptId(Number(e.target.value))}
-            className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value={0}>My departments</option>
-            {activeDepartments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {/* Task Table */}
-      {loadingTasks ? (
-        <LoadingSkeleton count={4} />
-      ) : tasks.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-slate-400">
-            {selectedDeptId === 0
-              ? 'No active tasks in your departments — ask an admin to assign you to departments if this looks wrong.'
-              : 'No active tasks for this department.'}
-          </p>
-        </div>
-      ) : (
-        <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 bg-slate-900">
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Part</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Revision</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Step</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Stage</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.owner')}</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">RASIC</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Started</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((task) => {
-                const colors = rasicColors[task.rasic_letter] ?? rasicColors['R'];
-                const startedDate = new Date(task.instance_started_at).toLocaleDateString();
-                return (
-                  <tr
-                    key={task.task_id}
-                    className={`border-b border-slate-700 hover:bg-slate-750 last:border-0${
-                      task.mine ? ' border-l-2 border-sky-500' : ''
-                    }`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="text-slate-100 font-medium">{task.part_name}</div>
-                      <div className="text-slate-400 text-xs">{task.part_number}</div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-300">{task.revision_name}</td>
-                    <td className="px-4 py-3 text-slate-300">{task.step_name}</td>
-                    <td className="px-4 py-3 text-slate-300">
-                      <span className="text-slate-400 text-xs mr-1">Stage {task.stage_order}</span>
-                      {task.stage_name && (
-                        <span className="text-slate-300">{task.stage_name}</span>
-                      )}
-                    </td>
-                    {/* The task is mandatory — there is no "I take this one".
-                        A name appears once somebody has worked the row. */}
-                    <td className="px-4 py-3">
-                      {task.owner_id !== null ? (
-                        <span className="text-slate-200">{task.owner_name}</span>
-                      ) : (
-                        <span className="text-slate-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs">
-                      {task.due_date ? (
-                        <span className={task.overdue ? 'text-red-400 font-semibold' : 'text-slate-300'}>
-                          {new Date(task.due_date).toLocaleDateString()}
-                          {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`${colors.bg} ${colors.text} text-xs font-semibold px-2 py-0.5 rounded`}
-                      >
-                        {task.rasic_letter}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-400 text-xs">{startedDate}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => navigate(`/projects/${task.project_id}`)}
-                        className="text-xs text-blue-400 hover:text-blue-300 underline"
-                      >
-                        View Part
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }

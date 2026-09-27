@@ -238,6 +238,8 @@ class ValidationService:
         names = await ValidationService._department_names(session)
         planned = await ValidationService.planned_cycle_seconds_by_department(
             session, change)
+        planned_total_s = (round(sum(planned.values()), 3)
+                           if planned else None)
         people = await ValidationService._names(
             session, [r.checked_by for r in rows] + [change.weight_delta_ack_by])
         estimate = (float(change.estimated_part_weight_g)
@@ -254,16 +256,20 @@ class ValidationService:
             stored = {r.check_key: r for r in by_dept[dept_id]}
             checks = []
             # Catalog order, not insertion order: the list reads the way the
-            # rule book states it. Keys stored before a catalog change still
-            # surface, at the end, so a retired check never silently vanishes
-            # from a change that already answered it.
-            keys = catalog.keys_for(dept_name)
-            keys += [k for k in stored if k not in keys]
+            # rule book states it. Keys an older catalog seeded still surface,
+            # at the end and marked retired, when somebody answered them, so
+            # an answer never silently vanishes; an unanswered retired row is
+            # not owed any more and is left out. Retired rows never count.
+            current = catalog.keys_for(dept_name)
+            keys = current + [k for k in stored if k not in current
+                              and stored[k].status != "open"]
             for key in keys:
                 row = stored.get(key)
-                item = catalog.item_for(key, dept_name) or {
-                    "key": key, "label_de": key, "label_en": key,
-                    "expects_value": False, "unit": None, "extra": True}
+                item = (catalog.item_for(key, dept_name)
+                        or catalog.any_item_for(key) or {
+                            "key": key, "label_de": key, "label_en": key,
+                            "expects_value": False, "unit": None,
+                            "extra": True})
                 entry = {
                     "check_key": key,
                     "label_de": item["label_de"], "label_en": item["label_en"],
@@ -276,28 +282,46 @@ class ValidationService:
                     "checked_by_name": (people.get(row.checked_by)
                                         if row else None),
                     "checked_at": row.checked_at if row else None,
+                    "retired": key not in current,
                 }
                 if key == catalog.CYCLE_TIME_KEY:
                     # The costing never stated an absolute cycle time, only
                     # the seconds this change adds per part. Named as what it
                     # is so nobody subtracts a measurement from it.
-                    entry["planned_delta_seconds"] = planned.get(dept_id)
+                    if dept_name == catalog.CYCLE_TIME_DEPARTMENT:
+                        # The Tool Engineer measures the line for the whole
+                        # change, so its row is held against the change-wide
+                        # sum of every department's lifecycle minutes (it
+                        # rarely prices lifecycle minutes itself).
+                        entry["planned_delta_seconds"] = planned_total_s
+                        entry["planned_delta_source"] = (
+                            "change_lifecycle_total"
+                            if planned_total_s is not None else None)
+                    else:
+                        entry["planned_delta_seconds"] = planned.get(dept_id)
+                        entry["planned_delta_source"] = (
+                            "department_lifecycle"
+                            if planned.get(dept_id) is not None else None)
                 if key == catalog.WEIGHT_KEY:
                     entry["estimated_part_weight_g"] = estimate
                     entry["delta_g"] = delta
                 checks.append(entry)
-            answered = [c for c in checks if c["status"] in VALIDATION_WRITE_STATUSES]
+            if not checks:
+                continue
+            owed = [c for c in checks if not c["retired"]]
+            answered = [c for c in owed if c["status"] in VALIDATION_WRITE_STATUSES]
             departments.append({
                 "department_id": dept_id,
                 "department_name": dept_name,
                 "checks": checks,
-                "open_count": len(checks) - len(answered),
-                "failed_count": sum(1 for c in checks if c["status"] == "failed"),
-                "all_passed": bool(checks) and all(
-                    c["status"] == "passed" for c in checks),
+                "open_count": len(owed) - len(answered),
+                "failed_count": sum(1 for c in owed if c["status"] == "failed"),
+                "all_passed": bool(owed) and all(
+                    c["status"] == "passed" for c in owed),
             })
 
-        all_checks = [c for d in departments for c in d["checks"]]
+        all_checks = [c for d in departments for c in d["checks"]
+                      if not c["retired"]]
         # The costing's lifecycle assumption for the change as a whole, in the
         # unit the costing states it (minutes per part). The measured cycle
         # times come in SECONDS, which is how a line measures; converting one
@@ -355,14 +379,14 @@ class ValidationService:
         status = spec.get("status")
         if status not in VALIDATION_WRITE_STATUSES:
             raise ValidationError(
-                f"Invalid validation status '{status}' — "
+                f"Invalid validation status '{status}': "
                 f"one of {', '.join(VALIDATION_WRITE_STATUSES)}")
 
         implementing = await ValidationService.implementing_department_ids(
             session, change)
         if department_id not in implementing:
             raise ValidationError(
-                f"Department {department_id} is not implementing this change — "
+                f"Department {department_id} is not implementing this change: "
                 "only departments that costed work on it validate it")
         names = await ValidationService._department_names(session)
         dept_name = names.get(department_id)
@@ -377,7 +401,7 @@ class ValidationService:
             value = round(float(value), 3)
         if status == "passed" and item["expects_value"] and value is None:
             raise ValidationError(
-                f"{item['label_en']} is a measurement — record the value "
+                f"{item['label_en']} is a measurement: record the value "
                 f"({item['unit']}) to pass it")
 
         rows = await ValidationService.ensure_checks(session, change)
@@ -397,6 +421,10 @@ class ValidationService:
             row.value = value
         if spec.get("note") is not None:
             row.note = spec.get("note") or None
+        elif status == "passed" and old_status != "passed":
+            # the note said why it was not passing; a pass without a new
+            # note leaves no stale explanation behind
+            row.note = None
         row.checked_by = actor.id
         row.checked_at = datetime.utcnow()
         await session.flush()
@@ -412,11 +440,16 @@ class ValidationService:
             old_value={"status": old_status, "value": old_value},
             new_value={"department_id": department_id, "check_key": check_key,
                        "status": status, "value": row.value},
-            notes=row.note)
+            notes=row.note, for_department_id=department_id)
 
         if check_key == catalog.WEIGHT_KEY and status == "passed":
             await ValidationService._stamp_validated_weight(
                 session, change, row.value, actor)
+        # Validation issues (spec §12): a passed re-answer closes the issue
+        # linked to this check; a new failure sends one waiting for
+        # re-validation back to fixing.
+        from app.services.validation_issue_service import ValidationIssueService
+        await ValidationIssueService.on_check_answered(session, change, row, actor)
         return row
 
     @staticmethod
@@ -460,11 +493,11 @@ class ValidationService:
         delta = ValidationService.weight_delta(change)
         if delta is None:
             raise ValidationError(
-                "No weight delta to acknowledge — the part weight has not been "
+                "No weight delta to acknowledge: the part weight has not been "
                 "both estimated and validated")
         if not delta:
             raise ValidationError(
-                "The validated weight matches the estimate — there is nothing "
+                "The validated weight matches the estimate: there is nothing "
                 "to update the quote for")
         if change.weight_delta_ack_at is not None:
             raise ValidationError("That weight delta is already acknowledged")
@@ -505,6 +538,10 @@ class ValidationService:
         if not rows:
             return None
         names = await ValidationService._department_names(session)
+        # Only the checks the department owes under the current catalog: a
+        # row an older catalog seeded (Development's 'sampled') is retired.
+        rows = [r for r in rows if r.check_key in catalog.keys_for(
+            names.get(r.department_id))]
 
         def _name(row) -> str:
             dept = names.get(row.department_id) or f"dept {row.department_id}"
@@ -512,10 +549,10 @@ class ValidationService:
 
         failed = [r for r in rows if r.status == "failed"]
         if failed:
-            return ("validation failed — " + ", ".join(sorted(map(_name, failed)))
+            return ("Validation failed: " + ", ".join(sorted(map(_name, failed)))
                     + ". Send the change back to implementation with a reason")
         outstanding = [r for r in rows if r.status != "passed"]
         if outstanding:
-            return ("validation incomplete — still open: "
+            return ("Validation incomplete, still open: "
                     + ", ".join(sorted(map(_name, outstanding))))
         return None

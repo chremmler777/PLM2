@@ -110,7 +110,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
 
       {!relations || relations.length === 0 ? (
         <p className="text-slate-500 text-sm">
-          No linked items — connect tools, gauges, or equipment to the articles they serve
+          No linked items. Connect tools, gauges, or equipment to the articles they serve
         </p>
       ) : (
         <div className="space-y-1.5">
@@ -164,7 +164,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
               <option value="">-- Select item --</option>
               {availableParts.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {CATEGORY_ICONS[p.item_category] ?? ''} {p.part_number} — {p.name}
+                  {CATEGORY_ICONS[p.item_category] ?? ''} {p.part_number} · {p.name}
                 </option>
               ))}
             </select>

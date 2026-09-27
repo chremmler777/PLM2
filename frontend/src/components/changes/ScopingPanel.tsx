@@ -1,21 +1,66 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Check, UserRound, X } from 'lucide-react'
+import Button from '../common/Button'
+import { btnSm } from '../common/buttonStyles'
+import { apiErrorMessage, toastError } from '../../lib/apiError'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
-import { contactsApi } from '../../api/contacts'
+import { contactsApi, type Contact } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
 import ReasonDialog from './ReasonDialog'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
+import TransitionConfirmDialog from './TransitionConfirmDialog'
+import DateInput from '../gantt/DateInput'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
-import type { Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, RasicLetter } from '../../types/change'
+import { formatDate } from '../../lib/format'
+import type {
+  Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier, MeetingParticipant, RasicLetter,
+} from '../../types/change'
+import { carrierOf, isPersonContact } from '../../lib/scopingRules'
+import { departmentLabel, pickableDepartments } from '../../lib/departments'
+import { plantText } from '../../lib/plantName'
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+/** The room's letters, in the order the picker shows them. I (informed) is an
+ *  FYI: no assessment, nothing blocks on it. */
+const RASIC_PICK: RasicLetter[] = ['R', 'A', 'S', 'C', 'I']
+
+/** An attendee as picked. A directory person is a colleague (and carries
+ *  their user id and email as the contacts API sends them); a typed name
+ *  that matched nobody is an external guest. `guest` is UI-only and never
+ *  sent. */
+type Attendee = MeetingParticipant & { guest?: boolean }
+/** What the backend gets: the name plus whatever identifies the PLM2 user
+ *  (user_id, checked against the email; else the email to resolve). A
+ *  guest is a name. */
+const toParticipant = ({ name, user_id, email }: Attendee): MeetingParticipant => ({
+  name,
+  ...(user_id != null ? { user_id } : {}),
+  ...(email ? { email } : {}),
+})
+/** The picker text for each contact: the name, and for a name two people
+ *  share, the name with their email (else department) so the right one is
+ *  picked and its user id sent. */
+function contactLabels(people: Contact[]): Map<Contact, string> {
+  const count = new Map<string, number>()
+  for (const c of people) {
+    const k = c.name.trim().toLowerCase()
+    count.set(k, (count.get(k) ?? 0) + 1)
+  }
+  const out = new Map<Contact, string>()
+  for (const c of people) {
+    const shared = (count.get(c.name.trim().toLowerCase()) ?? 0) > 1
+    const tag = c.email || c.department
+    out.set(c, shared && tag ? `${c.name} (${tag})` : c.name)
+  }
+  return out
+}
+const attendeeKey = (a: Attendee) => (a.user_id != null ? `u${a.user_id}` : `n${a.name.toLowerCase()}`)
 
 const DECISION_LABEL: Record<string, string> = {
   proceed: t('meeting.proceed'), reject: t('meeting.reject'),
@@ -23,8 +68,18 @@ const DECISION_LABEL: Record<string, string> = {
 }
 
 export default function ScopingPanel(
-  { change, canSendRejection = true, canAnswerConcerns = false, isPm = false }: {
+  { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [],
+    canRecordMeeting = true, onInformTeam }: {
     change: ChangeRequest & { attachments?: Attachment[] }
+    /** A change from KTX Weissenburg / Solingen: opens the tab where the
+     *  information goes out to the team (its scoping ends there, never in
+     *  an assessment). */
+    onInformTeam?: () => void
+    /** Lead, Project Management or admin (stage-state `can_record_meeting`):
+     *  records the meeting and decides it. Everyone else reads the record. */
+    canRecordMeeting?: boolean
+    /** The viewer's departments: a new flag is filed under their own. */
+    myDepartmentIds?: number[]
     /** Sales membership: Sales writes the answer of record. */
     canAnswerConcerns?: boolean
     /** Project Management may close a question the asking side left hanging. */
@@ -36,6 +91,10 @@ export default function ScopingPanel(
 ) {
   const changeId = change.id
   const status = change.status
+  // Mother plant (spec §14): no assessment, costing or offer. The scoping
+  // record says which departments are informed; the backend refuses
+  // "proceed" (it would enter assessment) and there is no cost carrier.
+  const motherPlant = change.origin === 'mother_plant'
   const qc = useQueryClient()
   const { userId } = useAuth()
   const { data: concerns = [] } = useQuery({
@@ -50,14 +109,28 @@ export default function ScopingPanel(
 
   const [date, setDate] = useState('')
   const [channel, setChannel] = useState<'meeting' | 'chat' | 'email'>('meeting')
-  const [participants, setParticipants] = useState('')
+  const [participants, setParticipants] = useState<Attendee[]>([])
   const [addName, setAddName] = useState('')
+  const channelId = useId()
+  const attendeeId = useId()
+  const attendeeHintId = useId()
   // The room's RASIC call per department. A department in the map is on the
   // hook with that letter; one outside it is not involved. Seeded from the
   // standard routing's letters, overruled by the people in the room.
   const [deptRasic, setDeptRasic] = useState<Record<number, RasicLetter>>({})
   const deptIds = Object.keys(deptRasic).map(Number)
   const [deptTouched, setDeptTouched] = useState(false)
+  // Who pays, as the room confirms it: required next to RASIC (spec §16).
+  // Never preselected: the room makes the call consciously; what capture
+  // said (and the last meeting's call) is shown beside it as a hint.
+  const [carrier, setCarrier] = useState<CostCarrier | ''>('')
+  // The form is a record of one meeting: open while there is none, then one
+  // click away. After a save it resets and folds up.
+  const [formOpen, setFormOpen] = useState<boolean | null>(null)
+  const [carried, setCarried] = useState(false)
+  // Proceeding (and closing a rejected change) is asked once more.
+  const [confirmProceed, setConfirmProceed] = useState<ChangeMeeting | null>(null)
+  const [confirmSent, setConfirmSent] = useState(false)
 
   // Recommended assessors for this change type (stage-1 Responsible depts): the
   // technical disciplines who each assess their part. Pre-marked in the picker;
@@ -78,6 +151,14 @@ export default function ScopingPanel(
       setDeptRasic(recommendedRasic())
     }
   }, [recommended]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A later meeting starts from the last one's RASIC call and cost carrier:
+  // the room edits the difference (spec §16).
+  const lastLetters = meetings[meetings.length - 1]?.department_rasic
+  useEffect(() => {
+    if (deptTouched || !lastLetters || Object.keys(lastLetters).length === 0) return
+    setDeptRasic(Object.fromEntries(Object.entries(lastLetters).map(([k, v]) => [Number(k), v])) as Record<number, RasicLetter>)
+    setCarried(true)
+  }, [lastLetters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Attendee autofill: the signed-in user's Entra "relevant people" via the hub,
   // or local PLM2 users in dev. Free-text still allowed for external attendees.
@@ -86,29 +167,40 @@ export default function ScopingPanel(
     enabled: status === 'captured' || status === 'scoping',
     staleTime: 60 * 60 * 1000,
   })
-  const appendParticipant = (name: string) => {
-    const n = name.trim()
-    if (!n) return
-    const cur = participants.split(',').map((s) => s.trim()).filter(Boolean)
-    if (!cur.includes(n)) setParticipants([...cur, n].join(', '))
+  const people = contacts.filter((c) => isPersonContact(c, departments.map((d) => d.name)))
+  const labels = contactLabels(people)
+  const labelOf = (c: Contact) => labels.get(c) ?? c.name
+  const fromContact = (c: Contact): Attendee =>
+    ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null, guest: false })
+  const appendParticipant = (a: Attendee | null) => {
+    if (!a || !a.name.trim()) return
+    const next = { ...a, name: a.name.trim() }
+    // Same user id, or the same name where one side is a bare name: two
+    // colleagues who share a name are two attendees.
+    if (!participants.some((p) => attendeeKey(p) === attendeeKey(next)
+      || ((p.user_id == null || next.user_id == null)
+        && p.name.toLowerCase() === next.name.toLowerCase()))) {
+      setParticipants([...participants, next])
+    }
     setAddName('')
   }
-  const removeParticipant = (name: string) => {
-    const cur = participants.split(',').map((s) => s.trim()).filter(Boolean)
-    setParticipants(cur.filter((n) => n !== name).join(', '))
-  }
-  const participantList = participants.split(',').map((s) => s.trim()).filter(Boolean)
+  const removeParticipant = (a: Attendee) =>
+    setParticipants(participants.filter((p) => attendeeKey(p) !== attendeeKey(a)))
+  const participantList = participants
 
   // Resolve the typed text to the best contact match so Enter/Tab confirms the
-  // suggestion (exact > prefix > contains); falls back to the raw text for
-  // external attendees not in the directory.
-  const bestMatch = (q: string): string => {
+  // suggestion (exact > prefix > contains, on label, name or mail); falls
+  // back to the raw text for external attendees not in the directory.
+  const bestMatch = (q: string): Attendee | null => {
     const s = q.trim().toLowerCase()
-    if (!s) return ''
-    const exact = contacts.find((c) => c.name.toLowerCase() === s)
-    const prefix = contacts.find((c) => c.name.toLowerCase().startsWith(s))
-    const contains = contacts.find((c) => c.name.toLowerCase().includes(s))
-    return (exact ?? prefix ?? contains)?.name ?? q.trim()
+    if (!s) return null
+    const keys = (c: Contact) => [labelOf(c), c.name, (c.email ?? '').split('@')[0], c.email ?? '']
+      .map((k) => k.toLowerCase()).filter(Boolean)
+    const exact = people.find((c) => keys(c).some((k) => k === s))
+    const prefix = people.find((c) => keys(c).some((k) => k.startsWith(s)))
+    const contains = people.find((c) => c.name.toLowerCase().includes(s))
+    const hit = exact ?? prefix ?? contains
+    return hit ? fromContact(hit) : { name: q.trim(), user_id: null, guest: true }
   }
   const confirmTyped = () => appendParticipant(bestMatch(addName))
 
@@ -116,21 +208,29 @@ export default function ScopingPanel(
     qc.invalidateQueries({ queryKey: ['change-meetings', changeId] })
     qc.invalidateQueries({ queryKey: ['change', changeId, 'concerns'] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
   }
   const create = useMutation({
     mutationFn: () => changesApi.createMeeting(changeId, {
       meeting_date: date ? `${date}T12:00:00Z` : undefined,
       channel,
-      participants: participants.split(',').map((n) => n.trim())
-        .filter(Boolean).map((name) => ({ name })),
+      participants: participants.map(toParticipant),
       selected_department_ids: deptIds,
-      department_rasic: deptRasic,
+      // Mother plant: every department on the record is informed, nobody
+      // assesses.
+      department_rasic: motherPlant
+        ? Object.fromEntries(deptIds.map((id) => [id, 'I' as RasicLetter])) : deptRasic,
+      ...(carrier && !motherPlant ? { cost_carrier: carrier } : {}),
     }),
     onSuccess: () => {
-      setParticipants(''); setAddName('')
-      setDeptTouched(false); setDeptRasic(recommendedRasic()); invalidate()
+      // A fresh form for the next record, folded away; the letters of this
+      // meeting are what the next one starts from (seeded on reopen).
+      setParticipants([]); setAddName(''); setDate(''); setChannel('meeting'); setCarrier('')
+      setDeptTouched(false); setCarried(false); setFormOpen(false)
+      toast.success(t('meeting.saved'))
+      invalidate()
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
+    onError: (e: unknown) => toastError(e, 'Could not record the meeting'),
   })
   // A refused decision names the open concerns that blocked it — that detail is
   // the whole answer, so it is shown in place and not only as a toast.
@@ -143,7 +243,13 @@ export default function ScopingPanel(
       toast.success(t('reject.sent'))
       invalidate()
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not close the change'),
+    onError: (e: unknown) => toastError(e, 'Could not close the change'),
+  })
+  const setMeetingCarrier = useMutation({
+    mutationFn: (vars: { meetingId: number; carrier: CostCarrier }) =>
+      changesApi.updateMeeting(changeId, vars.meetingId, { cost_carrier: vars.carrier }),
+    onSuccess: invalidate,
+    onError: (e: unknown) => toastError(e, 'Could not set the cost carrier'),
   })
   const decide = useMutation({
     mutationFn: (vars: {
@@ -151,9 +257,8 @@ export default function ScopingPanel(
     }) => changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason),
     onSuccess: () => { setDecideError(null); invalidate() },
     onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Decision failed'
-      setDecideError(detail)
-      toast.error(detail)
+      setDecideError(apiErrorMessage(e, 'Could not record the decision'))
+      toastError(e, 'Could not record the decision')
     },
   })
   // Reject and needs-info both owe the originator an answer, so both collect
@@ -167,6 +272,9 @@ export default function ScopingPanel(
   // Meetings belong to scoping: the backend refuses to create one while the
   // change is still being captured, so the recording UI stays hidden there.
   const meetingOpen = status === 'scoping'
+  // Recording and deciding are the lead's, PM's or an admin's (the backend
+  // answers anyone else 403): others see the record, not the controls.
+  const recordOpen = meetingOpen && canRecordMeeting
   // The most recent decision that leaves a ball in our court: a rejection the
   // customer has to be told about, or missing information somebody has to go
   // and get. Cleared once a later meeting reaches 'proceed'.
@@ -198,7 +306,7 @@ export default function ScopingPanel(
     id == null ? undefined : meetings.find((m: ChangeMeeting) => m.id === id)
   const originOf = (c: ChangeConcern) => {
     const m = meetingOf(c.raised_by_meeting_id)
-    return m ? `${t('concern.fromMeeting')} ${new Date(m.meeting_date).toLocaleDateString()}` : undefined
+    return m ? `${t('concern.fromMeeting')} ${formatDate(m.meeting_date)}` : undefined
   }
   const latestMeeting: ChangeMeeting | null =
     meetings.length > 0 ? meetings[meetings.length - 1] : null
@@ -218,6 +326,35 @@ export default function ScopingPanel(
   const outstanding = [...meetings].reverse().find(
     (m: ChangeMeeting) => m.decision === 'reject' || m.decision === 'needs_info')
     ?? null
+  // The carrier a meeting confirmed: its own record, or (older backend that
+  // keeps no carrier on the meeting) the change's flag.
+  const carrierOfMeeting = (m: ChangeMeeting): CostCarrier | '' =>
+    m.cost_carrier !== undefined ? (m.cost_carrier ?? '') : carrierOf(change.customer_relevant)
+  const carrierName = (c: CostCarrier | '') =>
+    c ? t(`meeting.costCarrier.${c}`) : '-'
+  const openForm = () => {
+    // A reopened form starts from the last meeting's call: its letters and
+    // its cost carrier, so the room edits the difference, not the whole list.
+    const last = latestMeeting
+    const letters = last?.department_rasic
+      ? Object.fromEntries(Object.entries(last.department_rasic).map(([k, v]) => [Number(k), v]))
+      : null
+    if (letters && Object.keys(letters).length > 0) {
+      setDeptRasic(letters as Record<number, RasicLetter>); setDeptTouched(true); setCarried(true)
+    } else if (!deptTouched) {
+      setDeptRasic(recommendedRasic())
+    }
+    setFormOpen(true)
+  }
+  // Open by default, except while the last record still waits for its
+  // decision: then the next record is one click away, not in the way.
+  const formShown = formOpen ?? !(latestMeeting && !latestMeeting.decision)
+  const saveMissing = [
+    ...(carrier || motherPlant ? [] : [t('meeting.costCarrier')]),
+  ]
+  // The backend refuses to start the assessment on an unlocked impacted
+  // set: the step says so instead of answering 400.
+  const impactUnlocked = !change.impact_confirmed_at
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptRasic((prev) => {
@@ -232,6 +369,18 @@ export default function ScopingPanel(
   const letterOf = (m: ChangeMeeting, id: number): string | null =>
     m.department_rasic?.[String(id)] ?? null
 
+  // Why "Proceed & start assessment" cannot be pressed yet, in words.
+  const proceedBlockedWhy = (m: ChangeMeeting): string | undefined =>
+    carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing')
+      : impactUnlocked ? t('meeting.impactNotLocked') : undefined
+
+  // "25.09.2026 · Anna, Ben", or what is known when the record is thin.
+  const meetingHeadline = (m: ChangeMeeting): string => {
+    const names = m.participants.map((p) => p.name).filter(Boolean).join(', ')
+    const date = m.meeting_date ? formatDate(m.meeting_date) : ''
+    const who = names || t('meeting.noAttendees')
+    return date ? `${date} · ${who}` : (names || t('meeting.undated'))
+  }
   const meetingRow = (m: ChangeMeeting) => (
     <li key={m.id} className="p-3 space-y-1">
       <div className="flex justify-between items-center">
@@ -239,33 +388,81 @@ export default function ScopingPanel(
           <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
             {t(`channel.${m.channel ?? 'meeting'}`)}
           </span>
-          {new Date(m.meeting_date).toLocaleDateString()} — {' '}
-          {m.participants.map((p) => p.name).join(', ') || '—'}
+          {meetingHeadline(m)}
         </span>
         {m.decision ? (
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
             {DECISION_LABEL[m.decision] ?? m.decision}
           </span>
-        ) : meetingOpen && (
-          <span className="flex gap-2">
-            <button className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs"
-              disabled={decide.isPending}
-              onClick={() => decide.mutate({ meetingId: m.id, decision: 'proceed' })}>
-              {t('meeting.proceed')}
-            </button>
-            <button className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs"
+        ) : recordOpen && motherPlant ? (
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            {onInformTeam && (
+              <button type="button" className={btnSm.primary}
+                data-testid={`meeting-inform-${m.id}`} onClick={onInformTeam}>
+                {t('mp.sendInfo')}
+              </button>
+            )}
+            <button type="button" className={btnSm.secondary}
               disabled={decide.isPending}
               onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
               {t('meeting.needsInfo')}
             </button>
-            <button className="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs"
+            <button type="button"
+              className={`${btnSm.secondary} text-red-300 hover:text-red-200 hover:border-red-700`}
               disabled={decide.isPending}
               onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
               {t('meeting.reject')}
             </button>
           </span>
+        ) : recordOpen ? (
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            {carrierOfMeeting(m) === '' && (
+              <select aria-label={t('meeting.costCarrier')} data-testid={`meeting-carrier-${m.id}`}
+                value="" onChange={(e) => e.target.value
+                  && setMeetingCarrier.mutate({ meetingId: m.id, carrier: e.target.value as CostCarrier })}
+                className="h-7 bg-slate-800 border border-amber-600 rounded-lg px-2 text-xs text-slate-100">
+                <option value="">{t('meeting.costCarrierPick')}</option>
+                <option value="customer">{t('meeting.costCarrier.customer')}</option>
+                <option value="internal">{t('meeting.costCarrier.internal')}</option>
+              </select>
+            )}
+            <button type="button" className={btnSm.primary}
+              data-testid={`meeting-proceed-${m.id}`}
+              disabled={decide.isPending || carrierOfMeeting(m) === '' || impactUnlocked}
+              title={proceedBlockedWhy(m)}
+              aria-describedby={proceedBlockedWhy(m) ? `meeting-proceed-why-${m.id}` : undefined}
+              onClick={() => setConfirmProceed(m)}>
+              {t('meeting.proceed')}
+            </button>
+            <button type="button" className={btnSm.secondary}
+              disabled={decide.isPending}
+              onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
+              {t('meeting.needsInfo')}
+            </button>
+            <button type="button"
+              className={`${btnSm.secondary} text-red-300 hover:text-red-200 hover:border-red-700`}
+              disabled={decide.isPending}
+              onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
+              {t('meeting.reject')}
+            </button>
+          </span>
+        ) : meetingOpen && !motherPlant && (
+          <span className="text-xs text-slate-500" data-testid={`meeting-undecided-${m.id}`}>
+            {t('meeting.undecided')}
+          </span>
         )}
       </div>
+      {!m.decision && recordOpen && !motherPlant && proceedBlockedWhy(m) && (
+        <p id={`meeting-proceed-why-${m.id}`} data-testid={`meeting-proceed-why-${m.id}`}
+          className="text-right text-[11px] text-slate-400">
+          {proceedBlockedWhy(m)}
+        </p>
+      )}
+      {!m.decision && recordOpen && motherPlant && (
+        <p data-testid={`meeting-inform-hint-${m.id}`} className="text-[11px] text-slate-400">
+          {plantText('mp.sendInfoHint', change.mother_plant_name)}
+        </p>
+      )}
       {m.decision_reason && (
         <p className={`whitespace-pre-wrap ${
           m.decision === 'reject' ? 'text-red-300' : 'text-amber-300'}`}>
@@ -283,18 +480,67 @@ export default function ScopingPanel(
       )}
       {m.selected_department_ids.length > 0 && (
         <p className="text-xs text-slate-500" data-testid={`meeting-depts-${m.id}`}>
-          {t('meeting.departments')}: {m.selected_department_ids.map((id) => {
+          {t(motherPlant ? 'mp.informDepartments' : 'meeting.departments')}: {m.selected_department_ids.map((id) => {
             const name = departments.find((d) => d.id === id)?.name ?? `#${id}`
             const letter = letterOf(m, id)
             return letter ? `${name} (${letter})` : name
           }).join(', ')}
         </p>
       )}
+      {carrierOfMeeting(m) && !motherPlant && (
+        <p className="text-xs text-slate-500" data-testid={`meeting-carrier-line-${m.id}`}>
+          {t('meeting.costCarrier')}: {carrierName(carrierOfMeeting(m))}
+        </p>
+      )}
     </li>
   )
 
+  // What proceeding sets in motion, read before it happens.
+  const proceedConfirm = (() => {
+    const m = confirmProceed
+    if (!m) return null
+    const rasic = m.department_rasic ?? {}
+    const lines = m.selected_department_ids.map((id) => {
+      const name = departments.find((d) => d.id === id)?.name ?? `#${id}`
+      const letter = rasic[String(id)]
+      return letter ? `${name}: ${letter}` : name
+    })
+    const assessors = Object.values(rasic).filter((l) => l === 'R' || l === 'A').length
+    const c = carrierOfMeeting(m)
+    const flipped = c !== '' && carrierOf(change.customer_relevant) !== '' && c !== carrierOf(change.customer_relevant)
+    return {
+      to: 'in_assessment',
+      title: t('meeting.proceedTitle'),
+      consequence: t('meeting.proceedConsequence'),
+      open: [
+        ...(assessors === 0 && m.department_rasic ? [t('meeting.proceedNoAssessor')] : []),
+        ...(flipped ? [t('meeting.costCarrierFlip')
+          .replace('{from}', carrierName(carrierOf(change.customer_relevant))).replace('{to}', carrierName(c))] : []),
+      ],
+      allClear: undefined,
+      info: [t('meeting.proceedCarrier').replace('{x}', carrierName(c)), ...lines],
+      confirmLabel: t('meeting.proceedConfirm'),
+    }
+  })()
+
   return (
     <div className="space-y-4 text-sm">
+      <TransitionConfirmDialog confirm={proceedConfirm} busy={decide.isPending}
+        onClose={() => setConfirmProceed(null)}
+        onConfirm={() => {
+          const m = confirmProceed!
+          setConfirmProceed(null)
+          decide.mutate({ meetingId: m.id, decision: 'proceed' })
+        }} />
+      <TransitionConfirmDialog busy={markSent.isPending}
+        confirm={confirmSent ? {
+          to: 'closed', title: t('reject.closeTitle'),
+          consequence: t('reject.closeConsequence'), open: [],
+          info: rejectionLetters.map((l) => l.filename),
+          confirmLabel: t('reject.closeConfirm'), final: true,
+        } : null}
+        onClose={() => setConfirmSent(false)}
+        onConfirm={() => { setConfirmSent(false); markSent.mutate() }} />
       <ReasonDialog
         open={pending !== null}
         title={pending?.decision === 'reject' ? t('meeting.rejectTitle') : t('meeting.needsInfoTitle')}
@@ -313,12 +559,14 @@ export default function ScopingPanel(
       <section className="space-y-3" data-testid="scoping-now">
         <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.now')}</h3>
 
-        {outstanding?.decision === 'reject' && change.customer_relevant && (
+        {(outstanding?.decision === 'reject' || change.status === 'rejected'
+          || (change.status === 'closed' && !!change.rejected_at)) && change.customer_relevant && (
           <div className="rounded-lg border border-red-800/60 bg-red-950/30 p-3 space-y-2">
-            <p className="font-medium text-slate-100">{t('meeting.shareRejection')}</p>
+            <p className="font-medium text-slate-100" data-testid="rejection-title">{t('reject.sendTitle')}</p>
             <p className="text-xs text-slate-400">{t('meeting.shareHint')}</p>
             {/* Rejection closure: the letter, then the confirmed send that closes it. */}
             <div className="space-y-2" data-testid="rejection-closure">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('reject.step1')}</p>
               {rejectionLetters.length > 0 && (
                 <ul className="text-sm divide-y divide-slate-700/60">
                   {rejectionLetters.map((l) => (
@@ -326,21 +574,34 @@ export default function ScopingPanel(
                   ))}
                 </ul>
               )}
-              <AttachmentDropzone changeId={changeId} kind="rejection_letter"
-                label={t('attach.rejectionSlot')} onUploaded={invalidate} />
+              {!change.rejection_sent_at && (
+                <AttachmentDropzone changeId={changeId} kind="rejection_letter"
+                  label={t('attach.rejectionSlot')} onUploaded={invalidate} />
+              )}
+              {!change.rejection_sent_at && (
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('reject.step2')}</p>
+              )}
               {change.rejection_sent_at ? (
-                <p className="text-xs text-emerald-300">
-                  ✓ {t('reject.sent')} · {new Date(change.rejection_sent_at).toLocaleDateString()}
+                <p className="inline-flex items-center gap-1.5 text-xs text-emerald-300">
+                  <Check aria-hidden="true" size={14} />
+                  {t('reject.sent')} · {formatDate(change.rejection_sent_at)}
                 </p>
               ) : (
-                <button type="button" data-testid="rejection-sent"
-                  disabled={rejectionLetters.length === 0 || !canSendRejection || markSent.isPending}
+                <Button variant="primary" data-testid="rejection-sent"
+                  disabled={rejectionLetters.length === 0 || !canSendRejection}
+                  loading={markSent.isPending}
                   title={!canSendRejection ? t('reject.salesOnly')
                     : rejectionLetters.length === 0 ? t('reject.needLetter') : undefined}
-                  onClick={() => markSent.mutate()}
-                  className="bg-red-800 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                  aria-describedby={!canSendRejection || rejectionLetters.length === 0
+                    ? 'rejection-sent-why' : undefined}
+                  onClick={() => setConfirmSent(true)}>
                   {t('reject.markSent')}
-                </button>
+                </Button>
+              )}
+              {!change.rejection_sent_at && (!canSendRejection || rejectionLetters.length === 0) && (
+                <p id="rejection-sent-why" className="text-[11px] text-slate-400" data-testid="rejection-sent-why">
+                  {!canSendRejection ? t('reject.salesOnly') : t('reject.needLetter')}
+                </p>
               )}
             </div>
           </div>
@@ -352,7 +613,7 @@ export default function ScopingPanel(
             {openQuestions.map(questionCard)}
           </div>
         ) : (
-          !outstanding && <p className="text-xs text-slate-500">{t('concern.none')}</p>
+          !outstanding && <p className="text-xs text-slate-500" data-testid="scoping-now-empty">{t('scoping.noOpenQuestions')}</p>
         )}
 
         {unassignedQuestionDocs.length > 0 && (
@@ -372,7 +633,9 @@ export default function ScopingPanel(
 
         {/* Everything else the team flagged, in one strip. */}
         <ConcernStrip changeId={changeId} editable={open} departments={departments}
-          isPm={isPm} hideConcernIds={needsInfo.map((c) => c.id)} />
+          isPm={isPm} hideConcernIds={needsInfo.map((c) => c.id)}
+          myDepartmentIds={myDepartmentIds}
+          changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]} />
       </section>
 
       {decideError && (
@@ -404,19 +667,19 @@ export default function ScopingPanel(
                 <li key={m.id}>
                   <button type="button" data-testid={`meeting-summary-${m.id}`}
                     onClick={() => setShowMeeting(m.id)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-800">
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400">
                     <span className="px-1.5 py-0 rounded bg-slate-700 text-slate-300">
                       {t(`channel.${m.channel ?? 'meeting'}`)}
                     </span>
                     <span className="text-slate-400">
-                      {new Date(m.meeting_date).toLocaleDateString()}
+                      {formatDate(m.meeting_date)}
                     </span>
                     {m.decision && (
                       <span className="px-1.5 py-0 rounded-full bg-slate-700 text-slate-300">
                         {DECISION_LABEL[m.decision] ?? m.decision}
                       </span>
                     )}
-                    <span className="ml-auto text-slate-600">{t('scoping.showDetails')}</span>
+                    <span className="ml-auto text-slate-500">{t('scoping.showDetails')}</span>
                   </button>
                 </li>
               )
@@ -431,16 +694,47 @@ export default function ScopingPanel(
         </ul>
       </section>
 
-      {meetingOpen && (
-        <div className="border border-slate-700 rounded-lg p-4 space-y-3">
-          <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.newMeeting')}</h3>
+      {meetingOpen && !canRecordMeeting && (
+        <p className="text-xs text-slate-500" data-testid="meeting-record-rights">{t('meeting.recordRights')}</p>
+      )}
+      {recordOpen && !formShown && (
+        <div className="flex items-center gap-3">
+          <button type="button" data-testid="meeting-form-open" onClick={openForm}
+            className="text-sm text-sky-300 hover:text-sky-200">
+            {meetings.length > 0 ? t('meeting.recordAnother') : t('meeting.recordFirst')}
+          </button>
+          {latestMeeting && !latestMeeting.decision && !motherPlant && (
+            <span className="text-xs text-slate-500">{t('meeting.awaitingDecision')}</span>
+          )}
+        </div>
+      )}
+      {recordOpen && formShown && (
+        <div className="border border-slate-700 rounded-lg p-4 space-y-3" data-testid="meeting-form">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.newMeeting')}</h3>
+            {meetings.length > 0 && (
+              <button type="button" onClick={() => setFormOpen(false)}
+                className="text-xs text-slate-500 hover:text-slate-300">{t('meeting.collapse')}</button>
+            )}
+          </div>
+          {carried && (
+            <p className="text-[11px] text-slate-400" data-testid="meeting-carried">{t('meeting.carriedLetters')}</p>
+          )}
           {/* No minutes field: the discussion itself lives in the mail thread,
               which belongs on the change as a document. */}
-          <p className="text-xs text-slate-500">{t('scoping.discussionByEmail')}</p>
+          {channel === 'email' && (
+            <p className="text-xs text-slate-500" data-testid="meeting-email-hint">{t('scoping.discussionByEmail')}</p>
+          )}
+          {motherPlant && (
+            <p className="text-xs text-slate-400 max-w-[65ch]" data-testid="meeting-mother-plant-hint">
+              {plantText('mp.scopingHint', change.mother_plant_name)}
+            </p>
+          )}
           <div className="flex flex-wrap gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">{t('channel.label')}</label>
-              <select value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)}
+              <label htmlFor={channelId} className="block text-xs text-slate-400 mb-1">{t('channel.label')}</label>
+              <select id={channelId} data-testid="meeting-channel"
+                value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)}
                 className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100">
                 <option value="meeting">{t('channel.meeting')}</option>
                 <option value="chat">{t('channel.chat')}</option>
@@ -448,35 +742,45 @@ export default function ScopingPanel(
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">{t('meeting.date')}</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              <span className="block text-xs text-slate-400 mb-1" aria-hidden="true">{t('meeting.dateLabel')}</span>
+              <DateInput value={date} onChange={setDate} aria-label={t('meeting.dateLabel')}
+                className="w-36 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
             </div>
             <div className="flex-1 min-w-[14rem]">
-              <label className="block text-xs text-slate-500 mb-1">
+              <label htmlFor={attendeeId} className="block text-xs text-slate-400 mb-1">
                 {t('meeting.participants')}
-                <span className="ml-2 opacity-70">{t('meeting.attendanceHint')}</span>
+                <span id={attendeeHintId} className="ml-2 text-slate-500">{t('meeting.attendanceHint')}</span>
               </label>
-              {/* Picked names live as removable chips — grouped, contained, not
-                  free-editable text that can be accidentally mangled. */}
-              <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 min-h-[2.25rem]">
-                {participantList.map((name) => (
-                  <span key={name}
-                    className="inline-flex items-center gap-1 rounded-md bg-slate-700 text-slate-100 text-xs px-2 py-0.5">
-                    {name}
-                    <button type="button" aria-label={`Remove ${name}`}
-                      className="text-slate-400 hover:text-red-300"
-                      onClick={() => removeParticipant(name)}>×</button>
+              {/* Picked people live as removable chips: grouped, contained, not
+                  free-editable text that can be accidentally mangled. A person
+                  from the directory is the user (person icon); a typed name
+                  is an external guest. */}
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 min-h-[2.25rem] focus-within:border-sky-500">
+                {participantList.map((a) => (
+                  <span key={attendeeKey(a)} data-testid="meeting-attendee"
+                    data-user-id={a.user_id ?? undefined} data-guest={a.guest || undefined}
+                    title={a.guest ? 'Guest, not a PLM user' : (a.email ?? undefined)}
+                    className={`inline-flex items-center gap-1 rounded-md text-xs pl-2 pr-0.5 py-0.5 ${
+                      a.guest ? 'bg-slate-800 text-slate-300 ring-1 ring-inset ring-slate-600' : 'bg-slate-700 text-slate-100'}`}>
+                    {!a.guest && <UserRound aria-hidden="true" size={12} className="text-sky-300" />}
+                    {a.name}
+                    <button type="button" aria-label={`Remove ${a.name}`}
+                      className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                      onClick={() => removeParticipant(a)}>
+                      <X aria-hidden="true" size={12} />
+                    </button>
                   </span>
                 ))}
                 <input
-                  type="text" list="sc-contacts" value={addName}
+                  id={attendeeId} aria-describedby={attendeeHintId}
+                  type="text" list="sc-contacts" value={addName} autoComplete="off"
                   placeholder={participantList.length ? '' : t('meeting.addAttendee')}
                   onChange={(e) => {
                     const v = e.target.value
                     setAddName(v)
                     // Picking a suggestion sets the full name in one change event.
-                    if (contacts.some((c) => c.name === v)) appendParticipant(v)
+                    const picked = people.find((c) => labelOf(c) === v)
+                    if (picked) appendParticipant(fromContact(picked))
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') { e.preventDefault(); confirmTyped() }
@@ -487,12 +791,13 @@ export default function ScopingPanel(
                       removeParticipant(participantList[participantList.length - 1])
                     }
                   }}
-                  className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-100 outline-none" />
+                  className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-100 placeholder:text-slate-500 outline-none" />
               </div>
               <datalist id="sc-contacts">
-                {contacts.map((c) => (
-                  <option key={c.email ?? c.name} value={c.name}>
-                    {c.email ?? ''}
+                {people.map((c) => (
+                  <option key={c.user_id != null ? `u${c.user_id}` : (c.email ?? c.name)}
+                    value={labelOf(c)}>
+                    {[c.email, c.department].filter(Boolean).join(' · ')}
                   </option>
                 ))}
               </datalist>
@@ -500,25 +805,29 @@ export default function ScopingPanel(
           </div>
           <div>
             <div className="flex items-baseline justify-between gap-4 mb-1">
-              <label className="text-xs text-slate-500">
-                {t('meeting.departments')}
+              <span className="text-xs text-slate-400">
+                {t(motherPlant ? 'mp.informDepartments' : 'meeting.departments')}
                 {recommendedIds.length > 0 && (
-                  <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
+                  <span className="ml-2 text-slate-500">{t('meeting.recommendedHint')}</span>
                 )}
-              </label>
+              </span>
               <span className="text-[11px] text-slate-500 tabular-nums" data-testid="rasic-summary">
-                {t('meeting.rasicSummary')
-                  .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
-                  .replace('{n}', String(deptIds.length))}
+                {motherPlant ? t('mp.informSummary').replace('{n}', String(deptIds.length))
+                  : t('meeting.rasicSummary')
+                    .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
+                    .replace('{n}', String(deptIds.length))}
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 mb-2 max-w-[65ch]">{t('meeting.rasicHint')}</p>
+            {!motherPlant && (
+              <p className="text-[11px] text-slate-500 mb-2 max-w-[65ch]">{t('meeting.rasicHint')}</p>
+            )}
             {/* One row per department: name left, its letter right. A row
                 without a letter is not involved and reads muted. Retired
                 departments stay resolvable by name on old records but are
-                never offered for new work. */}
+                never offered for new work; one a carried-over call still
+                holds shows "(retired)" so it can be taken off. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 border-t border-slate-700/70">
-              {departments.filter((d) => d.is_active).map((d) => {
+              {pickableDepartments(departments, deptIds).map((d) => {
                 const isRec = recommendedIds.includes(d.id)
                 const letter = deptRasic[d.id]
                 return (
@@ -530,25 +839,31 @@ export default function ScopingPanel(
                       title={isRec ? t('meeting.recommended') : undefined}
                       className={`min-w-0 truncate text-left text-sm rounded px-1 -mx-1 transition-colors ${
                         letter ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-                      {d.name}
+                      {departmentLabel(d)}
                     </button>
+                    {motherPlant ? (
+                      <input type="checkbox" checked={!!letter} data-testid={`inform-${d.id}`}
+                        aria-label={`${t('mp.informDepartments')}: ${d.name}`}
+                        onChange={() => toggleDept(d.id)} />
+                    ) : (
                     <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
                       role="group" aria-label={`${d.name} RASIC`}>
-                      {(['R', 'A', 'S', 'C'] as RasicLetter[]).map((l) => (
+                      {RASIC_PICK.map((l) => (
                         <button key={l} type="button" data-testid={`rasic-${d.id}-${l}`}
                           aria-pressed={letter === l} title={t(`rasic.${l}`)}
+                          aria-label={`${l}, ${t(`rasic.${l}`)}`}
                           onClick={() => setLetter(d.id, l)}
                           className={`w-7 h-6 text-[11px] font-semibold transition-colors active:scale-[0.97] ${
                             letter === l
                               ? (l === 'R' || l === 'A'
-                                ? 'bg-sky-600 text-white'
+                                ? 'bg-sky-700 text-white'
                                 : 'bg-slate-600 text-slate-100')
                               : 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}>
                           {l}
                         </button>
                       ))}
                       <button type="button" data-testid={`rasic-${d.id}-none`}
-                        aria-pressed={!letter} title={t('rasic.none')}
+                        aria-pressed={!letter} title={t('rasic.none')} aria-label={t('rasic.none')}
                         onClick={() => { if (letter) toggleDept(d.id) }}
                         className={`w-7 h-6 text-[11px] transition-colors ${
                           letter ? 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'
@@ -556,20 +871,62 @@ export default function ScopingPanel(
                         &ndash;
                       </button>
                     </span>
+                    )}
                   </div>
                 )
               })}
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-500">
-              <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
-            </p>
+            {!motherPlant && (
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
+              </p>
+            )}
           </div>
-          <button
-            className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50"
-            disabled={create.isPending}
-            onClick={() => create.mutate()}>
-            {t('meeting.save')}
-          </button>
+          {/* Who pays, confirmed by the room next to who works. A change from
+              KTX Weissenburg / Solingen has no cost carrier to confirm. */}
+          {!motherPlant && (
+          <fieldset data-testid="meeting-carrier">
+            <legend className="text-xs text-slate-400 mb-1">
+              {t('meeting.costCarrier')}
+              <span className="ml-2 text-slate-500">{t('meeting.costCarrierHint')}</span>
+            </legend>
+            {carrierOf(change.customer_relevant) && (
+              <p className="text-[11px] text-slate-400 mb-1" data-testid="meeting-carrier-captured">
+                {t('meeting.costCarrierCaptured').replace('{x}', t(change.customer_relevant ? 'start.customerChange' : 'start.internalChange'))}
+                {latestMeeting && carrierOfMeeting(latestMeeting)
+                  ? ` · ${t('meeting.costCarrierLast').replace('{x}', carrierName(carrierOfMeeting(latestMeeting)))}` : ''}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-4 text-sm">
+              {(['customer', 'internal'] as CostCarrier[]).map((c) => (
+                <label key={c} className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" name="meeting-carrier" data-testid={`meeting-carrier-${c}`}
+                    checked={carrier === c} onChange={() => setCarrier(c)} />
+                  <span className="text-slate-200">{t(`meeting.costCarrier.${c}`)}</span>
+                </label>
+              ))}
+            </div>
+            {carrier && carrierOf(change.customer_relevant) && carrier !== carrierOf(change.customer_relevant) && (
+              <p data-testid="meeting-carrier-flip" className="mt-1 text-xs text-amber-300">
+                {t('meeting.costCarrierFlip')
+                  .replace('{from}', carrierName(carrierOf(change.customer_relevant))).replace('{to}', carrierName(carrier))}
+              </p>
+            )}
+          </fieldset>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="primary" data-testid="meeting-save"
+              disabled={saveMissing.length > 0} loading={create.isPending}
+              aria-describedby={saveMissing.length > 0 ? 'meeting-save-missing' : undefined}
+              onClick={() => create.mutate()}>
+              {t('meeting.save')}
+            </Button>
+            {saveMissing.length > 0 && (
+              <span id="meeting-save-missing" className="text-xs text-slate-400" data-testid="meeting-save-missing">
+                {t('meeting.saveMissing').replace('{x}', saveMissing.join(', '))}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

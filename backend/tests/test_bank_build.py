@@ -9,7 +9,9 @@ to in_implementation; both show up as my-tasks rows.
 import pytest
 
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import login, lock_impact, approve_gates, ENGINEER_PASSWORD
+from tests.conftest import (
+    login, lock_impact, approve_gates, validate_timing, ENGINEER_PASSWORD,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -119,6 +121,11 @@ async def test_planned_scrap_needs_a_scrap_quote(client, admin_auth, seed, roles
                                  "note": "scrap 1200 pcs"}, headers=sched)
     assert res.status_code == 200, res.text
     assert res.json()["bank_build_mode"] == "planned_scrap"
+    # Scheduling writes the price but is no cost role: it reads back only
+    # that one is set; an admin reads the amount.
+    assert res.json()["scrap_quote_price"] is None
+    assert res.json()["scrap_price_set"] is True
+    res = await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)
     assert res.json()["scrap_quote_price"] == 4200.50
 
 
@@ -295,6 +302,7 @@ async def test_approved_to_in_implementation_is_still_open(
     existing approved -> in_implementation flow."""
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     await lock_impact(session_factory, cid, seed["admin_id"])
+    await validate_timing(session_factory, cid, seed["admin_id"])
     await approve_gates(client, admin_auth, cid, "release")
     res = await client.post(f"/api/v1/changes/{cid}/transition",
                             json={"to_status": "in_implementation"},

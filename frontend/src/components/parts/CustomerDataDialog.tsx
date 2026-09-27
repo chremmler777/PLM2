@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import DateInput from '../gantt/DateInput'
 
 export interface CustomerDataInput {
   statement: 'review' | 'official';
@@ -43,7 +44,7 @@ export default function CustomerDataDialog({ open, title, onClose, onSubmit, pen
           ))}
         </fieldset>
         <label className="block text-sm text-slate-400">Received on
-          <input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)}
+          <DateInput aria-label="Received on" value={receivedAt} onChange={setReceivedAt}
             className="mt-1 w-full p-2 rounded bg-slate-900 border border-slate-700 text-slate-100" />
         </label>
         <label className="block text-sm text-slate-400">Revision number (optional)

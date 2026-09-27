@@ -8,7 +8,8 @@ pytestmark = pytest.mark.asyncio
 
 async def _approved_change(session_factory, seed, part_id):
     """Change with one lead impacted item, forced to approved with gates yes,
-    and impact already confirmed (Task 18 soft-gate) so kickoff tests exercise
+    impact already confirmed (Task 18 soft-gate) and timing validated, so
+    kickoff tests exercise
     what they intend to exercise, not the impact-confirmation guard."""
     from app.services.change_service import ChangeService
     from app.models.change import ChangeImpactedItem
@@ -23,6 +24,10 @@ async def _approved_change(session_factory, seed, part_id):
         change.status = "approved"
         change.impact_confirmed_by = seed["engineer_id"]
         change.impact_confirmed_at = datetime.utcnow()
+        # ...and timing validated (the detailed-plan soft gate), for the same
+        # reason: these tests are about what kickoff does, not what gates it.
+        change.timing_validated_by = seed["engineer_id"]
+        change.timing_validated_at = datetime.utcnow()
         await s.execute(update(ChangeGate).where(ChangeGate.change_id == change.id)
                         .values(decision="yes"))
         await s.commit()

@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import { toastError } from '../../lib/apiError'
+import { btnSm } from '../common/buttonStyles'
+import { Pencil } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeRequest } from '../../types/change'
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 /**
  * F1(b): overview-tab display + edit of `customer_relevant` — the flag that
@@ -31,10 +32,10 @@ export function CustomerRelevantEditor({ change, canEdit }: {
       changesApi.update(change.id, { customer_relevant }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['change', change.id] })
-      toast.success('Saved')
+      toast.success('Cost carrier saved')
       setOpen(false)
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to save'),
+    onError: (e: unknown) => toastError(e, 'Could not save the cost carrier'),
   })
 
   return (
@@ -44,8 +45,8 @@ export function CustomerRelevantEditor({ change, canEdit }: {
       {editable && !open && (
         <button type="button" data-testid="customer-relevant-edit"
           onClick={() => { setValue(!!change.customer_relevant); setOpen(true) }}
-          className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">
-          ✎ edit
+          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">
+          <Pencil aria-hidden="true" size={11} />edit
         </button>
       )}
       {editable && open && (
@@ -57,7 +58,7 @@ export function CustomerRelevantEditor({ change, canEdit }: {
             <option value="no">Internal change</option>
           </select>
           <button type="button"
-            className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+            className={btnSm.primary}
             disabled={save.isPending}
             onClick={() => save.mutate(value)}>
             Save

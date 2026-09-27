@@ -31,6 +31,12 @@ class Plant(Base):
     name: Mapped[str] = mapped_column(String(255))
     code: Mapped[str] = mapped_column(String(50))
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ISO 4217; the cost sheet prices this plant's rows in it (migration 094).
+    currency: Mapped[str] = mapped_column(String(3), default="EUR", server_default="EUR")
+    # A second currency the plant works in (106): Silao quotes in USD
+    # (currency, used by costing and offers) and pays in MXN (local_currency).
+    # None = one currency only.
+    local_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -119,6 +125,11 @@ class Project(Base):
 
     plant: Mapped["Plant"] = relationship(back_populates="projects")
     files: Mapped[list["CADFile"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    # One responsible (main owner) per department, per project -- the project
+    # team (spec 2026-09-25). Everyone else active in that department is a
+    # backup: they still see and can act, but it is not "theirs" for counting.
+    responsibles: Mapped[list["ProjectResponsible"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan")
 
 
 class CADFile(Base):

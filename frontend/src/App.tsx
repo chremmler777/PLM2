@@ -4,6 +4,7 @@
 
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { OpenChangeBridge } from './components/changes/plan/openChange';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -13,6 +14,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import ProjectDetailPopout from './pages/ProjectDetailPopout';
 import PartDetail from './pages/PartDetail';
 import DfmPopout from './pages/DfmPopout';
+import PlanPopout from './pages/PlanPopout';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
@@ -25,10 +27,29 @@ import ChangesPage from './pages/ChangesPage';
 import ChangeDetailPage from './pages/ChangeDetailPage';
 import ReportsPage from './pages/ReportsPage';
 import PnlPage from './pages/PnlPage';
+import CostSheetPage from './pages/CostSheetPage';
 import ProcessMapPage from './pages/ProcessMapPage';
+import TrainingPage from './pages/TrainingPage';
+import TrainingRunPage from './pages/TrainingRunPage';
+import TrainingHandoutPage from './pages/TrainingHandoutPage';
 import AppLayout from './components/layout/AppLayout';
 
-const queryClient = new QueryClient();
+// Defaults against refetch storms (a change page made 32 to 72 calls on load):
+// data counts as fresh for 30 s, a tab switch does not refetch everything,
+// one retry. Mutations still invalidate what they touch; pages that need a
+// live view keep their own refetchInterval / refetchOnWindowFocus.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+// Reference data that only changes with an admin edit: fetch once per session.
+queryClient.setQueryDefaults(['workflow', 'departments'], { staleTime: Infinity });
+queryClient.setQueryDefaults(['plants'], { staleTime: Infinity });
 
 function ProtectedRoute({ children, bare = false }: { children: React.ReactNode; bare?: boolean }) {
   const { isAuthenticated, loading } = useAuth();
@@ -90,6 +111,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute bare>
             <DfmPopout />
+          </ProtectedRoute>
+        }
+      />
+      {/* Pop-out plan window: one change plan (quote or detailed) alone, no sidebar. */}
+      <Route
+        path="/changes/:changeId/plan/:plan"
+        element={
+          <ProtectedRoute bare>
+            <PlanPopout />
           </ProtectedRoute>
         }
       />
@@ -190,6 +220,42 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/cost-sheet"
+        element={
+          <ProtectedRoute>
+            <CostSheetPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* ECR training: the record and the manual in the layout; the practical
+          check and the printable handout bare. The check must run outside the
+          layout: its sandbox takes over the shared API client, and the
+          sidebar's live polling must not share the page with it. */}
+      <Route
+        path="/training"
+        element={
+          <ProtectedRoute>
+            <TrainingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/training/run/:role"
+        element={
+          <ProtectedRoute bare>
+            <TrainingRunPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/training/handout/:role"
+        element={
+          <ProtectedRoute bare>
+            <TrainingHandoutPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/" element={<Navigate to="/dashboard" />} />
     </Routes>
   );
@@ -218,7 +284,8 @@ export default function App() {
         <AuthProvider>
           <BrowserRouter basename="/plm2">
             <AppRoutes />
-            <Toaster position="top-right" />
+            <OpenChangeBridge />
+            <Toaster position="bottom-right" theme="dark" richColors closeButton />
           </BrowserRouter>
         </AuthProvider>
       </ThemeProvider>

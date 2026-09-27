@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.auth.security import get_password_hash
 from app.models.change import ChangeAssessment, ChangeRequest
-from app.models.change_cost import AssessmentCostLine
+from app.models.change_cost import AssessmentCostLine, CostingPosition
 from app.models.entities import AuditLog, Organization, Plant, Project, User
 from app.models.workflow import Department, WfInstance, WfInstanceTask, WfTemplate
 
@@ -94,6 +94,15 @@ async def report_data(session_factory, seed):
             demand_hours=1.0, rate_snapshot=100.0, internal_cost=100.0, external_cost=50.0,
         ))
 
+        # A costing position on change1 (spec: the cost report's basis is
+        # cost lines PLUS costing positions, same as the P&L list) - 75 EUR
+        # external, estimate-priced, no vendor offer.
+        s.add(CostingPosition(
+            change_id=change1.id, department_id=dept.id,
+            label="Tool rework", kind="external", pricing="estimate",
+            est_cost=75.0, created_by=seed["engineer_id"],
+        ))
+
         # Org B: a second org/plant/project/user/change, invisible to org A.
         org_b = Organization(name="Report Org B", code="report-org-b", is_active=True)
         s.add(org_b)
@@ -170,6 +179,10 @@ async def test_workload_report(client, eng_auth, seed, report_data):
 
 
 async def test_cost_report(client, eng_auth, seed, report_data):
+    """Cost basis = assessment cost lines (150 EUR: 100 internal + 50
+    external) PLUS costing positions (75 EUR external) - the same basis the
+    P&L list (PnlService.changes_pnl) uses, single currency (EUR) here so
+    the back-compat scalar `actual` carries the full total."""
     res = await client.get("/api/v1/reports/cost", headers=eng_auth)
     assert res.status_code == 200, res.text
     body = res.json()
@@ -177,11 +190,17 @@ async def test_cost_report(client, eng_auth, seed, report_data):
     assert len(body["projects"]) == 1
     proj = body["projects"][0]
     assert proj["project_id"] == seed["project_id"]
-    assert proj["actual"] == pytest.approx(150.0)
+    assert proj["actual"] == pytest.approx(225.0)
     assert proj["budget"] == pytest.approx(500.0)
+    assert proj["currency"] == "EUR"
+    assert proj["mixed_currency"] is False
+    assert proj["actual_by_currency"] == {"EUR": pytest.approx(225.0)}
 
     assert len(body["plants"]) == 1
-    assert body["plants"][0]["actual"] == pytest.approx(150.0)
+    plant = body["plants"][0]
+    assert plant["actual"] == pytest.approx(225.0)
+    assert plant["currency"] == "EUR"
+    assert plant["actual_by_currency"] == {"EUR": pytest.approx(225.0)}
 
 
 async def test_org_scoping_hides_org_b(client, eng_auth, seed, report_data):

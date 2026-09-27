@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.display import fmt_date
 from app.models.workflow import WfInstance, WfInstanceTask
 from app.models.change import ChangeAssessment, ChangeRequest, TERMINAL_STATUSES
 from app.services.notification_service import NotificationService
@@ -36,7 +37,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 session, [task.owner_id], kind="overdue",
                 subject_key=f"task:{task.id}:overdue",
                 title="Task overdue",
-                body=f"Your task is overdue (was due {task.due_date.date().isoformat()}).",
+                body=f"Your task is overdue (was due {fmt_date(task.due_date)}).",
                 link="/my-tasks",
             )
             counts["overdue"] += n
@@ -45,7 +46,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 session, [task.owner_id], kind="due_soon",
                 subject_key=f"task:{task.id}:due_soon",
                 title="Task due soon",
-                body=f"Your task is due {task.due_date.date().isoformat()}.",
+                body=f"Your task is due {fmt_date(task.due_date)}.",
                 link="/my-tasks",
             )
             counts["due_soon"] += n
@@ -80,7 +81,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             subject_key=f"task:{task.id}:overdue:lead",
             title="Task overdue (escalation)",
             body=f"A task on your change is overdue"
-                 f" (was due {task.due_date.date().isoformat()}){claim}.",
+                 f" (was due {fmt_date(task.due_date)}){claim}.",
             link=f"/changes/{change_id}",
         )
         counts["overdue"] += n
@@ -110,7 +111,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 subject_key=f"assessment:{assessment.id}:overdue",
                 title="Assessment overdue",
                 body=f"Your assessment is overdue (was due "
-                     f"{assessment.due_date.date().isoformat()}).",
+                     f"{fmt_date(assessment.due_date)}).",
                 link="/my-tasks",
             )
             counts["overdue"] += n
@@ -120,7 +121,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 subject_key=f"assessment:{assessment.id}:overdue:lead",
                 title="Assessment overdue (escalation)",
                 body=f"An assessment on your change is overdue (was due "
-                     f"{assessment.due_date.date().isoformat()}).",
+                     f"{fmt_date(assessment.due_date)}).",
                 link=f"/changes/{assessment.change_id}",
             )
             counts["overdue"] += n
@@ -141,9 +142,16 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             session, [change.lead_id], kind=f"deadline_{state}",
             subject_key=f"chg:{change.id}:{state}",
             title=f"Change deadline {state.replace('_', ' ')}: {change.change_number}",
-            body=f"Required by {change.required_by_date.date().isoformat()}.",
+            body=f"Required by {fmt_date(change.required_by_date)}.",
             link=f"/changes/{change.id}",
         )
         counts[f"deadline_{state}"] += n
+
+    # Validation issues (spec §12a): the time-based escalation triggers
+    # (overdue fix action, no route after 2 working days, an unacknowledged
+    # level 2, the plan moving past the baseline or the release deadline).
+    from app.services.validation_issue_service import ValidationIssueService
+    counts["validation_issue_escalated"] = \
+        await ValidationIssueService.reevaluate_all(session)
 
     return counts

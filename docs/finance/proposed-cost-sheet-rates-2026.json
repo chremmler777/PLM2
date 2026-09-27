@@ -1,0 +1,69 @@
+{
+  "status": "proposal, to be confirmed by Sales and Finance",
+  "as_of": "2026-09-26",
+  "unit": "per hour",
+  "method": {
+    "toccoa_multiplier": 2.20,
+    "toccoa_wage_basis": "BLS OEWS May 2025, Georgia statewide mean hourly wage",
+    "anchors": {"Tool Engineer": 120, "Manufacturing Engineer": 100, "APQP": 80},
+    "silao_country_factor": 0.43,
+    "fx_mxn_per_usd_info": 17.3015,
+    "fx_source": "Banxico FIX 2026-09-22"
+  },
+  "plants": {
+    "USA Toccoa": {
+      "currency": "USD",
+      "departments": {
+        "Development": 116,
+        "Tool Engineer": 120,
+        "Manufacturing Engineer": 100,
+        "Process Engineer": 100,
+        "APQP": 80,
+        "Packaging Engineer": 100,
+        "Quality": 92,
+        "Scheduling": 63,
+        "Sales": 134,
+        "Project Manager": 114
+      },
+      "machine_classes": {
+        "<=200 t": 59,
+        "200-450 t": 76,
+        "450-800 t": 93,
+        ">800 t": 148
+      },
+      "sampling_per_class": {
+        "<=200 t": null,
+        "200-450 t": null,
+        "450-800 t": null,
+        ">800 t": null
+      }
+    },
+    "Silao Mexico": {
+      "currency": "USD",
+      "departments": {
+        "Development": 50,
+        "Tool Engineer": 52,
+        "Manufacturing Engineer": 43,
+        "Process Engineer": 43,
+        "APQP": 34,
+        "Packaging Engineer": 43,
+        "Quality": 40,
+        "Scheduling": 27,
+        "Sales": 58,
+        "Project Manager": 49
+      },
+      "machine_classes": {
+        "<=200 t": 43,
+        "200-450 t": 52,
+        "450-800 t": 62,
+        ">800 t": 114
+      },
+      "sampling_per_class": {
+        "<=200 t": null,
+        "200-450 t": null,
+        "450-800 t": null,
+        ">800 t": null
+      }
+    }
+  }
+}

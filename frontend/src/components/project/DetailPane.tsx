@@ -4,6 +4,7 @@
  * detail window.
  */
 import RevisionWorkflowSection from '../workflows/RevisionWorkflowSection';
+import { formatDate } from '../../lib/format';
 import PartBOMSection from '../PartBOMSection';
 import PartRelationsSection from '../PartRelationsSection';
 import ProcessFlowSection from '../ProcessFlowSection';
@@ -173,7 +174,7 @@ export default function DetailPane({
                       </div>
                       <div className="flex items-center justify-between text-xs">
                         <span className={statusColor(rev.status)}>{rev.status.replace(/_/g, ' ')}</span>
-                        <span className="text-slate-500">{new Date(rev.created_at).toLocaleDateString()}</span>
+                        <span className="text-slate-500">{formatDate(rev.created_at)}</span>
                       </div>
                     </div>
                   ))}

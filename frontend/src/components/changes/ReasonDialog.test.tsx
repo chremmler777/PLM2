@@ -49,4 +49,14 @@ describe('ReasonDialog', () => {
       onSubmit={() => {}} onClose={() => {}} />)
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('')
   })
+
+  it('closes on Escape without submitting', () => {
+    const onSubmit = vi.fn()
+    const onClose = vi.fn()
+    render(<ReasonDialog open title="Reject change" label="Why?" onSubmit={onSubmit} onClose={onClose} />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'half a reason' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

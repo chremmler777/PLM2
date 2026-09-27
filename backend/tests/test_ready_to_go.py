@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select, update
 
-from tests.conftest import force_complete_check_workflows
+from tests.conftest import complete_release_step, force_complete_check_workflows
 from tests.test_change_kickoff import _approved_change
 
 pytestmark = pytest.mark.asyncio
@@ -57,6 +57,7 @@ async def test_release_guarded_by_ready_to_go(
         await s.commit()
 
     await force_complete_check_workflows(session_factory, cid)
+    await complete_release_step(session_factory, cid)   # release checklist + lessons
     async with session_factory() as s:
         change = await ChangeService.get_change(s, cid)
         await ChangeService.transition(s, change, "released",

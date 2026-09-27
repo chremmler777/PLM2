@@ -1,10 +1,47 @@
 import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/change'
+import { plantName } from './plantName'
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
   captured: 'Captured', scoping: 'Scoping', in_assessment: 'In Assessment', costing: 'Costing',
   quoting: 'Quote creation', quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
   in_validation: 'Validation', released: 'Released', closed: 'Closed',
-  on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Cancelled',
+  on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Canceled',
+}
+
+/**
+ * One verb per step (UI polish plan 2.4): the cockpit button, the confirm
+ * dialog's title and button, My Tasks and the process flow all say the same
+ * thing for the same move. Keyed by the target status; `transitionLabel`
+ * covers the few targets whose verb depends on where the change comes from.
+ */
+export const TRANSITION_LABELS: Record<ChangeStatus, string> = {
+  captured: 'Back to capture',
+  scoping: 'Hand over to scoping',
+  in_assessment: 'Start assessment',
+  costing: 'Close assessment',
+  quoting: 'Close costing',
+  quoted: 'Mark offer as sent',
+  approved: 'Record approval',
+  in_implementation: 'Start implementation',
+  in_validation: 'Finish implementation',
+  released: 'Release change',
+  closed: 'Close change',
+  on_hold: 'Put on hold',
+  rejected: 'Reject change',
+  cancelled: 'Cancel change',
+}
+
+/** The verb for moving a change from `from` to `to`. */
+export function transitionLabel(to: ChangeStatus | string, from?: ChangeStatus | string | null): string {
+  // Canceling and holding read the same from anywhere, also from on hold.
+  if (to === 'cancelled' || to === 'on_hold') return TRANSITION_LABELS[to]
+  if (from === 'on_hold') return 'Resume'
+  // The backward moves (ALLOWED_TRANSITIONS): each says it goes back.
+  if (to === 'scoping' && from === 'in_assessment') return 'Back to scoping'
+  if (to === 'scoping' && from === 'rejected') return 'Reopen change'
+  if (to === 'costing' && from === 'quoting') return 'Reopen costing'
+  if (to === 'in_implementation' && from === 'in_validation') return 'Back to implementation'
+  return TRANSITION_LABELS[to as ChangeStatus] ?? STATUS_LABELS[to as ChangeStatus] ?? String(to)
 }
 
 /**
@@ -68,11 +105,39 @@ export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {
   closed: 'Wrapped up',
 }
 
+/**
+ * Mother-plant side track (spec §14): no assessment, costing or quote. The
+ * mother plant engineered and sold the change; scoping informs the team and
+ * goes straight to approved (the backend refuses everything else).
+ */
+export const MOTHER_PLANT_STEP_ORDER: ChangeStatus[] = [
+  'captured', 'scoping', 'approved', 'in_implementation', 'in_validation', 'released', 'closed',
+]
+
+/**
+ * Engineering review (spec §17): the light track of a new customer index.
+ * Development locks the impact, the serving departments answer; all "no
+ * impact" releases and closes it, any impact is escalated to a full ECR.
+ */
+export const REVIEW_STEP_ORDER: ChangeStatus[] = ['captured', 'scoping', 'released', 'closed']
+export const isEngineeringReview = (origin?: string | null): boolean => origin === 'engineering_review'
+
+/** NEXT_STATUS for one change: the mother-plant side track leaves scoping for approved. */
+export function nextStatusesFor(status: ChangeStatus, origin?: string | null): ChangeStatus[] {
+  if (origin === 'mother_plant' && status === 'scoping') return ['approved', 'rejected']
+  // The review's answers release it; no status button moves it on.
+  if (isEngineeringReview(origin) && status === 'scoping') return ['rejected']
+  return NEXT_STATUS[status] ?? []
+}
+
 /** On-path step order for a given branch: customer-relevant changes keep `quoted`,
  * non-customer-relevant (internal) changes skip it. Mirrors the backend, which treats
  * any falsy customer_relevant (false OR null/undefined — e.g. a legacy change captured
  * before the flag existed) as internal, so `undefined` is treated as internal too. */
-export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
+export function branchStepOrder(customerRelevant?: boolean, origin?: string | null): ChangeStatus[] {
+  // The mother-plant side track (spec §14) shows only the stages it uses.
+  if (origin === 'mother_plant') return MOTHER_PLANT_STEP_ORDER
+  if (isEngineeringReview(origin)) return REVIEW_STEP_ORDER
   return !customerRelevant
     // An internal change is never offered, so neither quoting step applies.
     ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoting' && s !== 'quoted')
@@ -83,10 +148,11 @@ export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
  * if `status` is off-path (on_hold/rejected/cancelled). */
 export function stepPosition(
   status: ChangeStatus,
-  customerRelevant?: boolean
+  customerRelevant?: boolean,
+  origin?: string | null,
 ): { index: number; total: number } | null {
   if (OFF_PATH_STATUSES.includes(status)) return null
-  const order = branchStepOrder(customerRelevant)
+  const order = branchStepOrder(customerRelevant, origin)
   const index = order.indexOf(status)
   if (index === -1) return null
   return { index, total: order.length }
@@ -98,4 +164,167 @@ export const GATE_TARGET_STATUS: Record<GateKey, ChangeStatus> = {
   feasibility: 'in_assessment',
   budget: 'costing',
   release: 'in_implementation',
+}
+
+/**
+ * Stepper names where the stage reads better by its work than by its status:
+ * at `approved` the open job is the detailed timing, so the node says so. The
+ * status itself (and every advance button) keeps its own label.
+ */
+export const STEPPER_LABELS: Partial<Record<ChangeStatus, string>> = {
+  approved: 'Timing',
+}
+export const stepperLabel = (s: ChangeStatus): string => STEPPER_LABELS[s] ?? STATUS_LABELS[s]
+
+/**
+ * The change detail tabs (spec 2026-09-25 section 9). Governance tabs (d1,
+ * audit) sit in their own group on the right.
+ */
+export type ChangeTab =
+  | 'overview' | 'scoping' | 'impacted' | 'assessments'
+  | 'costing' | 'offer' | 'mother' | 'review' | 'timing' | 'release' | 'd1' | 'audit'
+
+export const EVERYDAY_TABS: ChangeTab[] = [
+  'overview', 'scoping', 'impacted', 'assessments', 'costing', 'offer', 'timing', 'release',
+]
+/** Mother plant (spec §14): Assessments, Costing and Offer become one "Mother plant" tab. */
+export const MOTHER_PLANT_TABS: ChangeTab[] = [
+  'overview', 'scoping', 'impacted', 'mother', 'timing', 'release',
+]
+/** Engineering review (spec §17): no assessment, costing, offer or timing. */
+export const REVIEW_TABS: ChangeTab[] = ['overview', 'impacted', 'review']
+/** The everyday tabs of a change; `hasReview` keeps the Review tab on a
+ *  review escalated to a full ECR (its answers are the scoping input). */
+export const everydayTabsFor = (origin?: string | null, hasReview = false): ChangeTab[] => {
+  if (origin === 'mother_plant') return MOTHER_PLANT_TABS
+  if (isEngineeringReview(origin)) return REVIEW_TABS
+  if (hasReview) return ['overview', 'scoping', 'impacted', 'review', ...EVERYDAY_TABS.slice(3)]
+  return EVERYDAY_TABS
+}
+export const GOVERNANCE_TABS: ChangeTab[] = ['d1', 'audit']
+export const ALL_TABS: ChangeTab[] = [...EVERYDAY_TABS, 'mother', 'review', ...GOVERNANCE_TABS]
+
+/** Each phase-bound tab opens when the change reaches its phase. */
+export const TAB_UNLOCK_STATUS: Partial<Record<ChangeTab, ChangeStatus>> = {
+  scoping: 'scoping',
+  impacted: 'scoping',
+  review: 'scoping',
+  assessments: 'in_assessment',
+  costing: 'costing',
+  // The quote plan can be prepared while costing still runs.
+  offer: 'costing',
+  timing: 'approved',
+  release: 'in_validation',
+}
+
+/** The tab where the change's current phase is worked. */
+export const STATUS_ACTIVE_TAB: Partial<Record<ChangeStatus, ChangeTab>> = {
+  captured: 'scoping', scoping: 'scoping',
+  in_assessment: 'assessments',
+  costing: 'costing',
+  quoting: 'offer', quoted: 'offer',
+  approved: 'timing', in_implementation: 'timing',
+  in_validation: 'release', released: 'release',
+}
+
+/**
+ * The tabs where the change's current phase is worked, given its branch. An
+ * internal change at costing is approved by PM on the Approval (offer) tab
+ * while the departments still enter lines on costing, so both are active.
+ */
+export function activeTabsFor(status: string, customerRelevant?: boolean | null,
+  origin?: string | null): ChangeTab[] {
+  // Mother plant: scoping is informing the team, worked on its own tab.
+  if (origin === 'mother_plant' && status === 'scoping') return ['mother']
+  if (isEngineeringReview(origin)) return status === 'scoping' ? ['review'] : []
+  const tab = STATUS_ACTIVE_TAB[status as ChangeStatus]
+  if (!tab) return []
+  if (status === 'costing' && !customerRelevant) return ['costing', 'offer']
+  return [tab]
+}
+
+const RELEASE_STAGE: string[] = ['in_validation', 'released', 'closed']
+
+/**
+ * A tab name as links, actions and waits may still send it: the old
+ * `commercial` and `implementation` tabs resolve to the new tab for the
+ * change's stage. Unknown names come back as null.
+ */
+export function resolveChangeTab(raw: string | null | undefined, status: string,
+  origin?: string | null): ChangeTab | null {
+  if (!raw) return null
+  // A mother-plant change has no assessment, costing or offer: those names
+  // (and their aliases) land on its Mother plant tab.
+  if (origin === 'mother_plant'
+    && ['assessments', 'costing', 'offer', 'commercial', 'quote', 'quoting'].includes(raw)) return 'mother'
+  if (origin !== 'mother_plant' && raw === 'mother') return null
+  // An engineering review has no assessment, costing, offer or timing.
+  if (isEngineeringReview(origin)
+    && ['assessments', 'costing', 'offer', 'commercial', 'quote', 'quoting', 'timing',
+      'implementation', 'release', 'validation'].includes(raw)) return 'review'
+  if (raw === 'commercial') return status === 'costing' ? 'costing' : 'offer'
+  if (raw === 'implementation') return RELEASE_STAGE.includes(status) ? 'release' : 'timing'
+  if (raw === 'quote' || raw === 'quoting') return 'offer'
+  if (raw === 'validation') return 'release'
+  return (ALL_TABS as string[]).includes(raw) ? raw as ChangeTab : null
+}
+
+/** Display name of a tab (also for the aliases). */
+export function changeTabLabel(raw: string, customerRelevant?: boolean | null, status = '',
+  /** The plant a mother-plant change came from: names its tab. */
+  plant?: string | null): string {
+  const tb = resolveChangeTab(raw, status) ?? raw
+  switch (tb) {
+    case 'overview': return 'Overview'
+    case 'scoping': return 'Scoping'
+    case 'impacted': return 'Impacted'
+    case 'assessments': return 'Assessments'
+    case 'costing': return 'Costing'
+    case 'offer': return customerRelevant ? 'Offer' : 'Approval'
+    case 'mother': return plantName(plant)
+    case 'review': return 'Review'
+    case 'timing': return 'Timing'
+    case 'release': return 'Release'
+    case 'd1': return 'D1'
+    case 'audit': return 'Audit'
+    default: return tb ? tb[0].toUpperCase() + tb.slice(1) : tb
+  }
+}
+
+/** A changelog value as plain text. The API returns plain values, but the
+ *  column stores JSON text ('"on_hold"'), so an older backend or a cached
+ *  response may still carry the encoded form: decode a JSON string, keep
+ *  anything else as it is. */
+export function decodeLogValue(v: string | null | undefined): string | null {
+  if (v == null) return null
+  if (v.startsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(v)
+      if (typeof parsed === 'string') return parsed
+    } catch {
+      // not JSON: keep the text
+    }
+  }
+  return v
+}
+
+/**
+ * A stopped change (rejected or cancelled, also a rejection that was closed
+ * afterwards) keeps the tabs of the stage it stopped at; a tab that stage
+ * never reached stays locked, as it was then. Unknown stop stage: nothing is
+ * locked (older data without a status log).
+ */
+export function stoppedTabLocked(stoppedAt: ChangeStatus | null | undefined, tb: ChangeTab): boolean {
+  if (!stoppedAt) return false
+  const from = TAB_UNLOCK_STATUS[tb]
+  if (from === undefined) return false
+  const at = CHANGE_STATUS_ORDER.indexOf(stoppedAt)
+  if (at === -1) return false
+  return at < CHANGE_STATUS_ORDER.indexOf(from)
+}
+
+/** Where a stopped change opens: Scoping when it was rejected there, else Overview. */
+export function stoppedDefaultTab(kind: 'rejected' | 'cancelled',
+  stoppedAt: ChangeStatus | null | undefined): ChangeTab {
+  return kind === 'rejected' && (stoppedAt === 'scoping' || stoppedAt === 'captured') ? 'scoping' : 'overview'
 }

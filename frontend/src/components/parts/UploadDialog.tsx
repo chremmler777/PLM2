@@ -6,13 +6,15 @@
  * informational and optional.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import {
   defaultLevel, detectedIndex, inferFileType, nextMajorName, nextProposalName,
   type ParsedRow, type UploadLevel,
 } from '../../lib/uploadLevel';
+import DateInput from '../gantt/DateInput'
+import { invalidateRevisionWorkflow } from '../../hooks/queries/useWorkflows'
 
 export interface UploadDialogProps {
   open: boolean;
@@ -37,6 +39,7 @@ const inputCls = 'mt-1 w-full p-2 rounded bg-slate-900 border border-slate-700 t
 
 export default function UploadDialog(props: UploadDialogProps) {
   const { open, partId, currentRevision, revisionNames, officialOnly, projectNaming, initialFiles, onClose, onDone } = props;
+  const queryClient = useQueryClient();
   const [rows, setRows] = useState<Row[]>(() => {
     const seen = new Set<string>();
     const next: Row[] = [];
@@ -138,6 +141,8 @@ export default function UploadDialog(props: UploadDialogProps) {
           const res = await client.post(`/v1/parts/${partId}/revisions/customer-data`, {
             statement: effectiveStatement, received_at: receivedAt,
             customer_index: index.trim() || undefined, summary: summary.trim() || undefined,
+            // spec §17: the new index waits for Development's triage
+            source: 'upload',
           });
           targetId = res.data.id;
           setSessionTargetId(targetId);
@@ -179,6 +184,7 @@ export default function UploadDialog(props: UploadDialogProps) {
       }
     }
     toast.success(`${done} file${done === 1 ? '' : 's'} uploaded`);
+    invalidateRevisionWorkflow(queryClient, targetId);
     submittingRef.current = false;
     onDone(targetId);
   };
@@ -260,7 +266,7 @@ export default function UploadDialog(props: UploadDialogProps) {
                 ))}
               </div>
               <label className="block text-sm text-slate-400">Received on
-                <input aria-label="Received on" type="date" value={receivedAt} disabled={busy} onChange={(e) => setReceivedAt(e.target.value)} className={inputCls} />
+                <DateInput aria-label="Received on" value={receivedAt} disabled={busy} onChange={setReceivedAt} className={inputCls} />
               </label>
               <label className="block text-sm text-slate-400">Customer index
                 <input aria-label="Customer index" value={index} disabled={busy} onChange={(e) => setIndex(e.target.value)} placeholder="optional" className={inputCls} />

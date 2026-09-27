@@ -1,5 +1,6 @@
 """Pydantic schemas for Change Management."""
-from datetime import datetime
+import json
+from datetime import date, datetime
 from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,6 +23,19 @@ class ChangeCreate(BaseModel):
     lead_id: Optional[int] = None
     data_classification: str = "confidential"
     customer_relevant: Optional[bool] = None
+    # Mother-plant side track (spec §14): origin 'mother_plant' carries the
+    # plant (one of app/services/mother_plants.MOTHER_PLANTS, default
+    # Weissenburg), their reference and the SOP date (required).
+    origin: Optional[str] = None
+    mother_plant_name: Optional[str] = Field(None, max_length=120)
+    mother_plant_ref: Optional[str] = Field(None, max_length=120)
+    mother_plant_sop: Optional[date] = None
+    # Atomic capture (spec §16): the impacted items in the same request.
+    # The first id is the lead unless lead_part_id says otherwise; with
+    # title_auto (default) the server composes the title from the lead.
+    impacted_part_ids: Optional[List[int]] = None
+    lead_part_id: Optional[int] = None
+    title_auto: Optional[bool] = None
 
 
 class ChangeUpdate(BaseModel):
@@ -61,6 +75,11 @@ class TransitionRequest(BaseModel):
     # its alias so an older client keeps working.
     reason: Optional[str] = None
     escalation_reason: Optional[str] = None
+    # Final walk P2-3: when a soft guard refuses the hop and an approved
+    # deviation would lift it, the endpoint files the deviation request with
+    # this reason (or reuses the pending one) and answers 202 with it,
+    # instead of a bare 400. Ignored when the hop goes through.
+    deviation_reason: Optional[str] = None
 
 
 class CustomerResponseRequest(BaseModel):
@@ -68,6 +87,8 @@ class CustomerResponseRequest(BaseModel):
     # Mandatory when response == 'accepted' (enforced in the service)
     release_due_date: Optional[NaiveUtcDatetime] = None
     release_due_reason: Optional[str] = None
+    # Required to accept when the latest sent offer version has expired.
+    expired_override_reason: Optional[str] = None
 
 
 class SignOffRequest(BaseModel):
@@ -79,6 +100,8 @@ class ImpactedItemCreate(BaseModel):
     impact_note: Optional[str] = None
     eng_level_before: Optional[str] = None
     is_lead: bool = False
+    # Required from 'quoted' on: the offer no longer covers the scope.
+    reason: Optional[str] = None
 
 
 class AssessmentSubmit(BaseModel):
@@ -104,6 +127,10 @@ class ImpactedItemResponse(BaseModel):
     eng_level_after: Optional[str] = None
     is_lead: bool = False
     resulting_revision_id: Optional[int] = None
+    # The article itself, so a list of impacted items reads without a lookup
+    # per row. Filled in one batch by the endpoints (fill_part_labels).
+    part_number: Optional[str] = None
+    part_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -129,6 +156,9 @@ class AssessmentResponse(BaseModel):
     rfq_expected: bool = False
     stage_order: int = 1
     rasic_letter: str = "R"
+    # "Not our responsibility" pending the lead's decision (spec §16): the
+    # letter asked for; the row keeps rasic_letter until approval.
+    pending_rasic_letter: Optional[str] = None
     status: str = "active"
     owner_id: Optional[int] = None
     owner_name: Optional[str] = None
@@ -151,6 +181,7 @@ class AssessmentResponse(BaseModel):
                     "lead_time_impact_days", "conditions", "notes",
                     "responsible_id", "effort_hours", "submitted_at",
                     "stage_order", "rasic_letter")},
+                "pending_rasic_letter": getattr(data, "pending_rasic_letter", None),
                 "status": data.effective_status,
                 "owner_id": data.effective_owner_id,
                 "owner_name": data.effective_owner_name,
@@ -188,6 +219,7 @@ class AttachmentResponse(BaseModel):
     responds_to_id: Optional[int] = None
     concern_id: Optional[int] = None
     assessment_id: Optional[int] = None
+    validation_issue_id: Optional[int] = None
     created_at: datetime
     uploaded_by: int
     uploaded_by_name: Optional[str] = None
@@ -203,6 +235,29 @@ class ChangelogResponse(BaseModel):
     performed_by: int
     performed_at: datetime
     notes: Optional[str] = None
+    # Which field changed, and its before/after (e.g. field_name="status",
+    # old_value="on_hold", new_value="in_assessment"). Absent on rows that
+    # don't carry a single before/after (most actions), and blanked by
+    # price_redaction.redact_changelog_row for a money-carrying field_name
+    # when the viewer may not read prices.
+    field_name: Optional[str] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+
+    @field_validator("old_value", "new_value", mode="before")
+    @classmethod
+    def _decode_json_string(cls, v: Any) -> Any:
+        """The changelog stores its values as JSON text, so a status reads
+        '"on_hold"' in the column. A JSON string goes out as its plain value
+        ('on_hold'); JSON objects, numbers and non-JSON text stay as stored."""
+        if isinstance(v, str) and v.startswith('"'):
+            try:
+                decoded = json.loads(v)
+            except ValueError:
+                return v
+            if isinstance(decoded, str):
+                return decoded
+        return v
 
     class Config:
         from_attributes = True
@@ -243,10 +298,40 @@ class ChangeResponse(BaseModel):
     cm_external: bool = False
     implementation_mode: Optional[str] = None
     customer_relevant: bool = False
+    # Spec §16: the title follows the lead item; an impact edit after the
+    # quote leaves the offer short of the scope.
+    title_auto: bool = False
+    scope_changed_after_quote: bool = False
+    # Set by the list endpoint: the caller leads or raised the change.
+    is_mine: bool = False
+    # customer | internal | mother_plant (migration 093, spec §14) |
+    # engineering_review (spec §17, the light track of a new index).
+    origin: str = "customer"
+    # Spec §17: the change was started by (or took) a revision intake.
+    from_intake: bool = False
+    mother_plant_name: Optional[str] = None
+    mother_plant_ref: Optional[str] = None
+    mother_plant_sop: Optional[date] = None
+    # The team informed (mother plant): first send, and the departments
+    # that have not confirmed "Read and understood" yet (Blocked by, info).
+    info_sent_at: Optional[datetime] = None
+    info_department_ids: List[int] = []
+    info_open_department_ids: List[int] = []
     car_line: Optional[str] = None
     affected_plant_ids: List[int] = []
     required_by_date: Optional[datetime] = None
     required_by_reason: Optional[str] = None
+    # Costing to close (087).
+    plan_revision: int = 0
+    timing_validated_at: Optional[datetime] = None
+    timing_validated_by: Optional[int] = None
+    accepted_offer_id: Optional[int] = None
+    lessons_done_at: Optional[datetime] = None
+    lessons_none_reason: Optional[str] = None
+    # When the change was released / closed: the release summary's actual
+    # finish when plan tasks were never marked done (re-check walk P3-6).
+    released_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
     deadline_state: Optional[str] = None
     quoted_at: Optional[datetime] = None
     quoted_on_time: Optional[bool] = None
@@ -256,6 +341,12 @@ class ChangeResponse(BaseModel):
     # Departments that found the change feasible but have priced nothing yet.
     # Populated only while the change is in costing (see the endpoint).
     costing_pending_department_ids: List[int] = []
+    # Departments with costing lines the cost sheet cannot price (no rate):
+    # [{department_id, department_name, subject, count, message}], message =
+    # "No cost sheet rate for <department>: 12 h unpriced", or for a machine
+    # line "No machine rate for class <class> at <plant>: 12 h unpriced"
+    # (department_id None). In costing and quoting.
+    costing_unpriced: List[dict] = []
     release_due_date: Optional[datetime] = None
     release_due_reason: Optional[str] = None
     impact_confirmed_by: Optional[int] = None
@@ -287,6 +378,9 @@ class ChangeResponse(BaseModel):
     bank_build_mode: Optional[str] = None
     bank_build_note: Optional[str] = None
     scrap_quote_price: Optional[float] = None
+    # Whether a scrap quote price is on record. Never redacted: a viewer who
+    # may not read the price still needs to know one exists (reads "set").
+    scrap_price_set: bool = False
     bank_build_set_by: Optional[int] = None
     bank_build_set_by_name: Optional[str] = None
     bank_build_set_at: Optional[datetime] = None
@@ -333,8 +427,15 @@ class ChangeResponse(BaseModel):
             row["quoted_on_time"] = data.quoted_on_time
             row["blocked_department_ids"] = data.blocked_department_ids
             row["negotiated_final_price"] = data.negotiated_final_price
+            row["scrap_price_set"] = data.scrap_quote_price is not None
+            row["info_sent_at"] = getattr(data, "info_sent_at", None)
+            row["info_department_ids"] = getattr(data, "info_department_ids", [])
+            row["info_open_department_ids"] = getattr(
+                data, "info_open_department_ids", [])
             row["project_number"] = data.project_number
             row["project_name"] = data.project_name
+            row["project_plant_id"] = (data.project.plant_id
+                                       if data.project is not None else None)
             return row
         return data
 
@@ -343,6 +444,8 @@ class ChangeResponse(BaseModel):
 
 
 class ChangeDetailResponse(ChangeResponse):
+    # The project's plant (Project.plant_id): the plant the change is made in.
+    project_plant_id: Optional[int] = None
     impacted_items: List[ImpactedItemResponse] = []
     assessments: List[AssessmentResponse] = []
     attachments: List[AttachmentResponse] = []
@@ -359,6 +462,10 @@ class RoutingDepartment(BaseModel):
     status: Optional[str] = None     # None for info-only
     verdict: Optional[str] = None
     assessment_id: Optional[int] = None
+    pending_rasic_letter: Optional[str] = None
+    # A pending deviation asks to take this row off the routing; it stays
+    # (still owed) until the decision.
+    pending_removal: bool = False
 
 
 class RoutingStage(BaseModel):
@@ -483,7 +590,7 @@ class CostLineResponse(BaseModel):
     activity_label: Optional[str] = None
     cost_kind: str
     demand_hours: float
-    rate_snapshot: float
+    rate_snapshot: Optional[float] = None
     internal_cost: float
     external_cost: float
     minutes_per_part: Optional[float] = None
@@ -500,6 +607,11 @@ class ActualsDeptRow(BaseModel):
     # The rate the hours were valued at, and null when the plant has none for
     # this department — in which case actual_cost is a floor, not a total.
     hourly_rate: Optional[float] = None
+    # Every rate the bookings were priced with (the one valid on each
+    # booking's date); hourly_rate is None when there is more than one.
+    rates: List[float] = []
+    machine_hours: float = 0.0
+    machine_cost: float = 0.0
     actual_cost: float
     plan_cost: float
     variance: float
@@ -527,6 +639,9 @@ class ActualsBlock(BaseModel):
     unrated_hours: bool = False
     rate_plant_id: Optional[int] = None
     variance: float = 0.0
+    currency: Optional[str] = None
+    other_currency: Dict[str, float] = {}
+    total_machine_hours: float = 0.0
 
 
 class PlantRollup(BaseModel):
@@ -535,6 +650,7 @@ class PlantRollup(BaseModel):
     one_time_external: float
     lifecycle_internal: float
     lifecycle_external: float
+    currency: Optional[str] = None
 
 
 class DeptRollup(BaseModel):
@@ -555,6 +671,7 @@ class DeptPlantRollup(BaseModel):
     lifecycle_external: float
     demand_hours: float = 0.0
     minutes_per_part: float = 0.0
+    currency: Optional[str] = None
 
 
 class SummationTotals(BaseModel):
@@ -588,6 +705,10 @@ class PositionVendorDetail(BaseModel):
     label: str
     kind: str
     cost: float = 0.0
+    currency: Optional[str] = None
+    # hours (trials) x the line's rate; None = no rate in the cost sheet
+    line_value: Optional[float] = None
+    rate: Optional[float] = None
     recommended_vendor: Optional[str] = None
     recommended_cost: Optional[float] = None
     chosen_vendor: Optional[str] = None
@@ -606,6 +727,9 @@ class PositionRollup(BaseModel):
     # hours × the department's rate at the costing plant, the same valuation a
     # cost line gives demand_hours. Counted in one_time_internal.
     hours_cost: float = 0.0
+    machine_hours: float = 0.0
+    trials: int = 0
+    unpriced_count: int = 0
     position_count: int = 0
     # Hours were declared but no rate is configured for this department at the
     # costing plant, so they are valued at zero. Flagged rather than guessed.
@@ -615,7 +739,42 @@ class PositionRollup(BaseModel):
     positions: List[PositionVendorDetail] = []
 
 
+class UnpricedLine(BaseModel):
+    position_id: int
+    department_id: int
+    label: str
+    kind: str
+    quantity: float = 0.0
+    unit: str = "h"
+    reason: Optional[str] = None
+    message: str = "No rate in the cost sheet"
+    # machine_time / sampling: what is missing ("machine rate for class
+    # 200-450 t at USA Toccoa"); None for a labour line (its department's rate)
+    subject: Optional[str] = None
+
+
+class SummationWarning(BaseModel):
+    code: str
+    message: str
+    # no_rate_department: the department whose rate is missing, or the
+    # subject (a machine class's rate at a plant) with department_id None
+    department_id: Optional[int] = None
+    subject: Optional[str] = None
+
+
 class SummationResponse(BaseModel):
+    # Spec §15 phase 2: totals, by_department and the position margins are
+    # in `currency` (the costing plant's); totals_by_currency holds every
+    # currency's own sums. Currencies are never added or converted.
+    currency: Optional[str] = None
+    # the revenue's currency (basis offer's, else `currency`): no margin when it differs
+    revenue_currency: Optional[str] = None
+    totals_by_currency: Dict[str, SummationTotals] = {}
+    mixed_currency: bool = False
+    unpriced_lines: List[UnpricedLine] = []
+    warnings: List[SummationWarning] = []
+    cost_sheet_versions_used: List[int] = []
+    cost_sheet_current_version: Optional[int] = None
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
     by_department_plant: List[DeptPlantRollup] = []
@@ -738,6 +897,15 @@ class CostingPositionCreate(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: str = "calendar_days"
     notes: Optional[str] = None
+    # Cost sheet pricing (spec §15 phase 2): the labour position that picks
+    # the rate (own time), the machine class (machine_time, sampling; default
+    # the change's class) and the number of trials (sampling).
+    labour_position: Optional[str] = Field(default=None, max_length=80)
+    machine_class_id: Optional[int] = None
+    trials: Optional[int] = Field(default=None, ge=0, le=10000)
+    # A named MachineDB press (machine_time, sampling): its own cost sheet
+    # rate beats the class rate.
+    machine_id: Optional[int] = None
 
 
 class CostingPositionUpdate(BaseModel):
@@ -753,6 +921,12 @@ class CostingPositionUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: Optional[str] = None
     notes: Optional[str] = None
+    labour_position: Optional[str] = Field(default=None, max_length=80)
+    machine_class_id: Optional[int] = None
+    trials: Optional[int] = Field(default=None, ge=0, le=10000)
+    # A named MachineDB press (machine_time, sampling): its own cost sheet
+    # rate beats the class rate.
+    machine_id: Optional[int] = None
 
 
 class CostingPositionResponse(BaseModel):
@@ -769,6 +943,43 @@ class CostingPositionResponse(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: str = "calendar_days"
     notes: Optional[str] = None
+    labour_position: Optional[str] = None
+    machine_class_id: Optional[int] = None
+    # The class the line is priced on: its own, or the change's
+    # (machine_class_from_change) which it follows when the change's moves.
+    machine_class: Optional[str] = None
+    machine_class_used_id: Optional[int] = None
+    machine_class_from_change: bool = False
+    # Where the class came from (costing_rates.price_for_position):
+    # {kind: line | machine | change} for a hand pick or a named press;
+    # {kind: tool, tool_number, source: machinedb | twos | plm2, tonnage,
+    # basis, machine, class_found} for the change's tool tonnage; {kind:
+    # none, tools, without} when no tool has one. None before 108.
+    machine_class_origin: Optional[dict] = None
+    trials: Optional[int] = None
+    machine_id: Optional[int] = None
+    machine_name: Optional[str] = None
+    machine_rate_own: bool = False
+    # The rate the line is priced with (spec §15 phase 2): the snapshot taken
+    # when it was costed. rate None + rate_missing = "No rate in the cost
+    # sheet" (not counted, never 0). rate_label reads e.g. "Cost sheet v2,
+    # Tool Engineer, Engineer, 21.50 USD/h". line_value = hours (trials) x
+    # rate, in rate_currency; currency is the money currency of est_cost and
+    # the offers (the costing plant's).
+    rate: Optional[float] = None
+    rate_currency: Optional[str] = None
+    currency: Optional[str] = None
+    rate_unit: Optional[str] = None
+    rate_source: Optional[str] = None
+    cost_sheet_version_id: Optional[int] = None
+    cost_sheet_version: Optional[int] = None
+    rate_match: Optional[str] = None
+    rate_on: Optional[date] = None
+    rate_label: Optional[str] = None
+    rate_missing: bool = False
+    rate_missing_reason: Optional[str] = None
+    rate_is_snapshot: bool = False
+    line_value: Optional[float] = None
     created_by: int
     created_at: datetime
     updated_at: datetime
@@ -810,8 +1021,9 @@ class GateDecisionIn(BaseModel):
 
 class GateResponse(BaseModel):
     gate_key: str
-    decision: str
+    decision: Optional[str] = None  # None: nobody has decided it yet
     decided_by: Optional[int] = None
+    decided_by_name: Optional[str] = None
     decided_at: Optional[datetime] = None
     remark: Optional[str] = None
 
@@ -822,6 +1034,10 @@ class GateResponse(BaseModel):
 class MeetingParticipant(BaseModel):
     name: str
     user_id: Optional[int] = None
+    # From the contact picker: used to find the PLM2 user behind a name
+    # when user_id is missing (the backend resolves and stores user_id).
+    username: Optional[str] = None
+    email: Optional[str] = None
 
 
 class MeetingCreate(BaseModel):
@@ -833,6 +1049,9 @@ class MeetingCreate(BaseModel):
     # {department_id: "R"|"A"|"S"|"C"} — the room's call. When given, it is
     # authoritative and selected_department_ids follows its keys.
     department_rasic: Optional[Dict[int, str]] = None
+    # The room re-confirms the cost carrier: customer | internal (§16).
+    # Proceed is refused until it is set.
+    cost_carrier: Optional[str] = None
 
 
 class MeetingUpdate(BaseModel):
@@ -841,6 +1060,7 @@ class MeetingUpdate(BaseModel):
     notes: Optional[str] = None
     selected_department_ids: Optional[List[int]] = None
     department_rasic: Optional[Dict[int, str]] = None
+    cost_carrier: Optional[str] = None
 
 
 class NegotiationCreate(BaseModel):
@@ -851,6 +1071,8 @@ class NegotiationCreate(BaseModel):
     # number in it.
     counter_price: Optional[float] = Field(default=None, ge=0)
     is_final: bool = False
+    # The offer version the round is about; defaults to the latest sent one.
+    offer_id: Optional[int] = None
 
 
 class NegotiationResponse(BaseModel):
@@ -860,6 +1082,7 @@ class NegotiationResponse(BaseModel):
     note: str
     counter_price: Optional[float] = None
     is_final: bool = False
+    offer_id: Optional[int] = None
     created_by: int
     created_by_name: Optional[str] = None
     created_at: datetime
@@ -951,6 +1174,8 @@ class ConcernResponse(BaseModel):
     department_id: Optional[int] = None
     # Set on kind "risk" only; null on legacy kinds.
     risk_type: Optional[str] = None
+    # Human label of risk_type ("Tolerance stack"), spec §16.
+    risk_type_label: Optional[str] = None
     severity: Optional[int] = None
     checklist_key: Optional[str] = None
     raised_by_meeting_id: Optional[int] = None
@@ -961,6 +1186,12 @@ class ConcernResponse(BaseModel):
     # it and fell back to '#id' while nothing served it.
     answered_by_name: Optional[str] = None
     withdrawn_at: Optional[datetime] = None
+    withdrawn_by: Optional[int] = None
+    # author | pm | department, and its words ("Withdrawn by author",
+    # "Settled by Project Management"), spec §16.
+    settled_as: Optional[str] = None
+    settled_label: Optional[str] = None
+    withdrawn_by_name: Optional[str] = None
     resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None
     is_open: bool = True
@@ -986,6 +1217,7 @@ class MeetingResponse(BaseModel):
     decision: Optional[str] = None
     selected_department_ids: List[int] = []
     department_rasic: Optional[Dict[int, str]] = None
+    cost_carrier: Optional[str] = None
     created_by: int
     created_at: datetime
     decided_by: Optional[int] = None
@@ -1001,6 +1233,8 @@ class ImpactSuggestIn(BaseModel):
 
 class ImpactSelectionIn(BaseModel):
     part_ids: List[int]
+    # Required from 'quoted' on (spec §16).
+    reason: Optional[str] = None
 
 
 class DeviationProposeIn(BaseModel):
@@ -1023,6 +1257,11 @@ class TransitionDeviationResponse(BaseModel):
     decided_by: Optional[int] = None
     decided_at: Optional[datetime] = None
     decision_note: Optional[str] = None
+    # Viewer-relative (GET /deviations): may this caller approve/reject it
+    # (4-eyes, engineer/admin, lead-or-admin), and the names to show.
+    can_decide: bool = False
+    proposed_by_name: Optional[str] = None
+    decided_by_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -1036,6 +1275,11 @@ class ImplementationBookingCreate(BaseModel):
     # correction, which is DELETE plus a fresh booking.
     hours: float = Field(gt=0)
     note: Optional[str] = None
+    # Optional pricing detail (spec §15 phase 2): the position whose cost
+    # sheet rate prices the hours, and machine hours on a machine class.
+    labour_position: Optional[str] = Field(default=None, max_length=80)
+    machine_class_id: Optional[int] = None
+    machine_hours: Optional[float] = Field(default=None, ge=0, lt=1e6)
 
 
 class ImplementationBookingResponse(BaseModel):
@@ -1044,6 +1288,9 @@ class ImplementationBookingResponse(BaseModel):
     department_id: int
     hours: float
     note: Optional[str] = None
+    labour_position: Optional[str] = None
+    machine_class_id: Optional[int] = None
+    machine_hours: Optional[float] = None
     # The stored columns. Kept in the payload because "booked" is what the
     # act is called on the shop floor.
     booked_by: int
@@ -1176,9 +1423,15 @@ class ValidationCheckState(BaseModel):
     # the change would add. A delta, not an absolute cycle time — the costing
     # never stated one.
     planned_delta_seconds: Optional[float] = None
+    # Where planned_delta_seconds comes from: "change_lifecycle_total" (the
+    # Tool Engineer's row: every department's lifecycle minutes summed) or
+    # "department_lifecycle" (that department's own lines). None with no number.
+    planned_delta_source: Optional[str] = None
     # weight only: what the quote was built on, and the gap to the weighed part.
     estimated_part_weight_g: Optional[float] = None
     delta_g: Optional[float] = None
+    # An answered row an older catalog seeded; shown, never counted.
+    retired: bool = False
 
 
 class ValidationDepartmentState(BaseModel):

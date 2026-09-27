@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client, { API_BASE_URL } from '../api/client';
 import FormRenderer from './FormRenderer';
+import { formatDate, formatDateTime } from '../lib/format';
 import type { FormInstance, FormData } from './types';
 
 const STATUS_STYLE: Record<string, { pill: string; dot: string }> = {
@@ -40,8 +41,8 @@ const submitError = (e: unknown): string => {
   return Array.isArray(missing) && missing.length > 0 ? `${base}: ${missing.join(', ')}` : base;
 };
 
-const fmtDate = (iso: string) => iso.slice(0, 10);
-const fmtStamp = (iso: string) => iso.slice(0, 16).replace('T', ' ');
+const fmtDate = formatDate;
+const fmtStamp = formatDateTime;
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'created', saved: 'saved', submitted: 'submitted', reopened: 'reopened', signed: 'signed',
@@ -143,8 +144,8 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
                     <div className="flex gap-1"><dt className="text-slate-500">Version</dt><dd className="font-mono text-slate-300">v{inst.version}</dd></div>
                     {inst.implements && (
                       <div className="flex gap-1"><dt className="text-slate-500">Implements</dt><dd className="font-mono text-slate-300">{inst.implements}</dd></div>)}
-                    <div className="flex gap-1"><dt className="text-slate-500">Owner</dt><dd className="text-slate-300">{inst.owner_name ?? '—'}</dd></div>
-                    <div className="flex gap-1"><dt className="text-slate-500">Updated</dt><dd className="text-slate-300">{fmtDate(inst.updated_at)} by {inst.updated_by_name ?? '—'}</dd></div>
+                    <div className="flex gap-1"><dt className="text-slate-500">Owner</dt><dd className="text-slate-300">{inst.owner_name ?? '-'}</dd></div>
+                    <div className="flex gap-1"><dt className="text-slate-500">Updated</dt><dd className="text-slate-300">{fmtDate(inst.updated_at)} by {inst.updated_by_name ?? '-'}</dd></div>
                   </dl>
                   {inst.references.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">

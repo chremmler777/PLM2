@@ -10,6 +10,10 @@ vi.mock('../../api/changes', () => ({
   changesApi: {
     create: vi.fn().mockResolvedValue({ id: 42, change_number: 'CR-2026-0042' }),
     addImpactedItem: vi.fn().mockResolvedValue({}),
+    // An older backend: the detail read fails, so every item is added by hand.
+    get: vi.fn().mockRejectedValue(new Error('no detail')),
+    uploadAttachment: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
   },
 }))
 vi.mock('../../contexts/AuthContext', () => ({
@@ -57,10 +61,36 @@ describe('StartChangeModal', () => {
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle at clip' } })
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 1, change_type: 'physical_part', lead_id: 5, customer_relevant: true })))
+      expect.objectContaining({ project_id: 1, change_type: 'physical_part', customer_relevant: true })))
+    expect(vi.mocked(changesApi.create).mock.calls[0][0]).not.toHaveProperty('lead_id')
     await waitFor(() => expect(changesApi.addImpactedItem).toHaveBeenCalledWith(
       42, { part_id: 4, is_lead: true }))
     expect(navigate).toHaveBeenCalledWith('/changes/42')
+  })
+
+  it('shows the project PM as the default lead when the project has one', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/plants/projects'))
+        return Promise.resolve({ data: [{ id: 1, code: '1864', name: 'VW426 Atlas' }] })
+      if (url.includes('/parts/project/')) return Promise.resolve({ data: [] })
+      if (url.includes('/projects/1/team'))
+        return Promise.resolve({ data: [
+          { department_id: 6, department_name: 'Project Manager',
+            responsible: { id: 3, name: 'Petra PM' } },
+          { department_id: 5, department_name: 'Sales', responsible: null },
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    await waitFor(() => expect(screen.getByTestId('start-default-lead').textContent)
+      .toContain('Petra PM'))
+    expect(screen.getByTestId('start-default-lead').textContent).toContain('project PM')
+  })
+
+  it('shows no default-lead info when the project has none', async () => {
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    await screen.findByLabelText(/Change type/)
+    expect(screen.queryByTestId('start-default-lead')).toBeNull()
   })
 
   it('sends customer_relevant: true when the Yes option is picked', async () => {
@@ -314,5 +344,110 @@ describe('StartChangeModal', () => {
     // Nothing the modal can do sends the internal branch.
     expect(changesApi.create).not.toHaveBeenCalledWith(
       expect.objectContaining({ customer_relevant: false }))
+  })
+
+  describe('kickoff needs and the one-request create (spec §16)', () => {
+    const prefill = {
+      projectId: 1,
+      part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
+    }
+    beforeEach(() => {
+      vi.mocked(changesApi.get).mockReset().mockRejectedValue(new Error('no detail'))
+      vi.mocked(changesApi.uploadAttachment).mockClear()
+    })
+
+    it('sends the impacted parts and description in the create request, then sets the quote deadline', async () => {
+      vi.mocked(changesApi.create).mockResolvedValueOnce(
+        { id: 42, impacted_items: [{ id: 1, part_id: 4, is_lead: true }] } as never)
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+      fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Rib at the clip tower' } })
+      const date = screen.getByLabelText('Quote deadline')
+      fireEvent.change(date, { target: { value: '05.11.2026' } })
+      fireEvent.blur(date)
+      fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
+      await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(expect.objectContaining({
+        impacted_part_ids: [4],
+        lead_part_id: 4,
+        title_auto: true,
+        description: 'Rib at the clip tower',
+      })))
+      // The create body takes no deadline: it follows as a PATCH.
+      await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(42, { required_by_date: '2026-11-05T23:59:59Z' }))
+      // The backend attached it: nothing is added a second time.
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith('/changes/42'))
+      expect(changesApi.addImpactedItem).not.toHaveBeenCalled()
+    })
+
+    it('adds only the items the backend did not attach, never a second lead', async () => {
+      clientMocks.get.mockImplementation((url: string) => {
+        if (url.includes('/plants/projects'))
+          return Promise.resolve({ data: [{ id: 1, code: '1864', name: 'VW426 Atlas' }] })
+        if (url.includes('/parts/project/'))
+          return Promise.resolve({ data: [
+            { id: 4, part_number: '20-3457-001-0', name: 'Bracket LH', item_category: 'article' },
+            { id: 5, part_number: '20-3457-002-0', name: 'Bracket RH', item_category: 'article' },
+          ] })
+        return Promise.resolve({ data: [] })
+      })
+      vi.mocked(changesApi.get).mockResolvedValueOnce(
+        { id: 42, impacted_items: [{ id: 1, part_id: 4, is_lead: true }] } as never)
+      wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+      fireEvent.click(await screen.findByText('20-3457-001-0'))
+      fireEvent.click(await screen.findByText('20-3457-002-0'))
+      fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Warpage' } })
+      fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
+      await waitFor(() => expect(navigate).toHaveBeenCalledWith('/changes/42'))
+      expect(vi.mocked(changesApi.addImpactedItem).mock.calls.map((c) => c[1])).toEqual([
+        { part_id: 5, is_lead: false },
+      ])
+    })
+
+    it('lists what the hand-over still misses, softly, and clears it once given', async () => {
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      const missing = screen.getByTestId('start-ready-missing')
+      expect(missing.textContent).toContain('Description')
+      expect(missing.textContent).toContain('At least one attachment')
+      expect(missing.textContent).toContain('Quote deadline')
+      // Soft: Create is not held by it.
+      fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+      expect((screen.getByRole('button', { name: /Create change/ }) as HTMLButtonElement).disabled).toBe(false)
+
+      fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Rib' } })
+      const date = screen.getByLabelText('Quote deadline')
+      fireEvent.change(date, { target: { value: '05.11.2026' } })
+      fireEvent.blur(date)
+      fireEvent.change(screen.getByTestId('start-file-input'),
+        { target: { files: [new File(['x'], 'drawing.pdf', { type: 'application/pdf' })] } })
+      expect(await screen.findByTestId('start-ready')).toBeTruthy()
+      expect(screen.queryByTestId('start-ready-missing')).toBeNull()
+    })
+
+    it('recalculates the missing list while the quote deadline is typed (no blur)', async () => {
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      const date = screen.getByLabelText('Quote deadline') as HTMLInputElement
+      fireEvent.change(date, { target: { value: '05.11.20' } })
+      expect(screen.getByTestId('start-ready-missing').textContent).toContain('Quote deadline')
+      fireEvent.change(date, { target: { value: '05.11.2026' } })
+      expect(screen.getByTestId('start-ready-missing').textContent).not.toContain('Quote deadline')
+      // The typed text stays as typed.
+      expect(date.value).toBe('05.11.2026')
+      fireEvent.change(date, { target: { value: '' } })
+      expect(screen.getByTestId('start-ready-missing').textContent).toContain('Quote deadline')
+    })
+
+    it('uploads the dropped documents to the new change', async () => {
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      const file = new File(['x'], 'customer-mail.msg')
+      fireEvent.drop(screen.getByTestId('start-dropzone'), { dataTransfer: { files: [file] } })
+      expect(screen.getByTestId('start-files').textContent).toContain('customer-mail.msg')
+      fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+      fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
+      await waitFor(() => expect(changesApi.uploadAttachment).toHaveBeenCalledWith(42, file))
+    })
   })
 })

@@ -127,6 +127,13 @@ class ImplementationService:
             .where(ChangeAssessment.change_id == change.id)
             .distinct())).scalars()
         dept_ids.update(rows.all())
+        # A mother-plant change (spec §14) prices nothing here: the informed
+        # departments are the ones doing the local work.
+        from app.services import mother_plants as mp
+        if mp.is_mother_plant(change):
+            from app.services.mother_plant_service import MotherPlantService
+            dept_ids.update(await MotherPlantService.informed_department_ids(
+                session, change))
         return sorted(dept_ids)
 
     # ------------------------------------------------------------------
@@ -331,11 +338,33 @@ class ImplementationService:
         if hours is None or float(hours) <= 0:
             raise ImplementationError(
                 "A time booking needs hours greater than zero")
+        machine_hours = spec.get("machine_hours")
+        machine_class_id = spec.get("machine_class_id")
+        if machine_hours and machine_class_id is None:
+            from app.services import costing_rates
+            # the class the machine hours were costed on (a priced line
+            # keeps its tool class while the tonnage moves), else live
+            machine_class_id = await costing_rates.booking_machine_class_id(
+                session, change)
+            if machine_class_id is None:
+                raise ImplementationError(
+                    "Machine hours need a machine class: pick one or set the "
+                    "change's machine class")
+        if machine_class_id is not None:
+            from app.models.cost_sheet import CostSheetMachineClass
+            from app.services import costing_rates
+            cls = await session.get(CostSheetMachineClass, machine_class_id)
+            if cls is None or cls.organization_id != await costing_rates.change_org_id(
+                    session, change):
+                raise ImplementationError(f"Unknown machine class {machine_class_id}")
         booking = ImplementationBooking(
             change_id=change.id, department_id=department_id,
             hours=round(float(hours), 2),
             note=(spec.get("note") or None), booked_by=actor.id,
             booked_at=datetime.utcnow(),
+            labour_position=((spec.get("labour_position") or "").strip() or None),
+            machine_class_id=machine_class_id if machine_hours else None,
+            machine_hours=(round(float(machine_hours), 2) if machine_hours else None),
         )
         session.add(booking)
         await session.flush()
@@ -489,6 +518,9 @@ class ImplementationService:
         return [{
             "id": b.id, "change_id": b.change_id,
             "department_id": b.department_id, "hours": b.hours, "note": b.note,
+            "labour_position": b.labour_position,
+            "machine_class_id": b.machine_class_id,
+            "machine_hours": b.machine_hours,
             "booked_by": b.booked_by, "booked_at": b.booked_at,
             "created_by": b.booked_by, "created_at": b.booked_at,
             "created_by_name": names.get(b.booked_by),

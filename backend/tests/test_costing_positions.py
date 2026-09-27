@@ -450,7 +450,10 @@ async def test_costing_tags_offer_common_plus_department_extras(
     items = res.json()["items"]
     by_key = {i["key"]: i for i in items}
     assert by_key["hot_runner"]["entry_type"] == "money" and by_key["hot_runner"]["extra"]
-    assert by_key["sampling"]["entry_type"] == "time"
+    assert by_key["trial_support"]["entry_type"] == "time"
+    # sampling is priced per trial of the machine class now: not an own-time
+    # category any more
+    assert "sampling" not in by_key
     assert by_key["hot_runner"]["label_en"] == "Hot runner"
     assert "other_money" in by_key and "other_time" in by_key
     assert "robot_program" not in by_key      # Manufacturing's, not Tooling's
@@ -500,8 +503,8 @@ async def test_a_department_adds_its_own_category_typed_money_or_time(
 async def test_an_own_time_line_is_a_position_of_hours(client, admin_auth, costing):
     """A further line of the department's own hours: no money, valued at the
     rate in the summation like the standing effort answers."""
-    res = await _add_position(client, admin_auth, costing, label="Sampling support",
-                              kind="own_time", tag="sampling", hours=8.0,
+    res = await _add_position(client, admin_auth, costing, label="Trial support",
+                              kind="own_time", tag="trial_support", hours=8.0,
                               pricing="quote")   # nobody quotes our hours
     assert res.status_code == 201, res.text
     body = res.json()
@@ -950,3 +953,71 @@ async def test_partial_quotes_add_up_and_the_alternative_comes_on_top(
                            json={"favorite": True}, headers=admin_auth)
     assert res.status_code == 200 and res.json()["favorite"] is False
     assert pos["effective_cost"] == 1850.0
+
+
+# --- standing effort rows: one per department and kind (final walk P2-1) ---
+
+async def test_a_second_save_of_a_standing_row_merges_into_the_first(
+        client, admin_auth, costing):
+    """The effort row saved on blur and again on click: one line, the last
+    value, never a duplicate."""
+    first = await _add_position(client, admin_auth, costing,
+                                kind="support_effort", label="Support", hours=8.0)
+    assert first.status_code == 201, first.text
+    second = await _add_position(client, admin_auth, costing,
+                                 kind="support_effort", label="Support", hours=12.0)
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["hours"] == 12.0
+    rows = (await client.get(_positions_url(costing), headers=admin_auth)).json()
+    assert [(r["kind"], r["hours"]) for r in rows] == [("support_effort", 12.0)]
+
+
+async def test_standing_rows_stay_one_per_department_and_kind_only(
+        client, admin_auth, costing):
+    for kind, dept in (("internal_effort", "tool"), ("support_effort", "tool"),
+                       ("internal_effort", "dev")):
+        res = await _add_position(client, admin_auth, costing, kind=kind,
+                                  department_id=costing[dept], hours=1.0)
+        assert res.status_code == 201, res.text
+    # Other kinds may repeat freely.
+    for _ in range(2):
+        res = await _add_position(client, admin_auth, costing, kind="own_time",
+                                  hours=2.0, label="Drawing")
+        assert res.status_code == 201, res.text
+    rows = (await client.get(_positions_url(costing), headers=admin_auth)).json()
+    assert len(rows) == 5
+
+
+async def test_a_line_cannot_be_turned_into_a_second_standing_row(
+        client, admin_auth, costing):
+    await _add_position(client, admin_auth, costing, kind="internal_effort", hours=1.0)
+    other = (await _add_position(client, admin_auth, costing, kind="own_time",
+                                 hours=2.0)).json()
+    res = await client.put(f"{_positions_url(costing)}/{other['id']}",
+                           json={"kind": "internal_effort"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+
+
+async def test_the_database_refuses_a_duplicate_standing_row(session_factory, costing, seed):
+    from sqlalchemy.exc import IntegrityError
+    from app.models.change_cost import CostingPosition
+    async with session_factory() as s:
+        for _ in range(2):
+            s.add(CostingPosition(change_id=costing["change_id"],
+                                  department_id=costing["tool"], label="x",
+                                  kind="internal_effort", created_by=seed["admin_id"]))
+        with pytest.raises(IntegrityError):
+            await s.flush()
+
+
+async def test_retired_sampling_category_still_labels_old_rows(client, admin_auth, costing):
+    from app.services import costing_tags
+    assert "sampling" not in {i["key"] for i in costing_tags.tags_for("Tool Engineer")}
+    assert "sampling" not in {i["key"] for i in costing_tags.tags_for("Nobody configured")}
+    assert costing_tags.label_for("sampling") == "Sampling"
+    # a row raised under it before is still accepted and read back
+    res = await _add_position(client, admin_auth, costing, label="Old sampling support",
+                              kind="own_time", tag="sampling", hours=2.0)
+    assert res.status_code == 201, res.text
+    assert res.json()["tag"] == "sampling"

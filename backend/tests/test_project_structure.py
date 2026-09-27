@@ -1,3 +1,4 @@
+from tests.conftest import post_active
 async def _create(client, auth, seed, number, name, item_category="article"):
     res = await client.post("/api/v1/parts", headers=auth, json={
         "project_id": seed["project_id"], "part_number": number, "name": name,
@@ -8,7 +9,7 @@ async def _create(client, auth, seed, number, name, item_category="article"):
 
 
 async def _customer_data(client, auth, pid, index):
-    r = await client.post(f"/api/v1/parts/{pid}/revisions/customer-data", headers=auth,
+    r = await post_active(client, f"/api/v1/parts/{pid}/revisions/customer-data", headers=auth,
                           json={"statement": "review", "received_at": "2026-05-28", "customer_index": index})
     assert r.status_code in (200, 201), r.text
     return r.json()["id"]

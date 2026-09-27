@@ -11,8 +11,11 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _create(client, auth, seed, **over):
+    # The engineer leads the change: PATCHing capture fields is the lead's
+    # (or Sales') right.
     body = {"project_id": seed["project_id"], "title": "Capture gate",
-            "reason": "r", "change_type": "physical_part"}
+            "reason": "r", "change_type": "physical_part",
+            "lead_id": seed["engineer_id"]}
     body.update(over)
     res = await client.post("/api/v1/changes", json=body, headers=auth)
     assert res.status_code == 200, res.text
@@ -53,7 +56,7 @@ async def test_kickoff_blocked_without_date_when_customer_relevant(
     await _attach(client, eng_auth, change["id"])
     res = await _kickoff(client, eng_auth, change["id"])
     assert res.status_code == 400
-    assert "required-by date" in res.json()["detail"].lower()
+    assert "quote deadline" in res.json()["detail"].lower()
 
 
 async def test_internal_change_needs_no_date(client, eng_auth, seed):

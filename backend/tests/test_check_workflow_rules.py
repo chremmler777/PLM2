@@ -148,6 +148,29 @@ async def test_evidence_gate_blocks_approval_without_evidence(
         assert inst.current_stage_order == 2
 
 
+async def test_instance_says_when_approve_needs_3d_evidence(
+        client, admin_auth, session_factory, seed, part, rules_template):
+    """The screen disables Approve the backend would refuse: the task carries
+    requires_cad_evidence and the instance whether the revision has it."""
+    from app.models.part import PartRevision
+    inst_id = await _start_instance(session_factory, seed, part, rules_template)
+    body = (await client.get(f"/api/v1/workflow-instances/{inst_id}",
+                             headers=admin_auth)).json()
+    stage1 = [t for t in body["tasks"] if t["stage_order"] == 1]
+    assert stage1 and all(t["requires_cad_evidence"] for t in stage1)
+    assert all(not t["requires_cad_evidence"] for t in body["tasks"] if t["stage_order"] == 2)
+    assert body["has_3d_evidence"] is False
+
+    async with session_factory() as s:
+        rev = await s.get(PartRevision, part["revision_id"])
+        rev.no_geometry_change = True
+        await s.commit()
+    cur = (await client.get(
+        f"/api/v1/workflow-instances/revisions/{part['revision_id']}/current",
+        headers=admin_auth)).json()["instance"]
+    assert cur["has_3d_evidence"] is True
+
+
 async def test_four_eyes_blocks_previous_stage_completer(
         session_factory, seed, part, rules_template):
     from app.services.workflow_service import WorkflowService

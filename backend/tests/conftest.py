@@ -1,4 +1,6 @@
 """Shared test fixtures: isolated SQLite DB per test, app client, seeded users."""
+import logging
+import re
 from datetime import datetime, timedelta
 
 import pytest_asyncio
@@ -13,6 +15,13 @@ from app.models.database import Base
 from app.models.entities import Organization, Plant, Project, User
 from app.auth.security import get_password_hash
 
+# app.main runs logging.basicConfig(level=DEBUG) on import, so every aiosqlite
+# operation logs a DEBUG line to stderr (~0.8 MB per test). pytest captures it
+# and keeps it on each passed test's report for the whole session, so an xdist
+# worker grew by ~1-2 MB per test until the machine ran out of memory. Tests
+# only need warnings and errors.
+logging.getLogger().setLevel(logging.WARNING)
+
 ADMIN_PASSWORD = "admin-secret-1"
 ENGINEER_PASSWORD = "eng-secret-12"
 
@@ -24,6 +33,13 @@ async def db_engine(tmp_path):
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()
+    # Each mapper keeps an LRU of compiled INSERT/UPDATE/DELETE statements
+    # keyed by the engine's dialect. A new engine per test means a new dialect
+    # per test, so the old entries (and the dialect they pin) are never hit
+    # again but stay in memory until the LRU fills (~150 per mapper, ~100
+    # mappers). Drop them with the engine.
+    for mapper in Base.registry.mappers:
+        mapper._compiled_cache.clear()
 
 
 @pytest_asyncio.fixture
@@ -82,9 +98,39 @@ async def client(session_factory, seed):
 
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with _LeadKeepingClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+KEEP_LEAD_RULE = "X-Test-Keep-Lead-Rule"
+
+
+class _LeadKeepingClient(AsyncClient):
+    """Spec §16: POST /changes ignores lead_id unless the caller is Project
+    Management or an admin (the capturer never names the lead). Most tests
+    create a change as the engineer with a lead in the body because they
+    are about something else; for those the lead is assigned right after,
+    as the admin, the way Project Management would. A test about the rule
+    itself sends KEEP_LEAD_RULE and sees the real answer."""
+
+    async def post(self, url, *args, **kwargs):
+        headers = kwargs.get("headers") or {}
+        keep_rule = KEEP_LEAD_RULE in headers
+        if keep_rule:
+            kwargs["headers"] = {k: v for k, v in headers.items() if k != KEEP_LEAD_RULE}
+        res = await super().post(url, *args, **kwargs)
+        body = kwargs.get("json")
+        if (not keep_rule and str(url).rstrip("/") == "/api/v1/changes"
+                and isinstance(body, dict) and body.get("lead_id") is not None
+                and res.status_code in (200, 201)
+                and res.json().get("lead_id") is None):
+            fix = await super().patch(f"/api/v1/changes/{res.json()['id']}",
+                                      json={"lead_id": body["lead_id"]},
+                                      headers=_mint_cookie("admin@test.io"))
+            if fix.status_code == 200:
+                return fix
+        return res
 
 
 def _mint_cookie(email: str, admin: bool = True) -> dict:
@@ -107,6 +153,40 @@ def _mint_cookie(email: str, admin: bool = True) -> dict:
 async def login(client, email: str, password: str | None = None, admin: bool = True) -> dict:
     # SSO mode: password ignored; returns a Cookie header for the shared JWT.
     return _mint_cookie(email, admin=admin)
+
+
+async def activate_pending(client, part_id: int) -> None:
+    """Spec §17: a new customer major waits for Development's triage. Test
+    setups that just need an active index decide it administratively (as
+    admin), which activates it."""
+    admin = await login(client, "admin@test.io")
+    r = await client.get("/api/v1/intakes", params={"part_id": part_id, "waiting": True},
+                         headers=admin)
+    assert r.status_code == 200, r.text
+    for i in r.json()["intakes"]:
+        if i["needs_triage"]:
+            d = await client.post(f"/api/v1/intakes/{i['id']}/decide", headers=admin,
+                                  json={"route": "administrative", "reason": "test setup"})
+            assert d.status_code == 200, d.text
+
+
+async def receive_active(client, part_id: int, headers: dict, **body):
+    """POST customer-data, then activate the pending index (activate_pending)."""
+    res = await client.post(f"/api/v1/parts/{part_id}/revisions/customer-data",
+                            json=body, headers=headers)
+    if res.status_code == 201:
+        await activate_pending(client, part_id)
+    return res
+
+
+async def post_active(client, url: str, **kwargs):
+    """client.post on .../parts/{id}/revisions/customer-data, then activate
+    the pending index (activate_pending). Same arguments as client.post."""
+    res = await client.post(url, **kwargs)
+    if res.status_code == 201:
+        m = re.search(r"/parts/(\d+)/revisions/customer-data", url)
+        await activate_pending(client, int(m.group(1)))
+    return res
 
 
 async def record_proceed_meeting(session_factory, change_id: int,
@@ -180,6 +260,49 @@ async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
         await s.commit()
 
 
+async def validate_timing(session_factory, change_id: int, actor_id: int = 1):
+    """Stamp 'Timing validated' directly (bypasses the detailed plan and the
+    teams' confirmations) so state-machine tests can cross the approved ->
+    in_implementation soft guard. Same shortcut as lock_impact; the real
+    flow is covered in test_change_plan.py."""
+    from datetime import datetime
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, change_id)
+        change.timing_validated_by = actor_id
+        change.timing_validated_at = datetime.utcnow()
+        await s.commit()
+
+
+async def complete_release_step(session_factory, change_id: int,
+                                actor_id: int = 1):
+    """Answer every release-checklist item 'done' and complete the lessons
+    step directly, so state-machine tests can cross the in_validation ->
+    released soft guard. The real flow is covered in
+    test_release_checklist.py."""
+    from datetime import datetime
+    from sqlalchemy import select as _select
+    from app.models.change import ChangeRequest
+    from app.models.change_validation import ChangeReleaseCheck
+    from app.services.release_checklist import CHECK_KEYS
+    async with session_factory() as s:
+        have = {r.check_key: r for r in (await s.execute(_select(
+            ChangeReleaseCheck).where(
+                ChangeReleaseCheck.change_id == change_id))).scalars()}
+        for key in CHECK_KEYS:
+            row = have.get(key) or ChangeReleaseCheck(
+                change_id=change_id, check_key=key)
+            row.status = "done"
+            row.checked_by = actor_id
+            row.checked_at = datetime.utcnow()
+            s.add(row)
+        change = await s.get(ChangeRequest, change_id)
+        change.lessons_done_by = actor_id
+        change.lessons_done_at = datetime.utcnow()
+        change.lessons_none_reason = "test fixture"
+        await s.commit()
+
+
 async def make_internal(client, auth, change_id: int):
     """Turn a freshly captured change internal.
 
@@ -197,8 +320,17 @@ async def make_internal(client, auth, change_id: int):
 async def satisfy_capture_gate(client, auth, change_id: int):
     """Kickoff (captured -> scoping) is soft-gated on a complete capture:
     a description, at least one attachment, and — for customer-relevant
-    changes — the quote deadline. See ChangeService._guard. The date is set
-    unconditionally here; it is harmless on internal changes."""
+    changes — the quote deadline, plus a change lead (spec §16). See
+    ChangeService._guard. The date is set unconditionally here; it is
+    harmless on internal changes. A change with no lead gets its raiser."""
+    cur = await client.get(f"/api/v1/changes/{change_id}", headers=auth)
+    if cur.status_code == 200 and cur.json().get("lead_id") is None:
+        # Assigning the lead is PM's (or the admin's) act, not the
+        # capturer's: done as the admin.
+        res = await client.patch(f"/api/v1/changes/{change_id}",
+                                 json={"lead_id": cur.json()["raised_by"]},
+                                 headers=_mint_cookie("admin@test.io"))
+        assert res.status_code == 200, res.text
     res = await client.patch(
         f"/api/v1/changes/{change_id}",
         json={"description": "Captured by Sales",
@@ -285,11 +417,9 @@ async def part(client, eng_auth, seed):
     assert res.status_code in (200, 201), res.text
     part_id = res.json()["id"]
 
-    res = await client.post(
-        f"/api/v1/parts/{part_id}/revisions/customer-data",
-        json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"},
-        headers=eng_auth,
-    )
+    res = await receive_active(
+        client, part_id, eng_auth,
+        statement="review", received_at="2026-09-01", summary="initial")
     assert res.status_code == 201, res.text
     return {"part_id": part_id, "revision_id": res.json()["id"]}
 

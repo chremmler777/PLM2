@@ -31,7 +31,7 @@ export default function SepDocumentsTab({ projectId }: { projectId: number }) {
       {withFiles.map((g) => (
         <div key={g.gate_id} data-testid={`sep-doc-gate-${g.gate_id}`}>
           <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
-            {g.gate_code} — {g.phase_en} (
+            {g.gate_code}: {g.phase_en} (
             {g.items.reduce((n, i) => n + i.files.length, 0)})
           </div>
           <div className="space-y-2">

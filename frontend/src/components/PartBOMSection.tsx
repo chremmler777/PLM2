@@ -186,7 +186,7 @@ export default function PartBOMSection({ partId, revisionId, revisionName, locke
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-slate-200">
-          BOM{revisionName ? <span className="text-slate-400 font-normal"> — {revisionName}</span> : null}
+          BOM{revisionName ? <span className="text-slate-400 font-normal"> · {revisionName}</span> : null}
           {locked && <span className="ml-2 text-xs text-amber-400">🔒 read-only</span>}
         </h3>
         <div className="flex gap-2">
@@ -290,7 +290,7 @@ export default function PartBOMSection({ partId, revisionId, revisionName, locke
               <option value="">-- Select project part --</option>
               {availableParts.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.part_number} — {p.name}
+                  {p.part_number} · {p.name}
                 </option>
               ))}
             </select>
@@ -304,7 +304,7 @@ export default function PartBOMSection({ partId, revisionId, revisionName, locke
               <option value="">-- Select catalog part --</option>
               {catalogParts?.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.part_number} — {p.name}
+                  {p.part_number} · {p.name}
                   {p.supplier ? ` (${p.supplier})` : ''}
                 </option>
               ))}

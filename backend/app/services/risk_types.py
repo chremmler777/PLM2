@@ -170,3 +170,33 @@ async def allowed_keys(session, department) -> set:
             .where(DepartmentRiskType.department_id == department.id))).all()
         keys |= {k for (k,) in rows}
     return keys
+
+
+def static_label(key: str | None, lang: str = "en") -> str | None:
+    """The coded label of a risk type key, whatever department owns it; None
+    for a key that is not coded (a department's own type, or no type)."""
+    if not key:
+        return None
+    for items in [COMMON_TYPES, LEGACY_TYPES, *DEPARTMENT_TYPES.values()]:
+        for k, de, en in items:
+            if k == key:
+                return de if lang == "de" else en
+    return None
+
+
+async def labels_for_keys(session, keys) -> dict:
+    """{key: label_en} for every key given: coded types from here, the
+    departments' own types from the table (deleted ones included, they are
+    history), the key itself as the last resort. Spec §16: a risk never
+    reads 'tolerance_stack' in the UI or the audit."""
+    keys = {k for k in keys if k}
+    out = {k: static_label(k) for k in keys}
+    missing = [k for k, v in out.items() if v is None]
+    if missing:
+        from sqlalchemy import select
+        from app.models.change import DepartmentRiskType
+        for k, lab in (await session.execute(
+                select(DepartmentRiskType.key, DepartmentRiskType.label)
+                .where(DepartmentRiskType.key.in_(missing)))).all():
+            out[k] = lab
+    return {k: (v or k.replace("_", " ").capitalize()) for k, v in out.items()}

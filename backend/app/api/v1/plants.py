@@ -26,7 +26,9 @@ class ProjectCreate(BaseModel):
 class ProjectPatch(BaseModel):
     """Partial update of a project header. Every field optional; a field
     that is present with null clears it (customer_naming and description
-    only -- name and status ignore a null instead of clearing)."""
+    only -- name and status ignore a null instead of clearing). The project
+    team (one responsible per department) is its own endpoint: see
+    GET/PUT /v1/projects/{id}/team."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     status: Optional[Literal["active", "completed", "archived"]] = None

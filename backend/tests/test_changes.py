@@ -1,3 +1,4 @@
+from tests.conftest import post_active
 # backend/tests/test_changes.py
 import pytest
 from datetime import datetime, timedelta
@@ -6,6 +7,7 @@ from sqlalchemy import select
 from tests.conftest import (
     approve_gates, force_complete_check_workflows, advance_to_assessment, login,
     satisfy_capture_gate, make_development_member, make_internal,
+    validate_timing, complete_release_step,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -95,7 +97,8 @@ async def test_illegal_transition_rejected(client, eng_auth, seed):
 
 
 async def test_cancel_requires_reason(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     res = await _transition(client, eng_auth, change["id"], "cancelled")
     assert res.status_code == 400, res.text
     res = await _transition(client, eng_auth, change["id"], "cancelled",
@@ -112,14 +115,15 @@ async def _make_part(client, auth, project_id, number, category="article"):
     assert res.status_code in (200, 201), res.text
     part_id = res.json()["id"]
     # a change needs customer data to hang its ECN proposal off
-    res = await client.post(f"/api/v1/parts/{part_id}/revisions/customer-data",
+    res = await post_active(client, f"/api/v1/parts/{part_id}/revisions/customer-data",
                             json={"statement": "review", "received_at": "2026-09-01"}, headers=auth)
     assert res.status_code == 201, res.text
     return part_id
 
 
 async def test_add_and_remove_impacted_item(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-1")
     res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                             json={"part_id": part_id, "impact_note": "wall thickness"},
@@ -138,7 +142,8 @@ async def test_add_and_remove_impacted_item(client, eng_auth, seed):
 
 
 async def test_seed_impacted_from_relations(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     article = await _make_part(client, eng_auth, seed["project_id"], "ART-2", "article")
     tool = await _make_part(client, eng_auth, seed["project_id"], "TOOL-2", "tool")
     # tool produces article
@@ -219,10 +224,12 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth, sessio
                       json={"part_id": part_id}, headers=auth)
     await advance_to_assessment(client, auth, session_factory, change["id"])
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=auth)
+    # Each department answers for itself; the admin stands in for all of them
+    # (a non-member may not submit a department's assessment).
     for a in res.json()["assessments"]:
         await client.post(f"/api/v1/changes/{change['id']}/assessments",
                           json={"department_id": a["department_id"], "verdict": "feasible"},
-                          headers=auth)
+                          headers=admin_auth)
     await _transition(client, auth, change["id"], "costing")
     # Writing the offer is its own stage now: costing -> quoting -> quoted.
     await _transition(client, auth, change["id"], "quoting")
@@ -279,6 +286,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await make_development_member(session_factory, seed["admin_id"])
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
+    await validate_timing(session_factory, cid)   # the approved -> in_implementation soft guard
     res = await _transition(client, eng_auth, cid, "in_implementation")
     assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
@@ -300,10 +308,12 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await make_development_member(session_factory, seed["admin_id"])
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
+    await validate_timing(session_factory, cid)
     await _transition(client, eng_auth, cid, "in_implementation")
     res = await _transition(client, eng_auth, cid, "in_validation")
     assert res.status_code == 200, res.text
     await force_complete_check_workflows(session_factory, cid)
+    await complete_release_step(session_factory, cid)   # release checklist + lessons
     res = await _transition(client, eng_auth, cid, "released")
     assert res.status_code == 200, res.text
 
@@ -316,7 +326,8 @@ async def test_release_activates_revisions_and_stamps_eng_level(
 
 
 async def test_changelog_is_hash_chained(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     await _transition(client, eng_auth, change["id"], "on_hold")
     res = await client.get(f"/api/v1/changes/{change['id']}/changelog", headers=eng_auth)
     assert res.status_code == 200, res.text
@@ -527,7 +538,8 @@ async def _get_plant_id(client, auth) -> int:
 async def test_affected_plant_ids_set_and_clear(client, eng_auth, seed):
     """Set affected_plant_ids → GET round-trip returns same ids; [] clears them."""
     plant_id = await _get_plant_id(client, eng_auth)
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     # Initially empty
@@ -555,7 +567,8 @@ async def test_affected_plant_ids_set_and_clear(client, eng_auth, seed):
 
 async def test_boolean_false_round_trip(client, eng_auth, seed):
     """PATCH is_series True→False and confirm GET returns False."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     # Set True
@@ -575,7 +588,8 @@ async def test_boolean_false_round_trip(client, eng_auth, seed):
 
 async def test_invalid_implementation_mode_returns_400(client, eng_auth, seed):
     """Out-of-set implementation_mode raises HTTP 400."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     res = await client.patch(
@@ -588,7 +602,8 @@ async def test_invalid_implementation_mode_returns_400(client, eng_auth, seed):
 
 async def test_valid_implementation_modes_accepted(client, eng_auth, seed):
     """Both valid implementation_mode values are accepted."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
 
     for mode in ("integrated", "separational"):
@@ -794,7 +809,8 @@ async def test_reject_requires_a_memo_and_can_be_reopened(client, eng_auth, seed
 
 async def test_cancelled_stays_terminal(client, eng_auth, seed):
     """Cancellation is the irreversible one — no reopen path out of it."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
     res = await _transition(client, eng_auth, cid, "cancelled",
                             cancellation_reason="Duplicate of CR-2026-0001")

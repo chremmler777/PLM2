@@ -55,7 +55,7 @@ describe('ConcernStrip', () => {
     wrap(<ConcernStrip changeId={7} editable />)
     expect(await screen.findByText('Tool cannot hold tolerance')).toBeDefined()
     expect(screen.getByText(/Rita RD/)).toBeDefined()
-    expect(screen.getByText(/1 open — blocks proceed/)).toBeDefined()
+    expect(screen.getByText(/1 open, blocks proceed/)).toBeDefined()
   })
 
   it('offers withdraw only on your own flag', async () => {
@@ -75,15 +75,16 @@ describe('ConcernStrip', () => {
     await waitFor(() => expect(changesApi.withdrawConcern).toHaveBeenCalledWith(7, 2, undefined))
   })
 
-  it('greys the withdraw control for anyone but the author — admin included', async () => {
+  it('offers no withdraw control to anyone but the author, admin included: it says who may', async () => {
     authState.current = { userId: 5, isAdmin: true }
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
       concern({ id: 1, raised_by: 9, raised_by_name: 'Rita RD' })] as never)
     wrap(<ConcernStrip changeId={7} editable />)
     await screen.findByText('Tool cannot hold tolerance')
-    const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
-    expect(btn.getAttribute('title')).toBe(t('concern.authorOrPm'))
+    expect(screen.queryByTestId('concern-close-1')).toBeNull()
+    const who = screen.getByTestId('concern-closer-1')
+    expect(who.textContent).toBe(t('concern.closerShortPm'))
+    expect(who.getAttribute('title')).toBe(t('concern.authorOrPm'))
   })
 
   it('leaves the author their own withdraw', async () => {
@@ -103,7 +104,7 @@ describe('ConcernStrip', () => {
         concern({ id: 1, raised_by: 5, raised_by_name: 'Me' })] as never)
       wrap(<ConcernStrip changeId={7} editable />)
       await screen.findByText('Tool cannot hold tolerance')
-      expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.queryByTestId('concern-close-1')).toBeNull()
     } finally {
       sessionStorage.removeItem('plm2.actsAsDepartmentId')
     }
@@ -117,9 +118,8 @@ describe('ConcernStrip', () => {
     wrap(<ConcernStrip changeId={7} editable departments={[{ id: 6, name: 'Sales' }]}
       myDepartmentIds={[6]} />)
     await screen.findByText('Tool cannot hold tolerance')
-    const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
-    expect(btn.getAttribute('title')).toBe(t('concern.authorOrPm'))
+    expect(screen.queryByTestId('concern-close-1')).toBeNull()
+    expect(screen.getByTestId('concern-closer-1').getAttribute('title')).toBe(t('concern.authorOrPm'))
   })
 
   it('lets PM settle an attributed flag in scoping', async () => {
@@ -139,7 +139,52 @@ describe('ConcernStrip', () => {
       concern({ id: 1, kind: 'reject_proposal', raised_by: null as unknown as number })] as never)
     wrap(<ConcernStrip changeId={7} editable />)
     await screen.findByText('Tool cannot hold tolerance')
-    expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('concern-close-1')).toBeNull()
+  })
+
+  it('names the PM settle as such on a flag the PM did not raise', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({ id: 1, raised_by: 9 })] as never)
+    wrap(<ConcernStrip changeId={7} editable isPm />)
+    expect((await screen.findByTestId('concern-close-1')).textContent).toBe(t('concern.settleAsPm'))
+  })
+
+  it('records a settled cancel vote as settled by the PM, by name', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({ id: 1, raised_by: 9,
+      is_open: false, withdrawn_at: '2026-08-07T10:00:00', withdrawn_by: 4,
+      withdrawn_by_name: 'Pia PM' })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    expect((await screen.findByTestId('concern-settled-1')).textContent)
+      .toBe(t('concern.settledByPm').replace('{x}', 'Pia PM'))
+  })
+
+  it('records a withdrawn cancel vote as withdrawn by its author', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({ id: 1, raised_by: 9,
+      is_open: false, withdrawn_at: '2026-08-07T10:00:00', withdrawn_by: 9 })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    expect((await screen.findByTestId('concern-settled-1')).textContent)
+      .toBe(t('concern.withdrawnByAuthor'))
+  })
+
+  it('files a new scoping flag under the viewer\'s own department on the change', async () => {
+    wrap(<ConcernStrip changeId={7} editable
+      departments={[{ id: 2, name: 'Quality' }, { id: 6, name: 'Sales' }, { id: 8, name: 'APQP' }]}
+      myDepartmentIds={[8, 6]} changeDepartmentIds={[6]} />)
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    expect((screen.getByLabelText(t('concern.department')) as HTMLSelectElement).value).toBe('6')
+  })
+
+  it('says why the Flag button is still disabled', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped
+      departments={[{ id: 4, name: 'Tool Engineer' }]} myDepartmentIds={[4]} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
+    expect(screen.getByTestId('risk-submit-missing').textContent).toBe(
+      t('concern.missing').replace('{x}', `${t('concern.missingType')}, ${t('concern.missingNote')}`))
+  })
+
+  it('says plainly in assessment that no risk is raised, not "before the meeting"', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={[]} />)
+    expect((await screen.findByTestId('concern-empty')).textContent).toBe(t('risk.none'))
+    expect(screen.queryByText(/before the meeting/)).toBeNull()
   })
 
   it('raises a question or a cancel vote — the scoping kinds, not a risk', async () => {
@@ -222,19 +267,16 @@ describe('ConcernStrip in the assessment phase', () => {
     expect(screen.queryByText(t('concern.wouldReject'))).toBeNull()
   })
 
-  it('makes a non-Development member choose their department before flagging', async () => {
+  it('starts a member on their own department, and asks one without any', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped
       departments={depts} myDepartmentIds={[4]} />)
     fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
-    // Nothing is guessed: the placeholder stands until the user picks.
+    // The flag starts filed under the member's own department (spec §16).
     const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
-    expect(picker.value).toBe('')
-    expect(screen.getByText(t('concern.pickDepartment'))).toBeTruthy()
+    expect(picker.value).toBe('4')
     fireEvent.change(screen.getByTestId('risk-type-select'),
       { target: { value: 'dimensional_issue' } })
     fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'gauge missing' } })
-    expect((screen.getByTestId('risk-submit') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.change(picker, { target: { value: '4' } })
     fireEvent.click(screen.getByTestId('risk-submit'))
     await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
       kind: 'risk', note: 'gauge missing', risk_type: 'dimensional_issue',
@@ -467,8 +509,9 @@ describe('ConcernStrip risk proposals', () => {
     expect(screen.getByTestId('concern-proposal-3').textContent).toContain('Eva Eng')
     // The proposal's documentation reads on the card.
     expect(screen.getByRole('link', { name: 'mitigation.pptx' })).toBeTruthy()
-    // A proposer from another department cannot close it.
-    expect((screen.getByTestId('concern-close-3') as HTMLButtonElement).disabled).toBe(true)
+    // A proposer from another department cannot close it: no button, only who does.
+    expect(screen.queryByTestId('concern-close-3')).toBeNull()
+    expect(screen.getByTestId('concern-closer-3').textContent).toBe(t('concern.closerShortDept'))
   })
 
   it('leaves the resolution to the raising department', async () => {
@@ -520,16 +563,14 @@ describe('ConcernStrip risk rows', () => {
     await show([riskRow(), riskRow({ id: 4, severity: 1, note: 'minor witness line',
       risk_type: 'visual_surface' })])
     expect(screen.queryByText(/blocks proceed/)).toBeNull()
-    expect(screen.getByTestId('risk-open-count').textContent)
-      .toBe(t('risk.openCount').replace('{n}', '2'))
+    expect(screen.getByTestId('risk-open-count').textContent).toBe('2 open risks')
   })
 
   it('still counts a legacy flag as blocking, alongside the risks', async () => {
     await show([riskRow(),
       concern({ id: 9, kind: 'needs_info', department_id: 4, note: 'price unknown' })])
-    expect(screen.getByText(/1 open — blocks proceed/)).toBeTruthy()
-    expect(screen.getByTestId('risk-open-count').textContent)
-      .toBe(t('risk.openCount').replace('{n}', '1'))
+    expect(screen.getByText(/1 open, blocks proceed/)).toBeTruthy()
+    expect(screen.getByTestId('risk-open-count').textContent).toBe('1 open risk')
   })
 
   it('leaves the legacy flags readable and settleable as they were', async () => {
@@ -719,5 +760,29 @@ describe('ConcernStrip risks that came from a checklist row', () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([])
     strip()
     expect(await screen.findByText('+ ' + t('risk.raiseOffChecklist'))).toBeTruthy()
+  })
+
+  it("reads a team concern in its raising department's words, not the viewer's", async () => {
+    // Tooling (4) raised it from its own checklist; the viewer is Quality (2).
+    vi.mocked(changesApi.riskTypes).mockImplementation(async (d?: number) => (d === 4
+      ? { items: [{ key: 'not_steel_safe', label_en: 'Not steel safe' }] }
+      : { items: [] }) as never)
+    vi.mocked(changesApi.assessmentChecklist).mockImplementation(async (d: number) => (d === 4
+      ? [{ key: 'tool_modification', label_de: 'W', label_en: 'Tool modification needed', extra: false }]
+      : []) as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({
+      id: 31, kind: 'risk', severity: 2, risk_type: 'not_steel_safe', department_id: 4,
+      checklist_key: 'tool_modification', note: 'Core pin too thin' }),
+    concern({ id: 32, kind: 'risk', severity: 1, risk_type: 'some_unknown_key', department_id: 6,
+      checklist_key: 'odd_row', note: 'x' })] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped myDepartmentIds={[2]}
+      departments={[{ id: 2, name: 'Quality' }, { id: 4, name: 'Tooling' }, { id: 6, name: 'Paint' }]} />)
+    await waitFor(() => expect(screen.getByTestId('risk-type-31').textContent).toBe('Not steel safe'))
+    await waitFor(() => expect(screen.getByTestId('risk-origin-31').textContent)
+      .toBe(`${t('risk.from')}: Tool modification needed`))
+    expect(changesApi.riskTypes).toHaveBeenCalledWith(4)
+    // Nothing served for the key: a readable fallback, never the raw key.
+    expect(screen.getByTestId('risk-type-32').textContent).toBe('Some unknown key')
+    expect(screen.getByTestId('risk-origin-32').textContent).toBe(`${t('risk.from')}: Odd row`)
   })
 })

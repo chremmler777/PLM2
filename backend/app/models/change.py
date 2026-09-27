@@ -6,11 +6,11 @@ start), and a hash-chained changelog hang off it. On approval the change spawns
 ECN PartRevisions on each impacted part; on release those become active.
 """
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
-    String, Text, DateTime, Float, Integer, Numeric, ForeignKey, JSON, Boolean,
+    String, Text, Date, DateTime, Float, Integer, Numeric, ForeignKey, JSON, Boolean,
     Table, Column,
 )
 from sqlalchemy import false as sa_false
@@ -59,10 +59,17 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 # behind it.
 ATTACHMENT_KINDS = ("general", "info_request", "info_response",
                     "rejection_letter", "rfq", "change_ppt", "customer_email",
-                    "vendor_quote")
+                    "vendor_quote",
+                    # the mother plant's timing (MS Project XML), spec §14
+                    "mother_plant_timing")
 
 BLOCKING_LETTERS = ("R", "A")
-TASK_LETTERS = ("R", "A", "S", "C")
+# Every letter a department can carry on a change's routing. "I" (Informed) is
+# told about the change and nothing more: no assessment row, no answer owed,
+# never waited on by any gate. Only ASSESSMENT_LETTERS get an assessment row
+# (and a task to answer it, blocking for R/A, noted for S/C).
+TASK_LETTERS = ("R", "A", "S", "C", "I")
+ASSESSMENT_LETTERS = ("R", "A", "S", "C")
 ASSESSMENT_STATUSES = ("pending", "active", "submitted", "waived")
 
 # Maps a WfInstanceTask.status onto the assessment status vocabulary, so a
@@ -112,6 +119,15 @@ class ChangeRequest(Base):
     cm_external: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     implementation_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     customer_relevant: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # Where the change comes from (migration 093, spec §14): customer |
+    # internal (mirroring customer_relevant) | mother_plant, the side track
+    # engineered and sold by the mother plant. The plant is stored by name
+    # (app/services/mother_plants.py), with their reference and SOP date.
+    origin: Mapped[str] = mapped_column(
+        String(20), default="customer", server_default="customer")
+    mother_plant_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    mother_plant_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    mother_plant_sop: Mapped[date | None] = mapped_column(Date, nullable=True)
     car_line: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     status: Mapped[str] = mapped_column(String(20), default="captured", index=True)
@@ -213,6 +229,47 @@ class ChangeRequest(Base):
     plan_published_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     plan_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Costing to close (migration 087). plan_revision counts edits to the
+    # DETAILED plan before its baseline: a team's confirmation is only worth
+    # the revision it confirmed. timing_validated_* is the baseline moment —
+    # the soft guard on approved -> in_implementation reads it.
+    plan_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Plan calendar for both plans (migration 088): {mode: calendar|working,
+    # workdays: [1..7, Mon=1], holidays: ["YYYY-MM-DD"]}. None = calendar days.
+    plan_calendar: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    timing_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    timing_validated_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    # The offer version the customer said yes to. No FK: change_offers points
+    # back at this table, and a cycle of constraints buys nothing here.
+    accepted_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The lessons-learned step before release: done with at least one lesson,
+    # or with a reason there is none. Guarded on in_validation -> released.
+    lessons_done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lessons_done_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    lessons_none_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Early stages polish (migration 095, spec §16). title_auto: the title is
+    # the composed one (<ours>[ +n] - <customer no.> - <name> from the lead
+    # item) and follows the lead item; a hand-edited title switches it off.
+    title_auto: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sa_false())
+    # Impact edited from 'quoted' on: the offer no longer covers the scope
+    # until a newer offer version is sent or a transition deviation is
+    # approved. The flag stays as history; scope_change_department_ids are
+    # the departments whose costing reopens.
+    scope_changed_after_quote: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false())
+    scope_changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scope_change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope_change_department_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # The press class machine_time / sampling costing lines are priced on
+    # (cost sheet §15a, migration 098). None = default from the impacted
+    # tool's tonnage (costing_rates.default_machine_class).
+    machine_class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
 
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -382,6 +439,24 @@ class ChangeRequest(Base):
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
         order_by="ChangeNegotiation.id",
     )
+    # Mother plant: the departments informed ("Read and understood").
+    info_receipts: Mapped[list["ChangeInfoReceipt"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeInfoReceipt.id",
+    )
+
+    @property
+    def info_sent_at(self) -> Optional[datetime]:
+        return min((r.sent_at for r in self.info_receipts), default=None)
+
+    @property
+    def info_department_ids(self) -> list[int]:
+        return sorted({r.department_id for r in self.info_receipts})
+
+    @property
+    def info_open_department_ids(self) -> list[int]:
+        return sorted({r.department_id for r in self.info_receipts
+                       if r.acknowledged_at is None})
 
 
 class ChangeImpactedItem(Base):
@@ -436,6 +511,10 @@ class ChangeAssessment(Base):
     stage_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     rasic_letter: Mapped[str] = mapped_column(String(1), default="R", server_default="R")
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="active")  # pending|active|submitted|waived
+    # "Not our responsibility" (spec §16 P1-3): the letter the department
+    # asked to be moved to, pending the lead's decision. The row keeps its
+    # letter until the routing deviation is approved.
+    pending_rasic_letter: Mapped[str | None] = mapped_column(String(1), nullable=True)
 
     responsible_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -573,6 +652,10 @@ class ChangeAttachment(Base):
     # with the other two — a quote PDF is evidence for exactly one offer.
     costing_offer_id: Mapped[int | None] = mapped_column(
         ForeignKey("costing_offers.id"), nullable=True, index=True)
+    # The validation issue this document is filed into (evidence, customer
+    # mails; spec §12, migration 090). Exclusive with the containers above.
+    validation_issue_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_validation_issues.id"), nullable=True, index=True)
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -617,6 +700,10 @@ class ChangeMeeting(Base):
     # decides this with the team, and routing builds stage 1 from it. Empty
     # on older meetings: then the standard template's letters apply.
     department_rasic: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The cost carrier re-confirmed by the room (migration 095): customer |
+    # internal. Proceed is refused until set; a flip against the change's
+    # capture is audited and Sales is told.
+    cost_carrier: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -667,6 +754,8 @@ class ChangeNegotiation(Base):
         Numeric(12, 2, asdecimal=False), nullable=True)
     # The round that ended it. At most one per change.
     is_final: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # The offer version this round is about (defaults to the latest sent one).
+    offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -787,6 +876,10 @@ class ChangeConcern(Base):
     # Withdrawn by its author — the objection no longer stands.
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     withdrawn_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Who closed it, as a role (migration 095): "author" (withdrawn by the
+    # person who raised it), "pm" (settled by Project Management) or
+    # "department" (settled by a member of the owning department).
+    settled_as: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # How the objection was addressed. Required to withdraw a department-scoped
     # (assessment-phase) concern — lifting a hold is itself a record.
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -817,6 +910,23 @@ class ChangeConcern(Base):
     @property
     def is_answered(self) -> bool:
         return self.answered_at is not None
+
+    @property
+    def risk_type_label(self) -> Optional[str]:
+        """The coded label of the risk type ("Tolerance stack"), None when
+        the type is a department's own (the list endpoint resolves those)."""
+        from app.services.risk_types import static_label
+        return static_label(self.risk_type)
+
+    @property
+    def settled_label(self) -> Optional[str]:
+        """How it was closed, in words: "Withdrawn by author" vs "Settled by
+        Project Management" (spec §16)."""
+        if self.withdrawn_at is None:
+            return None
+        from app.services.cm_labels import label
+        return label("settled_as", self.settled_as or (
+            "author" if self.withdrawn_by == self.raised_by else "pm"))
 
     @property
     def raised_by_name(self) -> Optional[str]:

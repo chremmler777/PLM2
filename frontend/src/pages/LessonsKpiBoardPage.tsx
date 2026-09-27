@@ -116,7 +116,7 @@ function CycleTrend({ data }: { data: Record<string, number> }) {
 }
 
 const label = (s: string) => s.replace(/_/g, ' ');
-const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
+const pct = (v: number | null) => (v === null ? '-' : `${Math.round(v * 100)}%`);
 
 function Tile({ title, value, sub, accent = 'text-slate-100' }: {
   title: string;
@@ -203,7 +203,7 @@ export default function LessonsKpiBoardPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-100">Lessons Learned — KPI Board</h1>
+          <h1 className="text-xl font-bold text-slate-100">Lessons Learned: KPI Board</h1>
           <p className="text-sm text-slate-400">Process governance: review speed, implementation, accountability, reuse.</p>
         </div>
         <button
@@ -218,13 +218,13 @@ export default function LessonsKpiBoardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <Tile
           title="Time to review"
-          value={kpis.avg_time_to_review_days === null ? '—' : `${kpis.avg_time_to_review_days}d`}
+          value={kpis.avg_time_to_review_days === null ? '-' : `${kpis.avg_time_to_review_days}d`}
           sub="avg capture → accepted"
           accent={kpis.avg_time_to_review_days !== null && kpis.avg_time_to_review_days > 30 ? 'text-amber-300' : 'text-slate-100'}
         />
         <Tile
           title="Time to close"
-          value={kpis.avg_time_to_close_days === null ? '—' : `${kpis.avg_time_to_close_days}d`}
+          value={kpis.avg_time_to_close_days === null ? '-' : `${kpis.avg_time_to_close_days}d`}
           sub={`avg capture → closed · ${pct(kpis.on_time_close_rate)} on time vs target`}
           accent={kpis.on_time_close_rate !== null && kpis.on_time_close_rate < 0.7 ? 'text-amber-300' : 'text-slate-100'}
         />

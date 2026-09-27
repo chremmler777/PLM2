@@ -36,10 +36,28 @@ describe('CustomerPackageDialog', () => {
     fireEvent.change(screen.getByTestId('part-x.stp'), { target: { value: '3' } })
     fireEvent.change(screen.getByTestId('action-x.stp'), { target: { value: 'new_major' } })
     fireEvent.click(screen.getByText('Store package'))
+    // spec §17: the result says the new index waits for triage
+    await waitFor(() => expect(screen.getByTestId('package-result').textContent).toContain('1 new, pending triage'))
+    fireEvent.click(screen.getByText('Done'))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     const form = post.mock.calls[1][1] as FormData
     const rows = JSON.parse(form.get('rows') as string)
     expect(rows.find((r: { filename: string }) => r.filename === 'x.stp')).toMatchObject({ part_id: 3, action: 'new_major' })
+  })
+
+  it('keeps the result column in view: capped part picker, scrollable table, result never squeezed', async () => {
+    post.mockResolvedValueOnce({ data: { rows: [{ ...previewRows[0], current_pending: true,
+      pending_note: 'E2 is still pending triage; a new index supersedes it' }] } })
+    render(<CustomerPackageDialog open assemblyId={1} projectParts={[{ id: 1, part_number: '1994-100', name: 'A very long part name that used to push the result column out of the dialog' }]}
+      onClose={() => {}} onDone={() => {}} />)
+    fireEvent.change(screen.getByTestId('package-files'), { target: { files: [new File(['x'], 'top.stp')] } })
+    fireEvent.click(screen.getByText('Check package'))
+    const result = await screen.findByTestId('result-top.stp')
+    expect(result.className).toContain('min-w-[12rem]')
+    expect(result.textContent).toContain('pending triage')
+    expect(result.textContent).toContain('a new index supersedes it')
+    expect(screen.getByTestId('part-top.stp').className).toContain('max-w-[14rem]')
+    expect(result.closest('table')?.parentElement?.className).toContain('overflow-x-auto')
   })
 
   it('shows row errors from a 409 and keeps the table', async () => {

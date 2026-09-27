@@ -31,6 +31,10 @@ import type { PartMaterial } from '../api/materials';
 import FieldNoteMarker from '../components/fieldNotes/FieldNoteMarker';
 import { usePartFieldNoteIndex } from '../hooks/queries/useFieldNotes';
 import { useFieldFocus } from '../hooks/useFieldFocus';
+import IntakePanel from '../components/intake/IntakePanel';
+import { usePartIntakes } from '../hooks/queries/useIntakes';
+import { pendingChipText } from '../api/intakes';
+import { formatCalendarDate } from '../lib/format';
 
 interface Part extends Partial<PartMaterial> {
   id: number;
@@ -138,11 +142,15 @@ export default function PartDetail() {
     enabled: !!activeRevision,
   });
   const fieldNotes = usePartFieldNoteIndex(part?.id);
+  // Spec §17: new customer indexes wait for Development's triage.
+  const { data: intakeData } = usePartIntakes(part?.id);
+  const pendingRevisions = new Map((intakeData?.intakes ?? []).map((i) => [i.revision_id, pendingChipText(i)] as const));
+  const refetchIntakes = () => queryClient.invalidateQueries({ queryKey: ['intakes'] });
   useFieldFocus(!!part);
 
   const customerData = useMutation({
     mutationFn: (v: CustomerDataInput) => client.post(`/v1/parts/${partId}/revisions/customer-data`, v),
-    onSuccess: (res) => { toast.success(`Recorded ${res.data.revision_name}`); setShowCustomerData(false); refetch(); },
+    onSuccess: (res) => { toast.success(`Recorded ${res.data.revision_name}, pending triage`); setShowCustomerData(false); refetch(); refetchIntakes(); },
     onError: (e) => toast.error(errMsg(e, 'Could not record customer data')),
   });
   const saveCustomerNumber = useMutation({
@@ -158,7 +166,7 @@ export default function PartDetail() {
   const promote = useMutation({
     mutationFn: ({ id, v }: { id: number; v: CustomerDataInput }) =>
       client.post(`/v1/parts/${partId}/revisions/${id}/promote`, { statement: v.statement, received_at: v.received_at, customer_index: v.customer_index, major: v.major }),
-    onSuccess: (res) => { toast.success(`Now ${res.data.revision_name}`); setPromoting(null); refetch(); },
+    onSuccess: (res) => { toast.success(`Recorded ${res.data.revision_name}, pending triage`); setPromoting(null); refetch(); refetchIntakes(); },
     onError: (e) => toast.error(errMsg(e, 'Could not promote')),
   });
   const proposal = useMutation({
@@ -300,7 +308,7 @@ export default function PartDetail() {
                 </span>
                 <span data-field-key="part.lifecycle_phase" className="inline-flex items-center">
                   <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
-                    {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
+                    {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${formatCalendarDate(part.nominated_at)}` : ''}{part.sop_at ? ` · SOP ${formatCalendarDate(part.sop_at)}` : ''}
                   </span>
                   {marker('part.lifecycle_phase', 'Phase')}
                 </span>
@@ -325,6 +333,8 @@ export default function PartDetail() {
           </div>
         </div>
 
+        <IntakePanel partId={part.id} onDecided={refetch} />
+
         {showStartChange && (
           <StartChangeModal open onClose={() => setShowStartChange(false)}
             prefill={{ projectId: part.project_id, part: { id: part.id, part_number: part.part_number, name: part.name, item_category: part.item_category } }} />
@@ -338,7 +348,7 @@ export default function PartDetail() {
         {showPackage && (
           <CustomerPackageDialog open assemblyId={part.id} projectParts={projectParts ?? []} officialOnly={hasOfficial}
             onClose={() => setShowPackage(false)}
-            onDone={(r) => { toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`); setShowPackage(false); refetch();
+            onDone={(r) => { toast.success(`${r.created.length} new, pending triage; kept ${r.kept.length}`); setShowPackage(false); refetch(); refetchIntakes();
               queryClient.invalidateQueries({ queryKey: ['where-used', partId] }); }} />
         )}
 
@@ -404,7 +414,7 @@ export default function PartDetail() {
 
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
           <h2 data-field-key="revision.level" className="text-xl font-bold text-slate-100 mb-6">Revisions{marker('revision.level', 'E level')}</h2>
-          <RevisionTimeline revisions={part.revisions} activeRevisionId={part.active_revision_id}
+          <RevisionTimeline revisions={part.revisions} activeRevisionId={part.active_revision_id} pending={pendingRevisions}
             onNewProposal={(id) => setProposalParent(id)} onPromote={(r) => setPromoting(r)}
             onReject={(id) => reject.mutate(id)} onUnreject={(id) => unreject.mutate(id)} />
 

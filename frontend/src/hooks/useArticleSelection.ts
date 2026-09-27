@@ -3,7 +3,7 @@
  *
  * Shared by the project page and the pop-out detail window so both apply the
  * same revision rules: an explicit pick wins, otherwise the active revision,
- * otherwise the latest one.
+ * otherwise the latest one that is not a new customer index pending triage.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePartRevisions } from './queries/useProjectDetail';
@@ -81,8 +81,14 @@ export function useArticleSelection(parts: Part[] | undefined, initialPartId: nu
       return;
     }
     const activeId = parts?.find((p) => p.id === partId)?.active_revision_id;
-    const fallback = partRevisions[partRevisions.length - 1].id;
-    setRevisionId(partRevisions.some((r) => r.id === activeId) ? activeId! : fallback);
+    if (partRevisions.some((r) => r.id === activeId)) {
+      setRevisionId(activeId!);
+      return;
+    }
+    // No active revision: the latest one, but never an index still pending
+    // triage (spec §17a). Only pending ones: nothing is current yet.
+    const settled = partRevisions.filter((r) => !r.intake_pending);
+    setRevisionId(settled.length ? settled[settled.length - 1].id : null);
   }, [partId, partRevisions, parts]);
 
   const openPart = useCallback((id: number | null) => {

@@ -5,6 +5,7 @@
  * wherever they meet it.
  */
 import { useState } from 'react'
+import { Paperclip, X } from 'lucide-react'
 import { API_BASE_URL } from '../../api/client'
 import AttachmentDropzone from './AttachmentDropzone'
 import { UploadedBy } from '../common/UploadedBy'
@@ -34,7 +35,7 @@ export function KindChip({ kind }: { kind?: string | null }) {
   if (!key) return null
   return (
     <span data-testid={`attach-kind-${kind}`}
-      className={`inline-flex items-center rounded px-1 py-0 text-[10px] leading-tight font-medium ${
+      className={`inline-flex items-center rounded px-1 py-px text-[11px] leading-tight font-medium ${
         KIND_STYLE[kind!] ?? 'bg-slate-700 text-slate-200'}`}>
       {t(key)}
     </span>
@@ -54,17 +55,17 @@ export function AttachmentRow({ changeId, attachment: a, onDelete }: {
       {onDelete && (
         <button
           type="button"
-          className="flex-shrink-0 text-slate-600 hover:text-red-400 opacity-40 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          className="flex-shrink-0 rounded text-slate-500 hover:text-red-400 opacity-60 group-hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 transition-opacity"
           aria-label={`Delete ${a.filename}`}
           title="Delete attachment"
           onClick={() => onDelete(a)}
         >
-          ✕
+          <X aria-hidden="true" size={14} />
         </button>
       )}
       <span className="min-w-0">
         <span className="block truncate">
-          📎{' '}
+          <Paperclip aria-hidden="true" size={12} className="mr-1 inline align-[-1px] text-slate-500" />
           <a href={`${API_BASE_URL}/v1/changes/${changeId}/attachments/${a.id}/download`}
             download={a.filename}
             className="text-sky-300 hover:text-sky-200 hover:underline">

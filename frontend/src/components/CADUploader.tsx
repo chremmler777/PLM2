@@ -6,6 +6,7 @@ import { useState, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import { invalidateRevisionWorkflow } from '../hooks/queries/useWorkflows';
 
 interface CADUploaderProps {
   partId: number;
@@ -42,6 +43,7 @@ export default function CADUploader({ partId, revisionId, compact = false, onUpl
       queryClient.invalidateQueries({ queryKey: ['part-files', partId] });
       if (revisionId) {
         queryClient.invalidateQueries({ queryKey: ['revision-files', revisionId] });
+        invalidateRevisionWorkflow(queryClient, revisionId);
       }
       onUploadSuccess?.(data.file_id ?? data.id);
     },

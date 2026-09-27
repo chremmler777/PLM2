@@ -1,3 +1,4 @@
+from tests.conftest import post_active
 # backend/tests/test_impact_confirmation.py
 """Task 18: Development owns the affected-items decision. The lead
 proposes impacted items (existing flow, unchanged); a Development department member
@@ -160,6 +161,10 @@ async def _approved_change_for_kickoff(session_factory, seed, part_id, *, confir
         s.add(ChangeImpactedItem(change_id=change.id, part_id=part_id,
                                  is_lead=True, created_by=seed["engineer_id"]))
         change.status = "approved"
+        # Timing validated, so the only kickoff guard in play is the one
+        # under test (impact confirmation).
+        change.timing_validated_by = seed["engineer_id"]
+        change.timing_validated_at = datetime.utcnow()
         if confirm:
             change.impact_confirmed_by = confirmed_by or seed["engineer_id"]
             change.impact_confirmed_at = datetime.utcnow()
@@ -275,7 +280,7 @@ async def test_add_impacted_item_after_confirmation_clears_it(
         "part_type": "internal_mfg", "data_classification": "confidential",
     }, headers=eng_auth)
     assert part2.status_code in (200, 201), part2.text
-    e1 = await client.post(f"/api/v1/parts/{part2.json()['id']}/revisions/customer-data",
+    e1 = await post_active(client, f"/api/v1/parts/{part2.json()['id']}/revisions/customer-data",
                            json={"statement": "review", "received_at": "2026-09-01"}, headers=eng_auth)
     assert e1.status_code == 201, e1.text
     added = await client.post(f"/api/v1/changes/{cid}/impacted-items",

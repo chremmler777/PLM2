@@ -14,7 +14,9 @@ vi.mock('../CADUploader', () => ({
   default: () => <div data-testid="cad-uploader" />,
 }))
 vi.mock('../workflows/RevisionWorkflowSection', () => ({
-  default: () => <div data-testid="wf-section" />,
+  default: (p: { onChanged?: () => void }) => (
+    <button type="button" data-testid="wf-section" onClick={() => p.onChanged?.()}>wf</button>
+  ),
 }))
 
 const progress = {
@@ -31,8 +33,10 @@ const progress = {
   ],
 }
 
+let lastQc: QueryClient
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  lastQc = qc
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
@@ -51,6 +55,24 @@ describe('ImplementationPanel', () => {
     expect(screen.getByRole('button', { name: /Sign no geometry change/ })).toBeDefined()
   })
 
+  it('names who a running check workflow still needs (final walk P2-4)', async () => {
+    vi.mocked(changesApi.getImplementation).mockResolvedValue({
+      ...progress, items: [{ ...progress.items[0], waiting_on: ['Development', 'Quality'] }],
+    })
+    wrap(<ImplementationPanel changeId={7} />)
+    expect((await screen.findByTestId('impl-needs-1')).textContent).toBe('Needs: Development, Quality')
+  })
+
+  it('a completed or canceled workflow task refreshes the progress and the cockpit actions (review M4)', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByText(/ECR1\.1/)
+    const spy = vi.spyOn(lastQc, 'invalidateQueries')
+    fireEvent.click(screen.getByRole('button', { name: /Workflow/ }))
+    fireEvent.click(screen.getByTestId('wf-section'))
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 7, 'implementation'] })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['change-my-actions', 7] })
+  })
+
   it('signs no-geometry-change with a reason', async () => {
     wrap(<ImplementationPanel changeId={7} />)
     await screen.findByText(/ECR1\.1/)
@@ -60,6 +82,17 @@ describe('ImplementationPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }))
     await waitFor(() =>
       expect(changesApi.signNoGeometryChange).toHaveBeenCalledWith(10, 55, 'label only'))
+  })
+
+  it('signing no geometry change refetches the revision workflow so a held Approve unlocks', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByText(/ECR1\.1/)
+    const spy = vi.spyOn(lastQc, 'invalidateQueries')
+    fireEvent.click(screen.getByRole('button', { name: /Sign no geometry change/ }))
+    fireEvent.change(await screen.findByRole('textbox'), { target: { value: 'label only' } })
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['workflow', 'revision', 55, 'instance'] }))
   })
 
   it('shows the ready banner when all revisions are ready', async () => {

@@ -1,18 +1,26 @@
 import { useState } from 'react';
 import client from '../../api/client';
 import { revisionLabel } from './RevisionBadge';
+import DateInput from '../gantt/DateInput'
 
 export interface PackageRow {
   filename: string; part_id: number | null; part_number: string | null; customer_part_number: string | null;
   customer_index: string | null; current_revision: string | null; current_index: string | null;
   action: 'new_major' | 'unchanged' | 'unmatched' | 'error'; suggested_name: string | null; major: number | null; error: string | null;
+  /** Spec §17: the current index is still pending triage (a new one supersedes it). */
+  current_pending?: boolean; pending_note?: string | null;
+}
+
+export interface PackageResult {
+  created: { part_id?: number; part_number?: string | null; revision_name?: string; filename?: string; pending?: boolean }[];
+  kept: unknown[]; skipped: string[]; pending_count?: number;
 }
 
 interface Props {
   open: boolean; assemblyId: number;
   projectParts: { id: number; part_number: string; name: string }[];
   officialOnly?: boolean; onClose(): void;
-  onDone(result: { created: unknown[]; kept: unknown[]; skipped: string[] }): void;
+  onDone(result: PackageResult): void;
 }
 
 const ACTIONS: PackageRow['action'][] = ['new_major', 'unchanged', 'unmatched'];
@@ -25,6 +33,8 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec §17: the stored package's new indexes wait for Development's triage.
+  const [result, setResult] = useState<PackageResult | null>(null);
   if (!open) return null;
   const effective = officialOnly ? 'official' : statement;
 
@@ -59,7 +69,8 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
       fd.append('rows', JSON.stringify(rows.map((r) => ({
         filename: r.filename, part_id: r.part_id, customer_index: r.customer_index, action: r.action, major: r.major }))));
       const res = await client.post(`/v1/parts/${assemblyId}/revisions/customer-package`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      onDone(res.data);
+      if ((res.data as PackageResult).created?.length) setResult(res.data);
+      else onDone(res.data);
     } catch (e) {
       const err = e as { response?: { status?: number; data?: { detail?: string; rows?: PackageRow[] } } };
       if (err.response?.status === 409 && err.response.data?.rows) setRows(err.response.data.rows);
@@ -87,6 +98,34 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
     && rows.some((r) => r.part_id != null && (r.action === 'new_major' || r.action === 'unchanged'))
     && !rows.some((r) => r.action === 'new_major' && r.part_id == null);
 
+  if (result) {
+    const n = result.created.length;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div data-testid="package-result" className="bg-slate-800 rounded-lg shadow-lg max-w-xl w-full mx-4 p-6 space-y-3">
+          <h3 className="text-lg font-bold text-slate-100">{n} new, pending triage</h3>
+          <p className="text-sm text-slate-300">
+            Each new index waits for Development to decide the route (engineering review, full ECR, attach to a
+            change, or administrative). Until then the current index stays active.
+          </p>
+          <ul className="text-sm space-y-1">
+            {result.created.map((c, i) => (
+              <li key={i} className="flex items-center gap-2">
+                <span className="font-mono text-slate-100">{c.part_number}</span>
+                <span className="font-mono text-blue-300">{c.revision_name}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/50 text-amber-200">pending triage</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-slate-400">Kept {result.kept.length}, skipped {result.skipped.length}.</p>
+          <div className="flex justify-end">
+            <button onClick={() => onDone(result)} className="px-4 py-2 rounded bg-blue-600 text-white">Done</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-slate-800 rounded-lg shadow-lg max-w-4xl w-full mx-4 p-6 space-y-4 max-h-[90vh] overflow-auto">
@@ -105,7 +144,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
           ))}
         </fieldset>
         <label className="block text-sm text-slate-400">Received on
-          <input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)}
+          <DateInput aria-label="Received on" value={receivedAt} onChange={setReceivedAt}
             className="mt-1 w-full p-2 rounded bg-slate-900 border border-slate-700 text-slate-100" />
         </label>
         <label className="block text-sm text-slate-400">Customer index (optional)
@@ -120,47 +159,52 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
           </div>
         )}
         {rows && (
-          <table className="w-full text-sm">
+          // The result column carries the pending / supersede notes: the part
+          // picker is capped so it can never push that column out of view.
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm [&_td]:pr-2 [&_th]:pr-2 [&_td]:py-1 [&_td]:align-top">
             <thead className="text-slate-400 text-left"><tr>
-              <th>File</th><th>Part</th><th>Current</th><th>Index</th><th>Action</th><th>Rev. no.</th><th>Result</th>
+              <th>File</th><th>Part</th><th>Current</th><th>Index</th><th>Action</th><th>Rev. no.</th><th className="min-w-[12rem]">Result</th>
             </tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.filename} data-testid={`row-${r.filename}`} className={r.action === 'error' ? 'bg-red-900/20' : ''}>
-                  <td className="font-mono text-slate-100 truncate max-w-[16rem]" title={r.filename}>{r.filename}</td>
+                  <td className="font-mono text-slate-100 truncate max-w-[12rem]" title={r.filename}>{r.filename}</td>
                   <td>
-                    <select data-testid={`part-${r.filename}`} value={r.part_id ?? ''} className="bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
+                    <select data-testid={`part-${r.filename}`} aria-label={`Part for ${r.filename}`} value={r.part_id ?? ''} className="w-full max-w-[14rem] bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
                       onChange={(e) => { const id = e.target.value ? parseInt(e.target.value, 10) : null;
                         const p = projectParts.find((x) => x.id === id);
                         patch(r.filename, { part_id: id, part_number: p?.part_number ?? null, action: id == null ? 'unmatched' : ((r.action === 'unmatched' || r.action === 'error') ? 'new_major' : r.action) }); }}>
-                      <option value="">— not in project —</option>
+                      <option value="">Not in project</option>
                       {(r.part_id != null && !projectParts.some((p) => p.id === r.part_id)) && <option value={r.part_id}>{r.part_number}</option>}
                       {projectParts.map((p) => <option key={p.id} value={p.id}>{p.part_number} {p.name}</option>)}
                     </select>
                   </td>
-                  <td className="font-mono text-slate-300">{revisionLabel(r.current_revision, r.current_index) || '—'}</td>
-                  <td><input data-testid={`index-${r.filename}`} value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
+                  <td className="font-mono text-slate-300 whitespace-nowrap">{revisionLabel(r.current_revision, r.current_index) || '-'}</td>
+                  <td><input data-testid={`index-${r.filename}`} aria-label={`Customer index for ${r.filename}`} value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100" /></td>
                   <td>
-                    <select data-testid={`action-${r.filename}`} value={r.action === 'error' ? 'new_major' : r.action}
+                    <select data-testid={`action-${r.filename}`} aria-label={`Action for ${r.filename}`} value={r.action === 'error' ? 'new_major' : r.action}
                       onChange={(e) => patch(r.filename, { action: e.target.value as PackageRow['action'] })}
                       className="bg-slate-900 border border-slate-700 rounded px-1 text-slate-100">
                       {ACTIONS.map((a) => <option key={a} value={a}>{a === 'new_major' ? 'new major' : a}</option>)}
                     </select>
                   </td>
-                  <td><input data-testid={`major-${r.filename}`} type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
+                  <td><input data-testid={`major-${r.filename}`} aria-label={`Revision number for ${r.filename}`} type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
                     disabled={r.action !== 'new_major' && r.action !== 'error'} onChange={(e) => patch(r.filename, { major: e.target.value ? parseInt(e.target.value, 10) : null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100 disabled:opacity-40" /></td>
-                  <td className="text-xs">
+                  <td data-testid={`result-${r.filename}`} className="text-xs min-w-[12rem]">
                     {r.action === 'error' && <span className="text-red-300">{r.error}</span>}
-                    {r.action === 'new_major' && <span className="text-blue-300">→ {r.major ? `${effective === 'review' ? 'E' : ''}${r.major}` : (r.suggested_name ?? '?')}</span>}
-                    {r.action === 'unchanged' && <span className="text-slate-400">kept {r.current_revision ?? '—'}</span>}
+                    {r.action === 'new_major' && <span className="text-blue-300">→ {r.major ? `${effective === 'review' ? 'E' : ''}${r.major}` : (r.suggested_name ?? '?')}<span className="block text-amber-300">pending triage</span></span>}
+                    {r.pending_note && <span className="block text-amber-300">{r.pending_note}</span>}
+                    {r.action === 'unchanged' && <span className="text-slate-400">kept {r.current_revision ?? '-'}</span>}
                     {r.action === 'unmatched' && <span className="text-slate-500">skipped</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
         {error && <p className="text-sm text-red-300">{error}</p>}
         {rows && (

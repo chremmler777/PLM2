@@ -25,7 +25,7 @@ const SUMMATION = {
 
 const CHANGE = {
   id: 1, change_number: 'CHG-001', project_id: 1, title: 'Test', change_type: 'physical_part',
-  priority: 'medium', status: 'in_assessment', lead_id: null, raised_by: 1,
+  priority: 'medium', status: 'scoping', lead_id: 7, raised_by: 1,
   customer_response: 'pending', created_at: '2026-01-01', updated_at: '2026-01-01',
   issuer: 'Alice', car_line: 'VW426', is_series: true, cm_internal: false, cm_external: true,
   implementation_mode: 'integrated', customer_relevant: false,
@@ -47,8 +47,14 @@ vi.mock('../../api/changes', () => ({
     update: vi.fn(),
     getSummation: vi.fn(),
     listCostPositions: vi.fn(),
+    getImpactTree: vi.fn(),
+    leadCandidates: vi.fn(),
   },
 }));
+
+// The viewer: user 7 leads CHANGE, so by default the gates are theirs to decide.
+const auth = { current: { userId: 7 as number | null, isAdmin: false } };
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => auth.current }));
 
 vi.mock('../../api/plants', () => ({
   plantsApi: {
@@ -58,7 +64,7 @@ vi.mock('../../api/plants', () => ({
 
 function makeWrapper(preloadGates?: boolean, preloadSummation?: boolean, preloadChange?: boolean, preloadPlants?: boolean) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  if (preloadGates) qc.setQueryData(['change-gates', 1], GATES);
+  if (preloadGates) qc.setQueryData(['change', 1, 'gates'], GATES);
   if (preloadSummation) qc.setQueryData(['change-summation', 1], SUMMATION);
   if (preloadChange) qc.setQueryData(['change', 1], CHANGE);
   if (preloadPlants) qc.setQueryData(['plants'], PLANTS);
@@ -70,6 +76,7 @@ function makeWrapper(preloadGates?: boolean, preloadSummation?: boolean, preload
 describe('D1MasterPanel', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    auth.current = { userId: 7, isAdmin: false };
     const { changesApi } = await import('../../api/changes');
     const { plantsApi } = await import('../../api/plants');
     (changesApi.get as ReturnType<typeof vi.fn>).mockResolvedValue(CHANGE);
@@ -86,26 +93,34 @@ describe('D1MasterPanel', () => {
     });
     (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (plantsApi.list as ReturnType<typeof vi.fn>).mockResolvedValue(PLANTS);
+    (changesApi.getImpactTree as ReturnType<typeof vi.fn>).mockResolvedValue({
+      tree: [{ part_id: 99, part_number: '20-1994-001', name: 'Underride cover', children: [] }],
+      impacted_part_ids: [99],
+    });
+    (changesApi.leadCandidates as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 42, name: 'Petra Quality' }]);
   });
   afterEach(() => { cleanup(); });
 
   it('renders all three gate labels', () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
     expect(screen.getByText(/Feasible\?/i)).toBeDefined();
     expect(screen.getByText(/Budget checked\?/i)).toBeDefined();
     expect(screen.getByText(/Technical release\?/i)).toBeDefined();
   });
 
-  it('renders yes/no/na buttons for each gate', () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true) });
-    const yesBtns = screen.getAllByRole('button', { name: 'yes' });
+  it('renders Yes / No / N/A buttons for each gate, the decision pressed', () => {
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
+    const yesBtns = screen.getAllByRole('button', { name: 'Yes' });
     expect(yesBtns.length).toBe(3);
+    expect(screen.getAllByRole('button', { name: 'N/A' }).length).toBe(3);
+    expect(yesBtns[0].getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('group', { name: /Feasible\?/i })).toBeTruthy();
   });
 
   it('calls putGate when a decision button is clicked', async () => {
     const { changesApi } = await import('../../api/changes');
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true) });
-    const noBtns = screen.getAllByRole('button', { name: 'no' });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
+    const noBtns = screen.getAllByRole('button', { name: 'No' });
     await act(async () => { fireEvent.click(noBtns[0]); });
     await waitFor(() => {
       expect(changesApi.putGate).toHaveBeenCalledWith(1, 'feasibility', { decision: 'no' });
@@ -113,7 +128,7 @@ describe('D1MasterPanel', () => {
   });
 
   it('renders D1 header fields pre-filled', async () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => {
       const issuerInput = screen.getByDisplayValue('Alice');
       expect(issuerInput).toBeDefined();
@@ -123,7 +138,7 @@ describe('D1MasterPanel', () => {
 
   it('calls changesApi.update with edited field', async () => {
     const { changesApi } = await import('../../api/changes');
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => screen.getByDisplayValue('Alice'));
     const issuerInput = screen.getByDisplayValue('Alice');
     await act(async () => {
@@ -136,9 +151,48 @@ describe('D1MasterPanel', () => {
     });
   });
 
+  it('sends only the fields that changed', async () => {
+    const { changesApi } = await import('../../api/changes');
+    render(<D1MasterPanel changeId={1} canEditD1 />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    await act(async () => {
+      fireEvent.change(screen.getByDisplayValue('Alice'), { target: { value: 'Bob' } });
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save/i })); });
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(1, { issuer: 'Bob' }));
+  });
+
+  it('lets a D1 editor without the lead right leave customer relevance alone', async () => {
+    render(<D1MasterPanel changeId={1} canEditD1 />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    const box = screen.getByLabelText(t('customer_relevant')) as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('names the cost carrier in words, like the scoping meeting (spec §16)', async () => {
+    const { changesApi } = await import('../../api/changes');
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    const sel = screen.getByTestId('d1-cost-carrier') as HTMLSelectElement;
+    expect(sel.selectedOptions[0].text).toBe('Internal (plant pays)');
+    await act(async () => { fireEvent.change(sel, { target: { value: 'customer' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save/i })); });
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(1,
+      expect.objectContaining({ customer_relevant: true })));
+  });
+
+  it('is read-only without any right: disabled fields, no save', async () => {
+    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/Plant B/i) as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
+  });
+
   it('calls changesApi.update with affected_plant_ids on plant toggle', async () => {
     const { changesApi } = await import('../../api/changes');
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => screen.getByLabelText(/Plant B/i));
     const plantBCheckbox = screen.getByLabelText(/Plant B/i);
     await act(async () => { fireEvent.click(plantBCheckbox); });
@@ -151,27 +205,110 @@ describe('D1MasterPanel', () => {
     });
   });
 
+  it('notes under the affected plants that Mexico (Silao) is not in use yet', async () => {
+    const { plantsApi } = await import('../../api/plants');
+    (plantsApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([...PLANTS, { id: 3, name: 'Silao Mexico', code: 'SIL' }]);
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, false) });
+    await waitFor(() => screen.getByLabelText(/Silao Mexico/i));
+    expect(screen.getByTestId('plant-not-in-use').textContent).toContain('Mexico (Silao) is not in use yet.');
+    // still selectable: nothing is blocked
+    expect((screen.getByLabelText(/Silao Mexico/i) as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('has no Mexico note without Silao among the plants', async () => {
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByLabelText(/Plant B/i));
+    expect(screen.queryByTestId('plant-not-in-use')).toBeNull();
+  });
+
   it('renders decided_at and decided_by for a gate', async () => {
     const gatesWithMeta = [
       { gate_key: 'feasibility', decision: 'yes', decided_by: 42, decided_at: '2026-03-15T10:00:00Z', remark: null },
       { gate_key: 'budget', decision: 'no', decided_by: null, decided_at: null, remark: null },
       { gate_key: 'release', decision: 'na', decided_by: null, decided_at: null, remark: null },
     ];
+    const { changesApi } = await import('../../api/changes');
+    (changesApi.getGates as ReturnType<typeof vi.fn>).mockResolvedValue(gatesWithMeta);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    qc.setQueryData(['change-gates', 1], gatesWithMeta);
+    qc.setQueryData(['change', 1, 'gates'], gatesWithMeta);
     qc.setQueryData(['change', 1], CHANGE);
     qc.setQueryData(['plants'], PLANTS);
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
-    render(<D1MasterPanel changeId={1} />, { wrapper });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
     await waitFor(() => {
-      expect(screen.getByText(/#42/)).toBeDefined();
+      expect(screen.getByTestId('d1-gate-decided-feasibility').textContent)
+        .toBe('Decided by Petra Quality on 15 Mar 2026');
     });
+    expect(screen.queryByText(/#42/)).toBeNull();
+  });
+
+  it('names impacted items by part number and name, never "Part 99"', async () => {
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => expect(screen.getByTestId('d1-item-10').textContent).toContain('20-1994-001'));
+    expect(screen.getByTestId('d1-item-10').textContent).toContain('Underride cover');
+    expect(screen.queryByText(/Part 99/)).toBeNull();
+  });
+
+  it('is a read-only record once the change is closed', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change', 1, 'gates'], GATES);
+    qc.setQueryData(['change', 1], { ...CHANGE, status: 'closed' });
+    qc.setQueryData(['plants'], PLANTS);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
+    expect((await screen.findByTestId('d1-panel')).getAttribute('data-readonly')).toBe('true');
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
+    screen.getAllByRole('button', { name: 'Yes' }).forEach((b) =>
+      expect((b as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  function renderWith(change: Record<string, unknown>) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change', 1, 'gates'], GATES);
+    qc.setQueryData(['change', 1], change);
+    qc.setQueryData(['plants'], PLANTS);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    return render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
+  }
+
+  it('locks the cost carrier once the change is past scoping', async () => {
+    renderWith({ ...CHANGE, status: 'in_assessment' });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect((screen.getByTestId('d1-cost-carrier') as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('locks the cost carrier on a mother-plant change', async () => {
+    renderWith({ ...CHANGE, status: 'scoping', origin: 'mother_plant' });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect((screen.getByTestId('d1-cost-carrier') as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it('shows gate decisions read-only to someone who is neither lead nor admin', async () => {
+    auth.current = { userId: 99, isAdmin: false };
+    renderWith(CHANGE);
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect(screen.queryByRole('button', { name: 'Yes' })).toBeNull();
+    expect(screen.getByTestId('d1-gate-value-feasibility').textContent).toBe('Yes');
+    expect(screen.getByTestId('d1-gate-value-release').textContent).toBe('N/A');
+  });
+
+  it('lets an admin decide gates on a change they do not lead', async () => {
+    auth.current = { userId: 99, isAdmin: true };
+    renderWith(CHANGE);
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect(screen.getAllByRole('button', { name: 'Yes' }).length).toBe(3);
   });
 
   it('renders lead part indicator', async () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => {
       expect(screen.getByText('Lead part')).toBeDefined();
     });
@@ -192,15 +329,15 @@ describe('SummationView', () => {
 
   it('renders grand total from summation data', () => {
     render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
-    expect(screen.getByText('425.00')).toBeDefined();
+    expect(screen.getByTestId('summation-total').textContent).toBe('425.00 EUR');
   });
 
   it('renders all four cost breakdown rows', () => {
     render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
-    expect(screen.getByText('100.00')).toBeDefined();
-    expect(screen.getByText('50.00')).toBeDefined();
-    expect(screen.getByText('200.00')).toBeDefined();
-    expect(screen.getByText('75.00')).toBeDefined();
+    expect(screen.getByText('100.00 EUR')).toBeDefined();
+    expect(screen.getByText('50.00 EUR')).toBeDefined();
+    expect(screen.getByText('200.00 EUR')).toBeDefined();
+    expect(screen.getByText('75.00 EUR')).toBeDefined();
   });
 
   it('renders by_department row', async () => {
@@ -222,8 +359,9 @@ describe('SummationView', () => {
   });
 
   // The wrap-up Sales quotes off: the department's grid lines AND the positions
-  // it booked, with the vendor it picked carrying the price.
-  it('adds each department’s cost positions to the wrap-up', async () => {
+  // it booked, with the vendor it picked carrying the price. The backend's
+  // department row already holds the positions: shown as a part, never added.
+  it('shows each department’s cost positions as a part of its backend total', async () => {
     const { changesApi } = await import('../../api/changes');
     (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: 3, department_id: 5, label: 'Anlagenumbau', tag: 'equipment_change',
@@ -237,11 +375,21 @@ describe('SummationView', () => {
         hours: 8, est_cost: 800, effective_cost: 800, offers: [] },
     ]);
     const withDept = {
+      currency: 'EUR',
       by_plant: [],
-      by_department: [{ department_id: 5, one_time_internal: 10, one_time_external: 5,
+      by_department: [{ department_id: 5, one_time_internal: 810, one_time_external: 5205,
         lifecycle_internal: 20, lifecycle_external: 8 }],
-      totals: { one_time_internal: 10, one_time_external: 5, lifecycle_internal: 20,
-        lifecycle_external: 8, grand_total: 43 },
+      totals: { one_time_internal: 810, one_time_external: 5205, lifecycle_internal: 20,
+        lifecycle_external: 8, grand_total: 6043 },
+      positions_by_department: [{ department_id: 5, position_cost: 6000, hours: 8,
+        hours_cost: 0, machine_hours: 0, trials: 0, position_count: 2,
+        unrated_hours: false, unpriced_count: 0, positions: [
+          { position_id: 3, label: 'Anlagenumbau', kind: 'external', cost: 5200,
+            currency: 'EUR', line_value: 0, rate: null },
+          { position_id: 4, label: 'Erprobung', kind: 'support_effort', cost: 800,
+            currency: 'EUR', line_value: 0, rate: null },
+        ] }],
+      total_position_cost: 6000, total_position_hours_cost: 0,
     };
     (changesApi.getSummation as ReturnType<typeof vi.fn>).mockResolvedValue(withDept);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -250,15 +398,14 @@ describe('SummationView', () => {
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
     render(<SummationView changeId={1} />, { wrapper });
-    // 5000 + 200 shipping from the favourite offer, plus the 800 estimate.
     await waitFor(() => expect(
-      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6000.00'));
-    // Grid lines (43) and positions (6000) side by side per department.
-    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6043.00');
-    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6000.00');
-    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6043.00');
+      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6,000.00 EUR'));
+    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6,043.00 EUR');
+    expect(screen.getByTestId('summation-total').textContent).toBe('43.00 EUR');
+    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6,000.00 EUR');
+    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6,043.00 EUR');
     // The chosen vendor is named — it is the price the total is built on.
-    expect(screen.getByTestId('summation-position-vendor-3').textContent).toContain('Vendor A');
+    expect((await screen.findByTestId('summation-position-vendor-3')).textContent).toContain('Vendor A');
   });
 
   it('renders by_plant row', async () => {

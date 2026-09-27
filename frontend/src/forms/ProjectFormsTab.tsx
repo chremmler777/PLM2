@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../api/client';
 import FormPanel from './FormPanel';
+import { formatDateShort } from '../lib/format';
 import type { FormGroup, FormInstance } from './types';
 
 const GATE_ORDER = ['K0/RG1', 'K/RG2', 'E/RG3', 'D/RG4', 'C/RG5', 'B/RG6', 'A/RG7'];
@@ -84,7 +85,7 @@ export default function ProjectFormsTab({ projectId }: { projectId: number }) {
                       <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[i.status] ?? 'bg-slate-500'}`} aria-hidden />
                       <span className="w-20 shrink-0 text-xs capitalize text-slate-300">{i.status}</span>
                       <span className="min-w-0 flex-1 break-words text-slate-200">{i.owner_name ?? 'unassigned'}</span>
-                      <span className="font-mono text-xs text-slate-500 tabular-nums">{i.updated_at.slice(0, 10)}</span>
+                      <span className="font-mono text-xs text-slate-500 tabular-nums">{formatDateShort(i.updated_at)}</span>
                       <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-slate-600 group-hover:text-slate-300 transition-colors" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l4 4-4 4" /></svg>
                     </button>
                   </li>))}

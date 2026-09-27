@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { assessmentProgress, resolveWaitStates } from './waitStates'
+import { assessmentProgress, resolveWaitStates, earlyStageWaits, deriveAssessmentState } from './waitStates'
 import { t } from '../i18n/cmLabels'
 
 const change = (over: Record<string, unknown> = {}) => ({
@@ -89,7 +89,7 @@ describe('resolveWaitStates', () => {
       change({ status: 'costing', costing_pending_department_ids: [2, 4] }), [], deptName)
     expect(waits[0].key).toBe('costing-input')
     expect(waits[0].text).toContain('Development, Tool Engineer')
-    expect(waits[0].tab).toBe('commercial')
+    expect(waits[0].tab).toBe('costing')
     // Only while costing is the live phase.
     expect(resolveWaitStates(
       change({ status: 'quoted', costing_pending_department_ids: [2] }), [], deptName)).toEqual([])
@@ -110,27 +110,69 @@ describe('resolveWaitStates', () => {
     const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName)
     expect(waits.map((w) => w.key)).toEqual(['bank-build'])
     expect(waits[0].text).toBe(t('wait.onBankBuild'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
     // Only at approved: earlier the decision is not due, later it is history.
     expect(resolveWaitStates(change({ status: 'quoted' }), [], deptName)).toEqual([])
     expect(resolveWaitStates(
       change({ status: 'in_implementation' }), [], deptName)).toEqual([])
   })
 
-  it('waits on Sales to publish the plan once the mode is set', () => {
+  it('waits on Sales to publish the plan once the mode is set and the timing is validated', () => {
     const waits = resolveWaitStates(
-      change({ status: 'approved', bank_build_mode: 'planned_scrap' }), [], deptName)
+      change({ status: 'approved', bank_build_mode: 'planned_scrap',
+        timing_validated_at: '2026-08-09T09:00:00' }), [], deptName)
     expect(waits.map((w) => w.key)).toEqual(['plan-publish'])
     expect(waits[0].text).toBe(t('wait.onPlanPublish'))
-    expect(waits[0].tab).toBe('implementation')
-    // Published — nothing left; and an internal change has nobody to publish to.
+    expect(waits[0].tab).toBe('timing')
+    // Not validated yet: nothing to publish.
+    expect(resolveWaitStates(change({ status: 'approved', bank_build_mode: 'planned_scrap' }),
+      [], deptName)).toEqual([])
+    // Published: nothing left; and an internal change has nobody to publish to.
     expect(resolveWaitStates(change({
-      status: 'approved', bank_build_mode: 'planned_scrap',
+      status: 'approved', bank_build_mode: 'planned_scrap', timing_validated_at: '2026-08-09T09:00:00',
       plan_published_at: '2026-08-10T09:00:00',
     }), [], deptName)).toEqual([])
     expect(resolveWaitStates(change({
       status: 'approved', bank_build_mode: 'running_change', customer_relevant: false,
+      timing_validated_at: '2026-08-09T09:00:00',
     }), [], deptName)).toEqual([])
+  })
+
+  it('names the teams the timing still waits on at approved', () => {
+    const fb = {
+      required: [
+        { department_name: 'Development', verdict: 'confirmed', stale: false },
+        { department_name: 'Tool Engineer', verdict: null, stale: false },
+        { department_name: 'Quality', verdict: 'confirmed', stale: true },
+      ],
+      all_confirmed: false, validated_at: null,
+    }
+    const waits = resolveWaitStates(change({ status: 'approved', bank_build_mode: 'running_change' }),
+      [], deptName, [], {}, null, fb)
+    expect(waits.map((w) => w.key)).toEqual(['timing-confirm'])
+    expect(waits[0].text).toBe('Timing: waiting on team confirmation: Tool Engineer, Quality')
+    expect(waits[0].tab).toBe('timing')
+  })
+
+  it('says the timing is not validated once every team confirmed', () => {
+    const fb = {
+      required: [{ department_name: 'Development', verdict: 'confirmed', stale: false }],
+      all_confirmed: true, validated_at: null,
+    }
+    const waits = resolveWaitStates(change({ status: 'approved', bank_build_mode: 'running_change' }),
+      [], deptName, [], {}, null, fb)
+    expect(waits.map((w) => w.key)).toEqual(['timing-validate'])
+    expect(waits[0].text).toBe('Timing not validated')
+    // Validated (per the feedback): the publish wait takes over.
+    const after = resolveWaitStates(change({ status: 'approved', bank_build_mode: 'running_change' }),
+      [], deptName, [], {}, null, { ...fb, validated_at: '2026-08-09T09:00:00' })
+    expect(after.map((w) => w.key)).toEqual(['plan-publish'])
+  })
+
+  it('lists the bank-build and timing waits side by side', () => {
+    const fb = { required: [{ department_name: 'Scheduling', verdict: 'concern', stale: false }] }
+    const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName, [], {}, null, fb)
+    expect(waits.map((w) => w.key)).toEqual(['bank-build', 'timing-confirm'])
   })
 
   it('names the departments the assessment round is still waiting on', () => {
@@ -182,7 +224,7 @@ describe('resolveWaitStates', () => {
     })
     expect(waits.map((w) => w.key)).toEqual(['implementation-reports'])
     expect(waits[0].text).toBe(t('wait.onProgressReports').replace('{n}', '2'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
   })
 
   it('keeps the implementation waits out of every other phase', () => {
@@ -199,7 +241,7 @@ describe('resolveWaitStates', () => {
       change({ status: 'in_implementation' }), [], deptName, [], { state })
     expect(waits.map((w) => w.key)).toEqual(['implementation-escalation'])
     expect(waits[0].text).toBe(t('wait.onRiskEscalation'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
 
     // An open escalation is the answer; a settled one is not.
     expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [],
@@ -231,7 +273,19 @@ describe('resolveWaitStates', () => {
       })
     expect(waits.map((w) => w.key)).toEqual(['validation-checks'])
     expect(waits[0].text).toBe(t('wait.onValidationChecks').replace('{n}', '2'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('release')
+  })
+
+  it('does not wait on a retired validation row', () => {
+    const waits = resolveWaitStates(
+      change({ status: 'in_validation' }), [], deptName, [], {}, {
+        departments: [
+          { department_id: 2, checks: [
+            { check_key: 'sampled', status: 'passed' },
+            { check_key: 'old_check', status: 'open', retired: true }] },
+        ],
+      })
+    expect(waits).toEqual([])
   })
 
   it('names the unacknowledged weight delta as its own wait, on Sales', () => {
@@ -269,5 +323,75 @@ describe('resolveWaitStates', () => {
       [concern(), concern({ id: 2, note: 'timing?', answer_note: 'Q4',
         answered_at: '2026-08-02T00:00:00' })], deptName)
     expect(waits.map((w) => w.key)).toEqual(['sales-info-1', 'review-2', 'blocked-departments'])
+  })
+})
+
+describe('resolveWaitStates: deviations and release blockers', () => {
+  const deptName = (id: number) => `#${id}`
+  it('names open plan deviations as information while the work runs', () => {
+    const waits = resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [], {}, null, null,
+      { openPlanDeviations: 2 })
+    expect(waits).toEqual([expect.objectContaining({ key: 'plan-deviations', info: true, tab: 'timing' })])
+    expect(waits[0].text).toBe('2 moves with plan deviations open: lock or escalate')
+  })
+  it('lists the release guard reasons at validation, once each', () => {
+    const waits = resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {}, null, null, {
+      openPlanDeviations: 1,
+      releaseBlockers: ['Not ready to go: 2 revisions open', 'Lessons learned step not done',
+        '1 move with plan deviations still open: lock or escalate them first'],
+    })
+    expect(waits.map((w) => w.text)).toEqual(['Not ready to go: 2 revisions open', 'Lessons learned step not done',
+      '1 move with plan deviations still open: lock or escalate them first'])
+    expect(waits.every((w) => !w.info)).toBe(true)
+    expect(waits[2].tab).toBe('timing')
+  })
+  it('names open plan deviation moves itself at validation when the guard has not', () => {
+    const waits = resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {}, null, null,
+      { openPlanDeviations: 1, releaseBlockers: [] })
+    expect(waits.map((w) => w.text)).toEqual(['1 move with plan deviations still open: lock or escalate them first'])
+  })
+})
+
+describe('earlyStageWaits (spec §16)', () => {
+  const base = { status: 'in_assessment' as const, lead_id: 5 }
+  it('takes the backend rows, replacing the client assessment line and skipping duplicates', () => {
+    const out = earlyStageWaits(base,
+      [{ key: 'assessment-round', text: 'client line', tab: 'assessments' },
+        { key: 'sales-info-3', text: 'Waiting on Sales: X', tab: 'scoping' }],
+      [{ kind: 'assessment_waiting', text: 'Assessment: waiting on Development (1/2)', target_tab: 'assessments' },
+        { kind: 'waiting_on_sales_answer', text: 'Waiting on Sales to answer 1 question(s)', target_tab: 'scoping' },
+        { kind: 'not_feasible', text: 'Tool Engineer: not feasible (Change PPT)', department_id: 27, target_tab: 'assessments' },
+        { kind: 'no_lead', text: 'No lead assigned', target_tab: 'overview' }])
+    expect(out.map((w) => w.key)).toEqual(['sales-info-3', 'assessment-round', 'not_feasible-27', 'no_lead'])
+    expect(out.find((w) => w.key === 'assessment-round')!.text).toContain('Development')
+    expect(out.find((w) => w.key === 'no_lead')!.tab).toBeUndefined()
+  })
+  it('derives no lead, open cancel votes, not feasible and scope rows without stage-state', () => {
+    const out = earlyStageWaits({ ...base, lead_id: null, scope_changed_after_quote: true, scope_offer_version: 2 }, [], undefined, {
+      concerns: [{ id: 1, kind: 'reject_proposal', is_open: true, raised_by: 3, raised_by_name: 'Ann' } as never],
+      assessments: [{ department_id: 27, verdict: 'not_feasible', stage_order: 1, rasic_letter: 'R', has_change_ppt: false }],
+      departmentName: () => 'Tool Engineer',
+    })
+    expect(out.map((w) => w.text)).toEqual([
+      'No lead assigned',
+      '1 open cancel vote from Ann',
+      'Tool Engineer: not feasible (no Change PPT)',
+      'Offer v2 no longer covers the scope: new offer version or approved deviation',
+    ])
+  })
+})
+
+describe('deriveAssessmentState', () => {
+  it('counts first-stage R/A rows only', () => {
+    const a = deriveAssessmentState([
+      { id: 1, department_id: 1, rasic_letter: 'R', status: 'submitted', submitted_at: 'x', verdict: 'feasible', stage_order: 1 },
+      { id: 2, department_id: 2, rasic_letter: 'A', status: 'active', submitted_at: null, verdict: 'pending', stage_order: 1 },
+      { id: 3, department_id: 3, rasic_letter: 'C', status: 'active', submitted_at: null, verdict: 'pending', stage_order: 1 },
+      { id: 4, department_id: 4, rasic_letter: 'R', status: 'active', submitted_at: null, verdict: 'pending', stage_order: 2 },
+    ] as never, (id) => `D${id}`)!
+    expect(a.total).toBe(2)
+    expect(a.waiting_on.map((d) => d.department_name)).toEqual(['D2'])
+    expect(a.all_submitted).toBe(false)
+    expect(a.verdicts.map((v) => v.verdict)).toEqual(['feasible'])
   })
 })

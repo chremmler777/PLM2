@@ -1,20 +1,30 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useId, useMemo, useRef, useState } from 'react';
+import { btnPrimary } from '../common/buttonStyles';
+import { Check, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiErrorMessage } from '../../lib/apiError';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { changesApi } from '../../api/changes';
-import { useAuth } from '../../contexts/AuthContext';
 import { t } from '../../i18n/cmLabels';
 import { groupItems } from '../../lib/itemCategory';
 import type { ChangeType } from '../../types/change';
+import { useChangePermissions } from '../../hooks/queries/useCanStartChange';
+import { FALLBACK_MOTHER_PLANTS } from '../../api/motherPlant';
+import DateInput from '../gantt/DateInput';
+import { useDialogFocus } from '../../hooks/useDialogFocus';
+import MotherPlantFields, {
+  emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
+} from './motherPlant/MotherPlantFields';
+import { plantText } from '../../lib/plantName';
 
 // Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
-  { value: 'physical_part', label: 'Physical Part' },
+  { value: 'physical_part', label: 'Physical part' },
   { value: 'tooling', label: 'Tooling' },
-  { value: 'document_spec', label: 'Document / Spec' },
-  { value: 'process_im', label: 'Process / IM' },
+  { value: 'document_spec', label: 'Document / specification' },
+  { value: 'process_im', label: 'Process (IM)' },
   { value: 'packaging', label: 'Packaging' },
 ];
 
@@ -57,8 +67,22 @@ export function composeTitle(picked: PickedPart[]): string {
   return parts.join(' - ').slice(0, TITLE_MAX_LENGTH);
 }
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+/** The backend's reason as text (also a 422 list), or undefined when it gave none. */
+const errDetail = (e: unknown): string | undefined => apiErrorMessage(e, '') || undefined;
+
+/**
+ * What the kickoff (captured -> scoping) still needs. Soft: the change is
+ * created either way; this only says what the hand-over will miss.
+ */
+function kickoffMissing(k: {
+  description: string; files: number; quoteDeadline: string; customer: boolean;
+}): string[] {
+  return [
+    ...(k.description.trim() ? [] : [t('kickoff.description')]),
+    ...(k.files > 0 ? [] : [t('kickoff.attachment')]),
+    ...(k.customer && !k.quoteDeadline ? [t('deadline.quote')] : []),
+  ];
+}
 
 interface PickedPart {
   id: number;
@@ -85,13 +109,18 @@ interface ProjectRef {
   name: string;
 }
 
+interface ProjectTeamRow {
+  department_id: number;
+  department_name: string;
+  responsible: { id: number; name: string } | null;
+}
+
 // Projects read number-first: "1864 · VW426 Atlas".
 const projectLabel = (p: ProjectRef): string =>
   p.code ? `${p.code} · ${p.name}` : p.name;
 
 export default function StartChangeModal({ open, onClose, prefill }: StartChangeModalProps) {
   const navigate = useNavigate();
-  const { userId } = useAuth();
 
   const projectLocked = prefill?.projectId != null;
   const [projectId, setProjectId] = useState<number | undefined>(prefill?.projectId);
@@ -108,6 +137,26 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   // (so the distinction stays visible) but cannot be chosen, and the customer
   // branch is preselected rather than forcing a choice with one legal answer.
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(true);
+  // Third origin (spec §14): a change engineered and sold by the mother plant.
+  const permissions = useChangePermissions();
+  const motherPlants = permissions?.mother_plants ?? FALLBACK_MOTHER_PLANTS;
+  const [fromMotherPlant, setFromMotherPlant] = useState(false);
+  const [motherPlant, setMotherPlant] = useState<MotherPlantDraft>(
+    () => emptyMotherPlantDraft(FALLBACK_MOTHER_PLANTS[0]));
+  // Kickoff needs, collected here so the change can be handed to scoping at
+  // once: the fuller description, the customer's documents and, for customer
+  // work, the quote deadline. All optional; the ready check says what is left.
+  const [description, setDescription] = useState('');
+  const [quoteDeadline, setQuoteDeadline] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const addFiles = (list: FileList | File[] | null) => {
+    const incoming = Array.from(list ?? []);
+    if (incoming.length === 0) return;
+    setFiles((prev) => [...prev, ...incoming.filter(
+      (f) => !prev.some((p) => p.name === f.name && p.size === f.size))]);
+  };
   const [submitting, setSubmitting] = useState(false);
   // Server-side refusals (e.g. 403 for a user outside a change-starting
   // department) are shown in place, not only as a toast that scrolls away.
@@ -124,6 +173,17 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
     queryFn: async () => (await client.get(`/v1/parts/project/${projectId}`)).data,
     enabled: open && !!projectId,
   });
+
+  // The project's Project Manager responsible: no lead_id goes in the create
+  // request (spec above), the backend defaults to this person on its own.
+  // Shown here as info only, so starting a change is no surprise.
+  const { data: team = [] } = useQuery<ProjectTeamRow[]>({
+    queryKey: ['project-team', projectId],
+    queryFn: async () => (await client.get(`/v1/projects/${projectId}/team`)).data,
+    enabled: open && !!projectId,
+    retry: false,
+  });
+  const projectPm = team.find((r) => r.department_name === 'Project Manager')?.responsible ?? null;
 
   const pickedIds = useMemo(() => new Set(picked.map((p) => p.id)), [picked]);
 
@@ -163,19 +223,30 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
   const title = useMemo(() => composeTitle(picked), [picked]);
 
+  // A modal: focus stays inside, Escape closes, the title names it.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus(dialogRef, open, onClose);
+  const qc = useQueryClient();
   if (!open) return null;
 
   const missing: string[] = [];
   if (!projectId) missing.push('project');
   if (picked.length === 0) missing.push('affected item');
   if (!reason.trim()) missing.push('reason');
-  if (customerRelevant !== true) missing.push('cost carrier');
+  // A mother-plant change is handed over by the PM who starts it: the
+  // kickoff needs its description, so the dialog asks for it up front.
+  if (fromMotherPlant) missing.push(...(description.trim() ? [] : ['description']), ...motherPlantMissing(motherPlant));
+  else if (customerRelevant !== true) missing.push('cost carrier');
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
+  const handOverMissing = fromMotherPlant ? [] : kickoffMissing({
+    description, files: files.length, quoteDeadline, customer: customerRelevant === true,
+  });
 
   const handleSubmit = async () => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
-    if (customerRelevant !== true) return;
+    if (customerRelevant !== true && !fromMotherPlant) return;
     setSubmitting(true);
     setCreateError(null);
     try {
@@ -184,26 +255,97 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         title,
         change_type: changeType,
         reason: reason.trim() || undefined,
-        lead_id: userId ?? undefined,
-        // Never leaves as false — the backend refuses internal changes for now.
-        customer_relevant: true,
+        // No lead_id: the backend picks the default lead (the project's PM).
+        // Sending the starter as lead made every Sales starter the lead.
+        // One request: the items ride along, the first is the lead, and the
+        // composed title follows the lead from here on.
+        impacted_part_ids: picked.map((p) => p.id),
+        lead_part_id: picked[0].id,
+        title_auto: true,
+        ...(description.trim() ? { description: description.trim() } : {}),
+        ...(fromMotherPlant
+          ? {
+            // Not customer relevant here: the mother plant handles the customer.
+            customer_relevant: false, origin: 'mother_plant' as const,
+            mother_plant_name: motherPlant.name,
+            mother_plant_ref: motherPlant.ref.trim() || undefined,
+            mother_plant_sop: motherPlant.sop,
+          }
+          // Never leaves as false — the backend refuses internal changes for now.
+          : { customer_relevant: true }),
       });
-      // Sequential on purpose: the lead item must land first, and a partial
-      // failure has to name the parts that did not attach so they can be added
-      // in the impact tree instead of vanishing silently.
-      const failed: string[] = [];
-      for (const [i, p] of picked.entries()) {
+      // The items went in the create request. A backend that ignored them
+      // (older API) leaves some unattached: those are added one by one, lead
+      // first, and a part that still fails is named so it can be added in the
+      // impact tree instead of vanishing silently.
+      const returned = (change as unknown as { impacted_items?: { part_id: number }[] }).impacted_items;
+      let attached: number[] | null = Array.isArray(returned) ? returned.map((i) => i.part_id) : null;
+      if (attached === null) {
         try {
-          await changesApi.addImpactedItem(change.id, { part_id: p.id, is_lead: i === 0 });
+          attached = ((await changesApi.get(change.id))?.impacted_items ?? []).map((i) => i.part_id);
+        } catch {
+          attached = [];
+        }
+      }
+      const failed: string[] = [];
+      const hasLead = attached.length > 0;
+      for (const [i, p] of picked.entries()) {
+        if (attached.includes(p.id)) continue;
+        try {
+          await changesApi.addImpactedItem(change.id, { part_id: p.id, is_lead: i === 0 && !hasLead });
         } catch {
           failed.push(p.part_number);
         }
       }
       if (failed.length > 0) {
         toast.error(
-          `Could not attach ${failed.join(', ')} — add ${failed.length > 1 ? 'them' : 'it'} in the impact tree.`,
+          `Could not attach ${failed.join(', ')}. Add ${failed.length > 1 ? 'them' : 'it'} in the impact tree.`,
         );
       }
+      // The create request takes no deadline: it is set right after, as the
+      // deadline editor does. A refusal is named; the change itself stands.
+      if (!fromMotherPlant && quoteDeadline) {
+        try {
+          await changesApi.update(change.id, { required_by_date: `${quoteDeadline}T23:59:59Z` });
+        } catch (e) {
+          toast.error(`Could not set the quote deadline${errDetail(e) ? ` (${errDetail(e)})` : ''}. Set it on the Status card.`);
+        }
+      }
+      if (!fromMotherPlant && files.length > 0) {
+        const refused: string[] = [];
+        for (const f of files) {
+          try {
+            await changesApi.uploadAttachment(change.id, f);
+          } catch (e) {
+            refused.push(`${f.name}${errDetail(e) ? ` (${errDetail(e)})` : ''}`);
+          }
+        }
+        if (refused.length > 0) {
+          toast.error(`Could not attach ${refused.join(', ')}. Add it on the Overview tab.`);
+        }
+      }
+      if (fromMotherPlant) {
+        // Their documents and timing file ride along; a refused file is named,
+        // the change itself stands.
+        const uploads: [File, 'general' | 'mother_plant_timing'][] = [
+          ...motherPlant.documents.map((f) => [f, 'general'] as [File, 'general']),
+          ...(motherPlant.timingFile
+            ? [[motherPlant.timingFile, 'mother_plant_timing'] as [File, 'mother_plant_timing']] : []),
+        ];
+        const refused: string[] = [];
+        for (const [f, kind] of uploads) {
+          try {
+            await changesApi.uploadAttachment(change.id, f, { kind });
+          } catch (e) {
+            refused.push(`${f.name}${errDetail(e) ? ` (${errDetail(e)})` : ''}`);
+          }
+        }
+        if (refused.length > 0) {
+          toast.error(plantText('mp.attachFailed', motherPlant.name).replace('{x}', refused.join(', ')));
+        }
+      }
+      // Every change list (the Changes page, the project's list) shows it on the way back.
+      qc.invalidateQueries({ queryKey: ['changes'] });
       onClose();
       navigate(`/changes/${change.id}`);
     } catch (e) {
@@ -231,10 +373,11 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
     });
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold">{t('start.title')}</h2>
+          <h2 id={titleId} className="text-lg font-semibold">{t('start.title')}</h2>
           <button
             className="text-slate-400 hover:text-slate-200 text-xl leading-none"
             onClick={onClose}
@@ -266,7 +409,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 setPicked([]);
               }}
             >
-              <option value="">—</option>
+              <option value="">-</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {projectLabel(p)}
@@ -320,7 +463,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 >
                   <span className="font-mono text-slate-100 flex-shrink-0 w-36">{p.part_number}</span>
                   <span className="font-mono text-sky-300/80 flex-shrink-0 w-32">
-                    {p.customer_part_number ?? <span className="text-slate-600">—</span>}
+                    {p.customer_part_number ?? <span className="text-slate-600">-</span>}
                   </span>
                   <span className="text-slate-400 truncate min-w-0">{p.name}</span>
                   {i === 0 ? (
@@ -343,7 +486,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                     onClick={() => removePart(p.id)}
                     aria-label={`${t('start.clearItem')}: ${p.part_number}`}
                   >
-                    ✕
+                    <X aria-hidden="true" size={14} />
                   </button>
                 </li>
               ))}
@@ -384,7 +527,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                     >
                       <span className="font-mono text-slate-100 flex-shrink-0 w-36">{p.part_number}</span>
                       <span className="font-mono text-sky-300/80 flex-shrink-0 w-32">
-                        {p.customer_part_number ?? <span className="text-slate-600">—</span>}
+                        {p.customer_part_number ?? <span className="text-slate-600">-</span>}
                       </span>
                       <span className="text-slate-400 truncate min-w-0">{p.name}</span>
                     </button>
@@ -417,6 +560,14 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           </output>
           <p className="mt-1 text-xs text-slate-500">{t('start.titleAuto')}</p>
         </div>
+
+        {/* Default lead — info only; nobody picks it here (spec §16). */}
+        {projectPm && (
+          <p data-testid="start-default-lead" className="mb-4 text-xs text-slate-400">
+            {t('start.defaultLead')}: <span className="text-slate-200">{projectPm.name}</span>{' '}
+            <span className="text-slate-500">({t('start.projectPm')})</span>
+          </p>
+        )}
 
         {/* Reason */}
         <div className="mb-6">
@@ -451,8 +602,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 type="radio"
                 name="sc-customer-relevant"
                 className="mt-1"
-                checked={customerRelevant === true}
-                onChange={() => setCustomerRelevant(true)}
+                checked={customerRelevant === true && !fromMotherPlant}
+                onChange={() => { setCustomerRelevant(true); setFromMotherPlant(false); }}
               />
               <span>
                 <span className="text-slate-100">{t('start.customerChange')}</span>
@@ -475,8 +626,121 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <span className="block text-xs text-amber-300/80">{t('start.internalLater')}</span>
               </span>
             </label>
+            {/* Mother plant (spec §14): started by Project Management (and
+                admins) only; everyone else reads who does it. */}
+            {permissions?.can_start_mother_plant === false && (
+              <p data-testid="mother-plant-pm-only" className="text-xs text-slate-500">
+                {plantText('mp.startPmOnly', null)}
+              </p>
+            )}
+            {permissions?.can_start_mother_plant !== false && (
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="sc-customer-relevant"
+                  className="mt-1"
+                  checked={fromMotherPlant}
+                  onChange={() => {
+                    setFromMotherPlant(true);
+                    setMotherPlant((d) => (motherPlants.includes(d.name)
+                      ? d : { ...d, name: permissions?.default_mother_plant ?? motherPlants[0] }));
+                  }}
+                />
+                <span>
+                  <span className="text-slate-100">{plantText('mp.startOption', null)}</span>
+                  <span className="block text-xs text-slate-500">
+                    {plantText('mp.startHint', null)}
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
         </fieldset>
+
+        {fromMotherPlant && (
+          <MotherPlantFields value={motherPlant} onChange={setMotherPlant} plants={motherPlants} />
+        )}
+        {fromMotherPlant && (
+          <div className="mb-6" data-testid="mother-plant-description">
+            <label htmlFor="sc-mp-description" className="block text-sm text-slate-300 mb-1">
+              {t('start.description')} <span className="text-slate-500">{t('start.required')}</span>
+            </label>
+            <textarea id="sc-mp-description" rows={3} required aria-required="true"
+              className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
+              placeholder={t('start.descriptionPlaceholderPlant')}
+              value={description} onChange={(e) => setDescription(e.target.value)} />
+            <p className="mt-1 text-xs text-slate-500">{t('start.descriptionPlantHint')}</p>
+          </div>
+        )}
+
+        {!fromMotherPlant && (
+          <div data-testid="kickoff-fields" className="mb-6 space-y-4">
+            <div>
+              <label htmlFor="sc-description" className="block text-sm text-slate-300 mb-1">
+                {t('start.description')} <span className="text-slate-500">{t('start.optional')}</span>
+              </label>
+              <textarea id="sc-description" rows={3}
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
+                placeholder={t('start.descriptionPlaceholder')}
+                value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+            {customerRelevant === true && (
+              <div>
+                <label htmlFor="sc-quote-deadline" className="block text-sm text-slate-300 mb-1">
+                  {t('deadline.quote')} <span className="text-slate-500">{t('start.optional')}</span>
+                </label>
+                <DateInput id="sc-quote-deadline" aria-label={t('deadline.quote')}
+                  value={quoteDeadline} onChange={setQuoteDeadline} commitOnChange
+                  className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm" />
+                <p className="mt-1 text-xs text-slate-500">{t('start.quoteDeadlineHint')}</p>
+              </div>
+            )}
+            <div>
+              <p className="block text-sm text-slate-300 mb-1">
+                {t('start.documents')} <span className="text-slate-500">{t('start.optional')}</span>
+              </p>
+              <div data-testid="start-dropzone" role="button" tabIndex={0}
+                onClick={() => fileInput.current?.click()}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click(); }}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+                className={`rounded-lg border border-dashed px-3 py-3 text-center text-xs cursor-pointer ${
+                  dragging ? 'border-sky-500 bg-sky-950/30 text-sky-200' : 'border-slate-600 text-slate-400 hover:border-slate-500'}`}>
+                {t('start.dropFiles')}
+              </div>
+              <input ref={fileInput} type="file" multiple className="hidden" data-testid="start-file-input"
+                onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+              {files.length > 0 && (
+                <ul className="mt-1 space-y-0.5" data-testid="start-files">
+                  {files.map((f) => (
+                    <li key={`${f.name}-${f.size}`} className="flex items-center gap-2 text-xs text-slate-300">
+                      <span className="truncate min-w-0">{f.name}</span>
+                      <button type="button" className="ml-auto text-slate-500 hover:text-slate-200"
+                        aria-label={`${t('start.removeFile')}: ${f.name}`}
+                        onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}><X aria-hidden="true" size={14} /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* Soft: never blocks Create, only says what the hand-over will miss. */}
+            {handOverMissing.length > 0 ? (
+              <div data-testid="start-ready-missing"
+                className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs">
+                <p className="text-amber-200">{t('start.readyMissing')}</p>
+                <ul className="mt-1 list-disc list-inside text-amber-100/80">
+                  {handOverMissing.map((m) => <li key={m}>{m}</li>)}
+                </ul>
+                <p className="mt-1 text-slate-400">{t('start.readySoft')}</p>
+              </div>
+            ) : (
+              <p data-testid="start-ready" className="inline-flex items-center gap-1 text-xs text-emerald-400">
+                <Check aria-hidden="true" size={12} />{t('start.ready')}
+              </p>
+            )}
+          </div>
+        )}
 
         {createError && (
           <p role="alert" data-testid="start-error"
@@ -497,8 +761,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           >
             {t('common.cancel')}
           </button>
-          <button
-            className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-500 disabled:opacity-50"
+          <button type="button"
+            className={btnPrimary}
             disabled={!canSubmit}
             onClick={handleSubmit}
           >

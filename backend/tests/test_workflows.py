@@ -165,9 +165,12 @@ async def test_department_queues_see_their_tasks(client, eng_auth, part, wf_temp
     )
     assert res.json() == []
 
-    # Open-task badge counts the one actionable task
+    # The open-task count is the sidebar badge's number: the caller's own
+    # queue ("my departments", as the badge reads it), never a global count
+    mine = (await client.get("/api/v1/workflow-instances/my-tasks",
+                             headers=eng_auth)).json()
     res = await client.get("/api/v1/workflow-instances/open-task-count", headers=eng_auth)
-    assert res.json()["count"] == 1
+    assert res.json()["count"] == len(mine)
 
 
 async def test_informed_task_cannot_be_completed(client, eng_auth, part, wf_template):

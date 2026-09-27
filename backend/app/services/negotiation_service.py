@@ -82,7 +82,7 @@ class NegotiationService:
     async def record_round(
         session: AsyncSession, change: ChangeRequest, actor: User, *,
         channel: str, note: str, counter_price: Optional[float] = None,
-        is_final: bool = False,
+        is_final: bool = False, offer_id: Optional[int] = None,
     ) -> ChangeNegotiation:
         if change.status != NEGOTIATION_STATUS:
             raise ChangeError(
@@ -94,11 +94,28 @@ class NegotiationService:
             raise ChangeError("A negotiation round must record its result")
         if counter_price is not None and counter_price < 0:
             raise ChangeError("A counter price cannot be negative")
+        # A round is about one offer version: the one named, or the one the
+        # customer currently holds (the latest sent). None when the quote
+        # predates versioned offers.
+        from app.services.offer_service import OfferService
+        if offer_id is not None:
+            from app.models.change_offer import ChangeOffer
+            offer = await session.get(ChangeOffer, offer_id)
+            if offer is None or offer.change_id != change.id:
+                raise ChangeError("That offer is not on this change")
+            # A round is about what the customer held: never a draft.
+            if offer.status not in ("sent", "superseded", "accepted", "declined"):
+                raise ChangeError(
+                    f"Offer v{offer.version} is a draft: a negotiation round "
+                    "refers to an offer the customer received")
+        else:
+            latest = await OfferService.latest_sent(session, change)
+            offer_id = latest.id if latest is not None else None
 
         row = ChangeNegotiation(
             change_id=change.id, channel=channel, note=note.strip(),
             counter_price=counter_price, is_final=bool(is_final),
-            created_by=actor.id)
+            offer_id=offer_id, created_by=actor.id)
         session.add(row)
         await session.flush()
         if row.is_final:
@@ -111,13 +128,15 @@ class NegotiationService:
                 session, change, "negotiation_final",
                 f"Negotiation closed ({channel}): {row.note}", actor.id,
                 new_value={"negotiation_id": row.id, "channel": channel,
-                           "counter_price": row.counter_price})
+                           "counter_price": row.counter_price,
+                           "offer_id": offer_id})
         else:
             await ChangeService.append_changelog(
                 session, change, "negotiation_round",
                 f"Negotiation round #{row.id} recorded ({channel})", actor.id,
                 new_value={"negotiation_id": row.id, "channel": channel,
-                           "counter_price": row.counter_price})
+                           "counter_price": row.counter_price,
+                           "offer_id": offer_id})
         return row
 
     @staticmethod

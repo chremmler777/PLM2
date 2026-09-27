@@ -4,6 +4,7 @@
  * scrolls; the tab content below it does.
  */
 import { useNavigate } from 'react-router-dom';
+import { formatDate, parseApiDateTime } from '../../lib/format';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -41,7 +42,9 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
   const activeRevision = sel.partRevisions?.find((r) => r.id === part.active_revision_id);
   const phase = article?.lifecycle_phase ?? part.lifecycle_phase;
   const category = CATEGORY_META[part.item_category];
-  const overdue = !!part.next_calibration_due && new Date(part.next_calibration_due) < new Date();
+  // An instant (last calibration + interval, naive UTC): overdue once it has
+  // passed, the same test as the dashboard's gauges_due (due < now).
+  const overdue = !!part.next_calibration_due && parseApiDateTime(part.next_calibration_due).getTime() < Date.now();
   const facts = [
     part.supplier ? `Supplier: ${part.supplier}` : null,
     part.data_classification ? `Classification: ${part.data_classification}` : null,
@@ -83,6 +86,12 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
             <RevisionLabel name={activeRevision.revision_name} index={activeRevision.customer_index} />
           </span>
         )}
+        {!activeRevision && !part.active_revision_id && sel.partRevisions?.some((r) => r.intake_pending) && (
+          <span data-testid="detail-no-active-revision" title="The new customer index waits for Development's triage"
+            className="px-1.5 py-0.5 rounded bg-amber-900/40 text-xs text-amber-200">
+            No active index yet, pending triage
+          </span>
+        )}
         <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${typeColor(part.part_type)}`}>
           {part.part_type.replace(/_/g, ' ')}
         </span>
@@ -102,7 +111,7 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
         <div className="mt-2 flex items-center gap-3 text-sm">
           {part.next_calibration_due ? (
             <span className={overdue ? 'text-red-400 font-medium' : 'text-slate-300'}>
-              📏 Calibration due {new Date(part.next_calibration_due).toLocaleDateString()}
+              📏 Calibration due {formatDate(part.next_calibration_due)}
               {overdue && ' (overdue)'}
             </span>
           ) : (

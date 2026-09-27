@@ -70,6 +70,17 @@ describe('CostingBuckets', () => {
   })
   afterEach(cleanup)
 
+  it('says once that Mexico (Silao) is not in use yet when it is one of the change\'s plants', () => {
+    buckets({ canSeeAll: true, plants: [...PLANTS, { id: 3, name: 'Silao Mexico', code: 'SIL', is_active: true }] })
+    expect(screen.getAllByTestId('plant-not-in-use')).toHaveLength(1)
+    expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
+  })
+
+  it('has no Mexico note for the US plant alone', () => {
+    buckets({ canSeeAll: true })
+    expect(screen.queryByTestId('plant-not-in-use')).toBeNull()
+  })
+
   it('gives every participating department a bucket', () => {
     buckets({ canSeeAll: true })
     expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
@@ -95,7 +106,8 @@ describe('CostingBuckets', () => {
   })
 
   it('shows a department member their own bucket and nobody else’s', async () => {
-    buckets({ myDepartmentIds: [2] })
+    buckets({ myDepartmentIds: [2],
+      change: change({ costing_pending_department_ids: [2, 4] }) })
     // No summation is even requested without the privilege.
     expect(changesApi.getSummation).not.toHaveBeenCalled()
     expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
@@ -104,7 +116,24 @@ describe('CostingBuckets', () => {
     expect(screen.queryByTestId('costing-state-4')).toBeNull()
     // Just a line saying the change does not sit on them alone.
     expect(screen.getByTestId('costing-others').textContent)
-      .toBe(t('costing.others').replace('{n}', '1'))
+      .toBe(t('costing.others').replace('{n}', '1').replace('{s}', ''))
+  })
+
+  it('counts the others from the backend pending list, the same as the cockpit', () => {
+    // Four departments routed, two of them already done: only the one still
+    // owing (not the viewer's) is "still costing".
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment(), assessment({ id: 2, department_id: 4 }),
+        assessment({ id: 3, department_id: 6 }), assessment({ id: 4, department_id: 8 })],
+      costing_pending_department_ids: [2, 6],
+    }) })
+    expect(screen.getByTestId('costing-others').textContent)
+      .toBe(t('costing.others').replace('{n}', '1').replace('{s}', ''))
+  })
+
+  it('says nothing about others once nobody else is costing', () => {
+    buckets({ myDepartmentIds: [2], change: change({ costing_pending_department_ids: [2] }) })
+    expect(screen.queryByTestId('costing-others')).toBeNull()
   })
 
   it('opens the member’s bucket onto their cost positions', async () => {
@@ -117,7 +146,7 @@ describe('CostingBuckets', () => {
 
   it('lets PM see the figures and which buckets are still empty', async () => {
     buckets({ canSeeAll: true })
-    await waitFor(() => expect(screen.getByTestId('costing-total-2').textContent).toBe('1000.00'))
+    await waitFor(() => expect(screen.getByTestId('costing-total-2').textContent).toBe('1,000.00'))
     expect(screen.getByTestId('costing-state-2').textContent).toBe(t('costing.filled'))
     expect(screen.getByTestId('costing-state-4').textContent).toBe(t('costing.empty'))
     expect(screen.getByTestId('costing-lead-2').textContent).toContain('15')
@@ -139,5 +168,54 @@ describe('CostingBuckets', () => {
   it('says so plainly when nobody is costing yet', () => {
     buckets({ change: change({ assessments: [] }) })
     expect(screen.getByText(t('costing.none'))).toBeTruthy()
+  })
+
+  it('names the departments that have not costed yet (costing-side signal for the step button)', async () => {
+    buckets({ canSeeAll: true })
+    const note = await screen.findByTestId('costing-readiness')
+    expect(note.textContent).toContain('1 of 2 departments has not costed yet: Tool Engineer')
+  })
+
+  it('says loudly when nothing is costed at all', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation, currency: 'USD',
+      by_department: summation.by_department.map((d) => ({ ...d, one_time_internal: 0, one_time_external: 0 })),
+      totals: { ...summation.totals, one_time_internal: 0, one_time_external: 0, grand_total: 0 },
+    } as never)
+    buckets({ canSeeAll: true })
+    const note = await screen.findByTestId('costing-readiness')
+    expect(note.textContent).toContain('Nothing is costed yet: the total is 0.00 USD')
+  })
+
+  it('counts money booked only in another currency as costed', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation, currency: 'EUR',
+      by_department: summation.by_department.map((d) => ({ ...d, one_time_internal: 0, one_time_external: 0 })),
+      totals: { ...summation.totals, one_time_internal: 0, one_time_external: 0, grand_total: 0 },
+      totals_by_currency: { USD: { one_time_internal: 0, one_time_external: 700,
+        lifecycle_internal: 0, lifecycle_external: 0, grand_total: 700 } },
+      mixed_currency: true,
+      by_department_plant: [{ department_id: 2, plant_id: 1, currency: 'USD', one_time_internal: 0,
+        one_time_external: 500, lifecycle_internal: 0, lifecycle_external: 0 }],
+      positions_by_department: [{ department_id: 4, position_cost: 0, hours: 0, hours_cost: 0, machine_hours: 0,
+        trials: 0, position_count: 1, unrated_hours: false, unpriced_count: 0,
+        positions: [{ position_id: 1, label: 'Tool', kind: 'external', cost: 200, currency: 'USD',
+          line_value: null, rate: null }] }],
+    } as never)
+    buckets({ canSeeAll: true })
+    await waitFor(() => expect(screen.getByTestId('costing-state-2').textContent).toBe(t('costing.filled')))
+    expect(screen.getByTestId('costing-state-4').textContent).toBe(t('costing.filled'))
+    expect(screen.queryByTestId('costing-readiness')).toBeNull()
+  })
+
+  it('stays quiet once every department has costed, and outside costing', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation,
+      by_department: summation.by_department.map((d) => ({ ...d, one_time_internal: 50 })),
+    } as never)
+    buckets({ canSeeAll: true })
+    await waitFor(() => expect(changesApi.getSummation).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 10))
+    expect(screen.queryByTestId('costing-readiness')).toBeNull()
   })
 })

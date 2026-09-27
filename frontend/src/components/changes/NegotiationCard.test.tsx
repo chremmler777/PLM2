@@ -64,7 +64,7 @@ describe('NegotiationCard', () => {
     expect(screen.getByTestId('negotiation-channel-3').textContent)
       .toBe(t('negotiation.channel.meeting'))
     // The round carries its date and who recorded it.
-    expect(screen.getByTestId('negotiation-round-1').textContent).toContain('2026-08-01')
+    expect(screen.getByTestId('negotiation-round-1').textContent).toContain('1 Aug 2026')
     expect(screen.getByTestId('negotiation-round-1').textContent).toContain('sales.anna')
   })
 
@@ -80,7 +80,7 @@ describe('NegotiationCard', () => {
       .toBe(t('negotiation.final'))
     // Only the result carries the badge — the earlier round is plain history.
     expect(screen.queryByTestId('negotiation-final-badge-1')).toBeNull()
-    expect(screen.getByTestId('negotiation-final-price').textContent).toBe('1100.00')
+    expect(screen.getByTestId('negotiation-final-price').textContent).toBe('1,100.00 EUR')
   })
 
   it('points at the acceptance controls once there is a result', async () => {
@@ -146,6 +146,9 @@ describe('NegotiationCard', () => {
     await waitFor(() => expect(screen.getByTestId('negotiation-delete-1')).toBeTruthy())
     expect(screen.queryByTestId('negotiation-delete-2')).toBeNull()
     fireEvent.click(screen.getByTestId('negotiation-delete-1'))
+    // Asks first.
+    expect(changesApi.deleteNegotiation).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete round' }))
     await waitFor(() => expect(changesApi.deleteNegotiation).toHaveBeenCalledWith(7, 1))
   })
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ImplementationTracking, { vendorLeadTimeLine } from './ImplementationTracking'
+import ImplementationTracking, { QUOTED_LEAD_TIMES, vendorLeadTimeLine } from './ImplementationTracking'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 
@@ -66,7 +66,7 @@ describe('vendorLeadTimeLine', () => {
       { id: 3, department_id: 2, label: 'Drawings', kind: 'internal_effort', offers: [] },
     ] as never)
     expect(line).toBe(
-      `${t('impl2.vendorLeadTimes')}: Equipment change — 30 business days (VendorA)`)
+      `${QUOTED_LEAD_TIMES}: Equipment change: 30 business days (VendorA)`)
   })
 
   it('says nothing when no vendor has been picked', () => {
@@ -173,6 +173,14 @@ describe('ImplementationTracking progress reports', () => {
     const ok = await screen.findByTestId('impl-cadence-2')
     expect(ok.textContent).toBe(t('impl2.reported'))
     expect(ok.className).toContain('emerald')
+  })
+
+  it('says no report yet, not reported, when nothing was ever reported', async () => {
+    setData({ state: [stateRow({ owes_report: false, last_report_at: null })] })
+    render_()
+    const chip = await screen.findByTestId('impl-cadence-2')
+    expect(chip.textContent).toBe(t('impl2.noReportChip'))
+    expect(chip.className).not.toContain('emerald')
   })
 
   it('shows the history with its author, the red chip and the risk note', async () => {

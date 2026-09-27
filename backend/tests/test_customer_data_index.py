@@ -1,5 +1,5 @@
 """HTTP flow: customer data → E1/E2 → official 1 → proposal 1.1 → promote."""
-from tests.conftest import login
+from tests.conftest import activate_pending, login
 
 
 async def _mk_part(client, auth, seed, number="P-CD"):
@@ -33,6 +33,11 @@ async def test_customer_data_flow(client, eng_auth, seed):
 
     part = (await client.get(f"/api/v1/parts/{pid}", headers=eng_auth)).json()
     assert [x["revision_name"] for x in part["revisions"]] == ["E1", "E1.1", "1"]
+    # spec §17: every new index waits for triage; nothing is active yet
+    assert part["active_revision_id"] is None
+    assert {x["revision_name"]: x["status"] for x in part["revisions"]}["1"] == "in_review"
+    await activate_pending(client, pid)
+    part = (await client.get(f"/api/v1/parts/{pid}", headers=eng_auth)).json()
     assert part["active_revision_id"] == [x for x in part["revisions"] if x["revision_name"] == "1"][0]["id"]
 
 

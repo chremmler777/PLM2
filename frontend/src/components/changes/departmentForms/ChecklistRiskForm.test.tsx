@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ChecklistRiskForm from './ChecklistRiskForm'
+import { t } from '../../../i18n/cmLabels'
 
 const raiseConcern = vi.fn().mockResolvedValue({ id: 1 })
 vi.mock('../../../api/changes', () => ({
@@ -46,5 +47,29 @@ describe('ChecklistRiskForm', () => {
     fireEvent.click(screen.getByTestId('check-risk-submit'))
     expect((await screen.findByRole('alert')).textContent).toContain('nope')
     expect((screen.getByTestId('check-risk-note') as HTMLTextAreaElement).value).toBe('x')
+  })
+
+  it('names each rating button by its weight, not a bare digit', async () => {
+    render(wrap(<ChecklistRiskForm changeId={5} departmentId={4}
+      checklistKey="threed_change" defaultNote="" onDone={() => {}} />))
+    const group = screen.getByRole('group', { name: t('risk.severity') })
+    expect(group).toBeTruthy()
+    const high = screen.getByRole('button', { name: 'Severity 3, highest' })
+    expect(high.textContent).toBe('3')
+    expect(screen.getByRole('button', { name: 'Severity 2, medium' }).getAttribute('aria-pressed')).toBe('true')
+    await screen.findByRole('option', { name: 'Cooling' })
+  })
+
+  it('says what the disabled Flag button still needs', async () => {
+    render(wrap(<ChecklistRiskForm changeId={5} departmentId={4}
+      checklistKey="threed_change" defaultNote="" onDone={() => {}} />))
+    const missing = screen.getByTestId('check-risk-missing')
+    expect(missing.textContent).toBe(t('concern.missing')
+      .replace('{x}', `${t('concern.missingType')}, ${t('concern.missingNote')}`))
+    expect(screen.getByTestId('check-risk-submit').getAttribute('title')).toBe(missing.textContent)
+    await screen.findByRole('option', { name: 'Cooling' })
+    fireEvent.change(screen.getByTestId('check-risk-type'), { target: { value: 'd4_cooling' } })
+    fireEvent.change(screen.getByTestId('check-risk-note'), { target: { value: 'gate' } })
+    expect(screen.queryByTestId('check-risk-missing')).toBeNull()
   })
 })

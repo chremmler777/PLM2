@@ -66,6 +66,21 @@ class Part(Base):
     toolmaker_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True, index=True)
     tool_tonnage_class: Mapped[int | None] = mapped_column(Integer, nullable=True)  # clamping force class, t
     tool_cycle_time_s: Mapped[float | None] = mapped_column(Numeric(6, 1, asdecimal=False), nullable=True)
+    # The press tonnage of the tool as the source systems know it (108),
+    # kept by the tool tonnage sync (tool_tonnage_service), one set per
+    # source so a failed MachineDB fetch never downgrades a tool to TWOS.
+    # Costing derives the change's default machine class from it: MachineDB
+    # first, then TWOS, then tool_tonnage_class above (typed in plm2). A sync
+    # never clears a value (an empty or failed answer leaves it as it was).
+    # MachineDB: the assigned press's clamping force, else the smallest
+    # press the tool is qualified on (basis "assigned" | "qualified_min").
+    tool_tonnage_mdb_t: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tool_tonnage_mdb_basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    tool_tonnage_mdb_machine: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tool_tonnage_mdb_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # TWOS: the tool's press ("1,300" -> 1300; "0" / "" unknown, not stored).
+    tool_tonnage_twos_t: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tool_tonnage_twos_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Material (item_category = article only). Linked to MaterialDB (a series
     # material with a 40- KTX number, or a research material without one) or

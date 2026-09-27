@@ -10,7 +10,7 @@ from app.models.change import ChangeMeeting
 async def post_meeting(client, auth, change_id, **overrides):
     body = {"participants": [{"name": "PM Jane"}, {"name": "Customer Rep"}],
             "notes": "Initial scope clarification",
-            "selected_department_ids": [], **overrides}
+            "selected_department_ids": [], "cost_carrier": "customer", **overrides}
     return await client.post(f"/api/v1/changes/{change_id}/meetings",
                              json=body, headers=auth)
 
@@ -132,7 +132,7 @@ async def test_meeting_authz_pm_or_lead_or_admin(client, admin_auth, seed):
     change = await create_change(client, admin_auth, seed["project_id"])
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await post_meeting(client, eng_auth, change["id"])
-    assert res.status_code == 400
+    assert res.status_code == 403   # a missing right, not a bad request (§16)
 
 
 @pytest.mark.asyncio
@@ -153,7 +153,7 @@ async def test_the_room_assigns_rasic_letters_and_routing_follows_them(
         s.add_all([dev, te, q]); await s.commit()
         ids = {"dev": dev.id, "te": te.id, "q": q.id}
     await to_scoping(client, admin_auth, change["id"])
-    # "I" is accepted and stored as C; a bad letter is refused.
+    # "I" (Informed) is kept as I; a bad letter is refused.
     res = await post_meeting(client, admin_auth, change["id"],
                              department_rasic={ids["dev"]: "X"})
     assert res.status_code == 400 and "RASIC" in res.text
@@ -162,7 +162,7 @@ async def test_the_room_assigns_rasic_letters_and_routing_follows_them(
                              department_rasic={ids["dev"]: "R", ids["te"]: "A", ids["q"]: "I"})
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["department_rasic"] == {str(ids["dev"]): "R", str(ids["te"]): "A", str(ids["q"]): "C"}
+    assert body["department_rasic"] == {str(ids["dev"]): "R", str(ids["te"]): "A", str(ids["q"]): "I"}
     assert sorted(body["selected_department_ids"]) == sorted(ids.values())
     mid = body["id"]
     # Editing the letters keeps the id list in step.
@@ -212,3 +212,48 @@ async def test_recommended_departments_carry_the_standard_letter(
     assert res.status_code == 200, res.text
     for row in res.json():
         assert row["rasic_letter"] in ("R", "A", "S", "C")
+
+
+
+@pytest.mark.asyncio
+async def test_meeting_attendees_resolve_to_users(client, admin_auth, seed):
+    """Attendees are stored as {name, user_id}: a given id stands, a missing
+    one is found by username or email, free text stays free text."""
+    change = await create_change(client, admin_auth, seed["project_id"])
+    await to_scoping(client, admin_auth, change["id"])
+    res = await post_meeting(client, admin_auth, change["id"], participants=[
+        {"name": "Admin", "user_id": seed["admin_id"]},
+        {"name": "Engineer (from hub)", "email": "ENG@test.io"},
+        {"name": "By username", "username": "eng"},
+        {"name": "Customer Rep"},
+    ])
+    assert res.status_code == 200, res.text
+    ps = res.json()["participants"]
+    assert [p["user_id"] for p in ps] == [
+        seed["admin_id"], seed["engineer_id"], seed["engineer_id"], None]
+    mid = res.json()["id"]
+    res = await client.patch(f"/api/v1/changes/{change['id']}/meetings/{mid}",
+                             json={"participants": [{"name": "E", "email": "eng@test.io"}]},
+                             headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["participants"][0]["user_id"] == seed["engineer_id"]
+
+
+@pytest.mark.asyncio
+async def test_a_user_id_that_disagrees_with_the_name_or_email_is_ignored(
+        client, admin_auth, seed):
+    """Review finding 8: a client cannot pin an attendee on another user by
+    id. A mismatching id is dropped and the name/email resolves instead."""
+    change = await create_change(client, admin_auth, seed["project_id"])
+    await to_scoping(client, admin_auth, change["id"])
+    res = await post_meeting(client, admin_auth, change["id"], participants=[
+        # the id is the admin's, the email the engineer's: the email wins
+        {"name": "Engineer", "user_id": seed["admin_id"], "email": "eng@test.io"},
+        # the id is the engineer's, the name somebody else's: free text
+        {"name": "Customer Rep", "user_id": seed["engineer_id"]},
+        # an id with the matching name stands
+        {"name": "engineer", "user_id": seed["engineer_id"]},
+    ])
+    assert res.status_code == 200, res.text
+    assert [p["user_id"] for p in res.json()["participants"]] == [
+        seed["engineer_id"], None, seed["engineer_id"]]

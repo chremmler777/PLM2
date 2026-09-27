@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { STATUS_LABELS, NEXT_STATUS, STATUS_PILL, OFF_PATH_STATUSES, STATUS_HINTS, stepPosition } from './changeStatus'
+import { STATUS_LABELS, NEXT_STATUS, STATUS_PILL, OFF_PATH_STATUSES, STATUS_HINTS, stepPosition, decodeLogValue } from './changeStatus'
 import { CHANGE_STATUS_ORDER } from '../types/change'
 import { t } from '../i18n/cmLabels'
 
@@ -68,5 +68,86 @@ describe('changeStatus', () => {
       expect(stepPosition('rejected', false)).toBeNull()
       expect(stepPosition('cancelled', undefined)).toBeNull()
     })
+  })
+})
+
+describe('activeTabsFor', () => {
+  it('marks Approval (offer) active next to costing for an internal change at costing', async () => {
+    const { activeTabsFor } = await import('./changeStatus')
+    expect(activeTabsFor('costing', false)).toEqual(['costing', 'offer'])
+    expect(activeTabsFor('costing', null)).toEqual(['costing', 'offer'])
+    expect(activeTabsFor('costing', true)).toEqual(['costing'])
+    expect(activeTabsFor('quoted', true)).toEqual(['offer'])
+    expect(activeTabsFor('approved', false)).toEqual(['timing'])
+    expect(activeTabsFor('on_hold', true)).toEqual([])
+  })
+})
+
+describe('decodeLogValue', () => {
+  it('decodes a JSON string and keeps everything else', () => {
+    expect(decodeLogValue('"on_hold"')).toBe('on_hold')
+    expect(decodeLogValue('on_hold')).toBe('on_hold')
+    expect(decodeLogValue('{"mode": "x"}')).toBe('{"mode": "x"}')
+    expect(decodeLogValue('"unterminated')).toBe('"unterminated')
+    expect(decodeLogValue(null)).toBeNull()
+    expect(decodeLogValue(undefined)).toBeNull()
+  })
+})
+
+describe('engineering review track (spec §17)', () => {
+  it('shows its own stages, tabs and next statuses', async () => {
+    const m = await import('./changeStatus')
+    expect(m.branchStepOrder(false, 'engineering_review')).toEqual(['captured', 'scoping', 'released', 'closed'])
+    expect(m.everydayTabsFor('engineering_review')).toEqual(['overview', 'impacted', 'review'])
+    expect(m.everydayTabsFor('customer', true)).toContain('review')
+    expect(m.everydayTabsFor('customer')).not.toContain('review')
+    expect(m.nextStatusesFor('scoping', 'engineering_review')).toEqual(['rejected'])
+    expect(m.activeTabsFor('scoping', false, 'engineering_review')).toEqual(['review'])
+    expect(m.resolveChangeTab('costing', 'scoping', 'engineering_review')).toBe('review')
+    expect(m.resolveChangeTab('review', 'scoping', 'customer')).toBe('review')
+    expect(m.changeTabLabel('review')).toBe('Review')
+  })
+})
+
+describe('one verb per step (UI polish 2.4)', () => {
+  it('names every forward step the same way everywhere', async () => {
+    const { transitionLabel, TRANSITION_LABELS } = await import('./changeStatus')
+    expect(transitionLabel('scoping', 'captured')).toBe('Hand over to scoping')
+    expect(transitionLabel('in_assessment', 'scoping')).toBe('Start assessment')
+    expect(transitionLabel('costing', 'in_assessment')).toBe('Close assessment')
+    expect(transitionLabel('quoting', 'costing')).toBe('Close costing')
+    expect(transitionLabel('approved', 'quoted')).toBe('Record approval')
+    expect(transitionLabel('in_implementation', 'approved')).toBe('Start implementation')
+    expect(transitionLabel('in_validation', 'in_implementation')).toBe('Finish implementation')
+    expect(transitionLabel('released', 'in_validation')).toBe('Release change')
+    expect(transitionLabel('closed', 'released')).toBe('Close change')
+    expect(transitionLabel('rejected', 'scoping')).toBe('Reject change')
+    // Where the change comes from changes the verb.
+    expect(transitionLabel('scoping', 'in_assessment')).toBe('Back to scoping')
+    expect(transitionLabel('scoping', 'rejected')).toBe('Reopen change')
+    expect(transitionLabel('in_assessment', 'on_hold')).toBe('Resume')
+    // Every status has a verb, and none is an arrow.
+    for (const v of Object.values(TRANSITION_LABELS)) expect(v).not.toMatch(/→/)
+  })
+
+  it('cancels and holds by their own verb even from on hold', async () => {
+    const { transitionLabel } = await import('./changeStatus')
+    expect(transitionLabel('cancelled', 'on_hold')).toBe('Cancel change')
+    expect(transitionLabel('on_hold', 'in_validation')).toBe('Put on hold')
+    expect(transitionLabel('in_validation', 'on_hold')).toBe('Resume')
+    expect(transitionLabel('released', 'on_hold')).toBe('Resume')
+  })
+
+  it('names every backward move as going back', async () => {
+    const { transitionLabel } = await import('./changeStatus')
+    expect(transitionLabel('in_implementation', 'in_validation')).toBe('Back to implementation')
+    expect(transitionLabel('costing', 'quoting')).toBe('Reopen costing')
+    expect(transitionLabel('scoping', 'in_assessment')).toBe('Back to scoping')
+    expect(transitionLabel('scoping', 'rejected')).toBe('Reopen change')
+    expect(transitionLabel('closed', 'rejected')).toBe('Close change')
+  })
+
+  it('spells statuses en-US', () => {
+    expect(STATUS_LABELS.cancelled).toBe('Canceled')
   })
 })

@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ChangeAttachments from './ChangeAttachments'
 import { t } from '../../i18n/cmLabels'
+import { formatDate } from '../../lib/format'
 
 vi.mock('../../api/changes', () => ({ changesApi: { deleteAttachment: vi.fn() } }))
 vi.mock('./AttachmentDropzone', () => ({
@@ -74,14 +75,14 @@ describe('ChangeAttachments provenance', () => {
       })],
     })} />)
     const line = screen.getByText(/Eva Eng/)
-    expect(line.textContent).toContain(new Date('2026-07-01T00:00:00').toLocaleDateString())
+    expect(line.textContent).toContain(formatDate('2026-07-01T00:00:00'))
   })
 
   it('falls back to the date alone when the uploader is unknown', () => {
     wrap(<ChangeAttachments change={change({
       attachments: [att({ id: 1, filename: 'base.pdf', created_at: '2026-07-01T00:00:00' })],
     })} />)
-    const line = screen.getByText(new Date('2026-07-01T00:00:00').toLocaleDateString())
+    const line = screen.getByText(formatDate('2026-07-01T00:00:00'))
     expect(line.textContent).not.toContain('·')
   })
 })

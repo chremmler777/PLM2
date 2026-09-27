@@ -47,7 +47,7 @@ async def test_incomplete_checklist_is_refused_naming_the_rows(client, admin_aut
     assert res.status_code == 400
     detail = res.json()["detail"]
     assert detail.startswith("Checklist incomplete, unanswered: ")
-    assert "Prototyping required" in detail and "Matching/sampling required" in detail
+    assert "Spare part required" in detail and "Scrap increase" in detail
 
 
 async def test_empty_checklist_is_refused(client, admin_auth, tab):
@@ -60,7 +60,7 @@ async def test_keyed_row_without_answer_counts_as_unanswered(client, admin_auth,
     del impacts[0]["answer"]
     res = await _submit(client, admin_auth, tab, {"impacts": impacts})
     assert res.status_code == 400
-    assert "Cycle time change" in res.json()["detail"]
+    assert "Work instruction / document update" in res.json()["detail"]
 
 
 async def test_invalid_answer_is_refused(client, admin_auth, tab):
@@ -73,13 +73,13 @@ async def test_invalid_answer_is_refused(client, admin_auth, tab):
 async def test_complete_checklist_is_accepted_and_no_rows_are_kept(
         client, admin_auth, tab, session_factory):
     res = await _submit(client, admin_auth, tab,
-                        {"impacts": answered(DEPT, yes={"threed_change"})})
+                        {"impacts": answered(DEPT, yes={"tool_modification"})})
     assert res.status_code == 200, res.text
     stored = await _stored(session_factory, tab)
-    assert len(stored["impacts"]) == 13
-    three = next(e for e in stored["impacts"] if e["key"] == "threed_change")
-    assert three == {"key": "threed_change", "answer": "yes", "impacted": True}
-    assert sum(1 for e in stored["impacts"] if e["answer"] == "no") == 12
+    assert len(stored["impacts"]) == 10
+    tool = next(e for e in stored["impacts"] if e["key"] == "tool_modification")
+    assert tool == {"key": "tool_modification", "answer": "yes", "impacted": True}
+    assert sum(1 for e in stored["impacts"] if e["answer"] == "no") == 9
 
 
 async def test_impacted_is_normalised_from_answer(client, admin_auth, tab, session_factory):
@@ -140,3 +140,99 @@ async def test_rest_to_no_mark_is_kept(client, admin_auth, tab, session_factory)
     stored = await _stored(session_factory, tab)
     assert stored["impacts"][3]["bulk"] is True
     assert sum(1 for e in stored["impacts"] if e.get("bulk")) == 1
+
+
+async def test_an_answer_stored_on_the_old_checklist_resubmits_as_it_is(
+        client, admin_auth, tab, session_factory):
+    """Item 4: the 13 common items before 2026-09-25 are legacy keys. An
+    assessment started on that checklist (its answers carry a key only the
+    old set asked) is complete on the set it was started with; answering the
+    new rows as well is accepted too."""
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no", "impacted": False}
+           for k in checklist.LEGACY_ITEMS]
+    res = await _submit(client, admin_auth, tab,
+                        {"impacts": old + answered(DEPT)})
+    assert res.status_code == 200, res.text
+    stored = await _stored(session_factory, tab)
+    assert {e["key"] for e in stored["impacts"]} >= {"cycle_time_change", "threed_change"}
+
+
+async def _store_on_row(session_factory, tab, details):
+    """What an assessment started on the earlier checklist left on its row."""
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, tab["assessment_id"])
+        a.details = json.dumps(details)
+        await s.commit()
+
+
+async def test_an_in_flight_resubmit_on_the_full_legacy_set_passes(
+        client, admin_auth, tab, session_factory):
+    """Review finding 3: a resubmit carrying exactly the earlier 13-item
+    checklist, on a row started on that checklist, is not refused for the
+    rows the new checklist added."""
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS]
+    await _store_on_row(session_factory, tab, {"impacts": old})
+    res = await _submit(client, admin_auth, tab, {"impacts": old})
+    assert res.status_code == 200, res.text
+
+
+async def test_a_legacy_key_only_in_the_payload_does_not_skip_the_new_checklist(
+        client, admin_auth, tab):
+    """Review finding 8: detection reads what is already on the row. A new
+    assessment sending one legacy-only key still owes the current rows."""
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS]
+    res = await _submit(client, admin_auth, tab, {"impacts": old})
+    assert res.status_code == 400
+    assert "Moldflow simulation" in res.json()["detail"]
+
+
+async def test_a_partial_legacy_set_names_the_legacy_rows_still_open(
+        client, admin_auth, tab, session_factory):
+    from app.services import assessment_checklist as checklist
+    old = [{"key": k[0], "answer": "no"} for k in checklist.LEGACY_ITEMS
+           if k[0] != "matching_required"]
+    await _store_on_row(session_factory, tab, {"draft": {"data": {"details": {
+        "impacts": old}}}})
+    res = await _submit(client, admin_auth, tab, {"impacts": old})
+    assert res.status_code == 400
+    assert "Matching/sampling required" in res.json()["detail"]
+    # The new rows are not demanded of an assessment started on the old set.
+    assert "Moldflow simulation" not in res.json()["detail"]
+
+
+async def test_a_legacy_draft_on_the_row_marks_the_assessment_as_legacy():
+    """Detection also reads what is stored on the row: a kept draft with a
+    legacy-only key makes the old set the one the answer is judged by."""
+    from app.services.change_service import ChangeService
+    stored = {"draft": {"data": {"details": {"impacts": [
+        {"key": "threed_change", "answer": "no"}]}}}}
+    assert ChangeService._started_on_legacy_checklist("Tool Engineer", stored)
+    assert not ChangeService._started_on_legacy_checklist("Tool Engineer", {})
+    assert not ChangeService._started_on_legacy_checklist(
+        "Tool Engineer", {"impacts": answered(DEPT)})
+
+
+async def test_a_new_assessment_owes_the_new_checklist(client, admin_auth, tab):
+    """No legacy key anywhere: the current department checklist is owed."""
+    res = await _submit(client, admin_auth, tab, {"impacts": [
+        {"key": "work_instruction_update", "answer": "no"}]})
+    assert res.status_code == 400
+    assert "Moldflow simulation" in res.json()["detail"]
+
+
+async def test_every_department_list_is_well_formed():
+    from app.services import assessment_checklist as checklist
+    common = [i[0] for i in checklist.COMMON_ITEMS]
+    assert len(common) == 4
+    for dept in ("Development", "Tool Engineer", "Manufacturing Engineer",
+                 "Process Engineer", "APQP", "Packaging Engineer", "Quality",
+                 "Scheduling", "Sales", "Project Manager", "Finance"):
+        keys = [i["key"] for i in checklist.items_for(dept)]
+        assert keys[:4] == common, dept
+        assert len(keys) > 4 and len(keys) == len(set(keys)), dept
+    assert checklist.label_for("cycle_time_change", "Sales") == "Cycle time change"
+    assert "cycle_time_change" in checklist.accepted_keys_for("Sales")
+    assert "cycle_time_change" not in checklist.keys_for("Sales")

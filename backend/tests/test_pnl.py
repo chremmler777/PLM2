@@ -246,7 +246,9 @@ async def test_summary_shape_and_totals(session_factory, seed, pnl_data):
             s["totals"]["revenue"] - s["totals"]["total_cost"])
         assert set(s["by_branch"]) == {"customer", "internal"}
         assert set(s.keys()) == {
-            "totals", "pipeline", "realized", "by_project", "by_branch", "count"}
+            "totals", "pipeline", "realized", "by_project", "by_branch", "count",
+        # grouped by costing currency (no FX): the top level is the main one
+        "currency", "currencies", "by_currency"}
         # cust(quoted) + internal(costing) + approved(approved) + org B's
         # change (admin bypasses org scoping) all in scope.
         assert s["count"] == 4
@@ -260,8 +262,18 @@ async def test_summary_shape_and_totals(session_factory, seed, pnl_data):
 async def test_org_scoping(session_factory, seed, pnl_data):
     from app.services.pnl_service import PnlService
     async with session_factory() as session:
-        # A non-admin viewer in org A must never see org B's change.
+        # Revenue and margin are prices: an engineer outside the cost roles
+        # has no P&L rows at all.
         engineer = await session.get(User, seed["engineer_id"])
+        assert await PnlService.changes_pnl(session, engineer) == []
+        # As a Sales member (a cost role), a non-admin viewer in org A must
+        # still never see org B's change.
+        from app.models.workflow import UserDepartment
+        sales = Department(name="Sales", flow_type="action", is_active=True)
+        session.add(sales)
+        await session.flush()
+        session.add(UserDepartment(user_id=engineer.id, department_id=sales.id))
+        await session.flush()
         rows = await PnlService.changes_pnl(session, engineer)
         ids = {r["change_id"] for r in rows}
         assert pnl_data["change_b_id"] not in ids

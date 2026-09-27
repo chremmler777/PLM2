@@ -3,12 +3,14 @@
  */
 
 import { useState } from 'react';
+import { formatDate } from '../lib/format';
 import { useTemplates, useDepartments, useCreateTemplate, useUpdateTemplate, useDeactivateTemplate } from '../hooks/queries/useWorkflows';
 import { WfTemplate, WfTemplateSave, WfStep, WfStage, Department } from '../types/workflow';
 import * as workflowApi from '../api/workflows';
 import { toast } from 'sonner';
 import StepEditorModal from '../components/workflows/StepEditorModal';
 import WorkflowFlowChart from '../components/workflows/WorkflowFlowChart';
+import { departmentLabel } from '../lib/departments';
 
 // Draft types for local editor state (id fields are optional)
 type DraftStage = Omit<WfStage, 'id' | 'template_id'> & { id?: number; template_id?: number };
@@ -328,7 +330,7 @@ export default function WorkflowDesignerPage() {
                   />
                   {selectedTemplate && (
                     <div className="text-xs text-slate-400 mt-3">
-                      v{selectedTemplate.version} • Updated {selectedTemplate.updated_at ? new Date(selectedTemplate.updated_at).toLocaleDateString() : 'never'}
+                      v{selectedTemplate.version} • Updated {selectedTemplate.updated_at ? formatDate(selectedTemplate.updated_at) : 'never'}
                     </div>
                   )}
                 </div>
@@ -500,7 +502,10 @@ function StageEditor({ stage, departments, onEditStep, onAddStep, onDeleteStep, 
 function StepCard({ step, departments, onEdit, onDelete }: any) {
   const rasicLetters = step.rasic_assignments.map((r: any) => r.rasic_letter).join('');
   const deptNames = step.rasic_assignments
-    .map((r: any) => departments.find((d: Department) => d.id === r.department_id)?.name)
+    .map((r: any) => {
+      const d = departments.find((x: Department) => x.id === r.department_id);
+      return d ? departmentLabel(d) : `#${r.department_id}`;
+    })
     .filter(Boolean)
     .join(', ');
 

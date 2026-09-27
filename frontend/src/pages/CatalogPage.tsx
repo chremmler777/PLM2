@@ -314,7 +314,7 @@ export default function CatalogPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Purchased Parts Library</h1>
-          <p className="text-slate-400 text-sm mt-1">Central repository of reusable purchased parts — link from any project</p>
+          <p className="text-slate-400 text-sm mt-1">Central repository of reusable purchased parts: link from any project</p>
         </div>
         <button
           onClick={() => setShowNewModal(true)}
@@ -391,7 +391,7 @@ export default function CatalogPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-300">{part.unit}</td>
-                    <td className="px-4 py-3 text-slate-300">{part.supplier || '—'}</td>
+                    <td className="px-4 py-3 text-slate-300">{part.supplier || '-'}</td>
                     <td className="px-4 py-3">
                       {part.is_active ? (
                         <span className="text-green-400 text-xs">Active</span>

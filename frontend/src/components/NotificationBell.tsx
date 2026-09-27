@@ -2,6 +2,7 @@
  * NotificationBell - unread badge + dropdown feed of in-app notifications.
  */
 import { useEffect, useRef, useState } from 'react';
+import { formatDateTime } from '../lib/format';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
@@ -144,7 +145,7 @@ export default function NotificationBell({ collapsed }: { collapsed: boolean }) 
                           {n.body && <p className="text-slate-400 text-xs mt-0.5 line-clamp-2">{n.body}</p>}
                           {n.created_at && (
                             <p className="text-slate-500 text-[10px] mt-0.5">
-                              {new Date(n.created_at).toLocaleString()}
+                              {formatDateTime(n.created_at)}
                             </p>
                           )}
                         </div>

@@ -15,11 +15,23 @@ html, body, #root {
 
 html {
   scroll-behavior: smooth;
+  /* Hiding the scrollbar under a modal must not shift the page sideways. */
+  scrollbar-gutter: stable;
+}
+
+/* A modal <dialog> is open: the page behind it does not scroll. */
+html:has(dialog:modal) {
+  overflow: hidden;
 }
 
 html, body {
   background-color: #0f172a;
   color: #f1f5f9;
+}
+
+/* Native selects, date popups, scrollbars and form controls render dark. */
+html {
+  color-scheme: dark;
 }
 
 body {
@@ -87,11 +99,14 @@ button:active:not(:disabled) {
   transform: scale(0.98);
 }
 
-/* Keyboard focus ring (mouse clicks stay clean) */
+/* Keyboard focus ring (mouse clicks stay clean). The outline follows each
+   element's own radius; inputs keep their border + glow from :focus above. */
 :focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.7);
+  outline: 2px solid rgba(56, 189, 248, 0.8);
   outline-offset: 2px;
-  border-radius: 4px;
+}
+a:focus-visible, button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible {
+  outline-color: #38bdf8;
 }
 
 button:disabled {
@@ -123,7 +138,12 @@ button:disabled {
   .rise-in { animation: none; }
   .skeleton { animation: none; }
   html { scroll-behavior: auto; }
+  /* State stays visible (the dot, the colour); only the movement stops. */
+  .animate-pulse, .animate-ping, .animate-bounce { animation: none; }
+  button:active:not(:disabled) { transform: none; }
 }
+
+/* Type floor: 11 px. Use text-2xs (11 px) or larger, never text-[9px]/[10px]. */
 
 /* Override Tailwind defaults for dark mode */
 .bg-white {

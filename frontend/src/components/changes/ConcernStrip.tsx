@@ -1,19 +1,20 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { btnSm } from '../common/buttonStyles'
+import { toastError } from '../../lib/apiError'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
-import { preferredDepartmentId } from '../../lib/departments'
+import { humanize, plural } from '../../lib/humanLabels'
+import { defaultFlagDepartment, settledLine } from '../../lib/scopingRules'
 import AttachmentDropzone from './AttachmentDropzone'
+import { useConcernLabels } from './useConcernLabels'
 import { AttachmentRow } from './AttachmentRow'
 import type {
   Attachment, ChangeConcern, ConcernKind, RiskSeverity, RiskType, RiskTemplateIn,
 } from '../../types/change'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const KIND_STYLE: Record<ConcernKind, string> = {
   reject_proposal: 'bg-red-900/60 text-red-200 border-red-800',
@@ -31,6 +32,11 @@ const RISK_TYPES: RiskType[] = [
 
 const SEVERITIES: RiskSeverity[] = [1, 2, 3]
 
+/** What a screen reader says for a rating button: the number and its weight. */
+const SEVERITY_NAME: Record<RiskSeverity, string> = {
+  1: 'Severity 1, lowest', 2: 'Severity 2, medium', 3: 'Severity 3, highest',
+}
+
 /** 1 is noted, 2 wants watching, 3 is the one that gets someone out of bed. */
 const SEVERITY_STYLE: Record<RiskSeverity, string> = {
   1: 'bg-slate-700 text-slate-200 border-slate-600',
@@ -43,7 +49,7 @@ function SeverityBadge({ value, testId }: { value?: number | null; testId: strin
   const style = SEVERITY_STYLE[value as RiskSeverity] ?? SEVERITY_STYLE[1]
   return (
     <span data-testid={testId} title={t('risk.severity')}
-      className={`inline-flex items-center rounded border px-1.5 py-0 text-[10px] leading-tight font-semibold ${style}`}>
+      className={`inline-flex items-center rounded border px-1.5 py-0 text-[11px] leading-tight font-semibold ${style}`}>
       {value}
     </span>
   )
@@ -63,6 +69,7 @@ function SeverityBadge({ value, testId }: { value?: number | null; testId: strin
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
   hideConcernIds = [], onlyDepartmentId, isPm = false, attachments = [],
+  changeDepartmentIds = [],
 }: {
   changeId: number
   editable: boolean
@@ -79,6 +86,9 @@ export default function ConcernStrip({
   scoped?: boolean
   departments?: { id: number; name: string; is_active?: boolean }[]
   myDepartmentIds?: number[]
+  /** Departments on this change (routed / picked): a new flag defaults to the
+   *  viewer's membership among them. */
+  changeDepartmentIds?: number[]
 }) {
   const qc = useQueryClient()
   const { userId, isAdmin } = useAuth()
@@ -111,11 +121,11 @@ export default function ConcernStrip({
     : isAdmin ? selectable
     : selectable.filter((d) => myDepartmentIds.includes(d.id))
   const [deptId, setDeptId] = useState<number | undefined>(onlyDepartmentId)
-  // Scoping starts on "Team". Assessment starts on the master department when
-  // the user holds it, and otherwise on nothing at all — they pick.
-  const effectiveDept = onlyDepartmentId ?? deptId ?? (scoped
-    ? preferredDepartmentId(myDepartmentIds, options)
-    : undefined)
+  // A flag starts filed under the viewer's own department (spec §16); "Team"
+  // (scoping) or an explicit pick (assessment) when they have none.
+  const [deptPicked, setDeptPicked] = useState(false)
+  const effectiveDept = onlyDepartmentId
+    ?? (deptPicked ? deptId : defaultFlagDepartment(myDepartmentIds, options, changeDepartmentIds))
   const deptName = (id?: number | null) =>
     id == null ? null : departments.find((d) => d.id === id)?.name ?? `#${id}`
 
@@ -145,7 +155,7 @@ export default function ConcernStrip({
   // only for the legacy keys when the reference is unreachable.
   const servedLabel = (k: string) => riskTypeData?.items?.find((i) => i.key === k)?.label_en
   const riskTypeLabel = (k?: string | null) =>
-    k ? (servedLabel(k) ?? (t(`risktype.${k}`) !== `risktype.${k}` ? t(`risktype.${k}`) : k))
+    k ? (servedLabel(k) ?? (t(`risktype.${k}`) !== `risktype.${k}` ? t(`risktype.${k}`) : humanize(k)))
       : t('risk.kind')
 
   // The department's own additions to the dropdown: "+ Add own risk type…"
@@ -158,12 +168,12 @@ export default function ConcernStrip({
   const createType = useMutation({
     mutationFn: (label: string) => changesApi.createRiskType(effectiveDept as number, label),
     onSuccess: (row) => { invalidateTypes(); setRiskType(row.key); setNewType(null); toast.success(t('risk.typeAdded')) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the risk type'),
+    onError: (e: unknown) => { toastError(e, 'Could not add the risk type') },
   })
   const deleteType = useMutation({
     mutationFn: (id: number) => changesApi.deleteRiskType(id),
     onSuccess: () => { invalidateTypes(); setRiskType(''); toast.success(t('risk.typeDeleted')) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not remove the risk type'),
+    onError: (e: unknown) => { toastError(e, 'Could not remove the risk type') },
   })
   const customIdOf = (k: string) => riskTypeData?.items?.find((i) => i.key === k)?.custom_id
 
@@ -188,14 +198,14 @@ export default function ConcernStrip({
   const deleteTemplate = useMutation({
     mutationFn: (id: number) => changesApi.deleteRiskTemplate(id),
     onSuccess: () => { setTemplateId(''); invalidateTemplates(); toast.success(t('risk.templateDeleted')) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the template'),
+    onError: (e: unknown) => { toastError(e, 'Could not delete the template') },
   })
   const saveTemplateNow = useMutation({
     // The payload is handed over, not read from state: the form is cleared in
     // the same tick the raise succeeds.
     mutationFn: (body: RiskTemplateIn) => changesApi.createRiskTemplate(body),
     onSuccess: () => { invalidateTemplates(); toast.success(t('risk.templateSaved')) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the template'),
+    onError: (e: unknown) => { toastError(e, 'Could not save the template') },
   })
 
   // Scoping raises a concern (question / cancel vote); assessment raises a
@@ -220,9 +230,7 @@ export default function ConcernStrip({
       invalidate()
     },
     onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Could not raise the flag'
-      setFailure(detail)
-      toast.error(detail)
+      setFailure(toastError(e, 'Could not raise the flag'))
     },
   })
   const withdraw = useMutation({
@@ -230,9 +238,7 @@ export default function ConcernStrip({
       changesApi.withdrawConcern(changeId, vars.concernId, vars.note.trim() || undefined),
     onSuccess: () => { setWithdrawing(null); setResolution(''); setFailure(null); invalidate() },
     onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Could not withdraw'
-      setFailure(detail)
-      toast.error(detail)
+      setFailure(toastError(e, 'Could not withdraw the flag'))
     },
   })
 
@@ -277,15 +283,11 @@ export default function ConcernStrip({
 
   // A risk raised from a checklist row says which row: the checklist is the
   // department's own list, served per department.
-  const originDept = onlyDepartmentId ?? effectiveDept
-  const { data: checklistDefs = [] } = useQuery({
-    queryKey: ['assessment-checklist', originDept],
-    queryFn: () => changesApi.assessmentChecklist(originDept as number),
-    enabled: scoped && originDept != null
-      && concerns.some((c: ChangeConcern) => !!c.checklist_key),
-  })
-  const originLabel = (key: string) => key.startsWith('free:') ? key.slice(5)
-    : checklistDefs.find((d) => d.key === key)?.label_en ?? key
+  // A row carries its own department's words (not the viewer's).
+  const rowLabels = useConcernLabels(concerns, scoped)
+  const rowRiskTypeLabel = (c: ChangeConcern) =>
+    c.department_id != null ? rowLabels.riskTypeLabel(c) : riskTypeLabel(c.risk_type)
+  const originLabel = (c: ChangeConcern) => rowLabels.originLabel(c)
 
   // A risk raised by mistake: its raiser may delete it while nothing hangs off
   // it yet. Acting-as does not matter here — the raise carried their own id.
@@ -297,9 +299,7 @@ export default function ConcernStrip({
     mutationFn: (concernId: number) => changesApi.retractConcern(changeId, concernId),
     onSuccess: () => { setRetracting(null); setFailure(null); invalidate() },
     onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Could not delete the risk'
-      setFailure(detail)
-      toast.error(detail)
+      setFailure(toastError(e, 'Could not delete the risk'))
     },
   })
 
@@ -311,11 +311,16 @@ export default function ConcernStrip({
       setFailure(null); invalidate()
     },
     onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Could not submit the proposal'
-      setFailure(detail)
-      toast.error(detail)
+      setFailure(toastError(e, 'Could not submit the proposal'))
     },
   })
+
+  // A disabled Flag button says what it still needs.
+  const riskMissing = [
+    ...(riskType ? [] : [t('concern.missingType')]),
+    ...(effectiveDept === undefined ? [t('concern.missingDept')] : []),
+    ...(note.trim() ? [] : [t('concern.missingNote')]),
+  ]
 
   const listed = concerns
     .filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
@@ -341,7 +346,7 @@ export default function ConcernStrip({
         {openRisks.length > 0 && (
           <span data-testid="risk-open-count" title={t('risk.open')}
             className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
-            {t('risk.openCount').replace('{n}', String(openRisks.length))}
+            {`${plural(openRisks.length, 'open risk')}`}
           </span>
         )}
         {editable && !adding && (
@@ -354,7 +359,10 @@ export default function ConcernStrip({
       {scoped && <p className="text-[11px] text-slate-500">{w.hint}</p>}
 
       {open.length === 0 && settled.length === 0 && (
-        <p className="text-xs text-slate-500">{t('concern.none')}</p>
+        // Assessment is past the meeting: its empty register says so plainly.
+        <p className="text-xs text-slate-500" data-testid="concern-empty">
+          {scoped ? t('risk.none') : t('concern.noneScoping')}
+        </p>
       )}
 
       <ul className="space-y-1">
@@ -368,7 +376,7 @@ export default function ConcernStrip({
               <span className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
                 <SeverityBadge value={c.severity} testId={`risk-severity-${c.id}`} />
                 <span className="text-xs font-semibold" data-testid={`risk-type-${c.id}`}>
-                  {riskTypeLabel(c.risk_type)}
+                  {rowRiskTypeLabel(c)}
                 </span>
               </span>
             ) : (
@@ -378,14 +386,14 @@ export default function ConcernStrip({
             )}
             <span className="min-w-0 flex-1">
               {c.department_id != null && (
-                <span className="mr-1.5 rounded bg-slate-800/80 px-1 py-0 text-[10px] leading-tight align-middle">
+                <span className="mr-1.5 rounded bg-slate-800/80 px-1 py-0 text-[11px] leading-tight align-middle">
                   {deptName(c.department_id)}
                 </span>
               )}
               {c.checklist_key && (
                 <span data-testid={`risk-origin-${c.id}`}
-                  className="mr-1.5 rounded border border-slate-600 px-1 py-0 text-[10px] leading-tight align-middle">
-                  {t('risk.from')}: {originLabel(c.checklist_key)}
+                  className="mr-1.5 rounded border border-slate-600 px-1 py-0 text-[11px] leading-tight align-middle">
+                  {t('risk.from')}: {originLabel(c)}
                 </span>
               )}
               <span className={c.is_open ? '' : 'line-through'}>{c.note}</span>
@@ -395,8 +403,12 @@ export default function ConcernStrip({
                     with the hat they wear. */}
                 {(c.raised_by_departments?.length ?? 0) > 0
                   && ` (${c.raised_by_departments!.join(', ')})`}
-                {!c.is_open && ` — ${c.withdrawn_at ? t('concern.withdrawn') : t('concern.answered')}`}
               </span>
+              {!c.is_open && (
+                <span className="block text-xs opacity-80" data-testid={`concern-settled-${c.id}`}>
+                  {settledLine(c, scoped)}
+                </span>
+              )}
               {!c.is_open && c.resolution_note && (
                 <span className="block text-xs opacity-70">
                   {t('concern.resolved')}: {c.resolution_note}
@@ -409,7 +421,7 @@ export default function ConcernStrip({
                   {c.answer_note && (
                     <>
                       <span data-testid={`concern-proposal-state-${c.id}`}
-                        className="inline-flex items-center rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[10px] leading-tight font-medium">
+                        className="inline-flex items-center rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[11px] leading-tight font-medium">
                         {t('concern.proposalReceived').replace('{x}',
                           deptName(c.department_id) ?? t('concern.deptTitle'))}
                       </span>
@@ -417,7 +429,7 @@ export default function ConcernStrip({
                         {w.proposal}: {c.answer_note}
                         <span className="block opacity-70">
                           {t('concern.proposalBy')}{' '}
-                          {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '—')}
+                          {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '-')}
                         </span>
                       </span>
                     </>
@@ -453,7 +465,7 @@ export default function ConcernStrip({
                       )}
                       <span className="flex flex-wrap gap-2">
                         <button data-testid={`concern-proposal-submit-${c.id}`}
-                          className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          className={btnSm.primary}
                           disabled={!proposal.trim() || !docConfirmed
                             || docsOf(c.id).length === 0 || propose.isPending}
                           onClick={() => propose.mutate({ concernId: c.id, note: proposal })}>
@@ -494,7 +506,7 @@ export default function ConcernStrip({
                       aria-label={answering ? t('concern.answer') : t('concern.resolution')}
                       className="flex-1 min-w-[14rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
                     <button data-testid="concern-withdraw-confirm"
-                      className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+                      className={btnSm.primary}
                       disabled={withdraw.isPending || (noteRequired && !resolution.trim())}
                       onClick={() => withdraw.mutate({ concernId: c.id, note: resolution })}>
                       {scoped ? w.settle : (answering ? t('concern.markSolved') : t('concern.withdraw'))}
@@ -519,7 +531,7 @@ export default function ConcernStrip({
               <span className="flex items-center gap-2 flex-shrink-0 text-xs">
                 <span className="text-slate-300">{t('risk.retractConfirm')}</span>
                 <button data-testid={`concern-retract-confirm-${c.id}`}
-                  className="bg-red-700 hover:bg-red-600 text-white px-2 py-0.5 rounded disabled:opacity-50"
+                  className={btnSm.danger}
                   disabled={retract.isPending}
                   onClick={() => retract.mutate(c.id)}>{t('risk.retractYes')}</button>
                 <button className="text-slate-400 hover:text-slate-200"
@@ -532,15 +544,22 @@ export default function ConcernStrip({
                 {t('risk.retract')}
               </button>
             ))}
-            {c.is_open && editable && withdrawing !== c.id && retracting !== c.id && (
+            {/* Only those who may close a flag get the control; everyone else
+                reads who does, never a dead button. */}
+            {c.is_open && editable && withdrawing !== c.id && retracting !== c.id && (mayClose(c) ? (
               <button data-testid={`concern-close-${c.id}`}
-                className="text-xs underline decoration-dotted flex-shrink-0 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed disabled:text-slate-500"
-                disabled={!mayClose(c) || withdraw.isPending}
-                title={mayClose(c) ? undefined : closerRule(c)}
+                className="text-xs underline decoration-dotted flex-shrink-0 disabled:opacity-50"
+                disabled={withdraw.isPending}
                 onClick={() => { setWithdrawing(c.id); setResolution('') }}>
-                {scoped ? w.settle : (isAuthor(c) ? t('concern.withdraw') : t('concern.markSolved'))}
+                {scoped ? w.settle
+                  : isAuthor(c) ? t('concern.withdraw') : t('concern.settleAsPm')}
               </button>
-            )}
+            ) : (
+              <span data-testid={`concern-closer-${c.id}`} title={closerRule(c)}
+                className="text-[11px] text-slate-500 flex-shrink-0">
+                {scoped && c.department_id != null ? t('concern.closerShortDept') : t('concern.closerShortPm')}
+              </span>
+            ))}
           </li>
         ))}
       </ul>
@@ -565,7 +584,7 @@ export default function ConcernStrip({
           </select>
           {onlyDepartmentId === undefined && options.length > 0 && (
             <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
-              onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+              onChange={(e) => { setDeptPicked(true); setDeptId(e.target.value ? Number(e.target.value) : undefined) }}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
               <option value="">{t('concern.team')}</option>
               {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -574,8 +593,10 @@ export default function ConcernStrip({
           <input value={note} onChange={(e) => setNote(e.target.value)}
             placeholder={t('concern.notePlaceholder')} aria-label={t('concern.note')}
             className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-          <button className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+          <button className={btnSm.primary}
+            data-testid="concern-submit"
             disabled={!note.trim() || raise.isPending}
+            title={!note.trim() ? t('concern.missing').replace('{x}', t('concern.missingNote')) : undefined}
             onClick={() => raise.mutate()}>{w.raise}</button>
           <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
             onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
@@ -593,7 +614,7 @@ export default function ConcernStrip({
                 <option value="">{t('risk.pickTemplate')}</option>
                 {templates.map((x) => (
                   <option key={x.id} value={x.id}>
-                    {`[${x.severity}] ${riskTypeLabel(x.risk_type)} — ${x.note}`}
+                    {`[${x.severity}] ${riskTypeLabel(x.risk_type)}: ${x.note}`}
                   </option>
                 ))}
               </select>
@@ -646,7 +667,7 @@ export default function ConcernStrip({
                   }}
                   className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 w-44" />
                 <button type="button" data-testid="risk-new-type-save"
-                  className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50"
+                  className={btnSm.primary}
                   disabled={!newType.trim() || createType.isPending}
                   onClick={() => createType.mutate(newType.trim())}>{t('risk.saveType')}</button>
                 <button type="button" className="text-xs text-slate-400 hover:text-slate-200 px-1"
@@ -655,7 +676,7 @@ export default function ConcernStrip({
             )}
             {onlyDepartmentId === undefined && (
               <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
-                onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+                onChange={(e) => { setDeptPicked(true); setDeptId(e.target.value ? Number(e.target.value) : undefined) }}
                 className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
                 {effectiveDept === undefined
                   && <option value="">{t('concern.pickDepartment')}</option>}
@@ -669,6 +690,7 @@ export default function ConcernStrip({
               {SEVERITIES.map((s) => (
                 <button key={s} type="button" data-testid={`risk-severity-pick-${s}`}
                   aria-pressed={severity === s} title={t('risk.severityHint')}
+                  aria-label={SEVERITY_NAME[s]}
                   onClick={() => setSeverity(s)}
                   className={`w-7 h-6 rounded border text-xs font-semibold ${
                     severity === s ? SEVERITY_STYLE[s]
@@ -684,10 +706,16 @@ export default function ConcernStrip({
             className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
           <div className="flex gap-2 items-center">
             <button data-testid="risk-submit"
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!note.trim() || !riskType || raise.isPending
-                || effectiveDept === undefined}
+              className={btnSm.primary}
+              disabled={riskMissing.length > 0 || raise.isPending}
+              title={riskMissing.length > 0
+                ? t('concern.missing').replace('{x}', riskMissing.join(', ')) : undefined}
               onClick={() => raise.mutate()}>{w.raise}</button>
+            {riskMissing.length > 0 && (
+              <span data-testid="risk-submit-missing" className="text-[11px] text-slate-500">
+                {t('concern.missing').replace('{x}', riskMissing.join(', '))}
+              </span>
+            )}
             <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
               onClick={() => { setAdding(false); setNote(''); setFailure(null); setSaveTemplate(false); setTemplateId('') }}>
               {t('common.cancel')}

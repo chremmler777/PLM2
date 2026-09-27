@@ -1,5 +1,6 @@
 """Workflow instance execution service (Phase 3c)."""
 from datetime import datetime, timedelta
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -177,12 +178,16 @@ class WorkflowService:
         actionable_departments: set[int] = set()
         fyi_departments: set[int] = set()
         tasks_created: list[WfInstanceTask] = []
+        # Departments owing a step-less (deviation-added) task: told with a
+        # link to the change's assessments, where their row is listed.
+        added_departments: set[int] = set()
 
         # Change-scoped instances execute the change's routing *snapshot*, which
         # may be scoped down from the template (scoping-meeting department
         # selection, deviations). Skip template assignments absent from the
         # snapshot so engine tasks never outnumber the governed routing.
         allowed_pairs: set | None = None
+        snap_departments: list[dict] = []
         if instance.change_id is not None:
             from app.models.change import ChangeRouting
             routing = (await db.execute(
@@ -194,32 +199,92 @@ class WorkflowService:
                     (st for st in routing.standard_snapshot.get("stages", [])
                      if st["stage_order"] == stage.stage_order), None)
                 if snap_stage is not None:
+                    # An approved deviation add sits on the snapshot
+                    # (added_by_deviation) but is still outside the
+                    # template: its step-less task comes from its row below.
+                    snap_departments = [d for d in snap_stage["departments"]
+                                        if not d.get("added_by_deviation")]
                     allowed_pairs = {(d["department_id"], d["rasic_letter"])
-                                     for d in snap_stage["departments"]}
+                                     for d in snap_departments}
 
-        for step in sorted(stage.steps, key=lambda s: s.position_in_stage):
+        def _add_task(step_id, department_id: int, letter: str) -> None:
+            is_actionable = letter in ACTIONABLE_LETTERS
+            if is_actionable:
+                actionable_departments.add(department_id)
+            elif letter == "I":
+                fyi_departments.add(department_id)
+            task = WfInstanceTask(
+                instance_id=instance.id,
+                stage_order=stage.stage_order,
+                step_id=step_id,
+                department_id=department_id,
+                rasic_letter=letter,
+                status="active" if is_actionable else "noted",
+                is_actionable=is_actionable,
+                due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS))
+                if is_actionable else None,
+            )
+            db.add(task)
+            tasks_created.append(task)
+
+        steps = sorted(stage.steps, key=lambda s: s.position_in_stage)
+        produced: set = set()
+        for step in steps:
             for rasic in step.rasic_assignments:
                 if allowed_pairs is not None and \
                         (rasic.department_id, rasic.rasic_letter) not in allowed_pairs:
                     continue
-                is_actionable = rasic.rasic_letter in ACTIONABLE_LETTERS
-                if is_actionable:
-                    actionable_departments.add(rasic.department_id)
-                elif rasic.rasic_letter == "I":
-                    fyi_departments.add(rasic.department_id)
-                task = WfInstanceTask(
-                    instance_id=instance.id,
-                    stage_order=stage.stage_order,
-                    step_id=step.id,
-                    department_id=rasic.department_id,
-                    rasic_letter=rasic.rasic_letter,
-                    status="active" if is_actionable else "noted",
-                    is_actionable=is_actionable,
-                    due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS))
-                    if is_actionable else None,
-                )
-                db.add(task)
-                tasks_created.append(task)
+                _add_task(step.id, rasic.department_id, rasic.rasic_letter)
+                produced.add((rasic.department_id, rasic.rasic_letter))
+
+        # The snapshot is authoritative for a change (the scoping room decides
+        # who assesses, and with which letter): a department the room pulled
+        # in that the template's stage does not carry, or carries with another
+        # letter, still gets its task. Without this the row sat in the stage
+        # with no task, owed an answer nobody could give, and held the gate
+        # forever (final walk P1-1). Hung off the step that carries the
+        # department, else the stage's first step.
+        for d in snap_departments:
+            pair = (d["department_id"], d["rasic_letter"])
+            if pair in produced:
+                continue
+            produced.add(pair)
+            step_id = next(
+                (s.id for s in steps
+                 if any(r.department_id == d["department_id"]
+                        for r in s.rasic_assignments)),
+                steps[0].id if steps else None)
+            _add_task(step_id, d["department_id"], d["rasic_letter"])
+
+        # A routing deviation that added an R/A/S/C department to this stage
+        # before it started left an assessment row, but neither the template
+        # nor the snapshot's standard entries carry it (an approved add sits
+        # on the snapshot marked added_by_deviation, skipped above). Its
+        # task is created here, with the stage's others, BEFORE the caller
+        # decides whether the stage has a gate: otherwise a stage whose
+        # template rows are all C/I cascades straight through and the added
+        # Responsible department is never asked. Such a row is outside the
+        # template and the snapshot: its task carries NO step (never the
+        # stage's first step), the mark is_assessment_row, blocking_complete,
+        # My Tasks and the cockpit read as "a department somebody added to
+        # the assessment", whatever stage it landed on.
+        if instance.change_id is not None:
+            from app.models.change import ChangeAssessment, ASSESSMENT_LETTERS
+            extra = (await db.execute(
+                select(ChangeAssessment.department_id, ChangeAssessment.rasic_letter)
+                .where(ChangeAssessment.change_id == instance.change_id,
+                       ChangeAssessment.stage_order == stage.stage_order,
+                       ChangeAssessment.wf_instance_task_id.is_(None),
+                       ChangeAssessment.rasic_letter.in_(ASSESSMENT_LETTERS))
+                .order_by(ChangeAssessment.id))).all()
+            for department_id, letter in extra:
+                pair = (department_id, letter)
+                if pair in produced:
+                    continue
+                produced.add(pair)
+                _add_task(None, department_id, letter)
+                if letter in ACTIONABLE_LETTERS:
+                    added_departments.add(department_id)
         await db.flush()
 
         # Change-scoped instances: link this stage's assessment payload rows to the
@@ -254,17 +319,31 @@ class WorkflowService:
                                 t.accepted_at = a.accepted_at or a.submitted_at
             await db.flush()
 
-        if actionable_departments:
+        standard_departments = actionable_departments - added_departments
+        if standard_departments:
             from app.services.notification_service import NotificationService
 
             part, revision = await WorkflowService._instance_part_context(db, instance)
             stage_label = stage.name or f"stage {stage.stage_order}"
-            await NotificationService.notify_departments(
-                db,
-                list(actionable_departments),
+            # Project team (spec §18): the responsible first, backups as info.
+            await NotificationService.notify_team(
+                db, part.project_id,
+                list(standard_departments),
                 title=f"Workflow task: {part.name} {revision.revision_name}",
                 body=f"Your department has a new task in '{stage_label}'.",
                 link="/my-tasks",
+            )
+        if added_departments:
+            from app.services.notification_service import NotificationService
+
+            part, revision = await WorkflowService._instance_part_context(db, instance)
+            await NotificationService.notify_team(
+                db, part.project_id,
+                sorted(added_departments),
+                title=f"Assessment task: {revision.revision_name}",
+                body=(f"Your department was added to the assessment of "
+                      f"'{part.name}' and has an assessment to give."),
+                link=f"/changes/{instance.change_id}?tab=assessments",
             )
 
         if fyi_departments:
@@ -274,8 +353,8 @@ class WorkflowService:
             stage_label = stage.name or f"stage {stage.stage_order}"
             link = (f"/changes/{instance.change_id}?tab=assessments"
                     if instance.change_id is not None else "/my-tasks")
-            await NotificationService.notify_departments_once(
-                db,
+            await NotificationService.notify_team(
+                db, part.project_id,
                 list(fyi_departments),
                 kind="fyi_stage",
                 subject_key=f"inst:{instance.id}:stage:{stage.stage_order}",
@@ -463,6 +542,20 @@ class WorkflowService:
             )
         )
         all_actionable = stage_tasks_result.scalars().all()
+
+        # Spec §16 P1-2: a change's later routing stages (PM's summation,
+        # Sales' customer activities) stay dormant while the change is in
+        # assessment. Stage 1 completing there only earns the hop to costing;
+        # the hop itself wakes the next stage (ChangeService.transition).
+        # Otherwise PM and Sales get assessment tasks nobody owes, and a
+        # department's bucket rebinds from its submitted row to a later one.
+        if instance.change_id is not None:
+            from app.models.change import ChangeRequest
+            change_status = (await db.execute(
+                select(ChangeRequest.status).where(
+                    ChangeRequest.id == instance.change_id))).scalar_one_or_none()
+            if change_status == "in_assessment":
+                return instance
 
         if all(t.status in ("approved", "waived") for t in all_actionable):
             # Advance: load template stages to find next
@@ -722,12 +815,22 @@ class WorkflowService:
         )
         tasks = result.scalars().all()
 
+        # Project team (spec 2026-09-25): a task's department may have a
+        # responsible on the task's project -- everyone else active in the
+        # department is a backup there. TeamRoles caches the responsible per
+        # (project, department), the same resolver every task list uses.
+        from app.services.project_team_service import TeamRoles
+        roles = TeamRoles(db, user_id)
+
         results = []
         for t in tasks:
             instance = t.instance
             revision = instance.part_revision
             part = revision.part
             stage = t.step.stage
+            # A task the viewer took is theirs, backup or not.
+            role, main_name = await roles.role(part.project_id, t.department_id,
+                                               owned=t.owner_id == user_id)
             results.append({
                 "task_id": t.id,
                 "instance_id": t.instance_id,
@@ -751,6 +854,11 @@ class WorkflowService:
                 "due_date": t.due_date,
                 "overdue": t.overdue,
                 "mine": t.owner_id == user_id,
+                # Project team (spec 2026-09-25): "main" (counts) or "backup"
+                # (visible, actionable, not counted); main_name only set when
+                # this task's role is "backup".
+                "role": role,
+                "main_name": main_name if role == "backup" else None,
             })
 
         results.sort(key=lambda d: (

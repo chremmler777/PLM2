@@ -58,6 +58,21 @@ async def _submit(client, auth, tab, impacts, **extra):
                              headers=auth)
 
 
+async def _file(client, auth, tab, kind, filename):
+    return await client.post(
+        f"/api/v1/changes/{tab['change_id']}/attachments",
+        files={"file": (filename, b"x", "application/octet-stream")},
+        data={"assessment_id": str(tab["assessment_id"]), "kind": kind},
+        headers=auth)
+
+
+async def _file_external_docs(client, auth, tab):
+    """What a Yes on external modification owes before the submit."""
+    for kind, name in (("change_ppt", "change.pptx"), ("rfq", "rfq.pdf")):
+        up = await _file(client, auth, tab, kind, name)
+        assert up.status_code in (200, 201), up.text
+
+
 async def test_the_checklist_definitions_are_served_per_department(
         client, admin_auth, tab, session_factory):
     """Config, not data: the frontend renders the list the backend validates."""
@@ -69,18 +84,25 @@ async def test_the_checklist_definitions_are_served_per_department(
     assert res.status_code == 200, res.text
     items = res.json()
     keys = [i["key"] for i in items]
-    assert keys == ["cycle_time_change", "scrap_increase", "maintenance_increase",
-                    "threed_change", "dimensional_risk", "visual_risk",
-                    "work_instruction_update", "new_process",
-                    "sparepart_required", "modification_internal",
-                    "modification_external", "prototyping_required",
-                    "matching_required"]
-    assert all(i["extra"] is False for i in items)      # Tool Engineer has no extras
+    # Four common items, then the Tool Engineer's own list.
+    assert keys[:4] == ["work_instruction_update", "modification_internal",
+                        "modification_external", "timing_risk"]
+    assert keys[4:] == ["tool_modification", "moldflow_simulation",
+                        "matching_required", "maintenance_increase",
+                        "sparepart_required", "scrap_increase"]
+    assert [i["extra"] for i in items] == [False] * 4 + [True] * 6
     spare = next(i for i in items if i["key"] == "sparepart_required")
     assert spare["label_de"] == "Ersatzteil erforderlich"
     assert spare["label_en"] == "Spare part required"
     ext = next(i for i in items if i["key"] == "modification_external")
     assert ext["label_de"] == "Externe Änderung/Umbau (Lieferant)"
+    # External work owes two documents, told apart by attachment kind.
+    assert [(d["kind"], d["label_en"]) for d in ext["requires_documents"]] == [
+        ("change_ppt", "Change presentation"), ("rfq", "Change RFQ")]
+    assert ext["requires_documents"][0]["extensions"] == [".ppt", ".pptx", ".pdf"]
+    # Nothing else in the list declares a document.
+    assert [i["key"] for i in items if i.get("requires_documents")] == [
+        "modification_external"]
 
     async with session_factory() as sess:
         apqp = (await sess.execute(select(Department).where(
@@ -90,7 +112,8 @@ async def test_the_checklist_definitions_are_served_per_department(
         "/api/v1/changes/reference/assessment-checklist"
         f"?department_id={apqp_id}", headers=admin_auth)
     extras = [i for i in res.json() if i["extra"]]
-    assert [i["key"] for i in extras] == ["pfmea_update", "control_plan_update"]
+    assert [i["key"] for i in extras] == ["pfmea_update", "control_plan_update",
+                                          "ppap_resubmission", "imds_update"]
 
 
 async def test_development_extra_carries_its_choices(
@@ -114,6 +137,7 @@ async def test_keyed_checklist_round_trips_with_remarks(client, admin_auth, tab)
                        yes={"cycle_time_change", "modification_external"},
                        remarks={"cycle_time_change": "+0.4s",
                                 "modification_external": "Supplier rebuild"})
+    await _file_external_docs(client, admin_auth, tab)
     res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
     assert res.json()["details"]["impacts"] == impacts
@@ -177,12 +201,12 @@ async def test_legacy_rows_are_still_accepted(client, admin_auth, tab):
 async def test_checklist_coexists_with_department_specific_keys(
         client, admin_auth, tab):
     res = await _submit(client, admin_auth, tab,
-                        answered("Tool Engineer", yes={"new_process"}),
+                        answered("Tool Engineer", yes={"tool_modification"}),
                         packaging_impacted=False)
     assert res.status_code == 200, res.text
     body = res.json()["details"]
     assert body["packaging_impacted"] is False
-    assert len(body["impacts"]) == 13
+    assert len(body["impacts"]) == 10
 
 
 async def test_not_feasible_requires_the_explanation_document(
@@ -210,6 +234,54 @@ async def test_not_feasible_requires_the_explanation_document(
     assert res.status_code == 200, res.text
 
 
+async def test_not_feasible_reads_the_deck_on_the_open_row(
+        client, admin_auth, tab, seed, session_factory):
+    """Review 760bb129 finding 3: a department Responsible in stage 1 (already
+    submitted) and Accountable in stage 2 answers its stage-2 row. The deck
+    that counts is the one filed on THAT row, the row the document check and
+    the form use, not the department's lowest-stage row."""
+    from datetime import datetime
+    from app.models.change import ChangeAttachment
+    async with session_factory() as s:
+        first = await s.get(ChangeAssessment, tab["assessment_id"])
+        first.rasic_letter = "R"
+        first.status = "submitted"
+        first.verdict = "feasible"
+        first.submitted_at = datetime.utcnow()
+        second = ChangeAssessment(change_id=tab["change_id"],
+                                  department_id=tab["department_id"],
+                                  stage_order=2, rasic_letter="A",
+                                  verdict="pending", status="pending")
+        s.add(second)
+        await s.flush()
+        # The deck filed on the stage-1 row does not answer for stage 2.
+        s.add(ChangeAttachment(change_id=tab["change_id"], filename="old.pptx",
+                               stored_path="x", content_type="application/octet-stream",
+                               size_bytes=1, sha256="0" * 64, kind="change_ppt",
+                               assessment_id=first.id, uploaded_by=seed["admin_id"]))
+        await s.commit()
+        second_id = second.id
+
+    async def not_feasible():
+        return await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                                 json={"department_id": tab["department_id"],
+                                       "verdict": "not_feasible"}, headers=admin_auth)
+
+    res = await not_feasible()
+    assert res.status_code == 400, res.text
+    assert "explanation document" in res.json()["detail"]
+
+    up = await _file(client, admin_auth, {**tab, "assessment_id": second_id},
+                     "change_ppt", "why-not.pptx")
+    assert up.status_code in (200, 201), up.text
+    res = await not_feasible()
+    assert res.status_code == 200, res.text
+    assert res.json()["id"] == second_id
+    async with session_factory() as s:
+        assert (await s.get(ChangeAssessment, tab["assessment_id"])).verdict == "feasible"
+        assert (await s.get(ChangeAssessment, second_id)).verdict == "not_feasible"
+
+
 async def test_other_verdicts_need_no_evidence(client, admin_auth, tab):
     res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
                             json={"department_id": tab["department_id"],
@@ -219,50 +291,123 @@ async def test_other_verdicts_need_no_evidence(client, admin_auth, tab):
     assert res.status_code == 200, res.text
 
 
-async def test_rfq_expectation_is_reported_not_enforced(client, admin_auth, tab):
-    """Checking external modification is a promise to ask a supplier; the RFQ
-    is expected, and submitting without it still works."""
-    res = await _submit(client, admin_auth, tab,
-                        answered("Tool Engineer", yes={"modification_external"}))
+async def test_external_modification_holds_the_submit_until_both_documents(
+        client, admin_auth, tab):
+    """A Yes on external modification is only a finished answer with the change
+    presentation and the change RFQ filed against the assessment."""
+    impacts = answered("Tool Engineer", yes={"modification_external"})
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"] == (
+        "External modification needs the change presentation (PPT) and the "
+        "change RFQ attached before you submit")
+
+    detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
+                               headers=admin_auth)).json()
+    row = next(a for a in detail["assessments"]
+               if a["department_id"] == tab["department_id"])
+    assert row["has_rfq"] is False and row["has_change_ppt"] is False
+    assert row["submitted_at"] is None
+
+    # The RFQ alone: the message names what is still missing.
+    up = await _file(client, admin_auth, tab, "rfq", "rfq.xlsx")
+    assert up.status_code in (200, 201), up.text
+    assert up.json()["kind"] == "rfq"
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"] == (
+        "External modification needs the change presentation (PPT) attached "
+        "before you submit")
+
+    # Generic evidence is not the deck: the kind decides, not the file name.
+    up = await _file(client, admin_auth, tab, "general", "change.pptx")
+    assert up.status_code in (200, 201), up.text
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400, res.text
+
+    up = await _file(client, admin_auth, tab, "change_ppt", "deck.pdf")
+    assert up.status_code in (200, 201), up.text
+    res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
 
+    detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
+                               headers=admin_auth)).json()
+    row = next(a for a in detail["assessments"]
+               if a["department_id"] == tab["department_id"])
+    assert row["has_rfq"] is True and row["has_change_ppt"] is True
+
+
+async def test_external_modification_no_owes_nothing(client, admin_auth, tab):
+    res = await _submit(client, admin_auth, tab, answered("Tool Engineer"))
+    assert res.status_code == 200, res.text
+
+
+async def test_a_draft_saves_without_the_documents(client, admin_auth, tab):
+    """Only the submit is held: the half-done answer keeps."""
+    res = await client.put(
+        f"/api/v1/changes/{tab['change_id']}/assessments/{tab['assessment_id']}/draft",
+        json={"draft": {"details": {"impacts": answered(
+            "Tool Engineer", yes={"modification_external"})}}},
+        headers=admin_auth)
+    assert res.status_code in (200, 204), res.text
+
+
+async def test_the_stored_answer_is_judged_when_the_submit_sends_none(
+        client, admin_auth, tab, session_factory):
+    import json
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, tab["assessment_id"])
+        a.details = json.dumps({"impacts": answered(
+            "Tool Engineer", yes={"modification_external"})})
+        await s.commit()
+    res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                            json={"department_id": tab["department_id"],
+                                  "verdict": "feasible"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    assert "change RFQ" in res.json()["detail"]
     detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
                                headers=admin_auth)).json()
     row = next(a for a in detail["assessments"]
                if a["department_id"] == tab["department_id"])
     assert row["rfq_expected"] is True
-    assert row["has_rfq"] is False
-    assert row["has_evidence"] is False
 
-    up = await client.post(
-        f"/api/v1/changes/{tab['change_id']}/attachments",
-        files={"file": ("rfq.pdf", b"%PDF x", "application/pdf")},
-        data={"assessment_id": str(tab["assessment_id"]), "kind": "rfq"},
-        headers=admin_auth)
-    assert up.status_code in (200, 201), up.text
-    assert up.json()["kind"] == "rfq"
 
-    detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
-                               headers=admin_auth)).json()
-    row = next(a for a in detail["assessments"]
-               if a["department_id"] == tab["department_id"])
-    assert row["has_rfq"] is True and row["has_evidence"] is True
+@pytest.mark.parametrize("kind,name,ok", [
+    ("change_ppt", "deck.ppt", True), ("change_ppt", "deck.PPTX", True),
+    ("change_ppt", "deck.pdf", True), ("change_ppt", "deck.docx", False),
+    ("rfq", "rfq.pdf", True), ("rfq", "rfq.xls", True), ("rfq", "rfq.xlsx", True),
+    ("rfq", "rfq.doc", True), ("rfq", "rfq.docx", True), ("rfq", "rfq.msg", True),
+    ("rfq", "rfq.eml", True),
+    ("rfq", "rfq.pptx", False), ("general", "anything.zip", True),
+])
+async def test_the_document_slots_take_their_file_types(
+        client, admin_auth, tab, kind, name, ok):
+    up = await _file(client, admin_auth, tab, kind, name)
+    if ok:
+        assert up.status_code in (200, 201), up.text
+    else:
+        assert up.status_code == 400, up.text
+        assert "must be a" in up.json()["detail"]
 
 
 async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
     """Cycle time is charged per part; everything else is a one-off."""
-    res = await _submit(client, admin_auth, tab, answered(
+    # A stored answer from before the checklist changed (cycle time used to
+    # be common) still resubmits and still seeds its lifecycle line.
+    impacts = answered(
         "Tool Engineer",
-        yes={"cycle_time_change", "sparepart_required", "modification_external",
-             "prototyping_required"},
-        remarks={"cycle_time_change": "+0.4s"}))
+        yes={"sparepart_required", "modification_external", "matching_required"})
+    impacts.insert(0, {"key": "cycle_time_change", "answer": "yes",
+                       "impacted": True, "remark": "+0.4s"})
+    await _file_external_docs(client, admin_auth, tab)
+    res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
     lines = (await client.get(url, headers=admin_auth)).json()
     assert [l["activity_label"] for l in lines] == [
-        "Cycle time change", "Spare part required",
-        "External modification (supplier)", "Prototyping required"]
+        "Cycle time change", "External modification (supplier)",
+        "Matching/sampling required", "Spare part required"]
     assert [l["cost_kind"] for l in lines] == [
         "lifecycle", "one_time", "one_time", "one_time"]
     assert all(l["activity_id"] is None for l in lines)   # keys, not catalog ids
@@ -273,7 +418,7 @@ async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
 
 async def test_seeding_stays_idempotent_with_keys(client, admin_auth, tab):
     res = await _submit(client, admin_auth, tab,
-                        answered("Tool Engineer", yes={"new_process"}))
+                        answered("Tool Engineer", yes={"tool_modification"}))
     assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")

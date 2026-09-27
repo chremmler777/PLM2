@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { toastError } from '../../lib/apiError'
+import { btnSm } from '../common/buttonStyles'
 import { t } from '../../i18n/cmLabels'
+import { formatNumber } from '../../lib/format'
 import type { ChangeRequest } from '../../types/change'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const EDITABLE_STATUSES = ['costing', 'quoting', 'quoted']
 
@@ -32,7 +32,7 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
       qc.invalidateQueries({ queryKey: ['change', change.id] })
       toast.success('Quoted price saved')
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to save quoted price'),
+    onError: (e: unknown) => toastError(e, 'Could not save the quoted price'),
   })
 
   // What the negotiation ended on, next to what was offered — the two numbers
@@ -42,7 +42,7 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
     <p data-testid="quoted-price-negotiated">
       <span className="text-slate-400">{t('negotiation.finalPrice')}:</span>{' '}
       <span className="tabular-nums text-emerald-200">
-        {change.negotiated_final_price.toFixed(2)}
+        {formatNumber(change.negotiated_final_price, { min: 2, max: 2 })}
       </span>
     </p>
   )
@@ -50,7 +50,7 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
   if (!editable) {
     return (
       <>
-        <p><span className="text-slate-400">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+        <p><span className="text-slate-400">Quoted price:</span> <span className="tabular-nums">{formatNumber(change.quoted_price, { min: 2, max: 2 })}</span></p>
         {negotiated}
       </>
     )
@@ -63,11 +63,11 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
     <>
     <p className="flex items-center gap-2">
       <span className="text-slate-400">Quoted price:</span>
-      <input type="number" step="0.01" value={value}
+      <input type="number" step="0.01" value={value} aria-label="Quoted price"
         onChange={(e) => setValue(e.target.value)}
         className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 w-32" />
       <button type="button"
-        className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+        className={btnSm.primary}
         disabled={!canSave}
         onClick={() => save.mutate(parsed)}>
         Save

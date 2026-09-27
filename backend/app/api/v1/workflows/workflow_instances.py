@@ -63,7 +63,22 @@ def _serialize_task(t: WfInstanceTask) -> dict:
         "accepted_at": t.accepted_at,
         "due_date": t.due_date,
         "overdue": t.overdue,
+        # the step refuses "approved" without 3D evidence on the revision
+        "requires_cad_evidence": bool(t.step.requires_cad_evidence) if t.step else False,
     }
+
+
+async def _instance_out(db: AsyncSession, instance: WfInstance) -> dict:
+    """The instance as the screens read it, plus whether its revision has
+    the 3D evidence a CAD-evidence step needs to be approved (the same
+    WorkflowService.has_3d_evidence the complete endpoint checks), so an
+    Approve button the backend would refuse is shown disabled with why."""
+    out = _serialize_instance(instance)
+    needs = any(t.get("requires_cad_evidence") for t in out["tasks"])
+    out["has_3d_evidence"] = (
+        await WorkflowService.has_3d_evidence(db, instance.part_revision_id)
+        if needs and instance.part_revision_id is not None else None)
+    return out
 
 
 def _serialize_instance(instance: WfInstance) -> dict:
@@ -106,29 +121,46 @@ async def _task_response(db: AsyncSession, task: WfInstanceTask) -> dict:
 # Routes — NOTE: my-tasks MUST be registered before /{instance_id}
 # ---------------------------------------------------------------------------
 
+def _fold_main_count(rows: list[dict], key) -> int:
+    """Rows folded like My Tasks folds them (lib/myTasks.ts): one row per
+    key; a folded row is backup only when every row in it is backup."""
+    folded: dict[tuple, bool] = {}
+    for r in rows:
+        k = key(r)
+        backup = r.get("role") == "backup"
+        folded[k] = folded.get(k, True) and backup
+    return sum(1 for backup in folded.values() if not backup)
+
+
 @router.get("/open-task-count")
 async def get_open_task_count(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Actionable open tasks for the nav badge — scoped to the user's
-    departments when they have memberships, global otherwise."""
-    from sqlalchemy import func
+    """The nav badge's number, counted exactly as the sidebar and the My
+    Tasks header count it (hooks/queries/useOpenTaskCount.ts): the workflow
+    tasks of the caller's departments and the change tasks, folded the same
+    way, plus the new-index triage and engineering review rows and the
+    Finance review task; rows where the caller is only backup (spec §18) are
+    not counted."""
+    from app.api.v1.changes.changes import my_change_tasks
+    from app.api.v1.cost_sheet import review_task
+    from app.services.revision_intake_service import RevisionIntakeService
 
-    stmt = (
-        select(func.count(WfInstanceTask.id))
-        .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
-        .where(
-            WfInstance.status == "active",
-            WfInstanceTask.status == "active",
-            WfInstanceTask.is_actionable == True,  # noqa: E712
-        )
-    )
     dept_ids = await WorkflowService.effective_department_ids(db, current_user)
-    if dept_ids:
-        stmt = stmt.where(WfInstanceTask.department_id.in_(dept_ids))
-    result = await db.execute(stmt)
-    return {"count": result.scalar() or 0}
+    workflow = await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
+    changes = await my_change_tasks(current_user=current_user, db=db)
+    intakes = await RevisionIntakeService.my(db, current_user)
+    finance = await review_task(current_user=current_user, db=db)
+    count = (
+        _fold_main_count(workflow, lambda r: (
+            r["instance_id"], r["stage_order"], r["step_name"], r["department_name"]))
+        + _fold_main_count(changes, lambda r: (
+            r.get("change_id"), r.get("kind"), r.get("department_id")))
+        + sum(1 for r in [*intakes["triage"], *intakes["review"]]
+              if r.get("role") != "backup")
+        + (1 if finance.get("due") else 0))
+    return {"count": count}
 
 
 @router.get("/my-tasks")
@@ -166,7 +198,7 @@ async def start_workflow(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return _serialize_instance(full)
+        return await _instance_out(db, full)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -182,7 +214,7 @@ async def get_current_workflow(
     instance = await WorkflowService.get_revision_workflow(db, revision_id)
     if instance is None:
         return {"instance": None}
-    return {"instance": _serialize_instance(instance)}
+    return {"instance": await _instance_out(db, instance)}
 
 
 @router.get("/{instance_id}")
@@ -195,7 +227,7 @@ async def get_workflow_instance(
     full = await _load_instance_full(db, instance_id)
     if not full:
         raise HTTPException(status_code=404, detail="Workflow instance not found")
-    return _serialize_instance(full)
+    return await _instance_out(db, full)
 
 
 @router.post("/{instance_id}/tasks/{task_id}/complete")
@@ -207,6 +239,25 @@ async def complete_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Complete an actionable task with approve/reject decision."""
+    # The task must belong to the instance the URL names.
+    found = (await db.execute(
+        select(WfInstanceTask.instance_id, WfInstance.change_id)
+        .join(WfInstance, WfInstanceTask.instance_id == WfInstance.id)
+        .where(WfInstanceTask.id == task_id))).one_or_none()
+    if found is None or found[0] != instance_id:
+        raise HTTPException(status_code=404,
+                            detail="Task not found on this workflow instance")
+    # Every actionable task on a change-scoped instance is a department's
+    # assessment (its ChangeAssessment row links it). Completing it here would
+    # skip everything the assessment submit checks (documents, the
+    # not-feasible deck, the checklist, open concerns) and record no verdict.
+    # The change's assessment submit is the one way to finish it.
+    if found[1] is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=("This task is a change assessment: submit it from the "
+                    "change's Assessments tab (POST /api/v1/changes/"
+                    f"{found[1]}/assessments), not through the workflow task."))
     try:
         instance = await WorkflowService.complete_task(
             db,
@@ -217,7 +268,7 @@ async def complete_task(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return _serialize_instance(full)
+        return await _instance_out(db, full)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -295,7 +346,7 @@ async def cancel_workflow(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return _serialize_instance(full)
+        return await _instance_out(db, full)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

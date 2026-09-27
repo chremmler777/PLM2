@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, plm2_roles
 from app.models import get_db
 from app.models.workflow import Department
+from app.version import SOFTWARE_VERSION
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -45,6 +46,8 @@ async def me(request: Request, user=Depends(get_current_user)) -> dict:
         "acting_as": ({"id": dept.id, "name": dept.name} if dept else None),
         "is_real_admin": user.is_real_admin,
         "effective_role": user.effective_role,
+        # The user-facing version the training record is stamped with.
+        "software_version": SOFTWARE_VERSION,
     }
 
 

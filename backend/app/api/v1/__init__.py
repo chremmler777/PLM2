@@ -1,7 +1,8 @@
 """API v1 routes, grouped into functional modules."""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.api.v1.health import router as health_router
 from app.api.v1.plants import router as plants_router
+from app.api.v1.project_team import router as project_team_router
 from app.api.v1.catalog_parts import router as catalog_parts_router
 from app.api.v1.paints import router as paints_router
 
@@ -22,6 +23,7 @@ from app.api.v1.items.dfm import router as dfm_router
 from app.api.v1.items.field_notes import router as field_notes_router
 from app.api.v1.items.materials import router as materials_router
 from app.api.v1.items.worksheet import router as worksheet_router
+from app.api.v1.items.intakes import router as intakes_router
 from app.api.v1.equipment import router as equipment_router
 
 # Module: workflows (RASIC templates and instances)
@@ -50,9 +52,27 @@ from app.api.v1.learning.lessons import router as lessons_router
 
 # Module: changes (engineering change management)
 from app.api.v1.changes.changes import router as changes_router
+from app.api.v1.changes.plan_offer import router as change_plan_offer_router
+from app.api.v1.changes.validation_issues import router as change_validation_issues_router
+from app.api.v1.changes.actual_costs import router as change_actual_costs_router
+from app.api.v1.changes.mother_plant import router as change_mother_plant_router
+from app.api.v1.changes.early_stage import router as change_early_stage_router
+from app.api.v1.changes.engineering_review import router as change_engineering_review_router
+from app.api.v1.changes.costing_context import router as change_costing_context_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.pnl import router as pnl_router
+from app.api.v1.cost_sheet import router as cost_sheet_router
+from app.api.v1.cost_sheet_machines import router as cost_sheet_machines_router
+
+# Module: training (ECR training record; the gate below is off by default)
+from app.api.v1.training import router as training_router, enforce_training_gate
+
+#: Wired onto the change routers and the revision intake, off unless
+#: TRAINING_GATE or the org setting 'training_gate' switches it on (ruling
+#: 2026-09-25: training is recorded, it does not block). Only the writes in
+#: training.GUARDED_WRITES are ever refused; reads always pass.
+_TRAINING_GATE = [Depends(enforce_training_gate)]
 
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
@@ -69,6 +89,7 @@ api_router.include_router(dfm_router)
 api_router.include_router(field_notes_router)
 api_router.include_router(materials_router)
 api_router.include_router(worksheet_router)
+api_router.include_router(intakes_router, dependencies=_TRAINING_GATE)
 api_router.include_router(equipment_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
@@ -81,14 +102,25 @@ api_router.include_router(sep_router)
 api_router.include_router(sep_files_router)
 api_router.include_router(forms_router)
 api_router.include_router(lessons_router)
-api_router.include_router(changes_router)
+api_router.include_router(changes_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_plan_offer_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_validation_issues_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_actual_costs_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_mother_plant_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_early_stage_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_engineering_review_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_costing_context_router, dependencies=_TRAINING_GATE)
 api_router.include_router(audit_router)
 api_router.include_router(plants_router)
+api_router.include_router(project_team_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
 api_router.include_router(catalog_parts_router)
 api_router.include_router(paints_router)
 api_router.include_router(reports_router)
 api_router.include_router(pnl_router)
+api_router.include_router(cost_sheet_machines_router)
+api_router.include_router(cost_sheet_router)
+api_router.include_router(training_router)
 
 __all__ = ["api_router"]

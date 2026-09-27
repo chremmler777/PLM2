@@ -1,0 +1,149 @@
+/** Number, date and chip helpers shared by the offer workspace. */
+import {
+  daysUntil, formatDate, formatMoney, formatNumber, formatPercent, formatPiecePrice, parseNumberInput,
+} from '../../../lib/format'
+
+/** 2 decimals + currency code: "12,345.50 EUR". */
+export const fmtMoney = formatMoney
+
+/** Piece-price deltas carry 2 to 4 decimals and a sign on a rise: "+0.4125 EUR". */
+export function fmtPiece(v: number | null | undefined, currency = 'EUR'): string {
+  return formatPiecePrice(v, currency, { sign: true })
+}
+
+/** "27.2%". */
+export function fmtPct(v: number | null | undefined): string {
+  return formatPercent(v)
+}
+
+/** "25 Sep 2026" from an ISO date or datetime. */
+export const fmtDate = formatDate
+
+export { todayIso, addDaysIso } from '../../../lib/format'
+
+/** A result: green above zero, red below, neutral at zero or unknown. */
+export function resultTone(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v) || Math.abs(v) < 0.005) return 'text-slate-400'
+  return v > 0 ? 'text-emerald-400' : 'text-rose-400'
+}
+
+/**
+ * How long a sent offer still holds, counted here from valid_until (local
+ * calendar days), so a null days_left from the server never reads "null d".
+ * Accepted and declined offers do not count down: null.
+ */
+export function offerDaysLeft(o: { status: string; valid_until?: string | null; days_left?: number | null }): number | null {
+  if (o.status !== 'sent' || !o.valid_until) return null
+  const d = daysUntil(o.valid_until.slice(0, 10))
+  return Number.isNaN(d) ? (o.days_left ?? null) : d
+}
+
+/** The validity chip's words: "Accepted", "12 d left", "expired". */
+export function validityText(o: { status: string; valid_until?: string | null; days_left?: number | null; expired?: boolean }): string {
+  if (o.status === 'accepted') return 'accepted'
+  if (o.status === 'declined') return 'declined'
+  const d = offerDaysLeft(o)
+  if (o.expired || (d != null && d < 0)) return 'expired'
+  return d == null ? '' : `${d} d left`
+}
+
+/** green > 10 days, amber <= 10, red when expired. */
+export function daysLeftTone(daysLeft: number | null | undefined, expired?: boolean): string {
+  if (expired || (daysLeft != null && daysLeft < 0)) return 'bg-rose-950/60 text-rose-200 border-rose-800'
+  if (daysLeft != null && daysLeft <= 10) return 'bg-amber-950/60 text-amber-200 border-amber-800'
+  return 'bg-emerald-950/60 text-emerald-200 border-emerald-800'
+}
+
+/**
+ * A user-typed number: "." is the decimal point, "," only groups thousands
+ * in 3-digit groups ("12,500", "1,234,567.5"); "12,5" is refused as
+ * ambiguous, never read as 12.5. lib/format parseNumberInput, the same rule
+ * as the backend's offer_service.read_number.
+ */
+export const parseNum = parseNumberInput
+
+export const inputCls =
+  'bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-100 '
+  + 'placeholder:text-slate-600 focus:outline-none focus:border-sky-500 disabled:opacity-60'
+
+export const sectionLabel = 'text-[11px] uppercase tracking-wider text-slate-500 font-medium'
+
+export const DEFAULT_DISCLAIMER =
+  'Draft timing. Final dates are confirmed after order according to shop, supplier and equipment availability.'
+
+export const quotePlanKey = (changeId: number) => ['change', changeId, 'plan', 'quote'] as const
+
+/** Weeks from the order milestone to the end of the plan, rounded up. */
+/**
+ * Weeks of a plan from its calendar span (start to the inclusive finish),
+ * never from its duration: in a working-day calendar the duration counts
+ * working days, and 78 working days are 16 weeks, not 12. A bare number is
+ * still read as calendar days (older callers).
+ */
+export function planWeeks(
+  span: number | { start: string | null; finish: string | null } | null | undefined,
+): number | null {
+  if (span == null) return null
+  if (typeof span === 'number') return span > 0 ? Math.ceil(span / 7) : null
+  if (!span.start || !span.finish) return null
+  const days = (Date.UTC(+span.finish.slice(0, 4), +span.finish.slice(5, 7) - 1, +span.finish.slice(8, 10))
+    - Date.UTC(+span.start.slice(0, 4), +span.start.slice(5, 7) - 1, +span.start.slice(8, 10))) / 86_400_000 + 1
+  return days > 0 ? Math.ceil(days / 7) : null
+}
+
+// ---------------------------------------------------------------- offer diff
+
+const CHANGEOVER_LABEL: Record<string, string> = {
+  running_change: 'Running change',
+  customer_pays_scrap: 'Customer pays scrap',
+}
+const TERMS_LABEL: Record<string, string> = {
+  payment: 'Payment terms', incoterms: 'Incoterms', delivery: 'Delivery', notes: 'Terms notes',
+}
+
+const RAW_LABEL: Record<string, string> = {
+  total_one_time: 'Total one-time',
+  piece_price_delta: 'Piece price delta',
+  changeover: 'Changeover',
+  scrap_qty: 'Scrap quantity',
+  scrap_unit_price: 'Scrap unit price',
+  weeks_from_order: 'Timing weeks from order',
+}
+
+/** The server names most rows already; raw keys get a readable name. */
+export function diffLabel(field: string): string {
+  if (RAW_LABEL[field]) return RAW_LABEL[field]
+  const terms = /^Terms (\w+)$/.exec(field)
+  if (terms) return TERMS_LABEL[terms[1]] ?? `Terms: ${terms[1].replace(/_/g, ' ')}`
+  if (/^[a-z0-9_]+$/.test(field)) {
+    const words = field.replace(/_/g, ' ')
+    return words[0].toUpperCase() + words.slice(1)
+  }
+  return field
+}
+
+const numFmt = { format: (v: number) => formatNumber(v, { max: 4 }) }
+
+/** A diff value in the words and units of its row. */
+export function diffValue(rawField: string, v: unknown, currency = 'EUR'): string {
+  const field = RAW_LABEL[rawField] ?? rawField
+  if (v === null || v === undefined || v === '') return '-'
+  if (typeof v === 'boolean') return v ? 'yes' : 'no'
+  if (field === 'Changeover' && typeof v === 'string') return CHANGEOVER_LABEL[v] ?? v.replace(/_/g, ' ')
+  if (typeof v === 'number') {
+    if (field === 'Piece price delta') return fmtPiece(v, currency)
+    if (field === 'Total one-time' || field === 'Scrap unit price' || field.startsWith('Cost line ')) {
+      return fmtMoney(v, currency)
+    }
+    if (field === 'Timing weeks from order') return `${numFmt.format(v)} week${v === 1 ? '' : 's'}`
+    if (field === 'Scrap quantity') return `${numFmt.format(v)} pcs`
+    return numFmt.format(v)
+  }
+  if (Array.isArray(v)) return v.map((x) => diffValue(field, x, currency)).join(', ')
+  if (typeof v === 'object') {
+    return Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x !== null && x !== undefined && x !== '')
+      .map(([k, x]) => `${k.replace(/_/g, ' ')}: ${diffValue(k, x, currency)}`).join(', ') || '-'
+  }
+  return String(v)
+}

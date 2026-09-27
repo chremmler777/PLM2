@@ -7,6 +7,7 @@
  * yield a file in the browser — save it as .msg first, then drop that.
  */
 import { useRef, useState } from 'react';
+import { LoaderCircle, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { apiErrorMessage } from '../../lib/apiError';
@@ -28,22 +29,34 @@ interface Props {
   assessmentId?: number;
   /** A vendor quote files itself under the offer it prices. */
   costingOfferId?: number;
+  /** Evidence and customer mails filed into one validation issue. */
+  validationIssueId?: number;
   /** Slot label — the needs-info and response slots say what they are for. */
   label?: string;
   /** Inside a card the zone is one quiet line, not a big dashed billboard. */
   compact?: boolean;
+  /** A slot that takes only some file types (e.g. ['.ppt', '.pptx', '.pdf']):
+   *  narrows the browse dialog and turns other drops away before upload. The
+   *  backend enforces the same list. */
+  extensions?: string[];
 }
 
 export default function AttachmentDropzone({
   changeId, onUploaded, kind, respondsToId, concernId, assessmentId,
-  costingOfferId, label, compact = false,
+  costingOfferId, validationIssueId, label, compact = false, extensions,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const upload = async (files: File[]) => {
-    if (files.length === 0) return;
+  const upload = async (picked: File[]) => {
+    if (picked.length === 0) return;
+    const typed = (f: File) => !extensions?.length
+      || extensions.some((x) => f.name.toLowerCase().endsWith(x.toLowerCase()));
+    picked.filter((f) => !typed(f)).forEach((f) =>
+      toast.error(t('attach.wrongType').replace('{name}', f.name)
+        .replace('{x}', (extensions ?? []).join(', '))));
+    const files = picked.filter(typed);
     const tooBig = files.filter((f) => f.size > MAX_BYTES);
     const ok = files.filter((f) => f.size <= MAX_BYTES);
     tooBig.forEach((f) =>
@@ -56,7 +69,7 @@ export default function AttachmentDropzone({
     for (const f of ok) {
       try {
         await changesApi.uploadAttachment(changeId, f,
-          { kind, respondsToId, concernId, assessmentId, costingOfferId });
+          { kind, respondsToId, concernId, assessmentId, costingOfferId, validationIssueId });
         uploaded += 1;
       } catch (e) {
         toast.error(apiErrorMessage(e, t('attach.failed').replace('{name}', f.name)));
@@ -109,19 +122,29 @@ export default function AttachmentDropzone({
             : 'border-slate-600 bg-slate-900/40 text-slate-400 hover:border-slate-500')
         }
       >
-        <span className={compact ? 'leading-none' : 'text-2xl leading-none'} aria-hidden>
-          {busy ? '⏳' : '📎'}
+        <span className="leading-none" aria-hidden="true">
+          {busy
+            ? <LoaderCircle size={compact ? 14 : 22} className="motion-safe:animate-spin" />
+            : <Paperclip size={compact ? 14 : 22} />}
         </span>
         <span className={compact ? 'text-xs' : 'text-sm'}>
           {busy ? t('attach.uploading') : label ?? t('attach.dropHere')}
         </span>
         {!compact && <span className="text-xs text-slate-500">{t('attach.hint')}</span>}
       </div>
+      {/* An RFQ is what went OUT to the supplier; the priced answer that
+          came back belongs on the costing line, where its readers are
+          limited to the people who may see that price. */}
+      {kind === 'rfq' && (
+        <p className="mt-1 text-[11px] text-slate-500" data-testid="rfq-hint">
+          {t('attach.rfqHint')}
+        </p>
+      )}
       <input
         ref={inputRef}
         type="file"
         multiple
-        accept={ACCEPT}
+        accept={extensions?.length ? extensions.join(',') : ACCEPT}
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);

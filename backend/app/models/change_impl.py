@@ -48,6 +48,13 @@ class ImplementationBooking(Base):
     # into it buys nothing but TypeErrors.
     hours: Mapped[float] = mapped_column(Numeric(8, 2, asdecimal=False))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional pricing detail (098): the position whose cost sheet rate
+    # prices these hours, and machine hours on a machine class.
+    labour_position: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    machine_class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
+    machine_hours: Mapped[float | None] = mapped_column(
+        Numeric(8, 2, asdecimal=False), nullable=True)
 
     booked_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     booked_at: Mapped[datetime] = mapped_column(

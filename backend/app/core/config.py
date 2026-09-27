@@ -1,4 +1,5 @@
 """Application configuration using Pydantic Settings."""
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -91,6 +92,20 @@ class Settings(BaseSettings):
     notification_task_completed: bool = True
     notification_escalation: bool = True
     notification_workflow_complete: bool = True
+
+    # ECR training gate (app/services/training.py). Unset (the default) means
+    # the org setting 'training_gate' decides, and that defaults to off. Set
+    # TRAINING_GATE=true/false to force it for the whole installation.
+    training_gate: bool | None = None
+
+    @field_validator("training_gate", mode="before")
+    @classmethod
+    def _blank_training_gate_is_unset(cls, v):
+        # TRAINING_GATE= (empty, as compose files write an unset variable)
+        # means "not pinned", not a startup failure.
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
     class Config:
         env_file = ".env"

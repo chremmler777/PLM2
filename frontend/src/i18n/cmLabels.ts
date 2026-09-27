@@ -34,18 +34,18 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   no_lead_set: { de: 'Kein Leit-Teil', en: 'No lead set' },
   by_department: { de: 'Nach Abteilung', en: 'By department' },
   by_plant: { de: 'Nach Werk', en: 'By plant' },
-  summierung: { de: 'Summierung', en: 'Summierung' },
+  summierung: { de: 'Kostenübersicht', en: 'Cost summary' },
   no_rate_configured: { de: 'Keine Kostensätze für diese Abteilung konfiguriert', en: 'No cost rates configured for this department' },
   'impact.title': { de: 'Betroffene Struktur', en: 'Impact tree' },
-  'impact.hint': { de: 'Betroffene Knoten wählen — Vorschläge zeigen strukturell betroffene Baugruppen.', en: 'Pick impacted nodes — suggestions mark structurally affected parent assemblies.' },
+  'impact.hint': { de: 'Betroffene Knoten wählen. Vorschläge zeigen strukturell betroffene Baugruppen.', en: 'Pick impacted nodes. Suggestions mark structurally affected parent assemblies.' },
   'impact.suggested': { de: 'Vorschlag', en: 'Suggested' },
   'impact.lead': { de: 'Leit-Teil', en: 'Lead item' },
   'impact.leadPinned': {
-    de: 'Ab der Bewertung fest — die Fachbereiche sind darauf geroutet.',
-    en: 'Pinned from assessment on — departments are routed against it.',
+    de: 'Ab der Bewertung fest: Die Fachbereiche sind darauf geroutet.',
+    en: 'Pinned from assessment on: departments are routed against it.',
   },
   'impact.apply': { de: 'Auswahl übernehmen', en: 'Apply selection' },
-  'impact.locked': { de: 'Auswahl gesperrt — Umsetzung gestartet', en: 'Selection locked — implementation started' },
+  'impact.locked': { de: 'Auswahl gesperrt, Umsetzung gestartet', en: 'Selection locked, implementation started' },
   'impact.empty': { de: 'Keine Teile im Projekt. Teile zuerst im Projekt anlegen.', en: 'No parts in this project. Create parts on the project page first.' },
   'impact.confirm': { de: 'Umfang bestätigen (Entwicklung)', en: 'Confirm impact (Development)' },
   'impact.confirmed': { de: 'Bestätigt von', en: 'Confirmed by' },
@@ -55,11 +55,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'impact.pending': { de: 'Bestätigung durch die Entwicklung ausstehend', en: 'Impact confirmation pending (Development)' },
   'impl.title': { de: 'Umsetzung', en: 'Implementation' },
-  'impl.readyToGo': { de: 'Ready to go — alle Prüf-Workflows abgeschlossen', en: 'Ready to go — all check workflows completed' },
+  'impl.readyToGo': { de: 'Ready to go - alle Prüf-Workflows abgeschlossen', en: 'Ready to go - all check workflows completed' },
   'impl.notReady': { de: 'Noch nicht ready to go', en: 'Not ready to go yet' },
   'impl.evidenceOk': { de: '3D-Nachweis vorhanden', en: '3D evidence present' },
   'impl.evidenceMissing': { de: '3D-Nachweis fehlt', en: '3D evidence missing' },
   'impl.noGeometry': { de: 'Keine Geometrieänderung', en: 'No geometry change' },
+  'impl.noGeometryReason': { de: 'Warum ändert diese Revision die Geometrie nicht? (Pflicht, protokolliert)', en: 'Why does this revision not change the geometry? (required, audited)' },
   'impl.signNoGeometry': { de: 'Keine Geometrieänderung bestätigen', en: 'Sign no geometry change' },
   'impl.stage': { de: 'Stufe', en: 'Stage' },
   'impl.noRevision': { de: 'Noch keine ECN-Revision (Kickoff ausstehend)', en: 'No ECN revision yet (kickoff pending)' },
@@ -73,19 +74,34 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.changeWork': { de: 'Änderungsaufgaben', en: 'Change tasks' },
   'tasks.open': { de: 'Öffnen', en: 'Open' },
   'tasks.task': { de: 'Aufgabe', en: 'Task' },
+  // My Tasks as one list (spec §16).
+  'tasks.openList': { de: 'Offene Aufgaben', en: 'Open tasks' },
+  'tasks.subtitle': { de: 'Alles, was auf dich wartet, in einer Liste', en: 'Everything waiting on you, in one list' },
+  'tasks.what': { de: 'Änderung / Teil', en: 'Change / part' },
+  'tasks.stage': { de: 'Phase', en: 'Stage' },
+  'tasks.stageN': { de: 'Stufe {n}', en: 'Stage {n}' },
+  'tasks.revision': { de: 'Revision', en: 'Revision' },
+  'tasks.viewPart': { de: 'Teil ansehen', en: 'View part' },
+  'tasks.deptFilter': { de: 'Workflow-Aufgaben von', en: 'Workflow tasks of' },
+  'tasks.myDepartments': { de: 'Meine Abteilungen', en: 'My departments' },
+  'tasks.emptyMine': {
+    de: 'Nichts offen. Fehlt eine Aufgabe, prüfe mit einem Admin deine Abteilungen.',
+    en: 'Nothing open. If a task is missing, check your departments with an admin.',
+  },
+  'tasks.emptyDept': { de: 'Keine offenen Aufgaben in dieser Abteilung.', en: 'No open tasks in this department.' },
   'tasks.kind.assessment': { de: 'Bewertung', en: 'Assessment' },
-  'tasks.kind.kickoff': { de: 'Kickoff', en: 'Kickoff' },
+  'tasks.kind.kickoff': { de: 'An das Scoping übergeben', en: 'Hand over to scoping' },
   'tasks.kind.scoping_wrapup': { de: 'Scoping abschließen', en: 'Wrap up scoping' },
-  'tasks.kind.impact_confirm': { de: 'Umfang bestätigen', en: 'Confirm impact' },
+  'tasks.kind.impact_confirm': { de: 'Umfang wählen und bestätigen', en: 'Pick and confirm impact' },
   'tasks.kind.customer_response': { de: 'Kundenantwort', en: 'Customer response' },
-  'tasks.hint.kickoff': { de: 'Kickoff ausstehend — fehlt: {x}', en: 'Kickoff pending — missing: {x}' },
+  'tasks.hint.kickoff': { de: 'Kickoff ausstehend, fehlt: {x}', en: 'Kickoff pending, missing: {x}' },
   'tasks.hint.kickoffReady': { de: 'Kickoff ausstehend', en: 'Kickoff pending' },
   'tasks.hint.impactOpen': { de: 'Impact bestätigen', en: 'impact to confirm' },
   'tasks.hint.decisionOpen': { de: 'Entscheidung offen', en: 'decision open' },
   'tasks.hint.wrapup': { de: 'Scoping abschließen', en: 'wrap up scoping' },
   'tasks.hint.impact_confirm': {
-    de: 'Betroffene Teile festlegen und bestätigen',
-    en: 'Define and confirm the impacted set',
+    de: 'Betroffene Teile wählen und bestätigen',
+    en: 'Pick and confirm the impacted set',
   },
       'tasks.kind.send_rejection': { de: 'Absage an Kunden senden', en: 'Send rejection to customer' },
   'tasks.hint.send_rejection_letter': {
@@ -106,8 +122,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
   'tasks.hint.questionsOpen': {
-    de: '{n} offene Fragen — neueste',
-    en: '{n} questions open — newest',
+    de: '{n} offene Fragen, neueste:',
+    en: '{n} questions open, newest:',
   },
   'tasks.hint.obtain_info': {
     de: 'Offene Rückfrage beim Kunden klären',
@@ -117,7 +133,36 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Kundenantwort einholen',
     en: 'Chase the customer response',
   },
-  'esc.title': { de: 'Eskalationen — überfällig in meinen Changes', en: 'Escalations — overdue in my changes' },
+  'esc.title': { de: 'Eskalationen: überfällig in meinen Changes', en: 'Escalations: overdue in my changes' },
+  // The other plant a change comes from (origin mother_plant): always named,
+  // {p} is the plant ("KTX Weissenburg"), or both when none is set.
+  'mp.generic': { de: 'KTX Weissenburg / Solingen', en: 'KTX Weissenburg / Solingen' },
+  'mp.startOption': { de: 'Änderung von {p}', en: 'Change from {p}' },
+  'mp.startPmOnly': { de: 'Änderungen von {p} startet das Projektmanagement (PM).', en: 'Changes from {p} are started by Project Management (PM).' },
+  'mp.startHint': { de: 'Von {p} entwickelt und verkauft; wir informieren das Team und übernehmen deren Terminplan.', en: 'Engineered and sold by {p}; we inform the team and take over their timing.' },
+  'mp.plantLabel': { de: 'Werk', en: 'Plant' },
+  'mp.plantMissing': { de: 'Werk', en: 'plant' },
+  'mp.from': { de: 'Von {p}', en: 'From {p}' },
+  'mp.sop': { de: 'SOP von {p}', en: 'SOP from {p}' },
+  'mp.inform': { de: '{p} informieren', en: 'Inform {p}' },
+  'mp.informAgain': { de: '{p} erneut informieren', en: 'Inform {p} again' },
+  'mp.informed': { de: '{p} über den Terminplan informiert', en: '{p} informed of the timing' },
+  'mp.pmInforms': { de: 'Die Projektleitung informiert {p}.', en: 'Project Management informs {p}.' },
+  'mp.notInformed': { de: '{p} noch nicht über den validierten Terminplan informiert', en: '{p} not informed of the validated timing yet' },
+  'mp.stillToTell': { de: 'Terminplan validiert. {p} muss die Baseline noch erfahren.', en: 'Timing validated. {p} still has to be told the baseline.' },
+  'mp.pnlBasis': { de: 'Kein Plan: Änderung von {p}, nur tatsächliche lokale Kosten', en: 'No plan: change from {p}, actual local costs only' },
+  'mp.loadError': { de: 'Die Angaben von {p} konnten nicht geladen werden.', en: 'Could not load the details from {p}.' },
+  'mp.addDocument': { de: 'Dokument von {p} hinzufügen', en: 'Add a document from {p}' },
+  'mp.attachTiming': { de: 'Terminplan von {p} anhängen', en: 'Attach the timing from {p}' },
+  'mp.infoHint': { de: 'Jedem Team, das handeln muss, sagen, was {p} geändert hat. Die Freigabe wartet, bis die Information verschickt ist.', en: 'Tell every team that has to act what {p} changed. Approval waits until the information is sent.' },
+  'mp.approveBody': { de: 'Die Go-Entscheidung wird festgehalten: der SOP von {p} wird der Freigabetermin, und die Detailplanung beginnt auf dem Timing-Tab mit deren Terminplan.', en: 'The go decision is recorded: the SOP from {p} becomes the release deadline, and the detailed timing starts on the Timing tab from their timing.' },
+  'mp.approveClear': { de: 'Der betroffene Umfang ist bestätigt und das Team ist informiert.', en: 'The impacted set is locked and the team is informed.' },
+  'mp.sendInfo': { de: 'Information an das Team senden', en: 'Send information to the team' },
+  'mp.sendInfoHint': { de: 'Auf dem Tab {p}: jede Abteilung bestätigt "Gelesen und verstanden". Die Freigabe wartet, bis die Information verschickt ist.', en: 'On the {p} tab: each department confirms "Read and understood". Approval waits until the information is sent.' },
+  'mp.scopingHint': { de: '{p} hat Bewertung und Angebot gemacht: hier steht, welche Abteilungen informiert werden. Keine Bewertung, kein Kostenträger.', en: '{p} did the assessment and the offer: this record says which departments are informed. No assessment, no cost carrier.' },
+  'mp.informDepartments': { de: 'Zu informierende Abteilungen', en: 'Departments to inform' },
+  'mp.informSummary': { de: '{n} zu informieren', en: '{n} to inform' },
+  'mp.attachFailed': { de: '{x} konnte nicht angehängt werden. Im Tab {p} hinzufügen.', en: 'Could not attach {x}. Add it on the {p} tab.' },
   'kickoff.title': {
     de: 'Für den Start ins Scoping fehlt noch:',
     en: 'Missing before scoping can start:',
@@ -128,6 +173,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Weiterschalten ist möglich, erfordert aber eine Abweichung.',
     en: 'You can still advance, but it needs a deviation.',
   },
+  'kickoff.hard': { de: 'Die Übergabe wartet, bis nichts mehr fehlt.', en: 'The hand-over waits until nothing is missing.' },
   'kickoff.ready': { de: 'Bereit fürs Scoping', en: 'Ready for scoping' },
   'responsible.label': { de: 'Verantwortlich', en: 'Responsible' },
   'role.sales': { de: 'Vertrieb', en: 'Sales' },
@@ -140,10 +186,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'role.pmShort': { de: 'PM', en: 'PM' },
   'role.team': { de: 'Team', en: 'Team' },
   'role.customer': { de: 'Kunde', en: 'Customer' },
+  // Engineering review track (spec §17): Development owns every stage.
+  'role.development': { de: 'Entwicklung', en: 'Development' },
+  'role.developmentIntake': { de: 'Entwicklung / Eingang', en: 'Development / intake' },
   'cockpit.where': { de: 'Status', en: 'Status' },
   'cockpit.blocking': { de: 'Blockiert durch', en: 'Blocked by' },
   'cockpit.next': { de: 'Nächster Schritt', en: 'Next step' },
   'cockpit.nothingBlocking': { de: 'Nichts blockiert', en: 'Nothing blocking' },
+  'cockpit.worthKnowing': { de: 'Gut zu wissen', en: 'Worth knowing' },
   'cockpit.lead': { de: 'Verantwortlich (Lead)', en: 'Lead' },
   'cockpit.pendingDeviations': { de: 'Offene Abweichungen', en: 'Pending deviations' },
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
@@ -153,17 +203,36 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments blocked by open concerns',
   },
   'cockpit.decideInMeeting': {
-    de: 'Entscheidung im Scoping-Termin festhalten — Freigabe, Rückfrage oder Ablehnung →',
-    en: 'Record the decision in the scoping meeting — proceed, needs info or reject →',
+    de: 'Scoping-Termin festhalten: weiter, Rückfrage oder Ablehnung →',
+    en: 'Record the scoping meeting: proceed, ask for information or reject →',
+  },
+  'cockpit.meetingDecides': {
+    de: 'Der Scoping-Termin entscheidet (Lead, Projektmanagement): Scoping ansehen →',
+    en: 'The scoping meeting decides (lead, Project Management): see Scoping →',
+  },
+  'cockpit.startImplementation': { de: 'Umsetzung starten', en: 'Start implementation' },
+  'cockpit.startImplementationHint': {
+    de: 'Benötigt validiertes Timing oder eine genehmigte Abweichung',
+    en: 'Needs validated timing or an approved deviation',
   },
   'cockpit.gate': { de: 'Gate', en: 'Gate' },
   'cockpit.resolveGate': { de: 'Gate auf dem D1-Tab entscheiden', en: 'Decide this gate on the D1 tab' },
   'actions.title': { de: 'Deine Aufgaben', en: 'Your actions' },
   'actions.none': { de: 'Für dich gibt es hier gerade nichts zu tun.', en: 'Nothing needs you here right now.' },
   'actions.notYourDepartment': { de: 'Nicht deine Abteilung', en: 'Not your department' },
+  'actions.asBackup': { de: 'Als Vertretung', en: 'As backup' },
+  'team.backup': { de: 'Vertretung', en: 'Backup' },
+  'team.main': { de: 'Verantwortlich: {x}', en: 'Main: {x}' },
+  'team.backupHint': {
+    de: 'Du vertrittst hier. Zählt nicht auf deinem Zähler.',
+    en: 'You are backup here. It does not count on your badge.',
+  },
+  'tasks.asBackup': { de: '+{n} als Vertretung', en: '+{n} as backup' },
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },
+  'audit.actingAs': { de: '(als {d})', en: '(as {d})' },
+  'audit.reason': { de: 'Grund', en: 'reason' },
   'audit.title': { de: 'Audit-Trail', en: 'Audit trail' },
   'audit.chainOk': { de: 'Kette intakt', en: 'chain intact' },
   'audit.chainBroken': { de: 'Kette beschädigt', en: 'chain broken' },
@@ -171,8 +240,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.chainOkScoped': { de: 'Kette intakt (diese Änderung)', en: 'chain intact (this change)' },
   'audit.chainBrokenScoped': { de: 'Kette beschädigt (diese Änderung)', en: 'chain broken (this change)' },
   'audit.truncated': {
-    de: 'Zeigt die neuesten 1000 Einträge — für die vollständige Historie CSV exportieren.',
-    en: 'showing the newest 1000 entries — export CSV for the full trail',
+    de: 'Zeigt die neuesten 1000 Einträge. Für die vollständige Historie CSV exportieren.',
+    en: 'showing the newest 1000 entries; export CSV for the full trail',
   },
   'audit.export': { de: 'CSV exportieren', en: 'Export CSV' },
   'audit.empty': { de: 'Noch keine Audit-Einträge.', en: 'No audit entries yet.' },
@@ -182,8 +251,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.project': { de: 'Projekt', en: 'Project' },
   'start.item': { de: 'Betroffene Teile', en: 'Affected items' },
   'start.itemHint': {
-    de: 'Mehrere Teile wählbar — z. B. alle Teile eines Werkzeugs in einem Antrag. Das erste ist das führende Teil.',
-    en: 'Pick several — e.g. all parts of one tool in a single request. The first one is the lead item.',
+    de: 'Mehrere Teile wählbar, z. B. alle Teile eines Werkzeugs in einem Antrag. Das erste ist das führende Teil.',
+    en: 'Pick several, e.g. all parts of one tool in a single request. The first one is the lead item.',
   },
   'start.lead': { de: 'Führend', en: 'Lead' },
   'start.makeLead': { de: 'Als führendes Teil setzen', en: 'Make lead item' },
@@ -192,8 +261,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.colCustomer': { de: 'Kundennummer', en: 'Customer no.' },
   'start.colName': { de: 'Benennung', en: 'Name' },
   'start.searchItem': {
-    de: 'Teil suchen — eigene Nummer, Kundennummer oder Benennung…',
-    en: 'Search item — part number, customer number or name…',
+    de: 'Teil suchen: eigene Nummer, Kundennummer oder Benennung…',
+    en: 'Search item: part number, customer number or name…',
   },
   'start.articles': { de: 'Artikel', en: 'Articles' },
   'start.tools': { de: 'Werkzeuge & Betriebsmittel', en: 'Tools & equipment' },
@@ -206,8 +275,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Internal changes where the physical part does not change will be tracked in a separate system (coming later).',
   },
   'start.typeMoreSoon': {
-    de: 'Vorerst nur physische Teileänderungen — weitere Arten folgen.',
-    en: 'Physical part changes only for now — more types coming.',
+    de: 'Vorerst nur physische Teileänderungen; weitere Arten folgen.',
+    en: 'Physical part changes only for now; more types are coming.',
   },
   'start.hiddenNonPhysical': {
     de: '{n} Nicht-Physische-Teile ausgeblendet (Verpackung, Material … folgen später).',
@@ -215,12 +284,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'start.changeTitle': { de: 'Titel (automatisch)', en: 'Title (automatic)' },
   'start.titleAuto': {
-    de: 'Wird aus Projekt, Kundennummer und führendem Teil gebildet — wie die Dateinamen im Datenmanagement.',
-    en: 'Built from project, customer number and lead item — the same way the data-management system names its files.',
+    de: 'Wird aus Projekt, Kundennummer und führendem Teil gebildet, wie die Dateinamen im Datenmanagement.',
+    en: 'Built from project, customer number and lead item, the same way the data-management system names its files.',
   },
   'start.titlePlaceholder': {
-    de: 'Teil wählen — der Titel entsteht daraus',
-    en: 'Pick an item — the title follows from it',
+    de: 'Teil wählen; der Titel entsteht daraus',
+    en: 'Pick an item; the title follows from it',
   },
   'start.reason': { de: 'Kurzbeschreibung', en: 'Short description' },
   'start.reasonPlaceholder': {
@@ -232,9 +301,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'One line. Detail belongs in the attachments and assessments.',
   },
   'start.type': { de: 'Änderungsart', en: 'Change type' },
+  'start.defaultLead': { de: 'Leitung', en: 'Lead' },
+  'start.projectPm': { de: 'Projekt-PM', en: 'project PM' },
   'start.create': { de: 'Änderung anlegen', en: 'Create change' },
   'start.clearItem': { de: 'Auswahl entfernen', en: 'Remove selected item' },
-  'start.noMatches': { de: 'Keine Treffer — Nummer oder Namen anders schreiben?', en: 'No matches — try a different number or name?' },
+  'start.noMatches': { de: 'Keine Treffer. Nummer oder Namen anders schreiben?', en: 'No matches. Try a different number or name?' },
   // Who carries the cost, and therefore which costing branch the change takes.
   // Deliberately NOT worded "internal / external": the D1 master already has
   // independent "CM internal" and "CM external" flags meaning something else,
@@ -243,12 +314,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.customerChange': { de: 'Kundenänderung', en: 'Customer change' },
   'start.internalChange': { de: 'Interne Änderung', en: 'Internal change' },
   'start.customerRelevantYesHint': {
-    de: 'Läuft über den Angebotsprozess — Kunde muss den Preis akzeptieren, bevor freigegeben wird.',
-    en: 'Goes through the quote workflow — the customer must accept a price before approval.',
+    de: 'Läuft über den Angebotsprozess: Kunde muss den Preis akzeptieren, bevor freigegeben wird.',
+    en: 'Goes through the quote workflow: the customer must accept a price before approval.',
   },
   'start.customerRelevantNoHint': {
-    de: 'Läuft über die interne Kostenfreigabe — kein Kunde beteiligt.',
-    en: 'Goes through internal cost approval — no customer involved.',
+    de: 'Läuft über die interne Kostenfreigabe, kein Kunde beteiligt.',
+    en: 'Goes through internal cost approval, no customer involved.',
   },
   'concern.title': { de: 'Einwände des Teams', en: 'Team concerns' },
   // Assessment is a risk assessment, so the same mechanics are worded as risks
@@ -257,9 +328,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risk.hint': {
     // Risks are a register, not a gate: they are rated, tracked and closed with
     // a proposal. Nothing about them stops the assessment.
-    de: 'Ein Risiko hält nichts auf — es wird bewertet, verfolgt und mit einem '
+    de: 'Ein Risiko hält nichts auf: Es wird bewertet, verfolgt und mit einem '
       + 'Lösungsvorschlag geschlossen. Entschieden wird mit dem Urteil.',
-    en: 'A risk blocks nothing — it is rated, tracked and closed with a mitigation '
+    en: 'A risk blocks nothing: it is rated, tracked and closed with a mitigation '
       + 'proposal. The verdict is the decision.',
   },
   'risk.raise': { de: 'Risiko melden', en: 'Flag risk' },
@@ -283,8 +354,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risk.severityHint': { de: '3 = höchstes Risiko', en: '3 = highest risk' },
   'risk.note': { de: 'Beschreibung', en: 'Description' },
   'risk.notePlaceholder': {
-    de: 'Was genau ist das Risiko — und woran zeigt es sich?',
-    en: 'What exactly is the risk — and how does it show?',
+    de: 'Was genau ist das Risiko, und woran zeigt es sich?',
+    en: 'What exactly is the risk, and how does it show?',
   },
   'risktype.fill_issue': { de: 'Füllprobleme', en: 'Fill issues' },
   'risktype.dimensional_issue': { de: 'Maßabweichung', en: 'Dimensional issue' },
@@ -323,22 +394,22 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Documentation attached (PPT)',
   },
   'concern.proposalNeedsDoc': {
-    de: 'Ein Vorschlag braucht die Dokumentation — Text allein reicht nicht.',
-    en: 'A proposal needs its documentation — text alone is not enough.',
+    de: 'Ein Vorschlag braucht die Dokumentation. Text allein reicht nicht.',
+    en: 'A proposal needs its documentation. Text alone is not enough.',
   },
   'concern.proposalReceived': {
-    de: 'Vorschlag eingegangen — wartet auf Prüfung durch {x}',
-    en: 'Proposal received — awaiting {x} review',
+    de: 'Vorschlag eingegangen, wartet auf Prüfung durch {x}',
+    en: 'Proposal received, awaiting {x} review',
   },
   'concern.proposalBy': { de: 'vorgeschlagen von', en: 'proposed by' },
   'concern.none': {
-    de: 'Keine Einwände. Wer etwas blockiert sieht, kann es hier markieren — auch vor dem Termin.',
-    en: 'No concerns. Anyone who sees a blocker can flag it here — before the meeting, too.',
+    de: 'Keine Einwände. Wer etwas blockiert sieht, kann es hier markieren, auch vor dem Termin.',
+    en: 'No concerns. Anyone who sees a blocker can flag it here, even before the meeting.',
   },
   'concern.raise': { de: 'Einwand', en: 'Flag' },
   'concern.blocking': {
-    de: '{n} offen — blockiert die Freigabe',
-    en: '{n} open — blocks proceed',
+    de: '{n} offen, blockiert die Freigabe',
+    en: '{n} open, blocks proceed',
   },
   'concern.wouldReject': { de: 'Würde ablehnen', en: 'Would reject' },
   'concern.wantsInfo': { de: 'Info fehlt', en: 'Needs info' },
@@ -358,7 +429,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.resolved': { de: 'Geklärt', en: 'Addressed' },
   'concern.awaitingAnswer': { de: 'Wartet auf Antwort', en: 'Awaiting answer' },
   'concern.solved': { de: 'Geklärt', en: 'Solved' },
-  'concern.awaitingClosure': { de: 'Antwort da — Abschluss offen', en: 'Answered — awaiting closure' },
+  'concern.awaitingClosure': { de: 'Antwort da, Abschluss offen', en: 'Answered, awaiting closure' },
   'concern.submitAnswer': { de: 'Antworten', en: 'Answer' },
   'concern.updateAnswer': { de: 'Antwort aktualisieren', en: 'Update answer' },
   'concern.answeredBy': { de: 'beantwortet von', en: 'answered by' },
@@ -388,10 +459,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Carried over from an earlier assessment',
   },
   'check.title': { de: 'Betroffene Bereiche', en: 'Impacted areas' },
+  'check.earlier': { de: 'Frühere Checklistenpunkte', en: 'Earlier checklist items' },
+  'check.earlierHint': {
+    de: 'Nach einer früheren Fassung der Checkliste beantwortet. Bleibt wie gegeben und wird unverändert mitgesendet.',
+    en: 'Answered against an earlier version of the checklist. Kept as given and sent back unchanged.',
+  },
   'check.evidenceRequired': {
-    de: 'Erklärung (PPT) für den Kunden anhängen — wird von der verantwortlichen '
+    de: 'Erklärung (PPT) für den Kunden anhängen. Wird von der verantwortlichen '
       + 'Seite versendet.',
-    en: 'Attach the explanation (PPT) for the customer — sent by the responsible side.',
+    en: 'Attach the explanation (PPT) for the customer. It is sent by the responsible side.',
   },
   'check.hint': {
     de: 'Jede Zeile mit Ja oder Nein beantworten. Ja wird in der Kostenerfassung '
@@ -432,6 +508,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.title': { de: 'Kostenerfassung', en: 'Cost input' },
   'costing.filled': { de: 'Erfasst', en: 'Filled' },
   'costing.empty': { de: 'Offen', en: 'Empty' },
+  'costing.noRate': { de: 'Ohne Satz', en: 'No rate' },
+  'costing.noRateHint': {
+    de: 'Stunden erfasst, aber kein Satz im Kostenblatt: nicht bepreist, die Summe ist zu niedrig',
+    en: 'Hours entered, but no rate in the cost sheet: unpriced, the total is too low',
+  },
   'costing.hidden': { de: 'Nicht sichtbar', en: 'Not shared' },
   'costing.hiddenHint': {
     de: 'Zahlen anderer Fachbereiche sind nicht sichtbar',
@@ -444,8 +525,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.activityPlaceholder': { de: 'Tätigkeit benennen …', en: 'Name the activity …' },
   'costing.sum': { de: 'Summe', en: 'Sum' },
   'costing.noActivities': {
-    de: 'Noch keine Tätigkeiten — aus der Bewertung übernommen oder hier ergänzen.',
-    en: 'No activities yet — they arrive from the assessment, or add them here.',
+    de: 'Noch keine Tätigkeiten - aus der Bewertung übernommen oder hier ergänzen.',
+    en: 'No activities yet - they arrive from the assessment, or add them here.',
   },
   'costing.minutes': { de: 'Fertigungszeit ± min/Teil', en: 'production time ± min/part' },
   'costing.minutesShort': { de: '± min/Teil', en: '± min/part' },
@@ -455,8 +536,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'quote.basis': { de: 'Grundlage für das Angebot', en: 'Basis for the quote' },
   'quote.basisHint': {
-    de: 'Der Preis bleibt Ihre Entscheidung — hier wird nichts summiert.',
-    en: 'The price stays your call — nothing here is summed into it.',
+    de: 'Der Preis bleibt Ihre Entscheidung. Hier wird nichts summiert.',
+    en: 'The price stays your call. Nothing here is summed into it.',
   },
   // Only the severity-3 risks travel this far — Sales carries them onto the
   // offer as technical judgement, not as a cost line.
@@ -465,8 +546,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Technical risks for the offer',
   },
   'quote.risksHint': {
-    de: 'Offene Risiken der Bewertung 3 — im Angebot benennen, nicht einpreisen.',
-    en: 'Open rating-3 risks — state them in the offer, do not price them in.',
+    de: 'Offene Risiken der Bewertung 3: im Angebot benennen, nicht einpreisen.',
+    en: 'Open rating-3 risks: state them in the offer, do not price them in.',
   },
   // The negotiation log at `quoted`: every round that moved the price, and the
   // one entry that ended it. The go-ahead itself stays where it always was —
@@ -494,8 +575,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'negotiation.submit': { de: 'Runde speichern', en: 'Save round' },
   'negotiation.delete': { de: 'Löschen', en: 'Delete' },
   'negotiation.goAheadHint': {
-    de: 'Freigabe über die Kundenannahme erfassen — Freigabetermin erforderlich.',
-    en: 'Record the go-ahead via customer acceptance — release deadline required.',
+    de: 'Freigabe über die Kundenannahme erfassen - Freigabetermin erforderlich.',
+    en: 'Record the go-ahead via customer acceptance - release deadline required.',
   },
   'summation.timeBasis': { de: 'Zeitbasis für das Angebot', en: 'Time basis for the quote' },
   'summation.perPart': { de: 'pro Teil', en: 'per part' },
@@ -508,8 +589,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'costing.yourBucket': { de: 'Ihr Fachbereich', en: 'Your department' },
   'costing.others': {
-    de: '{n} weitere Fachbereiche erfassen ihre Kosten.',
-    en: '{n} other departments are costing their part.',
+    de: '{n} weitere(r) Fachbereich(e) erfassen noch ihre Kosten.',
+    en: '{n} other department{s} still costing their part.',
   },
   // Cost positions — what a department books against the change, one row each.
   'costpos.title': { de: 'Kostenpositionen', en: 'Cost positions' },
@@ -533,6 +614,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Implementation support (estimated)',
   },
   'costpos.kind.external': { de: 'Extern', en: 'External' },
+  'costpos.kind.own_time': { de: 'Eigenzeit', en: 'Own time' },
   'costpos.hours': { de: 'Stunden', en: 'Hours' },
   // External work still costs the department time — coordinating the vendor,
   // running the trials. That is not the vendor's price and never was.
@@ -548,18 +630,18 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // fields, not as something you have to know to add.
   'costpos.effortTitle': { de: 'Aufwand', en: 'Effort' },
   'costpos.internalEffortField': {
-    de: 'Interner Aufwand — Zeit für Bewertung (h)',
-    en: 'Internal effort — time spent on assessment (h)',
+    de: 'Interner Aufwand: Zeit für Bewertung (h)',
+    en: 'Internal effort: time spent on assessment (h)',
   },
   'costpos.supportEffortField': {
-    de: 'Support Umsetzung — geschätzt (h)',
-    en: 'Implementation support — estimated (h)',
+    de: 'Support Umsetzung, geschätzt (h)',
+    en: 'Implementation support, estimated (h)',
   },
   // The Tool Engineer's other standing answer during costing: what the part
   // will weigh. A quote, not a measurement — the real figure comes later.
   'costpos.partWeightField': {
-    de: 'Teilegewicht (g) — Schätzung, wird validiert',
-    en: 'Part weight (g) — estimate, validated later',
+    de: 'Teilegewicht (g): Schätzung, wird validiert',
+    en: 'Part weight (g): estimate, validated later',
   },
   'costpos.partWeightSaved': {
     de: 'Gewichtsschätzung gespeichert',
@@ -582,8 +664,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.delete': { de: 'Löschen', en: 'Delete' },
   'costpos.saved': { de: 'Position gespeichert', en: 'Position saved' },
   'costpos.readOnly': {
-    de: 'Nur lesend — Positionen pflegt der Fachbereich selbst.',
-    en: 'Read only — the department maintains its own positions.',
+    de: 'Nur lesend: Positionen pflegt der Fachbereich selbst.',
+    en: 'Read only: the department maintains its own positions.',
   },
   'costpos.offers': { de: 'Angebote', en: 'Offers' },
   'costpos.scope.full': { de: 'Komplett', en: 'Full' },
@@ -607,8 +689,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.shippingIncluded': { de: 'im Angebot enthalten', en: 'included in offer' },
   'costpos.favorite': { de: 'Favorit', en: 'Favourite' },
   'costpos.favoriteHint': {
-    de: 'Ein Favorit je Position — die Wahl des Fachbereichs.',
-    en: 'One favourite per position — the department’s choice.',
+    de: 'Ein Favorit je Position: die Wahl des Fachbereichs.',
+    en: 'One favorite per position: the department’s choice.',
   },
   'costpos.quoteDoc': { de: 'Angebotsdokument', en: 'Quote document' },
   'costtag.moldflow': { de: 'Moldflow', en: 'Moldflow' },
@@ -676,6 +758,93 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.vendorHint': { de: 'Lieferanten kommen aus den Stammdaten; ein neuer Name wird beim Speichern angelegt.', en: 'Vendors come from the Suppliers list; a new name is stored on save.' },
   'costpos.vendorOptional': { de: 'Lieferant (optional)', en: 'Vendor (optional)' },
   'costpos.type.weight': { de: 'Schätzung', en: 'Estimate' },
+  // Cost sheet pricing (spec §15 phase 2)
+  'costpos.type.machine': { de: 'Maschinenzeit', en: 'Machine time' },
+  'costpos.type.sampling': { de: 'Bemusterung', en: 'Sampling' },
+  'costpos.kind.machine_time': { de: 'Maschinenzeit (h × Maschinensatz)', en: 'Machine time (h × machine rate)' },
+  'costpos.kind.sampling': { de: 'Bemusterung (Versuche × Preis)', en: 'Sampling (trials × price)' },
+  'costpos.costSheetGroup': { de: 'Aus dem Kostenblatt', en: 'From the cost sheet' },
+  'costpos.machineHours': { de: 'Maschinenstunden', en: 'Machine hours' },
+  'costpos.trials': { de: 'Versuche', en: 'Trials' },
+  'costpos.trialsShort': { de: 'Versuche', en: 'trials' },
+  'costpos.machineClass': { de: 'Maschinenklasse', en: 'Machine class' },
+  'costpos.machineClassPick': { de: 'Klasse wählen', en: 'Pick a class' },
+  'costpos.machine': { de: 'Maschine', en: 'Machine' },
+  'costpos.machineAny': { de: 'Beliebige Maschine (Klassensatz)', en: 'Any machine (class rate)' },
+  'costpos.ownRate': { de: 'eigener Satz', en: 'own rate' },
+  'costpos.machineInactive': { de: 'inaktiv', en: 'inactive' },
+  'costpos.labourPosition': { de: 'Funktion', en: 'Position' },
+  'costpos.labourDefault': { de: 'Abteilungssatz', en: 'Department rate' },
+  'costpos.noRate': { de: 'Kein Satz im Kostenblatt', en: 'No rate in the cost sheet' },
+  'costpos.currencyUnrecorded': {
+    de: 'Keine Währung gespeichert: gelesen in {cur}, der Währung des Kalkulationswerks',
+    en: 'No recorded currency: read as {cur}, the costing plant\'s currency',
+  },
+  'costpos.noRateHint': {
+    de: 'Nicht in der Summe. Sales (oder Finance) muss den Satz im Kostenblatt pflegen.',
+    en: 'Not in the total. Sales (or Finance) has to add the rate to the cost sheet.',
+  },
+  'costpos.notCounted': { de: 'nicht gezählt', en: 'not counted' },
+  'costpos.unpricedInTotal': { de: '{n} ohne Satz, nicht gezählt', en: '{n} without a rate, not counted' },
+  'costing.sheetInfo': {
+    de: 'Preise aus Kostenblatt v{v} ({plant}, {cur}): die Version, die bei Anlage der Änderung am {date} galt',
+    en: 'Priced from cost sheet v{v} ({plant}, {cur}): the version valid when the change was created on {date}',
+  },
+  'costing.sheetEarliest': {
+    de: 'Preise aus Kostenblatt v{v} ({plant}, {cur}): die Änderung wurde am {date} angelegt, vor der ersten Version; bepreist mit v{v}, dem frühesten Kostenblatt',
+    en: 'Priced from cost sheet v{v} ({plant}, {cur}): the change was created on {date}, before the first version; priced with v{v}, the earliest cost sheet',
+  },
+  'costing.sheetLegacy': { de: 'Kein Kostenblatt: Abteilungssätze ({plant}, {cur})', en: 'No cost sheet yet: department rates ({plant}, {cur})' },
+  'costing.sheetNone': {
+    de: 'Am Anlagetag der Änderung ({date}) galt keine Kostenblatt-Version: nichts kann bepreist werden',
+    en: 'No cost sheet version was valid on the day the change was created ({date}): nothing can be priced',
+  },
+  'costing.stale': {
+    de: 'Das Kostenblatt v{v} ist älter als {m} Monate (fällig seit {due}). Sales prüft es; bis dahin gelten die alten Sätze.',
+    en: 'Cost sheet v{v} is older than {m} months (review due {due}). Sales is asked to review it; the current rates apply until then.',
+  },
+  'costing.staleNone': { de: 'Es ist kein Kostenblatt veröffentlicht.', en: 'No cost sheet is published.' },
+  'costing.machineClass': { de: 'Maschinenklasse der Änderung', en: 'Machine class of the change' },
+  'costing.machineClassDefault': { de: 'aus Werkzeug {t} t', en: 'from tool {t} t' },
+  'costing.machineClassNone': { de: 'keine (Tonnage unbekannt)', en: 'none (tonnage unknown)' },
+  'costing.machineClassAuto': { de: 'Automatisch', en: 'Automatic' },
+  'costing.machineClassSaved': { de: 'Maschinenklasse gespeichert', en: 'Machine class saved' },
+  'costing.classFromTool': { de: 'aus Werkzeug {tool} ({source}, {t} t)', en: 'from tool {tool} ({source}, {t} t)' },
+  'costing.classNoBand': {
+    de: 'keine Maschinenklasse deckt {t} t ab, bitte von Hand wählen',
+    en: 'no machine class covers {t} t, pick one by hand',
+  },
+  'costing.tonnageSource.machinedb': { de: 'MachineDB', en: 'MachineDB' },
+  'costing.tonnageSource.twos': { de: 'TWOS', en: 'TWOS' },
+  'costing.tonnageSource.plm2': { de: 'PLM2-Werkzeugdaten', en: 'PLM2 tool data' },
+  'costing.tonnageAssigned': { de: 'zugeordnete Maschine {machine}', en: 'assigned press {machine}' },
+  'costing.tonnageQualifiedMin': {
+    de: 'kleinste freigegebene Maschine (keine zugeordnet)',
+    en: 'smallest qualified press (none assigned)',
+  },
+  'costing.toolNoTonnage': {
+    de: 'Werkzeug {tools} hat keine Tonnage: Maschinenklasse bitte von Hand wählen',
+    en: 'Tool {tools} has no tonnage: pick a machine class by hand',
+  },
+  'costing.toolsNoTonnage': {
+    de: 'Werkzeuge {tools} haben keine Tonnage: Maschinenklasse bitte von Hand wählen',
+    en: 'Tools {tools} have no tonnage: pick a machine class by hand',
+  },
+  'costing.noToolOnChange': {
+    de: 'Kein Werkzeug an dieser Änderung: Maschinenklasse bitte von Hand wählen',
+    en: 'No tool on this change: pick a machine class by hand',
+  },
+  'costing.refreshTonnage': { de: 'Werkzeugtonnage aktualisieren', en: 'Refresh tool tonnage' },
+  'costing.refreshTonnageDone': { de: 'Werkzeugtonnage aktualisiert', en: 'Tool tonnage refreshed' },
+  'costing.refreshTonnageFailed': {
+    de: '{source} nicht erreichbar, die gespeicherte Tonnage bleibt',
+    en: '{source} could not be reached, the stored tonnage stays',
+  },
+  'costing.refreshTonnageFailedWhy': {
+    de: '{why}. Die gespeicherte Tonnage bleibt',
+    en: '{why}. The stored tonnage stays',
+  },
+  'costing.totalsByCurrency': { de: 'Summen je Währung', en: 'Totals per currency' },
   'costpos.standing': { de: 'Pflichtangabe', en: 'standing' },
   'costpos.internalEffortRow': { de: 'Aufwand Bewertung', en: 'Assessment effort' },
   'costpos.supportEffortRow': { de: 'Support Umsetzung', en: 'Implementation support' },
@@ -709,19 +878,30 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Die Änderung geht von der Angebotserstellung zurück in die Kalkulation. Die Fachbereiche können ihre Zeilen wieder bearbeiten, bis die Kalkulation erneut geschlossen wird.',
     en: 'The change goes from quote creation back to costing. Departments can edit their lines again until costing is closed once more.',
   },
+  'costing.stageTitle': { de: 'Kalkulation', en: 'Costing' },
+  'costing.stageBody': {
+    de: 'Jeder Fachbereich kalkuliert seinen Teil: interne Stunden, Schätzungen oder Lieferantenangebote, und die Durchlaufzeit jeder Zeile. PM schließt die Kalkulation, wenn sie vollständig ist.',
+    en: 'Each department prices its part: internal hours, estimates or vendor quotes, and the lead time of every line. PM closes costing when complete.',
+  },
   'costing.closedHint': {
-    de: 'Kalkulation geschlossen — Fachbereiche können nicht mehr eintragen. PM, Sales oder der Change Lead können sie wieder öffnen.',
-    en: 'Costing is closed — departments can no longer enter lines. PM, Sales or the change lead can reopen it.',
+    de: 'Kalkulation geschlossen - Fachbereiche können nicht mehr eintragen. PM, Sales oder der Change Lead können sie wieder öffnen.',
+    en: 'Costing is closed - departments can no longer enter lines. PM, Sales or the change lead can reopen it.',
   },
   'quote.timeline': { de: 'Umsetzungs-Zeitplan', en: 'Implementation timeline' },
   'quote.timelineBody': {
-    de: 'Planungstool folgt — Reihenfolge und Parallelität entscheidet der Vertrieb später.',
-    en: 'Planning tool to come — Sales will sequence the work (what runs in parallel) later.',
+    de: 'Planungstool folgt. Reihenfolge und Parallelität entscheidet der Vertrieb später.',
+    en: 'Planning tool to come. Sales will sequence the work (what runs in parallel) later.',
   },
   'summation.withPositions': {
     de: 'Gesamt inkl. Kostenpositionen',
     en: 'Total incl. cost positions',
   },
+  'summation.costLines': { de: 'Summe Kostenzeilen', en: 'Total cost lines' },
+  'summation.positionsPart': {
+    de: 'Kostenpositionen (in den Spalten enthalten)',
+    en: 'Cost positions (included in the columns)',
+  },
+  'costpos.classFromChange': { de: 'Klasse der Änderung', en: 'change class' },
   'summation.timing': { de: 'Terminlage', en: 'Timing' },
   'summation.maxLeadTime': { de: 'Längste Vorlaufzeit', en: 'Longest lead time' },
   'summation.days': { de: 'Tage', en: 'days' },
@@ -755,8 +935,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'bucket.waived': { de: 'Entfällt', en: 'Waived' },
   'bucket.objects': { de: 'Zu bewerten', en: 'To assess' },
   'bucket.noObjects': {
-    de: 'Keine verknüpften Objekte — allgemein bewerten',
-    en: 'No linked objects — assess generally',
+    de: 'Keine verknüpften Objekte, allgemein bewerten',
+    en: 'No linked objects, assess generally',
   },
   'bucket.via': { de: 'über Teil', en: 'via part' },
   'bucket.evidence': { de: 'Nachweise', en: 'Evidence' },
@@ -766,8 +946,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'bucket.evidenceSlot': { de: 'Nachweis ablegen', en: 'Drop evidence here' },
   'bucket.staleRowsHint': {
-    de: 'Weitere Zeilen aus einer früheren Routing-Version — nicht mehr aktiv',
-    en: 'Further rows from an earlier routing version — no longer active',
+    de: 'Weitere Zeilen aus einer früheren Routing-Version, nicht mehr aktiv',
+    en: 'Further rows from an earlier routing version, no longer active',
   },
   'bucket.othersHidden': {
     de: 'Antworten anderer Fachbereiche sind nicht einsehbar',
@@ -784,15 +964,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'bucket.answer': { de: 'Bewertung', en: 'Assessment' },
   'bucket.none': {
-    de: 'Noch keine Fachbereiche eingebunden — Scoping-Meeting entscheidet die Verteilung.',
-    en: 'No departments routed yet — the scoping meeting decides who assesses.',
+    de: 'Noch keine Fachbereiche eingebunden. Das Scoping-Meeting entscheidet die Verteilung.',
+    en: 'No departments routed yet. The scoping meeting decides who assesses.',
   },
   'bucket.expand': { de: 'Aufklappen', en: 'Expand' },
   'bucket.collapse': { de: 'Zuklappen', en: 'Collapse' },
   // A member sees their own bucket in full; the rest of the board is one line.
   'bucket.progress': {
-    de: '{n}/{m} Bewertungen abgegeben — offen: {x}',
-    en: '{n}/{m} submitted — waiting on: {x}',
+    de: '{n}/{m} Bewertungen abgegeben, offen: {x}',
+    en: '{n}/{m} submitted, waiting on: {x}',
   },
   'bucket.progressDone': {
     de: '{n}/{m} Bewertungen abgegeben',
@@ -800,13 +980,17 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   // The internal deck behind the answer — required when the answer is "no".
   'bucket.changePpt': { de: 'Change-PPT (intern)', en: 'Change PPT (internal)' },
+  'bucket.changePptAtSubmit': {
+    de: 'Oben neben „Absenden" ablegen.',
+    en: 'Drop it next to Submit, above.',
+  },
   'bucket.changePptSlot': {
     de: 'Change-PPT ablegen (intern)',
     en: 'Drop the change PPT here (internal)',
   },
   'bucket.changePptHint': {
-    de: 'Interne Präsentation zur Bewertung — bei „nicht machbar" erforderlich',
-    en: 'Internal deck behind the assessment — required for “not feasible”',
+    de: 'Interne Präsentation zur Bewertung, bei „nicht machbar" erforderlich',
+    en: 'Internal deck behind the assessment, required for “not feasible”',
   },
   'check.changePptRequired': {
     de: '„Nicht machbar" braucht die Change-PPT als Begründung.',
@@ -831,22 +1015,24 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Unassigned question documents',
   },
   'concern.unassignedHint': {
-    de: 'Vor den Fragekarten hochgeladen — gehören zu keiner Frage. Für die '
+    de: 'Vor den Fragekarten hochgeladen, gehören zu keiner Frage. Für die '
       + 'Zuordnung erneut in der jeweiligen Karte hochladen.',
     en: 'Uploaded before the question cards existed, so they belong to no '
       + 'question. Re-upload inside a card if the link matters.',
   },
   'concern.openRequests': { de: 'Offene Rückfragen', en: 'Open questions' },
+  /** Scoping "Now" with nothing waiting (the concern line lives in Team concerns). */
+  'scoping.noOpenQuestions': { de: 'Keine offenen Rückfragen.', en: 'No open questions.' },
   'concern.solvedQuestions': { de: 'Geklärte Rückfragen', en: 'Settled questions' },
   'concern.solvedBy': { de: 'geklärt von', en: 'solved by' },
   'concern.fromMeeting': { de: 'aus Termin vom', en: 'from meeting of' },
   'wait.onSales.info': {
-    de: 'Wartet auf Vertrieb — Kundeninfo wird eingeholt: {x}',
-    en: 'Waiting on Sales — obtaining customer info: {x}',
+    de: 'Wartet auf Vertrieb - Kundeninfo wird eingeholt: {x}',
+    en: 'Waiting on Sales - obtaining customer info: {x}',
   },
   'wait.onReview': {
-    de: 'Antwort liegt vor — wartet auf Prüfung: {x}',
-    en: 'Answer received — awaiting review: {x}',
+    de: 'Antwort liegt vor - wartet auf Prüfung: {x}',
+    en: 'Answer received - awaiting review: {x}',
   },
   'wait.onDepartments': {
     de: 'Wartet: {x} hat offene Punkte',
@@ -857,8 +1043,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Assessment: waiting on {x} ({n}/{m})',
   },
   'wait.onRejectionLetter': {
-    de: 'Wartet auf Vertrieb — Absage an Kunden versenden',
-    en: 'Waiting on Sales — send the rejection to the customer',
+    de: 'Wartet auf Vertrieb - Absage an Kunden versenden',
+    en: 'Waiting on Sales - send the rejection to the customer',
   },
   'scoping.now': { de: 'Jetzt dran', en: 'Now' },
   'scoping.history': { de: 'Verlauf', en: 'History' },
@@ -883,7 +1069,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.answer': { de: 'Antwort', en: 'Answer' },
   'concern.answerPlaceholder': {
     de: 'Antwort des Kunden zusammenfassen …',
-    en: 'Summarise the customer’s answer …',
+    en: 'Summarize the customer’s answer …',
   },
   'concern.answerHint': {
     de: 'Ein angehängtes Antwortdokument zählt ebenfalls als Beleg.',
@@ -898,10 +1084,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'routingDev.department': { de: 'Abteilung', en: 'Department' },
   'routingDev.role': { de: 'Rolle in der Bewertung', en: 'Role in the assessment' },
-  'routingDev.letter.R': { de: 'R — bewertet (verbindlich)', en: 'R — assesses (blocking)' },
-  'routingDev.letter.A': { de: 'A — verantwortet (verbindlich)', en: 'A — accountable (blocking)' },
-  'routingDev.letter.S': { de: 'S — unterstützt', en: 'S — supports' },
-  'routingDev.letter.C': { de: 'C — wird informiert', en: 'C — consulted, no answer owed' },
+  // RASIC, one vocabulary everywhere (rasic.* below): R Responsible,
+  // A Accountable, S Supportive, C Consulted, I Informed.
+  'routingDev.letter.R': { de: 'R: Verantwortlich (bewertet, verbindlich)', en: 'R: Responsible (assesses, blocking)' },
+  'routingDev.letter.A': { de: 'A: Rechenschaftspflichtig (bewertet, verbindlich)', en: 'A: Accountable (assesses, blocking)' },
+  'routingDev.letter.S': { de: 'S: Unterstützend (keine Bewertung geschuldet)', en: 'S: Supportive (no assessment owed)' },
+  'routingDev.letter.C': { de: 'C: Konsultiert (keine Antwort geschuldet)', en: 'C: Consulted (no answer owed)' },
+  'routingDev.letter.I': { de: 'I: Informiert (nur benachrichtigt)', en: 'I: Informed (notified only)' },
   'routingDev.reason': { de: 'Warum wurde die Abteilung vergessen bzw. warum ist sie betroffen?',
     en: 'Why was this department left out, or why is it impacted after all?' },
   'routingDev.templateHint': {
@@ -913,11 +1102,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Takes effect once the change lead approves it (4-eyes rule).',
   },
   'routingDev.noneLeft': { de: 'Alle Abteilungen sind bereits eingebunden.', en: 'Every department is already routed.' },
+  'routingDev.removalPending': {
+    de: 'Entfernung beantragt, Entscheidung offen', en: 'Removal requested, awaiting decision',
+  },
   'routingDev.pendingTitle': { de: 'Routing-Änderung wartet auf Freigabe', en: 'Routing change awaiting approval' },
   'routingDev.pendingBody': {
-    de: 'Die neue Abteilung ist bereits eingebunden und sieht ihre Aufgabe. Bis zur Entscheidung kann die Änderung nicht in die Kalkulation.',
-    en: 'The added department is already on the hook and sees its task. Until this is decided the change cannot move to costing.',
+    de: 'Bis zur Entscheidung gilt die bisherige Zuordnung: hinzugefügte Abteilungen sehen ihre Aufgabe bereits, zu entfernende bleiben eingebunden. Die Änderung kann bis dahin nicht in die Kalkulation.',
+    en: 'Until this is decided, added departments already see their task and departments up for removal stay on the hook. The change cannot move to costing until then.',
   },
+  'routingDev.leadActingAs': { de: 'Sie agieren als {x}: zurückwechseln, um als Change Lead zu entscheiden', en: 'You are acting as {x}: switch back to decide as change lead' },
+  'routingDev.switchBack': { de: 'Zurückwechseln', en: 'Switch back' },
   'routingDev.waitingForLead': { de: 'Entscheidung liegt beim Change Lead.', en: 'Waiting for the change lead to decide.' },
   'routingDev.addBlocked': {
     de: 'Erst die offene Routing-Änderung entscheiden.',
@@ -933,7 +1127,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'routingDev.approved': { de: 'Routing-Änderung freigegeben', en: 'Routing change approved' },
   'routingDev.rejected': { de: 'Routing-Änderung abgelehnt', en: 'Routing change rejected' },
-  'routingDev.proposed': { de: 'Abteilung hinzugefügt — wartet auf Freigabe', en: 'Department added — awaiting approval' },
+  'routingDev.proposed': { de: 'Abteilung hinzugefügt, wartet auf Freigabe', en: 'Department added, awaiting approval' },
   'routingDev.failed': { de: 'Fehlgeschlagen', en: 'Failed' },
   'concern.note': { de: 'Einwand', en: 'Concern' },
   'concern.notePlaceholder': {
@@ -947,9 +1141,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'meeting.rejectWarning': {
     de: 'Die Änderung wird gestoppt. Der Grund geht an den Antragsteller und in den Audit-Trail. '
-      + 'Ein Wiedereröffnen ist möglich — die Ablehnung bleibt aber im Protokoll.',
+      + 'Ein Wiedereröffnen ist möglich, die Ablehnung bleibt aber im Protokoll.',
     en: 'This stops the change. The reason goes to the originator and into the audit trail. '
-      + 'It can be reopened later — the rejection stays on the record either way.',
+      + 'It can be reopened later; the rejection stays on the record either way.',
   },
   'meeting.rejectedBecause': { de: 'Abgelehnt:', en: 'Rejected:' },
   'meeting.needsInfoTitle': { de: 'Weitere Informationen nötig', en: 'More information needed' },
@@ -972,18 +1166,18 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Request the missing information from the customer',
   },
   'meeting.shareHint': {
-    de: 'Vertrieb und Projektleitung antworten dem Kunden. Das versendete Dokument — '
-      + 'Absage, Fragenliste oder Gegenvorschlag — hier anhängen, damit es an der '
+    de: 'Vertrieb und Projektleitung antworten dem Kunden. Das versendete Dokument ('
+      + 'Absage, Fragenliste oder Gegenvorschlag) hier anhängen, damit es an der '
       + 'Änderung hängt und nicht im Postfach.',
-    en: 'Sales and project management answer the customer. Attach what you send — the '
-      + 'rejection letter, the list of open questions, or a counter-proposal — so it '
+    en: 'Sales and project management answer the customer. Attach what you send (the '
+      + 'rejection letter, the list of open questions, or a counter-proposal) so it '
       + 'lives on the change rather than in a mailbox.',
   },
   // Reads as what it is — an open question going out to the customer — not as a
   // validation error about the meeting form.
   'meeting.missingInfo': {
-    de: 'Offene Rückfrage — Vertrieb holt die Info beim Kunden ein:',
-    en: 'Open info request — Sales obtains this from the customer:',
+    de: 'Offene Rückfrage. Vertrieb holt die Info beim Kunden ein:',
+    en: 'Open info request. Sales obtains this from the customer:',
   },
   'start.internalLater': {
     de: 'Interne Änderungen folgen später',
@@ -1001,8 +1195,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'attach.rejectionLetter': { de: 'Absageschreiben', en: 'Rejection letter' },
   'attach.rfq': { de: 'RFQ', en: 'RFQ' },
   'attach.rfqSlot': {
-    de: 'RFQ hochladen — Kosten & Timing beim Lieferanten anfragen',
-    en: 'Upload RFQ — request costs & timing from supplier',
+    de: 'RFQ hochladen: Kosten & Timing beim Lieferanten anfragen',
+    en: 'Upload RFQ: request costs & timing from supplier',
+  },
+  'attach.rfqHint': {
+    de: 'RFQ = Anfrage an den Lieferanten. Das Preisangebot des Lieferanten als Lieferantenangebot an der Kostenposition ablegen.',
+    en: "RFQ = request sent to the supplier. File the supplier's priced reply as a vendor quote on the costing line.",
   },
   'attach.rfqMissing': {
     de: 'Noch keine RFQ hinterlegt',
@@ -1013,8 +1211,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Drop the rejection letter here',
   },
   'reject.markSent': {
-    de: 'An Kunden gesendet — ECR schließen',
-    en: 'Sent to customer — close ECR',
+    de: 'An Kunden gesendet, ECR schließen',
+    en: 'Sent to customer, close ECR',
   },
   'reject.needLetter': {
     de: 'Erst das Absageschreiben anhängen',
@@ -1069,14 +1267,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'deadline.quote': { de: 'Angebotstermin', en: 'Quote deadline' },
   'deadline.pushback': { de: 'Termin verschieben', en: 'Push back' },
   'deadline.pushbackHint': {
-    de: 'Nicht haltbar — warum, und bis wann nötig?',
-    en: 'Not feasible — why, and needed until when',
+    de: 'Nicht haltbar: warum, und bis wann nötig?',
+    en: 'Not feasible: why, and needed until when',
   },
   'deadline.release': { de: 'Freigabetermin', en: 'Release deadline' },
   'deadline.quotedOnTime': { de: 'Fristgerecht angeboten', en: 'Quoted on time' },
   'deadline.quotedLate': { de: 'Verspätet angeboten', en: 'Quoted late' },
-  'customer.releaseDue': { de: 'Freigabe bis', en: 'Release by' },
-  'customer.releaseDueReason': { de: 'Begründung', en: 'Reason' },
+  'customer.releaseDue': { de: 'Freigabetermin', en: 'Release deadline' },
+  'customer.releaseDueReason': { de: 'Notiz (optional)', en: 'Note (optional)' },
   'customer.confirmAccept': { de: 'Annahme bestätigen', en: 'Confirm acceptance' },
   'reports.title': { de: 'Reports', en: 'Reports' },
   'reports.pipeline': { de: 'Pipeline', en: 'Pipeline' },
@@ -1085,7 +1283,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.onTime': { de: 'Pünktlichkeit', en: 'On-time rate' },
   'reports.throughput': { de: 'Durchsatz (freigegeben/Monat)', en: 'Throughput (released/month)' },
   'reports.atRisk': { de: 'Gefährdete Changes', en: 'At-risk changes' },
-  'reports.empty': { de: 'Noch keine Änderungen — starte eine von einer Teileseite aus.', en: 'No changes yet — start one from a part page.' },
+  'reports.empty': { de: 'Noch keine Änderungen. Starte eine von einer Teileseite aus.', en: 'No changes yet. Start one from a part page.' },
   'reports.stageDays': { de: 'Ø Tage je Stufe', en: 'Avg days per stage' },
   'reports.departments': { de: 'Nach Abteilung', en: 'By department' },
   'reports.owners': { de: 'Nach Verantwortlichem', en: 'By owner' },
@@ -1098,6 +1296,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
   'tab.activePhase': { de: 'Aktuelle Phase', en: 'Current phase' },
   'tab.openWork': { de: 'Offene Aufgaben', en: 'Open work' },
+  'tab.lockedStopped': {
+    de: 'Die Änderung wurde vorher gestoppt, diese Phase wurde nie erreicht',
+    en: 'The change stopped before this stage, so it was never reached',
+  },
   'tab.lockedUntilScoping': { de: 'Ab dem Scoping verfügbar', en: 'Available from scoping' },
   'tab.lockedUntilPhase': {
     de: 'Wird in einer späteren Phase freigeschaltet',
@@ -1109,15 +1311,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'description.label': { de: 'Beschreibung', en: 'Description' },
   'description.placeholder': {
-    de: 'Was soll geändert werden — und warum?',
-    en: 'What should change — and why?',
+    de: 'Was soll geändert werden, und warum?',
+    en: 'What should change, and why?',
   },
   'description.saved': { de: 'Beschreibung gespeichert', en: 'Description saved' },
   'scoping.title': { de: 'Vorabklärung', en: 'Scoping' },
   'scoping.newMeeting': { de: 'Meeting erfassen', en: 'Record meeting' },
   'scoping.discussionByEmail': {
-    de: 'Diskussion per E-Mail — Verlauf als Anhang ablegen',
-    en: 'Discussion happens by email — attach the thread as a document',
+    de: 'Diskussion per E-Mail: Verlauf als Anhang ablegen',
+    en: 'Discussion happens by email: attach the thread as a document',
   },
   'scoping.deadline': { de: 'Termin', en: 'Deadline' },
   'meeting.addAttendee': { de: 'Teilnehmer hinzufügen…', en: 'Add attendee…' },
@@ -1141,28 +1343,45 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Der PM legt mit dem Team fest, wer diese Änderung bewertet. Anwesenheit allein macht niemanden verantwortlich.',
     en: 'The PM sets with the team who assesses this change. Attendance alone makes nobody responsible.',
   },
-  'meeting.attendanceHint': { de: 'Nur Anwesenheit — keine Zuständigkeit.', en: 'Attendance only — not responsibility.' },
+  'meeting.attendanceHint': { de: 'Nur Anwesenheit, keine Zuständigkeit.', en: 'Attendance only, not responsibility.' },
   'rasic.R': { de: 'Verantwortlich (bewertet)', en: 'Responsible (assesses)' },
   'rasic.A': { de: 'Rechenschaftspflichtig (bewertet)', en: 'Accountable (assesses)' },
-  'rasic.S': { de: 'Unterstützt', en: 'Supports' },
-  'rasic.C': { de: 'Wird konsultiert/informiert', en: 'Consulted / informed' },
+  'rasic.S': { de: 'Unterstützend', en: 'Supportive' },
+  'rasic.C': { de: 'Konsultiert', en: 'Consulted' },
+  'rasic.I': { de: 'Informiert (nur benachrichtigt)', en: 'Informed (notified only)' },
   'rasic.none': { de: 'Nicht beteiligt', en: 'Not involved' },
   'rasic.assessNote': {
-    de: 'bewerten und halten die Kalkulation auf; S/C werden eingebunden, schulden aber keine Bewertung.',
-    en: 'assess and gate costing; S/C are looped in but owe no assessment.',
+    de: 'bewerten und halten die Kalkulation auf; S/C werden eingebunden, schulden aber keine Bewertung; I wird nur benachrichtigt.',
+    en: 'assess and gate costing; S/C are looped in but owe no assessment; I is notified only.',
   },
   'meeting.rasicSummary': { de: '{a} bewerten · {n} beteiligt', en: '{a} assess · {n} involved' },
+  'lateAssess.takeOff': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
+  'lateAssess.takeOffHint': {
+    de: 'Die Abteilung schuldet keine Bewertung mehr (Routing-Abweichung, mit Begründung)',
+    en: 'The department no longer owes an assessment (a routing deviation, with a reason)',
+  },
+  'lateAssess.title': { de: '{x} aus dem Routing nehmen', en: 'Take {x} off the routing' },
+  'lateAssess.reason': {
+    de: 'Warum muss diese Abteilung nicht mehr bewerten?',
+    en: 'Why does this department no longer need to assess?',
+  },
+  'lateAssess.effect': {
+    de: 'Beantragt als Routing-Abweichung: Bis zur Entscheidung bleiben Bewertungszeile und Aufgabe offen und die Änderung wartet weiter darauf. Erst die Freigabe entfernt sie.',
+    en: 'Requested as a routing deviation: until it is decided the assessment row and its task stay open and the change still waits on them. Only the approval removes them.',
+  },
+  'lateAssess.submit': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
+  'lateAssess.done': { de: 'Entfernung beantragt, wartet auf Entscheidung', en: 'Removal requested, awaiting decision' },
   'notResp.button': { de: 'Nicht unsere Zuständigkeit', en: 'Not our responsibility' },
   'notResp.title': { de: 'Zuständigkeit ablehnen', en: 'Decline responsibility' },
   'notResp.reason': { de: 'Warum ist diese Änderung nicht Sache Ihrer Abteilung?', en: 'Why is this change not your department’s to assess?' },
   'notResp.whoInstead': { de: 'Wer sollte es stattdessen bewerten? (optional)', en: 'Who should assess it instead? (optional)' },
-  'notResp.nobody': { de: '— niemand vorschlagen —', en: '— no suggestion —' },
+  'notResp.nobody': { de: 'Niemand vorschlagen', en: 'No suggestion' },
   'notResp.effect': {
     de: 'Ihre Abteilung wird auf „konsultiert“ gesetzt und schuldet keine Bewertung mehr. Der Change Lead entscheidet; bei Ablehnung bleibt die Bewertung bei Ihnen.',
     en: 'Your department drops to consulted and owes no assessment. The change lead decides; if they reject, the assessment stays with you.',
   },
   'notResp.submit': { de: 'Ablehnen', en: 'Decline' },
-  'notResp.sent': { de: 'Zuständigkeit abgelehnt — wartet auf Entscheidung', en: 'Responsibility declined — awaiting decision' },
+  'notResp.sent': { de: 'Zuständigkeit abgelehnt, wartet auf Entscheidung', en: 'Responsibility declined, awaiting decision' },
   'meeting.decision': { de: 'Entscheidung', en: 'Decision' },
   'meeting.proceed': { de: 'Freigeben & Bewertung starten', en: 'Proceed & start assessment' },
   'meeting.reject': { de: 'Ablehnen', en: 'Reject' },
@@ -1182,6 +1401,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // English throughout — the flow is discussed in English across the team.
   'procmap.title': { de: 'ECR Process Flow', en: 'ECR Process Flow' },
   'procmap.link': { de: 'Process Flow', en: 'Process Flow' },
+  // Changes list (spec §16): search, mine, overdue first, stage owner.
+  'changes.search': { de: 'Suchen: Nummer, Titel, Projekt', en: 'Search number, title, project' },
+  'changes.statusFilter': { de: 'Status', en: 'Status' },
+  'changes.mine': { de: 'Nur meine', en: 'Mine only' },
+  'changes.sort': { de: 'Sortierung', en: 'Sort' },
+  'changes.sortRecent': { de: 'Neueste zuerst', en: 'Newest first' },
+  'changes.sortOverdue': { de: 'Überfällige zuerst', en: 'Overdue first' },
+  'changes.owner': { de: 'Am Zug', en: 'Stage owner' },
+  'changes.noMatch': { de: 'Keine Änderung passt zu Suche oder Filter.', en: 'No change matches the search or filter.' },
   'procmap.backToChanges': { de: 'Back to changes', en: 'Back to changes' },
   'stepper.hint.captured': { de: 'Beschreiben, was geändert werden soll', en: 'Describe what should change' },
   'stepper.hint.scoping': { de: 'Treffen, entscheiden, Abteilungen auswählen', en: 'Meet, decide, pick departments' },
@@ -1193,7 +1421,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'status.quoting': { de: 'Angebotserstellung', en: 'Quote creation' },
   'stepper.hint.quoted': { de: 'Angebot an Kunden gesendet', en: 'Offer sent to customer' },
-  'stepper.hint.approved': { de: 'Go-Entscheidung getroffen', en: 'Go decision made' },
+  'stepper.hint.approved': { de: 'Detailplanung, alle Teams bestätigen den Zeitplan', en: 'Detailed timing, every team confirms its part' },
   'stepper.hint.in_implementation': { de: 'Umsetzung läuft', en: 'Doing the work' },
   'stepper.hint.in_validation': { de: 'Ergebnisse werden geprüft', en: 'Checking results' },
   'stepper.hint.released': { de: 'Änderung ist live', en: 'Change is live' },
@@ -1209,8 +1437,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'bankbuild.mode.running_change': { de: 'Fließende Änderung', en: 'Running change' },
   'bankbuild.mode.running_change.hint': {
-    de: 'Umstellung in der laufenden Produktion — kein Ausschuss geplant.',
-    en: 'Switch over in running production — no scrap planned.',
+    de: 'Umstellung in der laufenden Produktion - kein Ausschuss geplant.',
+    en: 'Switch over in running production - no scrap planned.',
   },
   'bankbuild.mode.planned_scrap': { de: 'Geplanter Ausschuss', en: 'Planned scrap' },
   'bankbuild.mode.planned_scrap.hint': {
@@ -1218,9 +1446,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Remaining stock is scrapped and the bank is rebuilt.',
   },
   'bankbuild.scrapPrice': { de: 'Ausschuss-Angebotspreis', en: 'Scrap quote price' },
+  'bankbuild.scrapPriceHidden': { de: 'gesetzt (verborgen)', en: 'set (hidden)' },
   'bankbuild.scrapPriceHint': {
-    de: 'Die Ausschusskosten trägt der Kunde — als zusätzliches Angebot.',
-    en: 'The customer bears the scrap cost — as an additional quote.',
+    de: 'Die Ausschusskosten trägt der Kunde - als zusätzliches Angebot.',
+    en: 'The customer bears the scrap cost - as an additional quote.',
   },
   'bankbuild.needPrice': {
     de: 'Bei geplantem Ausschuss ist ein Angebotspreis erforderlich',
@@ -1258,8 +1487,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'tasks.kind.bank_build': { de: 'Bankbau festlegen', en: 'Decide bank build' },
   'tasks.hint.bank_build': {
-    de: 'Fließende Änderung oder geplanter Ausschuss — und den Plan skizzieren',
-    en: 'Running change or planned scrap — and outline the plan',
+    de: 'Fließende Änderung oder geplanter Ausschuss? Plan skizzieren.',
+    en: 'Running change or planned scrap? Outline the plan.',
   },
   'tasks.kind.publish_plan': { de: 'Plan veröffentlichen', en: 'Publish plan' },
   'tasks.hint.publish_plan': {
@@ -1267,21 +1496,29 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Publish the bank-build plan to the customer',
   },
   'wait.onBankBuild': {
-    de: 'Wartet auf Terminplanung — Bankbau-Entscheidung offen',
+    de: 'Wartet auf Terminplanung - Bankbau-Entscheidung offen',
     en: 'Scheduling: bank-build decision pending',
   },
+  'wait.onTimingConfirm': {
+    de: 'Timing: wartet auf Bestätigung der Teams: {x}',
+    en: 'Timing: waiting on team confirmation: {x}',
+  },
+  'wait.onTimingValidate': {
+    de: 'Timing noch nicht validiert',
+    en: 'Timing not validated',
+  },
   'wait.onPlanPublish': {
-    de: 'Wartet auf Vertrieb — Plan noch nicht an den Kunden veröffentlicht',
+    de: 'Wartet auf Vertrieb - Plan noch nicht an den Kunden veröffentlicht',
     en: 'Sales: plan not yet published to the customer',
   },
 
   // Stage 8 — how the work is going while it is being done.
-  'impl2.title': { de: 'Umsetzungsstand', en: 'Implementation tracking' },
+  'impl2.title': { de: 'Meldungen und Zeitbuchung', en: 'Reports and time booking' },
   'impl2.intro': {
-    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat — und was davon '
-      + 'eskaliert werden muss.',
-    en: 'What each department has booked and last reported — and what of it has '
-      + 'to be escalated.',
+    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat, und was davon '
+      + 'eskaliert werden muss. Der Fortschritt je Aufgabe steht im Gantt oben.',
+    en: 'What each department has booked and last reported, and what of it has '
+      + 'to be escalated. Progress per task lives in the Gantt above.',
   },
   'impl2.none': {
     de: 'Noch kein Fachbereich in der Umsetzung.',
@@ -1310,6 +1547,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl2.reports': { de: 'Fortschrittsmeldungen', en: 'Progress reports' },
   'impl2.noReports': { de: 'Noch keine Meldung.', en: 'No report yet.' },
   'impl2.reported': { de: 'gemeldet', en: 'reported' },
+  'impl2.noReportChip': { de: 'noch keine Meldung', en: 'no report yet' },
   'impl2.reportDue': { de: 'Meldung fällig', en: 'report due' },
   'impl2.lastReport': { de: 'Zuletzt gemeldet am {d}', en: 'Last reported on {d}' },
   'impl2.reportNote': { de: 'Was ist passiert?', en: 'What happened?' },
@@ -1341,15 +1579,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl2.resolve': { de: 'Erledigt melden', en: 'Mark resolved' },
   'impl2.resolutionNote': { de: 'Wie wurde es gelöst?', en: 'How was it settled?' },
   'impl2.escalationHint': {
-    de: 'Gefährdung gemeldet — an den Kunden oder intern eskalieren.',
-    en: 'At-risk flagged — escalate to the customer or internally.',
+    de: 'Gefährdung gemeldet - an den Kunden oder intern eskalieren.',
+    en: 'At-risk flagged - escalate to the customer or internally.',
   },
 
   // My-tasks rows
   'tasks.kind.progress_report': { de: 'Fortschritt melden', en: 'Report progress' },
   'tasks.hint.progress_report': {
-    de: 'Stand der Umsetzung melden — und Gefährdungen benennen',
-    en: 'Report where the work stands — and name anything at risk',
+    de: 'Stand der Umsetzung melden und Gefährdungen benennen',
+    en: 'Report where the work stands and name anything at risk',
   },
   'tasks.kind.escalate_risk': { de: 'Gefährdung eskalieren', en: 'Escalate risk' },
   'tasks.hint.escalate_risk': {
@@ -1363,8 +1601,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments owe a progress report',
   },
   'wait.onRiskEscalation': {
-    de: 'Gefährdung gemeldet — Eskalation durch den Vertrieb offen',
-    en: 'At-risk flagged — Sales escalation pending',
+    de: 'Gefährdung gemeldet - Eskalation durch den Vertrieb offen',
+    en: 'At-risk flagged - Sales escalation pending',
   },
 
   // ── Stage 9: validation ───────────────────────────────────────────────────
@@ -1376,12 +1614,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
       + 'held against the assumptions costing was built on.',
   },
   'validation.none': {
-    de: 'Noch keine Prüfpunkte — die Validierung beginnt mit dem Statuswechsel.',
-    en: 'No checks yet — validation starts when the change reaches this stage.',
+    de: 'Noch keine Prüfpunkte - die Validierung beginnt mit dem Statuswechsel.',
+    en: 'No checks yet - validation starts when the change reaches this stage.',
   },
   'validation.readOnly': {
-    de: 'Abgeschlossen — die Prüfpunkte sind hier nur noch das Protokoll.',
-    en: 'Closed — the checks below are the record, not a form.',
+    de: 'Abgeschlossen - die Prüfpunkte sind hier nur noch das Protokoll.',
+    en: 'Closed - the checks below are the record, not a form.',
   },
   'validation.others': {
     de: '{n} weitere Fachbereiche validieren ebenfalls.',
@@ -1389,11 +1627,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
 
   // The five checks, and the one that needs saying out loud.
-  'validation.check.sampled': { de: 'Bemusterung erfolgt', en: 'Sampling done' },
-  'validation.check.measured': { de: 'Vermessung erfolgt', en: 'Measurement done' },
-  'validation.check.cycle_time': { de: 'Taktzeit geprüft', en: 'Cycle time checked' },
-  'validation.check.weight': { de: 'Gewicht geprüft', en: 'Weight checked' },
+  // Fallbacks only: the backend sends each check's label (validation_checklist.py).
+  'validation.check.sampled': { de: 'Werkzeug abgemustert', en: 'Tool sampled' },
+  'validation.check.measured': { de: 'Teil vermessen', en: 'Part measured' },
+  'validation.check.cycle_time': { de: 'Zykluszeit gemessen', en: 'Measured cycle time' },
+  'validation.check.weight': { de: 'Teilegewicht validiert', en: 'Part weight validated' },
   'validation.check.revision_bump': { de: 'Indexstände angehoben', en: 'Revision levels raised' },
+  'validation.check.packaging_validated': {
+    de: 'Verpackung mit dem geänderten Teil validiert', en: 'Packaging validated with the changed part',
+  },
   'validation.hint.revision_bump': {
     de: 'Indexstände gemäß Kundenaussage angehoben und geprüft',
     en: 'Revision levels raised per customer statement and verified',
@@ -1429,8 +1671,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
 
   // The commercial consequence of a weight that moved.
   'validation.quoteUpdate': {
-    de: 'Angebot nachziehen — das Gewicht war geschätzt, Abweichung {x} g',
-    en: 'Quote update required — weight was estimated, delta {x} g',
+    de: 'Angebot nachziehen - das Gewicht war geschätzt, Abweichung {x} g',
+    en: 'Quote update required - weight was estimated, delta {x} g',
   },
   'validation.acknowledge': { de: 'Zur Kenntnis genommen', en: 'Acknowledge' },
   'validation.ackNote': { de: 'Bemerkung (optional)', en: 'Note (optional)' },
@@ -1441,16 +1683,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
 
   // Going back a stage, in professional words.
   'validation.escalate': {
-    de: 'Prüfpunkte nicht bestanden — zurück in die Umsetzung',
-    en: 'Checks not passed — escalate',
+    de: 'Prüfpunkte nicht bestanden - zurück in die Umsetzung',
+    en: 'Checks not passed - escalate',
   },
   'validation.escalateTitle': {
     de: 'Zurück in die Umsetzung',
     en: 'Return the change to implementation',
   },
   'validation.escalateLabel': {
-    de: 'Begründung — was ist nicht bestanden und was folgt daraus?',
-    en: 'Reason — what did not pass, and what follows from it?',
+    de: 'Begründung - was ist nicht bestanden und was folgt daraus?',
+    en: 'Reason - what did not pass, and what follows from it?',
   },
   'validation.escalateWarning': {
     de: 'Die Änderung geht in die Umsetzung zurück. Termine sind neu zu planen '
@@ -1473,8 +1715,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'actuals.delta': { de: 'Abweichung', en: 'Delta' },
   'actuals.unrated': { de: 'ohne Kostensatz', en: 'no rate' },
   'actuals.unratedHint': {
-    de: 'Für mindestens einen Fachbereich fehlt der Kostensatz — die Summe ist eine Untergrenze.',
-    en: 'At least one department has no rate — the total is a floor, not the figure.',
+    de: 'Für mindestens einen Fachbereich fehlt der Kostensatz. Die Summe ist eine Untergrenze.',
+    en: 'At least one department has no rate. The total is a floor, not the figure.',
   },
   'actuals.extras': { de: 'Zusatzkosten', en: 'Extra costs' },
   'actuals.extra.scrap_quote': { de: 'Verschrottung (Angebot)', en: 'Scrap quote' },
@@ -1484,13 +1726,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // My-tasks rows, stage 9
   'tasks.kind.validation_check': { de: 'Validierung bestätigen', en: 'Confirm validation' },
   'tasks.hint.validation_check': {
-    de: 'Offene Prüfpunkte des Fachbereichs bestätigen — Messwerte eintragen',
-    en: 'Confirm your department’s open checks — enter the measured values',
+    de: 'Offene Prüfpunkte des Fachbereichs bestätigen, Messwerte eintragen',
+    en: 'Confirm your department’s open checks and enter the measured values',
   },
   'tasks.kind.update_quote': { de: 'Angebot nachziehen', en: 'Update the quote' },
   'tasks.hint.update_quote': {
-    de: 'Das validierte Gewicht weicht von der Schätzung ab — Angebot nachziehen',
-    en: 'The validated weight differs from the estimate — bring the quote in line',
+    de: 'Das validierte Gewicht weicht von der Schätzung ab: Angebot nachziehen',
+    en: 'The validated weight differs from the estimate: bring the quote in line',
   },
 
   // Waits, stage 9
@@ -1499,24 +1741,24 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'validation checks open ({n} departments)',
   },
   'wait.onWeightAck': {
-    de: 'Gewichtsabweichung nicht bestätigt — Vertrieb',
-    en: 'weight delta unacknowledged — Sales',
+    de: 'Gewichtsabweichung nicht bestätigt - Vertrieb',
+    en: 'weight delta unacknowledged - Sales',
   },
 
   // Vendor decision, stage 5. The department's favourite is a recommendation;
   // Sales decides and answers for it, and both stay readable side by side.
   'vendor.decision': { de: 'Lieferantenentscheidung', en: 'Vendor decision' },
   'vendor.decisionHint': {
-    de: 'Die Empfehlung des Fachbereichs ist nicht bindend — der Vertrieb entscheidet und verantwortet.',
-    en: 'The department’s recommendation is not binding — Sales decides and is accountable.',
+    de: 'Die Empfehlung des Fachbereichs ist nicht bindend. Der Vertrieb entscheidet und verantwortet.',
+    en: 'The department’s recommendation is not binding. Sales decides and is accountable.',
   },
   'vendor.recommended': { de: 'Empfehlung', en: 'Recommended' },
   'vendor.chosen': { de: 'Gewählt', en: 'Chosen' },
   'vendor.choose': { de: 'Wählen', en: 'Choose' },
   'vendor.rechoose': { de: 'Ändern', en: 'Change' },
   'vendor.reasonLabel': {
-    de: 'Begründung — Entscheidung gegen die Empfehlung',
-    en: 'Reason — deciding against the recommendation',
+    de: 'Begründung: Entscheidung gegen die Empfehlung',
+    en: 'Reason: deciding against the recommendation',
   },
   'vendor.againstRecommendation': { de: 'gegen Empfehlung', en: 'against recommendation' },
   'vendor.salesChose': { de: 'Vertrieb wählte', en: 'Sales chose' },
@@ -1526,5 +1768,339 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Keine Empfehlung des Fachbereichs',
     en: 'No department recommendation',
   },
+  // Start dialog kickoff needs (spec §16 P2).
+  'start.description': { de: 'Beschreibung', en: 'Description' },
+  'start.descriptionPlaceholder': {
+    de: 'Was ändert sich, warum, was hat der Kunde geschickt?',
+    en: 'What changes, why, and what did the customer send?',
+  },
+  'start.optional': { de: '(optional)', en: '(optional)' },
+  'start.required': { de: '(Pflicht)', en: '(required)' },
+  'start.descriptionPlaceholderPlant': {
+    de: 'Was ändert sich und warum, wie vom Werk beschrieben?',
+    en: 'What changes and why, as the plant described it?',
+  },
+  'start.descriptionPlantHint': {
+    de: 'Die Übergabe an die Klärung braucht sie.',
+    en: 'The hand-over to scoping needs it.',
+  },
+  'start.quoteDeadlineHint': {
+    de: 'Bis wann der Kunde das Angebot erwartet. Später im Status änderbar.',
+    en: 'When the customer expects the offer. Can be changed later on the Status card.',
+  },
+  'start.documents': { de: 'Kundendokumente', en: 'Customer documents' },
+  'start.dropFiles': {
+    de: 'Dateien hier ablegen oder klicken (Zeichnung, Mail, Spezifikation)',
+    en: 'Drop files here or click to browse (drawing, mail, specification)',
+  },
+  'start.removeFile': { de: 'Datei entfernen', en: 'Remove file' },
+  'start.readyMissing': {
+    de: 'Für die Übergabe ans Scoping fehlt noch:',
+    en: 'Not ready to hand over to scoping yet, missing:',
+  },
+  'start.readySoft': {
+    de: 'Die Änderung wird trotzdem angelegt; nachtragen geht im Überblick.',
+    en: 'The change is created anyway; add the rest on the Overview tab.',
+  },
+  'start.ready': { de: 'Bereit zur Übergabe ans Scoping', en: 'Ready to hand over to scoping' },
+  // Impact tree (spec §16 P2/P3).
+  'impact.suggestedHint': {
+    de: 'Strukturell betroffen: eine Baugruppe über einem gewählten Teil. Klicken zum Übernehmen.',
+    en: 'Structurally affected: an assembly above a picked part. Click to add it.',
+  },
+  'impact.servedBy': { de: 'Bedient von:', en: 'Served by:' },
+  'impact.pendingAdd': { de: 'neu, nicht übernommen', en: 'added, not applied' },
+  'impact.pendingRemove': { de: 'entfernt, nicht übernommen', en: 'removed, not applied' },
+  'impact.notApplied': { de: '{n} Änderung(en) noch nicht übernommen', en: '{n} change(s) not applied yet' },
+  'impact.discard': { de: 'Verwerfen', en: 'Discard' },
+  'impact.applyFirst': {
+    de: 'Erst die Auswahl übernehmen oder verwerfen.',
+    en: 'Apply or discard the selection first.',
+  },
+  'impact.editRights': {
+    de: 'Den Umfang ändern die Entwicklung (im Scoping, vor der Bestätigung), die Change-Leitung, das Projektmanagement oder ein Admin.',
+    en: 'Development (at scoping, before the lock), the change lead, a Project Manager or an admin changes the impacted set.',
+  },
+  'impact.lockTitle': { de: 'Bestätigung der Entwicklung aufheben?', en: 'Clear Development\'s confirmation?' },
+  'impact.lockWarning': {
+    de: '{who} hat diesen Umfang am {when} bestätigt. Eine geänderte Auswahl hebt die Bestätigung auf; die Entwicklung muss neu bestätigen, bevor es weitergeht.',
+    en: '{who} confirmed this set on {when}. Applying a changed set clears that confirmation; Development must confirm again before the change can move on.',
+  },
+  'impact.keepSet': { de: 'Auswahl behalten', en: 'Keep the confirmed set' },
+  'impact.applyAnyway': { de: 'Übernehmen, neu bestätigen lassen', en: 'Apply and ask Development again' },
+  'impact.afterQuoteTitle': { de: 'Umfang nach dem Angebot ändern', en: 'Change the scope after the offer' },
+  'impact.afterQuoteWarning': {
+    de: 'Das Angebot ist raus und deckt den neuen Umfang nicht mehr ab. Es braucht eine neue Angebotsversion oder eine genehmigte Abweichung; die Kalkulation öffnet sich nur für betroffene Fachbereiche.',
+    en: 'The offer has gone out and will no longer cover the new scope. It needs a new offer version or an approved deviation; costing reopens only for the affected departments.',
+  },
+  'impact.afterQuoteLabel': { de: 'Warum ändert sich der Umfang? (Pflicht, protokolliert)', en: 'Why does the scope change? (required, audited)' },
+  'impact.scopeChangedAfterQuote': {
+    de: 'Umfang nach dem Angebot geändert: Das Angebot deckt ihn nicht mehr ab. Neue Angebotsversion oder genehmigte Abweichung nötig.',
+    en: 'Scope changed after the offer: the offer no longer covers it. A new offer version or an approved deviation is needed.',
+  },
+  'impact.titleFollowsLead': {
+    de: 'Der Titel folgt dem Leit-Teil: Wird ein anderes Teil führend, ändert sich der Titel mit (der alte bleibt im Audit).',
+    en: 'The title follows the lead item: making another item lead renames the change (the old title stays in the audit).',
+  },
+  'impact.leadChanged': { de: 'Leit-Teil geändert', en: 'Lead item changed' },
+  'impact.makeLeadFailed': { de: 'Leit-Teil konnte nicht geändert werden', en: 'Could not change the lead item' },
+
+  // --- Scoping / concerns polish (spec §16) ---
+  'meeting.dateLabel': { de: 'Termindatum', en: 'Meeting date' },
+  'meeting.costCarrier': { de: 'Kostenträger', en: 'Cost carrier' },
+  'meeting.costCarrierHint': {
+    de: 'Wer trägt die Kosten? Pflicht, bevor die Bewertung startet.',
+    en: 'Who pays? Required before the assessment can start.',
+  },
+  'meeting.costCarrier.customer': { de: 'Kunde (kundenrelevant)', en: 'Customer (customer relevant)' },
+  'meeting.costCarrier.internal': { de: 'Intern (Werk trägt)', en: 'Internal (plant pays)' },
+  'meeting.costCarrierFlip': {
+    de: 'Das ändert den Kostenträger von {from} auf {to}. Die Änderung wird protokolliert und der Vertrieb benachrichtigt.',
+    en: 'This changes the cost carrier from {from} to {to}. The change is audited and Sales is notified.',
+  },
+  'meeting.impactNotLocked': {
+    de: 'Erst den betroffenen Umfang bestätigen',
+    en: 'Lock the impacted set first, on the Impacted tab',
+  },
+  'meeting.costCarrierMissing': {
+    de: 'Erst den Kostenträger festlegen',
+    en: 'Set the cost carrier first',
+  },
+  'meeting.costCarrierCaptured': { de: 'Erfasst als: {x}', en: 'Captured as: {x}' },
+  'meeting.costCarrierLast': { de: 'letzter Termin: {x}', en: 'last meeting: {x}' },
+  'meeting.noAttendees': { de: 'keine Teilnehmer erfasst', en: 'no attendees recorded' },
+  'meeting.undated': { de: 'Ohne Datum, keine Teilnehmer erfasst', en: 'No date, no attendees recorded' },
+  'meeting.undecided': { de: 'Entscheidung offen', en: 'Decision pending' },
+  'meeting.recordRights': {
+    de: 'Den Scoping-Termin und seine Entscheidung erfassen der Lead, das Projektmanagement oder ein Admin.',
+    en: 'The lead, Project Management or an admin records the scoping meeting and its decision.',
+  },
+  'meeting.costCarrierPick': { de: 'Kostenträger wählen', en: 'Pick the cost carrier' },
+  'meeting.saveMissing': { de: 'Noch offen: {x}', en: 'Still needed: {x}' },
+  'meeting.recordAnother': { de: '+ Weiteren Termin erfassen', en: '+ Record another meeting' },
+  'meeting.recordFirst': { de: '+ Termin erfassen', en: '+ Record a meeting' },
+  'meeting.collapse': { de: 'Einklappen', en: 'Collapse' },
+  'meeting.carriedLetters': {
+    de: 'RASIC aus dem letzten Termin übernommen.',
+    en: 'RASIC letters carried over from the last meeting.',
+  },
+  'meeting.awaitingDecision': {
+    de: 'Der letzte Termin wartet noch auf seine Entscheidung.',
+    en: 'The last meeting is still waiting for its decision.',
+  },
+  'meeting.proceedTitle': { de: 'Freigeben und Bewertung starten', en: 'Proceed and start assessment' },
+  'meeting.proceedConsequence': {
+    de: 'Die mit R oder A markierten Abteilungen erhalten jetzt ihre Bewertungsaufgabe. Der Umfang ist damit für die Bewertung festgelegt; Änderungen danach laufen über eine Routing-Abweichung.',
+    en: 'The departments marked R or A get their assessment task now. This fixes who assesses; changing it afterwards goes through a routing deviation.',
+  },
+  'meeting.proceedNoAssessor': {
+    de: 'Keine Abteilung ist mit R oder A markiert: niemand bewertet',
+    en: 'No department is marked R or A: nobody assesses',
+  },
+  'meeting.proceedCarrier': { de: 'Kostenträger: {x}', en: 'Cost carrier: {x}' },
+  'meeting.proceedConfirm': { de: 'Bewertung starten', en: 'Start assessment' },
+  'reject.sendTitle': { de: 'Absageschreiben senden', en: 'Send rejection letter' },
+  'reject.step1': { de: '1. Absageschreiben anhängen', en: '1. Attach the rejection letter' },
+  'reject.step2': {
+    de: '2. An den Kunden senden, dann hier bestätigen',
+    en: '2. Send it to the customer, then confirm here',
+  },
+  'reject.closeTitle': { de: 'ECR schließen', en: 'Close the ECR' },
+  'reject.closeConsequence': {
+    de: 'Bestätigt, dass das Absageschreiben beim Kunden ist. Die Änderung wird geschlossen und ist danach nur noch lesbar.',
+    en: 'Confirms the rejection letter went to the customer. The change closes and becomes read only.',
+  },
+  'reject.closeConfirm': { de: 'Gesendet, ECR schließen', en: 'Sent, close ECR' },
+  'concern.noneScoping': {
+    de: 'Keine Einwände. Wer ein Hindernis sieht, kann es hier markieren, auch vor dem Termin.',
+    en: 'No concerns. Anyone who sees a blocker can flag it here, even before the meeting.',
+  },
+  'risk.none': {
+    de: 'Für diese Abteilung ist kein Risiko erfasst.',
+    en: 'No risks raised for this department.',
+  },
+  'concern.withdrawnByAuthor': { de: 'Zurückgezogen vom Ersteller', en: 'Withdrawn by its author' },
+  'concern.settledByPm': { de: 'Geklärt durch PM {x}', en: 'Settled by PM {x}' },
+  'concern.settledBy': { de: 'Geklärt durch {x}', en: 'Settled by {x}' },
+  'concern.settleAsPm': { de: 'Als PM klären', en: 'Settle as PM' },
+  'concern.closerShortPm': { de: 'Ersteller oder PM klärt', en: 'Author or PM settles' },
+  'concern.closerShortDept': {
+    de: 'Erhebende Abteilung oder PM klärt', en: 'Raising department or PM resolves' },
+  'concern.missing': { de: 'Noch offen: {x}', en: 'Still needed: {x}' },
+  'concern.missingNote': { de: 'Beschreibung', en: 'a description' },
+  'concern.missingType': { de: 'Risikoart', en: 'a risk type' },
+  'concern.missingDept': { de: 'Abteilung', en: 'a department' },
+  'concern.salesAnswersHint': {
+    de: 'Der Vertrieb beantwortet diese Frage.',
+    en: 'Sales answers this question.',
+  },
+  'concern.closerHint': {
+    de: 'Der fragende Bereich oder PM schließt die Frage.',
+    en: 'The asker or the PM closes the question.',
+  },
+  'concern.solvedByName': { de: "Geklärt von", en: "Solved by" },
+  'concern.solvedPlain': { de: "Geklärt", en: "Solved" },
+  'routingDev.waitingYou': {
+    de: 'Von dir vorgeschlagen. Entscheiden muss jemand anderes (Vier-Augen-Prinzip).',
+    en: 'Proposed by you. Someone else decides (four eyes).',
+  },
+  'routingDev.waitingForPm': {
+    de: 'Vom Änderungsleiter vorgeschlagen: wartet auf die Entscheidung des Projektmanagers.',
+    en: 'Proposed by the change lead: waiting for the Project Manager to decide.',
+  },
+  'routingDev.waitingForAnyone': {
+    de: 'Wartet auf eine Entscheidung durch jemand anderen als den Vorschlagenden.',
+    en: 'Waiting for someone other than the proposer to decide.',
+  },
+  'deadline.pushbackTitle': { de: 'Angebotstermin verschieben', en: 'Push back the quote deadline' },
+  'deadline.pushbackWhy': {
+    de: 'Warum ist der Angebotstermin nicht zu halten? (Pflicht, protokolliert)',
+    en: 'Why can the quote deadline not be met? (required, audited)',
+  },
+  'deadline.newQuote': { de: 'Neuer Angebotstermin', en: 'New quote deadline' },
+  'deadline.newRelease': { de: 'Neuer Freigabetermin', en: 'New release deadline' },
+  'deadline.pushbackSave': { de: 'Verschieben', en: 'Push back' },
+  'deadline.savedQuote': { de: 'Angebotstermin gespeichert', en: 'Quote deadline saved' },
+  'deadline.savedRelease': { de: 'Freigabetermin gespeichert', en: 'Release deadline saved' },
+  'assessment.pickVerdict': { de: "Ergebnis wählen", en: "Pick a verdict" },
+  'assessment.draftSaved': { de: "Entwurf gespeichert", en: "Draft saved" },
+  'assessment.draftRestored': { de: "Entwurf vom Server wiederhergestellt", en: "Draft restored from the server" },
+  'assessment.draftLocal': { de: "Entwurf in diesem Browser gesichert", en: "Draft kept in this browser" },
+  'assessment.confirmTitle': { de: "Bewertung abgeben: {d}", en: "Submit the {d} assessment" },
+  'assessment.confirmBody': { de: "Nach dem Abgeben ist die Bewertung schreibgeschützt. Eine Korrektur braucht die Projektleitung.", en: "Once submitted the answer is read only. Changing it later needs the Project Manager." },
+  'assessment.confirmImpacted': { de: "betroffen", en: "impacted" },
+  'check.openQuestionsOne': { de: "1 Frage offen", en: "1 question unanswered" },
+  'check.openRowsOne': { de: "1 Punkt offen", en: "1 row unanswered" },
+  'pkg.answerFirst': { de: "Zuerst beantworten: Ist die Verpackung betroffen?", en: "Answer first: is packaging impacted?" },
+  'pkg.questions': { de: "Verpackungsfragen", en: "Packaging questions" },
+  'pkg.questionsHint': { de: "Ankreuzen, was zutrifft. Danach folgt die allgemeine Checkliste.", en: "Tick what applies. The general checklist follows below." },
+  'attach.rfqGoto': { de: "RFQ im RFQ-Feld unten ablegen", en: "File the RFQ in the RFQ box below" },
+  'attach.wrongType': { de: "{name}: dieses Feld nimmt nur {x}", en: "{name}: this slot takes {x} only" },
+  'check.docRequired': { de: "{d} erforderlich", en: "{d} required" },
+  'check.docFiled': { de: "{d} hinterlegt", en: "{d} attached" },
+  'check.docSlot': { de: "{d} ablegen ({x})", en: "Drop the {d} here ({x})" },
+  'check.docsBlockSubmit': { de: "Absenden erst mit den Pflichtdokumenten: {x}", en: "Submit needs the required documents first: {x}" },
+  'bucket.crashed': { de: "Der Bereich {d} konnte nicht angezeigt werden.", en: "The {d} bucket could not be shown." },
+  'bucket.crashedHint': { de: "Die übrigen Abteilungen sind nicht betroffen. Der Entwurf ist gesichert.", en: "Other departments are not affected. The draft is kept." },
+  'bucket.retry': { de: "Erneut versuchen", en: "Try again" },
+  'bucket.declinedPending': { de: "Abgelehnt, Entscheidung offen", en: "Declined, awaiting decision" },
+  'bucket.staleRows': { de: "+{n} früher", en: "+{n} earlier" },
+  'meeting.saved': { de: "Termin gespeichert", en: "Meeting saved" },
+  'next.waitingCostInput': { de: "Wartet auf Kosten von {n} Abteilung(en)", en: "Waiting on cost input from {n} department{s}" },
+  'next.waitingOn': { de: "Wartet auf {n} Abteilung(en)", en: "Waiting on {n} department{s}" },
+  'next.waitingRouting': { de: "Wartet auf die Entscheidung zur Routing-Änderung", en: "Waiting on the routing change decision" },
+  'next.reject': { de: "Änderung ablehnen", en: "Reject change" },
+  'next.backToScoping': { de: "Zurück ins Scoping", en: "Back to scoping" },
+  'next.override': { de: "Trotzdem ins Costing (mit Begründung)", en: "Override with a reason" },
+  'next.overrideHint': { de: "Beantragt eine Abweichung zum Costing; entscheidet jemand anderes als der Antragsteller", en: "Proposes a deviation to costing; someone other than the proposer approves it" },
+  'next.closeAssessment': { de: "Bewertung abschließen", en: "Close assessment" },
+  'next.sendRejection': { de: "Absageschreiben senden", en: "Send rejection letter" },
+  'next.notYours': { de: "Nur die Änderungsleitung, die Projektleitung oder ein Admin kann hier weiterschalten.", en: "Only the change lead, Project Management or an admin moves this change on." },
+  'cockpit.gateWord': { de: "Gate", en: "gate" },
+  'cockpit.gateNo': { de: "mit Nein beantwortet (D1)", en: "answered No (D1)" },
+  'cockpit.gateOpen': { de: "nicht mit Ja beantwortet (es ist n/a, D1)", en: "not answered Yes (it is n/a) (D1)" },
+  'cockpit.gateNone': { de: "noch nicht entschieden (D1)", en: "not decided yet (D1)" },
+  'cockpit.gateHolds': { de: "{gate}-Gate {state}: erst auf D1 entscheiden", en: "{gate} gate {state}: decide it on D1 first" },
+  'cockpit.gateHoldsNotYours': { de: "{gate}-Gate {state}: die Änderungsleitung entscheidet es auf D1", en: "{gate} gate {state}: the change lead decides it on D1" },
+  'cockpit.gateStateNo': { de: "mit Nein beantwortet", en: "answered No" },
+  'cockpit.gateStateOpen': { de: "nicht mit Ja beantwortet (es ist n/a)", en: "not answered Yes (it is n/a)" },
+  'cockpit.gateStateNone': { de: "noch nicht entschieden", en: "not decided yet" },
+  'cockpit.gateDeviationApproved': { de: "{gate}-Gate {state}: eine genehmigte Abweichung deckt den Schritt", en: "{gate} gate {state}: an approved deviation covers the step" },
+  'cockpit.gateDeviationPending': { de: "Abweichung beantragt: sie wartet auf ihre Entscheidung", en: "Deviation asked: it waits for its decision" },
+  'cockpit.askDeviation': { de: "Abweichung beantragen", en: "Ask for a deviation" },
+  'cockpit.askDeviationHint': { de: "Das Gate ist ein weicher Schutz: mit einer genehmigten Abweichung geht der Schritt trotzdem. Jemand anderes als du entscheidet.", en: "The gate is a soft guard: with an approved deviation the step can still be taken. Someone other than you decides." },
+  'cockpit.decideDeviations': { de: "Abweichung entscheiden", en: "Decide the deviation" },
+  'cockpit.noLead': { de: "Keine Leitung zugewiesen", en: "No lead assigned" },
+  'cockpit.created': { de: "Erfasst", en: "Created" },
+  'cockpit.updated': { de: "zuletzt geändert", en: "last change" },
+  'cockpit.leadPick': { de: "Leitung wählen", en: "Pick a lead" },
+  'cockpit.leadMe': { de: "Ich übernehme", en: "Me" },
+  'cockpit.leadSaved': { de: "Leitung gesetzt", en: "Lead set" },
+  'cockpit.leadHint': { de: "Leitung: Änderungsleitung, Projektleitung oder Admin setzen sie", en: "The change lead, Project Management or an admin sets the lead" },
+  'stepper.endRejected': { de: "Abgelehnt", en: "Rejected" },
+  'stepper.endRejectedClosed': { de: "Abgelehnt, geschlossen", en: "Rejected, closed" },
+  'stepper.endCancelled': { de: "Storniert", en: "Canceled" },
+  'stepper.stoppedAt': { de: "gestoppt in {x}", en: "stopped at {x}" },
+  'stepper.stoppedHere': { de: "hier gestoppt", en: "stopped here" },
+  'audit.brokenInChange': { de: "Kette in den Einträgen dieser Änderung beschädigt (ab #{n})", en: "Chain broken inside this change's entries (at #{n})" },
+  'audit.brokenGlobally': { de: "Einträge dieser Änderung intakt; die globale Kette ist bei #{n} beschädigt (außerhalb dieser Änderung)", en: "This change's entries are intact; the global chain is broken at #{n}, outside this change" },
+  'cockpit.leadChange': { de: "ändern", en: "change" },
+
+  // Project team (spec 2026-09-25): one responsible per department per project.
+  'team.title': { de: 'Projektteam', en: 'Project team' },
+  'team.pick': { de: 'Zuständige/n wählen', en: 'Pick a responsible' },
+  'team.unassigned': { de: 'Nicht zugewiesen', en: 'Unassigned' },
+  'team.change': { de: 'ändern', en: 'change' },
+  'team.saved': { de: 'Gespeichert', en: 'Saved' },
+  'team.saveFailed': { de: 'Speichern fehlgeschlagen', en: 'Could not save' },
+  'next.overrideSent': { de: "Abweichung beantragt: jemand anderes entscheidet", en: "Deviation proposed: someone other than you decides" },
+  'confirm.kickoffTitle': { de: "An das Scoping übergeben", en: "Hand over to scoping" },
+  'confirm.kickoffBody': { de: "Die Projektleitung übernimmt: sie trifft das Team, wählt die Abteilungen und entscheidet. Die Erfassung ist danach nur noch über die Leitung änderbar.", en: "Project Management takes over: it meets the team, picks the departments and decides. After this the capture changes only through the lead." },
+  'confirm.kickoffGo': { de: "An das Scoping übergeben", en: "Hand over to scoping" },
+  'confirm.recallBody': { de: "Die Änderung geht zurück ins Scoping. Die Bewertungen bleiben im Protokoll; das Scoping-Meeting entscheidet neu.", en: "The change goes back to scoping. The assessments stay on the record and the scoping meeting decides again." },
+  'confirm.recallReason': { de: "Warum geht die Änderung zurück ins Scoping? (Pflicht, im Protokoll)", en: "Why does the change go back to scoping? (required, audited)" },
+  'confirm.recallReasonHint': { de: "Was am Umfang neu entschieden werden muss", en: "What about the scope has to be decided again" },
+  'confirm.closeAssessmentTitle': { de: "Bewertung abschließen", en: "Close assessment" },
+  'confirm.closeAssessmentBody': { de: "Die Antworten der Abteilungen werden eingefroren und das Costing beginnt für die betroffenen Abteilungen.", en: "The department answers are frozen and costing opens for the departments on the hook." },
+  'confirm.notAnswered': { de: "noch keine Antwort", en: "not answered yet" },
+  'confirm.allAnswered': { de: "Alle verantwortlichen Abteilungen haben geantwortet.", en: "Every department on the hook has answered." },
+  'confirm.risk': { de: "Risiko", en: "Risk" },
+  'confirm.overrideBody': { de: "Eine Abteilung sagt „nicht machbar“. Weiter ins Costing geht es nur mit einer genehmigten Abweichung: jemand anderes als du entscheidet, beides wird protokolliert.", en: "A department answered not feasible. Going on to costing needs an approved deviation: someone other than you decides, and both are on the record." },
+  'confirm.overrideLabel': { de: "Warum trotzdem weiter? (Pflicht, protokolliert)", en: "Why go on anyway? (required, audited)" },
+  'confirm.overrideGo': { de: "Abweichung beantragen", en: "Propose the deviation" },
+  'confirm.cancelFinal': { de: "Stornieren ist endgültig: die Änderung stoppt für immer und kann nicht wieder geöffnet werden. Alles bisher Erfasste bleibt als Protokoll erhalten.", en: "Canceling is final: the change stops for good and cannot be reopened. Everything recorded so far stays on the record." },
+  'description.none': { de: "Keine Beschreibung", en: "No description" },
+  'description.frozen': { de: "Bei der Übergabe ins Scoping festgeschrieben; weitere Überlegungen gehören in den Mailverlauf.", en: "Fixed at the hand-over to scoping; later thinking goes in the mail thread." },
+  'description.readOnly': { de: "Vertrieb, die Änderungsleitung oder ein Admin schreiben die Beschreibung.", en: "Sales, the change lead or an admin write the description." },
+  'description.readOnlyPlant': { de: "Projektmanagement, die Änderungsleitung oder ein Admin schreiben die Beschreibung.", en: "Project Management, the change lead or an admin write the description." },
+  'description.discard': { de: "Verwerfen", en: "Discard" },
+  'description.unsaved': { de: "Nicht gespeichert", en: "Unsaved changes" },
+  'description.savedState': { de: "Gespeichert", en: "Saved" },
+  'description.empty': { de: "Noch leer: für die Übergabe ins Scoping nötig", en: "Still empty: needed for the hand-over to scoping" },
+  'impact.confirmTitle': { de: "Betroffenen Umfang bestätigen", en: "Confirm the impacted set" },
+  'impact.confirmBody': { de: "Die Bewertung wird auf diesen Umfang geroutet. Eine spätere Änderung am Umfang hebt diese Bestätigung auf und die Entwicklung muss erneut bestätigen.", en: "The assessment is routed on this set. A later edit to the set clears this confirmation and Development has to confirm again." },
+  'impact.confirmBodyReview': { de: "Die Prüfung fragt die Abteilungen, die diese Teile betreuen: jede antwortet \"keine Auswirkung\" oder \"Auswirkung\". Eine spätere Änderung am Umfang hebt diese Bestätigung auf.", en: "The review asks the departments serving these parts: each answers \"no impact\" or \"impact\". A later edit to the set clears this confirmation." },
+  'impact.confirmCount': { de: "{n} betroffene Teile", en: "{n} impacted items" },
+  'next.notFeasible': { de: "{x}: nicht machbar. Wie geht es weiter?", en: "{x}: not feasible. Choose how to go on:" },
+  'next.notFeasibleNotYours': {
+    de: "{x}: nicht machbar. Wie es weitergeht, entscheiden die Änderungsleitung oder das Projektmanagement.",
+    en: "{x}: not feasible. The change lead or Project Management decides how to go on.",
+  },
+  'next.overridePending': { de: "Abweichung zum Costing beantragt: wartet auf Entscheidung", en: "Deviation to costing proposed: waiting for its decision" },
+  'confirm.overrideApproved': { de: "„Nicht machbar“ durch eine genehmigte Abweichung übersteuert", en: "Not feasible overridden by an approved deviation" },
+  'next.ended': { de: "Beendet: kein weiterer Schritt", en: "Ended: no further step" },
+  // UI polish WP3: one truth per cockpit, compact header, closed read-only.
+  'next.resolveBlockers': { de: "Erst {n} Blocker lösen", en: "Resolve {n} blocker{s} first" },
+  'next.resolveFirst': { de: "Zuerst: {x}", en: "First: {x}" },
+  'next.blockedStepHint': {
+    de: "{n} Blocker offen. Wird der Schritt abgelehnt, kann eine Abweichung beantragt werden.",
+    en: "{n} blocker{s} open. If the step is refused, you can ask for a deviation.",
+  },
+  'next.answerReview': { de: "Prüfung beantworten", en: "Answer the review" },
+  'next.waitingReview': { de: "Wartet auf {n} Antwort(en) zur Prüfung", en: "Waiting on {n} review answer{s}" },
+  'next.reviewImpact': { de: "Auswirkung gemeldet: zur vollen Änderung eskalieren", en: "Impact reported: escalate to a full ECR" },
+  'next.reviewImpactWait': { de: "Auswirkung gemeldet: die Entwicklung eskaliert zur vollen Änderung", en: "Impact reported: Development escalates to a full ECR" },
+  'next.reviewDone': { de: "Alle Antworten liegen vor: die Prüfung gibt den Index frei", en: "Every answer is in: the review releases the index" },
+  'next.lockImpact': { de: "Betroffenen Umfang wählen und festlegen (Entwicklung)", en: "Pick and lock the impacted set (Development)" },
+  'cockpit.blockersCount': { de: "{n} Blocker", en: "{n} blocker{s}" },
+  'cockpit.actionsCount': { de: "{n} Aufgabe(n) für dich", en: "{n} action{s} for you" },
+  'cockpit.ready': { de: "Nichts blockiert", en: "Nothing blocking" },
+  'change.moreActions': { de: "Weitere Aktionen", en: "More actions" },
+  'change.tabs': { de: "Bereiche der Änderung", en: "Change sections" },
+  'change.governance': { de: "Governance", en: "Governance" },
+  'change.closedBanner': { de: "Geschlossen{d}. Die Änderung und ihre Unterlagen sind schreibgeschützt.", en: "Closed{d}. The change and its records are read only." },
+  'change.canceledBanner': { de: "Storniert. Die Änderung und ihre Unterlagen sind schreibgeschützt.", en: "Canceled. The change and its records are read only." },
+  'confirm.approveBody': {
+    de: "Die Go-Entscheidung wird festgehalten und die Detailplanung beginnt auf dem Timing-Tab.",
+    en: "The go decision is recorded and the detailed timing starts on the Timing tab.",
+  },
+  'confirm.approveClear': { de: "Kunde hat angenommen, PM und Qualität haben unterschrieben.", en: "The customer accepted, and PM and Quality signed." },
+  'confirm.approveClearInternal': { de: "Die internen Kosten sind freigegeben.", en: "The internal costs are approved." },
+  'tasks.dueIn': { de: "in {n} T", en: "in {n} d" },
+  'tasks.dueToday': { de: "heute", en: "today" },
+  'tasks.dueOverdue': { de: "{n} T überfällig", en: "{n} d overdue" },
+  'changes.sortAction': { de: "Handlungsbedarf zuerst", en: "Needs action first" },
+  'changes.priorityMediumHint': { de: "Priorität Mittel wird nicht angezeigt", en: "Medium priority is not shown" },
+  'changes.showType': { de: "Typ anzeigen", en: "Show type" },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

@@ -54,7 +54,7 @@ export default function StartWorkflowModal({ revisionId, onStarted, onCancel }: 
                 }
                 className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">— Choose a template —</option>
+                <option value="">Choose a template</option>
                 {activeTemplates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name} (v{t.version})

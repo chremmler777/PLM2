@@ -144,6 +144,9 @@ class PartRevisionResponse(PartRevisionBase):
     updated_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    # Spec §17a: a new customer index still waiting for triage (not active,
+    # never shown as the current one). Set by the revisions list.
+    intake_pending: bool = False
 
     class Config:
         from_attributes = True
@@ -215,6 +218,9 @@ class CustomerDataReceivedRequest(BaseModel):
     customer_index: Optional[str] = Field(None, max_length=20, description="Customer's own index, e.g. B")
     summary: Optional[str] = None
     major: Optional[int] = Field(None, ge=1, description="Chosen major number; must be above every existing major of this kind")
+    # Intake source (spec §17): typed customer data, or the upload dialog's
+    # "next customer data" path. Either way the new major waits for triage.
+    source: Literal["customer_data", "upload"] = "customer_data"
 
 
 class CreateProposalRequest(BaseModel):
@@ -259,6 +265,10 @@ class PackageRowOut(BaseModel):
     suggested_name: Optional[str] = None
     major: Optional[int] = None
     error: Optional[str] = None
+    # Spec §17a: the current revision is still pending triage; a new file
+    # supersedes it (pending_note says so).
+    current_pending: bool = False
+    pending_note: Optional[str] = None
 
 
 class PackageRowIn(BaseModel):

@@ -128,7 +128,7 @@ async def _pass_all(client, auth, val, skip=()):
     for dept in state["departments"]:
         name = dept["department_name"]
         for check in dept["checks"]:
-            if check["check_key"] in skip:
+            if check["check_key"] in skip or check.get("retired"):
                 continue
             value = {"cycle_time": 41.5, "weight": 510.0}.get(check["check_key"])
             res = await _check(client, auth, val, name, check["check_key"],
@@ -165,8 +165,9 @@ async def test_catalog_is_per_department_and_only_for_implementers(
 
     tool_keys = [c["check_key"] for c in by_name["Tool Engineer"]["checks"]]
     assert tool_keys == ["sampled", "measured", "cycle_time", "weight"]
+    # Development answers for its own scope only: no tool, no line.
     dev_keys = [c["check_key"] for c in by_name["Development"]["checks"]]
-    assert dev_keys == ["sampled", "measured", "cycle_time", "revision_bump"]
+    assert dev_keys == ["revision_bump"]
 
     # The two measurements declare their unit; the yes/no checks do not.
     units = {c["check_key"]: (c["expects_value"], c["unit"])
@@ -177,21 +178,24 @@ async def test_catalog_is_per_department_and_only_for_implementers(
     assert units["revision_bump"] == (False, None)
 
     assert state["all_passed"] is False
-    assert state["open_count"] == state["check_count"] == 8
+    assert state["open_count"] == state["check_count"] == 5
 
 
 async def test_state_carries_the_costing_assumptions_to_compare_against(
         client, admin_auth, val):
     state = await _state(client, admin_auth, val)
     by_name = {d["department_name"]: d for d in state["departments"]}
-    dev_cycle = next(c for c in by_name["Development"]["checks"]
-                     if c["check_key"] == "cycle_time")
-    # 0.5 min/part of lifecycle cost line = 30 s the costing priced in.
-    assert dev_cycle["planned_delta_seconds"] == 30.0
-    # Tool Engineer priced no lifecycle minutes: no assumption is not zero.
+    # Development priced 0.5 min/part but times nothing itself: the
+    # assumption surfaces change-wide (below), not on a Development check.
+    assert "cycle_time" not in {c["check_key"]
+                                for c in by_name["Development"]["checks"]}
+    # The Tool Engineer times the line for the whole change: its row is held
+    # against every department's lifecycle minutes summed (Development's
+    # 0.5 min = 30 s), and says where that number comes from.
     tool_cycle = next(c for c in by_name["Tool Engineer"]["checks"]
                       if c["check_key"] == "cycle_time")
-    assert tool_cycle["planned_delta_seconds"] is None
+    assert tool_cycle["planned_delta_seconds"] == 30.0
+    assert tool_cycle["planned_delta_source"] == "change_lifecycle_total"
 
     # Change-wide, in the unit the COSTING states it: minutes per part.
     assert state["planned_cycle_time_min_per_part"] == 0.5
@@ -214,7 +218,7 @@ async def test_rows_are_seeded_once_however_often_the_state_is_read(
     async with session_factory() as s:
         rows = (await s.execute(select(ValidationCheck).where(
             ValidationCheck.change_id == val["change_id"]))).scalars().all()
-    assert len(rows) == 8
+    assert len(rows) == 5
     assert all(r.status == "open" and r.checked_by is None for r in rows)
 
 
@@ -227,7 +231,7 @@ async def test_department_signs_its_own_checks_only(client, val):
     assert res.json()["status"] == "passed"
     assert "validation_check" in await _actions(client, tool, val["change_id"])
 
-    res = await _check(client, tool, val, "Development", "sampled")
+    res = await _check(client, tool, val, "Development", "revision_bump")
     assert res.status_code == 403, res.text
 
 
@@ -235,7 +239,7 @@ async def test_pm_signs_for_anyone_and_admin_ignores_the_status_window(
         client, admin_auth, val, session_factory):
     pm = await _auth(client, val, "Project Manager")
     assert (await _check(client, pm, val, "Development",
-                         "sampled")).status_code == 201
+                         "revision_bump")).status_code == 201
 
     await _set_status(session_factory, val["change_id"], "in_implementation")
     tool = await _auth(client, val, "Tool Engineer")
@@ -382,7 +386,8 @@ async def test_release_refused_while_checks_are_open(client, admin_auth, val):
     res = await _release(client, admin_auth, val)
     assert res.status_code == 400, res.text
     detail = res.json()["detail"]
-    assert "validation incomplete" in detail
+    assert "Validation incomplete" in detail
+    assert "\u2014" not in detail
     # The message NAMES what is missing, department by check.
     assert "Tool Engineer: Part weight validated" in detail
 
@@ -394,7 +399,7 @@ async def test_release_refused_when_a_check_failed(client, admin_auth, val):
     res = await _release(client, admin_auth, val)
     assert res.status_code == 400, res.text
     detail = res.json()["detail"]
-    assert "validation failed" in detail
+    assert "Validation failed" in detail
     assert "Development: Revision levels raised" in detail
 
     state = await _state(client, admin_auth, val)
@@ -535,3 +540,112 @@ async def test_actuals_extras_carry_the_scrap_quote_and_the_weight_delta(
         f"/api/v1/pnl/changes/{val['change_id']}/actuals", headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["actuals"]["total_extras"] == 4200.0
+
+
+# --- the catalog per department (walk 1) ---------------------------------
+
+async def test_catalog_departments():
+    from app.services import validation_checklist as cat
+    for name in ("Tool Engineer", "Manufacturing Engineer", "Process Engineer"):
+        assert cat.keys_for(name)[:2] == ["sampled", "measured"]
+    # the cycle time is measured by the Tool Engineer only (2026-09-26)
+    assert cat.keys_for("Tool Engineer")[2:] == ["cycle_time", "weight"]
+    assert cat.keys_for("Manufacturing Engineer") == ["sampled", "measured"]
+    assert cat.keys_for("Process Engineer") == ["sampled", "measured"]
+    assert cat.CYCLE_TIME_DEPARTMENT == "Tool Engineer"
+    assert cat.label_for("cycle_time", "Process Engineer") == "Measured cycle time"
+    assert cat.keys_for("APQP") == ["measured"]
+    assert cat.items_for("APQP")[0]["label_en"] == "Parts measured"
+    assert [i["label_en"] for i in cat.items_for("Packaging Engineer")] == [
+        "Packaging validated with the changed part"]
+    assert cat.keys_for("Development") == ["revision_bump"]
+    assert cat.keys_for("Sales") == [] and cat.keys_for(None) == []
+    # a retired key still reads with its words
+    assert cat.label_for("sampled", "Development") == "Tool sampled"
+
+
+async def test_retired_rows_are_kept_but_never_block(
+        client, admin_auth, val, session_factory):
+    """Rows an older catalog seeded (Development's sampled / measured) stay
+    in the table; open ones are not shown, answered ones are shown as
+    retired, and neither counts for the release verdict."""
+    async with session_factory() as s:
+        s.add(ValidationCheck(change_id=val["change_id"],
+                              department_id=val["dept"]["Development"],
+                              check_key="sampled", status="open"))
+        s.add(ValidationCheck(change_id=val["change_id"],
+                              department_id=val["dept"]["Development"],
+                              check_key="measured", status="failed"))
+        await s.commit()
+    await _pass_all(client, admin_auth, val)
+    state = await _state(client, admin_auth, val)
+    dev = next(d for d in state["departments"]
+               if d["department_name"] == "Development")
+    shown = {c["check_key"]: c for c in dev["checks"]}
+    assert "sampled" not in shown
+    assert shown["measured"]["retired"] is True
+    assert shown["measured"]["label_en"] == "Part measured"
+    assert shown["revision_bump"]["retired"] is False
+    assert dev["failed_count"] == 0 and dev["all_passed"] is True
+    assert state["all_passed"] is True and state["release_blocker"] is None
+    async with session_factory() as s:
+        n = len((await s.execute(select(ValidationCheck).where(
+            ValidationCheck.change_id == val["change_id"]))).scalars().all())
+    assert n == 7
+
+
+async def test_cycle_time_measured_by_other_departments_stays_readable(
+        client, admin_auth, val, session_factory):
+    """Manufacturing and Process Engineer measured the cycle time under the
+    older catalog: their answers stay on the record, read-only and never
+    owed; only the Tool Engineer's counts."""
+    async with session_factory() as s:
+        depts = {}
+        for name in ("Manufacturing Engineer", "Process Engineer"):
+            d = Department(name=name, flow_type="action", is_active=True)
+            s.add(d)
+            await s.flush()
+            depts[name] = d.id
+        s.add(ValidationCheck(change_id=val["change_id"],
+                              department_id=depts["Process Engineer"],
+                              check_key="cycle_time", status="passed", value=41.0))
+        s.add(ValidationCheck(change_id=val["change_id"],
+                              department_id=depts["Manufacturing Engineer"],
+                              check_key="cycle_time", status="open"))
+        await s.commit()
+    state = await _state(client, admin_auth, val)
+    by_name = {d["department_name"]: d for d in state["departments"]}
+    pe = by_name["Process Engineer"]
+    # the current catalog first (sampled, measured), the retired answer last
+    assert [(c["check_key"], c["retired"], c["value"]) for c in pe["checks"]] == [
+        ("sampled", False, None), ("measured", False, None),
+        ("cycle_time", True, 41.0)]
+    assert pe["checks"][-1]["label_en"] == "Measured cycle time"
+    assert pe["open_count"] == 2          # the retired cycle time is not owed
+    # an unanswered one is not owed and not shown
+    assert "cycle_time" not in {
+        c["check_key"] for c in by_name["Manufacturing Engineer"]["checks"]}
+    tool = next(c for c in by_name["Tool Engineer"]["checks"]
+                if c["check_key"] == "cycle_time")
+    assert tool["retired"] is False and tool["expects_value"] is True
+    # the retired answer cannot be written any more
+    res = await client.post(_url(val, "/checks"), headers=admin_auth, json={
+        "department_id": depts["Process Engineer"], "check_key": "cycle_time",
+        "status": "passed", "value": 40.0})
+    assert res.status_code == 400, res.text
+    # only the Tool Engineer's measurement is owed for the release
+    for dept in state["departments"]:
+        if dept["department_name"] not in val["dept"]:
+            continue      # not implementing here: nothing seeded, nothing owed
+        for check in dept["checks"]:
+            if check["retired"]:
+                continue
+            value = {"cycle_time": 41.5, "weight": 510.0}.get(check["check_key"])
+            res = await _check(client, admin_auth, val, dept["department_name"],
+                               check["check_key"], value=value)
+            assert res.status_code == 201, res.text
+    state = await _state(client, admin_auth, val)
+    by_name = {d["department_name"]: d for d in state["departments"]}
+    assert by_name["Tool Engineer"]["all_passed"] is True
+    assert state["release_blocker"] is None
+

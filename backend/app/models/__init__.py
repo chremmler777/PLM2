@@ -28,13 +28,29 @@ from app.models.change_cost import (
 from app.models.change_impl import (
     ImplementationBooking, ImplementationReport, ImplementationEscalation,
 )
-from app.models.change_validation import ValidationCheck
+from app.models.change_validation import ValidationCheck, ChangeReleaseCheck
+from app.models.change_plan import (
+    ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation, ChangePlanLink,
+)
+from app.models.change_offer import ChangeOffer
+from app.models.change_validation_issue import (
+    ValidationIssue, ValidationIssueAction, ValidationIssueEscalation,
+)
+from app.models.change_actual_cost import ChangeActualCost
+from app.models.change_info import ChangeInfoReceipt
+from app.models.revision_intake import RevisionIntake, ChangeReviewAnswer
+from app.models.cost_sheet import (
+    CostSheetVersion, CostSheetRate, CostSheetMachineClass, CostSheetMachineRate,
+    CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
+)
+from app.models.cost_sheet_machines import CostSheetMachine, CostSheetMachineItemRate
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
-    WfInstance, WfInstanceTask, CheckWorkflowStandard,
+    WfInstance, WfInstanceTask, CheckWorkflowStandard, ProjectResponsible,
 )
 from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile, DfmAuditEvent
 from app.models.field_note import FieldNote, FieldNoteComment
+from app.models.training import TrainingVersion, TrainingSignoff, TrainingAttempt
 
 __all__ = [
     "Base",
@@ -61,6 +77,9 @@ __all__ = [
     "RevisionPhase",
     "RevisionStatus",
     "TestDataStatus",
+    "TrainingVersion",
+    "TrainingSignoff",
+    "TrainingAttempt",
     "DfmTopic",
     "DfmEntry",
     "DfmEntryFile",
@@ -75,6 +94,7 @@ __all__ = [
     "WfStepRasic",
     "WfTemplateHistory",
     "CheckWorkflowStandard",
+    "ProjectResponsible",
     # New workflow instance models (Phase 3c)
     "WfInstance",
     "WfInstanceTask",
@@ -95,6 +115,16 @@ __all__ = [
     "ImplementationReport",
     "ImplementationEscalation",
     "ValidationCheck",
+    "ChangeReleaseCheck",
+    "ChangePlanTask", "ChangePlanLink",
+    "ChangePlanFeedback",
+    "ChangePlanDeviation",
+    "ChangeOffer",
+    "ChangeActualCost",
+    "ChangeInfoReceipt",
+    "RevisionIntake", "ChangeReviewAnswer",
+    "CostSheetVersion", "CostSheetRate", "CostSheetMachineClass", "CostSheetMachineRate",
+    "CostSheetSamplingRate", "CostSheetOverhead", "OrgSetting",
     "FormDefinition",
     "FormInstance",
     "FormEvent",

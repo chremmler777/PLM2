@@ -7,29 +7,42 @@
  * A department's work never appears outside its own row, so there is exactly one
  * place to look for it.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Check, ChevronDown, ChevronRight, Cog, FileText, Flag, Gauge, Package, Paperclip,
+  TriangleAlert, Wrench, X,
+} from 'lucide-react'
 import { changesApi } from '../../api/changes'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
 import RoutingDeviationPanel from './RoutingDeviationPanel'
+import PendingRemovalChip from './PendingRemovalChip'
 import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
-import { impactedCount, impactsOf } from './departmentForms/ActivityChecklist'
-import { assessmentProgress } from '../../lib/waitStates'
+import {
+  impactedCount, impactsOf, choiceLabel, checklistItemLabel, DOCUMENT_EXTENSIONS,
+} from './departmentForms/ActivityChecklist'
+import BucketErrorBoundary from './BucketErrorBoundary'
+import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
+import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
+import { formatDate } from '../../lib/format'
 import type {
   ChangeConcern,
-  Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
+  Assessment, AssessmentObject, ChangeDetail, DepartmentObjects, StageAssessment,
 } from '../../types/change'
 
-const OBJECT_ICON: Record<string, string> = {
-  tool: '🛠', equipment: '⚙️', gauge: '📐', document: '📄', part: '🔩',
+const OBJECT_ICON: Record<string, ReactNode> = {
+  tool: <Wrench size={14} />, equipment: <Cog size={14} />, gauge: <Gauge size={14} />,
+  document: <FileText size={14} />, part: <Package size={14} />,
 }
 
-const VERDICT_ICON: Record<string, string> = {
-  feasible: '✓', feasible_with_conditions: '≈', not_feasible: '✗',
+const VERDICT_ICON: Record<string, ReactNode> = {
+  feasible: <Check size={16} />,
+  feasible_with_conditions: <TriangleAlert size={15} />,
+  not_feasible: <X size={16} />,
 }
 
 const VERDICT_TONE: Record<string, string> = {
@@ -38,7 +51,8 @@ const VERDICT_TONE: Record<string, string> = {
   not_feasible: 'text-red-300',
 }
 
-type State = 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold' | 'queued'
+type State =
+  | 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold' | 'queued' | 'declined' | 'optional'
 
 const STATE_STYLE: Record<State, string> = {
   waiting: 'bg-slate-700 text-slate-300',
@@ -47,12 +61,21 @@ const STATE_STYLE: Record<State, string> = {
   waived: 'bg-slate-800 text-slate-500',
   on_hold: 'bg-amber-900/70 text-amber-200',
   queued: 'bg-slate-800 text-slate-500',
+  declined: 'bg-amber-900/70 text-amber-200',
+  optional: 'bg-slate-800 text-slate-400',
 }
 
 const STATE_LABEL: Record<State, string> = {
   waiting: 'bucket.waiting', in_work: 'bucket.inWork', submitted: 'bucket.submitted',
   waived: 'bucket.waived', on_hold: 'concern.onHold', queued: 'bucket.queued',
+  declined: 'bucket.declinedPending',
+  optional: '',
 }
+
+/** Copy kept local (cmLabels is owned elsewhere): a C/S row owes no answer. */
+const OPTIONAL_LABEL = 'Optional'
+const OPTIONAL_HINT = 'Consulted or supporting: this department may add input, no answer is required'
+const stateLabel = (s: State) => (s === 'optional' ? OPTIONAL_LABEL : t(STATE_LABEL[s]))
 
 /**
  * A department can carry more than one assessment row — multi-stage routing
@@ -62,8 +85,13 @@ const STATE_LABEL: Record<State, string> = {
  * earliest dormant one. An answer must never lose to a stage that has not
  * started — that is how a department submits and watches its verdict vanish.
  */
-export function pickAssessment(list: Assessment[]): Assessment | undefined {
+export function pickAssessment(list: Assessment[], stage?: number): Assessment | undefined {
   if (list.length <= 1) return list[0]
+  // The board is one stage (the assessment round): a later stage's row that
+  // activated must never pull the bucket away from this stage's answer.
+  const inStage = stage == null ? [] : list.filter((a) => a.stage_order === stage)
+  if (inStage.length > 0) list = inStage
+  if (list.length === 1) return list[0]
   const byStage = [...list].sort((a, b) => a.stage_order - b.stage_order)
   return byStage.find((a) => a.status === 'active')
     ?? [...byStage].reverse().find((a) => a.submitted_at || (a.verdict && a.verdict !== 'pending'))
@@ -71,18 +99,33 @@ export function pickAssessment(list: Assessment[]): Assessment | undefined {
     ?? byStage[0]
 }
 
-function stateOf(a: Assessment | undefined, onHold: boolean): State {
+function stateOf(
+  a: Assessment | undefined, onHold: boolean, declined = false, owed = false, assesses = true,
+): State {
   if (a?.status === 'waived') return 'waived'
   if (a?.submitted_at || (a?.verdict && a.verdict !== 'pending')) return 'submitted'
+  // "Not our responsibility" waits on the lead: the letter stays, the row is
+  // neither answered nor free of its duty until that is decided.
+  if (declined) return 'declined'
   // A pending row belongs to a stage that has not started — the department is
   // not on the hook yet, so no hold, no owner, no "waiting" urgency.
-  if (a?.status === 'pending') return 'queued'
+  // ... unless the round says it owes its answer now: a department the scoping
+  // meeting put on the hook (R/A) whose row has not been activated yet is
+  // owed work, not a later stage.
+  if (a?.status === 'pending' && !owed) return 'queued'
   if (onHold) return 'on_hold'
+  // Only R and A owe an answer. A consulted or supporting department (and one
+  // whose decline was approved, relettered to C) is never "waiting".
+  if (!assesses) return 'optional'
   if (a?.owner_id != null || a?.accepted_at) return 'in_work'
   return 'waiting'
 }
 
-function ObjectList({ objects }: { objects: AssessmentObject[] }) {
+function ObjectList({ objects, partName }: {
+  objects: AssessmentObject[]
+  /** Part number and name for "via part", instead of a bare id. */
+  partName: (id: number) => string
+}) {
   if (objects.length === 0) {
     return <p className="text-xs text-slate-500">{t('bucket.noObjects')}</p>
   }
@@ -100,12 +143,15 @@ function ObjectList({ objects }: { objects: AssessmentObject[] }) {
             {objects.filter((o) => o.type === type).map((o) => (
               <li key={`${o.type}-${o.id}`}
                 className="flex items-baseline gap-2 text-sm min-w-0">
-                <span aria-hidden className="flex-shrink-0">{OBJECT_ICON[o.type] ?? '•'}</span>
+                <span aria-hidden="true" className="flex-shrink-0 self-center text-slate-500">
+                  {OBJECT_ICON[o.type] ?? <FileText size={14} />}
+                </span>
                 <span className="font-mono text-slate-200 flex-shrink-0">{o.number}</span>
                 <span className="text-slate-400 truncate">{o.name}</span>
-                {o.via_part_id != null && (
-                  <span className="text-[11px] text-slate-600 flex-shrink-0">
-                    {t('bucket.via')} #{o.via_part_id}
+                {/* A part is not "via" itself. */}
+                {o.via_part_id != null && !(o.type === 'part' && o.via_part_id === o.id) && (
+                  <span className="text-[11px] text-slate-500 flex-shrink-0">
+                    {t('bucket.via')} {partName(o.via_part_id)}
                   </span>
                 )}
               </li>
@@ -119,7 +165,7 @@ function ObjectList({ objects }: { objects: AssessmentObject[] }) {
 
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
-  canAddDepartment = false, userId = null, isChangeLead = false,
+  canAddDepartment = false, userId = null, isChangeLead = false, declinedIds, round,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -135,6 +181,11 @@ export default function AssessmentBuckets({
   /** For the 4-eyes rule on a pending routing change (see canDecideDeviation). */
   userId?: number | null
   isChangeLead?: boolean
+  /** "Not our responsibility" declines awaiting a decision (stage-state). */
+  declinedIds?: number[]
+  /** The assessment round as "Blocked by" counts it (stage-state, else
+   *  derived): the progress line reads the same numbers. */
+  round?: StageAssessment | null
 }) {
   const changeId = change.id
   // `undefined` means the user has not touched a row yet, so their own bucket
@@ -171,6 +222,15 @@ export default function AssessmentBuckets({
 
   const deptName = (id: number) =>
     departments.find((d) => d.id === id)?.name ?? `#${id}`
+  // "via part" names the part, not its id: from the impacted items when the
+  // backend sends names, else from the part objects any department holds.
+  const partName = (id: number): string => {
+    const item = change.impacted_items?.find((i) => i.part_id === id)
+    if (item?.part_number) return [item.part_number, item.part_name].filter(Boolean).join(' ')
+    const obj = (objectData?.departments ?? []).flatMap((d) => d.objects)
+      .find((o) => o.type === 'part' && o.id === id)
+    return obj ? [obj.number, obj.name].filter(Boolean).join(' ') : `#${id}`
+  }
   const objectsOf = (id: number): AssessmentObject[] =>
     (objectData?.departments ?? []).find((d: DepartmentObjects) => d.department_id === id)
       ?.objects ?? []
@@ -180,6 +240,7 @@ export default function AssessmentBuckets({
   const allRouted = (routing?.stages ?? []).flatMap((s) =>
     s.departments.map((d) => ({
       department_id: d.department_id, rasic: d.rasic_letter, stage: s.stage_order,
+      pendingRemoval: !!d.pending_removal,
     })))
   // This board is the ASSESSMENT stage only — the first one. Later stages
   // (PM's summation, Sales' customer activities) also live as assessment rows
@@ -200,15 +261,20 @@ export default function AssessmentBuckets({
   // One bucket per department, whatever the routing history left behind.
   const rows = ids.map((id) => {
     const mine = change.assessments.filter((x) => x.department_id === id)
-    const a = pickAssessment(mine)
+    const a = pickAssessment(mine, Number.isFinite(assessStage) ? assessStage : undefined)
     const r = routed.find((x) => x.department_id === id)
     return {
       id,
       assessment: a,
       rasic: a?.rasic_letter ?? r?.rasic ?? null,
       stage: a?.stage_order ?? r?.stage ?? 0,
-      stale: Math.max(0, mine.length - 1),
+      // Rows of this department in the same stage beyond the bound one: left
+      // over from an earlier routing version. Later stages are not "stale".
+      stale: Math.max(0, mine.filter((x) => x.stage_order === (a?.stage_order ?? assessStage)).length - 1),
       onHold: change.blocked_department_ids?.includes(id) ?? false,
+      declined: (declinedIds ?? change.stage_state?.declined_pending_department_ids ?? []).includes(id),
+      // A pending deviation asks to take this row off; it is still owed until then.
+      pendingRemoval: r?.pendingRemoval ?? false,
     }
   }).sort((x, y) => x.stage - y.stage || deptName(x.id).localeCompare(deptName(y.id)))
 
@@ -223,7 +289,8 @@ export default function AssessmentBuckets({
     <RoutingDeviationPanel changeId={changeId} routing={routing}
       departments={departments} routedIds={ids}
       stageOrder={Number.isFinite(assessStage) ? assessStage : 1}
-      canAdd={canAddDepartment && editable} canDecide={!!canDecideDeviation} />
+      canAdd={canAddDepartment && editable} canDecide={!!canDecideDeviation}
+      leadId={change.lead_id ?? null} />
   )
 
   if (rows.length === 0) {
@@ -241,7 +308,17 @@ export default function AssessmentBuckets({
   // departments is their job. A viewer with neither gets the line alone.
   const visible = canSeeAll ? rows : rows.filter((r) => myDepartmentIds.includes(r.id))
   const summarised = canSeeAll ? [] : rows.filter((r) => !myDepartmentIds.includes(r.id))
-  const progress = assessmentProgress(summarised.map((r) => ({
+  // Every first-stage R/A department, the viewer's own included, counted the
+  // way "Blocked by" counts them, so the two never disagree.
+  const roundState = round ?? deriveAssessmentState(change.assessments, deptName)
+  // Owed now: the round the page hands in (stage-state) waits on this
+  // department, whatever its row's engine status says.
+  const owedIds = new Set(change.status !== 'in_assessment' ? []
+    : (round?.waiting_on ?? []).map((d) => d.department_id))
+  const progress = roundState ? {
+    done: roundState.submitted, total: roundState.total,
+    waiting: roundState.waiting_on.map((d) => d.department_id),
+  } : assessmentProgress(rows.map((r) => ({
     departmentId: r.id,
     rasic: r.rasic,
     submitted: !!r.assessment?.submitted_at
@@ -256,7 +333,10 @@ export default function AssessmentBuckets({
       {deviationPanel}
       {visible.map((row) => {
         const a = row.assessment
-        const state = stateOf(a, row.onHold)
+        const owed = owedIds.has(row.id) && (row.rasic === 'R' || row.rasic === 'A')
+        // A department the gate waits on is never "Optional", whatever its letter.
+        const assesses = owedIds.has(row.id) || row.rasic == null || row.rasic === 'R' || row.rasic === 'A'
+        const state = stateOf(a, row.onHold, row.declined, owed, assesses)
         const isMine = myDepartmentIds.includes(row.id)
         // Another department's answers are theirs; ordinary members see the
         // status board only. The overview belongs to PM/Sales/lead/admin.
@@ -264,7 +344,7 @@ export default function AssessmentBuckets({
         const expanded = mayOpen && (autoOpen ? isMine : openDept === row.id)
         const areas = impactedCount(a?.details)
         const risks = checklistRisks(row.id)
-        const canSubmit = isMine && editable && a?.status === 'active'
+        const canSubmit = isMine && editable && (a?.status === 'active' || (owed && a?.status === 'pending'))
         return (
           <section key={row.id} data-testid={`bucket-${row.id}`}
             className={`rounded-lg border ${
@@ -276,47 +356,53 @@ export default function AssessmentBuckets({
                 : t('bucket.othersHidden')}
               onClick={() => { if (mayOpen) setOpenDept(expanded ? null : row.id) }}
               className="w-full flex items-center gap-3 px-3 py-2 text-left disabled:cursor-default">
-              <span aria-hidden className="text-slate-500 text-xs w-3 flex-shrink-0">
-                {mayOpen ? (expanded ? '▾' : '▸') : ''}
+              <span aria-hidden="true" className="text-slate-500 w-3.5 flex-shrink-0">
+                {mayOpen ? (expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
               </span>
               {row.rasic && (
-                <span className="rounded border border-slate-600 px-1.5 py-0 text-[10px] leading-tight text-slate-300 flex-shrink-0">
+                <span title={t(`rasic.${row.rasic}`)}
+                  className="rounded border border-slate-600 px-1.5 py-0 text-[11px] leading-tight font-semibold text-slate-300 flex-shrink-0">
                   {row.rasic}
                 </span>
               )}
               <span className="text-slate-100 font-medium truncate">{deptName(row.id)}</span>
               <span data-testid={`bucket-state-${row.id}`}
-                className={`rounded px-1.5 py-0 text-[10px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
-                {t(STATE_LABEL[state])}
+                title={state === 'optional' ? OPTIONAL_HINT : undefined}
+                className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
+                {stateLabel(state)}
               </span>
+              {row.pendingRemoval && <PendingRemovalChip testId={`bucket-removal-${row.id}`} />}
               {a?.verdict && a.verdict !== 'pending' && (
                 <span data-testid={`bucket-verdict-${row.id}`}
-                  className={`text-sm flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
-                  title={a.verdict}>
-                  {VERDICT_ICON[a.verdict] ?? ''}
+                  className={`inline-flex flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
+                  title={assessmentVerdictLabel(a)}>
+                  <span aria-hidden="true" className="inline-flex">{VERDICT_ICON[a.verdict] ?? null}</span>
+                  <span className="sr-only">{assessmentVerdictLabel(a)}</span>
                 </span>
               )}
               {evidenceOf(a?.id).length > 0 && (
                 <span data-testid={`bucket-evidence-count-${row.id}`}
                   title={t('bucket.evidence')}
-                  className="text-[10px] text-slate-400 flex-shrink-0">
-                  📎 {evidenceOf(a?.id).length}
+                  className="inline-flex items-center gap-0.5 text-[11px] text-slate-400 tabular-nums flex-shrink-0">
+                  <Paperclip aria-hidden="true" size={12} />
+                  <span className="sr-only">{t('bucket.evidence')}:</span>
+                  {evidenceOf(a?.id).length}
                 </span>
               )}
               {row.stale > 0 && (
                 <span data-testid={`bucket-stale-${row.id}`}
                   title={t('bucket.staleRowsHint')}
-                  className="rounded bg-slate-700/70 text-slate-400 px-1.5 py-0 text-[10px] leading-tight flex-shrink-0">
-                  +{row.stale}
+                  className="rounded bg-slate-700/70 text-slate-400 px-1.5 py-0 text-[11px] leading-tight flex-shrink-0">
+                  {t('bucket.staleRows').replace('{n}', String(row.stale))}
                 </span>
               )}
               {(areas > 0 || risks > 0) && (
                 <span data-testid={`bucket-areas-${row.id}`}
-                  className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[10px] leading-tight flex-shrink-0">
-                  {risks > 0
-                    ? t('check.summary').replace('{n}', String(areas)).replace('{k}', String(risks))
-                    : areas === 1 ? t('check.impactedOne')
-                      : t('check.impactedCount').replace('{n}', String(areas))}
+                  className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[11px] leading-tight flex-shrink-0">
+                  {[
+                    ...(areas > 0 ? [`${plural(areas, 'area')} impacted`] : []),
+                    ...(risks > 0 ? [`${plural(risks, 'risk')} flagged`] : []),
+                  ].join(' · ')}
                 </span>
               )}
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
@@ -326,21 +412,25 @@ export default function AssessmentBuckets({
                   <span className="text-slate-400">{a.owner_name}</span>
                 )}
                 {a?.due_date && (
-                  <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
-                    {new Date(a.due_date).toLocaleDateString()}
-                    {a.overdue && ` ⚠ ${t('tasks.overdue')}`}
+                  <span className={`inline-flex items-center gap-1 tabular-nums ${
+                    a.overdue ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>
+                    {a.overdue && <TriangleAlert aria-hidden="true" size={12} />}
+                    {/* due_date is a timestamp (utcnow() + N days), not a calendar date. */}
+                    {formatDate(a.due_date)}
+                    {a.overdue && ` ${t('tasks.overdue')}`}
                   </span>
                 )}
               </span>
             </button>
 
             {expanded && (
+              <BucketErrorBoundary name={deptName(row.id)}>
               <div className="border-t border-slate-700 px-3 py-3 space-y-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
                     {t('bucket.objects')}
                   </p>
-                  <ObjectList objects={objectsOf(row.id)} />
+                  <ObjectList objects={objectsOf(row.id)} partName={partName} />
                 </div>
 
                 {/* This department's own holds, in the room where the work happens. */}
@@ -354,7 +444,7 @@ export default function AssessmentBuckets({
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       {t('bucket.answer')}
                     </p>
-                    <p className={VERDICT_TONE[a!.verdict] ?? 'text-slate-200'}>{a!.verdict}</p>
+                    <p className={VERDICT_TONE[a!.verdict] ?? 'text-slate-200'}>{assessmentVerdictLabel(a)}</p>
                     {a!.conditions && <p className="text-slate-300">{a!.conditions}</p>}
                     {a!.notes && <p className="text-slate-400 whitespace-pre-wrap">{a!.notes}</p>}
                   </div>
@@ -362,6 +452,7 @@ export default function AssessmentBuckets({
                   <>
                     <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
                       departmentName={deptName(row.id)} showEffort={false}
+                      serverDraft={a?.details ?? null}
                       changePptCount={changePptOf(a?.id).length
                         + (a?.has_change_ppt ? 1 : 0)}
                       assessmentId={a?.id} evidence={evidenceOf(a?.id)}
@@ -372,7 +463,7 @@ export default function AssessmentBuckets({
                         department, looking at the change, may say it is not.
                         Only while a blocking letter is theirs and no routing
                         change is already waiting on the lead. */}
-                    {(row.rasic === 'R' || row.rasic === 'A')
+                    {(row.rasic === 'R' || row.rasic === 'A') && !row.declined
                       && routing?.deviation_status !== 'pending_approval' && (
                       <div className="flex justify-end">
                         <button type="button" data-testid={`not-responsible-${row.id}`}
@@ -441,7 +532,7 @@ export default function AssessmentBuckets({
                         </ul>
                       )}
                       {isMine && editable ? drop : atts.length === 0 && (
-                        <p className="text-xs text-slate-600">{hint}</p>
+                        <p className="text-xs text-slate-500">{hint}</p>
                       )}
                     </div>
                   )
@@ -452,13 +543,20 @@ export default function AssessmentBuckets({
                           old evidence block and its tests. */}
                       {slot(`bucket-evidence-${row.id}`, t('bucket.changePpt'),
                         [...ofKind('change_ppt'), ...legacy], t('bucket.changePptHint'),
-                        <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
-                          kind="change_ppt" label={t('bucket.changePptSlot')}
-                          onUploaded={invalidate} />, required)}
+                        // While the form owes the deck, its one drop zone sits
+                        // next to Submit; this slot points there, not a second zone.
+                        required && canSubmit
+                          ? <p className="text-xs text-amber-200/80" data-testid={`bucket-ppt-at-submit-${row.id}`}>
+                              {t('bucket.changePptAtSubmit')}</p>
+                          : <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
+                              kind="change_ppt" label={t('bucket.changePptSlot')}
+                              extensions={DOCUMENT_EXTENSIONS.change_ppt}
+                              onUploaded={invalidate} />, required)}
                       {slot(`bucket-rfq-${row.id}`, t('attach.rfq'),
                         ofKind('rfq'), t('attach.rfqSlot'),
                         <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
                           kind="rfq" label={t('attach.rfqSlot')}
+                          extensions={DOCUMENT_EXTENSIONS.rfq}
                           onUploaded={invalidate} />)}
                       {slot(`bucket-mail-${row.id}`, t('mail.title'),
                         mails, t('mail.none'),
@@ -471,7 +569,7 @@ export default function AssessmentBuckets({
 
                 {/* What they ticked, for whoever may read the bucket. */}
                 {impactsOf(a?.details).filter((i) => i.impacted).length > 0 && (
-                  <ImpactAnswers departmentId={row.id} details={a?.details}
+                  <ImpactAnswers departmentId={row.id} details={a?.details} lang="en"
                     riskKeys={new Set((concerns as ChangeConcern[]).filter((c) =>
                       c.kind === 'risk' && c.is_open && c.department_id === row.id
                       && !!c.checklist_key).map((c) => c.checklist_key!))} />
@@ -489,6 +587,7 @@ export default function AssessmentBuckets({
                   ) : null
                 })()}
               </div>
+              </BucketErrorBoundary>
             )}
           </section>
         )
@@ -509,10 +608,11 @@ export default function AssessmentBuckets({
   )
 }
 
-/** A submitted department's Yes rows, named from its own checklist, with ⚑
- *  where a row still carries an open risk. */
-function ImpactAnswers({ departmentId, details, riskKeys }: {
+/** A submitted department's Yes rows, named from its own checklist, with a
+ *  flag where a row still carries an open risk. */
+function ImpactAnswers({ departmentId, details, riskKeys, lang = 'en' }: {
   departmentId: number
+  lang?: 'de' | 'en'
   details: Record<string, unknown> | null | undefined
   riskKeys: Set<string>
 }) {
@@ -520,19 +620,31 @@ function ImpactAnswers({ departmentId, details, riskKeys }: {
     queryKey: ['assessment-checklist', departmentId],
     queryFn: () => changesApi.assessmentChecklist(departmentId),
   })
-  const labelOf = (i: { key?: string; label?: string }) =>
-    i.label ?? defs.find((d) => d.key === i.key)?.label_en ?? i.key ?? ''
+  // Earlier checklist keys (no longer served) still read by name.
+  const labelOf = (i: { key?: string; label?: string }) => checklistItemLabel(i, defs, lang)
   return (
     <ul className="text-xs text-slate-400 space-y-0.5"
       data-testid={`bucket-impacts-${departmentId}`}>
       {impactsOf(details).filter((i) => i.impacted).map((i) => {
         const id = i.key ?? `free:${i.label ?? ''}`
         return (
-          <li key={`${i.key ?? i.activity_id ?? 'free'}-${i.label ?? ''}`}>
-            ✓ {labelOf(i)}{i.remark ? `: ${i.remark}` : ''}
+          <li key={`${i.key ?? i.activity_id ?? 'free'}-${i.label ?? ''}`}
+            className="flex items-baseline gap-1.5">
+            <Check aria-hidden="true" size={12} className="self-center flex-shrink-0 text-emerald-400" />
+            <span>
+            {labelOf(i)}
+            {i.choice ? ` (${choiceLabel(
+              defs.find((d) => d.key === i.key)?.choices?.find((c) =>
+                (typeof c === 'string' ? c : c.value) === i.choice) ?? i.choice, lang)})` : ''}
+            {i.remark ? `: ${i.remark}` : ''}
             {riskKeys.has(id) && (
-              <span data-testid={`bucket-impact-risk-${id}`} className="ml-1 text-amber-300">⚑</span>
+              <span data-testid={`bucket-impact-risk-${id}`} title="Open risk"
+                className="ml-1 inline-flex align-middle text-amber-300">
+                <Flag aria-hidden="true" size={12} />
+                <span className="sr-only">Open risk</span>
+              </span>
             )}
+            </span>
           </li>
         )
       })}

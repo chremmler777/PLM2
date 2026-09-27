@@ -43,9 +43,10 @@ async def test_engineer_with_owned_active_task_gets_assessment_action(
         dept = Department(name="QA-MA", flow_type="action", is_active=True)
         s.add(dept)
         await s.flush()
+        # Assessment actions exist only while the change is in assessment (§16).
         chg = ChangeRequest(change_number="C-MA-001", title="x", reason="y",
                             change_type="physical_part", project_id=seed["project_id"],
-                            raised_by=seed["admin_id"])
+                            raised_by=seed["admin_id"], status="in_assessment")
         s.add(chg)
         await s.flush()
         a = ChangeAssessment(change_id=chg.id, department_id=dept.id, stage_order=1,
@@ -165,7 +166,9 @@ async def test_user_with_nothing_gets_empty_list(client, eng_auth, seed):
 
     out = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=eng_auth)
     assert out.status_code == 200, out.text
-    assert out.json()["actions"] == []
+    # A starter who captured it owes the hand-over (the same row My Tasks
+    # shows) and nothing else.
+    assert [a["kind"] for a in out.json()["actions"]] in ([], ["kickoff"])
 
 
 async def test_admin_sees_gate_action_on_soft_blocked_change(
@@ -222,3 +225,76 @@ async def test_response_carries_memberships(client, eng_auth, seed, session_fact
     out = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=eng_auth)
     assert out.status_code == 200, out.text
     assert dept_id in out.json()["memberships"]
+
+
+_EQUIV = {"create_quote": "offer_build"}
+
+
+async def _assert_tasks_in_actions(client, auth, cid):
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+    rows = [t for t in tasks if t["change_id"] == cid]
+    actions = (await client.get(f"/api/v1/changes/{cid}/my-actions",
+                                headers=auth)).json()["actions"]
+    kinds = {a["kind"] for a in actions}
+    for t in rows:
+        assert _EQUIV.get(t["kind"], t["kind"]) in kinds or t["kind"] in kinds, (
+            t["kind"], sorted(kinds))
+    return rows, actions
+
+
+async def test_every_task_row_of_a_change_is_a_cockpit_action(
+        client, admin_auth, seed, session_factory):
+    """Item 6: one stage_tasks() builder: "Hand over to scoping" and "Wrap
+    up scoping" (and every other my-tasks row) appear in my_actions too."""
+    from app.models.change import ChangeRequest
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "both lists",
+        "change_type": "physical_part", "lead_id": seed["admin_id"]}, headers=admin_auth)
+    cid = res.json()["id"]
+    rows, actions = await _assert_tasks_in_actions(client, admin_auth, cid)
+    assert "kickoff" in {r["kind"] for r in rows}
+    kick = next(a for a in actions if a["kind"] == "kickoff")
+    assert kick["label"] == "Hand over to scoping" and kick["target_tab"] == "overview"
+    for status in ("scoping", "quoted", "approved", "rejected", "costing"):
+        async with session_factory() as s:
+            c = await s.get(ChangeRequest, cid)
+            c.status = status
+            c.customer_relevant = True
+            await s.commit()
+        rows, actions = await _assert_tasks_in_actions(client, admin_auth, cid)
+        if status == "scoping":
+            assert "scoping_wrapup" in {r["kind"] for r in rows}
+            wrap = next(a for a in actions if a["kind"] == "scoping_wrapup")
+            assert wrap["label"] == "Wrap up scoping" and wrap["target_tab"] == "scoping"
+    # no action is listed twice
+    keys = [(a["kind"], a.get("department_id"), a.get("assessment_id")) for a in actions]
+    assert len(keys) == len(set(keys))
+
+
+async def test_cockpit_bundle_matches_its_parts(client, admin_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "bundle",
+        "change_type": "physical_part", "lead_id": seed["admin_id"]}, headers=admin_auth)
+    cid = res.json()["id"]
+    await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
+                     json={"decision": "yes"}, headers=admin_auth)
+    bundle = await client.get(f"/api/v1/changes/{cid}/cockpit", headers=admin_auth)
+    assert bundle.status_code == 200, bundle.text
+    b = bundle.json()
+    for part, url in (("my_actions", "my-actions"), ("gates", "gates"),
+                      ("deviations", "deviations"), ("concerns", "concerns"),
+                      ("stage_state", "stage-state")):
+        alone = (await client.get(f"/api/v1/changes/{cid}/{url}", headers=admin_auth)).json()
+        assert b[part] == alone, part
+    assert (await client.get("/api/v1/changes/999999/cockpit",
+                             headers=admin_auth)).status_code == 404
+
+
+async def test_action_key_keeps_questions_and_the_meeting_request_apart():
+    """Review finding 9: obtain_info (a question to Sales, per concern) is
+    not the meeting's needs_info; two questions are two rows."""
+    from app.services.change_service import ChangeService as CS
+    k = CS._action_key
+    assert k({"kind": "obtain_info", "concern_id": 5}) != k({"kind": "needs_info"})
+    assert k({"kind": "obtain_info", "concern_id": 5}) != k({"kind": "obtain_info", "concern_id": 6})
+    assert k({"kind": "create_quote"}) == k({"kind": "offer_build"})

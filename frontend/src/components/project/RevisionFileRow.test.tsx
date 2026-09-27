@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RevisionFileRow } from './RevisionFileRow'
+import { formatDate } from '../../lib/format'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -22,7 +23,7 @@ describe('RevisionFileRow provenance', () => {
     wrap(<RevisionFileRow file={file({ uploaded_by: 5, uploaded_by_name: 'Eva Eng' })}
       isViewing={false} locked={false} />)
     expect(screen.getByTestId('uploaded-by').textContent)
-      .toContain(`Eva Eng · ${new Date('2026-07-01T00:00:00').toLocaleDateString()}`)
+      .toContain(`Eva Eng · ${formatDate('2026-07-01T00:00:00')}`)
   })
 
   it('shows the date alone for a file with no recorded uploader', () => {
@@ -48,5 +49,17 @@ describe('RevisionFileRow provenance', () => {
     wrap(<RevisionFileRow file={file({ file_type: 'drawing', mime_type: 'application/pdf', filename: 'd.pdf' })} isViewing={false} locked={false} onOpen={onOpen} />)
     fireEvent.click(screen.getByText('Open'))
     expect(onOpen).toHaveBeenCalled()
+  })
+
+  it('deleting a file refetches the revision workflow (3D evidence may be gone)', async () => {
+    clientMocks.delete.mockResolvedValue({})
+    const qc = new QueryClient()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    render(<QueryClientProvider client={qc}>
+      <RevisionFileRow file={file()} isViewing={false} locked={false} />
+    </QueryClientProvider>)
+    fireEvent.click(screen.getByText('Delete'))
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['workflow', 'revision', 9, 'instance'] }))
   })
 })

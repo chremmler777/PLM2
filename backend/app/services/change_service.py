@@ -37,11 +37,13 @@ def _org_scope(stmt, viewer: Optional[User]):
     Plant.organization_id. Changes with project_id NULL stay visible to
     everyone (explicit decision - no silent data loss). viewer=None means
     "internal/service caller" and returns the statement unchanged. Admins
-    (viewer.role == "admin") also see every organization - mirrors the
-    intent already documented on the dead get_org_filter helper in
-    app/dependencies/auth.py ("Admins see all organizations").
+    (viewer.effective_role == "admin") also see every organization - mirrors
+    the intent already documented on the dead get_org_filter helper in
+    app/dependencies/auth.py ("Admins see all organizations"). An admin acting
+    as a department is scoped like that department's members: acts-as drops
+    the admin bypass everywhere, org visibility included.
     """
-    if viewer is None or viewer.role == "admin":
+    if viewer is None or viewer.effective_role == "admin":
         return stmt
     org_projects = select(Project.id).join(Plant, Project.plant_id == Plant.id).where(
         Plant.organization_id == viewer.organization_id)
@@ -53,7 +55,11 @@ ALLOWED_TRANSITIONS = {
     # down outright without first being scoped, and forcing it through scoping
     # would demand an impacted set for a change that is dying anyway.
     "captured":          {"scoping", "rejected", "cancelled", "on_hold"},
-    "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
+    # 'approved' straight from scoping is the MOTHER-PLANT side track only
+    # (spec §14): no assessment, costing or quote. transition() refuses it
+    # for every other origin.
+    "scoping":           {"in_assessment", "approved", "rejected", "cancelled",
+                          "on_hold"},
     "in_assessment":     {"scoping", "costing", "rejected", "cancelled", "on_hold"},
     # 'approved' straight from costing is the INTERNAL branch (no quote at
     # all). Customer-relevant changes go costing -> quoting -> quoted.
@@ -68,7 +74,7 @@ ALLOWED_TRANSITIONS = {
     "in_implementation": {"in_validation", "on_hold", "cancelled"},
     "in_validation":     {"released", "in_implementation", "on_hold", "cancelled"},
     "released":          {"closed"},
-    "on_hold":           {"scoping", "in_assessment", "costing", "quoting",
+    "on_hold":           {"captured", "scoping", "in_assessment", "costing", "quoting",
                           "quoted", "approved",
                           "in_implementation", "in_validation", "cancelled"},
     # Rejection is reversible: a change rejected in error goes back to scoping
@@ -99,8 +105,44 @@ IMPACT_LOCKED_STATUSES = ("in_implementation", "in_validation", "released",
                           "closed", "rejected", "cancelled")
 
 
+# my-tasks kinds the cockpit (my_actions) lists under its own name.
+# obtain_info (a question to Sales) is NOT the meeting's needs_info (the
+# room could not decide): two different errands, both listed.
+STAGE_TASK_EQUIV = {"create_quote": "offer_build"}
+# Where a stage task is done (mirrors the task list's TASK_TAB).
+STAGE_TASK_TAB = {
+    "kickoff": "overview", "scoping_wrapup": "scoping", "impact_confirm": "impacted",
+    "customer_response": "overview", "obtain_info": "scoping",
+    "close_question": "scoping", "send_rejection": "scoping",
+    "costing_input": "commercial", "costing_update": "commercial",
+    "create_quote": "commercial", "bank_build": "implementation",
+    "publish_plan": "implementation", "progress_report": "implementation",
+    "escalate_risk": "implementation", "update_quote": "implementation",
+}
+
+# A finished change's D1 master data and gates are the record: closed,
+# cancelled and rejected changes refuse edits to them.
+D1_LOCKED_STATUSES = ("closed", "cancelled", "rejected")
+D1_FIELDS = ("issuer", "car_line", "is_series", "cm_internal", "cm_external",
+             "implementation_mode", "affected_plant_ids")
+
+
 class ChangeError(ValueError):
     """Raised for invalid change operations; mapped to HTTP 400 in the router."""
+
+
+class DeviationRequired(ChangeError):
+    """A soft guard refused the hop and no approved transition deviation
+    covers it: an approved deviation WOULD let it through. Still a 400, but
+    the router can offer (or create) the deviation request instead of a bare
+    refusal (final walk P2-3)."""
+
+    def __init__(self, message: str, *, to_status: str, guard_reason: str,
+                 pending_deviation_id: Optional[int] = None):
+        super().__init__(message)
+        self.to_status = to_status
+        self.guard_reason = guard_reason
+        self.pending_deviation_id = pending_deviation_id
 
 
 class ChangeService:
@@ -132,7 +174,24 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, action: str,
         description: str, performed_by: int, *, field_name: Optional[str] = None,
         old_value=None, new_value=None, notes: Optional[str] = None,
+        for_department_id: Optional[int] = None,
     ) -> ChangeChangelog:
+        """for_department_id: the department whose role the act belongs to.
+        When the project has another responsible for it (spec §18), the act
+        is a backup's stand-in (a member of that department acting for its
+        responsible): notes lead with "<backup> for <main>", and a dict
+        new_value carries stands_in_for {user_id, name, department_id} next
+        to its own keys. Any other new_value keeps its shape (readers parse
+        it as the value it is); the notes carry the stand-in then."""
+        if for_department_id is not None:
+            from app.services.project_team_service import ProjectTeamService
+            si = await ProjectTeamService.stand_in(
+                session, change.project_id, for_department_id, performed_by)
+            if si is not None:
+                line = await ProjectTeamService.stand_in_note(session, si, performed_by)
+                notes = f"{line}: {notes}" if notes else line
+                if isinstance(new_value, dict):
+                    new_value = {**new_value, "stands_in_for": si}
         prev = await ChangeService._last_entry_hash(session, change.id)
         old_s = json.dumps(old_value) if old_value is not None else None
         new_s = json.dumps(new_value) if new_value is not None else None
@@ -162,6 +221,9 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, gate_key: str,
         decision: str, user_id: int, *, remark: Optional[str] = None,
     ) -> ChangeGate:
+        if change.status in D1_LOCKED_STATUSES:
+            raise ChangeError(
+                f"The change is {change.status}: its gates can no longer be decided")
         if gate_key not in GATE_KEYS:
             raise ChangeError(f"Unknown gate '{gate_key}'")
         if decision not in GATE_DECISIONS:
@@ -221,6 +283,20 @@ class ChangeService:
         return dev
 
     @staticmethod
+    def transition_deviation_refusal(change: ChangeRequest, dev, user) -> Optional[str]:
+        """None when `user` may decide the pending deviation `dev`, else why
+        not. One rule for the decide endpoint, the deviation list's
+        can_decide and the cockpit's 'Decide deviation #n' action."""
+        if dev.proposed_by == user.id:
+            return "Cannot decide your own deviation (4-eyes rule)"
+        if user.effective_role not in ("admin", "engineer"):
+            return "Deviation decisions require an engineer or admin role"
+        if (user.effective_role != "admin" and user.id != change.lead_id
+                and dev.proposed_by != change.lead_id):
+            return "Only the change lead or an admin may decide this deviation"
+        return None
+
+    @staticmethod
     async def decide_transition_deviation(
         session: AsyncSession, change: ChangeRequest, deviation_id: int,
         decision: str, actor: User, *, note: Optional[str] = None,
@@ -232,13 +308,9 @@ class ChangeService:
             raise ChangeError("Deviation not found")
         if dev.status != "pending":
             raise ChangeError(f"Deviation is '{dev.status}', not pending")
-        if dev.proposed_by == actor.id:
-            raise ChangeError("Cannot decide your own deviation (4-eyes rule)")
-        if actor.effective_role not in ("admin", "engineer"):
-            raise ChangeError("Deviation decisions require an engineer or admin role")
-        if (actor.effective_role != "admin" and actor.id != change.lead_id
-                and dev.proposed_by != change.lead_id):
-            raise ChangeError("Only the change lead or an admin may decide this deviation")
+        refusal = ChangeService.transition_deviation_refusal(change, dev, actor)
+        if refusal:
+            raise ChangeError(refusal)
         dev.status = decision
         dev.decided_by = actor.id
         dev.decided_at = datetime.utcnow()
@@ -260,9 +332,41 @@ class ChangeService:
         priority: str = "medium", lead_id: Optional[int] = None,
         data_classification: str = "confidential",
         customer_relevant: Optional[bool] = None,
+        origin: Optional[str] = None,
+        mother_plant_name: Optional[str] = None,
+        mother_plant_ref: Optional[str] = None,
+        mother_plant_sop=None,
     ) -> ChangeRequest:
+        from app.services import mother_plants as mp
         if change_type not in CHANGE_TYPES:
             raise ChangeError(f"Invalid change_type '{change_type}'")
+        if origin is not None and origin not in mp.ORIGINS:
+            raise ChangeError(
+                f"Invalid origin '{origin}' - one of {', '.join(mp.ORIGINS)}")
+        if lead_id is None:
+            # Standard PM: the project's Project Manager responsible is the
+            # default lead of every new change on it, when nobody named an
+            # explicit one.
+            from app.services.project_team_service import ProjectTeamService
+            lead_id = await ProjectTeamService.responsible_user_id(
+                session, project_id, "Project Manager")
+        if origin == mp.MOTHER_PLANT:
+            # The mother plant sold it: never customer relevant here (no quote
+            # deadline, no offer).
+            if customer_relevant:
+                name = mp.plant_name(mother_plant_name or mp.DEFAULT_MOTHER_PLANT)
+                raise ChangeError(
+                    f"A change from {name} is not customer relevant "
+                    f"here: {name} handles the customer")
+            from app.services.mother_plant_service import MotherPlantService
+            mother_plant_name, mother_plant_ref, mother_plant_sop = \
+                MotherPlantService.check_capture(
+                    mother_plant_name, mother_plant_ref, mother_plant_sop)
+            customer_relevant = False
+        else:
+            # customer / internal mirror the flag (the flag stays the rule
+            # the flow reads; origin says where the change came from).
+            origin = "customer" if customer_relevant else "internal"
         number = await ChangeService.generate_change_number(session)
         change = ChangeRequest(
             change_number=number, project_id=project_id, title=title,
@@ -272,6 +376,11 @@ class ChangeService:
         )
         if customer_relevant is not None:
             change.customer_relevant = customer_relevant
+        change.origin = origin
+        if origin == mp.MOTHER_PLANT:
+            change.mother_plant_name = mother_plant_name
+            change.mother_plant_ref = mother_plant_ref
+            change.mother_plant_sop = mother_plant_sop
         session.add(change)
         await session.flush()
         # Only the release gate is seeded up front. Feasibility is answered by
@@ -487,6 +596,11 @@ class ChangeService:
                 "has_cad_file": False,
                 "no_geometry_change": False,
                 "ready": False,
+                # Who still owes a task in the revision's check workflow:
+                # the departments (with the task owner, when one accepted
+                # it) of the open actionable tasks of its current stage.
+                "waiting_on": [],
+                "waiting_on_detail": [],
             }
             if item.resulting_revision_id is not None:
                 rev = await session.get(PartRevision, item.resulting_revision_id)
@@ -513,6 +627,29 @@ class ChangeService:
                         select(func.count()).select_from(WfStage).where(
                             WfStage.template_id == inst.template_id))).scalar()
                     entry["ready"] = inst.status == "completed"
+                    if inst.status == "active":
+                        from app.models.workflow import WfInstanceTask
+                        open_tasks = (await session.execute(
+                            select(WfInstanceTask).where(
+                                WfInstanceTask.instance_id == inst.id,
+                                WfInstanceTask.stage_order == inst.current_stage_order,
+                                WfInstanceTask.is_actionable.is_(True),
+                                WfInstanceTask.status.in_(("pending", "active")))
+                            .order_by(WfInstanceTask.id))).scalars().all()
+                        dept_names = dict((await session.execute(
+                            select(Department.id, Department.name).where(
+                                Department.id.in_({t.department_id for t in open_tasks}
+                                                  or {0})))).all())
+                        for t in open_tasks:
+                            name = dept_names.get(t.department_id) or f"Department {t.department_id}"
+                            if name not in entry["waiting_on"]:
+                                entry["waiting_on"].append(name)
+                            entry["waiting_on_detail"].append({
+                                "task_id": t.id, "department_id": t.department_id,
+                                "department_name": name,
+                                "owner_id": t.owner_id,
+                                "owner_name": t.owner_name if t.owner_id else None,
+                            })
             items.append(entry)
         return {
             "ready_to_go": bool(items) and all(e["ready"] for e in items),
@@ -535,10 +672,29 @@ class ChangeService:
                 ChangeAttachment.change_id == change.id))).scalar() or 0
         if att_count == 0:
             missing.append("at least one attachment")
-        # Internal changes have no quote deadline in the two-phase model.
-        if change.customer_relevant and change.required_by_date is None:
-            missing.append("required-by date")
+        # Internal changes have no quote deadline in the two-phase model, and
+        # a mother-plant change has no quote at all.
+        from app.services import mother_plants as mp
+        if (change.customer_relevant and not mp.is_mother_plant(change)
+                and change.required_by_date is None):
+            missing.append("quote deadline")
+        # Somebody has to own what is handed over (spec §16 P1-5).
+        if change.lead_id is None:
+            missing.append("change lead")
         return missing
+
+    #: The D1 sheet's questions, as the D1 tab labels them.
+    GATE_LABELS = {"feasibility": "Feasible?", "budget": "Budget checked?",
+                   "release": "Technical release?"}
+    GATE_DECISION_LABELS = {"no": "No", "na": "n/a", None: "not decided"}
+
+    @staticmethod
+    def gate_message(gate_key: str, decision: Optional[str]) -> str:
+        label = ChangeService.GATE_LABELS.get(gate_key, gate_key)
+        if decision is None:
+            return f"D1 gate '{label}' is not decided yet"
+        answer = ChangeService.GATE_DECISION_LABELS.get(decision, decision)
+        return f"D1 gate '{label}' is not answered Yes (it is {answer})"
 
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
@@ -553,7 +709,7 @@ class ChangeService:
         if to_status == "scoping":
             missing = await ChangeService.kickoff_missing(session, change)
             if missing:
-                return ("Incomplete capture — missing " + ", ".join(missing)
+                return ("Incomplete capture: missing " + ", ".join(missing)
                         + " before scoping")
         if to_status == "in_assessment":
             count = len(change.impacted_items)
@@ -564,7 +720,7 @@ class ChangeService:
             # Internal changes have no quote deadline; only customer-relevant
             # changes must set the required-by date before assessment.
             if change.customer_relevant and change.required_by_date is None:
-                return "No deadline set — define the required-by date in scoping"
+                return "No quote deadline set: define it in scoping"
             # A change that already has routing has fanned out once — the proceed
             # meeting was consumed then. Resuming from on_hold back into
             # in_assessment must not re-demand a fresh meeting (build_routing is
@@ -589,11 +745,16 @@ class ChangeService:
         # work nobody has agreed to do.
         if to_status in ("costing", "quoting"):
             from app.services.change_routing_service import ChangeRoutingService
-            if not await ChangeRoutingService.blocking_complete(session, change):
+            waiting = await ChangeRoutingService.blocking_waiting(session, change)
+            if waiting is None:
                 return "Not all responsible/accountable assessments are submitted"
+            if waiting:
+                return ("Not all responsible/accountable assessments are "
+                        f"submitted: waiting on {', '.join(waiting)}")
             submitted = [a for a in change.assessments if a.verdict != "pending"]
             if any(a.verdict == "not_feasible" for a in submitted):
-                return "An assessment is 'not_feasible' — explicit decision required"
+                return ("An assessment is 'not feasible': reject, go back to "
+                        "scoping, or override with an approved deviation")
             routing = change.routing
             if routing is not None and routing.deviation_status == "pending_approval":
                 return "Routing deviation is pending approval"
@@ -621,6 +782,22 @@ class ChangeService:
                 if missing:
                     return ("no check-workflow template mapped for item "
                             f"category: {', '.join(missing)}")
+            # The detailed plan is what the customer is told and what every
+            # team works to. Implementation starting on a plan nobody
+            # confirmed is how "we never agreed to that date" happens. Guarded
+            # on the FIRST start of implementation: out of 'approved', or out
+            # of 'on_hold' when the hold was taken before implementation ever
+            # began (otherwise approved -> on_hold -> in_implementation would
+            # walk around the guard). Resuming a hold taken during
+            # implementation, and looping back from validation, re-enter a
+            # plan that was already live and stay exempt.
+            if change.timing_validated_at is None and (
+                    change.status == "approved"
+                    or (change.status == "on_hold"
+                        and await ChangeService._approved_not_yet_implemented(
+                            session, change))):
+                return ("Timing not validated - every responsible team must "
+                        "confirm the detailed plan")
         if to_status == "released":
             # Stage 9 first: "the Tool Engineer's weight check failed" is a
             # more useful refusal than "2 of 5 revisions have not completed
@@ -631,17 +808,66 @@ class ChangeService:
             blocker = await ValidationService.release_blocker(session, change)
             if blocker is not None:
                 return blocker
-            progress = await ChangeService.implementation_progress(session, change)
-            if not progress["ready_to_go"]:
-                pending = sum(1 for e in progress["items"] if not e["ready"])
-                return (f"not ready to go: {pending} of {len(progress['items'])} "
-                        "impacted revisions have not completed their check workflow")
+            # Validation issues (spec §12): open ones hold the release; a
+            # transferred issue does not (the follow-up change carries it).
+            from app.services.validation_issue_service import ValidationIssueService
+            blocker = await ValidationIssueService.release_blocker(session, change)
+            if blocker is not None:
+                return blocker
+            from app.services.release_service import ReleaseService
+            not_ready = ReleaseService.not_ready_message(
+                await ChangeService.implementation_progress(session, change))
+            if not_ready:
+                return not_ready
+            # Stage 10: the paperwork around the part (release checklist),
+            # the lessons-learned step and the open plan deviations. After
+            # the validation blocker, so the more concrete refusal wins while
+            # validation is still open.
+            blocker = await ReleaseService.guard_reason(session, change)
+            if blocker is not None:
+                return blocker
         # Gate wiring (additive): a gate constrains its target transition only when a
         # row exists. Changes with no gate rows behave exactly as before.
         for gate in change.gates:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to_status and gate.decision != "yes":
-                return f"Gate '{gate.gate_key}' is not approved ('{gate.decision}')"
+                return ChangeService.gate_message(gate.gate_key, gate.decision)
         return None
+
+    @staticmethod
+    async def _status_before_hold(session: AsyncSession,
+                                  change: ChangeRequest) -> Optional[str]:
+        """The status the change had before its latest hop to 'on_hold', from
+        the status changelog; None when no such hop was recorded (legacy)."""
+        row = (await session.execute(
+            select(ChangeChangelog.old_value).where(
+                ChangeChangelog.change_id == change.id,
+                ChangeChangelog.field_name == "status",
+                ChangeChangelog.new_value == json.dumps("on_hold"))
+            .order_by(ChangeChangelog.performed_at.desc(),
+                      ChangeChangelog.id.desc()).limit(1))).first()
+        if row is None or row[0] is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except (TypeError, ValueError):
+            return row[0]
+
+    @staticmethod
+    async def _approved_not_yet_implemented(session: AsyncSession,
+                                            change: ChangeRequest) -> bool:
+        """The change was commercially approved (customer acceptance or the
+        internal approval, or a recorded hop to 'approved') and has never
+        been in implementation. Read from the status changelog."""
+        statuses = {v for (v,) in (await session.execute(
+            select(ChangeChangelog.new_value).where(
+                ChangeChangelog.change_id == change.id,
+                ChangeChangelog.field_name == "status"))).all()}
+        if json.dumps("in_implementation") in statuses:
+            return False
+        return (json.dumps("approved") in statuses
+                or change.accepted_offer_id is not None
+                or change.internal_approved_at is not None
+                or change.customer_response == "accepted")
 
     @staticmethod
     async def _cancel_engine_work(session: AsyncSession, change: ChangeRequest,
@@ -675,6 +901,57 @@ class ChangeService:
                 new_value={"instance_ids": [i.id for i in instances]})
 
     @staticmethod
+    async def close_engine_work(session: AsyncSession, change: ChangeRequest,
+                                user_id: int, *, why: str) -> list[int]:
+        """After release (or close): no workflow of this change stays open.
+
+        The revisions' check workflows are through once the change released
+        them, even when a deviation let the release go ahead of them: left
+        active, their tasks stayed on dashboards and My Tasks for work that
+        no longer gates anything (final walk P2-4). Each still-active
+        instance (the revisions' ECN flows and the change's own
+        assessment/costing flow) is closed: open tasks waived with `why` as
+        their note; a revision flow is canceled (its checks were not all
+        done: the record says so), the change's own flow completed, unless
+        the change was rejected or cancelled: then its own flow never
+        finished either and is canceled too. Returns the closed instance ids."""
+        from app.models.workflow import WfInstance, WfInstanceTask
+        instances = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.status == "active",
+                (WfInstance.change_id == change.id)
+                | WfInstance.part_revision_id.in_(
+                    select(PartRevision.id).where(
+                        PartRevision.originating_change_id == change.id)),
+            ))).scalars().all()
+        now = datetime.utcnow()
+        for inst in instances:
+            open_tasks = (await session.execute(
+                select(WfInstanceTask).where(
+                    WfInstanceTask.instance_id == inst.id,
+                    WfInstanceTask.status.in_(("pending", "active", "noted"))
+                ))).scalars().all()
+            for t in open_tasks:
+                t.status = "waived"
+                t.notes = (f"{t.notes}\n{why}" if t.notes else why)
+            if inst.change_id is not None and change.status not in ("rejected", "cancelled"):
+                inst.status = "completed"
+                inst.completed_at = now
+            else:
+                inst.status = "canceled"
+                inst.canceled_at = now
+                inst.canceled_by = user_id
+                inst.cancel_reason = why
+        await session.flush()
+        if instances:
+            await ChangeService.append_changelog(
+                session, change, "engine_work_closed",
+                f"{len(instances)} workflow instance(s) closed: {why}; open "
+                "tasks waived", user_id,
+                new_value={"instance_ids": [i.id for i in instances]})
+        return [i.id for i in instances]
+
+    @staticmethod
     async def transition(
         session: AsyncSession, change: ChangeRequest, to_status: str,
         user_id: int, *, cancellation_reason: Optional[str] = None,
@@ -687,9 +964,41 @@ class ChangeService:
         allowed = ALLOWED_TRANSITIONS.get(change.status, set())
         if to_status not in allowed:
             raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
+        if to_status == "costing":
+            # Entering costing wakes the later routing stages: the engine
+            # advances and the routing repair runs. Take the instance lock
+            # before anything is written, the one lock order every routing
+            # write path keeps.
+            from app.services.change_routing_service import ChangeRoutingService
+            await ChangeRoutingService.lock_instance(session, change.id)
+
+        # Mother-plant side track (spec §14): no assessment, costing or
+        # quote, ever; scoping -> approved is its own hop, hard-gated on the
+        # impact lock and the team being informed (no deviation bypasses it).
+        from app.services import mother_plants as mp
+        mother_plant = mp.is_mother_plant(change)
+        if mother_plant and to_status in mp.MOTHER_PLANT_SKIPPED:
+            raise ChangeError(
+                f"A change from {mp.plant_name(change)} has no assessment, "
+                "costing or quote: it goes from scoping to approved")
+        # Engineering review (spec §17): the review answers release it; a full
+        # ECR is reached by escalating, never by a status hop.
+        from app.services.engineering_review_service import review_refusal
+        refusal = review_refusal(change, to_status)
+        if refusal is not None:
+            raise ChangeError(refusal)
+        if change.status == "scoping" and to_status == "approved":
+            if not mother_plant:
+                raise ChangeError(
+                    f"Only a change from {mp.FALLBACK_NAME} goes from scoping "
+                    "straight to approved")
+            from app.services.mother_plant_service import MotherPlantService
+            blocker = await MotherPlantService.approval_blocker(session, change)
+            if blocker is not None:
+                raise ChangeError(blocker)
 
         # HARD gates: the approval decision cannot be forced.
-        if to_status == "approved":
+        if to_status == "approved" and not mother_plant:
             if change.customer_relevant:
                 if change.customer_response != "accepted":
                     raise ChangeError("Customer has not accepted the offer")
@@ -705,16 +1014,37 @@ class ChangeService:
         if to_status in ("quoting", "quoted") and not change.customer_relevant:
             raise ChangeError(
                 "Internal changes skip the quote — record internal cost approval instead")
+        # HARD: a hold is resumed into the stage it was taken from.
+        # Implementation starts once, out of 'approved', after the timing is
+        # validated; resuming a hold taken earlier must not jump there.
+        # With the pre-hold status on record, that status (or cancelled) is
+        # the only way out of the hold.
+        if change.status == "on_hold" and to_status != "cancelled":
+            before = await ChangeService._status_before_hold(session, change)
+            if before is not None and before != "on_hold" and to_status != before:
+                raise ChangeError(
+                    f"Resume to the stage the change was in before the hold: "
+                    f"'{before}' (or cancel it)")
 
         # HARD precondition: recall (in_assessment -> scoping) is a correction for
         # a premature submit, not a silent undo of real work. Allowed only while no
         # assessment has been submitted or carries a non-pending verdict.
+        # Spec §16: after a "not feasible" the team may take the change back
+        # to scoping to reshape it. That throws submitted work away, so it
+        # needs a reason, and the answers are kept on the record.
+        supersede_reason = None
         if change.status == "in_assessment" and to_status == "scoping":
             started = [a for a in change.assessments
                        if a.verdict != "pending" or a.effective_status == "submitted"]
             if started:
-                raise ChangeError(
-                    "Cannot recall: assessment work has already started")
+                if not any(a.verdict == "not_feasible" for a in change.assessments):
+                    raise ChangeError(
+                        "Cannot recall: assessment work has already started")
+                supersede_reason = (reason or "").strip()
+                if not supersede_reason:
+                    raise ChangeError(
+                        "A reason is required to take the change back to "
+                        "scoping after a 'not feasible' verdict")
 
         # HARD precondition: validation sending the change BACK is the stage's
         # other outcome, and it is expensive — the timeline has to be replanned
@@ -772,8 +1102,15 @@ class ChangeService:
                 (d for d in change.transition_deviations
                  if d.to_status == to_status and d.status == "approved"), None)
             if deviation is None:
-                raise ChangeError(
-                    f"{reason}. An approved deviation is required to proceed.")
+                pending = next(
+                    (d for d in change.transition_deviations
+                     if d.to_status == to_status and d.status == "pending"), None)
+                raise DeviationRequired(
+                    f"{reason}. An approved deviation is required to proceed."
+                    + (f" Deviation #{pending.id} is waiting for its decision."
+                       if pending is not None else ""),
+                    to_status=to_status, guard_reason=reason,
+                    pending_deviation_id=pending.id if pending else None)
 
         # HARD gate: assessment cannot start on an unlocked impacted set. Not in
         # _guard, so no approved transition deviation can bypass it — defining and
@@ -792,16 +1129,16 @@ class ChangeService:
                     ChangeAttachment.kind == "rejection_letter"))).scalar() or 0
             if letters == 0:
                 raise ChangeError(
-                    "No rejection letter on file — attach the explanation sent "
+                    "No rejection letter on file: attach the explanation sent "
                     "to the customer before closing")
             if change.rejection_sent_at is None:
                 raise ChangeError(
-                    "Rejection has not been confirmed as sent — record the send "
+                    "Rejection has not been confirmed as sent: record the send "
                     "(POST /rejection-sent) before closing")
 
         if to_status == "in_assessment" and change.impact_confirmed_at is None:
             raise ChangeError(
-                "Impacted set is not locked — confirm impacted items before "
+                "Impacted set is not locked: confirm impacted items before "
                 "starting assessment")
 
         if deviation is not None:
@@ -810,6 +1147,10 @@ class ChangeService:
         # Side effects on entry
         if to_status == "scoping" and change.status == "in_assessment":
             from app.services.change_routing_service import ChangeRoutingService
+            if supersede_reason:
+                from app.services.early_stage_service import EarlyStageService
+                await EarlyStageService.supersede_assessments(
+                    session, change, user_id, supersede_reason)
             await ChangeRoutingService.teardown_routing(session, change, user_id)
         if to_status == "in_assessment":
             await ChangeService.ensure_assessments(session, change, user_id)
@@ -817,14 +1158,31 @@ class ChangeService:
             await ChangeService.spawn_ecn_revisions(session, change, user_id)
         if to_status == "released":
             await ChangeService.release(session, change, user_id)
+            await ChangeService.close_engine_work(
+                session, change, user_id,
+                why=(f"Released by {change.change_number}"
+                     + (f" on deviation #{deviation.id}" if deviation else "")))
         if to_status == "closed":
             change.closed_at = datetime.utcnow()
+            await ChangeService.close_engine_work(
+                session, change, user_id,
+                why=f"{change.change_number} closed")
         if to_status == "quoted" and change.quoted_at is None:
             change.quoted_at = datetime.utcnow()
 
         old = change.status
         change.status = to_status
         await session.flush()
+        if to_status == "costing":
+            # Spec §16 P1-2: later routing stages wake only now (instance
+            # locked at the top of this transition).
+            from app.services.early_stage_service import EarlyStageService
+            await EarlyStageService.wake_later_stages(session, change)
+        if mother_plant and old == "scoping" and to_status == "approved":
+            # After the status flips: the detailed plan is only writable in
+            # approved.
+            from app.services.mother_plant_service import MotherPlantService
+            await MotherPlantService.on_approved(session, change, user_id)
         action = "deviated_transition" if deviation else "status_changed"
         desc = f"{old} -> {to_status}" + (
             f" (deviation #{deviation.id}: {deviation.reason})" if deviation else "")
@@ -841,6 +1199,11 @@ class ChangeService:
             await ChangeService.append_changelog(
                 session, change, "rejected", f"Rejected: {rejection_reason}",
                 user_id, notes=rejection_reason)
+        if to_status in ("rejected", "cancelled"):
+            # Spec §17a: an index this change was to release waits for a new
+            # triage; Development is told.
+            from app.services.revision_intake_service import RevisionIntakeService
+            await RevisionIntakeService.on_change_dead(session, change, user_id)
         if validation_escalation:
             await ChangeService.append_changelog(
                 session, change, "validation_escalated",
@@ -878,10 +1241,14 @@ class ChangeService:
                 if part is not None and part.active_revision_id:
                     parent = await session.get(PartRevision, part.active_revision_id)
                 if parent is None or parent.parent_revision_id is not None:
+                    # A customer major still pending triage is not the base
+                    # of anything yet (spec §17a decision 4).
+                    from app.models.revision_intake import waiting_revision_ids
                     parent = (await session.execute(
                         select(PartRevision)
                         .where((PartRevision.part_id == item.part_id)
-                               & (PartRevision.parent_revision_id.is_(None)))
+                               & (PartRevision.parent_revision_id.is_(None))
+                               & PartRevision.id.not_in(waiting_revision_ids()))
                         .order_by(PartRevision.created_at.desc()).limit(1))).scalar_one_or_none()
                 if parent is None:
                     raise ValueError(f"Part {item.part_id} has no revision to change")
@@ -945,6 +1312,19 @@ class ChangeService:
 
     @staticmethod
     async def release(session: AsyncSession, change: ChangeRequest, user_id: int):
+        # A pending customer index is released only by the change its intake
+        # is linked to: one superseded, rejected or re-triaged elsewhere after
+        # this change died (and was reopened) is refused, before anything moves.
+        from app.services.revision_intake_service import RevisionIntakeService
+        for item in change.impacted_items:
+            if item.resulting_revision_id is None:
+                continue
+            rev = await session.get(PartRevision, item.resulting_revision_id)
+            if rev is None:
+                continue
+            block = await RevisionIntakeService.activation_blocker(session, rev, change)
+            if block:
+                raise ChangeError(block)
         change.released_at = datetime.utcnow()
         change.released_by = user_id
         for item in change.impacted_items:
@@ -954,13 +1334,13 @@ class ChangeService:
             part = await session.get(Part, item.part_id)
             if rev is None or part is None:
                 continue
-            prior = part.active_revision_id
-            if prior is not None and prior != rev.id:
-                rev.supersedes_revision_id = prior
-            rev.status = "approved"
-            rev.approved_at = datetime.utcnow()
-            rev.approved_by = user_id
-            part.active_revision_id = rev.id
+            # Shared with the revision intake routes (spec §17a decision 5):
+            # pointer, approved, supersedes, and a pending customer major's
+            # intake side effects.
+            from app.services.revision_intake_service import RevisionIntakeService
+            await RevisionIntakeService.activate(
+                session, rev, user_id,
+                note=f"Released by {change.change_number}", change=change)
             # stamp engineering level
             item.eng_level_after = rev.revision_name
             await session.flush()
@@ -978,6 +1358,22 @@ class ChangeService:
             select(Part).where(Part.project_id == change.project_id)
         )).scalars().all()
         impacted = {i.part_id: i for i in change.impacted_items}
+        # The resulting revision's name, and whether it is a new customer
+        # index still pending (spec §17a: "E2 · 005 pending", not "ECN #id").
+        res_ids = [i.resulting_revision_id for i in change.impacted_items
+                   if i.resulting_revision_id is not None]
+        res_revs = {r.id: r for r in (await session.execute(
+            select(PartRevision).where(PartRevision.id.in_(res_ids)))).scalars().all()} \
+            if res_ids else {}
+        from app.models.revision_intake import RevisionIntake, waiting_revision_ids
+        res_waiting = set((await session.execute(waiting_revision_ids().where(
+            RevisionIntake.revision_id.in_(res_ids)))).scalars().all()) if res_ids else set()
+
+        def res_label(item) -> Optional[str]:
+            rev = res_revs.get(item.resulting_revision_id) if item else None
+            if rev is None:
+                return None
+            return rev.revision_name + (f" · {rev.customer_index}" if rev.customer_index else "")
         ids = {p.id for p in parts}
         children_map: dict = defaultdict(list)
         roots = []
@@ -1003,6 +1399,9 @@ class ChangeService:
                 "is_impacted": item is not None,
                 "is_lead": bool(item and item.is_lead),
                 "resulting_revision_id": item.resulting_revision_id if item else None,
+                "resulting_revision_label": res_label(item),
+                "resulting_revision_pending": bool(
+                    item and item.resulting_revision_id in res_waiting),
                 "children": [node(c, seen) for c in kids],
             }
 
@@ -1072,6 +1471,10 @@ class ChangeService:
         if unknown:
             raise ChangeError(f"Parts not in this project: {unknown}")
         current = {i.part_id: i for i in change.impacted_items}
+        # The audit names the part by its number, not its row id.
+        numbers = dict((await session.execute(
+            select(Part.id, Part.part_number).where(
+                Part.id.in_(wanted | set(current))))).all())
         changed = False
         # The lead names the change, so it is pinned once the change is out of
         # the door — but while it is still being captured or scoped, picking
@@ -1090,15 +1493,15 @@ class ChangeService:
             await session.delete(item)
             await ChangeService.append_changelog(
                 session, change, "impacted_removed",
-                f"Impacted part {pid} removed via impact tree", user_id,
-                old_value={"part_id": pid})
+                f"Impacted part {numbers.get(pid, pid)} removed via impact tree",
+                user_id, old_value={"part_id": pid})
             changed = True
         for pid in sorted(wanted - set(current)):
             session.add(ChangeImpactedItem(change_id=change.id, part_id=pid,
                                            created_by=user_id))
             await ChangeService.append_changelog(
                 session, change, "impacted_added",
-                f"Impacted part {pid} added via impact tree", user_id,
+                f"Impacted part {numbers.get(pid, pid)} added via impact tree", user_id,
                 new_value={"part_id": pid})
             changed = True
         await session.flush()
@@ -1178,10 +1581,12 @@ class ChangeService:
         item = await session.get(ChangeImpactedItem, item_id)
         if not item or item.change_id != change.id:
             raise ChangeError("Impacted item not found")
+        part = await session.get(Part, item.part_id)
         await session.delete(item)
         await ChangeService.append_changelog(
             session, change, "impacted_item_removed",
-            f"Removed impacted item {item.part_id}", user_id,
+            f"Removed impacted item {part.part_number if part else item.part_id}",
+            user_id,
             old_value={"part_id": item.part_id},
         )
         await ChangeService._reset_impact_confirmation(session, change, user_id)
@@ -1202,6 +1607,10 @@ class ChangeService:
             session, change, "impact_confirmed",
             "Impacted-item set confirmed by Development", user_id,
         )
+        # Engineering review (spec §17): the lock opens the review; the
+        # departments serving the locked parts are asked.
+        from app.services.engineering_review_service import EngineeringReviewService
+        await EngineeringReviewService.on_impact_locked(session, change, user_id)
         return change
 
     @staticmethod
@@ -1468,6 +1877,10 @@ class ChangeService:
                 "The bank build is planned after acceptance, while the change "
                 "is approved")
         if mode == "planned_scrap":
+            if scrap_quote_price is None and change.scrap_quote_price is not None:
+                # Omitted (the caller's view had the price redacted, or the
+                # user did not touch it): the stored quote stands.
+                scrap_quote_price = float(change.scrap_quote_price)
             if scrap_quote_price is None or scrap_quote_price <= 0:
                 raise ChangeError(
                     "Planned scrap requires an additional scrap quote price: "
@@ -1516,6 +1929,11 @@ class ChangeService:
         plan in front of the customer, and the previous stamp is in the
         changelog where the history belongs.
         """
+        from app.services import mother_plants as mp
+        if mp.is_mother_plant(change):
+            raise ChangeError(
+                f"A change from {mp.plant_name(change)} has no customer publish: "
+                f"inform {mp.plant_name(change)} instead")
         if change.status != "approved" and user.effective_role != "admin":
             raise ChangeError(
                 "The bank build plan is published while the change is approved")
@@ -1537,6 +1955,428 @@ class ChangeService:
                        "mode": change.bank_build_mode},
         )
         return change
+
+    @staticmethod
+    def _action_key(a: dict) -> tuple:
+        """Identity of a cockpit action / task row across the two builders:
+        the kind (under the cockpit's name for it) plus what tells two rows
+        of one kind apart."""
+        kind = STAGE_TASK_EQUIV.get(a["kind"], a["kind"])
+        return (kind, a.get("assessment_id"), a.get("issue_id"),
+                a.get("escalation_id"), a.get("action_id"), a.get("concern_id"),
+                a.get("department_id") if kind in (
+                    "costing_input", "costing_update", "plan_feedback",
+                    "info_ack", "release_check", "progress_report") else None)
+
+    @staticmethod
+    async def stage_tasks(db: AsyncSession, user: User, open_changes: list,
+                          dep_ids: set) -> list[dict]:
+        """The stage-responsibility rows of the task list: every open errand
+        a change's stage hands this user (kickoff "Hand over to scoping",
+        "Wrap up scoping", the quote, the customer response, bank build,
+        costing input, progress reports, questions ...). ONE builder shared
+        by GET /changes/my-tasks (all open changes) and my_actions (one
+        change), so the list and the cockpit can never disagree about what
+        is owed. Rows carry change identity + deadline context; the caller
+        dedupes and labels. Batched lookups: a handful of queries for the
+        whole list, not per change."""
+        from app.services.meeting_service import MeetingService
+        tasks: list[dict] = []
+        dep_ids = set(dep_ids or ())
+
+        async def _base(c) -> dict:
+            """Shared shape: identity plus the ACTIVE deadline's context, computed
+            by the service so the badge here and the badge on the change agree."""
+            kind = c.active_deadline
+            due = (c.release_due_date if kind == "release"
+                   else c.required_by_date if kind == "quote" else None)
+            state = await ChangeService.deadline_state(db, c)
+            return {
+                "change_id": c.id, "change_number": c.change_number, "title": c.title,
+                "project_id": c.project_id, "project_number": c.project_number,
+                "project_name": c.project_name,
+                "due_date": due, "overdue": state == "overdue",
+            }
+
+        can_capture = await ChangeService.user_can_start_change(db, user)
+        is_pm = await MeetingService.user_is_pm(db, user)
+        # Settling a concern has no admin shortcut, so the task that asks for it
+        # follows membership too (MeetingService.user_is_pm_member).
+        is_pm_member = await MeetingService.user_is_pm_member(db, user)
+        can_confirm = await ChangeService.user_can_confirm_impact(db, user)
+        in_sales = await ChangeService._user_in_department(db, user, "Sales")
+        in_scheduling = await ChangeService._user_in_department(
+            db, user, ChangeService.SCHEDULING_DEPARTMENT)
+
+        # Batch the per-stage lookups once for the whole list, instead of a few
+        # queries per change: departments by name, draft / latest sent offers,
+        # detailed-plan presence and feedback, release-check rows.
+        from app.models.change_offer import ChangeOffer
+        from app.models.change_plan import ChangePlanFeedback, ChangePlanTask
+        from app.models.change_validation import ChangeReleaseCheck
+        from app.services import release_checklist
+        from app.services.offer_service import EXPIRY_WARNING_DAYS, OfferService
+        dept_by_name = {n: i for i, n in (await db.execute(
+            select(Department.id, Department.name))).all()}
+
+        def _ids(*statuses):
+            return [c.id for c in open_changes if c.status in statuses]
+
+        # Changes with an open validation issue (spec §12), once for the list.
+        from app.models.change_validation_issue import (
+            ISSUE_DONE_STATUSES, ValidationIssue,
+        )
+        from app.services.validation_issue_service import ValidationIssueService
+        vi_ids = _ids("approved", "in_implementation", "in_validation")
+        issue_change_ids = set((await db.execute(
+            select(ValidationIssue.change_id).where(
+                ValidationIssue.change_id.in_(vi_ids),
+                ValidationIssue.status.not_in(ISSUE_DONE_STATUSES)).distinct()
+        )).scalars().all()) if vi_ids else set()
+
+        drafts: dict = {}
+        latest_sent: dict = {}
+        offer_ids = _ids("quoting", "quoted") if in_sales else []
+        if offer_ids:
+            for o in (await db.execute(
+                    select(ChangeOffer).where(
+                        ChangeOffer.change_id.in_(offer_ids),
+                        ChangeOffer.status.in_(("draft", "sent")))
+                    .order_by(ChangeOffer.version))).scalars().all():
+                # ordered by version: the last one per change wins
+                (drafts if o.status == "draft" else latest_sent)[o.change_id] = o
+        planned: set = set()
+        feedback: dict = {}
+        approved_ids = [c.id for c in open_changes
+                        if c.status == "approved" and c.timing_validated_at is None]
+        if dep_ids and approved_ids:
+            planned = {cid for (cid,) in (await db.execute(
+                select(ChangePlanTask.change_id).where(
+                    ChangePlanTask.change_id.in_(approved_ids),
+                    ChangePlanTask.plan == "detailed").distinct())).all()}
+            if planned:
+                for r in (await db.execute(
+                        select(ChangePlanFeedback).where(
+                            ChangePlanFeedback.change_id.in_(planned))
+                        .order_by(ChangePlanFeedback.id))).scalars().all():
+                    feedback.setdefault(r.change_id, {})[r.department_id] = r
+        # Mother-plant side track (spec §14): open "Read and understood"
+        # receipts of the caller's departments, and which changes have informed
+        # anybody yet (the PM's "Send information" errand).
+        from app.models.change_info import ChangeInfoReceipt
+        from app.services import mother_plants as mp
+        from app.services.mother_plant_service import MotherPlantService
+        mp_ids = [c.id for c in open_changes if mp.is_mother_plant(c)]
+        info_open = await MotherPlantService.open_receipts_for(db, mp_ids, dep_ids)
+        informed_ids = set((await db.execute(
+            select(ChangeInfoReceipt.change_id).where(
+                ChangeInfoReceipt.change_id.in_(mp_ids)).distinct()
+        )).scalars().all()) if mp_ids else set()
+        informed_depts: dict = {}
+        if mp_ids and approved_ids:
+            for cid, did in (await db.execute(
+                    select(ChangeInfoReceipt.change_id, ChangeInfoReceipt.department_id)
+                    .where(ChangeInfoReceipt.change_id.in_(
+                        [i for i in mp_ids if i in approved_ids])))).all():
+                informed_depts.setdefault(cid, set()).add(did)
+        release_rows: dict = {}
+        validation_ids = _ids("in_validation") if dep_ids else []
+        if validation_ids:
+            for r in (await db.execute(select(ChangeReleaseCheck).where(
+                    ChangeReleaseCheck.change_id.in_(validation_ids)))).scalars().all():
+                release_rows.setdefault(r.change_id, {})[r.check_key] = r
+
+        for c in open_changes:
+            if c.status == "captured" and (
+                    can_capture or (is_pm and mp.is_mother_plant(c))):
+                # a mother-plant change is captured by Project Management
+                tasks.append({**await _base(c), "kind": "kickoff",
+                              "missing": await ChangeService.kickoff_missing(db, c),
+                              # project team: a mother-plant kickoff is PM's role
+                              "role_department_id": (dept_by_name.get("Project Manager")
+                                                     if mp.is_mother_plant(c) else None)})
+            elif c.status == "scoping":
+                if is_pm:
+                    tasks.append({
+                        **await _base(c), "kind": "scoping_wrapup",
+                        "impact_confirmed": c.impact_confirmed_at is not None,
+                        "has_decision": any(m.decision in ("proceed", "reject")
+                                            for m in c.meetings),
+                    })
+                if can_confirm and c.impact_confirmed_at is None:
+                    tasks.append({**await _base(c), "kind": "impact_confirm"})
+
+            elif (c.status == "rejected" and in_sales and c.customer_relevant
+                    and c.rejection_sent_at is None):
+                tasks.append({
+                    **await _base(c), "kind": "send_rejection",
+                    # Tells the UI which half of the job is left: write the
+                    # explanation, or confirm it went out.
+                    "has_letter": await ChangeService.has_rejection_letter(db, c),
+                })
+            # The quoting stage IS Sales' open task: costing is wrapped up and the
+            # offer has to be written from it. has_price says which half is left —
+            # put a number on it, then send it (-> quoted).
+            elif c.status == "quoting" and in_sales and c.customer_relevant:
+                draft = drafts.get(c.id)
+                tasks.append({
+                    **await _base(c), "kind": "create_quote",
+                    "has_price": c.quoted_price is not None,
+                    # The offer document is the quote now: whether a draft exists
+                    # says which half of "build and send the offer" is left.
+                    "has_offer_draft": draft is not None,
+                    "offer_id": draft.id if draft is not None else None,
+                    "target_tab": "offer",
+                    "hint": "Build and send the offer",
+                })
+            elif (c.status == "quoted" and in_sales and c.customer_relevant
+                    and c.customer_response in (None, "pending")):
+                tasks.append({**await _base(c), "kind": "customer_response"})
+
+            # The scheduling block. Acceptance leaves two errands in sequence:
+            # Scheduling decides how the change reaches the line, then Sales tells
+            # the customer what was planned. Neither is a transition gate — the
+            # row IS the pressure.
+            elif c.status == "approved":
+                if in_scheduling and c.bank_build_mode is None:
+                    tasks.append({
+                        **await _base(c), "kind": "bank_build",
+                        "hint": "Decide running change vs planned scrap and "
+                                "outline the plan",
+                    })
+                if (in_sales and c.customer_relevant
+                        and c.bank_build_mode is not None
+                        and c.plan_published_at is None):
+                    tasks.append({
+                        **await _base(c), "kind": "publish_plan",
+                        "mode": c.bank_build_mode,
+                        "scrap_quote_price": c.scrap_quote_price,
+                    })
+
+            # The offer is valid for 30 days from receipt: a week before it runs
+            # out (or once it has) the customer has to be chased or a new
+            # version sent.
+            if c.status == "quoted" and in_sales and c.customer_relevant:
+                offer = latest_sent.get(c.id)
+                if (offer is not None and offer.valid_until is not None
+                        and OfferService.days_left(offer) <= EXPIRY_WARNING_DAYS):
+                    tasks.append({
+                        **await _base(c), "kind": "offer_expiring",
+                        "offer_id": offer.id, "version": offer.version,
+                        "valid_until": offer.valid_until,
+                        "days_left": OfferService.days_left(offer),
+                        "target_tab": "offer",
+                    })
+
+            # Mother plant: "Read and understood" for each informed department
+            # of the caller; "Send information" for the PM at scoping until
+            # somebody is informed; "Inform the mother plant" once the timing is
+            # validated (the customer publish does not exist here).
+            if mp.is_mother_plant(c):
+                for r in info_open.get(c.id, []):
+                    tasks.append({
+                        **await _base(c), "kind": "info_ack",
+                        "department_id": r.department_id, "receipt_id": r.id,
+                        "target_tab": "mother",
+                        "hint": (f"Read the change from {mp.plant_name(c)} and "
+                                 "confirm: read and understood"),
+                    })
+                if (c.status == "scoping" and c.id not in informed_ids
+                        and await MotherPlantService.may_send(db, c, user)):
+                    tasks.append({
+                        **await _base(c), "kind": "info_send",
+                        "target_tab": "mother",
+                        "hint": "Send information to the team",
+                    })
+                if (c.status in ("approved", "in_implementation")
+                        and c.timing_validated_at is not None
+                        and c.plan_published_at is None
+                        and await MotherPlantService.may_send(db, c, user)):
+                    tasks.append({
+                        **await _base(c), "kind": "inform_mother_plant",
+                        "target_tab": "timing",
+                        "hint": (f"Inform {mp.plant_name(c)} of the validated "
+                                 "timing"),
+                    })
+
+            # The detailed plan waits on every responsible team's confirmation;
+            # each unconfirmed one is that department's errand.
+            # Same rule as ChangePlanService.feedback_state, on preloaded rows.
+            if (c.status == "approved" and dep_ids
+                    and c.timing_validated_at is None and c.id in planned):
+                required = {a.department_id for a in c.assessments
+                            if a.rasic_letter in BLOCKING_LETTERS}
+                if mp.is_mother_plant(c):
+                    # no assessments: the informed departments and Scheduling
+                    required |= informed_depts.get(c.id, set())
+                    required |= {dept_by_name[n] for n in ("Scheduling",)
+                                 if n in dept_by_name}
+                else:
+                    required |= {dept_by_name[n] for n in ("Scheduling", "Sales")
+                                 if n in dept_by_name}
+                latest = feedback.get(c.id, {})
+                revision = int(c.plan_revision or 0)
+                for did in sorted(required & dep_ids):
+                    r = latest.get(did)
+                    stale = bool(r is not None and r.plan_revision < revision)
+                    if r is not None and r.verdict == "confirmed" and not stale:
+                        continue
+                    tasks.append({
+                        **await _base(c), "kind": "plan_feedback",
+                        "department_id": did,
+                        "stale": stale, "target_tab": "timing",
+                        "hint": "Confirm the detailed plan or raise a concern",
+                    })
+
+            # Stage 10: open release-checklist items, per owner department.
+            if c.status == "in_validation" and dep_ids:
+                rows = release_rows.get(c.id, {})
+                by_name = dept_by_name
+                open_by_dept: dict = {}
+                for key in release_checklist.CHECK_KEYS:
+                    r = rows.get(key)
+                    if r is not None and r.status in ("done", "na"):
+                        continue
+                    did = (r.department_id if r is not None
+                           else by_name.get(release_checklist.owner_for(key)))
+                    if did in dep_ids:
+                        open_by_dept.setdefault(did, []).append(key)
+                for did, keys in sorted(open_by_dept.items()):
+                    tasks.append({
+                        **await _base(c), "kind": "release_check",
+                        "department_id": did, "check_keys": keys,
+                        "open_count": len(keys), "target_tab": "release",
+                    })
+
+            # Costing is a queue too: a department that called the change feasible
+            # owes a number, and "no lines at all" is silence rather than a zero.
+            if c.status == "costing" and dep_ids:
+                pending = await ChangeService.costing_pending_department_ids(db, c)
+                for dept_id in sorted(set(pending) & dep_ids):
+                    tasks.append({
+                        **await _base(c), "kind": "costing_input",
+                        "department_id": dept_id,
+                    })
+
+            # Stage 8 is a cadence, not a milestone: while the change is being
+            # implemented, every implementing department owes a progress report
+            # at least twice a week, and a flag raised in one of those reports is
+            # Sales' errand until they take it somewhere.
+            if c.status == "in_implementation":
+                from app.services.implementation_service import ImplementationService
+                impl = await ImplementationService.state(db, c, user)
+                for row in impl["departments"]:
+                    if row["owes_report"] and row["department_id"] in dep_ids:
+                        tasks.append({
+                            **await _base(c), "kind": "progress_report",
+                            "department_id": row["department_id"],
+                            "last_report_at": row["last_report_at"],
+                            "hint": "Report progress at least twice a week",
+                        })
+                # "No unresolved escalation for it yet" needs no separate check:
+                # at_risk_open is already false once ANY escalation (open or
+                # resolved) answers the flag, so a row here means nobody has taken
+                # this risk anywhere.
+                flagged = [row["department_id"] for row in impl["departments"]
+                           if row["at_risk_open"]]
+                if in_sales and flagged:
+                    tasks.append({
+                        **await _base(c), "kind": "escalate_risk",
+                        "department_ids": flagged,
+                        "hint": "Take it to the customer, or escalate internally",
+                    })
+
+            # Validation issues (spec §12): contain / root cause / fix actions for
+            # the owner department, the route for PM / lead, the customer
+            # decision and "quote the fix" for Sales, and every unacknowledged
+            # escalation the caller was notified of. Same rights as the cockpit
+            # (ValidationIssueService.my_actions).
+            if c.id in issue_change_ids:
+                for item in await ValidationIssueService.my_actions(db, c, user):
+                    tasks.append({
+                        **await _base(c), **item, "hint": item["label"],
+                    })
+
+            # Stage 9's one commercial errand: the sampled part came off the scale
+            # at a different weight than the quote was built on. Not tied to a
+            # status — the delta stays owed whether the change is still validating
+            # or went back round to implementation — and cleared by the explicit
+            # acknowledgement (POST /validation/weight-ack), never by guessing at a
+            # quoted_price edit that may have happened for another reason.
+            if in_sales:
+                from app.services.validation_service import ValidationService
+                if ValidationService.weight_delta_open(c):
+                    delta = ValidationService.weight_delta(c)
+                    tasks.append({
+                        **await _base(c), "kind": "update_quote",
+                        "delta_g": delta,
+                        "estimated_part_weight_g": c.estimated_part_weight_g,
+                        "validated_part_weight_g": c.validated_part_weight_g,
+                        "hint": f"Validated part weight is {delta:+g} g against the "
+                                "estimate — update the quote or record the decision",
+                    })
+
+            # Independent of the stage chain: a question can be waiting on Sales at
+            # any live status, and it is one errand per change however many people
+            # asked. Cleared per question by answering it.
+            if in_sales:
+                questions = ChangeService.unanswered_questions(c)
+                if questions:
+                    newest = questions[-1]
+                    tasks.append({
+                        **await _base(c), "kind": "obtain_info",
+                        "reason": newest.note,
+                        "question_count": len(questions),
+                        "concern_id": newest.id,
+                        "department_id": newest.department_id,
+                    })
+
+            # The other half of the same loop: an answer is waiting on the side
+            # that asked. Addressed to the person who asked and to Project
+            # Management, the standing arbiter — mirroring withdraw_concern's
+            # rule. A department only owns the flag (any member may close it)
+            # while the change is in assessment; a scoping question's attribution
+            # is a label and hands its department nothing. An answered question
+            # nobody is told to review stalls exactly like an unanswered one.
+            answered = ChangeService.answered_questions(c)
+            if answered:
+                # Under acts-as the personal requester errand steps aside with the
+                # real memberships — the task list shows the department's view.
+                am_requester = (getattr(user, "acts_as_department_id", None)
+                                is None)
+                mine = [q for q in answered
+                        if is_pm_member
+                        or (am_requester and q.raised_by == user.id)
+                        or (c.status == "in_assessment"
+                            and q.department_id is not None
+                            and q.department_id in dep_ids)]
+                if mine:
+                    newest = mine[-1]
+                    tasks.append({
+                        **await _base(c), "kind": "close_question",
+                        "reason": newest.answer_note,
+                        "question_count": len(mine),
+                        "concern_id": newest.id,
+                        "department_id": newest.department_id,
+                        "question_note": newest.note,
+                    })
+
+        # Post-quote scope change (spec §16): costing reopens for the affected
+        # departments only, until a newer offer or an approved deviation covers it.
+        if dep_ids:
+            from app.services.early_stage_service import EarlyStageService as _ES
+            for c in open_changes:
+                mine_depts = set(c.scope_change_department_ids or []) & dep_ids
+                if not (c.scope_changed_after_quote and mine_depts):
+                    continue
+                state = await _ES.scope_change_state(db, c)
+                if state and not state["covered"]:
+                    for d in sorted(mine_depts):
+                        tasks.append({**await _base(c), "kind": "costing_update",
+                                      "department_id": d,
+                                      "reason": c.scope_change_reason})
+
+        return tasks
 
     @staticmethod
     async def my_actions(
@@ -1562,7 +2402,38 @@ class ChangeService:
                 select(Department.id, Department.name)
                 .where(Department.id.in_(assess_dept_ids)))).all()
             dept_names = {i: n for i, n in rows}
+        # Spec §16 P1-2: assessment work exists only while the change is in
+        # assessment, and only on the first routing stage (plus departments
+        # added by deviation). PM/Sales rows of later stages are no
+        # assessment, whatever their engine task says.
+        from app.services.early_stage_service import EarlyStageService
+        from app.services.change_routing_service import ChangeRoutingService
+        first_stage = EarlyStageService.first_stage(change)
+        # R/A rows owed outside the assessment phase stay owed whatever the
+        # change status: a deviation add (step-less task) of a later stage,
+        # or a row added after its stage passed (the routing repair never
+        # waives them), also once the instance has completed. The
+        # department still answers; the lead is flagged below for the late
+        # ones. Judged on the row's task, not on the instance being live.
+        live = change.status not in ("released", "closed", "rejected", "cancelled")
+        task_insts = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.change_id == change.id,
+                WfInstance.status.in_(("active", "completed"))))).scalars().all()
+        owed = (ChangeRoutingService.owed_stepless_rows(change, task_insts)
+                if live else [])
+        late = ChangeRoutingService.late_rows(change, task_insts) if live else []
+        # A row no task was ever made for that carries its own "active"
+        # (a routing add with no instance to hang a task off) is owed too.
+        owed_ids = {a.id for a in owed} | {
+            a.id for a in change.assessments
+            if live and a.task is None and a.status == "active"
+            and a.rasic_letter in BLOCKING_LETTERS}
         for a in change.assessments:
+            if a.id not in owed_ids and (
+                    change.status != "in_assessment"
+                    or not EarlyStageService.is_assessment_row(a, first_stage)):
+                continue
             if a.effective_status != "active":
                 continue
             # Only R/A letters owe a submit — a Consulted/Support row is
@@ -1581,7 +2452,34 @@ class ChangeService:
                 "label": f"Submit assessment for {dept_names.get(a.department_id, a.department_id)}",
                 "target_tab": "assessments",
                 "assessment_id": a.id,
+                "department_id": a.department_id,
+                "_owned": a.effective_owner_id == user.id,
             })
+
+        # kind "late_assessment": the lead's flag for a department added to
+        # a stage after it had passed that still owes its answer. Chase it,
+        # or take the department off by routing deviation.
+        from app.services.change_people import holds_lead
+        if late and (holds_lead(change, user)
+                     or (user.effective_role == "admin"
+                         and getattr(user, "acts_as_department_id", None) is None)):
+            late_names = dict((await session.execute(
+                select(Department.id, Department.name).where(
+                    Department.id.in_({a.department_id for a in late})))).all())
+            for a in late:
+                actions.append({
+                    "kind": "late_assessment",
+                    "label": (f"Chase {late_names.get(a.department_id, a.department_id)}: "
+                              f"assessment owed on stage {a.stage_order}, added "
+                              "after the stage had passed"),
+                    "target_tab": "assessments",
+                    "assessment_id": a.id,
+                    "department_id": a.department_id,
+                    # The other way out: take the department off the routing
+                    # (op remove, the lead / PM / admin), offered beside Chase.
+                    "stage_order": a.stage_order,
+                    "department_name": late_names.get(a.department_id),
+                })
 
         # kind "wf_task": active ECN (part-revision-scoped) tasks spawned by
         # this change, in the user's departments or owned by them. Mirrors
@@ -1604,8 +2502,14 @@ class ChangeService:
             actions.append({
                 "kind": "wf_task",
                 "label": f"Complete {step_name or 'workflow'} task",
-                "target_tab": "implementation",
+                # The ECN check flows run through implementation (Timing tab)
+                # and finish during validation (Release tab).
+                "target_tab": ("release"
+                               if change.status in ("in_validation", "released")
+                               else "timing"),
                 "task_id": t.id,
+                "role_department_id": t.department_id,
+                "_owned": t.owner_id == user.id,
             })
 
         # kind "deviation_decision": pending transition deviations this user
@@ -1614,18 +2518,16 @@ class ChangeService:
         for dev in change.transition_deviations:
             if dev.status != "pending":
                 continue
-            if dev.proposed_by == user.id:
-                continue
-            if user.effective_role not in ("admin", "engineer"):
-                continue
-            if (user.effective_role != "admin" and user.id != change.lead_id
-                    and dev.proposed_by != change.lead_id):
+            if ChangeService.transition_deviation_refusal(change, dev, user):
                 continue
             actions.append({
                 "kind": "deviation_decision",
                 "label": f"Decide deviation #{dev.id}",
                 "target_tab": "overview",
                 "deviation_id": dev.id,
+                # what the decide panel shows without another request
+                "to_status": dev.to_status,
+                "reason": dev.reason,
             })
 
         # kind "routing_deviation_decision": somebody added a department to
@@ -1633,21 +2535,28 @@ class ChangeService:
         # is this user's. Mirrors ChangeRoutingService.user_can_decide_deviation.
         if change.status == "in_assessment":
             from app.models.change import ChangeRouting
-            from app.services.change_routing_service import ChangeRoutingService
+            from app.services.change_routing_service import (
+                ChangeRoutingService, _pending_proposers)
+            from app.services.change_people import is_acting
             routing = (await session.execute(
                 select(ChangeRouting).where(ChangeRouting.change_id == change.id)
             )).scalar_one_or_none()
             if (routing is not None
-                    and ChangeRoutingService.user_can_decide_deviation(change, routing, user.id)):
+                    and routing.deviation_status == "pending_approval"
+                    and ChangeRoutingService.user_can_decide_deviation(
+                        change, routing, user.id,
+                        acting=is_acting(user),
+                        proposers=await _pending_proposers(session, routing))):
                 actions.append({
                     "kind": "routing_deviation_decision",
                     "label": "Decide added department",
                     "target_tab": "assessments",
                 })
 
-        # kind "impact_confirm": defining and locking the impacted set is the
+        # kind "impact_confirm": picking and locking the impacted set is the
         # first step INSIDE scoping — capture is Sales writing the request
-        # down, the impacted set is the project team's call. So it is offered
+        # down, the impacted set is Development's call (the lead and PM may
+        # pick too; Development confirms). So it is offered
         # in 'scoping' only, and offered even when the set is still empty
         # (that is the work). Locking unblocks assessment (the -> in_assessment
         # hard gate in transition()). Mirrors
@@ -1657,8 +2566,9 @@ class ChangeService:
                 and await ChangeService.user_can_confirm_impact(session, user)):
             actions.append({
                 "kind": "impact_confirm",
-                "label": ("Confirm impacted items" if change.impacted_items
-                          else "Define and confirm impacted items"),
+                # Development picks the set itself (it no longer waits on
+                # PM to pick first) and then confirms it.
+                "label": "Pick and confirm impacted items",
                 "target_tab": "impacted",
             })
 
@@ -1672,10 +2582,32 @@ class ChangeService:
                 and await ChangeService._user_in_department(session, user, "Sales")):
             actions.append({
                 "kind": "needs_info",
-                "label": "Sales: obtain missing information — "
+                "label": "Sales: obtain missing information: "
                          + (latest.decision_reason or "see meeting note"),
                 "target_tab": "scoping",
             })
+
+        actions += await ChangeService._costing_to_close_actions(
+            session, change, user, dept_ids)
+
+        # Mother-plant side track (spec §14): send the information, read and
+        # understood, inform the mother plant of the validated timing.
+        from app.services.mother_plant_service import MotherPlantService
+        actions += await MotherPlantService.my_actions(
+            session, change, user, dept_ids)
+
+        # Engineering review (spec §17): answer for your department, escalate.
+        from app.services.engineering_review_service import EngineeringReviewService
+        actions += await EngineeringReviewService.my_actions(
+            session, change, user, dept_ids)
+
+        # Validation issues (spec §12): contain / root cause / fix actions
+        # for the owner department, the route for PM/lead, the customer
+        # decision and "quote the fix" for Sales, and every unacknowledged
+        # escalation the user was notified of. Rights mirror the issue
+        # endpoints (validation_issues.py).
+        from app.services.validation_issue_service import ValidationIssueService
+        actions += await ValidationIssueService.my_actions(session, change, user)
 
         # kind "gate": a gate that guards the currently-reachable transition,
         # not yet decided 'yes', decidable by this user. Mirrors put_gate's
@@ -1692,7 +2624,141 @@ class ChangeService:
                         "gate_key": gate.gate_key,
                     })
 
+        # The stage-responsibility rows of the task list, from the SAME
+        # builder GET /changes/my-tasks uses (stage_tasks): "Hand over to
+        # scoping", "Wrap up scoping", the customer response, bank build,
+        # costing input ... Every task-list row of this change is an action
+        # here; a kind the cockpit already lists under its own name
+        # (create_quote = offer_build) is not listed twice.
+        if change.status not in ("released", "closed", "cancelled"):
+            from app.services import cm_labels
+            have = {ChangeService._action_key(a) for a in actions}
+            for r in await ChangeService.stage_tasks(session, user, [change], dept_ids):
+                key = ChangeService._action_key(r)
+                if key in have:
+                    continue
+                have.add(key)
+                kind = r["kind"]
+                item = {k: v for k, v in r.items()
+                        if k not in ("change_id", "change_number", "title",
+                                     "project_id", "project_number",
+                                     "project_name", "mine", "hint", "overdue",
+                                     "due_date")}
+                item["label"] = (r.get("label")
+                                 or (cm_labels.TASK_KIND[kind][0]
+                                     if kind in cm_labels.TASK_KIND
+                                     else cm_labels.label("task_kind", kind)))
+                if r.get("hint") and r.get("hint") != item["label"]:
+                    item["hint"] = r["hint"]
+                item["target_tab"] = (r.get("target_tab")
+                                      or STAGE_TASK_TAB.get(kind, "overview"))
+                item["_owned"] = bool(r.get("mine"))
+                actions.append(item)
+
+        # Project team (spec §18): each item carries the viewer's role on it.
+        # "main" items are theirs; "backup" items (the project has another
+        # responsible for the owing department) show in a muted "As backup"
+        # group. Lead-held and personal items (gates, deviations, escalations
+        # the user was notified of, a task they took) are always main.
+        from app.services.project_team_service import TeamRoles
+        from app.services.change_people import holds_lead
+        team = TeamRoles(session, user.id)
+        lead = holds_lead(change, user)
+        for a in actions:
+            owned = bool(a.pop("_owned", False)) or lead
+            await team.annotate(a, change.project_id, owned=owned)
+            a.pop("role_department_id", None)
         return actions
+
+    @staticmethod
+    async def _costing_to_close_actions(
+        session: AsyncSession, change: ChangeRequest, user: User,
+        dept_ids: set,
+    ) -> list[dict]:
+        """Spec §8 kinds: the offer, the detailed plan, deviations and the
+        release step. Each mirrors the rights of the endpoint that does the
+        work (plan_offer.py)."""
+        from app.services.change_plan_service import ChangePlanService
+        from app.services.offer_service import OfferService
+        from app.services.release_service import ReleaseService
+        from app.services import release_checklist
+        out: list[dict] = []
+        in_sales = await ChangeService._user_in_department(session, user, "Sales")
+
+        if change.status == "quoting" and in_sales:
+            out.append({"kind": "offer_build",
+                        "label": "Build and send the offer",
+                        "target_tab": "offer"})
+        if change.status == "quoted" and in_sales:
+            offer = await OfferService.expiring_offer(session, change)
+            if offer is not None:
+                left = OfferService.days_left(offer)
+                out.append({
+                    "kind": "offer_expiring",
+                    "label": (f"Offer v{offer.version} expired"
+                              if left < 0 else
+                              f"Offer v{offer.version} expires in {left} day(s)"),
+                    "target_tab": "offer", "offer_id": offer.id,
+                    "days_left": left,
+                })
+
+        if change.status == "approved" and change.timing_validated_at is None:
+            if await ChangePlanService.tasks(session, change, "detailed"):
+                state = await ChangePlanService.feedback_state(session, change)
+                for row in state["required"]:
+                    if row["department_id"] not in dept_ids:
+                        continue
+                    if row["verdict"] == "confirmed" and not row["stale"]:
+                        continue
+                    out.append({
+                        "kind": "plan_feedback",
+                        "label": f"Confirm the detailed plan for "
+                                 f"{row['department_name']}",
+                        "target_tab": "timing",
+                        "department_id": row["department_id"],
+                    })
+                if (state["all_confirmed"]
+                        and await ChangePlanService.may_validate_timing(
+                            session, change, user)):
+                    out.append({"kind": "timing_validate",
+                                "label": "Every team confirmed: validate the timing",
+                                "target_tab": "timing"})
+
+        if change.status in ("approved", "in_implementation", "in_validation"):
+            n = await ChangePlanService.open_deviation_count(session, change)
+            if n and await ChangePlanService.may_decide_deviation(session, change, user):
+                out.append({"kind": "plan_deviation",
+                            "label": f"Decide {n} move(s) with plan "
+                                     "deviations: lock or escalate to the "
+                                     "customer",
+                            "target_tab": "timing", "count": n})
+
+        if change.status == "in_validation":
+            answered = {r.check_key: r for r in await ReleaseService.rows(session, change)}
+            names = {i: n for i, n in (await session.execute(
+                select(Department.id, Department.name))).all()}
+            by_name = {n: i for i, n in names.items()}
+            open_by_dept: dict[int, int] = defaultdict(int)
+            for key in release_checklist.CHECK_KEYS:
+                row = answered.get(key)
+                if row is not None and row.status in ("done", "na"):
+                    continue
+                did = (row.department_id if row is not None
+                       else by_name.get(release_checklist.owner_for(key)))
+                if did is not None and did in dept_ids:
+                    open_by_dept[did] += 1
+            for did, n in sorted(open_by_dept.items()):
+                out.append({"kind": "release_check",
+                            "label": f"Answer {n} release check(s) for "
+                                     f"{names.get(did, did)}",
+                            "target_tab": "release", "department_id": did,
+                            "count": n})
+            if (change.lessons_done_at is None
+                    and await ReleaseService.is_pm_or_lead(session, change, user)):
+                out.append({"kind": "lessons_step",
+                            "label": "Record lessons learned and complete the step",
+                            "target_tab": "release"})
+        return out
 
     @staticmethod
     async def has_rejection_letter(
@@ -1786,7 +2852,7 @@ class ChangeService:
             raise ChangeError("Rejection was already confirmed as sent")
         if not await ChangeService.has_rejection_letter(session, change):
             raise ChangeError(
-                "No rejection letter on file — attach the explanation sent to "
+                "No rejection letter on file: attach the explanation sent to "
                 "the customer first")
         change.rejection_sent_at = datetime.utcnow()
         change.rejection_sent_by = user_id
@@ -1935,6 +3001,11 @@ class ChangeService:
         checklist existed land here and keep their task, which is the safe
         side of the line.
         """
+        # "Not impacted" is a complete answer (Packaging's questionnaire):
+        # costing does not wait on it (spec §16).
+        if assessment.details_dict.get("impacted") is False:
+            return bool(assessment.cost_impact or assessment.lifecycle_cost
+                        or assessment.lead_time_impact_days)
         impacts = assessment.details_dict.get("impacts")
         if not isinstance(impacts, list):
             return True
@@ -1986,6 +3057,7 @@ class ChangeService:
     @staticmethod
     async def _validate_impacts(
         session: AsyncSession, department_id: int, details: dict,
+        stored: Optional[dict] = None,
     ) -> None:
         """The D-tab checklist: "does the change impact X?" per catalog item.
 
@@ -2005,7 +3077,9 @@ class ChangeService:
             raise ChangeError("details.impacts must be a list")
         dept = await session.get(Department, department_id)
         dept_name = dept.name if dept is not None else None
-        allowed_keys = checklist.keys_for(dept_name)
+        # Current items plus the legacy ones: an answer stored before the
+        # checklist changed resubmits as it is (only current items are owed).
+        allowed_keys = checklist.accepted_keys_for(dept_name)
         answered: set[str] = set()
         catalog = None
         for entry in impacts:
@@ -2060,31 +3134,76 @@ class ChangeService:
         if details.get("impacted") is not False and not legacy_only:
             missing = [i["label_en"] for i in checklist.items_for(dept_name)
                        if i["key"] not in answered]
+            # An assessment started on the earlier checklist (the 13 common
+            # items) is judged against the set it was started with: a draft
+            # or resubmit carrying a key only that set had is complete when
+            # that set is answered. Derived from the keys, no stored version:
+            # the new checklist never asks a legacy-only key, so its answers
+            # can never carry one. Only what is ALREADY on the row counts
+            # (its stored answer or kept draft): a legacy key in the
+            # incoming payload alone must not let a new assessment skip the
+            # current checklist.
+            if missing and ChangeService._started_on_legacy_checklist(
+                    dept_name, stored):
+                missing = [i["label_en"]
+                           for i in ChangeService._legacy_checklist(dept_name)
+                           if i["key"] not in answered]
             if missing:
                 raise ChangeError(
                     "Checklist incomplete, unanswered: " + ", ".join(missing))
 
+    # The department extras the checklist carried before 2026-09-25 (on top
+    # of the 13 common LEGACY_ITEMS); their keys live on in the new lists.
+    _LEGACY_DEPARTMENT_KEYS = {
+        "APQP": ("pfmea_update", "control_plan_update"),
+        "Development": ("article_design_update",),
+        "Packaging Engineer": ("layout_change", "packaging_type_change",
+                               "packaging_modification"),
+    }
+
     @staticmethod
-    async def assessment_objects(
-        session: AsyncSession, change: ChangeRequest,
-    ) -> list[dict]:
-        """Per-routed-department buckets of the objects that department
-        assesses, derived from the impacted set. Four queries regardless of how
-        many parts or departments are involved."""
-        from app.models.workflow import Department
+    def _legacy_checklist(dept_name: Optional[str]) -> list[dict]:
+        """The checklist as it was served before 2026-09-25: the 13 common
+        items, then the department's extras of that time."""
+        items = [{"key": i[0], "label_en": i[2]} for i in checklist.LEGACY_ITEMS]
+        for key in ChangeService._LEGACY_DEPARTMENT_KEYS.get(dept_name or "", ()):
+            items.append({"key": key,
+                          "label_en": checklist.label_for(key, dept_name) or key})
+        return items
 
-        # Routed departments = the ones carrying an assessment row on this
-        # change. Ordered by stage then name so the buckets read like the
-        # routing does.
-        routed = {}
-        for a in change.assessments:
-            routed.setdefault(a.department_id, a.stage_order or 0)
-        if not routed:
-            return []
-        names = {d.id: d.name for d in (await session.execute(
-            select(Department).where(Department.id.in_(routed)))).scalars().all()}
+    @staticmethod
+    def _started_on_legacy_checklist(dept_name: Optional[str],
+                                     stored: Optional[dict]) -> bool:
+        """True when the answers already stored on the row (its answer or
+        its kept draft) carry a key only the earlier checklist asked. The
+        incoming payload is not read: it is what is being judged."""
+        legacy_only = ({i[0] for i in checklist.LEGACY_ITEMS}
+                       - checklist.keys_for(dept_name))
 
-        impacted_ids = [i.part_id for i in change.impacted_items]
+        def keys(entries) -> set:
+            return {e.get("key") for e in entries or []
+                    if isinstance(e, dict) and e.get("key")}
+
+        stored = stored or {}
+        found = keys(stored.get("impacts"))
+        # A kept draft: details["draft"]["data"]["details"]["impacts"].
+        data = (stored.get("draft") or {}).get("data") \
+            if isinstance(stored.get("draft"), dict) else None
+        det = data.get("details") if isinstance(data, dict) else None
+        if isinstance(det, dict) and isinstance(det.get("impacts"), list):
+            found |= keys(det["impacts"])
+        return bool(found & legacy_only)
+
+    @staticmethod
+    async def served_objects(
+        session: AsyncSession, part_ids: list[int],
+    ) -> dict[str, list[tuple]]:
+        """item_category -> [(part, via_part_id)]: the given parts themselves
+        plus everything serving them through part relations (tools, and one
+        hop further through the tools: stations, EOAT, gauges). Shared by
+        the assessment object buckets and the engineering review's
+        department list (spec §17a decision 3)."""
+        impacted_ids = list(dict.fromkeys(part_ids))
 
         async def _step(part_ids: list[int]) -> dict[int, set[int]]:
             """part_id -> everything related to it, in either direction. A tool
@@ -2145,6 +3264,31 @@ class ChangeService:
             if other is not None:
                 by_category.setdefault(other.item_category, []).append(
                     (other, found[other_id]))
+
+        return by_category
+
+    @staticmethod
+    async def assessment_objects(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> list[dict]:
+        """Per-routed-department buckets of the objects that department
+        assesses, derived from the impacted set. Four queries regardless of how
+        many parts or departments are involved."""
+        from app.models.workflow import Department
+
+        # Routed departments = the ones carrying an assessment row on this
+        # change. Ordered by stage then name so the buckets read like the
+        # routing does.
+        routed = {}
+        for a in change.assessments:
+            routed.setdefault(a.department_id, a.stage_order or 0)
+        if not routed:
+            return []
+        names = {d.id: d.name for d in (await session.execute(
+            select(Department).where(Department.id.in_(routed)))).scalars().all()}
+
+        by_category = await ChangeService.served_objects(
+            session, [i.part_id for i in change.impacted_items])
 
         out = []
         for dept_id in sorted(routed, key=lambda d: (routed[d], names.get(d, ""))):
@@ -2226,32 +3370,19 @@ class ChangeService:
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
-        # A "not feasible" is the answer that stops a change dead, and it is
-        # the one the customer will ask to see in writing. So it arrives with
-        # the document that explains it — specifically a change_ppt filed
-        # against THIS assessment, because that is the deck the customer is
-        # actually shown. A moldflow report proves the department did the work;
-        # it is not the thing that gets sent out. Every other verdict is
-        # ungated: evidence stays "if needed".
-        if verdict == "not_feasible":
-            target = (await session.execute(
-                select(ChangeAssessment).where(
-                    ChangeAssessment.change_id == change.id,
-                    ChangeAssessment.department_id == department_id)
-                .order_by(ChangeAssessment.stage_order))).scalars().first()
-            decks = 0
-            if target is not None:
-                decks = (await session.execute(
-                    select(func.count()).select_from(ChangeAttachment).where(
-                        ChangeAttachment.change_id == change.id,
-                        ChangeAttachment.assessment_id == target.id,
-                        ChangeAttachment.kind == "change_ppt"))).scalar() or 0
-            if not decks:
-                raise ChangeError(
-                    "Not feasible requires the explanation document (PPT) for "
-                    "the customer — attach it to this assessment as a "
-                    "'change_ppt'")
-
+        # Only the department answers for itself (or an admin). Blocking R/A
+        # rows get this from WorkflowService.complete_task; S/C letters,
+        # unlinked rows and bare submits never reach the engine, so the same
+        # guard is applied here, for every path, before anything is written.
+        from app.services.workflow_service import WorkflowService
+        actor = await session.get(User, user_id)
+        if actor is None:
+            raise ChangeError("Actor not found")
+        if actor.effective_role != "admin" and not await WorkflowService.actor_in_department(
+                session, actor, department_id):
+            raise ChangeError(
+                "Only members of the assessed department (or an admin) may "
+                "submit its assessment")
         # Soft hold: a department that flagged an open concern on this change
         # cannot sign its own answer off until that point is withdrawn with a
         # resolution note. Scoped to this one department — nobody else's
@@ -2273,8 +3404,13 @@ class ChangeService:
         if held:
             points = "; ".join(f"#{c.id} ({c.kind}): {c.note}" for c in held)
             raise ChangeError(
-                "This department has open concerns on the change — resolve "
+                "This department has open concerns on the change: resolve "
                 f"them before submitting its assessment: {points}")
+        # The row write below completes the engine task and may advance the
+        # stage and repair it: take the instance lock first, the one lock
+        # order every routing write path keeps.
+        from app.services.change_routing_service import ChangeRoutingService
+        await ChangeRoutingService.lock_instance(session, change.id)
         result = await session.execute(
             select(ChangeAssessment).where(
                 (ChangeAssessment.change_id == change.id)
@@ -2298,6 +3434,46 @@ class ChangeService:
             session.add(a)
         else:
             raise ChangeError("no open assessment for this department")
+        # A "not feasible" is the answer that stops a change dead, and it is
+        # the one the customer will ask to see in writing. So it arrives with
+        # the document that explains it: specifically a change_ppt filed
+        # against THIS assessment (the open row being answered, the one the
+        # document check below and the form read), because that is the deck
+        # the customer is actually shown. A moldflow report proves the
+        # department did the work; it is not the thing that gets sent out.
+        # Every other verdict is ungated: evidence stays "if needed".
+        if verdict == "not_feasible":
+            decks = 0
+            if a.id is not None:
+                decks = (await session.execute(
+                    select(func.count()).select_from(ChangeAttachment).where(
+                        ChangeAttachment.change_id == change.id,
+                        ChangeAttachment.assessment_id == a.id,
+                        ChangeAttachment.kind == "change_ppt"))).scalar() or 0
+            if not decks:
+                raise ChangeError(
+                    "Not feasible requires the explanation document (PPT) for "
+                    "the customer: attach it to this assessment as a "
+                    "'change_ppt'")
+        # A Yes on a checklist row that owes documents (external modification:
+        # the change presentation and the change RFQ) is not a finished answer
+        # until they are filed against THIS assessment, told apart by their
+        # attachment kind. Judged on the answer being submitted (else the one
+        # stored); a draft saves without them, only the submit is held. A
+        # department that said "not impacted" answered nothing below it.
+        answer = details if isinstance(details, dict) else a.details_dict
+        if answer.get("impacted") is not False:
+            filed: set = set()
+            if a.id is not None:
+                filed = {k for (k,) in (await session.execute(
+                    select(ChangeAttachment.kind).where(
+                        ChangeAttachment.change_id == change.id,
+                        ChangeAttachment.assessment_id == a.id))).all()}
+            dept = await session.get(Department, department_id)
+            owed = checklist.missing_documents(
+                answer.get("impacts"), filed, dept.name if dept else None)
+            if owed:
+                raise ChangeError("; ".join(owed))
         a.verdict = verdict
         a.cost_impact = cost_impact
         a.lead_time_impact_days = lead_time_impact_days
@@ -2308,8 +3484,15 @@ class ChangeService:
         if details is not None:
             if not isinstance(details, dict):
                 raise ChangeError("Assessment details must be an object")
-            await ChangeService._validate_impacts(session, department_id, details)
+            await ChangeService._validate_impacts(
+                session, department_id, details, stored=a.details_dict)
+            details.pop("draft", None)
             a.details = json.dumps(details)
+        elif "draft" in a.details_dict:
+            # The submit is the answer; an unfinished draft ends with it.
+            kept = a.details_dict
+            kept.pop("draft", None)
+            a.details = json.dumps(kept) if kept else None
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
         # Doing the work IS taking it. There is no claim step in front of an
@@ -2347,14 +3530,22 @@ class ChangeService:
             await WorkflowService.complete_task(
                 session, a.wf_instance_task_id, "approved",
                 notes or f"Assessment: {verdict}", user_id)
+            advanced = True
         else:
             a.status = "submitted"   # S/C payload-only; unlinked legacy rows too
+            advanced = False
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "assessment_submitted",
             f"Assessment for dept {department_id}: {verdict}", user_id,
             field_name="verdict", new_value=verdict,
+            for_department_id=department_id,
         )
+        if advanced:
+            # Completing the task may have started the next stage: a
+            # deviation-added row there gets its task now.
+            from app.services.change_routing_service import ChangeRoutingService
+            await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return a
 
     @staticmethod
@@ -2492,6 +3683,11 @@ class ChangeService:
         # driven downstream gates/pricing decisions. Idempotent PATCHes
         # (same value) are allowed at any status.
         cust_rel = fields.get("customer_relevant")
+        from app.services import mother_plants as mp
+        if cust_rel and mp.is_mother_plant(change):
+            raise ChangeError(
+                f"A change from {mp.plant_name(change)} is not customer relevant "
+                f"here: {mp.plant_name(change)} handles the customer")
         if (
             cust_rel is not None
             and cust_rel != change.customer_relevant
@@ -2500,12 +3696,23 @@ class ChangeService:
             raise ChangeError(
                 "Customer-relevant can only be changed during capture or scoping"
             )
+        if cust_rel is not None and not mp.is_mother_plant(change):
+            change.origin = "customer" if cust_rel else "internal"
 
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null
         # (clear the deadline) is honored rather than skipped by the `v is
         # not None` guard below.
+        # A PATCH that moves nothing writes nothing: no changelog, no audit.
+        changed = False
+        if ("required_by_date" in fields
+                and fields["required_by_date"] == change.required_by_date
+                and fields.get("required_by_reason",
+                               change.required_by_reason) == change.required_by_reason):
+            fields.pop("required_by_date")
+            fields.pop("required_by_reason", None)
         if "required_by_date" in fields:
+            changed = True
             new_date = fields.pop("required_by_date")
             old = change.required_by_date
             # The quote deadline is a capture-time commitment. Once the change
@@ -2529,14 +3736,21 @@ class ChangeService:
             await ChangeService.append_changelog(
                 session, change,
                 "quote_deadline_pushback" if pushback else "deadline_set",
-                f"Required-by {old} -> {new_date}", user_id,
+                f"Quote deadline {old} -> {new_date}", user_id,
                 field_name="required_by_date",
                 old_value=str(old) if old else None,
                 new_value=str(new_date) if new_date else None, notes=reason)
 
         # Release deadline: born at acceptance / internal approval (Tasks 3-4);
         # PATCH only ever *moves* it, with the same audited-set pattern.
+        if ("release_due_date" in fields
+                and fields["release_due_date"] == change.release_due_date
+                and fields.get("release_due_reason",
+                               change.release_due_reason) == change.release_due_reason):
+            fields.pop("release_due_date")
+            fields.pop("release_due_reason", None)
         if "release_due_date" in fields:
+            changed = True
             new_date = fields.pop("release_due_date")
             if change.release_due_date is None:
                 raise ChangeError(
@@ -2549,18 +3763,31 @@ class ChangeService:
             await ChangeService._apply_release_deadline(
                 session, change, new_date, reason, user_id)
 
+        plain_changed = False
         for k, v in fields.items():
-            if k in allowed and v is not None:
+            if k in allowed and v is not None and getattr(change, k) != v:
                 setattr(change, k, v)
+                plain_changed = True
 
         # Handle affected_plant_ids (replace-set semantics; [] clears all)
-        if "affected_plant_ids" in fields and fields["affected_plant_ids"] is not None:
+        if ("affected_plant_ids" in fields and fields["affected_plant_ids"] is not None
+                and sorted(fields["affected_plant_ids"])
+                != sorted(p.id for p in change.affected_plants)):
             from app.models.entities import Plant
+            changed = True
             plant_ids = fields["affected_plant_ids"]
+            # Only the change's own organization's plants: a foreign plant id
+            # is refused as if it did not exist.
+            org_id = None
+            if change.project_id is not None:
+                project = await session.get(Project, change.project_id)
+                owner = await session.get(Plant, project.plant_id) if project else None
+                org_id = owner.organization_id if owner else None
             plants = []
             for pid in plant_ids:
                 plant = await session.get(Plant, pid)
-                if plant is None:
+                if plant is None or (org_id is not None
+                                     and plant.organization_id != org_id):
                     raise ChangeError(f"Plant {pid} not found")
                 plants.append(plant)
             old_ids = sorted(p.id for p in change.affected_plants)
@@ -2574,11 +3801,15 @@ class ChangeService:
                 old_value=old_ids, new_value=new_ids,
             )
 
+        if not (changed or plain_changed):
+            return change
         change.updated_at = datetime.utcnow()
         await session.flush()
-        await ChangeService.append_changelog(
-            session, change, "metadata_updated", "Change metadata updated", user_id,
-        )
+        if plain_changed:
+            await ChangeService.append_changelog(
+                session, change, "metadata_updated", "Change metadata updated",
+                user_id,
+            )
         return change
 
     @staticmethod
@@ -2607,15 +3838,37 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, response: str, user_id: int,
         *, release_due_date: Optional[datetime] = None,
         release_due_reason: Optional[str] = None,
+        expired_override_reason: Optional[str] = None,
     ) -> ChangeRequest:
         if response not in CUSTOMER_RESPONSES:
             raise ChangeError(f"Invalid customer response '{response}'")
+        # An acceptance is final: the price and the release deadline were
+        # committed on it. A change of mind is a new change, not an edit.
+        if change.customer_response == "accepted":
+            from app.models.change_offer import ChangeOffer
+            accepted = (await session.get(ChangeOffer, change.accepted_offer_id)
+                        if change.accepted_offer_id else None)
+            what = f"v{accepted.version}" if accepted is not None else "the quote"
+            raise ChangeError(
+                f"The customer accepted {what}; the answer cannot be changed")
+        if change.status != "quoted":
+            raise ChangeError(
+                "The customer response is recorded while the quote is out "
+                "(status 'quoted')")
         # Acceptance is the moment deadline #2 is born: the customer said yes,
         # so a released-by commitment must exist from here on.
         if (response == "accepted" and release_due_date is None
                 and change.release_due_date is None):
             raise ChangeError(
                 "Recording acceptance requires a release deadline (release_due_date)")
+        # When the offer went out as a versioned document, the answer is an
+        # answer to THAT version: an expired one is only accepted with a
+        # reason on the record. Checked before anything is written.
+        from app.services.offer_service import OfferService
+        await OfferService.check_customer_response(
+            session, change, response, expired_override_reason)
+        await OfferService.apply_customer_response(
+            session, change, response, user_id, expired_override_reason)
         change.customer_response = response
         change.customer_response_at = datetime.utcnow()
         change.customer_response_by = user_id
@@ -2693,6 +3946,16 @@ class ChangeService:
             f"Internal costs approved ({summ['totals']['grand_total']:.2f})",
             actor.id, field_name="internal_approved_amount",
             new_value=summ["totals"]["grand_total"], notes=note)
+        # The internal branch has no offer to freeze the plan into: the
+        # planned P&L is frozen here, append-only, as its own changelog row
+        # (price-redacted via the "pnl" key); PnlService reads it as the
+        # planned basis (spec §16 follow-up).
+        from app.services.pnl_service import PnlService
+        pnl = await PnlService.planned_figures(session, change, None)
+        await ChangeService.append_changelog(
+            session, change, "pnl_frozen",
+            "Planned P&L frozen at internal approval", actor.id,
+            new_value={"pnl": pnl})
         return change
 
     @staticmethod
@@ -2703,12 +3966,20 @@ class ChangeService:
         concern_id: Optional[int] = None, assessment_id: Optional[int] = None,
         costing_offer_id: Optional[int] = None,
         actor: Optional[User] = None,
+        validation_issue_id: Optional[int] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
         phase = "baseline" if change.status in SCOPING_STATUSES else "post_scoping"
         if kind not in ATTACHMENT_KINDS:
             raise ChangeError(f"Invalid attachment kind '{kind}'")
+        # The documents a checklist row owes take only the file types they
+        # come in (the change presentation: PowerPoint or its PDF export).
+        exts = checklist.allowed_extensions(kind)
+        if exts and not filename.lower().endswith(exts):
+            raise ChangeError(
+                f"{checklist.DOCUMENT_PHRASES[kind].capitalize()} must be a "
+                f"{', '.join(exts)} file (got '{filename}')")
         # Customer correspondence belongs to the change, not to one department's
         # assessment or one open question. Filing it into a container would hide
         # it from everyone who is not looking in that container — the opposite
@@ -2754,7 +4025,15 @@ class ChangeService:
                     "instead")
         # A document belongs to ONE container: filing it into both a question
         # and an assessment would make "where does this live" unanswerable.
-        if sum(1 for c in (concern_id, assessment_id, costing_offer_id)
+        # A validation issue (spec §12) is the fourth container: its
+        # evidence and the customer's mails about it (general or
+        # customer_email), filed by whoever works on the issue.
+        if validation_issue_id is not None:
+            from app.services.validation_issue_service import ValidationIssueService
+            await ValidationIssueService.check_attach(
+                session, change, validation_issue_id, kind, actor)
+        if sum(1 for c in (concern_id, assessment_id, costing_offer_id,
+                           validation_issue_id)
                if c is not None) > 1:
             raise ChangeError(
                 "An attachment belongs to a concern, an assessment or a "
@@ -2795,6 +4074,7 @@ class ChangeService:
             uploaded_by=user_id, phase=phase, kind=kind,
             responds_to_id=responds_to_id, concern_id=concern_id,
             assessment_id=assessment_id, costing_offer_id=costing_offer_id,
+            validation_issue_id=validation_issue_id,
         )
         session.add(att)
         await session.flush()
@@ -2805,7 +4085,8 @@ class ChangeService:
                        "responds_to_id": responds_to_id,
                        "concern_id": concern_id,
                        "assessment_id": assessment_id,
-                       "costing_offer_id": costing_offer_id},
+                       "costing_offer_id": costing_offer_id,
+                       "validation_issue_id": validation_issue_id},
         )
         return att
 
@@ -2821,6 +4102,9 @@ class ChangeService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "attachment_removed", f"Removed {filename}", user_id,
-            old_value={"filename": filename},
+            # kind + offer so a vendor quote's removal can be redacted by the
+            # same rule as its addition (price_redaction.QuoteReader)
+            old_value={"filename": filename, "kind": att.kind,
+                       "costing_offer_id": att.costing_offer_id},
         )
         return stored_path

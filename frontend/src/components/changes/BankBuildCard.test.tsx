@@ -69,6 +69,34 @@ describe('BankBuildCard', () => {
     }))
   })
 
+  it('keeps a hidden scrap price: saves without it and says one is set', async () => {
+    wrap({ change: change({ bank_build_mode: 'planned_scrap', scrap_price_set: true }) })
+    expect((screen.getByTestId('bank-build-scrap-price') as HTMLInputElement).placeholder)
+      .toBe(t('bankbuild.scrapPriceHidden'))
+    expect(screen.queryByTestId('bank-build-need-price')).toBeNull()
+    fireEvent.change(screen.getByTestId('bank-build-note'), { target: { value: 'moved to CW40' } })
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenCalledWith(7, {
+      mode: 'planned_scrap', note: 'moved to CW40',
+    }))
+  })
+
+  it('sends the scrap price only when it was edited', async () => {
+    wrap({ change: change({ bank_build_mode: 'planned_scrap', scrap_quote_price: 900, scrap_price_set: true }) })
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenLastCalledWith(7, { mode: 'planned_scrap' }))
+    fireEvent.change(screen.getByTestId('bank-build-scrap-price'), { target: { value: '950' } })
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenLastCalledWith(7, {
+      mode: 'planned_scrap', scrap_quote_price: 950,
+    }))
+  })
+
+  it('reads "set (hidden)" to a viewer who may not read the price', () => {
+    wrap({ change: change({ bank_build_mode: 'planned_scrap', scrap_price_set: true }), canSetMode: false })
+    expect(screen.getByTestId('bank-build-price-hidden').textContent).toBe(t('bankbuild.scrapPriceHidden'))
+  })
+
   it('holds the save shut until a mode is picked', () => {
     wrap()
     expect((screen.getByTestId('bank-build-save') as HTMLButtonElement).disabled).toBe(true)
@@ -89,6 +117,16 @@ describe('BankBuildCard', () => {
       .toBe(t('bankbuild.unpublished'))
     fireEvent.click(screen.getByTestId('bank-build-publish'))
     await waitFor(() => expect(changesApi.publishBankBuildPlan).toHaveBeenCalledWith(7))
+  })
+
+  it('hides the publish block when the Timing tab publishes instead', () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BankBuildCard change={change({ bank_build_mode: 'running_change' })} canSetMode={false} canPublish hidePublish />
+      </QueryClientProvider>)
+    expect(screen.queryByTestId('bank-build-publish')).toBeNull()
+    expect(screen.queryByTestId('bank-build-publish-state')).toBeNull()
+    expect(screen.getByTestId('bank-build-card')).toBeDefined()
   })
 
   it('names who published the plan and drops the button once it is out', () => {
@@ -117,7 +155,7 @@ describe('BankBuildCard', () => {
     expect(screen.queryByTestId('bank-build-save')).toBeNull()
     const view = screen.getByTestId('bank-build-readonly')
     expect(view.textContent).toContain(t('bankbuild.mode.planned_scrap'))
-    expect(view.textContent).toContain('4200.00')
+    expect(view.textContent).toContain('4,200.00 EUR')
     expect(view.textContent).toContain('scrap 380 pcs at Ostrava')
     expect(view.textContent).toContain('sched.max')
     expect(view.textContent).toContain(t('bankbuild.readOnly'))
@@ -132,3 +170,18 @@ describe('BankBuildCard', () => {
       .toContain(t('bankbuild.mode.running_change'))
   })
 })
+
+describe('BankBuildCard on a mother-plant change', () => {
+  afterEach(cleanup)
+  it('names the mother plant instead of Sales and the customer, and has no publish block', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BankBuildCard change={change({ mother_plant_name: 'KTX Weissenburg (WUG)' })} canSetMode canPublish motherPlant />
+      </QueryClientProvider>)
+    const intro = screen.getByTestId('bank-build-intro').textContent ?? ''
+    expect(intro).toContain('KTX Weissenburg hears about it')
+    expect(intro).not.toContain('customer')
+    expect(screen.queryByTestId('bank-build-publish-state')).toBeNull()
+  })
+})
+

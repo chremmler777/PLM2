@@ -1,5 +1,6 @@
 /** Changelog of one part in a modal (the context menu's "View Changelog"). */
 import { useChangelog } from '../../hooks/queries/useProjectDetail';
+import { formatDateTime } from '../../lib/format';
 
 export function ChangelogList({ partId }: { partId: number }) {
   const { data: entries, isLoading } = useChangelog(partId);
@@ -14,7 +15,7 @@ export function ChangelogList({ partId }: { partId: number }) {
               {entry.action.replace(/_/g, ' ')}
             </span>
             <span className="text-slate-500 text-xs">
-              {new Date(entry.performed_at).toLocaleString()}
+              {formatDateTime(entry.performed_at)}
             </span>
           </div>
           <p className="text-slate-200 mt-1.5">{entry.action_description}</p>

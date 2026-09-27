@@ -244,7 +244,7 @@ async def test_assign_linked_assessment_lead_carveout(
     change = res.json()
     res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                             json={"part_id": part["part_id"], "is_lead": True},
-                            headers=eng_auth)
+                            headers=lead_auth)
     assert res.status_code == 200, res.text
     await approve_gates(client, lead_auth, change["id"])
     await advance_to_assessment(client, lead_auth, session_factory, change["id"])

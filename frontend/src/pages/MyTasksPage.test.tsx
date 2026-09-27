@@ -57,7 +57,7 @@ describe('MyTasksPage ownership', () => {
     // somebody has worked it.
     wrap(<MyTasksPage />)
     expect(await screen.findByText('Eva Eng')).toBeDefined()
-    expect(screen.getByText(/overdue/)).toBeDefined()
+    expect(screen.getAllByText(/overdue/).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
     expect(screen.getByText('unclaimed step')).toBeDefined()
     await waitFor(() => expect(clientMocks.post).not.toHaveBeenCalledWith(
@@ -128,9 +128,11 @@ describe('MyTasksPage change tasks by kind', () => {
       kind: 'impact_confirm', due_date: '2026-06-01T23:59:59', overdue: true,
     }))
     expect(screen.getByText(t('tasks.hint.impact_confirm'))).toBeDefined()
-    // The date cell carries the overdue styling; the mark sits inside it.
-    const due = screen.getByText(/overdue/).closest('span')?.parentElement
-    expect(due?.className).toContain('text-red-400')
+    // The due cell reads like the changes list: a red "n d overdue" chip, the date under it.
+    const chip = screen.getByTestId('task-due').querySelector('[data-testid="deadline-chip"]')
+    expect(chip?.className).toContain('red')
+    expect(chip?.textContent).toMatch(/\d+ d overdue/)
+    expect(screen.getByTestId('task-due').textContent).toContain('1 Jun 2026')
     fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=impacted')
   })
@@ -265,9 +267,10 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7')
   })
 
-  it('renders an unknown kind as a plain row instead of crashing', async () => {
+  it('renders an unknown kind as a plain, readable row instead of crashing', async () => {
     await renderWith(changeTask({ kind: 'something_new' }))
-    expect(screen.getByText('something_new')).toBeDefined()
+    expect(screen.getByText('Something new')).toBeDefined()
+    expect(screen.queryByText('something_new')).toBeNull()
     expect(screen.getByText('Clip rattles')).toBeDefined()
   })
 
@@ -290,5 +293,150 @@ describe('MyTasksPage change tasks by kind', () => {
       owner_id: 9, owner_name: 'Toola Engineer', mine: false,
     }))
     expect(screen.getByText('Toola Engineer')).toBeTruthy()
+  })
+})
+
+describe('MyTasksPage one list (spec §16)', () => {
+  beforeEach(() => {
+    navigate.mockClear()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/workflow-instances/my-tasks'))
+        return Promise.resolve({ data: [
+          myTask({ task_id: 1, rasic_letter: 'R', step_name: 'Update 3D data', overdue: false,
+                   due_date: '2026-10-02T00:00:00' }),
+          myTask({ task_id: 2, rasic_letter: 'A', step_name: 'Update 3D data', overdue: false,
+                   due_date: '2026-10-02T00:00:00' }),
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  it('lists change and workflow tasks in one table, counted in the title', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    await screen.findByText('Update 3D data')
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getAllByTestId('task-row')).toHaveLength(2)
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(2)')
+  })
+
+  it('folds the R and A row of the same step into one row carrying both letters', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('Update 3D data')
+    expect(screen.getAllByText('Update 3D data')).toHaveLength(1)
+    expect(screen.getAllByTestId('task-rasic').map((e) => e.textContent)).toEqual(['R', 'A'])
+  })
+
+  it('folds a department\'s duplicate change-task rows into one', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'assessment', department_id: 2, assessment_id: 3, rasic_letters: ['R'] }),
+      changeTask({ kind: 'assessment', department_id: 2, assessment_id: 4, rasic_letters: ['A'],
+                   due_date: '2026-09-01', overdue: true }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    expect(screen.getAllByText('GB-CM-0007')).toHaveLength(1)
+    // The earlier, overdue date wins.
+    expect(screen.getByText('1 Sep 2026')).toBeDefined()
+  })
+
+  it('reads the stage from stage_label, then stage, then status', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'costing_input', status: 'costing', stage: 'assessment', stage_label: 'Feasibility check' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'kickoff', status: 'costing', stage: 'captured' }),
+      changeTask({ change_id: 9, change_number: 'GB-CM-0009', kind: 'kickoff', status: 'quote_creation' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0009')
+    const stages = screen.getAllByTestId('task-stage').map((e) => e.textContent)
+    expect(stages).toContain('Feasibility check')
+    expect(stages).toContain('Captured')
+    expect(stages).not.toContain('Costing')
+    expect(stages.length).toBe(3)
+  })
+
+  it('shows the change stage and dates as 25 Sep 2026, overdue first', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'costing_input', status: 'costing', due_date: '2026-11-20' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'kickoff', status: 'captured',
+                   due_date: '2026-09-23', overdue: true }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    const stages = screen.getAllByTestId('task-stage').map((e) => e.textContent)
+    expect(stages[0]).toBe('Captured')
+    expect(stages).toContain('Costing')
+    expect(screen.getByText('20 Nov 2026')).toBeDefined()
+    expect(screen.getByText('2 Oct 2026')).toBeDefined()
+    const rows = screen.getAllByTestId('task-row')
+    expect(rows[0].textContent).toContain('GB-CM-0008')
+  })
+
+  it('uses the server kind label when one is sent', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'release_check', kind_label: 'Release checklist' })] as never)
+    wrap(<MyTasksPage />)
+    expect(await screen.findByText('Release checklist')).toBeDefined()
+  })
+})
+
+describe('MyTasksPage project team (spec §18)', () => {
+  beforeEach(() => {
+    clientMocks.get.mockResolvedValue({ data: [] })
+  })
+  afterEach(cleanup)
+
+  it('counts main rows only, lists backup rows muted with the main name', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'scoping_wrapup', role: 'main' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'impact_confirm',
+                   role: 'backup', main_name: 'Cody Hrtyanski' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(1)')
+    expect(screen.getByTestId('task-list-backup-count').textContent).toBe(
+      t('tasks.asBackup').replace('{n}', '1'))
+    const rows = screen.getAllByTestId('task-row')
+    expect(rows.map((r) => r.getAttribute('data-role'))).toEqual(['main', 'backup'])
+    expect(rows[1].className).toContain('opacity-60')
+    expect(screen.getByTestId('backup-chip').textContent).toContain('Cody Hrtyanski')
+  })
+})
+
+describe('MyTasksPage total: the badge number', () => {
+  afterEach(cleanup)
+
+  it('counts the main task rows, the main index rows and the Finance review, never backups', async () => {
+    navigate.mockClear()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/intakes/my'))
+        return Promise.resolve({ data: {
+          triage: [
+            { id: 1, part_id: 4, revision_name: 'B', part_number: 'P-1', part_name: 'Housing',
+              project_name: 'X', source_label: 'Customer', received_at: '2026-09-20', role: 'main' },
+            { id: 2, part_id: 5, revision_name: 'C', part_number: 'P-2', part_name: 'Cover',
+              project_name: 'X', source_label: 'Customer', received_at: '2026-09-20',
+              role: 'backup', main_name: 'Dev One' },
+          ],
+          review: [],
+        } })
+      if (url.includes('/cost-sheet/review-task'))
+        return Promise.resolve({ data: { due: true, is_finance: true, stale: null } })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    await screen.findByTestId('intake-task-1')
+    await screen.findByTestId('cost-sheet-review-task')
+    // 1 change task + 1 main index row + the Finance review; the backup index is not counted
+    await waitFor(() => expect(screen.getByTestId('my-tasks-total').textContent).toBe('(3)'))
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(1)')
   })
 })

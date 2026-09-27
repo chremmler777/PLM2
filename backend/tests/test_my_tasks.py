@@ -77,7 +77,7 @@ async def test_sales_sees_kickoff_with_the_unmet_parts(client, seed, roles):
     row = rows[0]
     assert row["change_id"] == cid
     assert row["missing"] == ["description", "at least one attachment",
-                              "required-by date"]
+                              "quote deadline", "change lead"]
     # ...and it is not the PM's row
     assert not [t for t in await _tasks(client, sales)
                 if t["kind"] == "scoping_wrapup"]
@@ -109,9 +109,10 @@ async def test_impact_confirm_row_disappears_once_locked(
         client, seed, roles, part, session_factory):
     sales = await _auth(client, "Sales")
     dev = await _auth(client, "Development")
-    cid = await _create(client, sales, seed, "impact row")
-    await client.post(f"/api/v1/changes/{cid}/impacted-items",
-                      json={"part_id": part["part_id"], "is_lead": True}, headers=sales)
+    # Sales captures the items with the change (atomic create, spec §16);
+    # editing the set afterwards is the lead's, PM's or an admin's.
+    cid = await _create(client, sales, seed, "impact row",
+                        impacted_part_ids=[part["part_id"]])
     await satisfy_capture_gate(client, sales, cid)
     await _set_status(session_factory, cid, status="scoping")
 

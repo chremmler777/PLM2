@@ -1,7 +1,7 @@
 /**
  * React Query hooks for workflow templates and instances
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import * as workflowApi from '../../api/workflows';
 import { WfTemplateSave, CompleteTaskRequest, CancelWorkflowRequest } from '../../types/workflow';
 
@@ -77,8 +77,19 @@ export const useRevisionWorkflow = (revisionId: number) => {
     queryKey: QUERY_KEYS.revisionWorkflow(revisionId),
     queryFn: () => workflowApi.getRevisionWorkflow(revisionId),
     enabled: revisionId > 0,
+    // has_3d_evidence changes outside the workflow (CAD upload/delete, signed
+    // no geometry change): never serve a cached copy on remount.
+    staleTime: 0,
   });
 };
+
+/** Refetch a revision's workflow instance after its 3D evidence changed (CAD
+ *  file uploaded or deleted, no geometry change signed), so a gated Approve
+ *  re-evaluates has_3d_evidence. Without an id, every revision instance. */
+export const invalidateRevisionWorkflow = (queryClient: QueryClient, revisionId?: number | null) =>
+  queryClient.invalidateQueries({
+    queryKey: revisionId ? QUERY_KEYS.revisionWorkflow(revisionId) : ['workflow', 'revision'],
+  });
 
 export const useStartWorkflow = (revisionId: number) => {
   const queryClient = useQueryClient();

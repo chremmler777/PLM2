@@ -110,6 +110,8 @@ export interface WfInstanceTask {
   accepted_at: string | null;
   due_date: string | null;
   overdue: boolean;
+  /** The step refuses "approved" until the revision has 3D evidence. */
+  requires_cad_evidence?: boolean;
 }
 
 export interface Escalation {
@@ -138,6 +140,9 @@ export interface WfInstance {
   started_at: string;
   completed_at: string | null;
   canceled_at: string | null;
+  /** Whether the revision has a CAD file or a signed "no geometry change";
+   *  null when no step of the instance needs it. */
+  has_3d_evidence?: boolean | null;
   cancel_reason: string | null;
   tasks: WfInstanceTask[];
 }
@@ -165,6 +170,9 @@ export interface MyTask {
   due_date: string | null;
   overdue: boolean;
   mine: boolean;
+  /** Project team (spec §18): "main" counts; "backup" is listed muted. */
+  role?: 'main' | 'backup';
+  main_name?: string | null;
 }
 
 // Instance request types

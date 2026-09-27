@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import client, { API_BASE_URL } from '../../api/client';
 import { UploadedBy } from '../common/UploadedBy';
 import { apiErrorMessage } from '../../lib/apiError';
+import { invalidateRevisionWorkflow } from '../../hooks/queries/useWorkflows';
 import type { RevisionFile } from './projectTypes';
 
 // File type badge colors
@@ -44,6 +45,7 @@ export function RevisionFileRow({
     onSuccess: () => {
       toast.success('File deleted');
       queryClient.invalidateQueries({ queryKey: ['revision-files', file.revision_id] });
+      invalidateRevisionWorkflow(queryClient, file.revision_id);
     },
     onError: (error: unknown) => {
       toast.error(apiErrorMessage(error, 'Failed to delete file'));

@@ -1,4 +1,5 @@
 """Item relation tests - tool/gauge/equipment to article links."""
+from tests.conftest import post_active
 
 
 async def _create(client, eng_auth, seed, part_number, name, item_category="article"):
@@ -100,7 +101,7 @@ async def test_relation_guards(client, eng_auth, seed):
 async def test_relation_carries_other_active_revision(client, eng_auth, seed):
     article = await _create(client, eng_auth, seed, "20-1994-003-0", "206.887.233 Isofix cover")
     tool = await _create(client, eng_auth, seed, "199403", "ISOFIX Cover", "tool")
-    res = await client.post(f"/api/v1/parts/{article}/revisions/customer-data",
+    res = await post_active(client, f"/api/v1/parts/{article}/revisions/customer-data",
                             json={"statement": "review", "received_at": "2026-09-01", "customer_index": "003"},
                             headers=eng_auth)
     assert res.status_code == 201, res.text

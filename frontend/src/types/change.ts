@@ -22,6 +22,9 @@ export interface ImpactedItem {
   eng_level_after?: string | null;
   resulting_revision_id?: number | null;
   is_lead?: boolean;
+  /** Human names, when the backend sends them (instead of "Part #id"). */
+  part_number?: string | null;
+  part_name?: string | null;
 }
 
 export interface Assessment {
@@ -58,6 +61,11 @@ export interface RoutingDepartment {
   status: 'pending' | 'active' | 'submitted' | 'waived' | null;
   verdict: string | null;
   assessment_id: number | null;
+  /** A declined letter awaiting the lead's decision. */
+  pending_rasic_letter?: RasicLetter | null;
+  /** A pending deviation asks to take this row off the routing; it stays
+   *  (still owed) until the decision. */
+  pending_removal?: boolean;
 }
 
 export interface RoutingStage {
@@ -74,6 +82,11 @@ export interface AssessmentObject {
   number: string;
   name: string;
   via_part_id?: number | null;
+}
+
+/** GET /changes/{id}/impact-objects: what serves each given part. */
+export interface ImpactObjectsResponse {
+  parts: { part_id: number; served_by: (AssessmentObject & { category?: string | null })[] }[];
 }
 
 export interface DepartmentObjects {
@@ -101,7 +114,7 @@ export interface ChangeRouting {
 export interface DeviationRequest {
   op: 'add' | 'remove' | 'reletter';
   department_id: number;
-  rasic_letter?: 'R' | 'A' | 'S' | 'C';
+  rasic_letter?: RasicLetter;
   stage_order?: number;
   /** Required for op 'add': the audit reason the lead decides on. */
   reason?: string;
@@ -115,7 +128,9 @@ export type AttachmentKind =
   /** Saved customer correspondence (.msg/.eml/pdf). Change-level, no assessment. */
   | 'customer_email'
   /** A vendor's written quote, filed under the offer it belongs to. */
-  | 'vendor_quote';
+  | 'vendor_quote'
+  /** The mother plant's timing (MS Project XML); seeds the detailed plan. */
+  | 'mother_plant_timing';
 
 export interface Attachment {
   id: number;
@@ -132,6 +147,8 @@ export interface Attachment {
   assessment_id?: number | null;
   /** The vendor offer this quote document belongs to. */
   costing_offer_id?: number | null;
+  /** The validation issue this evidence or customer mail is filed into. */
+  validation_issue_id?: number | null;
   created_at: string;
   /** Who put the file on the record — optional until every endpoint sends it. */
   uploaded_by?: number | null;
@@ -145,6 +162,12 @@ export interface ChangelogEntry {
   performed_by: number;
   performed_at: string;
   notes?: string | null;
+  /** Which field changed, and its before/after — absent on most rows, and
+      blanked server-side for a money-carrying field when the viewer may not
+      read prices. */
+  field_name?: string | null;
+  old_value?: string | null;
+  new_value?: string | null;
 }
 
 export interface ChangeRequest {
@@ -229,12 +252,91 @@ export interface ChangeRequest {
   bank_build_note?: string | null;
   /** Only set for planned scrap: the additional quote the customer bears. */
   scrap_quote_price?: number | null;
+  /** A scrap quote price is on record. Never redacted: a viewer who may not
+   *  read prices (scrap_quote_price null) still knows one exists. */
+  scrap_price_set?: boolean;
   bank_build_set_by_name?: string | null;
   bank_build_set_at?: string | null;
   /** Set once Sales has put the plan in front of the customer. */
   plan_published_by_name?: string | null;
   plan_published_at?: string | null;
+  /** Costing to close (spec 2026-09-25): timing, offer and release stage. */
+  plan_revision?: number | null;
+  timing_validated_at?: string | null;
+  timing_validated_by?: number | null;
+  accepted_offer_id?: number | null;
+  lessons_done_at?: string | null;
+  /** When the change was released / closed (release summary, re-check walk P3-6). */
+  released_at?: string | null;
+  closed_at?: string | null;
+  lessons_done_by?: number | null;
+  lessons_none_reason?: string | null;
+  /** Where the change comes from (spec §14): customer, internal, or the
+   *  mother-plant side track (no assessment, costing or quote). */
+  origin?: ChangeOrigin;
+  /** Spec §17: started by (or took) a revision intake. */
+  from_intake?: boolean;
+  mother_plant_name?: string | null;
+  mother_plant_ref?: string | null;
+  /** The mother plant's SOP (YYYY-MM-DD); the release deadline at approval. */
+  mother_plant_sop?: string | null;
+  /** Mother plant: first "Send information", and who has not confirmed yet. */
+  info_sent_at?: string | null;
+  info_department_ids?: number[];
+  info_open_department_ids?: number[];
+  // --- Early stages polish (spec §16). All optional: an older backend omits
+  // them and every reader falls back to what it can derive itself. ---
+  /** The statuses THIS viewer may move the change to (backend transition
+   *  rights). Absent: the client mirror in lib/transitionRights decides. */
+  allowed_transitions?: string[];
+  /** The assessment round's first stage, as the backend counts it. */
+  stage_state?: StageState | null;
+  /** End states: the stage the change was in when it was rejected/cancelled. */
+  stopped_at?: ChangeStatus | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  /** The title is composed from the lead item and follows it (default on). */
+  title_auto?: boolean;
+  /** Impact edited after the offer went out: the offer no longer covers it. */
+  scope_changed_after_quote?: boolean;
+  /** The offer version that no longer covers the scope (Blocked by text). */
+  scope_offer_version?: number | null;
+  /** Who picked the lead (and when), for the Status card. */
+  lead_set_at?: string | null;
+  /** Cost carrier as the scoping meeting confirmed it. */
+  cost_carrier_confirmed_at?: string | null;
+  /** Human labels the backend already resolved (lists): the stage owner. */
+  stage_owner?: string | null;
+  /** Changes list: the viewer leads it or is on its hook. */
+  is_mine?: boolean;
 }
+
+/** The first routing stage's standing (spec §16 P1 6). */
+export interface StageState {
+  /** R/A departments of the first stage that have not submitted. */
+  waiting_department_ids: number[];
+  submitted_department_ids?: number[];
+  /** Submitted not-feasible verdicts (Blocked by + next step options). */
+  not_feasible_department_ids?: number[];
+  /** "Not our responsibility" declines awaiting the lead's decision. */
+  declined_pending_department_ids?: number[];
+  /** Every first-stage R/A row has submitted. */
+  all_submitted: boolean;
+}
+
+/** Who may lead a change (lead picker on the Status card). */
+export interface LeadCandidate {
+  id: number;
+  name: string;
+  /** Login, shown when two candidates share a display name. */
+  username?: string | null;
+  department?: string | null;
+  /** The project's PM: the picker's default. */
+  is_default?: boolean;
+}
+
+/** engineering_review: the light track of a new customer index (spec §17). */
+export type ChangeOrigin = 'customer' | 'internal' | 'mother_plant' | 'engineering_review';
 
 /** Running change vs planned scrap — the two ways a change reaches the line. */
 export type BankBuildMode = 'running_change' | 'planned_scrap';
@@ -259,9 +361,13 @@ export interface ChangeNegotiation {
   /** Present when the backend serves the raw id; used to gate the delete. */
   created_by?: number | null;
   created_at: string;
+  /** The offer version the round was about (spec 2026-09-25). */
+  offer_id?: number | null;
 }
 
 export interface ChangeDetail extends ChangeRequest {
+  /** The project's plant (Project.plant_id). */
+  project_plant_id?: number | null;
   impacted_items: ImpactedItem[];
   assessments: Assessment[];
   attachments: Attachment[];
@@ -292,7 +398,7 @@ export type ChangeTaskKind =
  * backend still renders as a plain row instead of crashing the page.
  */
 export interface ChangeTask {
-  kind: ChangeTaskKind | (string & {});
+  kind: ChangeTaskKind | (string & NonNullable<unknown>);
   change_id: number;
   change_number: string;
   title: string;
@@ -307,6 +413,8 @@ export interface ChangeTask {
   owner_name?: string | null;
   accepted_at?: string | null;
   mine?: boolean;
+  /** The backend's word that the row is the viewer's own; wins over `mine`. */
+  is_mine?: boolean;
   // kickoff rows: which of description / attachment / date is still missing
   missing?: string[];
   // scoping wrap-up rows
@@ -318,7 +426,22 @@ export interface ChangeTask {
   concern_id?: number;
   // send_rejection rows: whether the letter is already attached
   has_letter?: boolean;
+  /** Human kind label and the change's stage, when the backend sends them. */
+  kind_label?: string | null;
+  status?: ChangeStatus | null;
+  /** The stage the row belongs to (backend key) and its human label. */
+  stage?: string | null;
+  stage_label?: string | null;
+  /** R and A rows of one department folded into one task. */
+  rasic_letters?: string[];
+  /** Project team (spec §18): "main" counts; "backup" is listed muted. */
+  role?: TeamRole;
+  /** The responsible's name, on backup rows. */
+  main_name?: string | null;
 }
+
+/** The viewer's standing on a role's work for a project (spec §18). */
+export type TeamRole = 'main' | 'backup';
 
 // --- Cost & summation types (sub-project A) ---
 
@@ -334,7 +457,7 @@ export interface CostLine {
    *  Negative when the change makes the part faster to produce. */
   minutes_per_part?: number | null;
   demand_hours: number;
-  rate_snapshot: number;
+  rate_snapshot: number | null;
   internal_cost: number;
   external_cost: number;
   note?: string | null;
@@ -353,11 +476,58 @@ export interface CostLineIn {
 
 export interface PlantRollup {
   plant_id: number;
+  /** A plant's row is in that plant's currency. */
+  currency?: string;
   one_time_internal: number; one_time_external: number;
   lifecycle_internal: number; lifecycle_external: number;
 }
 export interface DeptRollup extends Omit<PlantRollup, 'plant_id'> { department_id: number; }
+export interface SummationTotals {
+  one_time_internal: number; one_time_external: number;
+  lifecycle_internal: number; lifecycle_external: number; grand_total: number;
+}
+
+export interface SummationPositionLine {
+  position_id: number;
+  label: string;
+  kind: string;
+  /** The quoted money of the line (Sales' chosen offer, else the estimate). */
+  cost: number;
+  currency: string;
+  /** hours (trials) x rate; null = no rate in the cost sheet (not counted). */
+  line_value: number | null;
+  rate: number | null;
+}
+
+export interface SummationPositionRollup {
+  department_id: number;
+  position_cost: number;
+  hours: number;
+  hours_cost: number;
+  machine_hours: number;
+  trials: number;
+  position_count: number;
+  unrated_hours: boolean;
+  unpriced_count: number;
+  positions: SummationPositionLine[];
+}
+
 export interface Summation {
+  /** The costing currency (the costing plant's): totals and by_department are in it. */
+  currency?: string;
+  /** The revenue's currency (the accepted or latest sent offer's, else the costing's). No margin when it differs. */
+  revenue_currency?: string;
+  /** Every currency's own sums; never added together, never converted. */
+  totals_by_currency?: Record<string, SummationTotals>;
+  mixed_currency?: boolean;
+  unpriced_lines?: { position_id: number; department_id: number; label: string; kind: string;
+    quantity: number; unit: string; reason?: string | null; message: string;
+    /** machine_time / sampling: what is missing, e.g. "machine rate for class 200-450 t at USA Toccoa". */
+    subject?: string | null }[];
+  /** no_rate_department names its department_id, or its subject (a machine class's rate at a plant). */
+  warnings?: { code: string; message: string; department_id?: number | null; subject?: string | null }[];
+  cost_sheet_versions_used?: number[];
+  cost_sheet_current_version?: number | null;
   by_plant: PlantRollup[];
   by_department: DeptRollup[];
   totals: { one_time_internal: number; one_time_external: number;
@@ -372,6 +542,15 @@ export interface Summation {
   total_minutes_per_part?: number;
   /** The Tool Engineer's weight quote, carried into the wrap-up Sales prices. */
   part_weight_estimate_g?: number | null;
+  /**
+   * The costing positions' share of the totals, per department. Already
+   * INSIDE totals and by_department (never add it again): position_cost is
+   * the quoted money, hours_cost the positions' hours (trials) priced from
+   * the cost sheet, both in the costing currency.
+   */
+  positions_by_department?: SummationPositionRollup[];
+  total_position_cost?: number;
+  total_position_hours_cost?: number;
   /**
    * What the change actually cost, once the work has run (stage 8/9). Absent
    * before implementation — everything reading it must survive that.
@@ -416,8 +595,11 @@ export interface PnlActuals {
 export type GateKey = 'feasibility' | 'budget' | 'release';
 export interface Gate {
   gate_key: GateKey;
-  decision: 'yes' | 'no' | 'na';
+  /** null: nobody has decided it yet (a seeded gate). */
+  decision: 'yes' | 'no' | 'na' | null;
   decided_by?: number | null;
+  /** The decider's full name, resolved by the backend. */
+  decided_by_name?: string | null;
   decided_at?: string | null;
   remark?: string | null;
 }
@@ -429,8 +611,27 @@ export interface ChecklistItemDef {
   label_en: string;
   /** false for the common set, true for a department's own additions. */
   extra: boolean;
-  /** When present the ticked row must also pick one of these. */
-  choices?: string[];
+  /** When present the ticked row must also pick one of these. The backend
+   *  serves objects; plain strings are older payloads. */
+  choices?: (ChecklistChoice | string)[];
+  /** Documents a Yes owes before the assessment can be submitted (external
+   *  modification: the change presentation and the change RFQ). Told apart
+   *  by attachment kind; the backend refuses the submit without them. */
+  requires_documents?: ChecklistRequiredDocument[];
+}
+
+export interface ChecklistRequiredDocument {
+  kind: AttachmentKind;
+  label_de: string;
+  label_en: string;
+  /** File types the slot takes, e.g. ['.ppt', '.pptx', '.pdf']. */
+  extensions: string[];
+}
+
+export interface ChecklistChoice {
+  value: string;
+  label_de?: string;
+  label_en?: string;
 }
 
 export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }
@@ -440,7 +641,31 @@ export interface ActivityRef { id: number; department_id: number; label: string;
 
 export type MyActionKind =
   | 'assessment' | 'wf_task' | 'deviation_decision' | 'routing_deviation_decision'
-  | 'gate' | 'impact_confirm' | 'transition';
+  | 'gate' | 'impact_confirm' | 'transition'
+  /** Mother plant (spec §14). */
+  | 'info_send' | 'info_ack' | 'inform_mother_plant'
+  /** Validation issues (spec §12): the viewer's owed act on one issue. */
+  | 'validation_issue_contain' | 'validation_issue_root_cause' | 'validation_issue_route'
+  | 'validation_issue_action' | 'validation_issue_customer' | 'validation_issue_quote'
+  | 'validation_issue_close' | 'validation_issue_escalation'
+  /** Re-validation: the check's department answers the linked check again. */
+  | 'validation_issue_recheck'
+  /** Re-validation failed with every fix action done: a new action is owed. */
+  | 'validation_issue_add_action'
+  /** Spec §8 kinds the cockpit names itself. */
+  | 'offer_build' | 'offer_expiring' | 'plan_feedback' | 'timing_validate'
+  | 'plan_deviation' | 'release_check' | 'lessons_step' | 'needs_info'
+  /** Stage tasks shared with My Tasks (one builder): label + target_tab
+   *  (overview, scoping, commercial, implementation, or a tab name). */
+  | 'kickoff' | 'scoping_wrapup' | 'customer_response' | 'close_question'
+  | 'send_rejection' | 'costing_input' | 'costing_update' | 'create_quote'
+  | 'bank_build' | 'publish_plan' | 'progress_report' | 'escalate_risk'
+  | 'update_quote' | 'obtain_info' | 'deadline'
+  /** The lead's flag: a department added after its stage passed still owes
+   *  its answer. Chase it, or take it off the routing (op remove). */
+  | 'late_assessment'
+  /** A kind added later still renders from its label and target_tab. */
+  | (string & NonNullable<unknown>);
 
 export interface MyAction {
   kind: MyActionKind;
@@ -450,6 +675,22 @@ export interface MyAction {
   task_id?: number | null;
   deviation_id?: number | null;
   gate_key?: GateKey | null;
+  /** validation_issue_*: the issue the act is on (deep link ?issue=<id>). */
+  issue_id?: number | null;
+  escalation_id?: number | null;
+  level?: number | null;
+  /** Stage tasks: the department the task is owed by, the offer it is on. */
+  department_id?: number | null;
+  /** late_assessment: the department's name and the stage of its row. */
+  department_name?: string | null;
+  stage_order?: number | null;
+  offer_id?: number | null;
+  count?: number | null;
+  /** Extra context beyond the label (shown as the button's tooltip). */
+  hint?: string | null;
+  /** Project team (spec §18): backup items show in a muted "As backup" group. */
+  role?: TeamRole;
+  main_name?: string | null;
 }
 
 export interface MyActionsResponse {
@@ -467,6 +708,10 @@ export interface ImpactTreeNode {
   is_impacted: boolean;
   is_lead: boolean;
   resulting_revision_id: number | null;
+  /** "E2 · 005": the resulting revision's name and customer index. */
+  resulting_revision_label?: string | null;
+  /** A new customer index still pending triage/release (spec §17a). */
+  resulting_revision_pending?: boolean;
   children: ImpactTreeNode[];
 }
 
@@ -492,6 +737,9 @@ export interface ImplementationItem {
   has_cad_file: boolean;
   no_geometry_change: boolean;
   ready: boolean;
+  /** Who still owes a task in the check workflow (department or user names),
+      when the backend names them. */
+  waiting_on?: string[] | null;
 }
 
 export interface ImplementationProgress {
@@ -499,7 +747,13 @@ export interface ImplementationProgress {
   items: ImplementationItem[];
 }
 
-export interface MeetingParticipant { name: string; user_id?: number | null }
+export interface MeetingParticipant {
+  name: string;
+  user_id?: number | null;
+  /** From the contact picker: lets the backend resolve user_id when missing. */
+  username?: string | null;
+  email?: string | null;
+}
 
 export type MeetingChannel = 'meeting' | 'chat' | 'email';
 
@@ -515,7 +769,12 @@ export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
  * Three kinds, because the three are answered by different people and read
  * differently in the summation.
  */
-export type CostPositionKind = 'internal_effort' | 'support_effort' | 'own_time' | 'external';
+export type CostPositionKind =
+  | 'internal_effort' | 'support_effort' | 'own_time' | 'external'
+  /** hours x the machine class rate of the cost sheet */
+  | 'machine_time'
+  /** trials x the sampling price of the class */
+  | 'sampling';
 
 /** What a line under a category is: money bought, or the department's own hours. */
 export type CostEntryType = 'money' | 'time';
@@ -587,6 +846,110 @@ export interface CostPosition {
   /** The summed partial quotes on a quoted line. */
   parts_cost?: number;
   offers: CostingOffer[];
+  /** Cost sheet pricing (spec §15 phase 2). */
+  labour_position?: string | null;
+  /** The line's own class; null = priced on the change's class (follows it). */
+  machine_class_id?: number | null;
+  /** The class the line is priced on (its own or the change's). */
+  machine_class?: string | null;
+  machine_class_used_id?: number | null;
+  machine_class_from_change?: boolean;
+  /** Where the class came from; null on a line priced before tool tonnage. */
+  machine_class_origin?: MachineClassOrigin | null;
+  /** A named MachineDB press: its own cost sheet rate beats the class rate. */
+  machine_id?: number | null;
+  machine_name?: string | null;
+  /** True when the line is priced on the machine's own rate. */
+  machine_rate_own?: boolean;
+  trials?: number | null;
+  /** The rate snapshot the line is priced with; null = no rate (not 0). */
+  rate?: number | null;
+  /** The rate's currency (the cost sheet row's): line_value is in it. */
+  rate_currency?: string | null;
+  /** The money currency of the line (estimate, offers): the costing plant's. */
+  currency?: string | null;
+  /** An old line that never recorded its currency: shown in the costing plant's, flagged. */
+  currency_unrecorded?: boolean;
+  rate_unit?: 'h' | 'trial' | null;
+  rate_source?: 'cost_sheet' | 'department_rate' | null;
+  cost_sheet_version_id?: number | null;
+  cost_sheet_version?: number | null;
+  rate_match?: string | null;
+  rate_on?: string | null;
+  /** "Cost sheet v2, Tool Engineer, Engineer, 21,50 USD/h" or "No rate in the cost sheet". */
+  rate_label?: string | null;
+  /** Hours (trials) on the line but nothing to price them with. */
+  rate_missing?: boolean;
+  rate_missing_reason?: string | null;
+  rate_is_snapshot?: boolean;
+  /** quantity x rate in `rate_currency`; null when the rate is missing. */
+  line_value?: number | null;
+}
+
+/**
+ * Where a machine time / sampling line's class came from: picked by hand on
+ * the line, a named press, picked by hand on the change, the change's tool
+ * tonnage (MachineDB first, TWOS second, typed in PLM2 last), or none.
+ */
+export type MachineClassOrigin =
+  | { kind: 'line' | 'machine' | 'change' }
+  | {
+      kind: 'tool'; tool_number: string; source: 'machinedb' | 'twos' | 'plm2';
+      tonnage: number; basis?: 'assigned' | 'qualified_min' | null;
+      machine?: string | null; class_found?: boolean;
+    }
+  | { kind: 'none'; tools: string[]; without: string[] }
+
+export interface ToolTonnageSourceReport {
+  status: 'ok' | 'failed' | 'not_configured' | 'no_tools';
+  matched: number; updated: number; no_tonnage: string[]; error: string | null;
+}
+
+/** POST /changes/{id}/costing/tool-tonnage/refresh (report part). */
+export interface ToolTonnageRefresh {
+  tools: number;
+  machinedb: ToolTonnageSourceReport;
+  twos: ToolTonnageSourceReport;
+  without: string[];
+}
+
+/** GET /changes/{id}/costing/context */
+export interface CostingContext {
+  plant_id: number | null;
+  plant_name: string | null;
+  currency: string;
+  rate_source: 'cost_sheet' | 'department_rate';
+  /** The version that prices this change: valid on its creation date. */
+  current_version: { id: number; version: number; valid_from: string } | null;
+  /** The change's creation date (business date): the day its rates come from. */
+  pricing_date?: string | null;
+  /** "priced with v1, the earliest cost sheet": the change is older than the first version. */
+  pricing_note?: string | null;
+  /** The costing plant's second currency (Silao: MXN); null = one currency. */
+  local_currency?: string | null;
+  /** The change's version's exchange rates. */
+  fx_rates?: { pair: string; base: string; quote: string; rate: string }[];
+  latest_version: number | null;
+  stale: {
+    stale: boolean; review_months: number; latest_version: number | null;
+    reviewed_on: string | null; due_on: string | null; reason: string | null;
+  } | null;
+  machine_classes: { id: number; name: string; tonnage_min: number | null; tonnage_max: number | null }[];
+  machine_class_id: number | null;
+  default_machine_class_id: number | null;
+  effective_machine_class_id: number | null;
+  tonnage: number | null;
+  /** Where the default class comes from (the change's tools). */
+  tool_class_origin?: MachineClassOrigin | null;
+  /** Which tonnage sources the backend can ask. */
+  tonnage_sources?: { machinedb: boolean; twos: boolean };
+  /** Only on the answer of a tool tonnage refresh. */
+  tool_tonnage_refresh?: ToolTonnageRefresh;
+  /** Always {} since the cost sheet has one rate per department and plant. */
+  positions_by_department: Record<string, string[]>;
+  can_set_machine_class?: boolean;
+  /** May refresh the tool tonnage: may set the class, or Sales, Finance, admin. */
+  can_refresh_tonnage?: boolean;
 }
 
 export interface CostPositionIn {
@@ -601,6 +964,10 @@ export interface CostPositionIn {
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;
   notes?: string | null;
+  labour_position?: string | null;
+  machine_class_id?: number | null;
+  machine_id?: number | null;
+  trials?: number | null;
 }
 
 export interface CostingOfferIn {
@@ -618,7 +985,7 @@ export interface CostingOfferIn {
     typing older rows. Any string the backend serves is valid. */
 export type RiskType =
   | 'fill_issue' | 'dimensional_issue' | 'visual_surface'
-  | 'process_capability' | 'other' | (string & {});
+  | 'process_capability' | 'other' | (string & NonNullable<unknown>);
 
 /** A risk a department wrote down once to raise again. */
 export interface RiskTemplate {
@@ -670,6 +1037,11 @@ export interface ChangeConcern {
   severity?: RiskSeverity | null;
   /** Risk raised from a checklist row: that row's key (or free:<label>). */
   checklist_key?: string | null;
+  /** Who settled it ("solved by <name>"), and how it ended for a cancel vote:
+   *  settled by the PM, or withdrawn by its author. */
+  withdrawn_by?: number | null;
+  withdrawn_by_name?: string | null;
+  settled_as?: 'settled' | 'withdrawn' | null;
 }
 
 export interface ChangeMeeting {
@@ -684,13 +1056,20 @@ export interface ChangeMeeting {
   selected_department_ids: number[];
   /** The room's RASIC call, {department_id: letter}; absent on older meetings. */
   department_rasic?: Record<string, RasicLetter> | null;
+  /** Cost carrier as the room confirmed it (spec §16): customer or internal. */
+  cost_carrier?: CostCarrier | null;
   created_by: number;
   created_at: string;
   decided_by: number | null;
   decided_at: string | null;
 }
 
-export type RasicLetter = 'R' | 'A' | 'S' | 'C';
+/** R and A assess (blocking); S supports; C is consulted; I is informed
+ *  (an FYI task, no assessment). */
+export type RasicLetter = 'R' | 'A' | 'S' | 'C' | 'I';
+
+/** Who pays: the customer (customer relevant) or the plant itself. */
+export type CostCarrier = 'customer' | 'internal';
 
 export interface TransitionDeviation {
   id: number;
@@ -796,13 +1175,19 @@ export type ValidationCheckKey =
 export type ValidationCheckStatus = 'open' | 'passed' | 'failed';
 
 export interface ValidationCheck {
-  check_key: ValidationCheckKey | (string & {});
+  check_key: ValidationCheckKey | (string & NonNullable<unknown>);
+  /** The catalog's labels (backend validation_checklist). */
+  label_en?: string | null;
+  label_de?: string | null;
   status: ValidationCheckStatus;
   /** Seconds for `cycle_time`, grams for `weight`; null for the yes/no checks. */
   value?: number | null;
   note?: string | null;
   checked_by_name?: string | null;
   checked_at?: string | null;
+  /** No longer in the catalog: kept for the record when it was answered,
+   *  never owed. Every count and gate skips it (the backend does too). */
+  retired?: boolean;
 }
 
 export interface ValidationDepartmentState {
@@ -830,4 +1215,76 @@ export interface ValidationState {
   weight_ack_at?: string | null;
   weight_ack_by_name?: string | null;
   weight_ack_note?: string | null;
+}
+
+// --- GET /changes/{id}/stage-state (spec §16) ---------------------------------
+
+export interface StageDept {
+  department_id: number;
+  department_name?: string | null;
+  assessment_id?: number;
+  rasic_letter?: string;
+}
+
+export interface StageWait {
+  kind: string;
+  text: string;
+  target_tab?: string;
+  department_id?: number;
+  assessment_id?: number;
+  has_change_ppt?: boolean;
+  concern_ids?: number[];
+  missing?: string[];
+}
+
+export interface StageAssessment {
+  first_stage: number | null;
+  total: number;
+  submitted: number;
+  all_submitted: boolean;
+  waiting_on: StageDept[];
+  not_feasible: (StageDept & { has_change_ppt?: boolean })[];
+  declined_pending: (StageDept & { to_letter?: string | null })[];
+  verdicts: (StageDept & { verdict: string; verdict_label?: string | null; open_risks?: number })[];
+  open_risks: {
+    id: number; department_id: number | null; department_name?: string | null;
+    risk_type?: string | null; risk_type_label?: string | null;
+    severity?: number | null; note: string; checklist_key?: string | null;
+  }[];
+  routing_deviation_pending: boolean;
+  can_close: boolean;
+  /** Client side: a transition deviation to costing past a not-feasible answer. */
+  override?: 'pending' | 'approved' | null;
+}
+
+export interface StageEndState {
+  kind: 'rejected' | 'cancelled';
+  status: ChangeStatus;
+  closed: boolean;
+  stopped_at: ChangeStatus | null;
+  stopped_at_label?: string | null;
+  at?: string | null;
+  by?: number | null;
+  by_name?: string | null;
+  reason?: string | null;
+  label?: string | null;
+}
+
+export interface StageStateResponse {
+  change_id: number;
+  status: ChangeStatus;
+  status_label?: string;
+  /** {to_status: may the viewer} for every hop out of the current status. */
+  can_transition: Record<string, boolean>;
+  can_edit_impact: boolean;
+  impact_edit_needs_reason: boolean;
+  /** May the viewer record the scoping meeting and its decision (lead, PM, admin). */
+  can_record_meeting?: boolean;
+  lead_assigned: boolean;
+  title_auto: boolean;
+  assessment: StageAssessment | null;
+  routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;
+  end_state: StageEndState | null;
+  scope_change: { covered: boolean; offer_version?: number | null } | null;
+  waits: StageWait[];
 }

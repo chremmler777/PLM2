@@ -86,7 +86,9 @@ async def test_summary_shape_for_admin(client, admin_auth, seed, pnl_api_data):
     assert res.status_code == 200, res.text
     body = res.json()
     assert set(body.keys()) == {
-        "totals", "pipeline", "realized", "by_project", "by_branch", "count"}
+        "totals", "pipeline", "realized", "by_project", "by_branch", "count",
+        # grouped by costing currency (no FX): the top level is the main one
+        "currency", "currencies", "by_currency"}
     assert body["count"] == 2
 
 

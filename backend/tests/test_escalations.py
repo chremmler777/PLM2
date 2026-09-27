@@ -131,6 +131,8 @@ async def test_lead_escalations_roll_up(client, eng_auth, seed, session_factory,
         c.status = "approved"
         c.impact_confirmed_by = seed["engineer_id"]
         c.impact_confirmed_at = datetime.utcnow()
+        c.timing_validated_by = seed["engineer_id"]
+        c.timing_validated_at = datetime.utcnow()
         await s.execute(update(ChangeGate).where(ChangeGate.change_id == c.id)
                         .values(decision="yes"))
         await s.commit()
@@ -201,6 +203,8 @@ async def test_lead_escalations_no_double_count_for_backfilled_linked_row(
         c.status = "approved"
         c.impact_confirmed_by = seed["engineer_id"]
         c.impact_confirmed_at = datetime.utcnow()
+        c.timing_validated_by = seed["engineer_id"]
+        c.timing_validated_at = datetime.utcnow()
         await s.execute(update(ChangeGate).where(ChangeGate.change_id == c.id)
                         .values(decision="yes"))
         await s.commit()

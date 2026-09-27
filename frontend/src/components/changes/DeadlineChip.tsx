@@ -1,4 +1,6 @@
+import { Check, Clock } from 'lucide-react'
 import { t } from '../../i18n/cmLabels'
+import { daysUntil, formatCalendarDate } from '../../lib/format'
 import type { ChangeRequest } from '../../types/change'
 
 const STATE_CLASS: Record<string, string> = {
@@ -7,15 +9,31 @@ const STATE_CLASS: Record<string, string> = {
   overdue: 'bg-red-500/10 text-red-300 border-red-500/30',
 }
 
-export function DeadlineChip({ date, state }: { date: string | null; state: string | null }) {
+/** A due date relative to today, the same words in every list: "in 5 d", "today", "2 d overdue". */
+export function deadlineText(days: number): string {
+  if (days === 0) return t('tasks.dueToday')
+  return days > 0 ? t('tasks.dueIn').replace('{n}', String(days))
+    : t('tasks.dueOverdue').replace('{n}', String(Math.abs(days)))
+}
+
+export function DeadlineChip({ date, state, kind }: {
+  date: string | null; state: string | null
+  /** Named deadlines read as a sentence ("Release in 114 d"); lists keep the short chip. */
+  kind?: 'quote' | 'release'
+}) {
   if (!date) return null
-  const days = Math.ceil((new Date(date).getTime() - Date.now()) / 864e5)
-  const label = days >= 0 ? `${days}d` : `${Math.abs(days)}d over`
+  const days = daysUntil(date)
+  if (Number.isNaN(days)) return null
+  const what = kind === 'release' ? 'Release' : kind === 'quote' ? 'Quote' : null
+  const label = what
+    ? (days >= 0 ? `${what} in ${days} d` : `${what} ${Math.abs(days)} d overdue`)
+    : deadlineText(days)
   return (
     <span data-testid="deadline-chip"
-      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${STATE_CLASS[state ?? 'on_track']}`}
-      title={new Date(date).toLocaleDateString()}>
-      ⏱ {label}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs tabular-nums ${STATE_CLASS[state ?? 'on_track']}`}
+      title={formatCalendarDate(date)}>
+      {!what && <Clock aria-hidden="true" size={12} className="shrink-0" />}
+      {label}
     </span>
   )
 }
@@ -30,8 +48,9 @@ export function QuotedFactChip({ change }: { change: ChangeRequest }) {
       className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${
         ok ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
            : 'bg-red-500/10 text-red-300 border-red-500/30'}`}
-      title={change.required_by_date ? new Date(change.required_by_date).toLocaleDateString() : undefined}>
-      {ok ? `✓ ${t('deadline.quotedOnTime')}` : t('deadline.quotedLate')}
+      title={change.required_by_date ? formatCalendarDate(change.required_by_date) : undefined}>
+      {ok && <Check aria-hidden="true" size={12} className="shrink-0" />}
+      {ok ? t('deadline.quotedOnTime') : t('deadline.quotedLate')}
     </span>
   )
 }

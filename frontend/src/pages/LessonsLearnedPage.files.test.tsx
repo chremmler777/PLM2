@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LessonDetailModal } from './LessonsLearnedPage'
+import { formatDate } from '../lib/format'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -40,7 +41,7 @@ describe('Lesson evidence provenance', () => {
     wrap(<LessonDetailModal lessonId={1} onClose={() => {}} />)
     const lines = await screen.findAllByTestId('uploaded-by')
     expect(lines[0].textContent)
-      .toBe(`Rita RD · ${new Date('2026-07-02T00:00:00').toLocaleDateString()}`)
-    expect(lines[1].textContent).toBe(new Date('2026-07-03T00:00:00').toLocaleDateString())
+      .toBe(`Rita RD · ${formatDate('2026-07-02T00:00:00')}`)
+    expect(lines[1].textContent).toBe(formatDate('2026-07-03T00:00:00'))
   })
 })

@@ -7,10 +7,10 @@ import type {
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
-  CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
+  CostPosition, CostPositionIn, CostingOffer, CostingOfferIn, CostingContext,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
-  ValidationState, ValidationCheckKey,
+  ValidationState, ValidationCheckKey, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse, ImpactObjectsResponse,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -25,7 +25,42 @@ export const changesApi = {
     project_id: number; title: string; change_type: string;
     reason?: string; description?: string; priority?: string; lead_id?: number;
     customer_relevant?: boolean;
+    /** Mother-plant side track (spec §14). */
+    origin?: 'customer' | 'internal' | 'mother_plant';
+    mother_plant_name?: string; mother_plant_ref?: string; mother_plant_sop?: string;
+    /** The impacted parts in the same request, and which one leads (spec §16). */
+    impacted_part_ids?: number[]; lead_part_id?: number;
+    /** The title is composed from the lead item and follows it. */
+    title_auto?: boolean;
   }) => client.post<ChangeRequest>('/v1/changes', body).then((r) => r.data),
+
+  /** Who may lead the change: lead, PM members, admin (spec §16 P1 5). */
+  leadCandidates: (id: number) =>
+    client.get<LeadCandidate[]>(`/v1/changes/${id}/lead-candidates`).then((r) => r.data),
+  setLead: (id: number, leadId: number | null) =>
+    client.patch<ChangeRequest>(`/v1/changes/${id}`, { lead_id: leadId }).then((r) => r.data),
+
+  /** The department's unfinished checklist, kept server side (spec §16 P1 1). */
+  saveAssessmentDraft: (id: number, assessmentId: number, draft: Record<string, unknown>) =>
+    client.put(`/v1/changes/${id}/assessments/${assessmentId}/draft`, { draft })
+      .then((r) => r.data),
+
+  /** Everything the cockpit needs for the early stages (spec §16): waits,
+   *  the viewer's transition rights, the assessment round, the end state. */
+  stageState: (id: number) =>
+    client.get<StageStateResponse>(`/v1/changes/${id}/stage-state`).then((r) => r.data),
+
+  /** The cockpit in one request: stage-state, my-actions, gates, transition
+   *  deviations and concerns, each exactly as its own endpoint returns it. */
+  cockpit: (id: number) =>
+    client.get<{
+      change_id: number; stage_state: StageStateResponse; my_actions: MyActionsResponse
+      gates: Gate[]; deviations: TransitionDeviation[]; concerns: ChangeConcern[]
+    }>(`/v1/changes/${id}/cockpit`).then((r) => r.data),
+
+  /** Make an impacted item the lead; the composed title follows it. */
+  makeLead: (id: number, itemId: number) =>
+    client.post(`/v1/changes/${id}/impacted-items/${itemId}/make-lead`).then((r) => r.data),
 
   update: (id: number, body: Record<string, unknown>) =>
     client.patch<ChangeRequest>(`/v1/changes/${id}`, body).then((r) => r.data),
@@ -63,13 +98,23 @@ export const changesApi = {
     client.get<AssessmentObjectsResponse>(`/v1/changes/${id}/assessment-objects`)
       .then((r) => r.data),
 
+  // Served-by objects (tools, gauges, equipment) for the given parts, before
+  // any department is routed: the impact tree during capture and scoping.
+  impactObjects: (id: number, partIds: number[]) =>
+    client.get<ImpactObjectsResponse>(`/v1/changes/${id}/impact-objects`,
+      { params: { part_ids: partIds.join(',') } }).then((r) => r.data),
+
   submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string; effort_hours?: number; details?: Record<string, unknown> }) =>
     client.post(`/v1/changes/${id}/assessments`, body).then((r) => r.data),
 
   customerResponse: (
     id: number,
     response: string,
-    body?: { release_due_date?: string; release_due_reason?: string | null },
+    body?: {
+      release_due_date?: string; release_due_reason?: string | null;
+      /** Required by the server when the latest sent offer is past valid-until. */
+      expired_override_reason?: string | null;
+    },
   ) =>
     client.post(`/v1/changes/${id}/customer-response`, { response, ...body }).then((r) => r.data),
 
@@ -82,6 +127,9 @@ export const changesApi = {
   myActions: (id: number): Promise<MyActionsResponse> =>
     client.get(`/v1/changes/${id}/my-actions`).then((r) => r.data),
 
+  changelog: (id: number): Promise<ChangelogEntry[]> =>
+    client.get(`/v1/changes/${id}/changelog`).then((r) => r.data),
+
   myEscalations: (): Promise<Escalation[]> =>
     client.get('/v1/changes/my-escalations').then((r) => r.data),
 
@@ -93,6 +141,7 @@ export const changesApi = {
     opts?: {
       kind?: AttachmentKind; respondsToId?: number;
       concernId?: number; assessmentId?: number; costingOfferId?: number;
+      validationIssueId?: number;
     },
   ) => {
     const fd = new FormData();
@@ -107,6 +156,8 @@ export const changesApi = {
     if (opts?.assessmentId !== undefined) fd.append('assessment_id', String(opts.assessmentId));
     // A vendor quote belongs to the offer it prices, not to the change at large.
     if (opts?.costingOfferId !== undefined) fd.append('costing_offer_id', String(opts.costingOfferId));
+    // Evidence and customer mails filed into one validation issue.
+    if (opts?.validationIssueId !== undefined) fd.append('validation_issue_id', String(opts.validationIssueId));
     // The client sets a global Content-Type: application/json default; it must
     // be cleared here so the browser sets multipart/form-data WITH its boundary.
     // Otherwise FastAPI can't find the `file` field and returns 422.
@@ -169,6 +220,16 @@ export const changesApi = {
     client.put<CostPosition>(`/v1/changes/${id}/costing/positions/${pid}`, body).then((r) => r.data),
   deleteCostPosition: (id: number, pid: number) =>
     client.delete(`/v1/changes/${id}/costing/positions/${pid}`).then((r) => r.data),
+  /** Plant, currency, cost sheet version and stale state, machine classes (spec §15 phase 2). */
+  costingContext: (id: number) =>
+    client.get<CostingContext>(`/v1/changes/${id}/costing/context`).then((r) => r.data),
+  setMachineClass: (id: number, machineClassId: number | null) =>
+    client.put<CostingContext>(`/v1/changes/${id}/costing/machine-class`,
+      { machine_class_id: machineClassId }).then((r) => r.data),
+  /** Ask MachineDB and TWOS again for the tonnage of the change's tools. */
+  refreshToolTonnage: (id: number) =>
+    client.post<CostingContext>(`/v1/changes/${id}/costing/tool-tonnage/refresh`)
+      .then((r) => r.data),
 
   // Vendor offers under an external position — one row per vendor asked.
   addCostingOffer: (id: number, pid: number, body: CostingOfferIn) =>
@@ -226,8 +287,10 @@ export const changesApi = {
     client.get(`/v1/changes/${changeId}/impact-tree`).then((r) => r.data),
   suggestImpact: (changeId: number, partIds: number[]): Promise<{ suggested_part_ids: number[] }> =>
     client.post(`/v1/changes/${changeId}/impact-tree/suggest`, { part_ids: partIds }).then((r) => r.data),
-  applyImpactSelection: (changeId: number, partIds: number[]): Promise<{ impacted_part_ids: number[] }> =>
-    client.put(`/v1/changes/${changeId}/impacted-items`, { part_ids: partIds }).then((r) => r.data),
+  /** `reason` is required once the offer went out (scope_changed_after_quote). */
+  applyImpactSelection: (changeId: number, partIds: number[], reason?: string): Promise<{ impacted_part_ids: number[] }> =>
+    client.put(`/v1/changes/${changeId}/impacted-items`,
+      reason ? { part_ids: partIds, reason } : { part_ids: partIds }).then((r) => r.data),
   confirmImpact: (changeId: number): Promise<ChangeDetail> =>
     client.post(`/v1/changes/${changeId}/impact/confirm`).then((r) => r.data),
 
@@ -243,6 +306,7 @@ export const changesApi = {
     participants: MeetingParticipant[];
     notes?: string; selected_department_ids: number[];
     department_rasic?: Record<number, RasicLetter>;
+    cost_carrier?: CostCarrier;
   }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
   updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
@@ -313,6 +377,8 @@ export const changesApi = {
   addNegotiation: (id: number, body: {
     channel: NegotiationChannel; note: string;
     counter_price?: number | null; is_final?: boolean;
+    /** The offer version the round is about; the server defaults to the latest sent. */
+    offer_id?: number | null;
   }) => client.post<ChangeNegotiation>(`/v1/changes/${id}/negotiations`, body).then((r) => r.data),
   deleteNegotiation: (id: number, negotiationId: number) =>
     client.delete(`/v1/changes/${id}/negotiations/${negotiationId}`).then((r) => r.data),
@@ -376,7 +442,7 @@ export const changesApi = {
   // carries the note that says what went wrong.
   setValidationCheck: (id: number, body: {
     department_id: number;
-    check_key: ValidationCheckKey | (string & {});
+    check_key: ValidationCheckKey | (string & NonNullable<unknown>);
     status: 'passed' | 'failed';
     value?: number;
     note?: string;

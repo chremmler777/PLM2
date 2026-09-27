@@ -31,6 +31,13 @@ async def project_structure(session: AsyncSession, project_id: int) -> dict:
             (PartRelation.from_part_id.in_(list(by_id))) | (PartRelation.to_part_id.in_(list(by_id))))
         .order_by(PartRelation.relation_type, PartRelation.id))).scalars().all()
 
+    # Spec §17a: revisions still pending triage, flagged per article.
+    from app.models.revision_intake import CLOSED_STATUSES, RevisionIntake
+    waiting = {i.revision_id: i for i in (await session.execute(
+        select(RevisionIntake).where(
+            RevisionIntake.part_id.in_(article_ids),
+            RevisionIntake.activated_at.is_(None),
+            RevisionIntake.status.notin_(CLOSED_STATUSES)))).scalars().all()} if article_ids else {}
     revs_by_part: dict[int, list] = defaultdict(list)
     for r in revs:
         revs_by_part[r.part_id].append(r)
@@ -64,7 +71,10 @@ async def project_structure(session: AsyncSession, project_id: int) -> dict:
                 "status": r.status.value if hasattr(r.status, "value") else r.status,
                 "phase": r.phase.value if hasattr(r.phase, "value") else r.phase,
                 "parent_revision_id": r.parent_revision_id, "is_active": r.id == p.active_revision_id,
+                "intake_pending": r.id in waiting,
+                "intake_id": waiting[r.id].id if r.id in waiting else None,
             } for r in revs_by_part.get(p.id, [])],
+            "intake_pending": any(r.id in waiting for r in revs_by_part.get(p.id, [])),
             "related": sorted(related.get(p.id, []), key=lambda x: (x["relation_type"], x["part_number"])),
             "mirror_of": mirror_of.get(p.id),
             "mirrored_by": mirrored_by.get(p.id, []),

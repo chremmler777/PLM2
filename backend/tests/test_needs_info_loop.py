@@ -99,7 +99,7 @@ async def _departments(session_factory):
 async def _meeting(client, auth, cid, dept_ids):
     res = await client.post(f"/api/v1/changes/{cid}/meetings", json={
         "channel": "meeting", "participants": [{"name": "Eva"}],
-        "selected_department_ids": dept_ids}, headers=auth)
+        "selected_department_ids": dept_ids, "cost_carrier": "customer"}, headers=auth)
     assert res.status_code == 200, res.text
     return res.json()["id"]
 

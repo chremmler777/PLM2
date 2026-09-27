@@ -40,17 +40,40 @@ checked field-by-field. Do this before writing the formal description.
 
 ## 2. Stages
 
+```mermaid
+flowchart TD
+    A[captured] -->|kickoff gate, soft| B[scoping]
+    A -->|reject with reason| X[rejected]
+    B -->|proceed + impact lock HARD| C[in_assessment]
+    B -->|reject| X
+    C -->|not feasible| X
+    C --> D[costing]
+    D -->|customer change| E[quoting: Offer]
+    D -->|internal change: internal approval| H
+    E -->|offer v1 sent, auto| F[quoted: negotiation]
+    F -->|declined| X
+    F -->|accepted, unexpired + PM and Quality sign-off| H[approved: Timing]
+    H -->|timing validated, soft| I[in_implementation]
+    I --> J[in_validation: Release]
+    J -->|check failed: validation issue,<br/>routes 1 to 3 with a recovery group| I
+    J -->|checklist + lessons + no open issue, soft| K[released]
+    K -->|PM closes| M[closed]
+    MA[captured, origin mother_plant] --> MB[scoping-lite:<br/>impact lock + team informed]
+    MB -->|HARD: lock + inform list sent| H
+```
+
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here** | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
-| `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached | PM convenes; decision recorded by any member |
-| `in_assessment` | Routed departments answer feasibility + cost per the D1 matrix | Departments (RASIC) |
-| `costing` | Costs summed | — |
-| `quoted` | Offer to customer (customer-carried changes only) | Sales |
-| `approved` | Go decision | PM + Quality sign-off, or internal cost approval |
-| `in_implementation` | ECN revisions spawned, work done | — |
-| `in_validation` | Results checked | — |
-| `released` → `closed` | Change is live, then wrapped up | — |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
+| `scoping` | Team decides: proceed / needs info / reject. Impacted set picked and locked (first action there: Development picks and confirms; the lead and PM may pick too), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
+| `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
+| `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
+| `quoting` | Offer tab (Approval for internal changes): quote plan, price (cost basis, factors, risk weighting, changeover, piece price), document (CBD/rough, free fields, terms, PDF). Sending v1 auto-moves to `quoted` | Sales |
+| `quoted` | Offer sent, valid 30 days from receipt; negotiation rounds against an offer version, new versions with "what changed". Acceptance of a sent, unexpired version freezes the planned P&L | Sales |
+| `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", plan published, MS Project export. Mother plant: release deadline = their SOP | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
+| `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
+| `in_validation` | Release tab: validation checks plus the release checklist (16 items; 13 on a change that ended before the rework) and the lessons learned step; a failed check raises a validation issue (§3 "Validation issues") | departments, PM |
+| `released` → `closed` | Change is live (checklist + lessons done, no open issue); summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -80,8 +103,9 @@ Run these when discussing any stage's implementation:
   approved deviation. `change_service.py::_guard`.
   Rationale: Sales captures, the project team scopes — kickoff means handing
   over a request someone can actually work on. The impacted set is **no longer**
-  required here: it is defined during scoping (first PM action there) and stays
-  hard-locked before assessment, as before.
+  required here: it is defined during scoping (Development picks and confirms
+  it; the lead and PM may pick too) and stays hard-locked before assessment,
+  as before.
 
 ### Inside `scoping`
 - The onward move is **the meeting's call, not a button**. The cockpit offers no
@@ -183,7 +207,7 @@ Three typed containers, three responsibilities:
 | Artifact | Container | Responsible | Rule |
 |---|---|---|---|
 | **Change PPT** (internal explanation of the change) | per assessing department's bucket (`kind=change_ppt`) | assessing department | required for a `not_feasible` verdict (replaces the generic evidence gate) |
-| **RFQ** (external — supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | expected when "external modification" is ticked; reported, not gated |
+| **RFQ** (external: supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | required at submit when "external modification" is Yes (since 2026-09-27; .pdf, .xlsx, .xls, .docx, .msg, .eml) |
 | **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads, Sales owns the customer relationship | chronological tracked list, visible to all — the customer-communication record of the change |
 
 ### Assessment shape (2026-08-11, in build)
@@ -220,8 +244,16 @@ Three typed containers, three responsibilities:
   part required, internal modification, external modification, prototyping,
   matching/sampling. **Extras**: APQP → PFMEA update, control plan update;
   Development → article design update (internal vs customer-given). External
-  modification expects an **RFQ document** (costs & timing request to the
-  supplier; reported, not gated). **`not_feasible` hard-requires the Change
+  modification = Yes **requires two documents at submit** (2026-09-27): the
+  change presentation (`kind=change_ppt`; .ppt, .pptx, .pdf) and the change
+  RFQ (`kind=rfq`; .pdf, .xlsx, .xls, .docx, .msg, .eml), both filed against
+  the assessment. Declared per item in `REQUIRES_DOCUMENTS`
+  (`assessment_checklist.py`), served as `requires_documents`; the submit is
+  refused with "External modification needs the change presentation (PPT)
+  and the change RFQ attached before you submit" (naming only what is
+  missing), drafts save without them, and the row shows one upload slot per
+  document. Upload refuses other file types for those two kinds. No other
+  item declares a document. **`not_feasible` hard-requires the Change
   PPT** in the department's bucket (see the document table above).
   Checked items seed the department's costing grid (cycle time → lifecycle
   line, rest one-time; remark travels as the line note; deliberate deletions
@@ -373,6 +405,369 @@ costing is closed and offers **Reopen costing** to the same people who may
 close it; the reason is mandatory and recorded as `costing_reopened`. PM and
 admin may still fix any department's lines at any time (`may_write`).
 
+### Quote plan and the Offer tab (2026-09-25, spec `2026-09-25-ecr-costing-to-close.md`)
+
+`quoting` opens the Offer tab (labelled "Approval" for internal changes,
+which still holds the existing internal cost approval). Sales works two
+things there, in order:
+
+- **Quote plan**: a rough Gantt seeded from costing
+  (`ChangePlanService.seed`, template in `_template`), shared component
+  `GanttPlanner.tsx` in `plan: 'quote'` mode. It exists so timing is visible
+  before approval, not just after; the detailed plan at `approved` is a copy
+  of it (`ChangePlanService.seed` with `plan: 'detailed'`).
+- **The offer** (`change_offers`, `OfferService`, UI `OfferTab.tsx`): a
+  draft is created per change (`OfferService.create`, 409 with the existing
+  draft id if one is open), edited with `OfferService.patch` (deep-merge,
+  a list key replaces the whole list), and sent with `OfferService.send`.
+
+The offer's `data` covers three things the tab groups the same way
+(`OfferPriceSection.tsx`, `OfferDocumentSection.tsx`, `OfferTimingSection.tsx`,
+`OfferRisksSection.tsx`):
+- **Price**: `cost_lines` seeded from the costing summation
+  (`OfferService._costing_basis`, one line per department's internal money,
+  one per external position at the chosen or favourite vendor); optional
+  **factors** (percentage or amount, signed, e.g. overhead, margin,
+  engineering fee, discount as sign -1); **risk weighting**, one row per open
+  risk concern with its own percentage/amount and a `show` flag for the PDF;
+  **changeover**, running change or customer-pays-scrap with a scrap
+  quantity and unit price; **piece price** effect, optional, rows of
+  delta-per-piece times annual volume. Totals are computed server side only
+  (`offer_service.py::compute_totals`), the UI never recomputes them.
+- **Document**: `cbd_mode` detailed or rough (a free description instead of
+  the line-by-line table), plus free fields (label/value/amount) for
+  anything not covered by the structured data, terms (payment, incoterms,
+  delivery), a preview and the PDF.
+- **Timing**: weeks from order and key milestones taken from the quote plan,
+  a draft disclaimer, shown in the PDF's timing section.
+
+**Versions and what changed.** Sending a draft (`OfferService.send`) makes
+it `sent`, supersedes the previous sent version, sets `sent_at`/`received_at`
+(default today) and `valid_until = received_at + 30 days`, writes
+`change.quoted_price = total_one_time`, and moves `quoting -> quoted` through
+`ChangeService.transition` (changelog `offer_sent`). A second and later
+version needs a `change_note` (refused otherwise); `OfferService.serialize`
+computes a `diff` against the previous non-draft version (cost line amounts
+by key, factor/risk values, changeover, timing weeks, terms), which the UI
+shows as "what changed" on the offer history.
+
+**PDF** (`offer_pdf.py::render_offer_pdf`, A4, reportlab): letterhead, offer
+number and validity, recipient, scope of change, the price section (CBD
+table or rough description plus total), piece price effect, changeover,
+timing with a plan bar chart, risks marked `show`, and terms including the
+sentence "This offer is valid for 30 days from receipt". A draft renders
+with a DRAFT watermark. No em-dashes anywhere in the generated text.
+
+### Customer acceptance tied to the offer (2026-09-25)
+
+Acceptance now checks the offer, not just the change. `apply_customer_response`
+requires, when offers exist, that the **latest sent offer is not expired**
+(`OfferService.is_expired`, `valid_until` in the past) unless the caller
+supplies an `expired_override_reason`, which is recorded. Accepting sets
+`change.accepted_offer_id` and moves the change on as before (release
+deadline born here, unchanged); declining marks the offer `declined`.
+Negotiation rounds now carry an `offer_id` (defaults to the latest sent
+offer) so a round is tied to the version it was about
+(`change_negotiations.offer_id`). Legacy changes with no offers at all keep
+working exactly as before (acceptance with no sent offer is unchanged).
+
+### Timing validation at `approved` (2026-09-25)
+
+`approved` opens the Timing tab (`TimingTab.tsx`). The detailed plan is
+seeded from the quote plan on first entry; from then until "Timing
+validated" every plan editor's write bumps `change.plan_revision`
+(`ChangePlanService._bump`), so a department's confirmation goes stale the
+moment the plan changes under it.
+
+- **Team confirmation**: every required department (every department with
+  an R/A assessment row, plus Scheduling and Sales when they exist,
+  `ChangePlanService.required_department_ids`) posts `confirmed` or
+  `concern` (with a note) against the current revision
+  (`ChangePlanService.post_feedback`, panel `TeamFeedbackPanel.tsx`). Only
+  the latest row per department counts; a row whose `plan_revision` is
+  behind the current one shows as stale and does not count as confirmed.
+- **Baseline**: `ChangePlanService.validate_timing` stamps
+  `baseline_start`/`baseline_finish` on every detailed task,
+  `change.timing_validated_at/by`, changelog `timing_validated`. Refused
+  when the status is not `approved`/`in_implementation`, there are no
+  detailed tasks, validation still reports errors, any required department
+  has not confirmed at the current revision, or an idea block (a Sales
+  proposal, e.g. parallel bank build) is still in the detailed plan. It may
+  be re-run while `approved`/`in_implementation`, which resets the
+  baseline.
+- **Publish**: Sales (or lead/admin) publishes the validated plan to the
+  customer (`ChangeService.publish_bank_build_plan`, reused from the
+  existing bank-build feature, button "Publish plan to customer" in
+  `TimingTab.tsx`). The bank-build mode decision (running change vs
+  planned scrap, `ChangeService.set_bank_build`) sits alongside timing on
+  the same tab (`BankBuildCard`), predates this spec, and is unchanged by
+  it.
+- **MS Project export**: `GET /plan/export.xml` (`ChangePlanService.mspdi_xml`)
+  produces MSPDI XML that MS Project opens directly, with a baseline block
+  once timing is validated; `GET /plan/export.csv`
+  (`ChangePlanService.csv_export`) gives a plain CSV.
+
+`approved -> in_implementation` carries a **soft guard**
+(`ChangeService._guard`, `to_status == "in_implementation"`): "Timing not
+validated, every responsible team must confirm the detailed plan" when
+`change.timing_validated_at is None`. It applies only on the hop out of
+`approved` itself, not when resuming from `on_hold` or looping back from
+`in_validation`, both of which re-enter a plan that was already live.
+
+### Deviations after baseline (2026-09-25)
+
+Once timing is validated, the detailed plan stops being freely editable:
+`can_edit` is false, `can_edit_dates` stays true. Structural fields (name,
+kind, lane, department, predecessors, is_idea, sort order) are refused;
+`notes` stays editable; add/delete/auto-schedule are refused. A date or
+duration change on a baselined task needs a `reason` (400 without one) and a
+plan editor (`ChangePlanService._apply_dates`); it writes one
+`change_plan_deviations` row per changed task with the old/new dates,
+`slip_days` against that task's baseline end, and `finish_impact_days`
+against the plan finish before the edit (the same value on every deviation
+of one call), plus changelog `plan_deviation`. A date move no longer pushes
+successors automatically after baseline; moving a chain goes through the
+bulk `PATCH /plan/tasks` with one reason for the whole selection.
+
+Open deviations show in the cockpit's "Blocked by" list as information only,
+they never gate a transition. PM/Sales/lead/admin resolve each one
+(`DeviationsPanel.tsx`):
+- **Lock** (`ChangePlanService.lock_deviation`): accepted internally, no
+  customer impact recorded.
+- **Escalate** (`ChangePlanService.escalate_deviation`): Sales is telling
+  the customer; creates the existing stage-8 `ImplementationEscalation`
+  (direction `customer`) and marks the deviation escalated.
+
+### The tracker (`in_implementation`, 2026-09-25)
+
+The Timing tab stays active through `in_implementation` for progress work.
+`progress_pct`, `actual_start`, `actual_finish` are writable on the detailed
+plan only, status `in_implementation` only
+(`ChangePlanService._may_progress`): a plan editor writes any task, any
+other member of the task's own department writes only that task. A `PATCH`
+that mixes progress fields with anything else needs a plan editor, not just
+the department. Twice-weekly progress reports and time booking predate this
+spec and are unchanged; the deviation record (above) is what carries the
+at-risk signal, there is no separate flag.
+
+### Release checklist and lessons learned (`in_validation`, 2026-09-25)
+
+`in_validation` opens the Release tab (`ReleaseTab.tsx`), alongside the
+existing per-department validation checks.
+
+- **Release checklist**: 16 fixed items, keyed and department-owned, config
+  in code (`app/services/release_checklist.py::CHECK_KEYS/label_for/owner_for`).
+  Reworked 2026-09-26 (corrected the same day: "APQP confirms SPC, cycle
+  time comes from the tool engineer"): APQP owes `process_stable_apqp`
+  ("Process stable: SPC Cm > 1.67", one row, APQP alone), `surface_quality`,
+  `technical_quality`, `parts_measured` ("Measurements confirmed"),
+  `customer_approval` (PPAP documentation and customer approval, asked
+  once) and `control_plan`. The Tool Engineer owes `cycle_time_tool`
+  ("changed" with the new seconds, or "unchanged"; merged from
+  Manufacturing Engineer's `cycle_time_confirmed`; hinted with the Tool
+  Engineer's validation measurement), `equipment_updated` and
+  `weight_measured` (hinted when a validated weight exists). The Process
+  Engineer keeps the process details in the process database (PDB) and
+  owes no release row; Quality owns none either. Others: `index_updated`,
+  `drawing_released`, `spare_parts` (Development), `packaging_updated`
+  (Packaging Engineer), `erp_updated`/`stock_handled` (Scheduling),
+  `customer_informed` (Sales). The five new rows (`ADDED_LATER`) are left
+  off a change that ended before `PLM_RELEASE_ROWS_SINCE`
+  (`release_checklist.keys_for`; "ended" is `ended_at`: `released_at`,
+  else `cancelled_at` / `rejected_at` / `closed_at`, a finished change
+  without a stamp counts as before); such a change keeps the old wording
+  of the relabelled `parts_measured` and `customer_approval`
+  (`OLD_LABELS`). Retired rows (`RETIRED_CHECKS`: `cycle_time_confirmed`,
+  `documents_updated`, `process_parameters`, `process_fmea`,
+  `quality_samples`, `quality_control_plan`, and the Process Engineer's
+  `cycle_time` and `process_stable_pe` of the first 2026-09-26 version,
+  `FIRST_VERSION`) stay on an old change as they were where they were live
+  (a change that finished with the first version's `cycle_time` answered
+  keeps it counted and never gains `cycle_time_tool`, `SUCCESSOR_OF`: a
+  finished change never gains a row it was not released with), and
+  anywhere else an answer given to them shows read-only ("No longer
+  asked", `retired: true`) and is not counted (`retired_keys_for`). The cycle time
+  and the optional Cm have no column: they are rounded (seconds to 1
+  decimal, Cm to 2; the rounded Cm must exceed 1.67), and the rounded
+  value is written into the note and the changelog
+  (`release_checklist.answer_note`, `rounded_value`). The screen reads
+  numbers en-US and refuses an ambiguous or unreadable one with a message
+  instead of saving without it. Rows are written on first answer and
+  answered with `done`, `na` (note required) or reset to `open`
+  (`ReleaseService.set_check`, `ReleaseChecklist.tsx`) by a member of the
+  owner department, PM, lead or admin (`ReleaseService.may_answer`).
+  Future, not built: process engineering tasks will later be forwarded
+  from the PDB to PLM.
+- **Validation cycle time**: "Measured cycle time" (`cycle_time`, seconds)
+  is measured by the Tool Engineer only
+  (`validation_checklist.DEPARTMENT_CHECKS`, `CYCLE_TIME_DEPARTMENT`);
+  Tool Engineer, Manufacturing Engineer and Process Engineer still answer
+  "Tool sampled" and "Part measured". A cycle time Manufacturing or
+  Process Engineer recorded before stays readable, marked "No longer
+  asked" (`retired: true`), is never owed and never blocks the release;
+  it cannot be answered again, a new issue is not linked to it, and an
+  issue already linked to it closes with a note
+  (`ValidationIssueService.check_retired`).
+- **Lessons learned**: anyone on the change may add a lesson
+  (`ReleaseService.add_lesson`, creates a `LessonLearned` linked to the
+  change and its project). PM/lead/admin completes the step
+  (`ReleaseService.complete_lessons`, needs at least one lesson or a
+  `none_reason`), component `LessonsStep.tsx`.
+
+`in_validation -> released` carries a **soft guard**
+(`ChangeService._guard`, after the existing validation blocker and
+ready-to-go check): `ReleaseService.guard_reason` returns "Release checklist
+incomplete: n open" while any check is still `open`, else "Lessons learned
+step not done" while `lessons_done_at` is null.
+
+### The new soft guards, together
+
+Both new guards sit in `ChangeService._guard`, so no approved transition
+deviation can bypass them (that mechanism is reserved for the hard,
+unbypassable gates):
+- `approved -> in_implementation`: timing must be validated (this section).
+- `in_validation -> released`: release checklist complete and lessons step
+  done (previous section), checked after the pre-existing validation
+  blocker and ready-to-go check so the most concrete refusal wins.
+
+### Validation issues: the failure branch (2026-09-25, spec §12)
+
+A failed validation check becomes an issue `VI-n` (`change_validation_issues`,
+migration `090`), not just a bounce back. Shape, in order:
+- **Raise**: routed department member, PM, lead or admin, in `in_validation`
+  (or `in_implementation` after a loop back); a failed check offers "Raise
+  issue" prefilled, one open issue per failed check.
+- **Containment** (owner department, PM, lead): required before a route when
+  severity is 3.
+- **Root cause**: required before any route, except a concession the
+  customer accepts as-is.
+- **Route**, by PM or lead with a reason, 4-eyes (the decider is not the
+  raiser unless admin): 1 `internal_rework`, 2 `supplier_rework`, 3
+  `design_change` loop the change back to `in_implementation` with fix
+  actions and a recovery group in the plan; 4 `customer_concession` closes as
+  `accepted` only when Sales records `accept_deviation` **with a customer
+  mail filed** (hard rule), `require_fix` reopens the route; 5
+  `follow_up_change` spawns a new change at `captured` and marks the issue
+  `transferred`.
+- **Re-validation**: all fix actions done → `revalidation`; the linked check
+  answered `passed` closes the issue, a new `failed` reopens `fixing`.
+- **Guard**: `in_validation -> released` adds "n validation issues open"
+  (soft guard, after the checklist and lessons reasons).
+Code: `validation_issue_service.py`, `api/v1/changes/validation_issues.py`,
+`components/changes/validation/`. Changelog `validation_issue_*`.
+
+### Recovery timing and the escalation ladder (spec §12a)
+
+A fix route (1 to 3) adds a **recovery group** to the detailed plan: summary
+"Recovery VI-n", one block per fix action, "Re-validation VI-n", linked FS
+into the blocks that waited on the failed validation (SOP, customer
+approval), so scheduling pushes them. After the baseline every move is a
+deviation with reason "VI-n: <route reason>". When the recovery ends after
+the release deadline, Sales records the customer's `new_timing` (release
+deadline moved, audited as `release_deadline_set`) or `require_fix` (PM
+shortens the recovery); the recovery deviations are escalated together.
+
+Every issue has an **escalation level** with history
+(`change_validation_issue_escalations`):
+- **L1 department**: on raise; owner department + PM informed.
+- **L2 project**: automatic on severity 3, an overdue fix action, a recovery
+  past the baseline finish, or no route after 2 working days; PM + change
+  lead + Sales, Sales decides whether the customer is told.
+- **L3 management + customer**: automatic when the recovery ends after the
+  release deadline, an L2 is not acknowledged in 2 working days, or the
+  customer requires a fix on a concession; Sales informs the customer (mail
+  filed into the issue), management is notified; for a mother-plant change
+  the PM informs the mother-plant contact instead.
+Each level change writes a row, changelog `validation_issue_escalated`, a
+notification and an "Acknowledge escalation" action; manual escalation needs
+a reason; de-escalation only by closing or by the PM with a reason.
+
+### P&L: offer vs doing (spec §13)
+
+Every change compares the offer with what happened
+(`GET /api/v1/pnl/changes/{id}/offer-vs-actual`, cost roles only). Planned
+figures (revenue, internal, external, scrap) are **frozen at customer
+acceptance** or internal approval in the accepted offer's `_snapshot.pnl`
+(older changes fall back to current costing, basis `costing`). Actuals come
+from booked hours x department rate, `change_actual_costs` entries
+(migration `091`) and validation-issue costs by bearer (internal = our cost,
+supplier = recoverable, customer = revenue once quoted). The result carries
+planned and actual margin, variance and the timing slip. Touchpoints: planned
+at costing and acceptance; actual at implementation, validation and release
+(the release summary uses the same card). Code: `pnl_service.py`,
+`api/v1/changes/actual_costs.py`, `components/changes/pnl/`.
+
+### Mother-plant changes (spec §14, to build)
+
+Changes engineered and commercially handled by the mother plant:
+`change_requests.origin = mother_plant`, `mother_plant_name` (dropdown,
+default **KTX Weissenburg (WUG)**, second **KTX Solingen**, list in
+`app/services/mother_plants.py`), `mother_plant_ref`, `mother_plant_sop`.
+- **Flow**: `captured -> scoping -> approved -> in_implementation ->
+  in_validation -> released -> closed`. No assessment, costing, offer or
+  quote deadline (`customer_relevant` stays false).
+- **Scoping-lite**: impact lock (Development) as usual, then "Send
+  information" to the chosen departments: one `change_info_receipts` row
+  each and a "Read and understood" task; open receipts show in Blocked by as
+  information, not a gate.
+- **Gate**: `scoping -> approved` only for origin `mother_plant`, hard-gated
+  on the impact lock and the inform list being sent.
+- **Approved**: `release_due_date = mother_plant_sop` (reason "Mother plant
+  timing"); detailed plan from their MS Project file, else empty with the SOP
+  milestone. Timing as usual, with an "Inform mother plant" stamp instead of
+  the customer publish; escalation L3 informs the mother-plant contact via
+  the PM. P&L: actual local costs only (basis `none`).
+
+### Revision intake and the engineering review (spec §17, built)
+
+Every new customer index is captured and triaged: `revision_intakes`
+(migration 096). A new major arriving through a gated path (customer package
+with a `batch_id`, customer data, the upload dialog's "next customer data",
+promote) is **pending**: status `in_review`, `parts.active_revision_id` not
+moved, the BOM tree and the viewer fall back past it. Import scripts
+(WinCarat, Brose, the 1994 resets) call `receive_customer_data` without an
+`intake_source` and bypass the gate.
+- **Triage** (Development, acts-as aware, admin), alone, route + reason
+  (required for `administrative` and for any route other than the suggested
+  one). Suggested: first data on an RFQ part `administrative`; official data
+  or a series part `full_ecr`; else `engineering_review`.
+  - `full_ecr`: a new customer change in `captured`, lead item = the part,
+    the pending index as the item's `resulting_revision_id` (the ECN spawn
+    skips it).
+  - `attach_ecr`: the same link on an open change of the project; refused
+    from `in_validation` on.
+  - `engineering_review`: origin `engineering_review`, starts at `scoping`,
+    lead = the decider. Development locks the impact; the lock asks
+    Development, Packaging Engineer (articles) and the owners of the served
+    objects (`ChangeService.served_objects`: tools, stations/EOAT, gauges).
+    Each answers "no impact" / "impact" (note required). All "no impact":
+    the index is activated, the change `released` and `closed`. Any impact:
+    Development escalates (audited) to a full customer ECR in scoping; the
+    answers stay on its Review tab. No other status hop is allowed.
+  - `administrative`: activated now.
+- **Activation** is one helper (`RevisionIntakeService.activate`), shared
+  with `ChangeService.release`: pointer, `approved`, `supersedes`, and a
+  promotion's "approved / siblings rejected" happen only now.
+- **Superseding**: a newer index for a part with a pending one archives the
+  old one (intake `superseded`), unless the pending one is linked to a live
+  change: then the receive is refused (409) with the change named.
+- Release checklist hints "index updated" and "drawing and 3D data
+  released" from the linked revisions. My Tasks: triage (Development) and
+  open review answers (`GET /v1/intakes/my`).
+
+### The tab structure (2026-09-25)
+
+Tabs, in order: Overview, Scoping, Impacted, Assessments, Costing, Offer
+(Approval for internal changes), Timing, Release, then the governance group
+D1, Audit. `costing`, `offer`, `timing`, `release` each unlock at their own
+status (`offer` unlocks already at `costing`, so the quote plan can be
+prepared while costing still runs); the active tab follows the change's
+current status (`quoting`/`quoted -> offer`, `approved`/`in_implementation
+-> timing`, `in_validation`/`released -> release`). Old links still work: a
+`target_tab` of `commercial` resolves to `costing` or `offer` by status,
+`implementation` resolves to `timing` or `release` by status
+(`changeStatus.ts::resolveChangeTab`).
+
 ### Risk vocabulary: coded baseline + the department's own additions
 - Coded per department in `app/services/risk_types.py` (own types, then the
   common timing/cost/other). Legacy moulding keys stay valid for everyone.
@@ -451,7 +846,19 @@ only), `scoping` = Project Manager, impact lock = **Development only — no
 admin shortcut**; an admin who needs to lock a set does it through acts-as
 (`X-Acts-As-Department: <Development>`), so the department is on the record
 rather than the admin bypass (`ChangeService.user_can_confirm_impact`),
-`in_assessment` = routed departments per D1. UI shows the responsible role as
+`in_assessment` = routed departments per D1.
+
+**Who edits the impacted set** (`EarlyStageService.impact_edit_refusal`, the
+same rule behind `can_edit_impact` on the stage state and every impacted-items
+endpoint: add, remove, apply the tree selection, seed, make lead):
+Development members (acts-as aware, the same check as the confirm) pick the
+set themselves at `scoping` while it is not locked, then confirm it; they do
+not wait for PM to pick first. The change lead, Project Management and admin
+edit it at any open stage. Once Development has confirmed, only the lead, PM
+or admin can edit, and their edit clears the confirmation (the reopen);
+Development then confirms again. From `in_implementation` on the set is
+frozen for everyone. Every add and remove is in the changelog with the
+user and the part number. UI shows the responsible role as
 a badge on the stage (`StageResponsibleBadge.tsx`).
 
 **Acts-as (admin testing):** an admin can pick any role from a header dropdown
@@ -504,6 +911,15 @@ status change: `rejected`, `reopened`, `concern_raised`, `concern_withdrawn`
 (with resolution note for department concerns), `scoping_meeting_decided`,
 `impacted_lead_changed`, `title_backfilled`, `release_deadline_set`,
 `quote_deadline_pushback`, `customer_response_recorded`.
+
+Costing-to-close (2026-09-25) adds: `plan_seeded`, `plan_task_added`,
+`plan_task_updated`, `plan_task_removed`, `plan_feedback`,
+`timing_validated`, `plan_deviation`, `deviation_locked`,
+`deviation_escalated` (plan/timing, `change_plan_service.py`);
+`offer_created`, `offer_sent`, `offer_received` (offer,
+`offer_service.py`, customer acceptance/decline still write the existing
+`customer_response_recorded`); `release_check`, `lesson_added`,
+`lessons_completed` (release, `release_service.py`).
 
 An auditor asking "who objected, and what was done about it" is answered by the
 concern rows plus the meeting decision that resolved them — not by inference

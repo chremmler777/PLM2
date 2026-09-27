@@ -2,11 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AuditTimeline from './AuditTimeline'
+import { formatDate } from '../../lib/format'
 import { auditApi } from '../../api/audit'
 
 vi.mock('../../api/audit', () => ({
   auditApi: { list: vi.fn(), verify: vi.fn(), downloadCsv: vi.fn() },
 }))
+vi.mock('../../api/changes', () => ({
+  changesApi: { changelog: vi.fn().mockResolvedValue([]) },
+}))
+import { changesApi } from '../../api/changes'
+import { formatDateTime } from '../../lib/format'
 
 const entry = (over: Record<string, unknown>) => ({
   id: 1, entity_type: 'change', entity_id: 7, action: 'status_changed',
@@ -54,10 +60,29 @@ describe('AuditTimeline', () => {
     expect(await screen.findByText('Dana Lee')).toBeDefined()
     expect(screen.getByText('Sam Ito')).toBeDefined()
     // Human-readable payload, no braces/quotes/keys-as-JSON
-    expect(screen.getByText(/captured → in_assessment/)).toBeDefined()
+    expect(screen.getByText(/Captured → In Assessment/)).toBeDefined()
     expect(screen.getByText(/deck\.pptx/)).toBeDefined()
     expect(screen.queryByText(/\{/)).toBeNull()
     expect(screen.queryByText(/"filename"/)).toBeNull()
+  })
+
+  it('names the department an admin acted as, and reads resolved values in words', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 4, action: 'impacted_added', user_name: 'admin', real_user_name: 'Chris D',
+              acting_as_department_name: 'Project Manager',
+              old_values: null, new_values: '{"part_id": 2267}', display_values: { part_id: '3457-10' } }),
+      entry({ id: 3, action: 'scoping_meeting_recorded', user_name: 'Dana Lee',
+              old_values: null, new_values: '{"meeting_id": 27, "channel": "email"}' }),
+      entry({ id: 2, action: 'deadline_set', user_name: 'Dana Lee',
+              old_values: null, new_values: '"2026-09-30 23:59:59"' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect((await screen.findByTestId('audit-acting')).textContent).toBe('(as Project Manager)')
+    expect(screen.getByText(/Chris D/)).toBeDefined()
+    expect(screen.getByText(/part: 3457-10/)).toBeDefined()
+    expect(screen.queryByText(/2267/)).toBeNull()
+    expect(screen.getByText(/meeting: #27, channel: E-?mail/i)).toBeDefined()
+    expect(screen.getByText(/30 Sep 2026, 23:59/)).toBeDefined()
   })
 
   it('falls back to "System" when there is no actor', async () => {
@@ -80,40 +105,38 @@ describe('AuditTimeline', () => {
   it('filters by entity type and exports', async () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
-    fireEvent.click(screen.getByRole('button', { name: 'wf_instance' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Wf instance' }))
     expect(screen.queryByText('gate decided')).toBeNull()
     expect(screen.getByText('wf started')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }))
     expect(auditApi.downloadCsv).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007' })
   })
 
-  it('groups entries under UTC day headings suffixed "(UTC)"', async () => {
+  it('groups entries under a local-day heading with no "(UTC)" suffix', async () => {
     vi.mocked(auditApi.list).mockResolvedValue([
-      // 23:30 UTC on 2026-07-01 - a local-timezone browser (e.g. UTC+2)
-      // would incorrectly bucket this into 2026-07-02 if grouping used
-      // local time instead of UTC.
-      entry({ id: 1, action: 'gate_decided', timestamp: '2026-07-01T23:30:00Z' }),
+      entry({ id: 1, action: 'gate_decided', timestamp: '2026-07-01T10:00:00Z' }),
     ])
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
-    expect(screen.getByText(/\(UTC\)/)).toBeDefined()
+    expect(screen.queryByText(/\(UTC\)/)).toBeNull()
+    const expectedDay = formatDate('2026-07-01T10:00:00Z')
+    expect(screen.getByText(expectedDay)).toBeDefined()
   })
 
-  it('buckets entries straddling midnight UTC into two distinct day headings', async () => {
-    // One entry 30 minutes before midnight UTC on 2026-07-01, one 30 minutes
-    // after - these must land on two DIFFERENT UTC calendar days. A
-    // local-timezone (non-UTC) grouping bug would merge them into one
-    // heading for browsers ahead of UTC, or could otherwise miscompute the
-    // date. Assert both expected UTC-dated headings are present.
+  it('buckets entries straddling local midnight into two distinct day headings', async () => {
+    // The test environment pins TZ=Europe/Berlin (UTC+2 in July), where local
+    // midnight falls at 22:00 UTC. Naive timestamps (no "Z") are read as UTC
+    // by parseApiDateTime, so 21:30 UTC / 22:30 UTC straddle that boundary:
+    // 23:30 local on 2026-07-01 and 00:30 local on 2026-07-02.
     vi.mocked(auditApi.list).mockResolvedValue([
-      entry({ id: 2, action: 'gate_decided', timestamp: '2026-07-02T00:30:00Z' }),
-      entry({ id: 1, action: 'wf_started', timestamp: '2026-07-01T23:30:00Z' }),
+      entry({ id: 2, action: 'gate_decided', timestamp: '2026-07-01T22:30:00' }),
+      entry({ id: 1, action: 'wf_started', timestamp: '2026-07-01T21:30:00' }),
     ])
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
 
-    const expectedDay1 = `${new Date('2026-07-01T23:30:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
-    const expectedDay2 = `${new Date('2026-07-02T00:30:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+    const expectedDay1 = formatDate('2026-07-01T21:30:00Z')
+    const expectedDay2 = formatDate('2026-07-01T22:30:00Z')
     expect(expectedDay1).not.toBe(expectedDay2)
     expect(screen.getByText(expectedDay1)).toBeDefined()
     expect(screen.getByText(expectedDay2)).toBeDefined()
@@ -132,5 +155,72 @@ describe('AuditTimeline', () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
     expect(screen.queryByText(/newest 1000/)).toBeNull()
+  })
+
+  it('reads the change trail by change id and tells a global break from its own (spec §16)', async () => {
+    vi.mocked(auditApi.verify).mockResolvedValue({
+      valid: false, checked: 42, first_broken_id: 9, correlation_entries: 2, correlation_ok: false,
+      change_entries: 2, change_ok: true, change_first_broken_id: null, break_scope: 'global',
+    })
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    const badge = await screen.findByTestId('audit-chain')
+    expect(badge.textContent).toContain('global chain is broken at #9, outside this change')
+    expect(auditApi.list).toHaveBeenCalledWith(expect.objectContaining({ change_id: 7 }))
+    expect(auditApi.verify).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007', change_id: 7 })
+  })
+
+  it('flags a break inside the change\'s own entries in red', async () => {
+    vi.mocked(auditApi.verify).mockResolvedValue({
+      valid: false, checked: 42, first_broken_id: 2, change_entries: 2, change_ok: false,
+      change_first_broken_id: 2, break_scope: 'change',
+    })
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    const badge = await screen.findByTestId('audit-chain')
+    expect(badge.textContent).toContain("broken inside this change's entries (at #2)")
+    expect(badge.className).toContain('red')
+  })
+
+  it('shows audit values and entity types in words, days as dd.mm.yyyy', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 4, action: 'field_changed', old_values: '{"verdict": "pending"}',
+        new_values: '{"verdict": "feasible_with_conditions"}', entity_type: 'change_assessment' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    expect(await screen.findByText(/verdict: Not answered yet → verdict: Feasible with conditions/)).toBeDefined()
+    expect(screen.getByText('1 Jul 2026')).toBeDefined()
+    expect(screen.getAllByText(/Change assessment/).length).toBeGreaterThan(0)
+  })
+
+  it('names what an id refers to, drops ids a name already says, and reads moments in local time', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 5, action: 'back_to_scoping', old_values: null,
+        new_values: '{"superseded_assessment_ids": [258, 259]}' }),
+      entry({ id: 6, action: 'assessment_superseded', new_values: null,
+        old_values: '{"assessment_id": 258, "department_id": 28, "department_name": "Development", '
+          + '"submitted_at": "2026-09-25T12:17:00"}' }),
+      entry({ id: 7, action: 'scoping_meeting_recorded', old_values: null,
+        new_values: '{"meeting_id": 41, "channel": "meeting"}' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect(await screen.findByText(/superseded assessments: #258, #259/)).toBeDefined()
+    const superseded = screen.getByText(/assessment: #258/).textContent ?? ''
+    expect(superseded).toContain('department name: Development')
+    expect(superseded).not.toContain('department:')
+    expect(superseded).toContain(`submitted at: ${formatDateTime('2026-09-25T12:17:00')}`)
+    expect(screen.getByText(/meeting: #41/)).toBeDefined()
+  })
+
+  it('shows the reason back to scoping was taken with', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 5, action: 'back_to_scoping', old_values: null, timestamp: '2026-09-25T12:17:30',
+        new_values: '{"superseded_assessment_ids": [258]}' }),
+    ])
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 1, action: 'back_to_scoping', action_description: 'Back to scoping', performed_by: 1,
+        performed_at: '2026-09-25T12:17:31', notes: 'Hole cannot move, rescope with Tooling' },
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    expect((await screen.findByTestId('audit-reason-5')).textContent)
+      .toBe('(reason: Hole cannot move, rescope with Tooling)')
   })
 })

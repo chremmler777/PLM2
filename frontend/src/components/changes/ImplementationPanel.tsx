@@ -1,19 +1,17 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import type { ImplementationItem } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
 import ReasonDialog from './ReasonDialog';
 import CADUploader from '../CADUploader';
 import RevisionWorkflowSection from '../workflows/RevisionWorkflowSection';
+import { toastError } from '../../lib/apiError'
+import { invalidateRevisionWorkflow } from '../../hooks/queries/useWorkflows'
 
 interface Props {
   changeId: number;
 }
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 export default function ImplementationPanel({ changeId }: Props) {
   const qc = useQueryClient();
@@ -32,11 +30,12 @@ export default function ImplementationPanel({ changeId }: Props) {
   const sign = useMutation({
     mutationFn: ({ item, reason }: { item: ImplementationItem; reason: string }) =>
       changesApi.signNoGeometryChange(item.part_id, item.revision_id!, reason),
-    onSuccess: () => {
+    onSuccess: (_data, { item }) => {
       setSignTarget(null);
       invalidate();
+      invalidateRevisionWorkflow(qc, item.revision_id);
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
+    onError: (e: unknown) => toastError(e, 'Could not sign off the revision'),
   });
 
   if (isLoading || !data) return <div className="text-slate-400 text-sm">…</div>;
@@ -64,7 +63,7 @@ export default function ImplementationPanel({ changeId }: Props) {
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-slate-100 font-medium">
                 {item.part_name}{' '}
-                <span className="text-slate-500 text-xs">{item.part_number}</span>
+                <span className="text-slate-400 text-xs">{item.part_number}</span>
               </span>
               {item.revision_name ? (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-purple-900 text-purple-100">
@@ -97,6 +96,12 @@ export default function ImplementationPanel({ changeId }: Props) {
                   : t('impl.evidenceMissing')}
               </span>
             </div>
+
+            {!item.ready && (item.waiting_on?.length ?? 0) > 0 && (
+              <p data-testid={`impl-needs-${item.item_id}`} className="mt-2 text-xs text-amber-300">
+                Needs: {item.waiting_on!.join(', ')}
+              </p>
+            )}
 
             {!evidenceOk && item.revision_id !== null && (
               <div className="mt-3 flex items-center gap-2">
@@ -145,6 +150,12 @@ export default function ImplementationPanel({ changeId }: Props) {
                     <RevisionWorkflowSection
                       revisionId={item.revision_id}
                       revisionName={item.revision_name ?? undefined}
+                      // A task done or the workflow canceled changes the
+                      // progress here and the viewer's open actions.
+                      onChanged={() => {
+                        invalidate();
+                        qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] });
+                      }}
                     />
                   </div>
                 )}
@@ -157,7 +168,7 @@ export default function ImplementationPanel({ changeId }: Props) {
       <ReasonDialog
         open={signTarget !== null}
         title={t('impl.signNoGeometry')}
-        label={t('impl.signNoGeometry')}
+        label={t('impl.noGeometryReason')}
         submitLabel="Confirm"
         onSubmit={(reason: string) =>
           signTarget && sign.mutate({ item: signTarget, reason })

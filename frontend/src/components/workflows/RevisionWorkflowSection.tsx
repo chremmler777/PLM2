@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../../lib/apiError';
 import { LoadingSkeleton } from '../common/LoadingSkeleton';
 import ConfirmModal from '../common/ConfirmModal';
 import StartWorkflowModal from './StartWorkflowModal';
@@ -19,9 +20,13 @@ import { WfDecision } from '../../types/workflow';
 interface Props {
   revisionId: number;
   revisionName?: string;
+  /** Called after a task was completed, the workflow canceled or started:
+   *  the owner refreshes what depends on it (a change's implementation
+   *  progress and the viewer's open actions). */
+  onChanged?: () => void;
 }
 
-export default function RevisionWorkflowSection({ revisionId, revisionName }: Props) {
+export default function RevisionWorkflowSection({ revisionId, revisionName, onChanged }: Props) {
   const { data: instance, isLoading } = useRevisionWorkflow(revisionId);
   const completeMutation = useCompleteTask(instance?.id ?? 0, revisionId);
   const cancelMutation = useCancelWorkflow(instance?.id ?? 0, revisionId);
@@ -33,15 +38,18 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
     completeMutation.mutate(
       { taskId, data: { decision, notes } },
       {
-        onSuccess: () =>
+        onSuccess: () => {
           toast.success(
             decision === 'approved'
               ? 'Task approved'
               : decision === 'waived'
                 ? 'Task waived'
                 : 'Task rejected',
-          ),
-        onError: () => toast.error('Failed to complete task'),
+          );
+          onChanged?.();
+        },
+        // The backend says why (not your department, a later stage, ...).
+        onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to complete task')),
       },
     );
   };
@@ -53,8 +61,9 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
         onSuccess: () => {
           setConfirmCancel(false);
           toast.success('Workflow canceled');
+          onChanged?.();
         },
-        onError: () => toast.error('Failed to cancel workflow'),
+        onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to cancel workflow')),
       },
     );
   };
@@ -62,7 +71,7 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 className="text-sm font-semibold text-slate-200 mb-3">
-        Workflow{revisionName ? <span className="text-slate-400 font-normal"> — {revisionName}</span> : null}
+        Workflow{revisionName ? <span className="text-slate-400 font-normal">: {revisionName}</span> : null}
       </h3>
 
       {isLoading ? (
@@ -93,6 +102,7 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
           onStarted={() => {
             setShowStartModal(false);
             toast.success('Workflow started');
+            onChanged?.();
           }}
           onCancel={() => setShowStartModal(false)}
         />

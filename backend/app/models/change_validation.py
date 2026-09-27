@@ -62,3 +62,32 @@ class ValidationCheck(Base):
     @property
     def is_answered(self) -> bool:
         return self.status in VALIDATION_WRITE_STATUSES
+
+
+# Stage 10 — the release checklist. Validation proved the part is right; the
+# release checklist proves the paperwork around it moved with it (index,
+# drawings, ERP, packaging, the customer told). 'na' is an answer, not a skip:
+# it needs a note saying why the item does not apply to this change.
+RELEASE_CHECK_STATUSES = ("open", "done", "na")
+
+
+class ChangeReleaseCheck(Base):
+    """One item of the release checklist on one change (written on its first answer)."""
+    __tablename__ = "change_release_checks"
+    __table_args__ = (
+        UniqueConstraint("change_id", "check_key", name="uq_change_release_check"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(
+        ForeignKey("change_requests.id"), index=True)
+    check_key: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(
+        String(10), default="open", server_default="open")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Owner, resolved from the catalog's department name at seeding time.
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wf_departments.id"), nullable=True)
+    checked_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

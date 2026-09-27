@@ -15,21 +15,49 @@ export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   costing: 'role.team',
   quoting: 'role.sales',
   quoted: 'role.sales',
-  // The go/no-go at approval is the customer's — the badge keeps every
-  // stage on the path owned.
-  approved: 'role.customer',
+  // Once approved the open work is the detailed timing: every responsible
+  // team confirms its part of the plan (spec 2026-09-25).
+  approved: 'role.team',
   in_implementation: 'role.team',
   in_validation: 'role.team',
   released: 'role.pmShort',
 }
 
-export function StageResponsibleBadge({ status }: { status: ChangeStatus }) {
-  const key = STAGE_RESPONSIBLE[status]
+/**
+ * The engineering review (origin engineering_review, spec §17) is
+ * Development's light track: it comes from the intake triage, Development
+ * locks the impact and collects the answers, and the release is automatic
+ * once every department answered "no impact".
+ */
+export const REVIEW_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
+  captured: 'role.developmentIntake',
+  scoping: 'role.development',
+  released: 'role.development',
+}
+
+/**
+ * A change from KTX Weissenburg / Solingen (origin mother_plant, spec §14) is
+ * started by Project Management, not Sales: the capture is theirs, and so
+ * is the scoping (informing the team). The rest is the standard track.
+ */
+export const MOTHER_PLANT_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
+  ...STAGE_RESPONSIBLE,
+  captured: 'role.pmShort',
+}
+
+export function stageResponsibleKey(status: ChangeStatus, origin?: string | null): string | undefined {
+  const table = origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE
+    : origin === 'mother_plant' ? MOTHER_PLANT_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE
+  return table[status]
+}
+
+export function StageResponsibleBadge({ status, origin }: { status: ChangeStatus; origin?: string | null }) {
+  const key = stageResponsibleKey(status, origin)
   if (!key) return null
   return (
-    <span data-testid="stage-responsible" title={t('responsible.label')}
-      className="inline-flex items-center rounded bg-fuchsia-900/60 text-fuchsia-200 px-1 py-0 text-[10px] leading-tight font-medium align-middle">
-      {t(key)}
+    <span data-testid="stage-responsible" title={`${t('responsible.label')}: ${t(key)}`}
+      className="inline-flex items-center rounded bg-fuchsia-900/60 text-fuchsia-200 px-1.5 py-px text-[11px] leading-tight font-medium align-middle">
+      <span className="sr-only">{t('responsible.label')}: </span>{t(key)}
     </span>
   )
 }

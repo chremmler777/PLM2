@@ -54,7 +54,7 @@ describe('EscalationsCard', () => {
     ])
     wrap(<EscalationsCard />)
     expect(await screen.findByText(/at risk/)).toBeDefined()
-    expect(screen.getByText(/12\.0?7\.2026/)).toBeDefined()
+    expect(screen.getByText(/12 Jul 2026/)).toBeDefined()
     expect(screen.queryByText(/-9d/)).toBeNull()
   })
 
