@@ -163,7 +163,12 @@ takes comments and flags like the worksheet cells.
 - **Phase:** tools run their own phases, **rfq → dfm → preseries → series**
   (articles: rfq → nominated → series). An admin moves a tool on with
   **Mark <next phase>** next to the phase on the tool page; each move is in
-  the changelog. All 1994 tools are in **dfm** since 2026-09-29.
+  the changelog. All 1994 tools are in **dfm** since 2026-09-29. To move
+  all tools of a project one step at once: `backend/scripts/set_project_tool_phase.py
+  --project <code> --phase <phase>` (dry run by default, `--apply` writes).
+- **Toolmaker** is picked from the supplier list. A toolmaker that is not in
+  the list yet is added on the **Suppliers** page first. All 1994 tools are
+  built at **FZ Tools** (set 2026-09-29).
 - **Machine** is free text: the press the tool is planned on. It is not the
   press MachineDB has assigned to the tool (that one feeds costing through
   the tonnage sync).
