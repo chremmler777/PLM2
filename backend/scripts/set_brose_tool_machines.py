@@ -7,9 +7,10 @@ by default.
     docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
         python scripts/set_brose_tool_machines.py [--apply]
 
-Picks read from RFQ2 prod on 2026-09-29, by RFQ2's own rule (ToolCardV2):
-every press in machine_picks (the candidates chosen in the layout), in pick
-order, else the single machine_pick. RFQ2 names a press
+Picks read from RFQ2 prod on 2026-09-29: of the presses RFQ2 picked
+(machine_picks, else the single machine_pick, as ToolCardV2 reads them) the
+one of the smallest machine class (clamping force), on a tie the lowest
+machine number. One press per tool. RFQ2 names a press
 "KM 350-1", a dash, "KM KM 350/2000 CX" (machine, manufacturer, model); stored here as
 "KM 350-1 (KM 350/2000 CX)", with " (no fit)" where the layout says the tool
 does not fit that press.
@@ -25,26 +26,25 @@ from app.models.entities import Project
 from app.models.part import Part
 from app.services.part_service import ChangelogService
 
-# (project code, tool part_number) -> the presses RFQ2 picked; RFQ2 tooling_calc id in the comment
+# (project code, tool part_number) -> smallest-class press RFQ2 picked; RFQ2 tooling_calc id and the picks in the comment
 MACHINES = {
-    ("1994", "199401"): "KM 550-1 (KM 550/2000/750 GX)",  # 204 Handle, height adjustment LH/RH
-    ("1994", "199402"): "KM 200-1 (KM 200/750 CX)",  # 205 Latch cover 40/60 (single pick, no list)
-    ("1994", "199403"): "KM 550-1 (KM 550/2000/750 GX), KM 200-1 (KM 200/750 CX)",  # 206 Isofix cover
-    ("1994", "199404"): "KM 80-1 (KM 80/380 CX), KM 350-1 (KM 350/2000 CX)",  # 207 A-bracket inner trim
-    ("1994", "199405"): "KM 200-1 (KM 200/750 CX)",  # 208 Cover trim, center back
-    ("1994", "199406"): "KM 200-1 (KM 200/750 CX)",  # 209 Center bearing cover
-    ("1994", "199407"): "KM 80-1 (KM 80/380 CX), KM 200-1 (KM 200/750 CX)",  # 210 Belt exit cover
-    ("1994", "199408"): "KM 350-3 (KM 350/2000 CX), KM 350-1 (KM 350/2000 CX)",  # 211 Inner side shield
-    ("1994", "199409"): "KM 550-2 (KM 550/2000/750 GX)",  # 212 Decor cover
-    ("1994", "199410"): "KM 200-1 (KM 200/750 CX), KM 200-2 (KM 200/750 CX)",  # 213 A-bracket outer trim
-    ("2277", "227701"): "KM 2300-1 (KM 2300/12000 MX), KM 1300-1 (KM 1300/8100/750 MXL)",  # 202 Seat back panel MIC
-    ("2277", "227702"): "EN 3200-1 (Engel DUO 17060/3500 TECH US)",  # 203 Seat back panel DS/PS
-    ("2277", "227703"): "KM 900-1 (KM 900/4300 GX), KM 900-2 (KM 900/4300 GX)",  # 200 Map pocket
-    ("2277", "227704"): "KM 80-3 (KM 80/380 CX), KM 80-2 (KM 80/380 CX), KM 80-1 (KM 80/380 CX)",  # 201 Pivot axis (G05)
-    ("2277", "227705"): ("KM 80-1 (KM 80/380 CX) (no fit), KM 80-2 (KM 80/380 CX) (no fit), "
-                         "KM 80-3 (KM 80/380 CX) (no fit)"),  # 199 Rossette (G07)
+    ("1994", "199401"): "KM 550-1 (KM 550/2000/750 GX)",  # 204 Handle, height adjustment LH/RH; of KM 550-1
+    ("1994", "199402"): "KM 200-1 (KM 200/750 CX)",  # 205 Latch cover 40/60; single pick
+    ("1994", "199403"): "KM 200-1 (KM 200/750 CX)",  # 206 Isofix cover; of KM 550-1, KM 200-1
+    ("1994", "199404"): "KM 80-1 (KM 80/380 CX)",  # 207 A-bracket inner trim; of KM 80-1, KM 350-1
+    ("1994", "199405"): "KM 200-1 (KM 200/750 CX)",  # 208 Cover trim, center back; of KM 200-1
+    ("1994", "199406"): "KM 200-1 (KM 200/750 CX)",  # 209 Center bearing cover; of KM 200-1
+    ("1994", "199407"): "KM 80-1 (KM 80/380 CX)",  # 210 Belt exit cover; of KM 80-1, KM 200-1
+    ("1994", "199408"): "KM 350-1 (KM 350/2000 CX)",  # 211 Inner side shield; of KM 350-3, KM 350-1
+    ("1994", "199409"): "KM 550-2 (KM 550/2000/750 GX)",  # 212 Decor cover; of KM 550-2
+    ("1994", "199410"): "KM 200-1 (KM 200/750 CX)",  # 213 A-bracket outer trim; of KM 200-1, KM 200-2
+    ("2277", "227701"): "KM 1300-1 (KM 1300/8100/750 MXL)",  # 202 Seat back panel MIC; of KM 2300-1, KM 1300-1
+    ("2277", "227702"): "EN 3200-1 (Engel DUO 17060/3500 TECH US)",  # 203 Seat back panel DS/PS; of EN 3200-1
+    ("2277", "227703"): "KM 900-1 (KM 900/4300 GX)",  # 200 Map pocket; of KM 900-1, KM 900-2
+    ("2277", "227704"): "KM 80-1 (KM 80/380 CX)",  # 201 Pivot axis (G05); of KM 80-3, KM 80-2, KM 80-1
+    ("2277", "227705"): "KM 80-1 (KM 80/380 CX) (no fit)",  # 199 Rossette (G07); of KM 80-1/-2/-3, none fit
 }
-REASON = "Presses picked in the RFQ2 Tool Layout Designer (RFQ 26 loop 37 / RFQ 25 loop 36), set 2026-09-29"
+REASON = "Smallest-class press picked in the RFQ2 Tool Layout Designer (RFQ 26 loop 37 / RFQ 25 loop 36), set 2026-09-29"
 
 
 async def main():
