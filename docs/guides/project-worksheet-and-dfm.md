@@ -160,6 +160,10 @@ On a tool, the **Tool** card holds the sold state: **Cavities**,
 value clears it. Every change goes into the tool's changelog, and each field
 takes comments and flags like the worksheet cells.
 
+- **Phase:** tools run their own phases, **rfq → dfm → preseries → series**
+  (articles: rfq → nominated → series). An admin moves a tool on with
+  **Mark <next phase>** next to the phase on the tool page; each move is in
+  the changelog. All 1994 tools are in **dfm** since 2026-09-29.
 - **Machine** is free text: the press the tool is planned on. It is not the
   press MachineDB has assigned to the tool (that one feeds costing through
   the tonnage sync).

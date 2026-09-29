@@ -50,6 +50,19 @@ describe('ToolDetail', () => {
   })
   afterEach(cleanup)
 
+  it('offers the next tool phase only when given, and marks it', async () => {
+    renderTool()
+    expect(screen.queryByTestId('mark-tool-phase')).toBeNull()
+    cleanup()
+    const onMarkPhase = vi.fn()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><ToolDetail part={{ ...tool, lifecycle_phase: 'dfm' }} onOpenPart={vi.fn()}
+      onBack={() => {}} nextPhase="preseries" onMarkPhase={onMarkPhase} /></QueryClientProvider>)
+    expect(screen.getByTestId('lifecycle-phase').textContent).toBe('dfm')
+    fireEvent.click(screen.getByTestId('mark-tool-phase'))
+    expect(onMarkPhase).toHaveBeenCalledWith('preseries')
+  })
+
   it('shows the tool number and name without customer or tier 1 numbers', async () => {
     renderTool()
     expect(await screen.findByText('199403')).toBeTruthy()

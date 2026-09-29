@@ -12,7 +12,11 @@ class RevisionPhase(str, enum.Enum):
     OFFICIAL = "official"    # 1, 1.1  — customer-released, binding
 
 
-LIFECYCLE_PHASES = ("rfq", "nominated", "series")
+LIFECYCLE_PHASES = ("rfq", "nominated", "dfm", "preseries", "series")
+# The next phase per category: tools run their own chain (DFM, then the
+# preseries tryouts); every other item goes rfq -> nominated -> series.
+NEXT_PHASE = {"rfq": "nominated", "nominated": "series"}
+TOOL_NEXT_PHASE = {"rfq": "dfm", "dfm": "preseries", "preseries": "series"}
 CUSTOMER_STATEMENTS = ("review", "official")
 REVISION_SOURCES = ("customer", "internal")
 

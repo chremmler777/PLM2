@@ -155,7 +155,7 @@ export function suggestionReason(i: Pick<Intake, 'suggested_route' | 'revision_p
 
 export const PHASE_LABELS: Record<string, string> = {
   review: 'review data', official: 'official data',
-  rfq: 'RFQ', nominated: 'nominated', series: 'series',
+  rfq: 'RFQ', nominated: 'nominated', dfm: 'DFM', preseries: 'preseries', series: 'series',
 };
 
 /** The short text a pending revision carries on chips (timeline, project tree). */

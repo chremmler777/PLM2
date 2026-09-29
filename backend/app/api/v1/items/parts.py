@@ -352,7 +352,8 @@ async def set_lifecycle_phase(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """rfq → nominated (sets nominated_at) → series (sets sop_at). Admin only."""
+    """rfq → nominated (sets nominated_at) → series (sets sop_at); tools
+    rfq → dfm → preseries → series. Admin only."""
     if current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     try:

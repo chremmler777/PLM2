@@ -245,7 +245,7 @@ class RejectMajorRevisionRequest(BaseModel):
 
 
 class SetLifecyclePhaseRequest(BaseModel):
-    phase: Literal["nominated", "series"]
+    phase: Literal["nominated", "dfm", "preseries", "series"]
     effective: date
 
 

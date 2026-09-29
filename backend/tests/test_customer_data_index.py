@@ -106,3 +106,29 @@ async def test_customer_part_number_settable_on_create_and_update(client, eng_au
     r = await client.put(f"/api/v1/parts/{pid}", headers=eng_auth, json={"name": "x"})
     assert r.status_code == 200, r.text
     assert r.json()["customer_part_number"] == "3CR.807.425.B"
+
+
+async def test_tool_phases_run_rfq_dfm_preseries_series(client, eng_auth, admin_auth, seed):
+    res = await client.post("/api/v1/parts", headers=eng_auth, json={
+        "project_id": seed["project_id"], "part_number": "199401", "name": "Tool", "part_type": "purchased",
+        "data_classification": "confidential", "item_category": "tool"})
+    assert res.status_code == 200, res.text
+    pid = res.json()["id"]
+    url = f"/api/v1/parts/{pid}/lifecycle-phase"
+    r = await client.post(url, headers=admin_auth, json={"phase": "nominated", "effective": "2026-09-01"})
+    assert r.status_code == 400                           # tools have no 'nominated' step
+    for phase in ("dfm", "preseries", "series"):
+        r = await client.post(url, headers=admin_auth, json={"phase": phase, "effective": "2026-09-29"})
+        assert r.status_code == 200, r.text
+        assert r.json()["lifecycle_phase"] == phase
+    assert r.json()["sop_at"] == "2026-09-29" and r.json()["nominated_at"] is None
+    changelog = (await client.get(f"/api/v1/parts/{pid}/changelog", headers=eng_auth)).json()
+    assert [e["new_value"] for e in changelog if e.get("field_name") == "lifecycle_phase"][-3:] in (
+        ["dfm", "preseries", "series"], ["series", "preseries", "dfm"])
+
+
+async def test_articles_cannot_take_tool_phases(client, eng_auth, admin_auth, seed):
+    pid = await _mk_part(client, eng_auth, seed)
+    r = await client.post(f"/api/v1/parts/{pid}/lifecycle-phase", headers=admin_auth,
+                          json={"phase": "dfm", "effective": "2026-09-01"})
+    assert r.status_code == 400

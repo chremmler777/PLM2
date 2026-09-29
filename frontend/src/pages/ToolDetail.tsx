@@ -24,7 +24,7 @@ export interface ToolPart {
   part_type: string;
   project_id: number;
   item_category: string;
-  lifecycle_phase: 'rfq' | 'nominated' | 'series';
+  lifecycle_phase: 'rfq' | 'nominated' | 'dfm' | 'preseries' | 'series';
   tool_cavities: number | null;
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
@@ -33,13 +33,19 @@ export interface ToolPart {
   thumbnail_url?: string | null;
 }
 
+type ToolPhase = ToolPart['lifecycle_phase'];
+
 interface Props {
   part: ToolPart;
   onOpenPart(partId: number): void;
   onBack(): void;
+  /** The tool's next phase (rfq, dfm, preseries, series) when the viewer may set it; null hides the button. */
+  nextPhase?: ToolPhase | null;
+  onMarkPhase?(next: ToolPhase): void;
+  phasePending?: boolean;
 }
 
-export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
+export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null, onMarkPhase, phasePending = false }: Props) {
   const notes = usePartFieldNoteIndex(part.id);
   const [showStartChange, setShowStartChange] = useState(false);
   const [openDoc, setOpenDoc] = useState<PaneDocument | null>(null);
@@ -72,6 +78,12 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
               <div className="flex items-center gap-2 flex-wrap mb-3">
                 <span className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md">Tool</span>
                 <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">{part.lifecycle_phase}</span>
+                {nextPhase && onMarkPhase && (
+                  <button data-testid="mark-tool-phase" onClick={() => onMarkPhase(nextPhase)} disabled={phasePending}
+                    className="text-sm px-3 py-1 rounded-md bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-50">
+                    Mark {nextPhase}
+                  </button>
+                )}
               </div>
               {!relationsLoading && (
                 <div data-testid="produced-articles" className="flex items-center gap-2 flex-wrap text-sm">

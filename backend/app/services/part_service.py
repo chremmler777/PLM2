@@ -503,18 +503,21 @@ class RevisionService:
     async def set_lifecycle_phase(
         session: AsyncSession, part_id: int, phase: str, effective: date, created_by: int = None,
     ) -> Part:
-        """rfq → nominated (sets nominated_at) → series (sets sop_at)."""
+        """rfq → nominated (sets nominated_at) → series (sets sop_at); tools
+        rfq → dfm → preseries → series (sets sop_at); the changelog keeps
+        when each step happened."""
+        from app.models.part import NEXT_PHASE, TOOL_NEXT_PHASE
         part = await session.get(Part, part_id)
         if part is None:
             raise ValueError("Part not found")
-        allowed = {"rfq": "nominated", "nominated": "series"}
+        allowed = TOOL_NEXT_PHASE if part.item_category == "tool" else NEXT_PHASE
         if allowed.get(part.lifecycle_phase) != phase:
             raise ValueError(f"Cannot move part from {part.lifecycle_phase} to {phase}")
         old = part.lifecycle_phase
         part.lifecycle_phase = phase
         if phase == "nominated":
             part.nominated_at = effective
-        else:
+        elif phase == "series":
             part.sop_at = effective
         await ChangelogService.log_action(
             session=session, part_id=part_id, revision_id=None, action="lifecycle_phase",

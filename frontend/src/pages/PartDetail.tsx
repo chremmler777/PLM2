@@ -49,7 +49,7 @@ interface Part extends Partial<PartMaterial> {
   item_category: string;
   project_id: number;
   active_revision_id?: number | null;
-  lifecycle_phase: 'rfq' | 'nominated' | 'series';
+  lifecycle_phase: LifecyclePhase;
   nominated_at?: string | null;
   sop_at?: string | null;
   revisions: Revision[];
@@ -80,9 +80,11 @@ function flattenUsedIn(list: WhereUsed[], acc: WhereUsed[] = []): WhereUsed[] {
   return acc;
 }
 
-const NEXT_PHASE: Record<Part['lifecycle_phase'], 'nominated' | 'series' | null> = {
-  rfq: 'nominated', nominated: 'series', series: null,
-};
+type LifecyclePhase = 'rfq' | 'nominated' | 'dfm' | 'preseries' | 'series';
+
+/** The next phase (backend NEXT_PHASE / TOOL_NEXT_PHASE): tools run rfq, dfm, preseries, series. */
+const NEXT_PHASE: Partial<Record<LifecyclePhase, LifecyclePhase>> = { rfq: 'nominated', nominated: 'series' };
+const TOOL_NEXT_PHASE: Partial<Record<LifecyclePhase, LifecyclePhase>> = { rfq: 'dfm', dfm: 'preseries', preseries: 'series' };
 
 function errMsg(error: unknown, fallback: string) {
   return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback;
@@ -185,7 +187,7 @@ export default function PartDetail() {
     onSuccess: () => refetch(), onError: (e) => toast.error(errMsg(e, 'Could not restore')),
   });
   const phase = useMutation({
-    mutationFn: (next: 'nominated' | 'series') =>
+    mutationFn: (next: LifecyclePhase) =>
       client.post(`/v1/parts/${partId}/lifecycle-phase`, { phase: next, effective: new Date().toISOString().slice(0, 10) }),
     onSuccess: (res) => { toast.success(`Part is now ${res.data.lifecycle_phase}`); refetch(); },
     onError: (e) => toast.error(errMsg(e, 'Could not change phase')),
@@ -216,12 +218,15 @@ export default function PartDetail() {
         }}
         onOpenPart={(id) => navigate(`/parts/${id}`)}
         onBack={() => navigate('/dashboard')}
+        nextPhase={isAdmin ? TOOL_NEXT_PHASE[part.lifecycle_phase] ?? null : null}
+        onMarkPhase={(next) => phase.mutate(next)}
+        phasePending={phase.isPending}
       />
     );
   }
 
   const hasOfficial = part.revisions.some((r) => r.phase === 'official' && !r.parent_revision_id);
-  const nextPhase = NEXT_PHASE[part.lifecycle_phase];
+  const nextPhase = NEXT_PHASE[part.lifecycle_phase] ?? null;
   const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
   const nextMajor = {
     review: Math.max(0, ...majorsOf(part.revisions).filter((r) => r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name.slice(1), 10))) + 1,
