@@ -66,6 +66,9 @@ class Part(Base):
     toolmaker_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True, index=True)
     tool_tonnage_class: Mapped[int | None] = mapped_column(Integer, nullable=True)  # clamping force class, t
     tool_cycle_time_s: Mapped[float | None] = mapped_column(Numeric(6, 1, asdecimal=False), nullable=True)
+    # The press the tool is planned on (109), free text, e.g. the RFQ2 Tool
+    # Layout Designer's pick. Not the MachineDB assigned press below.
+    tool_machine: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # The press tonnage of the tool as the source systems know it (108),
     # kept by the tool tonnage sync (tool_tonnage_service), one set per
     # source so a failed MachineDB fetch never downgrades a tool to TWOS.

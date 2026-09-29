@@ -16,6 +16,8 @@ export interface WorksheetTool {
   toolmaker_name: string | null;
   cycle_time_s: number | null;
   tonnage_class: number | null;
+  /** The press the tool is planned on (free text, e.g. the RFQ2 layout pick). */
+  machine: string | null;
 }
 
 export type DfmSheetStatus = 'no_topic' | 'waiting' | 'all_answered' | 'open' | 'finished';

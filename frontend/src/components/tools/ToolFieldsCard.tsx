@@ -1,6 +1,6 @@
 /**
  * ToolFieldsCard - the sold state of a tool: cavities, toolmaker, machine
- * tonnage class, target cycle time. Inline edits, one PUT per field with
+ * tonnage class, target cycle time, and the press it is planned on. Inline edits, one PUT per field with
  * only that key (the backend applies keys that are present). Cavities fall
  * back to the "n cavities" note on the produces relation until set here.
  */
@@ -19,6 +19,7 @@ export interface ToolFieldValues {
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;
+  tool_machine: string | null;
 }
 
 type NumericKey = 'tool_cavities' | 'tool_tonnage_class' | 'tool_cycle_time_s';
@@ -40,7 +41,7 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
   const queryClient = useQueryClient();
   const { data: suppliers } = useSuppliers();
   const notes = usePartFieldNoteIndex(partId);
-  const [editing, setEditing] = useState<{ key: NumericKey; value: string } | null>(null);
+  const [editing, setEditing] = useState<{ key: NumericKey | 'tool_machine'; value: string } | null>(null);
 
   const save = useMutation({
     mutationFn: (payload: Partial<ToolFieldValues>) => client.put(`/v1/parts/${partId}`, payload),
@@ -59,6 +60,8 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
     if (Number.isNaN(n) || n <= 0) { toast.error(`${field.label} must be a positive number`); return; }
     save.mutate({ [field.key]: n });
   };
+
+  const submitMachine = (raw: string) => save.mutate({ tool_machine: raw.trim() || null });
 
   const fallbackCavities = values.tool_cavities == null ? cavitiesFromNotes(producedNotes) : null;
 
@@ -114,6 +117,33 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
             <option value="">(not set)</option>
             {suppliers?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+        </div>
+        <div data-field-key="tool.machine" className="col-span-2">
+          <div className="text-sm text-slate-400">
+            Machine
+            <FieldNoteMarker partId={partId} fieldKey="tool.machine" label="Machine" note={notes.get('tool.machine')} projectId={projectId} />
+          </div>
+          {editing?.key === 'tool_machine' ? (
+            <div className="flex items-center gap-2 mt-1">
+              <input data-testid="tool-machine-input" autoFocus type="text" maxLength={255}
+                value={editing.value} onChange={(e) => setEditing({ key: 'tool_machine', value: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitMachine(editing.value);
+                  if (e.key === 'Escape') setEditing(null);
+                }}
+                className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm" />
+              <button data-testid="save-tool-machine" disabled={save.isPending}
+                onClick={() => submitMachine(editing.value)}
+                className="text-sm px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white">Save</button>
+              <button onClick={() => setEditing(null)} className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
+            </div>
+          ) : (
+            <button data-testid="edit-tool-machine" title="Edit machine"
+              onClick={() => setEditing({ key: 'tool_machine', value: values.tool_machine ?? '' })}
+              className="block text-left font-medium text-slate-100 hover:text-blue-300 mt-1">
+              {values.tool_machine || <span className="text-slate-500">+ set</span>}
+            </button>
+          )}
         </div>
       </div>
     </div>

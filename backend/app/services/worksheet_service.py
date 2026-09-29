@@ -55,7 +55,8 @@ def _paint(setup: Optional[PartPaint]) -> dict:
 def _tool(t: Part, toolmakers: dict) -> dict:
     return {"part_id": t.id, "part_number": t.part_number, "name": t.name, "cavities": t.tool_cavities,
             "toolmaker_id": t.toolmaker_id, "toolmaker_name": toolmakers.get(t.toolmaker_id),
-            "cycle_time_s": t.tool_cycle_time_s, "tonnage_class": t.tool_tonnage_class}
+            "cycle_time_s": t.tool_cycle_time_s, "tonnage_class": t.tool_tonnage_class,
+            "machine": t.tool_machine}
 
 
 def _identity(p: Part, kind: str) -> dict:

@@ -63,6 +63,7 @@ async def create_part(
             toolmaker_id=body.toolmaker_id,
             tool_tonnage_class=body.tool_tonnage_class,
             tool_cycle_time_s=body.tool_cycle_time_s,
+            tool_machine=body.tool_machine,
             colour_code=body.colour_code,
             grain=body.grain,
         )
@@ -144,6 +145,8 @@ async def update_part(
             update_tool_tonnage_class='tool_tonnage_class' in body.model_fields_set,
             tool_cycle_time_s=body.tool_cycle_time_s,
             update_tool_cycle_time_s='tool_cycle_time_s' in body.model_fields_set,
+            tool_machine=body.tool_machine,
+            update_tool_machine='tool_machine' in body.model_fields_set,
             colour_code=body.colour_code,
             update_colour_code='colour_code' in body.model_fields_set,
             grain=body.grain,

@@ -89,7 +89,7 @@ describe('worksheet column registry', () => {
 
 describe('worksheet notes on tool-only rows', () => {
   const toolOnly = row({ part_id: 95, part_number: '199413', row_kind: 'tool_only', item_category: 'tool', part_type: 'purchased',
-    tool: { part_id: 95, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null } })
+    tool: { part_id: 95, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null } })
 
   it('offers no note where the backend would refuse the field key for the owner', () => {
     expect(notePartId(col('paint.painted'), toolOnly)).toBeNull()

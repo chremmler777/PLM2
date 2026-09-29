@@ -39,6 +39,7 @@ export default function ToolInfoTab({ part, onOpenPart }: { part: Part; onOpenPa
           toolmaker_id: part.toolmaker_id ?? null,
           tool_tonnage_class: part.tool_tonnage_class ?? null,
           tool_cycle_time_s: part.tool_cycle_time_s ?? null,
+          tool_machine: part.tool_machine ?? null,
         }}
         producedNotes={produced.map((a) => a.notes)}
       />

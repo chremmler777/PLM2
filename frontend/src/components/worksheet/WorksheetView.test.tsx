@@ -13,7 +13,7 @@ const rows = [
   row({ part_id: 1, part_number: '20-1994-010-0', name: 'Side shield' }),
   row({ part_id: 2, part_number: '20-1994-002-0', name: 'Handle RH', part_type: 'purchased', row_kind: 'purchased' }),
   row({ part_id: 3, part_number: '20-1994-005-0', name: 'ISOFIX Cover',
-    tool: { part_id: 93, part_number: '199403', name: 't', cavities: 4, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null } }),
+    tool: { part_id: 93, part_number: '199403', name: 't', cavities: 4, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null } }),
 ]
 const notes = [{ id: 1, part_id: 93, field_key: 'tool.cavities', flag_status: 'open', flag_set_by: null, flag_set_by_name: null,
   flag_set_at: null, created_at: null, comment_count: 1, last_comment: { id: 1, body: 'Excel says 2', author_id: 1, author_name: 'E', created_at: '2026-09-24T09:00:00' } }]
@@ -100,7 +100,7 @@ describe('WorksheetView', () => {
   it('a tool-only row has no comment or flag on paint and revision cells', async () => {
     const tool = row({ part_id: 4, part_number: '199413', name: 'TOOL Cover', row_kind: 'tool_only', item_category: 'tool',
       part_type: 'purchased', tool: { part_id: 4, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null,
-        toolmaker_name: null, cycle_time_s: null, tonnage_class: null }, dfm: null })
+        toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null }, dfm: null })
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/projects/35/worksheet') return Promise.resolve({ data: { project_id: 35, rows: [tool] } })
       return Promise.resolve({ data: [] })

@@ -9,7 +9,7 @@ const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
-const empty: ToolFieldValues = { tool_cavities: null, toolmaker_id: null, tool_tonnage_class: null, tool_cycle_time_s: null }
+const empty: ToolFieldValues = { tool_cavities: null, toolmaker_id: null, tool_tonnage_class: null, tool_cycle_time_s: null, tool_machine: null }
 
 function wrap(values: ToolFieldValues = empty, notes: (string | null)[] = [], projectId: number | null = null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -43,6 +43,19 @@ describe('ToolFieldsCard', () => {
     fireEvent.change(screen.getByTestId('tool-cycle-input'), { target: { value: '31.8' } })
     fireEvent.keyDown(screen.getByTestId('tool-cycle-input'), { key: 'Enter' })
     await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7', { tool_cycle_time_s: 31.8 }))
+  })
+
+  it('saves the machine as trimmed text and clears it when emptied', async () => {
+    wrap({ ...empty, tool_machine: 'KM 200-1 (KM 200/750 CX)' })
+    expect(screen.getByTestId('edit-tool-machine').textContent).toBe('KM 200-1 (KM 200/750 CX)')
+    fireEvent.click(screen.getByTestId('edit-tool-machine'))
+    fireEvent.change(screen.getByTestId('tool-machine-input'), { target: { value: ' KM 350-1 ' } })
+    fireEvent.keyDown(screen.getByTestId('tool-machine-input'), { key: 'Enter' })
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7', { tool_machine: 'KM 350-1' }))
+    fireEvent.click(screen.getByTestId('edit-tool-machine'))
+    fireEvent.change(screen.getByTestId('tool-machine-input'), { target: { value: '' } })
+    fireEvent.click(screen.getByTestId('save-tool-machine'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7', { tool_machine: null }))
   })
 
   it('picks the toolmaker from the supplier list and saves at once', async () => {

@@ -77,7 +77,8 @@ async def test_rows_carry_article_tool_revision_material_paint_and_dfm(client, e
     assert lh["paint"] == {"painted": False, "colour": None, "colour_hex": None, "paint_system": None}
     assert lh["tool"] == {"part_id": ids["tool"], "part_number": "199401", "name": "Name 199401", "cavities": 2,
                           "toolmaker_id": ids["maker"], "toolmaker_name": "Formenbau Nord",
-                          "cycle_time_s": 55.0, "tonnage_class": None}
+                          "cycle_time_s": 55.0, "tonnage_class": None,
+                          "machine": None}
     assert lh["dfm"] == {"status": "waiting", "waiting_on": ["ktx"], "open_topics": 1}
     assert lh["other_tools"] == []
 

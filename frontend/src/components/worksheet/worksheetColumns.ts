@@ -235,6 +235,8 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
   def({ key: 'tool.tonnage_class', label: 'Tonnage (t)', group: 'Tool', display: 'number', exportType: 'number',
     noteOwner: 'tool', editableOn: 'tool', defaultVisible: false, value: (r) => r.tool?.tonnage_class ?? null,
     edit: onTool('tool.tonnage_class') }),
+  def({ key: 'tool.machine', label: 'Machine', group: 'Tool', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
+    value: (r) => r.tool?.machine ?? null, edit: onTool('tool.machine') }),
   def({ key: 'dfm.status', label: 'DFM', group: 'DFM', display: 'dfm', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => dfmLabel(r.dfm), edit: onTool('dfm.status') }),
   def({ key: 'notes.summary', label: 'Notes', group: 'Notes', display: 'notes', noteOwner: null, editableOn: null,

@@ -10,7 +10,7 @@ const col = (key: string) => WORKSHEET_COLUMNS.find((c) => c.key === key)!
 const ctx = buildContext([])
 const a = row({ part_id: 1, part_number: '20-1994-010-0', name: 'Side shield', part_type: 'internal_mfg' })
 const b = row({ part_id: 2, part_number: '20-1994-002-0', name: 'Handle RH', part_type: 'purchased', row_kind: 'purchased',
-  tool: { part_id: 91, part_number: '199409', name: 't', cavities: 8, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null } })
+  tool: { part_id: 91, part_number: '199409', name: 't', cavities: 8, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null } })
 const c = row({ part_id: 3, part_number: '199413', name: 'Tool only', row_kind: 'tool_only', tool: null, dfm: null })
 
 describe('worksheet table helpers', () => {

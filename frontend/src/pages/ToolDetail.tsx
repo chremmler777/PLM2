@@ -29,6 +29,7 @@ export interface ToolPart {
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;
+  tool_machine?: string | null;
   thumbnail_url?: string | null;
 }
 
@@ -94,7 +95,8 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
 
         <ToolFieldsCard partId={part.id}
           values={{ tool_cavities: part.tool_cavities, toolmaker_id: part.toolmaker_id,
-            tool_tonnage_class: part.tool_tonnage_class, tool_cycle_time_s: part.tool_cycle_time_s }}
+            tool_tonnage_class: part.tool_tonnage_class, tool_cycle_time_s: part.tool_cycle_time_s,
+            tool_machine: part.tool_machine ?? null }}
           producedNotes={produced.map((a) => a.notes)} projectId={part.project_id} />
 
         {openDoc && (

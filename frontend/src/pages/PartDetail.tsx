@@ -57,6 +57,7 @@ interface Part extends Partial<PartMaterial> {
   toolmaker_id?: number | null;
   tool_tonnage_class?: number | null;
   tool_cycle_time_s?: number | null;
+  tool_machine?: string | null;
   thumbnail_url?: string | null;
 }
 
@@ -210,6 +211,7 @@ export default function PartDetail() {
           project_id: part.project_id, item_category: part.item_category, lifecycle_phase: part.lifecycle_phase,
           tool_cavities: part.tool_cavities ?? null, toolmaker_id: part.toolmaker_id ?? null,
           tool_tonnage_class: part.tool_tonnage_class ?? null, tool_cycle_time_s: part.tool_cycle_time_s ?? null,
+          tool_machine: part.tool_machine ?? null,
           thumbnail_url: part.thumbnail_url ?? null,
         }}
         onOpenPart={(id) => navigate(`/parts/${id}`)}

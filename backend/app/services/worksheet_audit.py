@@ -65,6 +65,7 @@ FIELD_NAME_KEYS: dict[str, str] = {
     "customer_received_at": "revision.level",
     "tool_cavities": "tool.cavities",
     "tool_cycle_time_s": "tool.cycle_time_s",
+    "tool_machine": "tool.machine",
     "tool_tonnage_class": "tool.tonnage_class",
     "toolmaker_id": "tool.toolmaker",
 }
