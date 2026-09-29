@@ -320,7 +320,7 @@ describe('CockpitSummary', () => {
       })}
       gates={[]} pendingDeviations={0}
       onAdvance={vi.fn()} advancing={false} />))
-    expect(screen.getByText(/impact/i)).toBeDefined()
+    expect(screen.getByText(new RegExp(t('impact.pending').replace(/[()]/g, '\\$&')))).toBeDefined()
     expect(screen.queryByText(/nothing/i)).toBeNull()
   })
 
@@ -370,7 +370,7 @@ describe('CockpitSummary', () => {
 describe('CockpitSummary scoping decisions belong to the meeting', () => {
   afterEach(cleanup)
 
-  it('offers no advance buttons in scoping, only a pointer to the meeting', () => {
+  it('offers no advance buttons in scoping, only a jump to the meeting', () => {
     const onAction = vi.fn()
     render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
@@ -401,6 +401,27 @@ describe('CockpitSummary scoping decisions belong to the meeting', () => {
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
       may={(to) => to === 'scoping'} />))
     expect(screen.queryByRole('button', { name: new RegExp(t('next.reject')) })).toBeNull()
+  })
+
+  it('lists what the meeting still needs, with the meeting note', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', next_step: {
+      to: 'in_assessment', items: [
+        { key: 'meeting', kind: 'hard' }, { key: 'impact_confirmed', kind: 'hard' },
+      ] } })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    const hint = screen.getByTestId('next-hint')
+    expect(hint.textContent).toContain(t('scopingSteps.title'))
+    expect(hint.textContent).toContain(t('next.item.meeting'))
+    expect(hint.textContent).toContain(t('next.item.impact_confirmed'))
+    expect(hint.textContent).toContain(t('scopingSteps.note'))
+  })
+
+  it('is ready for the decision once nothing is missing', () => {
+    render(wrap(<CockpitSummary
+      change={change({ status: 'scoping', next_step: { to: 'in_assessment', items: [] } })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByTestId('next-hint')).toBeNull()
+    expect(screen.getByTestId('next-ready').textContent).toContain(t('scopingSteps.ready'))
   })
 
   it('still offers the ordinary advance button on statuses the meeting does not own', () => {
@@ -444,47 +465,53 @@ describe('CockpitSummary phase-aware deadline widget', () => {
   })
 })
 
-describe('CockpitSummary kickoff readiness at capture', () => {
+describe('CockpitSummary next-step box', () => {
   afterEach(cleanup)
 
   const captured = (over: Partial<ChangeDetail> = {}) => render(wrap(
     <CockpitSummary change={change({ status: 'captured', ...over })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
 
-  it('names every missing kickoff requirement for a customer change', () => {
-    captured({ customer_relevant: true, description: null, attachments: [], required_by_date: null })
-    const hint = screen.getByTestId('kickoff-hint')
-    expect(hint.textContent).toContain(t('kickoff.description'))
-    expect(hint.textContent).toContain(t('kickoff.attachment'))
-    expect(hint.textContent).toContain(t('deadline.quote'))
+  it('names every missing kickoff requirement and offers the deviation route', () => {
+    captured({ next_step: { to: 'scoping', items: [
+      { key: 'description', kind: 'soft' }, { key: 'attachment', kind: 'soft' },
+      { key: 'quote_deadline', kind: 'soft' },
+    ] } })
+    const hint = screen.getByTestId('next-hint')
+    expect(hint.textContent).toContain('Missing before Scoping')
+    expect(hint.textContent).toContain(t('next.item.description'))
+    expect(hint.textContent).toContain(t('next.item.attachment'))
+    expect(hint.textContent).toContain(t('next.item.quote_deadline'))
+    expect(hint.textContent).toContain(t('kickoff.soft'))
+    // The advance button stays underneath, as before.
+    expect(screen.getByRole('button', { name: 'Hand over to scoping' })).toBeDefined()
   })
 
-  it('drops the requirement it already has and never asks internal changes for a quote date', () => {
-    captured({
-      customer_relevant: false, description: 'Clip rattles', required_by_date: null,
-      attachments: [] as ChangeDetail['attachments'],
-    })
-    const hint = screen.getByTestId('kickoff-hint')
-    expect(hint.textContent).not.toContain(t('kickoff.description'))
-    expect(hint.textContent).not.toContain(t('deadline.quote'))
-    expect(hint.textContent).toContain(t('kickoff.attachment'))
+  it('reports readiness once nothing is missing', () => {
+    captured({ next_step: { to: 'scoping', items: [] } })
+    expect(screen.queryByTestId('next-hint')).toBeNull()
+    expect(screen.getByTestId('next-ready').textContent).toContain('Ready for Scoping')
   })
 
-  it('reports readiness once description, attachment and date are there', () => {
-    captured({
-      customer_relevant: true, description: 'Clip rattles',
-      required_by_date: '2026-09-01T23:59:59',
-      attachments: [{ id: 1 }] as unknown as ChangeDetail['attachments'],
-    })
-    expect(screen.queryByTestId('kickoff-hint')).toBeNull()
-    expect(screen.getByTestId('kickoff-ready')).toBeDefined()
-  })
-
-  it('says nothing about kickoff once the change has left capture', () => {
-    render(wrap(<CockpitSummary change={change({ status: 'in_assessment', description: null })}
+  it('fills counts and gate names, and flags items no deviation can skip', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'quoted', next_step: { to: 'approved', items: [
+      { key: 'customer_accepted', kind: 'hard' },
+      { key: 'assessments', kind: 'soft', n: 2 },
+      { key: 'gate', kind: 'soft', detail: 'release' },
+    ] } })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
-    expect(screen.queryByTestId('kickoff-hint')).toBeNull()
-    expect(screen.queryByTestId('kickoff-ready')).toBeNull()
+    const hint = screen.getByTestId('next-hint')
+    expect(hint.textContent).toContain('Missing before Approved')
+    expect(hint.textContent).toContain('2 assessments still open')
+    expect(hint.textContent).toContain(`${t('gate.release')} gate`)
+    expect(hint.textContent).toContain(t('next.hardNote'))
+  })
+
+  it('shows nothing when there is no onward stage', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'closed', next_step: null })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByTestId('next-hint')).toBeNull()
+    expect(screen.queryByTestId('next-ready')).toBeNull()
   })
 
   it('tags every stage with its agreed owner — Sales, PM or Team', () => {
@@ -752,9 +779,10 @@ describe('CockpitSummary early stages (spec §16)', () => {
   })
 
   it('lists a missing lead among the kickoff needs', () => {
-    render(wrap(<CockpitSummary change={change({ status: 'captured', lead_id: null, lead_name: null })}
+    render(wrap(<CockpitSummary change={change({ status: 'captured', lead_id: null, lead_name: null,
+      next_step: { to: 'scoping', items: [{ key: 'lead', kind: 'soft' }] } })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
-    expect(screen.getByTestId('kickoff-hint').textContent).toContain('No lead assigned')
+    expect(screen.getByTestId('next-hint').textContent).toContain(t('next.item.lead'))
   })
 })
 

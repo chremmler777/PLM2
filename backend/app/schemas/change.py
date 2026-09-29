@@ -453,6 +453,9 @@ class ChangeDetailResponse(ChangeResponse):
     # ChangeRequest.negotiated_final_price) — the number Sales' go-ahead is
     # based on when it is not the quoted one. No column behind it.
     negotiated_final_price: Optional[float] = None
+    # The cockpit's "missing before <next stage>" checklist — see
+    # ChangeService.next_step_missing. None when there is no onward stage.
+    next_step: Optional[dict] = None
 
 
 class RoutingDepartment(BaseModel):

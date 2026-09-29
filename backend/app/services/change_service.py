@@ -697,6 +697,182 @@ class ChangeService:
         return f"D1 gate '{label}' is not answered Yes (it is {answer})"
 
     @staticmethod
+    async def unmapped_check_categories(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> list[str]:
+        """Item categories among the impacted parts with no check-workflow
+        template — kickoff would have nothing to spawn for them."""
+        from app.models.workflow import CheckWorkflowStandard
+        part_ids = [i.part_id for i in change.impacted_items]
+        if not part_ids:
+            return []
+        cats = {c for (c,) in await session.execute(
+            select(Part.item_category).where(Part.id.in_(part_ids)))}
+        mapped = {c for (c,) in await session.execute(
+            select(CheckWorkflowStandard.item_category).where(
+                CheckWorkflowStandard.item_category.in_(cats)))}
+        return sorted(cats - mapped)
+
+    @staticmethod
+    def next_step_target(change: ChangeRequest) -> Optional[str]:
+        """The onward status the cockpit is working towards, if any. Where a
+        stage forks, the main road: a customer change goes to its quote, an
+        internal one straight to approval. An engineering review has no next
+        stage to work towards: its review answers release it; a mother-plant
+        change goes from scoping straight to approved."""
+        from app.services import mother_plants as mp
+        from app.services.engineering_review_service import is_review
+        if is_review(change):
+            return None
+        if change.status == "scoping" and mp.is_mother_plant(change):
+            return "approved"
+        if change.status == "costing":
+            return "quoting" if change.customer_relevant else "approved"
+        if change.status == "rejected":
+            return "closed" if (change.customer_relevant
+                                and change.rejection_sent_at is None) else None
+        return {
+            "captured": "scoping", "scoping": "in_assessment",
+            "in_assessment": "costing", "quoting": "quoted", "quoted": "approved",
+            "approved": "in_implementation", "in_implementation": "in_validation",
+            "in_validation": "released", "released": "closed",
+        }.get(change.status)
+
+    @staticmethod
+    async def next_step_missing(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> Optional[dict]:
+        """What still stands between the change and its next stage, as the
+        cockpit's "missing before …" checklist.
+
+        Each item is {"key", "kind", "n"?, "detail"?}. `kind` says what the
+        item costs to skip: "hard" cannot be bypassed, "soft" is a _guard
+        refusal an approved deviation can override, "todo" is the stage's own
+        work that no guard enforces but somebody still owes. The keys are
+        stable codes — the UI owns the wording in both languages. Mirrors
+        _guard and the hard checks in transition(); when those change, this
+        has to follow, or the checklist lies about what blocks.
+        """
+        to = ChangeService.next_step_target(change)
+        if to is None:
+            return None
+        items: list[dict] = []
+
+        def add(key: str, kind: str, **extra) -> None:
+            items.append({"key": key, "kind": kind, **extra})
+
+        if to == "scoping":
+            for m in await ChangeService.kickoff_missing(session, change):
+                add({"description": "description",
+                     "at least one attachment": "attachment",
+                     "quote deadline": "quote_deadline",
+                     "change lead": "lead"}[m], "soft")
+        elif to == "approved" and change.status == "scoping":
+            # Mother plant: MotherPlantService.approval_blocker, all hard.
+            from app.services.mother_plant_service import MotherPlantService
+            if not change.impacted_items:
+                add("impacted_items", "hard")
+            elif change.impact_confirmed_at is None:
+                add("impact_confirmed", "hard")
+            if not await MotherPlantService.receipts(session, change):
+                add("team_informed", "hard")
+            if change.mother_plant_sop is None:
+                add("mother_plant_sop", "hard")
+        elif to == "in_assessment":
+            from app.services.meeting_service import MeetingService
+            latest = change.meetings[-1] if change.meetings else None
+            if latest is None or latest.decision is not None:
+                add("follow_up_meeting" if latest is not None
+                    and latest.decision == "needs_info" else "meeting", "hard")
+            if not change.impacted_items:
+                add("impacted_items", "hard")
+            elif change.impact_confirmed_at is None:
+                add("impact_confirmed", "hard")
+            if change.lead_id is None:
+                add("lead", "soft")
+            if change.customer_relevant and change.required_by_date is None:
+                add("quote_deadline", "soft")
+            concerns = MeetingService.open_concerns(change)
+            if concerns:
+                add("open_concerns", "hard", n=len(concerns))
+        if to in ("costing", "quoting") and change.status in (
+                "in_assessment", "costing"):
+            from app.services.change_routing_service import ChangeRoutingService
+            blocking = await ChangeRoutingService.blocking_rows(session, change)
+            open_rows = [a for a in blocking
+                         if a.effective_status not in ("submitted", "waived")]
+            if not blocking or open_rows:
+                add("assessments", "soft", n=len(open_rows))
+            if any(a.verdict == "not_feasible" for a in change.assessments):
+                add("not_feasible", "soft")
+            if (change.routing is not None
+                    and change.routing.deviation_status == "pending_approval"):
+                add("routing_deviation", "soft")
+        if change.status == "costing":
+            pending = await ChangeService.costing_pending_department_ids(session, change)
+            if pending:
+                add("costing_input", "todo", n=len(pending))
+            if to == "approved" and change.internal_approved_at is None:
+                add("internal_approval", "hard")
+        if to == "quoted" and change.quoted_price is None:
+            add("quoted_price", "soft")
+        if to == "approved" and change.status == "quoted":
+            if change.customer_response != "accepted":
+                add("customer_accepted", "hard")
+            if change.pm_signed_by is None:
+                add("pm_signoff", "hard")
+            if change.quality_signed_by is None:
+                add("quality_signoff", "hard")
+        if to == "in_implementation":
+            if change.bank_build_mode is None:
+                add("bank_build", "todo")
+            if change.impact_confirmed_at is None:
+                add("impact_confirmed", "soft")
+            missing = await ChangeService.unmapped_check_categories(session, change)
+            if missing:
+                add("check_mapping", "soft", detail=", ".join(missing))
+            if change.timing_validated_at is None and change.status == "approved":
+                add("timing_validated", "soft")
+        if to == "in_validation":
+            n = sum(1 for i in change.impacted_items if i.resulting_revision_id is None)
+            if n:
+                add("resulting_revisions", "soft", n=n)
+        if to == "released":
+            from app.services.validation_service import ValidationService
+            checks = await ValidationService.list_checks(session, change)
+            failed = sum(1 for r in checks if r.status == "failed")
+            if failed:
+                add("validation_failed", "soft", n=failed)
+            elif any(r.status != "passed" for r in checks):
+                add("validation_open", "soft",
+                    n=sum(1 for r in checks if r.status != "passed"))
+            progress = await ChangeService.implementation_progress(session, change)
+            if not progress["ready_to_go"]:
+                add("check_workflows", "soft",
+                    n=sum(1 for e in progress["items"] if not e["ready"]))
+            from app.services.validation_issue_service import ValidationIssueService
+            from app.services.release_service import ReleaseService
+            n = await ValidationIssueService.open_count(session, change)
+            if n:
+                add("validation_issues", "soft", n=n)
+            n = await ReleaseService.open_count(session, change)
+            if n:
+                add("release_checklist", "soft", n=n)
+            if change.lessons_done_at is None:
+                add("lessons", "soft")
+            n = await ReleaseService.open_deviation_count(session, change)
+            if n:
+                add("plan_deviations", "soft", n=n)
+        if change.status == "rejected":
+            if not await ChangeService.has_rejection_letter(session, change):
+                add("rejection_letter", "hard")
+            add("rejection_sent", "hard")
+        for gate in change.gates:
+            if GATE_TARGET_STATUS.get(gate.gate_key) == to and gate.decision != "yes":
+                add("gate", "soft", detail=gate.gate_key)
+        return {"to": to, "items": items}
+
+    @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
         """Return None if soft-OK, else a human reason string (overridable)."""
         # Capture is Sales' job, scoping is the project team's: kickoff means
@@ -770,18 +946,10 @@ class ChangeService:
         if to_status == "in_implementation":
             if change.impact_confirmed_at is None:
                 return "impact_not_confirmed"
-            from app.models.workflow import CheckWorkflowStandard
-            part_ids = [i.part_id for i in change.impacted_items]
-            if part_ids:
-                cats = {c for (c,) in await session.execute(
-                    select(Part.item_category).where(Part.id.in_(part_ids)))}
-                mapped = {c for (c,) in await session.execute(
-                    select(CheckWorkflowStandard.item_category).where(
-                        CheckWorkflowStandard.item_category.in_(cats)))}
-                missing = sorted(cats - mapped)
-                if missing:
-                    return ("no check-workflow template mapped for item "
-                            f"category: {', '.join(missing)}")
+            missing = await ChangeService.unmapped_check_categories(session, change)
+            if missing:
+                return ("no check-workflow template mapped for item "
+                        f"category: {', '.join(missing)}")
             # The detailed plan is what the customer is told and what every
             # team works to. Implementation starting on a plan nobody
             # confirmed is how "we never agreed to that date" happens. Guarded

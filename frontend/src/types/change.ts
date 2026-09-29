@@ -365,12 +365,33 @@ export interface ChangeNegotiation {
   offer_id?: number | null;
 }
 
+/**
+ * One line of the cockpit's "missing before <next stage>" box. `kind` says
+ * what skipping it costs: "hard" cannot be bypassed, "soft" needs an approved
+ * deviation, "todo" is stage work no guard enforces. The key is a stable code;
+ * the wording lives in cmLabels under `next.item.<key>`.
+ */
+export interface NextStepItem {
+  key: string;
+  kind: 'hard' | 'soft' | 'todo';
+  n?: number;
+  detail?: string;
+}
+
+/** What still stands between the change and `to` (ChangeService.next_step_missing). */
+export interface NextStep {
+  to: ChangeStatus;
+  items: NextStepItem[];
+}
+
 export interface ChangeDetail extends ChangeRequest {
   /** The project's plant (Project.plant_id). */
   project_plant_id?: number | null;
   impacted_items: ImpactedItem[];
   assessments: Assessment[];
   attachments: Attachment[];
+  /** Null once there is no onward stage; absent from list payloads. */
+  next_step?: NextStep | null;
 }
 
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */

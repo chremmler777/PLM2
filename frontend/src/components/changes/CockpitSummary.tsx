@@ -6,7 +6,7 @@ import { changesApi } from '../../api/changes'
 import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 import { toastError } from '../../lib/apiError'
-import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, StageAssessment } from '../../types/change'
+import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, NextStepItem, StageAssessment } from '../../types/change'
 import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
 import { btnBase, btnSizes, btnSm, buttonClass, type ButtonSize } from '../common/buttonStyles'
@@ -352,16 +352,26 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const impactUnconfirmed = !change.impact_confirmed_at
     && (change.impacted_items?.length ?? 0) > 0
     && (change.status === 'scoping' || change.status === 'approved')
-  // Kickoff (captured -> scoping) needs a description, something attached, and,
-  // for customer work, the quote-by date. The gate is soft on the backend, so
-  // this warns and names what is missing rather than blocking the button.
-  const kickoffMissing: string[] = change.status !== 'captured' ? [] : [
-    ...(change.description?.trim() ? [] : [t('kickoff.description')]),
-    ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
-    ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
-    // Kickoff wants a lead (soft): scoping is the lead's to run.
-    ...(change.lead_id == null ? [t('cockpit.noLead')] : []),
-  ]
+  // What still stands between the change and its next stage, straight from
+  // the backend guards (ChangeService.next_step_missing) so the box can never
+  // promise a transition the server would refuse. Same shape at every stage.
+  const nextStep = change.next_step ?? null
+  const nextItems = nextStep?.items ?? []
+  const itemLabel = (i: NextStepItem) => {
+    const key = i.key === 'assessments' && i.n ? 'assessments_n' : i.key
+    const detail = i.key === 'gate' && i.detail ? t('gate.' + i.detail) : (i.detail ?? '')
+    return t('next.item.' + key).replace('{n}', String(i.n ?? '')).replace('{detail}', detail)
+  }
+  const nextTo = nextStep ? STATUS_LABELS[nextStep.to] : ''
+  // The scoping meeting decides; a mother-plant change leaves scoping
+  // straight to approved and reads like any other stage.
+  const isScoping = change.status === 'scoping' && nextStep?.to === 'in_assessment'
+  const nextTitle = isScoping ? t('scopingSteps.title') : t('next.title').replace('{status}', nextTo)
+  const nextReady = isScoping ? t('scopingSteps.ready') : t('next.ready').replace('{status}', nextTo)
+  const nextNote = isScoping ? t('scopingSteps.note')
+    : nextItems.some((i) => i.kind === 'hard') ? t('next.hardNote')
+    : nextItems.some((i) => i.kind === 'soft') ? t('kickoff.soft')
+    : null
   const gateText = (g: Gate) => `${t('gate.' + g.gate_key)} ${t('cockpit.gateWord')}: ${gateRowText(g.decision)}`
   // One list of what holds the change up. The Blocked-by card, the count in
   // the compact bar and the "Resolve first" button all read it, so the next
@@ -768,21 +778,26 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <Check aria-hidden="true" size={12} />{t('impl.readyToGo')}
           </span>
         )}
-        {kickoffMissing.length > 0 && (
-          <div data-testid="kickoff-hint"
+        {nextItems.length > 0 && (
+          <div data-testid="next-hint"
             className="mb-2 rounded-lg border border-amber-700/60 bg-amber-950/30 p-2 text-xs">
             <p className="inline-flex items-center gap-1.5 text-amber-200">
-              <AlertTriangle aria-hidden="true" size={12} />{t('kickoff.title')}
+              <AlertTriangle aria-hidden="true" size={12} />{nextTitle}
             </p>
             <ul className="mt-1 list-disc list-inside text-amber-100/80">
-              {kickoffMissing.map((m) => <li key={m}>{m}</li>)}
+              {nextItems.map((i) => (
+                <li key={i.key + (i.detail ?? '')} data-kind={i.kind}
+                  className={i.kind === 'hard' && !isScoping ? 'text-red-300' : undefined}>
+                  {itemLabel(i)}
+                </li>
+              ))}
             </ul>
-            <p className="mt-1 text-slate-400">{t(motherPlant ? 'kickoff.hard' : 'kickoff.soft')}</p>
+            {nextNote && <p className="mt-1 text-slate-400">{nextNote}</p>}
           </div>
         )}
-        {change.status === 'captured' && kickoffMissing.length === 0 && (
-          <p data-testid="kickoff-ready" className="mb-2 inline-flex items-center gap-1.5 text-xs text-emerald-400">
-            <Check aria-hidden="true" size={12} />{t('kickoff.ready')}
+        {nextStep && nextItems.length === 0 && (
+          <p data-testid="next-ready" className="mb-2 inline-flex items-center gap-1.5 text-xs text-emerald-400">
+            <Check aria-hidden="true" size={12} />{nextReady}
           </p>
         )}
         {meetingDecides ? (

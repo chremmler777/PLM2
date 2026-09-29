@@ -883,6 +883,7 @@ async def get_change(
     out.from_intake = (await db.execute(
         select(RevisionIntake.id).where(RevisionIntake.change_id == change.id)
         .limit(1))).scalar_one_or_none() is not None
+    out.next_step = await ChangeService.next_step_missing(db, change)
     return out
 
 
