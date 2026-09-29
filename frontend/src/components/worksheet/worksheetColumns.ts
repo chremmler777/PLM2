@@ -33,7 +33,7 @@ export interface WorksheetColumn {
   label: string;
   group: ColumnGroup;
   filter: 'text' | 'enum' | 'none';
-  exportType: 'text' | 'number';
+  exportType: 'text' | 'number' | 'image';
   display: CellDisplay;
   noteOwner: 'row' | 'tool' | null;
   editableOn: 'article' | 'tool' | 'paint' | null;
@@ -193,7 +193,7 @@ const def = (d: Def): WorksheetColumn => ({
 });
 
 export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
-  def({ key: 'part.thumbnail', label: 'Image', group: 'Identity', display: 'thumbnail', filter: 'none',
+  def({ key: 'part.thumbnail', label: 'Image', group: 'Identity', display: 'thumbnail', filter: 'none', exportType: 'image',
     noteOwner: null, editableOn: null, frozenWidth: 44, value: () => null, edit: nowhere }),
   def({ key: 'part.part_number', label: 'KTX no.', group: 'Identity', display: 'mono', noteOwner: 'row',
     editableOn: 'article', frozenWidth: 170, value: (r) => r.part_number, edit: onRow('part.part_number') }),

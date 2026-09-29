@@ -69,7 +69,8 @@ export interface Worksheet {
 export interface WorksheetExportColumn {
   key: string;
   label: string;
-  type: 'text' | 'number' | 'date';
+  /** image: the cell value is the part id; the backend places its thumbnail in the cell. */
+  type: 'text' | 'number' | 'date' | 'image';
 }
 
 export interface WorksheetExportCell {

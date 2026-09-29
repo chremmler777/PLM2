@@ -6,13 +6,15 @@ from typing import Annotated, List, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.items.part_paint import _project_in_org
 from app.dependencies import get_current_user
 from app.models import User, get_db
 from app.models.entities import Project
-from app.services.worksheet_export import XLSX_MEDIA_TYPE, build_xlsx
+from app.models.part import Part
+from app.services.worksheet_export import XLSX_MEDIA_TYPE, build_xlsx, embeddable
 from app.services.worksheet_audit import (
     DEFAULT_LIMIT, MAX_CSV_ROWS, MAX_LIMIT, audit_entries, build_csv,
 )
@@ -31,7 +33,8 @@ async def get_worksheet(project_id: int, current_user: User = Depends(get_curren
 class ExportColumn(BaseModel):
     key: str = Field(..., max_length=64)
     label: str = Field(..., max_length=100)
-    type: Literal["text", "number", "date"] = "text"
+    # image: the cell value is the part id whose thumbnail is placed in the cell
+    type: Literal["text", "number", "date", "image"] = "text"
 
 
 MAX_CELL_TEXT = 5000
@@ -61,6 +64,27 @@ class ExportIn(BaseModel):
         return self
 
 
+async def _thumbnails(db: AsyncSession, project_id: int, body: "ExportIn") -> dict[int, bytes]:
+    """Picture bytes for the part ids in image columns, this project's parts
+    only; a missing or unreadable file just leaves the cell empty."""
+    cols = [j for j, c in enumerate(body.columns) if c.type == "image"]
+    ids = {r.cells[j].value for r in body.rows for j in cols if isinstance(r.cells[j].value, int)}
+    if not ids:
+        return {}
+    parts = (await db.execute(select(Part.id, Part.thumbnail_path).where(
+        Part.id.in_(ids), Part.project_id == project_id, Part.thumbnail_path.is_not(None)))).all()
+    out = {}
+    for pid, path in parts:
+        try:
+            with open(path, "rb") as fh:
+                pic = embeddable(fh.read())
+        except OSError:
+            continue
+        if pic:
+            out[pid] = pic
+    return out
+
+
 def _safe(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "project"
 
@@ -73,7 +97,8 @@ async def export_worksheet(project_id: int, body: ExportIn, current_user: User =
     code = _safe(project.code)
     data = build_xlsx([c.model_dump() for c in body.columns],
                       [[cell.model_dump() for cell in r.cells] for r in body.rows],
-                      body.frozen_columns, sheet_title=f"{code} worksheet")
+                      body.frozen_columns, sheet_title=f"{code} worksheet",
+                      images=await _thumbnails(db, project_id, body))
     filename = f"{code}-worksheet-{date.today().isoformat()}.xlsx"
     return Response(content=data, media_type=XLSX_MEDIA_TYPE,
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})

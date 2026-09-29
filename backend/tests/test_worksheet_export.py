@@ -105,3 +105,47 @@ async def test_build_xlsx_strips_control_characters_from_sheet_title():
                       sheet_title="19\x0194 worksheet")
     wb = openpyxl.load_workbook(BytesIO(data))
     assert wb.active.title == "1994 worksheet"
+
+
+def _webp() -> bytes:
+    from PIL import Image
+    out = BytesIO()
+    Image.new("RGB", (4, 4), "red").save(out, format="WEBP")
+    return out.getvalue()
+
+
+async def test_export_places_thumbnails_in_their_cells(client, eng_auth, seed, monkeypatch, tmp_path):
+    """Image columns carry the part id; the picture goes into the cell (Excel
+    "Place in Cell", click to zoom), WEBP converted, foreign parts ignored."""
+    import zipfile
+    from tests.test_part_thumbnail import PNG_BYTES
+    monkeypatch.chdir(tmp_path)
+    pid = seed["project_id"]
+    ids = []
+    for n, (name, data) in enumerate((("a.png", PNG_BYTES), ("b.webp", _webp()))):
+        res = await client.post("/api/v1/parts", headers=eng_auth, json={
+            "project_id": pid, "part_number": f"20-TH-{n}", "name": f"Pic {n}", "part_type": "internal_mfg",
+            "data_classification": "confidential"})
+        assert res.status_code == 200, res.text
+        ids.append(res.json()["id"])
+        res = await client.put(f"/api/v1/parts/{ids[-1]}/thumbnail", files={"file": (name, data, "image/png")},
+                               headers=eng_auth)
+        assert res.status_code == 200, res.text
+    payload = {"columns": [{"key": "part.thumbnail", "label": "Image", "type": "image"},
+                           {"key": "part.part_number", "label": "KTX no.", "type": "text"}],
+               "rows": [{"cells": [{"value": ids[0]}, {"value": "20-TH-0"}]},
+                        {"cells": [{"value": ids[1]}, {"value": "20-TH-1"}]},
+                        {"cells": [{"value": 999999}, {"value": "foreign"}]},
+                        {"cells": [{"value": None}, {"value": "none"}]}],
+               "frozen_columns": 2}
+    r = await _export(client, eng_auth, pid, payload)
+    assert r.status_code == 200, r.text
+    z = zipfile.ZipFile(BytesIO(r.content))
+    names = z.namelist()
+    assert "xl/richData/rdrichvalue.xml" in names                 # in-cell pictures
+    assert "xl/richData/_rels/richValueRel.xml.rels" in names
+    assert not any(n.startswith("/") for n in names)
+    assert not any(n.startswith("xl/drawings/") for n in names)   # not floating
+    assert len([n for n in names if n.startswith("xl/media/")]) == 2
+    ws = openpyxl.load_workbook(BytesIO(r.content)).active
+    assert [ws.cell(row=i, column=2).value for i in range(2, 6)] == ["20-TH-0", "20-TH-1", "foreign", "none"]

@@ -112,15 +112,19 @@ export function offeredFilters(
   return out;
 }
 
-/** What the xlsx gets: the visible columns (no images) and rows, in order, typed, with flags. */
+/**
+ * What the xlsx gets: the visible columns and rows, in order, typed, with flags. A picture
+ * column sends the row's part id (null without a picture); the backend places the image in the cell.
+ */
 export function buildExportPayload(
   cols: WorksheetColumn[], rows: WorksheetRow[], ctx: WorksheetContext,
 ): WorksheetExportPayload {
-  const exported = cols.filter((c) => c.display !== 'thumbnail');
+  const exported = cols;
   return {
     columns: exported.map((c) => ({ key: c.key, label: c.label, type: c.exportType })),
     rows: rows.map((row) => ({
       cells: exported.map((c) => {
+        if (c.exportType === 'image') return { value: row.thumbnail_url ? row.part_id : null, flag: null, comments: 0 };
         const note = noteFor(c, row, ctx);
         return { value: c.value(row, ctx), flag: note?.flag_status ?? null, comments: note?.comment_count ?? 0 };
       }),

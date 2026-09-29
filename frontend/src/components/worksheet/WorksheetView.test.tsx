@@ -196,7 +196,7 @@ describe('WorksheetView', () => {
     const [url, payload] = clientMocks.post.mock.calls[0]
     expect(url).toBe('/v1/projects/35/worksheet/export')
     expect(payload.rows).toHaveLength(1)
-    expect(payload.columns.some((c: { key: string }) => c.key === 'part.thumbnail')).toBe(false)
+    expect(payload.columns[0]).toEqual({ key: 'part.thumbnail', label: 'Image', type: 'image' })
   })
 })
 
