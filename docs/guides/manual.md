@@ -12,7 +12,7 @@ If you only work in one department, you may prefer the shorter guide for your ro
 - [`sales.md`](sales.md) — Sales / commercial
 - [`quality.md`](quality.md) — Quality (sign-off, D1 gates, Audit)
 - [`management-pnl.md`](management-pnl.md) — Management (P&L)
-- [`project-worksheet-and-dfm.md`](project-worksheet-and-dfm.md): Engineering (project page, Worksheet with comments, flags and audit log, material, colour and grain, DFM archive on tools)
+- [`project-worksheet-and-dfm.md`](project-worksheet-and-dfm.md): Engineering (project page, Worksheet with comments, flags, audit log and xlsx export with pictures, material, colour and grain, tool fields incl. machine, DFM archive on tools)
 
 ## What is a "change"?
 

@@ -2,7 +2,8 @@
 
 This guide covers the project page, the Worksheet overview with comments,
 flags and the audit log, the article fields for material, colour and grain,
-and the DFM archive on tools. Screenshots are from project 1994 Brose Seat
+the tool fields (including the planned machine) and the DFM archive on
+tools. Screenshots are from project 1994 Brose Seat
 Trim.
 
 ## The project page
@@ -49,7 +50,7 @@ where they live (article, tool, paint), and the worksheet shows the result.
 | Revision | E level and customer index, Phase |
 | Material | Material (linked to MaterialDB or marked new) |
 | Appearance | Painted, Colour, Grain |
-| Tool | Tool no., Cavities, Toolmaker, Cycle time, Tonnage |
+| Tool | Tool no., Cavities, Toolmaker, Cycle time, Tonnage, Machine |
 | DFM | DFM status of the tool (waiting on ..., all answered, no topic) |
 | Notes | Open flags and the latest comment for the row |
 
@@ -57,6 +58,10 @@ where they live (article, tool, paint), and the worksheet shows the result.
   unpainted parts show the moulded-in colour code (for example NM0) with a
   `MIC` tag.
 - **Grain:** the grain from the drawing, for example KF8.
+- **Machine:** the press the tool is planned on, for example
+  `KM 200-1 (KM 200/750 CX)`: machine number, then manufacturer and model.
+  `(no fit)` means the RFQ tool layout found that the tool does not fit this
+  press. Set on the tool card (see Tool fields below).
 - The image and the KTX and OEM numbers stay in place when you scroll
   sideways.
 
@@ -71,7 +76,11 @@ where they live (article, tool, paint), and the worksheet shows the result.
 - **Only rows with open flags** keeps the rows that still need attention.
   **Purchased parts** and **Tools without article** add those rows.
 - **Export xlsx** downloads what you see (visible columns and rows) with the
-  flag colours: yellow open, green confirmed, red rejected.
+  flag colours: yellow open, green confirmed, red rejected. A cell with
+  comments carries a note ("2 comments in PLM").
+- The **Image** column goes into the file as pictures placed in the cells.
+  Click a picture in Excel to see it large; the file keeps the full-size
+  image. Hide the Image column before exporting if you do not want pictures.
 
 ### Right-click a cell: Edit, Comment, Flag
 
@@ -143,6 +152,25 @@ On the article page, the **Part Information** card holds:
 
 ![New material badge](img/pw-ws-final-new-material-badge.png)
 
+## Tool fields
+
+On a tool, the **Tool** card holds the sold state: **Cavities**,
+**Tonnage class** (t), **Target cycle time** (s), **Toolmaker** and
+**Machine**. Click a value to edit it (Enter saves, Escape cancels); an empty
+value clears it. Every change goes into the tool's changelog, and each field
+takes comments and flags like the worksheet cells.
+
+- **Machine** is free text: the press the tool is planned on. It is not the
+  press MachineDB has assigned to the tool (that one feeds costing through
+  the tonnage sync).
+- For projects **1994** and **2277** the machine was taken over from the
+  RFQ2 Tool Layout Designer (RFQ 26 loop 37 and RFQ 25 loop 36): of the
+  presses picked there, the one of the smallest machine class (clamping
+  force), on a tie the lowest machine number. Script:
+  `backend/scripts/set_brose_tool_machines.py` (dry run by default,
+  `--apply` writes, one changelog entry per tool). If the picks change in
+  RFQ2, update the script's list and run it again, or edit the tool card.
+
 ## DFM archive on tools
 
 Open a tool (from the Tools group of the project, or its own page). The DFM
@@ -190,6 +218,15 @@ thread shows the comments and the History section shows who set the flag.
 
 **The Colour cell is empty.** The part is not painted and has no colour code
 yet; set the colour code on the article, or the paint on the paint section.
+
+**Where does the Machine value come from?** From the tool card. For 1994
+and 2277 it was taken over once from the RFQ2 tool layout (smallest machine
+class picked there); it does not follow RFQ2 automatically.
+
+**The export has no pictures.** Only articles and tools with a thumbnail get
+one, and only when the Image column is visible. The pictures are placed in
+the cells ("Place in Cell"), which needs Excel from Microsoft 365; older
+Excel versions and other viewers show an error or an empty cell there.
 
 **Why does a material say NEW, not in MaterialDB?** It was typed in because
 the material does not exist in MaterialDB yet. Create it in MaterialDB, then
