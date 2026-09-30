@@ -192,14 +192,14 @@ describe('datasheet shrinkage columns', () => {
   const v = (min: number | null, max: number | null = null) => ({ min, max, method: 'ISO 294-4', condition: '2 mm' })
   const withShrink = (shrinkage: unknown) => row({ material: { ...row().material, shrinkage } as never })
 
-  it('shows single values, ranges, a missing direction and nothing when not linked', () => {
+  it('shows single values and ranges, nothing when the datasheet has no value or the article is not linked', () => {
     const gf = withShrink({ parallel: v(0.7), normal: v(1.0), family: 'PA6', filler_type: 'GF', filler_pct: 15 })
     expect(shrinkText(gf, 'parallel')).toBe('0.7')
     expect(shrinkText(gf, 'normal')).toBe('1')
     expect(shrinkBasis(gf)).toBe('ISO 294-4, 2 mm · GF 15 %')
     const range = withShrink({ parallel: v(0.5, 0.7), normal: null, family: 'PC/ABS', filler_type: null, filler_pct: null })
     expect(shrinkText(range, 'parallel')).toBe('0.5-0.7')
-    expect(shrinkText(range, 'normal')).toBe('not on datasheet')
+    expect(shrinkText(range, 'normal')).toBeNull()
     expect(shrinkText(withShrink(null), 'parallel')).toBeNull()
     expect(shrinkBasis(withShrink(null))).toBeNull()
   })

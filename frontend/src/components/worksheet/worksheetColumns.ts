@@ -192,12 +192,10 @@ type ShrinkDir = 'parallel' | 'normal';
 
 const pct = (n: number) => String(Number(n.toFixed(3)));
 
-/** '0.7', '0.5-0.7', 'not on datasheet' (linked, no value) or null (not linked to MaterialDB). */
+/** '0.7' or '0.5-0.7'; null when the article is not linked or the datasheet has no value. */
 export function shrinkText(r: WorksheetRow, dir: ShrinkDir): string | null {
-  const s = r.material.shrinkage;
-  if (!s) return null;
-  const v = s[dir];
-  if (!v || (v.min == null && v.max == null)) return 'not on datasheet';
+  const v = r.material.shrinkage?.[dir];
+  if (!v || (v.min == null && v.max == null)) return null;
   if (v.min != null && v.max != null && v.max !== v.min) return `${pct(v.min)}-${pct(v.max)}`;
   return pct((v.min ?? v.max)!);
 }
