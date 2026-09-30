@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { WORKSHEET_COLUMNS, activeNoteFor, buildContext, cellNoteKey, colourSource, dfmLabel, noteFor, notePartId, notesSummary, rowNotes } from './worksheetColumns'
+import { WORKSHEET_COLUMNS, activeNoteFor, buildContext, cellNoteKey, colourSource, dfmLabel, noteFor, notePartId, notesSummary, rowNotes, shrinkBasis, shrinkText } from './worksheetColumns'
 import { FIELD_KEY_RE } from '../../lib/fieldNotes'
 import { row } from './worksheetFixtures'
 import type { FieldNoteSummary } from '../../api/fieldNotes'
@@ -89,7 +89,7 @@ describe('worksheet column registry', () => {
 
 describe('worksheet notes on tool-only rows', () => {
   const toolOnly = row({ part_id: 95, part_number: '199413', row_kind: 'tool_only', item_category: 'tool', part_type: 'purchased',
-    tool: { part_id: 95, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null } })
+    tool: { part_id: 95, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null } })
 
   it('offers no note where the backend would refuse the field key for the owner', () => {
     expect(notePartId(col('paint.painted'), toolOnly)).toBeNull()
@@ -108,12 +108,13 @@ describe('worksheet colour and grain columns', () => {
   const mic = row({ part_id: 2, paint: { painted: false, colour: null, colour_hex: null, paint_system: null }, colour_code: 'NM0' })
   const bare = row({ part_id: 3, paint: { painted: false, colour: null, colour_hex: null, paint_system: null }, colour_code: null, grain: null })
 
-  it('sits between Painted and Tool no. with Material before it', () => {
+  it('sits between Painted and the datasheet shrinkage with Material before it', () => {
     const keys = WORKSHEET_COLUMNS.map((c) => c.key)
     const at = (k: string) => keys.indexOf(k)
     expect(keys.includes('paint.colour')).toBe(false)
-    expect([at('part.material'), at('paint.painted'), at('part.colour'), at('part.grain'), at('tool.number')])
-      .toEqual([...Array(5).keys()].map((i) => at('part.material') + i))
+    const order = ['part.material', 'paint.painted', 'part.colour', 'part.grain', 'material.shrink_parallel',
+      'material.shrink_normal', 'material.shrink_basis', 'tool.number']
+    expect(order.map(at)).toEqual(order.map((_, i) => at('part.material') + i))
     expect(col('part.colour').exportType).toBe('text')
     expect(col('part.grain').exportType).toBe('text')
   })
@@ -184,5 +185,28 @@ describe('worksheet name column', () => {
     expect(col('part.name').value(r, ctx)).toBe('Handle, manual lift, passenger')
     expect(col('part.name').value(row({ name: '1994 Isofix Cover', customer_part_number: null }), ctx)).toBe('Isofix Cover')
     expect(col('part.name').title?.(r)).toBe('206.882.251 Handle, manual lift, passenger')
+  })
+})
+
+describe('datasheet shrinkage columns', () => {
+  const v = (min: number | null, max: number | null = null) => ({ min, max, method: 'ISO 294-4', condition: '2 mm' })
+  const withShrink = (shrinkage: unknown) => row({ material: { ...row().material, shrinkage } as never })
+
+  it('shows single values, ranges, a missing direction and nothing when not linked', () => {
+    const gf = withShrink({ parallel: v(0.7), normal: v(1.0), family: 'PA6', filler_type: 'GF', filler_pct: 15 })
+    expect(shrinkText(gf, 'parallel')).toBe('0.7')
+    expect(shrinkText(gf, 'normal')).toBe('1')
+    expect(shrinkBasis(gf)).toBe('ISO 294-4, 2 mm · GF 15 %')
+    const range = withShrink({ parallel: v(0.5, 0.7), normal: null, family: 'PC/ABS', filler_type: null, filler_pct: null })
+    expect(shrinkText(range, 'parallel')).toBe('0.5-0.7')
+    expect(shrinkText(range, 'normal')).toBe('not on datasheet')
+    expect(shrinkText(withShrink(null), 'parallel')).toBeNull()
+    expect(shrinkBasis(withShrink(null))).toBeNull()
+  })
+
+  it('tool shrinkage columns read the tool and edit on the tool card', () => {
+    const r = row({ tool: { ...row().tool!, shrink_parallel_pct: 0.7, shrink_normal_pct: 1.05 } })
+    expect(col('tool.shrink_parallel').value(r, buildContext([]))).toBe(0.7)
+    expect(col('tool.shrink_normal').edit(r)).toEqual({ partId: r.tool!.part_id, focus: 'tool.shrink_normal' })
   })
 })

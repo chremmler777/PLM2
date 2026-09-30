@@ -36,6 +36,8 @@ export interface Part {
   tool_tonnage_class?: number | null;
   tool_cycle_time_s?: number | null;
   tool_machine?: string | null;
+  tool_shrink_parallel_pct?: number | null;
+  tool_shrink_normal_pct?: number | null;
   /** /api/v1/parts/{id}/thumbnail?v=..., null when the part has no picture. */
   thumbnail_url?: string | null;
 }

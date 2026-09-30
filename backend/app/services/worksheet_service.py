@@ -13,7 +13,10 @@ from app.models.dfm import DFM_PARTIES, DFM_TOPIC_OPEN, DfmTopic
 from app.models.paint import PartPaint
 from app.models.part import Part, PartRelation, PartRevision
 from app.models.supplier import Supplier
+from app.services import materialdb_client
 from app.services.dfm_service import flow_state
+
+SHRINK_KEYS = {"parallel": "shrinkage_flow", "normal": "shrinkage_cross"}
 
 
 def material_dict(p: Part) -> dict:
@@ -21,6 +24,32 @@ def material_dict(p: Part) -> dict:
             "material_ktx_number": p.material_ktx_number, "material_label": p.material_label,
             "material_new_text": p.material_new_text,
             "material_synced_at": p.material_synced_at.isoformat() if p.material_synced_at else None}
+
+
+def _shrink_value(p: Optional[dict]) -> Optional[dict]:
+    if not isinstance(p, dict) or (p.get("v") is None and p.get("vmax") is None):
+        return None
+    return {"min": p.get("v"), "max": p.get("vmax"), "method": p.get("m"), "condition": p.get("c")}
+
+
+def datasheet_shrinkage(m: Optional[dict]) -> Optional[dict]:
+    """Mould shrinkage from a MaterialDB material: parallel / normal (%), each with test
+    method and specimen, plus what the resin is filled with. None: not in MaterialDB."""
+    if m is None:
+        return None
+    props = m.get("props") or {}
+    return {**{d: _shrink_value(props.get(k)) for d, k in SHRINK_KEYS.items()},
+            "family": m.get("family"), "filler_type": m.get("filler_type"), "filler_pct": m.get("filler_pct")}
+
+
+async def _materials(ids: set) -> tuple[dict, Optional[str]]:
+    """MaterialDB materials by id, or ({}, reason) when MaterialDB cannot answer."""
+    if not ids:
+        return {}, None
+    try:
+        return {m["id"]: m for m in await materialdb_client.fetch_all() if m.get("id") in ids}, None
+    except materialdb_client.MaterialDbUnavailable as e:
+        return {}, str(e)
 
 
 def dfm_status(topics: list, today: Optional[date] = None) -> dict:
@@ -56,7 +85,8 @@ def _tool(t: Part, toolmakers: dict) -> dict:
     return {"part_id": t.id, "part_number": t.part_number, "name": t.name, "cavities": t.tool_cavities,
             "toolmaker_id": t.toolmaker_id, "toolmaker_name": toolmakers.get(t.toolmaker_id),
             "cycle_time_s": t.tool_cycle_time_s, "tonnage_class": t.tool_tonnage_class,
-            "machine": t.tool_machine}
+            "machine": t.tool_machine, "shrink_parallel_pct": t.tool_shrink_parallel_pct,
+            "shrink_normal_pct": t.tool_shrink_normal_pct}
 
 
 def _identity(p: Part, kind: str) -> dict:
@@ -71,7 +101,7 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
     parts = (await session.execute(
         select(Part).where(Part.project_id == project_id).order_by(Part.part_number))).scalars().all()
     if not parts:
-        return {"project_id": project_id, "rows": []}
+        return {"project_id": project_id, "rows": [], "materialdb_error": None}
     by_id = {p.id: p for p in parts}
     articles = [p for p in parts if p.item_category == "article"]
     tools = {p.id: p for p in parts if p.item_category == "tool"}
@@ -108,6 +138,13 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
             mirror_of[src.id] = {"part_id": dst.id, "part_number": dst.part_number,
                                  "customer_part_number": dst.customer_part_number}
 
+    materials, materials_error = await _materials(
+        {a.materialdb_id for a in articles if a.material_source == "materialdb" and a.materialdb_id})
+
+    def _material(p: Part) -> dict:
+        linked = p.material_source == "materialdb" and p.materialdb_id
+        return {**material_dict(p), "shrinkage": datasheet_shrinkage(materials.get(p.materialdb_id)) if linked else None}
+
     rows = []
     for a in articles:
         made_by = sorted(tools_of.get(a.id, []), key=lambda t: t.part_number)
@@ -118,7 +155,7 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
             "mirror_of": mirror_of.get(a.id),
             "revision": {"revision_name": rev.revision_name, "customer_index": rev.customer_index,
                          "phase": rev.phase.value if hasattr(rev.phase, "value") else rev.phase} if rev else None,
-            "material": material_dict(a),
+            "material": _material(a),
             "paint": _paint(paints.get(a.id)),
             "tool": _tool(tool, toolmakers) if tool else None,
             "other_tools": [t.part_number for t in made_by[1:]],
@@ -128,6 +165,6 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
         if t.id in producing:
             continue
         rows.append({**_identity(t, "tool_only"), "mirror_of": None, "revision": None,
-                     "material": material_dict(t), "paint": _paint(None), "tool": _tool(t, toolmakers),
+                     "material": {**material_dict(t), "shrinkage": None}, "paint": _paint(None), "tool": _tool(t, toolmakers),
                      "other_tools": [], "dfm": dfm_status(topics_by_tool.get(t.id, []), today)})
-    return {"project_id": project_id, "rows": rows}
+    return {"project_id": project_id, "rows": rows, "materialdb_error": materials_error}

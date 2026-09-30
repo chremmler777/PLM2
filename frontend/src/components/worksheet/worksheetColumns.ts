@@ -188,6 +188,35 @@ const nowhere = (): EditTarget | null => null;
 type Def = Omit<WorksheetColumn, 'defaultVisible' | 'exportType' | 'display' | 'filter'>
   & Partial<Pick<WorksheetColumn, 'defaultVisible' | 'exportType' | 'display' | 'filter'>>;
 
+type ShrinkDir = 'parallel' | 'normal';
+
+const pct = (n: number) => String(Number(n.toFixed(3)));
+
+/** '0.7', '0.5-0.7', 'not on datasheet' (linked, no value) or null (not linked to MaterialDB). */
+export function shrinkText(r: WorksheetRow, dir: ShrinkDir): string | null {
+  const s = r.material.shrinkage;
+  if (!s) return null;
+  const v = s[dir];
+  if (!v || (v.min == null && v.max == null)) return 'not on datasheet';
+  if (v.min != null && v.max != null && v.max !== v.min) return `${pct(v.min)}-${pct(v.max)}`;
+  return pct((v.min ?? v.max)!);
+}
+
+function shrinkTitle(r: WorksheetRow, dir: ShrinkDir): string | null {
+  const v = r.material.shrinkage?.[dir];
+  return v ? [v.method, v.condition].filter(Boolean).join(', ') || null : null;
+}
+
+/** Test method and specimen of the datasheet values, and the filler (glass fibre shrinks unevenly). */
+export function shrinkBasis(r: WorksheetRow): string | null {
+  const s = r.material.shrinkage;
+  if (!s) return null;
+  const v = s.parallel ?? s.normal;
+  const test = v ? [v.method, v.condition].filter(Boolean).join(', ') : '';
+  const filler = s.filler_type ? `${s.filler_type}${s.filler_pct ? ` ${s.filler_pct} %` : ''}` : '';
+  return [test, filler].filter(Boolean).join(' · ') || null;
+}
+
 const def = (d: Def): WorksheetColumn => ({
   defaultVisible: true, exportType: 'text', display: 'text', filter: 'text', ...d,
 });
@@ -224,6 +253,14 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     edit: (r) => (r.row_kind === 'tool_only' ? null : { partId: r.part_id, focus: colourKey(r)! }) }),
   def({ key: 'part.grain', label: 'Grain', group: 'Material', noteOwner: 'row', editableOn: 'article',
     value: (r) => r.grain, noteKey: articleOnlyKey('part.grain'), edit: onArticle('part.grain') }),
+  // Datasheet shrinkage of the linked MaterialDB resin, read-only: what the supplier measured on a test
+  // plaque, not the value the tool is cut with (Tool group). A range shows as min-max.
+  def({ key: 'material.shrink_parallel', label: 'Datasheet shrink parallel (%)', group: 'Material', noteOwner: null,
+    editableOn: null, value: (r) => shrinkText(r, 'parallel'), title: (r) => shrinkTitle(r, 'parallel'), edit: nowhere }),
+  def({ key: 'material.shrink_normal', label: 'Datasheet shrink normal (%)', group: 'Material', noteOwner: null,
+    editableOn: null, value: (r) => shrinkText(r, 'normal'), title: (r) => shrinkTitle(r, 'normal'), edit: nowhere }),
+  def({ key: 'material.shrink_basis', label: 'Shrink basis', group: 'Material', noteOwner: null, editableOn: null,
+    value: shrinkBasis, title: shrinkBasis, edit: nowhere }),
   def({ key: 'tool.number', label: 'Tool no.', group: 'Tool', display: 'mono', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => r.tool ? [r.tool.part_number, ...r.other_tools].join(', ') : null, edit: onTool('tool.number') }),
   def({ key: 'tool.cavities', label: 'Cavities', group: 'Tool', display: 'number', exportType: 'number', noteOwner: 'tool',
@@ -237,6 +274,10 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     edit: onTool('tool.tonnage_class') }),
   def({ key: 'tool.machine', label: 'Machine', group: 'Tool', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => r.tool?.machine ?? null, edit: onTool('tool.machine') }),
+  def({ key: 'tool.shrink_parallel', label: 'Tool shrink parallel (%)', group: 'Tool', display: 'number', exportType: 'number',
+    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_parallel_pct ?? null, edit: onTool('tool.shrink_parallel') }),
+  def({ key: 'tool.shrink_normal', label: 'Tool shrink normal (%)', group: 'Tool', display: 'number', exportType: 'number',
+    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_normal_pct ?? null, edit: onTool('tool.shrink_normal') }),
   def({ key: 'dfm.status', label: 'DFM', group: 'DFM', display: 'dfm', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => dfmLabel(r.dfm), edit: onTool('dfm.status') }),
   def({ key: 'notes.summary', label: 'Notes', group: 'Notes', display: 'notes', noteOwner: null, editableOn: null,

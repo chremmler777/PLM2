@@ -104,3 +104,18 @@ async def test_tool_machine_set_trimmed_logged_and_cleared(client, eng_auth, see
 async def test_tool_machine_refused_on_articles(client, eng_auth, seed):
     res = await _create(client, eng_auth, seed, item_category="article", tool_machine="KM 200-1")
     assert res.status_code in (400, 422), res.text
+
+
+async def test_tool_shrinkage_set_logged_bounded_and_refused_on_articles(client, eng_auth, seed):
+    pid = (await _create(client, eng_auth, seed, tool_shrink_parallel_pct=0.7)).json()["id"]
+    res = await client.put(f"/api/v1/parts/{pid}", json={"tool_shrink_normal_pct": 1.05}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert (res.json()["tool_shrink_parallel_pct"], res.json()["tool_shrink_normal_pct"]) == (0.7, 1.05)
+    log = (await client.get(f"/api/v1/parts/{pid}/changelog", headers=eng_auth)).json()
+    assert any(e.get("field_name") == "tool_shrink_normal_pct" for e in log), log
+    assert (await client.put(f"/api/v1/parts/{pid}", json={"tool_shrink_parallel_pct": 6},
+                             headers=eng_auth)).status_code == 422
+    assert (await client.put(f"/api/v1/parts/{pid}", json={"tool_shrink_parallel_pct": None},
+                             headers=eng_auth)).json()["tool_shrink_parallel_pct"] is None
+    res = await _create(client, eng_auth, seed, item_category="article", tool_shrink_normal_pct=1.0)
+    assert res.status_code in (400, 422), res.text

@@ -18,6 +18,26 @@ export interface WorksheetTool {
   tonnage_class: number | null;
   /** The press the tool is planned on (free text, e.g. the RFQ2 layout pick). */
   machine: string | null;
+  /** Shrinkage the tool is cut with, %, along / across the flow (engineering, not the datasheet). */
+  shrink_parallel_pct: number | null;
+  shrink_normal_pct: number | null;
+}
+
+/** One datasheet shrinkage value, % (max set when the sheet gives a range). */
+export interface ShrinkValue {
+  min: number | null;
+  max: number | null;
+  method: string | null;
+  condition: string | null;
+}
+
+/** Mould shrinkage of the linked MaterialDB material; null when the article is not linked. */
+export interface DatasheetShrinkage {
+  parallel: ShrinkValue | null;
+  normal: ShrinkValue | null;
+  family: string | null;
+  filler_type: string | null;
+  filler_pct: number | null;
 }
 
 export type DfmSheetStatus = 'no_topic' | 'waiting' | 'all_answered' | 'open' | 'finished';
@@ -54,7 +74,7 @@ export interface WorksheetRow {
   grain: string | null;
   mirror_of: { part_id: number; part_number: string; customer_part_number: string | null } | null;
   revision: { revision_name: string; customer_index: string | null; phase: string } | null;
-  material: PartMaterial;
+  material: PartMaterial & { shrinkage?: DatasheetShrinkage | null };
   paint: WorksheetPaint;
   tool: WorksheetTool | null;
   other_tools: string[];

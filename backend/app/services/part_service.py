@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 # Controlled item categories (automotive PLM)
 VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "eoat", "gauge"}
 
-TOOL_FIELDS = ("tool_cavities", "toolmaker_id", "tool_tonnage_class", "tool_cycle_time_s", "tool_machine")
-TOOL_FIELDS_ONLY_ON_TOOLS = "Tool fields (cavities, toolmaker, tonnage class, cycle time, machine) only apply to tools"
+TOOL_FIELDS = ("tool_cavities", "toolmaker_id", "tool_tonnage_class", "tool_cycle_time_s", "tool_machine",
+               "tool_shrink_parallel_pct", "tool_shrink_normal_pct")
+TOOL_FIELDS_ONLY_ON_TOOLS = ("Tool fields (cavities, toolmaker, tonnage class, cycle time, machine, shrinkage) "
+                             "only apply to tools")
 ARTICLE_FIELDS_ONLY_ON_ARTICLES = "Colour code and grain only apply to articles"
 ARTICLE_TEXT_FIELDS = ("colour_code", "grain")
 
@@ -80,6 +82,8 @@ class PartService:
         tool_tonnage_class: Optional[int] = None,
         tool_cycle_time_s: Optional[float] = None,
         tool_machine: Optional[str] = None,
+        tool_shrink_parallel_pct: Optional[float] = None,
+        tool_shrink_normal_pct: Optional[float] = None,
         colour_code: Optional[str] = None,
         grain: Optional[str] = None,
     ) -> Part:
@@ -91,7 +95,9 @@ class PartService:
 
         tool_values = {"tool_cavities": tool_cavities, "toolmaker_id": toolmaker_id,
                        "tool_tonnage_class": tool_tonnage_class, "tool_cycle_time_s": tool_cycle_time_s,
-                       "tool_machine": clean_text(tool_machine)}
+                       "tool_machine": clean_text(tool_machine),
+                       "tool_shrink_parallel_pct": tool_shrink_parallel_pct,
+                       "tool_shrink_normal_pct": tool_shrink_normal_pct}
         if item_category != "tool" and any(v is not None for v in tool_values.values()):
             raise ValueError(TOOL_FIELDS_ONLY_ON_TOOLS)
         await PartService._check_toolmaker(session, toolmaker_id)
@@ -171,6 +177,10 @@ class PartService:
         update_tool_cycle_time_s: bool = False,
         tool_machine: Optional[str] = None,
         update_tool_machine: bool = False,
+        tool_shrink_parallel_pct: Optional[float] = None,
+        update_tool_shrink_parallel_pct: bool = False,
+        tool_shrink_normal_pct: Optional[float] = None,
+        update_tool_shrink_normal_pct: bool = False,
         colour_code: Optional[str] = None,
         update_colour_code: bool = False,
         grain: Optional[str] = None,
@@ -246,6 +256,8 @@ class PartService:
             "tool_tonnage_class": (update_tool_tonnage_class, tool_tonnage_class),
             "tool_cycle_time_s": (update_tool_cycle_time_s, tool_cycle_time_s),
             "tool_machine": (update_tool_machine, clean_text(tool_machine)),
+            "tool_shrink_parallel_pct": (update_tool_shrink_parallel_pct, tool_shrink_parallel_pct),
+            "tool_shrink_normal_pct": (update_tool_shrink_normal_pct, tool_shrink_normal_pct),
         }
         if any(flag for flag, _ in tool_updates.values()):
             if (item_category or part.item_category) != "tool":

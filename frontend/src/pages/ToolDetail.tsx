@@ -30,6 +30,8 @@ export interface ToolPart {
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;
   tool_machine?: string | null;
+  tool_shrink_parallel_pct?: number | null;
+  tool_shrink_normal_pct?: number | null;
   thumbnail_url?: string | null;
 }
 
@@ -108,7 +110,9 @@ export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null,
         <ToolFieldsCard partId={part.id}
           values={{ tool_cavities: part.tool_cavities, toolmaker_id: part.toolmaker_id,
             tool_tonnage_class: part.tool_tonnage_class, tool_cycle_time_s: part.tool_cycle_time_s,
-            tool_machine: part.tool_machine ?? null }}
+            tool_machine: part.tool_machine ?? null,
+            tool_shrink_parallel_pct: part.tool_shrink_parallel_pct ?? null,
+            tool_shrink_normal_pct: part.tool_shrink_normal_pct ?? null }}
           producedNotes={produced.map((a) => a.notes)} projectId={part.project_id} />
 
         {openDoc && (

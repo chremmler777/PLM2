@@ -4,7 +4,7 @@ import { materialOf } from '../../lib/material';
 
 const tool = {
   part_id: 90, part_number: '199401', name: 'TOOL Handle', cavities: 2, toolmaker_id: 3,
-  toolmaker_name: 'Formenbau Nord', cycle_time_s: 55, tonnage_class: null, machine: null,
+  toolmaker_name: 'Formenbau Nord', cycle_time_s: 55, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null,
 };
 
 export const row = (over: Partial<WorksheetRow> = {}): WorksheetRow => ({

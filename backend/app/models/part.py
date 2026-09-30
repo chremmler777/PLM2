@@ -73,6 +73,10 @@ class Part(Base):
     # The press the tool is planned on (109), free text, e.g. the RFQ2 Tool
     # Layout Designer's pick. Not the MachineDB assigned press below.
     tool_machine: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Mould shrinkage the tool steel is dimensioned with (110), %, parallel to and
+    # across the flow (glass-filled resins differ). Set by engineering, not the datasheet.
+    tool_shrink_parallel_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
+    tool_shrink_normal_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
     # The press tonnage of the tool as the source systems know it (108),
     # kept by the tool tonnage sync (tool_tonnage_service), one set per
     # source so a failed MachineDB fetch never downgrades a tool to TWOS.

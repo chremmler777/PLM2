@@ -9,7 +9,7 @@ const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
-const empty: ToolFieldValues = { tool_cavities: null, toolmaker_id: null, tool_tonnage_class: null, tool_cycle_time_s: null, tool_machine: null }
+const empty: ToolFieldValues = { tool_cavities: null, toolmaker_id: null, tool_tonnage_class: null, tool_cycle_time_s: null, tool_machine: null, tool_shrink_parallel_pct: null, tool_shrink_normal_pct: null }
 
 function wrap(values: ToolFieldValues = empty, notes: (string | null)[] = [], projectId: number | null = null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })

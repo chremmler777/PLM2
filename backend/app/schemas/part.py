@@ -32,6 +32,8 @@ class PartBase(BaseModel):
     tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
     tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
     tool_machine: Optional[str] = Field(None, max_length=255, description="Press the tool is planned on")
+    tool_shrink_parallel_pct: Optional[float] = Field(None, ge=0, le=5, description="Tool shrinkage parallel to flow, %")
+    tool_shrink_normal_pct: Optional[float] = Field(None, ge=0, le=5, description="Tool shrinkage across flow, %")
 
     # Article fields
     colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")
@@ -69,6 +71,8 @@ class PartUpdate(BaseModel):
     tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
     tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
     tool_machine: Optional[str] = Field(None, max_length=255, description="Press the tool is planned on")
+    tool_shrink_parallel_pct: Optional[float] = Field(None, ge=0, le=5, description="Tool shrinkage parallel to flow, %")
+    tool_shrink_normal_pct: Optional[float] = Field(None, ge=0, le=5, description="Tool shrinkage across flow, %")
 
     # Article fields (item_category = article only); empty clears
     colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")

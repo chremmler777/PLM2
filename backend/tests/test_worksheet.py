@@ -78,7 +78,8 @@ async def test_rows_carry_article_tool_revision_material_paint_and_dfm(client, e
     assert lh["tool"] == {"part_id": ids["tool"], "part_number": "199401", "name": "Name 199401", "cavities": 2,
                           "toolmaker_id": ids["maker"], "toolmaker_name": "Formenbau Nord",
                           "cycle_time_s": 55.0, "tonnage_class": None,
-                          "machine": None}
+                          "machine": None, "shrink_parallel_pct": None, "shrink_normal_pct": None}
+    assert lh["material"]["shrinkage"] is None  # not linked to MaterialDB
     assert lh["dfm"] == {"status": "waiting", "waiting_on": ["ktx"], "open_topics": 1}
     assert lh["other_tools"] == []
 
@@ -98,6 +99,36 @@ async def test_rows_carry_article_tool_revision_material_paint_and_dfm(client, e
     assert spare["tool"]["part_id"] == ids["spare"]
     assert (spare["colour_code"], spare["grain"]) == (None, None)
     assert spare["dfm"] == {"status": "no_topic", "waiting_on": [], "open_topics": 0}
+
+
+async def test_datasheet_shrinkage_from_materialdb(client, eng_auth, seed, session_factory, monkeypatch):
+    from app.services import materialdb_client
+    ids = await _build(session_factory, seed)
+    async with session_factory() as s:
+        lh = await s.get(Part, ids["lh"])
+        lh.material_source, lh.materialdb_id, lh.material_label = "materialdb", 88, "EPLAMID 6 H G15 BK005 (research)"
+        await s.commit()
+
+    async def fake_fetch(force=False):
+        return [{"id": 88, "family": "PA6", "filler_type": "GF", "filler_pct": 15, "props": {
+            "shrinkage_flow": {"v": 0.7, "vmax": None, "m": "ISO 294-4", "c": "2 mm"},
+            "shrinkage_cross": {"v": 1.0, "vmax": None, "m": "ISO 294-4", "c": "2 mm"},
+            "density": {"v": 1.23, "vmax": None}}}]
+    monkeypatch.setattr(materialdb_client, "fetch_all", fake_fetch)
+    body = (await client.get(f"/api/v1/projects/{seed['project_id']}/worksheet", headers=eng_auth)).json()
+    rows = {row["part_id"]: row for row in body["rows"]}
+    assert rows[ids["lh"]]["material"]["shrinkage"] == {
+        "parallel": {"min": 0.7, "max": None, "method": "ISO 294-4", "condition": "2 mm"},
+        "normal": {"min": 1.0, "max": None, "method": "ISO 294-4", "condition": "2 mm"},
+        "family": "PA6", "filler_type": "GF", "filler_pct": 15}
+    assert body["materialdb_error"] is None
+
+    async def down(force=False):
+        raise materialdb_client.MaterialDbUnavailable("MaterialDB is unreachable")
+    monkeypatch.setattr(materialdb_client, "fetch_all", down)
+    body = (await client.get(f"/api/v1/projects/{seed['project_id']}/worksheet", headers=eng_auth)).json()
+    assert body["materialdb_error"] == "MaterialDB is unreachable"
+    assert {row["part_id"]: row for row in body["rows"]}[ids["lh"]]["material"]["shrinkage"] is None
 
 
 async def test_dfm_status_variants(session_factory, seed):
@@ -122,6 +153,6 @@ async def test_dfm_status_variants(session_factory, seed):
 
 async def test_empty_project_and_other_org(client, eng_auth, seed, session_factory):
     r = await client.get(f"/api/v1/projects/{seed['project_id']}/worksheet", headers=eng_auth)
-    assert r.json() == {"project_id": seed["project_id"], "rows": []}
+    assert r.json() == {"project_id": seed["project_id"], "rows": [], "materialdb_error": None}
     r = await client.get("/api/v1/projects/999999/worksheet", headers=eng_auth)
     assert r.status_code == 404
