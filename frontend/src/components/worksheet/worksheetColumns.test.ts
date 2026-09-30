@@ -202,6 +202,9 @@ describe('datasheet shrinkage columns', () => {
     expect(shrinkText(range, 'normal')).toBeNull()
     expect(shrinkText(withShrink(null), 'parallel')).toBeNull()
     expect(shrinkBasis(withShrink(null))).toBeNull()
+    expect(shrinkBasis(withShrink({ parallel: null, normal: null, family: 'PP', filler_type: 'MD', filler_pct: 20 }))).toBeNull()
+    expect(shrinkBasis(withShrink({ parallel: v(0.8, 1.0), normal: v(0.8, 1.0), family: 'Other', filler_type: 'none', filler_pct: null })))
+      .toBe('ISO 294-4, 2 mm')
   })
 
   it('tool shrinkage columns read the tool and edit on the tool card', () => {

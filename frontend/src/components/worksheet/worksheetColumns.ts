@@ -208,10 +208,11 @@ function shrinkTitle(r: WorksheetRow, dir: ShrinkDir): string | null {
 /** Test method and specimen of the datasheet values, and the filler (glass fibre shrinks unevenly). */
 export function shrinkBasis(r: WorksheetRow): string | null {
   const s = r.material.shrinkage;
-  if (!s) return null;
-  const v = s.parallel ?? s.normal;
-  const test = v ? [v.method, v.condition].filter(Boolean).join(', ') : '';
-  const filler = s.filler_type ? `${s.filler_type}${s.filler_pct ? ` ${s.filler_pct} %` : ''}` : '';
+  const v = s?.parallel ?? s?.normal;
+  if (!s || !v) return null;  // no datasheet value: nothing to explain
+  const test = [v.method, v.condition].filter(Boolean).join(', ');
+  const filled = s.filler_type && s.filler_type.toLowerCase() !== 'none';
+  const filler = filled ? `${s.filler_type}${s.filler_pct ? ` ${s.filler_pct} %` : ''}` : '';
   return [test, filler].filter(Boolean).join(' · ') || null;
 }
 
