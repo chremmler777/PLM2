@@ -7,6 +7,8 @@ land; every rule here names the code that enforces it.
 
 **Status:** in progress. Sections marked ⚠ are open questions, not decisions.
 
+Checked against the code on 2026-10-01 (ECR simulation desk check, TOC-PLM-06).
+
 ---
 
 ## 1. Where the flow came from
@@ -46,20 +48,23 @@ flowchart TD
     A -->|reject with reason| X[rejected]
     B -->|proceed + impact lock HARD| C[in_assessment]
     B -->|reject| X
-    C -->|not feasible| X
-    C --> D[costing]
+    C -->|reject with reason| X
+    C -.->|not feasible: back to scoping, reason| B
+    C -->|soft: all R/A submitted, none not feasible,<br/>no routing change pending, else override by deviation| D[costing]
     D -->|customer change| E[quoting: Offer]
     D -->|internal change: internal approval| H
     E -->|offer v1 sent, auto| F[quoted: negotiation]
-    F -->|declined| X
+    F -->|reject with reason<br/>declined only records the answer| X
+    X -->|customer change: rejection letter<br/>attached and marked sent, HARD| M
+    X -.->|reopen with reason| B
     F -->|accepted, unexpired + PM and Quality sign-off| H[approved: Timing]
-    H -->|timing validated, soft| I[in_implementation]
-    I --> J[in_validation: Release]
-    J -->|check failed: validation issue,<br/>routes 1 to 3 with a recovery group| I
-    J -->|checklist + lessons + no open issue, soft| K[released]
+    H -->|soft: timing validated on first start, impact confirmed,<br/>check workflow per item category, D1 Technical release = Yes| I[in_implementation]
+    I -->|soft: every impacted item has its revision,<br/>open plan deviations do not hold this step| J[in_validation: Release]
+    J -->|check failed: validation issue,<br/>routes 1 to 3 with a recovery group,<br/>or by hand with a reason| I
+    J -->|soft: checks passed, no open validation issue,<br/>revisions through their check workflow, checklist,<br/>lessons done, no open plan deviation| K[released]
     K -->|PM closes| M[closed]
     MA[captured, origin mother_plant] --> MB[scoping-lite:<br/>impact lock + team informed]
-    MB -->|HARD: lock + inform list sent| H
+    MB -->|HARD: impact locked, team informed, SOP date set| H
 ```
 
 | Stage | What happens | Who |
@@ -70,10 +75,10 @@ flowchart TD
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
 | `quoting` | Offer tab (Approval for internal changes): quote plan, price (cost basis, factors, risk weighting, changeover, piece price), document (CBD/rough, free fields, terms, PDF). Sending v1 auto-moves to `quoted` | Sales |
 | `quoted` | Offer sent, valid 30 days from receipt; negotiation rounds against an offer version, new versions with "what changed". Acceptance of a sent, unexpired version freezes the planned P&L | Sales |
-| `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", plan published, MS Project export. Mother plant: release deadline = their SOP | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
+| `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
 | `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
 | `in_validation` | Release tab: validation checks plus the release checklist (16 items; 13 on a change that ended before the rework) and the lessons learned step; a failed check raises a validation issue (§3 "Validation issues") | departments, PM |
-| `released` → `closed` | Change is live (checklist + lessons done, no open issue); summary with the P&L offer vs doing; then PM wraps it up | PM |
+| `released` → `closed` | Change is live. The release (soft guard) needs: validation checks passed, no open validation issue, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation. Summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -96,11 +101,12 @@ Run these when discussing any stage's implementation:
 ## 3. Gates and rules, with enforcement
 
 ### Entering `scoping`
-- **Soft:** the capture must be complete — a `description`, **at least one
-  attachment**, and (customer-relevant changes only) the **required-by date**.
-  Missing pieces are listed in the message: *"Incomplete capture — missing
-  description, at least one attachment before scoping"*. Overridable by
-  approved deviation. `change_service.py::_guard`.
+- **Soft:** the capture must be complete: a `description`, **at least one
+  attachment**, (customer-relevant changes only) the **required-by date**
+  (quote deadline), and a **change lead**. Missing pieces are listed in the
+  message: *"Incomplete capture: missing description, at least one attachment,
+  change lead before scoping"*. Overridable by approved deviation.
+  `change_service.py::kickoff_missing`, read by `_guard`.
   Rationale: Sales captures, the project team scopes — kickoff means handing
   over a request someone can actually work on. The impacted set is **no longer**
   required here: it is defined during scoping (Development picks and confirms
@@ -169,10 +175,12 @@ One quote-by, one release-by; at any moment at most one is *active*
   back"). The date has **one owner** (lead/Sales/PM); discovery has many
   mouths — a meeting outcome, or a department flagging timing in its
   assessment answer, feeds the owner, who records the pushback.
-- **Release deadline** (`release_due_*`) — born mandatorily at the moment of
+- **Release deadline** (`release_due_*`): born mandatorily at the moment of
   commitment: customer acceptance (Sales) or internal cost approval (PM); the
-  API refuses the acceptance/approval without it. Editable afterwards via
-  audited PATCH (`release_deadline_set`), never clearable. Drives
+  API refuses the acceptance/approval without it. A mother-plant change takes
+  it from their SOP at approval. Moving it afterwards needs a reason in the
+  same PATCH (`release_due_reason`, required since 2026-10-01, UI: cockpit
+  "Move"), audited as `release_deadline_set`; never clearable. Drives
   `deadline_state` from then on; escalations and the workload report follow
   whichever deadline is active.
 
@@ -529,9 +537,10 @@ of one call), plus changelog `plan_deviation`. A date move no longer pushes
 successors automatically after baseline; moving a chain goes through the
 bulk `PATCH /plan/tasks` with one reason for the whole selection.
 
-Open deviations show in the cockpit's "Blocked by" list as information only,
-they never gate a transition. PM/Sales/lead/admin resolve each one
-(`DeviationsPanel.tsx`):
+Open deviations show in the cockpit's "Blocked by" list. They do not hold
+the work or `in_implementation -> in_validation`, but they **block the
+release** (soft, `ReleaseService.guard_reason`) until each move is locked or
+escalated. PM/Sales/lead/admin resolve each one (`DeviationsPanel.tsx`):
 - **Lock** (`ChangePlanService.lock_deviation`): accepted internally, no
   customer impact recorded.
 - **Escalate** (`ChangePlanService.escalate_deviation`): Sales is telling
@@ -618,17 +627,20 @@ existing per-department validation checks.
 (`ChangeService._guard`, after the existing validation blocker and
 ready-to-go check): `ReleaseService.guard_reason` returns "Release checklist
 incomplete: n open" while any check is still `open`, else "Lessons learned
-step not done" while `lessons_done_at` is null.
+step not done" while `lessons_done_at` is null, else "n move(s) with plan
+deviations still open: lock or escalate them first" while a plan deviation
+is open.
 
 ### The new soft guards, together
 
-Both new guards sit in `ChangeService._guard`, so no approved transition
-deviation can bypass them (that mechanism is reserved for the hard,
-unbypassable gates):
+Both new guards sit in `ChangeService._guard`, so an approved transition
+deviation can lift them (`DeviationRequired`), unlike the hard gates checked
+outside `_guard` (impact lock, approval, rejection letter):
 - `approved -> in_implementation`: timing must be validated (this section).
-- `in_validation -> released`: release checklist complete and lessons step
-  done (previous section), checked after the pre-existing validation
-  blocker and ready-to-go check so the most concrete refusal wins.
+- `in_validation -> released`: release checklist complete, lessons step
+  done and no open plan deviation (previous section), checked after the
+  pre-existing validation blocker and ready-to-go check so the most concrete
+  refusal wins.
 
 ### Validation issues: the failure branch (2026-09-25, spec §12)
 
@@ -697,7 +709,7 @@ at costing and acceptance; actual at implementation, validation and release
 (the release summary uses the same card). Code: `pnl_service.py`,
 `api/v1/changes/actual_costs.py`, `components/changes/pnl/`.
 
-### Mother-plant changes (spec §14, to build)
+### Mother-plant changes (spec §14, built)
 
 Changes engineered and commercially handled by the mother plant:
 `change_requests.origin = mother_plant`, `mother_plant_name` (dropdown,
@@ -711,7 +723,8 @@ default **KTX Weissenburg (WUG)**, second **KTX Solingen**, list in
   each and a "Read and understood" task; open receipts show in Blocked by as
   information, not a gate.
 - **Gate**: `scoping -> approved` only for origin `mother_plant`, hard-gated
-  on the impact lock and the inform list being sent.
+  on the impact lock, the team informed (information sent) and the SOP date
+  set (`MotherPlantService.approval_blocker`).
 - **Approved**: `release_due_date = mother_plant_sop` (reason "Mother plant
   timing"); detailed plan from their MS Project file, else empty with the SOP
   milestone. Timing as usual, with an "Inform mother plant" stamp instead of
@@ -741,9 +754,10 @@ moved, the BOM tree and the viewer fall back past it. Import scripts
     Development, Packaging Engineer (articles) and the owners of the served
     objects (`ChangeService.served_objects`: tools, stations/EOAT, gauges).
     Each answers "no impact" / "impact" (note required). All "no impact":
-    the index is activated, the change `released` and `closed`. Any impact:
-    Development escalates (audited) to a full customer ECR in scoping; the
-    answers stay on its Review tab. No other status hop is allowed.
+    the index is activated, the change `released` and `closed`. Any impact,
+    or none with a note saying why: Development escalates (audited) to a full
+    customer ECR in scoping; the answers stay on its Review tab. No other
+    status hop is allowed.
   - `administrative`: activated now.
 - **Activation** is one helper (`RevisionIntakeService.activate`), shared
   with `ChangeService.release`: pointer, `approved`, `supersedes`, and a
@@ -872,16 +886,16 @@ view.
 
 ## 6. Open questions
 
-- ⚠ **Cost carrier is never re-confirmed.** Sales picks it at capture and it
-  selects the whole commercial branch; the scoping meeting should confirm or
-  flip it before assessment, same pattern as the impact lock. A
-  misclassification currently surfaces at `quoted`.
-- ⚠ **Post-quote impact edits.** Editing the impacted set clears the Development lock —
-  correct pre-quote, but after `quoted` it means the quote no longer covers the
-  scope, and nothing forces reconciliation.
-- ⚠ **Title staleness.** Composed once at creation; swapping the lead item later
-  leaves the old name. See
-  `docs/superpowers/plans/2026-08-06-title-backfill-dms-link.md`.
+- **Resolved: cost carrier re-confirmation.** The scoping meeting confirms
+  it (proceed is refused without it, `meeting_service.py`) and it is locked
+  after scoping (`change_service.py::update`).
+- **Resolved: post-quote impact edits.** From `quoted` on an impact edit needs
+  a reason, flags `scope_changed_after_quote`, reopens costing for the affected
+  departments and holds the change until a newer offer version is sent or a
+  transition deviation is approved (`early_stage_service.py`).
+- **Resolved: title staleness.** While `title_auto` holds, the title follows
+  the lead item (`EarlyStageService.recompose_title`, changelog
+  `title_recomposed`); a hand-edited title switches it off.
 - ⚠ **One meeting or two.** Current position (and Fable's, consulted 2026-08-06):
   one. `captured` is originator data entry with no cross-functional obligation;
   `scoping` is the single CCB-style review. A `needs_info` outcome produces a
