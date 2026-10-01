@@ -97,12 +97,12 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
                 ], {"four_eyes": True}),
             ]),
             ("Industrialization", [
-                # F-06 (2026-10-01): Production and Logistics are retired; the
-                # Tool Engineer carries the tool change and Scheduling the
-                # master data (it owns ERP and stock in the release checklist),
-                # PM accountable as for the other steps of this stage.
+                # F-06 (2026-10-01): Production and Logistics are retired. The
+                # acting rows follow the role remap of the activity catalogs
+                # (CHANGE_MANAGEMENT_FLOW.md): Production -> Process Engineer,
+                # Logistics (stock/flow) -> Scheduling.
                 ("Implement tool change", [
-                    ("Tool Engineer", "R"), ("Project Manager", "A"), ("Production control", "I"),
+                    ("Process Engineer", "R"), ("Tool Engineer", "A"), ("Production control", "I"),
                 ], {}),
                 ("Adjust process / routing sheets", [
                     ("Manufacturing Engineer", "R"), ("Project Manager", "A"), ("Production", "C"),

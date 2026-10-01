@@ -5,11 +5,16 @@
 data & logistics" to Logistics (R). Both departments are retired, nobody is a
 member, so those tasks reach nobody and only an admin acting as themselves can
 finish them. Fixed in place (no stage is deleted, so running instances keep
-their steps), the same way wf_seed_service now seeds them:
+their steps), the same way wf_seed_service now seeds them, following the role
+remap of the activity catalogs (CHANGE_MANAGEMENT_FLOW.md: Production ->
+Process Engineer, Logistics stock/flow -> Scheduling):
 
-    Implement tool change            R Production   -> R Tool Engineer
-                                     A Tool Engineer -> A Project Manager
-    Update master data & logistics   R Logistics    -> R Scheduling
+    Implement tool change            R Process Engineer, A Tool Engineer
+    Update master data & logistics   R Scheduling,       A Project Manager
+
+The acting rows (R and A) of the two steps are set to that target state,
+whatever they hold now (also undoes the first version of this fix, which
+had put R Tool Engineer, A Project Manager on the tool change).
 
 Every template of those two names is fixed (prod holds a second, unused copy
 of each). Each changed template gets version + 1 and a wf_template_history
@@ -41,14 +46,13 @@ from app.models.workflow import (
 )
 
 TEMPLATES = ("ECN Implementation (Article)", "ECN Implementation (Tool)")
-# step name -> [(old department, old letter, new department, new letter)], in order
-FIXES = {
-    "Implement tool change": [("Production", "R", "Tool Engineer", "R"),
-                              ("Tool Engineer", "A", "Project Manager", "A")],
-    "Update master data & logistics": [("Logistics", "R", "Scheduling", "R")],
+# step name -> {letter: department}: the target state of the acting rows
+TARGET = {
+    "Implement tool change": {"R": "Process Engineer", "A": "Tool Engineer"},
+    "Update master data & logistics": {"R": "Scheduling", "A": "Project Manager"},
 }
-NOTE = ("F-06 (TOC-PLM-06): retired departments replaced. Implement tool change: "
-        "R Tool Engineer, A Project Manager (was R Production, A Tool Engineer). "
+NOTE = ("F-06 (TOC-PLM-06): retired departments replaced along the role remap. "
+        "Implement tool change: R Process Engineer, A Tool Engineer (was R Production). "
         "Update master data & logistics: R Scheduling (was R Logistics).")
 
 
@@ -77,7 +81,7 @@ async def run(apply: bool, actor_username: str) -> int:
             return 2
         depts = {d.name: d for d in (await s.execute(select(Department))).scalars()}
         names = {d.id: d.name for d in depts.values()}
-        for needed in ("Tool Engineer", "Project Manager", "Scheduling"):
+        for needed in ("Process Engineer", "Tool Engineer", "Project Manager", "Scheduling"):
             if needed not in depts or not depts[needed].is_active:
                 print(f"ABORT: department {needed!r} missing or retired")
                 return 2
@@ -92,15 +96,20 @@ async def run(apply: bool, actor_username: str) -> int:
             changes = []
             for st in t.stages:
                 for sp in st.steps:
-                    for old_d, old_l, new_d, new_l in FIXES.get(sp.step_name, []):
-                        row = next((r for r in sp.rasic_assignments
-                                    if names.get(r.department_id) == old_d and r.rasic_letter == old_l), None)
-                        if row is None:
+                    for letter, want in TARGET.get(sp.step_name, {}).items():
+                        rows = [r for r in sp.rasic_assignments if r.rasic_letter == letter]
+                        if len(rows) != 1:
+                            print(f"ABORT: template {t.id} '{sp.step_name}' has {len(rows)} "
+                                  f"{letter} rows, expected 1")
+                            await s.rollback()
+                            return 2
+                        row = rows[0]
+                        have = names.get(row.department_id)
+                        if have == want:
                             continue
-                        row.department_id = depts[new_d].id
-                        row.rasic_letter = new_l
+                        row.department_id = depts[want].id
                         changes.append(f"  template {t.id} stage {st.stage_order} '{sp.step_name}': "
-                                       f"{old_l} {old_d} -> {new_l} {new_d}")
+                                       f"{letter} {have} -> {letter} {want}")
             if changes:
                 changed_any += 1
                 t.version = (t.version or 1) + 1
