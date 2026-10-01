@@ -291,7 +291,10 @@ class ChangeService:
             return "Cannot decide your own deviation (4-eyes rule)"
         if user.effective_role not in ("admin", "engineer"):
             return "Deviation decisions require an engineer or admin role"
-        if (user.effective_role != "admin" and user.id != change.lead_id
+        # Acting as a department drops the lead right like the admin bypass
+        # (holds_lead), as for the D1 gates.
+        from app.services.change_people import holds_lead
+        if (user.effective_role != "admin" and not holds_lead(change, user)
                 and dev.proposed_by != change.lead_id):
             return "Only the change lead or an admin may decide this deviation"
         return None

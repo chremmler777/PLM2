@@ -178,3 +178,25 @@ async def test_acting_admin_who_leads_cannot_decide_gates(client, admin_auth, se
     ok = await client.put(f"/api/v1/changes/{cid}/gates/release",
                           json={"decision": "yes"}, headers=admin_auth)
     assert ok.status_code == 200, ok.text
+
+
+async def test_acting_admin_who_leads_cannot_decide_a_deviation(client, admin_auth, eng_auth, seed, depts):
+    """Same rule as the D1 gates: while acting, the admin's lead right on a
+    transition deviation steps aside; as themselves they decide it."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "deviation while acting", "reason": "r",
+        "change_type": "physical_part", "lead_id": seed["admin_id"]}, headers=admin_auth)
+    assert res.status_code in (200, 201), res.text
+    cid = res.json()["id"]
+    dev = await client.post(f"/api/v1/changes/{cid}/deviations", json={
+        "to_status": "scoping", "reason": "capture docs follow"}, headers=eng_auth)
+    assert dev.status_code == 200, dev.text
+    did = dev.json()["id"]
+    denied = await client.post(f"/api/v1/changes/{cid}/deviations/{did}/decide",
+                               json={"decision": "approved"},
+                               headers=_acting(admin_auth, depts["sales"]))
+    assert denied.status_code in (400, 403)
+    assert "lead or an admin" in denied.json()["detail"]
+    ok = await client.post(f"/api/v1/changes/{cid}/deviations/{did}/decide",
+                           json={"decision": "approved"}, headers=admin_auth)
+    assert ok.status_code == 200, ok.text

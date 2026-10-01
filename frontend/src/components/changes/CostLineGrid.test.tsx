@@ -143,6 +143,19 @@ describe('CostLineGrid matrix', () => {
     ]))
   })
 
+  it('refreshes the change and "Your actions" after saving, so the wait list drops the department (F-01)', async () => {
+    const spy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+    try {
+      grid([line()])
+      fireEvent.change(screen.getByTestId('hours-a1-10'), { target: { value: '4' } })
+      fireEvent.click(screen.getByRole('button', { name: /save/i }))
+      await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 1] }))
+      expect(spy).toHaveBeenCalledWith({ queryKey: ['change-my-actions', 1] })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('says so when the department has no rate for any affected plant', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     qc.setQueryData(['cm-rates'], [{ department_id: 99, plant_id: 10, hourly_rate: 100, min_factor: 0.5 }])

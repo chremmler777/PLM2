@@ -384,8 +384,8 @@ export default function ChangeDetailPage() {
 
   // Close costing names the hours nobody can price (no cost sheet rate): the
   // summation lists them. Cost roles only, like every figure.
-  // Also read while costing runs: the "Close costing" step holds on the same
-  // facts the Costing tab states (nothing costed, departments not costed yet).
+  // Also read while costing runs: the "Close costing" step warns on the same
+  // fact the Costing tab states (nothing costed at all).
   const { data: closingSummation, isLoading: closingSummationLoading } = useQuery({
     queryKey: ['change-summation', changeId],
     queryFn: () => changesApi.getSummation(changeId),
