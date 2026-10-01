@@ -97,6 +97,12 @@ describe('ProcessMapPage', () => {
     const timing = screen.getByTestId('procmap-gate-timing').textContent ?? ''
     expect(timing).toContain('Timing validated')
     expect(timing).toContain('Sales, PM, Scheduling or lead')
+    // validate_timing refuses outright (no deviation): drawn red like the impact lock.
+    expect(screen.getByTestId('procmap-gate-timing').querySelector('polygon')?.getAttribute('stroke'))
+      .toBe('#f87171')
+    // The start-implementation condition on it stays soft.
+    expect(screen.getByTestId('procmap-gate-implementation').querySelector('polygon')
+      ?.getAttribute('stroke')).not.toBe('#f87171')
     const impl = screen.getByTestId('procmap-gate-implementation').textContent ?? ''
     for (const part of ['timing validated (first start)', 'impact confirmed',
       'check workflow per item category', 'D1 Technical release? = Yes']) {
@@ -167,6 +173,53 @@ describe('ProcessMapPage', () => {
       .toContain('Checked against the running system on 1 Oct 2026')
   })
 
+  it('states who decides what as the code does (review 2026-10-01)', () => {
+    const { container } = wrap()
+    const rules = screen.getByTestId('procmap-rules').textContent ?? ''
+    // Four eyes: transition / routing deviations and issue routes, not plan deviations.
+    expect(rules).toContain('a transition or routing deviation is decided by somebody other than its proposer')
+    expect(rules).toContain('Plan (date) deviations have no four-eyes rule')
+    expect(rules).not.toContain('whoever proposes a deviation or raises a validation issue does not decide it')
+    // Dates after the baseline: Scheduling moves them too; deciding stays with PM, Sales, lead, admin.
+    expect(rules).toContain('PM, Sales, Scheduling, the lead or an admin move dates')
+    expect(screen.getByTestId('procmap-decision-dates').textContent).toContain('Scheduling')
+    // The release hold is soft, and the P&L freezes at the go decision.
+    expect(rules).toContain('holds the release (soft: an approved deviation releases anyway)')
+    expect(rules).toContain("the PM's internal cost approval")
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('Sales only')
+    expect(text).not.toContain('any member records the decision')
+    expect(text).not.toContain('admin via acts-as')
+    expect(text).not.toContain('in build')
+    expect(text).not.toContain('FS into SOP')
+    expect(screen.getByTestId('procmap-role-quoting').textContent)
+      .toContain('Sales, the change lead or an admin')
+    expect(screen.getByTestId('procmap-role-scoping').textContent)
+      .toContain('the change lead, Project Management or an admin')
+    // Escalation: the acknowledge task starts at L2; L3 flags the customer errand.
+    expect(screen.getByTestId('procmap-escalation-ladder').textContent)
+      .toContain('L3 also an acknowledge task')
+    expect(screen.getByTestId('procmap-escalation-l3').textContent).toContain('inform the customer (Sales)')
+    // The quote deadline freezes when quoted, not at approval.
+    expect(screen.getByTestId('procmap-detail-approved').textContent)
+      .toContain('froze into its permanent on-time or late fact when the offer was sent')
+    // Capture: internal is not a form choice.
+    expect(screen.getByTestId('procmap-detail-captured').textContent)
+      .toContain('"Internal change" is not offered on the form')
+    // Risks: every open risk becomes an optional offer row.
+    expect(screen.getByTestId('procmap-chart').textContent).toContain('open risks → optional rows on the offer')
+  })
+
+  it('cancels only before release: a released change closes', () => {
+    wrap()
+    const edge = screen.getByTestId('procmap-edge-cancelled')
+    // Leaves the release gate (still in validation), never the Released box.
+    const startY = Number((edge.getAttribute('d') ?? '').split(/\s+/)[2])
+    const releasedY = Number(screen.getByTestId('procmap-node-released').querySelector('rect')?.getAttribute('y'))
+    expect(startY).toBeLessThan(releasedY)
+    expect(screen.getByTestId('procmap-node-cancelled').textContent).toContain('not after release')
+  })
+
   it('draws the customer-question loop back into scoping', () => {
     authMock.current = { role: 'admin' }
     window.localStorage.setItem('plm2.procmap.taskKeys', 'on')
@@ -175,7 +228,7 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-node-customer-answer').textContent)
       .toContain('info_request → info_response')
     expect(screen.getByTestId('procmap-node-close-question').textContent)
-      .toContain('only the asker may withdraw it')
+      .toContain('the asker or PM settles it')
     expect(screen.getByTestId('procmap-loop-needs-info').getAttribute('marker-end'))
       .toBe('url(#arrow-loop)')
   })
@@ -215,7 +268,7 @@ describe('ProcessMapPage', () => {
     wrap()
     const pnl = (key: string) => screen.getByTestId(`procmap-artifacts-${key}-pnl`).textContent
     expect(pnl('costing')).toContain('P&L planned')
-    expect(pnl('approved')).toContain('frozen at acceptance')
+    expect(pnl('approved')).toContain('frozen at the go decision')
     expect(pnl('implementation')).toContain('P&L actual')
     expect(pnl('validation')).toContain('issue costs by bearer')
     expect(pnl('released')).toContain('offer vs doing')
@@ -342,7 +395,7 @@ describe('ProcessMapPage', () => {
     expect(costing).toContain('Built')
     expect(costing).toContain('compared with the weighed part at validation')
     expect(screen.getByTestId('procmap-detail-in_validation').textContent)
-      .toContain('A failed check becomes a validation issue')
+      .toContain('A failed check offers to raise a validation issue, and a person raises it')
   })
 
   it('keeps the responsibles and the build order in their own blocks', () => {

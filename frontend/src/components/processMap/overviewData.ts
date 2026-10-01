@@ -46,7 +46,7 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
   {
     key: 'capture', name: 'Capture', owner: 'Sales (PM may start)', target: 'procmap-node-captured',
     gates: [{ text: 'triage route: full ECR or attach' }],
-    evidence: ['request + attachment', 'quote-by date', 'origin, cost carrier'],
+    evidence: ['request + attachment', 'quote-by date', 'origin: customer or plant change'],
   },
   {
     key: 'scoping', name: 'Scoping', owner: 'PM convenes', target: 'procmap-node-scoping',
@@ -68,7 +68,7 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
     evidence: ['costing lines with rate snapshot', 'vendor quotes + favorite', 'P&L planned'],
   },
   {
-    key: 'offer', name: 'Offer / Approval', owner: 'Sales; PM if internal', target: 'procmap-node-quoting',
+    key: 'offer', name: 'Offer / Approval', owner: 'Sales or the lead; PM if internal', target: 'procmap-node-quoting',
     gates: [
       { text: 'cost carrier (set at scoping) picks the offer or internal approval' },
       { text: 'customer: Close costing, same checks again', soft: true },
@@ -120,8 +120,8 @@ export const OVERVIEW_LANES: Lane[] = [
   {
     key: 'issues', name: 'Validation issues', joins: 'from Validation', tone: 'amber',
     target: 'procmap-node-issue-raise',
-    steps: ['failed check: raise VI-n', 'containment', 'root cause', 'route (PM or lead, 4-eyes)'],
-    note: 'Routes: internal rework, supplier rework, design change (back to Implementation with a recovery group), customer concession, follow-up change. Escalation L1 department, L2 project, L3 management + customer. Release waits while one is open.',
+    steps: ['raise VI-n (failed check or by hand)', 'containment', 'root cause', 'route (PM or lead, 4-eyes)'],
+    note: 'Routes: internal rework, supplier rework, design change (back to Implementation with a recovery group), customer concession, follow-up change. Escalation L1 department, L2 project, L3 management + customer (acknowledge task from L2). An open issue holds the release (soft).',
   },
   {
     key: 'mother-plant', name: 'Change from KTX Weissenburg / Solingen', joins: 'rejoins at Timing', tone: 'purple',

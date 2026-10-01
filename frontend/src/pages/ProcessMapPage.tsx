@@ -70,7 +70,7 @@ const STAGES: Stage[] = [
   {
     key: 'intake', name: 'Intake', badge: 'Development', state: 'built',
     sub: 'New customer index, pending triage', task: 'task: triage index',
-    responsible: 'Development decides the route (admin via acts-as)',
+    responsible: 'Development decides the route; an admin can triage too',
     artifacts: 'revision intake (source, batch, phase snapshot); pending index (not active); route + reason, audited',
     what: 'Every new customer index (customer package, customer data, upload, a proposal the customer adopted) is captured as an intake; the index stays pending and the active one is unchanged. Development picks the route alone: full ECR (a new change, lead item = the part), attach to an open change, engineering review (light track, lane R) or administrative (active now, reason required). Suggested: review data before series goes to the engineering review, official data or a series part to a full ECR, first data on an RFQ part to administrative. A newer index supersedes a pending one unless a live change already carries it.',
   },
@@ -78,14 +78,14 @@ const STAGES: Stage[] = [
     key: 'captured', name: 'Capture', badge: 'Sales', state: 'built',
     sub: 'Request, attachment, quote-by date, lead', task: 'task: kickoff',
     responsible: 'Sales (can_start_change); PM may start. A change from KTX Weissenburg / Solingen is started by Project Management only',
-    artifacts: 'kickoff gate (soft, deviation-overridable): description, at least one attachment, quote deadline (customer changes), change lead; origin (customer, internal, change from KTX Weissenburg / Solingen)',
-    what: 'The originator enters the request: project, affected items, description, documents, one-line reason, who carries the cost, quote deadline. No meetings here. Handing over to scoping needs a description, at least one attachment, the quote deadline (customer changes) and a change lead; the check is soft, so an urgent request can go on with an approved deviation. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is started by Project Management only, captured with its reference and SOP date, and runs in its own side track.',
+    artifacts: 'kickoff gate (soft, deviation-overridable): description, at least one attachment, quote deadline (customer changes), change lead; origin: customer, or change from KTX Weissenburg / Solingen (internal is not started from the form)',
+    what: 'The originator enters the request: project, affected items, description, documents, one-line reason, customer change or change from KTX Weissenburg / Solingen, quote deadline. "Internal change" is not offered on the form: a change becomes internal through the cost carrier at the scoping meeting, or the lead\'s edit during capture or scoping. No meetings here. Handing over to scoping needs a description, at least one attachment, the quote deadline (customer changes) and a change lead; the check is soft, so an urgent request can go on with an approved deviation. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is started by Project Management only, captured with its reference and SOP date, and runs in its own side track.',
   },
   {
     key: 'scoping', name: 'Scoping', badge: 'PM', state: 'built',
     sub: 'Meeting: RASIC, cost carrier, decision',
     task: 'tasks: scoping_wrapup · impact_confirm',
-    responsible: 'PM convenes; any member records the decision',
+    responsible: 'PM convenes; the change lead, Project Management or an admin records and decides the meeting',
     artifacts: 'meeting decision + reason; RASIC per department; cost carrier (fixed here); concerns; impact lock (hard gate)',
     what: 'The team decides proceed, needs info, or reject. Proceed needs at least one department marked R or A, the cost carrier and no open concern; the cost carrier is fixed at this meeting and cannot change after scoping. A negative decision resolves the open concerns and its reason becomes the rejection reason. A needs-info outcome raises a Sales-accountable task and a tracked question and answer cycle. Into assessment the soft checks are impacted items, a change lead and the quote deadline (customer changes); the impacted set must also be Development-locked, the one gate no deviation clears.',
   },
@@ -94,7 +94,7 @@ const STAGES: Stage[] = [
     sub: 'Verdict, risks, documents per department', task: 'task: assessment',
     responsible: 'Routed departments (Sales exempt)',
     artifacts: 'verdict; risk register; Change PPT / RFQ / customer mails',
-    what: 'Each routed department answers the impact checklist and submits a verdict: feasible, feasible with conditions, or not feasible, the last hard-requiring the Change PPT. A not-feasible verdict does not reject the change: it holds costing (soft) and the cockpit offers to reject, to go back to scoping with a reason (the answers are superseded) or to override with a reason (a deviation somebody else approves). Risks are a register, not a hold: typed, rated 1 to 3, and severity 3 travels to Sales for the offer. Routing deviations wait for approval. A recall to scoping is possible only while no assessment has started, or after a not-feasible verdict.',
+    what: 'Each routed department answers the impact checklist and submits a verdict: feasible, feasible with conditions, or not feasible, the last hard-requiring the Change PPT. A not-feasible verdict does not reject the change: it holds costing (soft) and the cockpit offers to reject, to go back to scoping with a reason (the answers are superseded) or to override with a reason (a deviation somebody else approves). Risks are a register, not a hold: typed, rated 1 to 3; every open risk travels to Sales as an optional row of the offer. Routing deviations wait for approval. A recall to scoping is possible only while no assessment has started, or after a not-feasible verdict.',
   },
   {
     key: 'costing', name: 'Costing', badge: 'Team', state: 'built',
@@ -106,9 +106,9 @@ const STAGES: Stage[] = [
   {
     key: 'quoting', name: 'Offer', badge: 'Sales', state: 'built',
     sub: '1 plan · 2 price · 3 document', task: 'task: create_quote (build the offer)',
-    responsible: 'Sales only (Offer tab)',
+    responsible: 'Sales, the change lead or an admin write and send it (Offer tab); PM and Scheduling may also edit the quote plan',
     artifacts: 'quote plan (rough Gantt); offer draft; offer PDF; sending v1 moves to quoted',
-    what: 'Sales builds the offer in three steps. Plan: a rough timeline seeded from costing. Price: cost basis, optional factors, risk weights for the severity-3 risks, changeover (running change or customer pays scrap) and the piece-price effect. Document: detailed CBD or a rough description, free fields, terms, preview and PDF. Sending version 1 moves the change to quoted on its own. Reopen costing (PM, Sales or lead, reason required) sends it back to costing when a number has to change.',
+    what: 'Sales (or the change lead) builds the offer in three steps. Plan: a rough timeline seeded from costing. Price: cost basis, optional factors, every open risk as an optional row (hidden by default; a severity-3 risk shown without a surcharge raises a warning), changeover (running change or customer pays scrap) and the piece-price effect. Document: detailed CBD or a rough description, free fields, terms, preview and PDF. Sending version 1 moves the change to quoted on its own. Reopen costing (PM, Sales or lead, reason required) sends it back to costing when a number has to change.',
   },
   {
     key: 'quoted', name: 'Negotiation', badge: 'Sales', state: 'built',
@@ -124,22 +124,22 @@ const STAGES: Stage[] = [
     task: 'tasks: plan_feedback · timing_validate',
     responsible: 'Sales records acceptance / PM approves internal; then PM + Scheduling + all teams',
     artifacts: 'detailed plan; team confirmations; baseline; bank build decision; published plan (a stamp, not a gate); MS Project / CSV export',
-    what: 'The go decision, then timing validation. The quote deadline freezes into a permanent on-time or late fact and the release deadline is live. The detailed plan is seeded from the quote plan; every R and A department, Scheduling and Sales confirm it or raise a concern at the current plan revision (an edit makes confirmations stale). Sales, PM, Scheduling or the lead validate the timing, which sets the baseline on every block; it can be validated again during implementation, which sets a new baseline. Side steps, not gates: Scheduling, PM or the lead decide the bank build (running change, or planned scrap with a scrap quote price), and Sales publishes the plan to the customer. Into implementation (soft): timing validated (first start), impact confirmed, a check workflow for every impacted item category, and D1 Technical release? = Yes.',
+    what: 'The go decision, then timing validation. The quote deadline froze into its permanent on-time or late fact when the offer was sent; now the release deadline is live. The detailed plan is seeded from the quote plan; every R and A department, Scheduling and Sales confirm it or raise a concern at the current plan revision (an edit makes confirmations stale). Sales, PM, Scheduling or the lead validate the timing, which sets the baseline on every block; it can be validated again during implementation, which sets a new baseline. Side steps, not gates: Scheduling, PM or the lead decide the bank build (running change, or planned scrap with a scrap quote price), and Sales publishes the plan to the customer. Into implementation (soft): timing validated (first start), impact confirmed, a check workflow for every impacted item category, and D1 Technical release? = Yes.',
   },
   {
     key: 'in_implementation', name: 'Implementation', badge: 'Team', state: 'built',
     sub: 'Tracker: progress %, actual start / finish',
     task: 'tasks: progress report · plan_deviation',
-    responsible: 'Implementing departments + vendors; PM / Sales / lead for dates',
+    responsible: 'Implementing departments + vendors; PM, Sales, Scheduling or the lead move dates',
     artifacts: 'tracker; progress reports; deviations locked or escalated; recovery groups from validation issues',
-    what: 'Departments track progress and actual dates on their own blocks, report twice a week and book time. After the baseline, dates change only by PM, Sales, lead or admin, and every move is a deviation with a reason: locked when accepted internally, or escalated to the customer through Sales. Open deviations do not stop the work or the step into validation, but they hold the release. Into validation (soft): every impacted item has its resulting revision. A validation issue on a fix route comes back here with a recovery group in the plan.',
+    what: 'Departments track progress and actual dates on their own blocks, report twice a week and book time. After the baseline, PM, Sales, Scheduling, the lead or an admin move dates, and every move is a deviation with a reason: PM, Sales, the lead or an admin lock it (accepted internally) or escalate it to the customer through Sales, also a move they made themselves. Open deviations do not stop the work or the step into validation, but they hold the release. Into validation (soft): every impacted item has its resulting revision. A validation issue on a fix route comes back here with a recovery group in the plan.',
   },
   {
     key: 'in_validation', name: 'Validation', badge: 'Team', state: 'partial',
     sub: 'Checks, release checklist, lessons', task: 'tasks: release_check · lessons_step',
     responsible: 'Each department (its own checks); PM',
-    artifacts: 'check results; release checklist (16 items); lessons learned; validation issues (in build); weighed part vs estimate with the Sales re-quote task; revision flow (to build)',
-    what: 'Tool sampled, measured, cycle time taken, each department on its own checks. A failed check becomes a validation issue: contained, root cause found, and routed by PM or lead to internal rework, supplier rework, design change, customer concession or a follow-up change, with an escalation level from department to management and customer. PM, Sales or the lead can also send the change back to implementation by hand, with a reason. Release waits for passed checks, no open validation issue, every impacted revision through its check workflow, the checklist, the lessons step and no open plan deviation.',
+    artifacts: 'check results; release checklist (16 items); lessons learned; validation issues; weighed part vs estimate with the Sales re-quote task; revision flow (to build)',
+    what: 'Tool sampled, measured, cycle time taken, each department on its own checks. A failed check offers to raise a validation issue, and a person raises it (an issue can also be raised without a check): contained, root cause found, and routed by PM or lead to internal rework, supplier rework, design change, customer concession or a follow-up change, with an escalation level from department to management and customer. PM, Sales or the lead can also send the change back to implementation by hand, with a reason. Release waits for passed checks, no open validation issue, every impacted revision through its check workflow, the checklist, the lessons step and no open plan deviation.',
   },
   {
     key: 'released', name: 'Released', badge: 'PM', state: 'built',
@@ -154,20 +154,20 @@ const RULES = [
   'Tasks are mandatory: no accept or claim step; submitting names the owner.',
   'Sales owns the customer: mails tracked on the change and filed into each validation issue; escalations to the customer go through Sales.',
   'Two deadlines, one active: quote-by until quoted (freezes the on-time fact; after capture it moves only by Push back with a reason); release-due entered at acceptance, at internal approval or from the SOP of KTX Weissenburg / Solingen, moved only with a reason, recorded in the audit trail.',
-  'P&L offer vs doing: planned frozen at acceptance, actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',
-  'The detailed plan leads from approval on: after the baseline every date move is a deviation with a reason. Open deviations do not stop the work, but the release waits until each one is locked or escalated.',
-  'Release is refused while a validation issue or a plan deviation is open; each issue carries an escalation level: L1 department, L2 project, L3 management and customer.',
+  'P&L offer vs doing: planned frozen at the go decision (customer acceptance, or the PM\'s internal cost approval), actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',
+  'The detailed plan leads from approval on: after the baseline PM, Sales, Scheduling, the lead or an admin move dates, and every move is a deviation with a reason. Open deviations do not stop the work, but they hold the release (soft) until each one is locked or escalated.',
+  'An open validation issue or plan deviation holds the release (soft: an approved deviation releases anyway); each issue carries an escalation level: L1 department, L2 project, L3 management and customer.',
   'Moves back carry a reason: back to scoping after a not-feasible verdict, reopen costing, reopen a rejected change, back from validation to implementation. A change can be rejected at capture, scoping, assessment and quoted, not in costing or quoting; a rejected customer change closes only once the rejection letter is attached and marked sent.',
   'D1 sheet gates are soft and only Yes passes: Technical release? is on every change and holds the start of implementation; Feasible? (into assessment) and Budget checked? (into costing) hold only where they were added.',
   'On hold resumes only into the stage it was taken from, or the change is cancelled. Cancel is final and needs a reason.',
-  'Four eyes: PM and Quality sign off as two different people, and whoever proposes a deviation or raises a validation issue does not decide it.',
+  'Four eyes: PM and Quality sign off as two different people; a transition or routing deviation is decided by somebody other than its proposer, and a validation issue\'s route by somebody other than its raiser. Plan (date) deviations have no four-eyes rule: PM, Sales, the lead or an admin lock or escalate them, their own moves included.',
   'Every decision writes its own audit entry: rejection, reopen, concern, meeting decision, deadline, offer, deviation, issue route and escalation.',
 ]
 
 const BUILD_ORDER = [
-  'Validation issues: raise from a failed check, containment, root cause, route, customer decision, escalation ladder (in build).',
-  'Recovery group in the Gantt for a fix route, with the new customer timing when it passes the release deadline (in build).',
-  'P&L offer vs doing: actual cost entries, offer-vs-actual table, P&L page columns (in build).',
+  'Validation issues: raise from a failed check or by hand, containment, root cause, route, customer decision, escalation ladder (built).',
+  'Recovery group in the Gantt for a fix route, with the new customer timing when it passes the release deadline (built).',
+  'P&L offer vs doing: actual cost entries, offer-vs-actual table, P&L page columns (built).',
   'Side track for a change from KTX Weissenburg / Solingen: origin, inform-the-team receipts, scoping to approved with the SOP as release deadline (built).',
   'Weight estimate at costing compared at validation, delta back to Sales as a quote update (built).',
   'Revision intake: every new customer index triaged by Development, engineering review lane, release activates the linked index (built).',
@@ -518,7 +518,7 @@ const L3_LINES = [
   'release date, or L2 is not',
   'acknowledged in 2 working days',
   'customer wants a fix on a concession',
-  'Sales tells the customer (mail filed)',
+  'flags: inform the customer (Sales)',
   'management notified; for KTX',
   'Weissenburg / Solingen the PM',
   'informs its contact instead',
@@ -543,7 +543,7 @@ function EscalationLadder() {
         d={`M ${rungX} ${RUNG.l2 + RUNG_H(L2_LINES.length)} L ${rungX} ${RUNG.l3}`} />
       <Rung y={RUNG.l3} level="L3" title="Management + customer" lines={L3_LINES}
         stroke={HARD} testId="procmap-escalation-l3" />
-      {['each level: audit row, notification and an', 'acknowledge task; manual escalation with a', 'reason; de-escalate only by closing or PM'].map((l, i) => (
+      {['each level: audit row and notification; L2 and', 'L3 also an acknowledge task; manual escalation', 'with a reason; de-escalate only by closing or PM'].map((l, i) => (
         <text key={l} x={LX} y={RUNG.l3 + RUNG_H(L3_LINES.length) + 16 + i * 13}
           fill="#64748b" fontSize={11}>{l}</text>
       ))}
@@ -712,7 +712,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         <Phase y={Y.released - 20} h={(Y.closed + TH + 16) - (Y.released - 20)} label="Close-out" />
         <Phase x={RX - 12} w={RW + 24} y={IY.raise - 26}
           h={(IY.accepted + TH + 12) - (IY.raise - 26)}
-          label="Validation issue VI-n · in build" color="#7dd3fc" />
+          label="Validation issue VI-n" color="#7dd3fc" />
 
         <DeadlineRail />
 
@@ -801,7 +801,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         <Edge testId="procmap-edge-answer-close" color={LOOP}
           d={`M ${lcx} ${Y.meeting + 102} L ${lcx} ${Y.meeting + 110}`} />
         <Box x={LX} y={Y.meeting + 110} w={LW} h={62} stroke={LOOP} badge="Team"
-          name="Close the question" sub="only the asker may withdraw it"
+          name="Close the question" sub="the asker or PM settles it"
           task="task: close_question" testId="procmap-node-close-question" />
         <Edge testId="procmap-loop-needs-info" color={LOOP} dashed
           d={`M ${LX} ${Y.meeting + 141} L ${LANE_L} ${Y.meeting + 141} L ${LANE_L} ${mid(Y.scoping, NH)} L ${CX0} ${mid(Y.scoping, NH)}`}
@@ -823,7 +823,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           testId="procmap-node-risk-register" />
         <Edge testId="procmap-edge-risk-carry" color={CROSS} dashed
           d={`M ${RX + RW} ${mid(Y.assessment, NH)} L ${LANE_R} ${mid(Y.assessment, NH)} L ${LANE_R} ${mid(Y.quoting, NH) - 12} L ${CX0 + CW} ${mid(Y.quoting, NH) - 12}`}
-          label="severity 3 → risk weights on the offer" lx={LANE_R - 8} ly={mid(Y.quoting, NH) - 18}
+          label="open risks → optional rows on the offer" lx={LANE_R - 8} ly={mid(Y.quoting, NH) - 18}
           anchor="end" />
 
         <Edge testId="procmap-edge-assessment-deviation" color={LOOP} both dashed
@@ -930,8 +930,8 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         <Box x={RX} y={mid(Y.confirm, DH) - 31} w={RW} h={62} stroke={LOOP} badge="Team"
           name="Concern raised" sub="plan revised, revision bumps"
           task="confirmations go stale" testId="procmap-node-plan-concern" />
-        <Gate y={Y.timingGate} x={WIDE_X} w={WIDE_W}
-          name="Timing validated (Sales, PM, Scheduling or lead) | baseline set: all confirmed, no plan errors or idea blocks"
+        <Gate y={Y.timingGate} x={WIDE_X} w={WIDE_W} hard
+          name="Timing validated (hard; Sales, PM, Scheduling or lead) | baseline set: all confirmed, no plan errors or idea blocks"
           testId="procmap-gate-timing" />
         {/* Side steps at approved, not gates: the bank build decision, then
             the published plan. Neither holds the start of implementation. */}
@@ -963,7 +963,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           ly={(Y.implementation + 52 + mid(Y.validation, NH)) / 2} rot />
         <Box x={RX} y={Y.implementation} w={RW} h={NH} stroke={LOOP} badge="PM"
           name="Recovery group" sub="fix blocks + Re-validation VI-n"
-          task="FS into SOP, pushes the plan" testId="procmap-node-recovery" />
+          task="linked to what followed validation" testId="procmap-node-recovery" />
         <Edge testId="procmap-edge-recovery-implementation" color={LOOP}
           d={`M ${RX} ${recoveryMid} L ${CX0 + CW} ${recoveryMid}`} />
         <Edge testId="procmap-edge-recovery-deviation" color={CROSS} dashed
@@ -971,7 +971,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           label="after baseline: deviations" lx={rcx - 8} ly={Y.implementation + NH + 24}
           anchor="end" />
         <Decision y={Y.dates} name="Dates held?"
-          lines={['moved only by PM, Sales, lead']} testId="procmap-decision-dates" />
+          lines={['moved by PM, Sales, Scheduling, lead']} testId="procmap-decision-dates" />
         <Edge testId="procmap-edge-dates-deviation" color={LOOP} both dashed
           d={`M ${CX0 + CW} ${mid(Y.dates, DH)} L ${RX} ${mid(Y.dates, DH)}`}
           label="moved" lx={CX0 + CW + 8} ly={mid(Y.dates, DH) - 7} />
@@ -1004,7 +1004,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
 
         {/* The issue, step by step: raised, contained, cause, route. */}
         <Box x={RX} y={IY.raise} w={RW} h={IH} stroke={LOOP} badge="Team"
-          name="Raise issue VI-n" sub="severity 1 to 3, owner, failed check"
+          name="Raise issue VI-n" sub="severity, owner; also without a check"
           task="escalation L1 starts" testId="procmap-node-issue-raise" />
         <Edge testId="procmap-edge-issue-raise-contain" color={LOOP}
           d={`M ${rcx} ${IY.raise + IH} L ${rcx} ${IY.contain}`} />
@@ -1058,11 +1058,14 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         {/* --- terminal states ------------------------------------------ */}
         <Terminal x={CX0 + 60} y={Y.closed} w={CW - 120} name="Closed"
           stroke={STROKE.built} testId="procmap-node-closed" />
+        {/* Cancel leaves before release, never after it: a released change
+            only closes. Drawn from the release gate's foot (the change is
+            still in validation there), below the issue-accepted terminal. */}
         <Edge testId="procmap-edge-cancelled" color={LOOP} dashed
-          d={`M ${CX0 + CW} ${mid(Y.released, NH)} L ${RX} ${mid(Y.released, NH)}`}
-          label="cancel" lx={CX0 + CW + 8} ly={mid(Y.released, NH) - 7} />
+          d={`M ${WIDE_X + WIDE_W - 20} ${Y.releaseGate + GH2} L ${WIDE_X + WIDE_W - 20} ${Y.releaseGate + GH2 + 14} L ${rcx} ${Y.releaseGate + GH2 + 14} L ${rcx} ${mid(Y.released, NH) - TH / 2}`}
+          label="cancel (reason)" lx={rcx + 8} ly={Y.releaseGate + GH2 + 32} />
         <Terminal x={RX} y={mid(Y.released, NH) - TH / 2} w={RW} name="Canceled"
-          sub="irreversible, from any active stage" stroke="#f87171"
+          sub="from any active stage, not after release" stroke="#f87171"
           testId="procmap-node-cancelled" />
 
         {/* --- what each stage owes, in its own gutter ------------------ */}
@@ -1070,13 +1073,13 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           <Artifacts key={a.key} y={a.y} lines={a.lines} pnl={a.pnl}
             testId={`procmap-artifacts-${a.key}`} />
         ))}
-        {/* The P&L line: planned frozen at acceptance, actuals from
+        {/* The P&L line: planned frozen at the go decision, actuals from
             implementation on, compared at release. */}
         <Edge testId="procmap-edge-pnl-compare" color={CROSS} dashed
           d={`M ${PNL_X} ${pnlTop} L ${PNL_X} ${pnlBottom}`} />
         <text x={PNL_X + 14} y={(pnlTop + pnlBottom) / 2} fill="#67e8f9" fontSize={11}
           textAnchor="middle" transform={`rotate(-90 ${PNL_X + 14} ${(pnlTop + pnlBottom) / 2})`}>
-          P&amp;L offer vs doing · planned at costing, frozen at acceptance · actual from implementation · compared at release
+          P&amp;L offer vs doing · planned at costing, frozen at acceptance (internal: at the PM's cost approval) · actual from implementation · compared at release
         </text>
 
         {/* --- the stages themselves, drawn last so they sit on top ----- */}
@@ -1116,9 +1119,9 @@ const ARTIFACTS: { key: string; y: number; lines: string[]; pnl?: string }[] = [
   { key: 'scoping', y: Y.scoping, lines: ['meeting decision + reason', 'concern rows', 'customer letters / questions'] },
   { key: 'assessment', y: Y.assessment, lines: ['Change PPT (per department)', 'RFQ (external modification)', 'customer mails (change level)'] },
   { key: 'costing', y: Y.costing, lines: ART.costing, pnl: 'P&L planned starts here' },
-  { key: 'quoting', y: Y.quoting, lines: ['quote plan (rough Gantt)', 'price: basis, factors, risk weights', 'changeover · piece-price effect', 'offer PDF (v1 sent = quoted)'] },
+  { key: 'quoting', y: Y.quoting, lines: ['quote plan (rough Gantt)', 'price: basis, factors, open risks', 'changeover · piece-price effect', 'offer PDF (v1 sent = quoted)'] },
   { key: 'quoted', y: Y.quoted, lines: ['offer versions + what changed', 'valid 30 days from receipt', 'negotiation rounds per version', 'expired: override reason'] },
-  { key: 'approved', y: Y.approved, lines: ['detailed plan + bank build / scrap', 'team confirmations per revision', 'baseline · published plan', 'MS Project XML / CSV'], pnl: 'P&L planned frozen at acceptance' },
+  { key: 'approved', y: Y.approved, lines: ['detailed plan + bank build / scrap', 'team confirmations per revision', 'baseline · published plan', 'MS Project XML / CSV'], pnl: 'P&L planned frozen at the go decision' },
   { key: 'implementation', y: Y.implementation, lines: ['tracker: progress %, actual dates', 'progress reports (2x per week)', 'deviations: locked / escalated'], pnl: 'P&L actual: hours x rate, cost entries' },
   { key: 'validation', y: Y.validation, lines: ['measurements + cycle time', 'weight delta → quote update', 'release checklist · lessons learned'], pnl: 'P&L actual + issue costs by bearer' },
   { key: 'issue', y: IY.raise, lines: ['VI-n: containment, cause, route', 'fix actions · evidence', 'customer mails filed on the issue', 'escalation rows L1 to L3'] },
