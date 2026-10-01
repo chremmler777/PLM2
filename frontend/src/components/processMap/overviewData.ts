@@ -50,43 +50,54 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
   },
   {
     key: 'scoping', name: 'Scoping', owner: 'PM convenes', target: 'procmap-node-scoping',
-    gates: [{ text: 'kickoff gate', soft: true }],
+    gates: [{ text: 'kickoff gate: description, attachment, quote deadline, change lead', soft: true }],
     evidence: ['meeting record with RASIC + cost carrier', 'decision + reason', 'concerns'],
   },
   {
     key: 'assessment', name: 'Assessment', owner: 'Routed departments', target: 'procmap-node-in_assessment',
-    gates: [{ text: 'impact set locked', hard: true }, { text: 'proceed, no open concern' }],
+    gates: [
+      { text: 'impact set locked', hard: true },
+      { text: 'proceed: R or A named, cost carrier set, no open concern' },
+      { text: 'impacted items, lead, quote deadline', soft: true },
+    ],
     evidence: ['department verdicts', 'impact checklist', 'risks (severity 1 to 3)', 'Change PPT'],
   },
   {
     key: 'costing', name: 'Costing', owner: 'Departments, PM runs', target: 'procmap-node-costing',
-    gates: [{ text: 'verdicts in, no open deviation' }],
+    gates: [{ text: 'all R/A submitted, none not feasible, no routing change pending', soft: true }],
     evidence: ['costing lines with rate snapshot', 'vendor quotes + favorite', 'P&L planned'],
   },
   {
     key: 'offer', name: 'Offer / Approval', owner: 'Sales; PM if internal', target: 'procmap-node-quoting',
-    gates: [{ text: 'every first-stage R/A submitted' }, { text: 'cost carrier decides' }],
+    gates: [
+      { text: 'cost carrier (set at scoping) picks the offer or internal approval' },
+      { text: 'customer: Close costing, same checks again', soft: true },
+    ],
     evidence: ['offer versions (PDF)', 'what changed per version', 'acceptance or internal approval'],
   },
   {
     key: 'timing', name: 'Timing', owner: 'PM, Scheduling, all teams', target: 'procmap-node-approved',
-    gates: [{ text: 'accepted unexpired version, PM + Quality sign-off' }],
-    evidence: ['detailed plan', 'baseline + team confirmations', 'published plan'],
+    gates: [
+      { text: 'customer: accepted offer, PM + Quality sign-off (two people)', hard: true },
+      { text: 'internal: PM approved costs + release deadline', hard: true },
+      { text: 'Weissenburg / Solingen: impact locked, team informed, SOP date', hard: true },
+    ],
+    evidence: ['detailed plan', 'baseline + team confirmations', 'bank build decision, published plan (not gates)'],
   },
   {
     key: 'implementation', name: 'Implemen\u00ADtation', owner: 'Implementing departments', target: 'procmap-node-in_implementation',
-    gates: [{ text: 'timing validated', soft: true }],
+    gates: [{ text: 'timing validated, impact confirmed, check workflows, D1 Technical release? = Yes', soft: true }],
     evidence: ['tracker + progress reports', 'deviations, locked or escalated', 'P&L actual'],
   },
   {
     key: 'validation', name: 'Validation', owner: 'Each department, PM', target: 'procmap-node-in_validation',
-    gates: [{ text: 'work done; deviations never gate' }],
+    gates: [{ text: 'every impacted item has its revision', soft: true }],
     evidence: ['checks: measured, cycle time, weight', 'validation issues'],
   },
   {
     key: 'release', name: 'Release', owner: 'PM', target: 'procmap-node-released',
-    gates: [{ text: 'checklist, lessons, no open validation issue', soft: true }],
-    evidence: ['release checklist (13 items)', 'lessons learned', 'plan vs actual, P&L'],
+    gates: [{ text: 'checks passed, revisions checked, checklist, lessons, no open validation issue or plan deviation', soft: true }],
+    evidence: ['release checklist (16 items)', 'lessons learned', 'plan vs actual, P&L'],
   },
   {
     key: 'close', name: 'Close', owner: 'PM', target: 'procmap-node-closed',
@@ -116,13 +127,13 @@ export const OVERVIEW_LANES: Lane[] = [
     key: 'mother-plant', name: 'Change from KTX Weissenburg / Solingen', joins: 'rejoins at Timing', tone: 'purple',
     target: 'procmap-mother-plant-lane',
     steps: ['PM captures: ref + SOP', 'scoping-lite: impact lock', 'inform the team: receipts', 'approved: release date = their SOP'],
-    note: 'Started by Project Management only. Skips assessment, costing, offer and the quote deadline: from scoping straight to approved, then bank-build planning and implementation. Hard gate: impact lock and the inform list sent.',
+    note: 'Started by Project Management only. Skips assessment, costing, offer and the quote deadline: from scoping straight to approved, then bank-build planning and implementation. Hard gate: impact locked, the team informed and the SOP date set. Timing confirmed by the informed departments and Scheduling.',
   },
   {
     key: 'revision', name: 'Revision intake', joins: 'from Intake', tone: 'teal',
     target: 'procmap-review-lane',
     steps: ['Development triage', 'engineering review: scoping-lite', 'serving departments answer', 'any impact?'],
-    note: 'Triage routes: full ECR, attach to an open change, engineering review, administrative (reason required). No impact: released, index activated. Impact: escalated to a full ECR at Scoping.',
+    note: 'Triage routes: full ECR, attach to an open change, engineering review, administrative (reason required). Owner: Development. No impact: released, index activated. Impact (or a note without one): Development escalates to a full ECR at Scoping.',
   },
 ]
 

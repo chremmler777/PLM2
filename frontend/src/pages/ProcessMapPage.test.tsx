@@ -49,9 +49,9 @@ describe('ProcessMapPage', () => {
     for (const key of [
       'captured-kickoff', 'kickoff-scoping', 'scoping-meeting', 'meeting-impactlock',
       'impactlock-assessment', 'assessment-verdict', 'verdict-costing',
-      'costing-costgate', 'costgate-carrier', 'carrier-quoting', 'quoting-quoted',
+      'costing-carrier', 'carrier-costgate', 'costgate-quoting', 'quoting-quoted',
       'quoted-fork', 'fork-approved', 'approved-confirm', 'confirm-timinggate',
-      'timinggate-publish', 'publish-implementation', 'implementation-dates',
+      'timinggate-implgate', 'implgate-implementation', 'implementation-dates',
       'dates-validation', 'validation-checks', 'checks-checklist',
       'checklist-lessons', 'lessons-releasegate', 'releasegate-released',
       'released-closed', 'internal-approved',
@@ -65,13 +65,14 @@ describe('ProcessMapPage', () => {
     wrap()
     const chart = screen.getByTestId('procmap-chart').textContent ?? ''
     for (const guard of [
-      'impact set locked (hard)',
-      'all 1st-stage R/A submitted',
-      'no open deviation',
+      'proceed: an R or A department, cost carrier set, no open concern',
+      'impact set locked (hard) · soft: impacted items, lead, quote deadline (customer)',
+      'soft: all R/A submitted, none not feasible, no routing change pending',
+      'Close costing (PM, Sales, lead)',
       'offer v1 sent (auto)',
-      'accepted: sent, unexpired version + PM and Quality sign-off',
-      'timing validated (soft guard)',
-      'work done; open deviations inform, never gate',
+      'accepted + PM and Quality sign-off (two people), Record approval (hard)',
+      'Start implementation',
+      'soft: every impacted item has its revision; open deviations do not hold this step',
       'all checks passed',
       'released (soft guard)',
       'capture complete (soft, deviation-overridable)',
@@ -90,12 +91,80 @@ describe('ProcessMapPage', () => {
     const hard = screen.getByTestId('procmap-gate-impact-lock')
     expect(hard.querySelector('polygon')?.getAttribute('stroke')).toBe('#f87171')
     expect(hard.textContent).toContain('no deviation clears it')
-    expect(screen.getByTestId('procmap-gate-kickoff')).toBeTruthy()
+    expect(screen.getByTestId('procmap-gate-kickoff').textContent).toContain('change lead')
     expect(screen.getByTestId('procmap-gate-costing').textContent)
-      .toContain('every first-stage R/A submitted')
-    expect(screen.getByTestId('procmap-gate-timing').textContent).toContain('Timing validated')
-    expect(screen.getByTestId('procmap-gate-release').textContent)
-      .toContain('no open validation issue')
+      .toContain('all R/A submitted, none not feasible, no routing change pending')
+    const timing = screen.getByTestId('procmap-gate-timing').textContent ?? ''
+    expect(timing).toContain('Timing validated')
+    expect(timing).toContain('Sales, PM, Scheduling or lead')
+    const impl = screen.getByTestId('procmap-gate-implementation').textContent ?? ''
+    for (const part of ['timing validated (first start)', 'impact confirmed',
+      'check workflow per item category', 'D1 Technical release? = Yes']) {
+      expect(impl).toContain(part)
+    }
+    const release = screen.getByTestId('procmap-gate-release').textContent ?? ''
+    for (const part of ['checks passed', 'no open validation issue', 'revisions checked',
+      'checklist complete', 'lessons done', 'no open plan deviation']) {
+      expect(release).toContain(part)
+    }
+  })
+
+  it('forks on the cost carrier fixed at scoping, before the costing gate', () => {
+    wrap()
+    expect(screen.getByTestId('procmap-decision-carrier').textContent)
+      .toContain('Cost carrier (set at scoping)')
+    // The gate closes costing on the customer branch: it sits below the fork.
+    const yOf = (id: string) => Number(screen.getByTestId(id).querySelector('polygon')
+      ?.getAttribute('points')?.split(/[ ,]/)[1])
+    expect(yOf('procmap-gate-costing')).toBeGreaterThan(yOf('procmap-decision-carrier'))
+    expect(screen.getByTestId('procmap-node-internal-approval').textContent)
+      .toContain('Approve internal costs')
+  })
+
+  it('draws the moves back that need a reason', () => {
+    wrap()
+    const chart = screen.getByTestId('procmap-chart').textContent ?? ''
+    for (const [id, text] of [
+      ['procmap-loop-reopen-costing', 'reopen costing (reason)'],
+      ['procmap-loop-reopen-rejected', 'reopen (reason)'],
+      ['procmap-loop-back-to-implementation', 'back to implementation (reason)'],
+    ]) {
+      expect(screen.getByTestId(id).getAttribute('marker-end')).toBe('url(#arrow-loop)')
+      expect(chart).toContain(text)
+    }
+    // Not feasible holds the change; rejecting is one of three ways on.
+    const nf = screen.getByTestId('procmap-node-not-feasible').textContent ?? ''
+    expect(nf).toContain('holds costing (soft)')
+    expect(nf).toContain('reject · back to scoping · override')
+    expect(screen.queryByTestId('procmap-node-rejected-not-feasible')).toBeNull()
+    expect(chart).toContain('recall: before work starts, or after not feasible')
+    // A declined offer is recorded; rejecting is its own step.
+    expect(screen.getByTestId('procmap-node-rejected-declined').textContent)
+      .toContain('reject is its own step')
+    expect(screen.getByTestId('procmap-node-rejected').textContent)
+      .toContain('closes once the letter is sent')
+  })
+
+  it('keeps the plan publish and the bank build off the main path', () => {
+    wrap()
+    expect(screen.getByTestId('procmap-node-bank-build').textContent).toContain('to-do, not a gate')
+    expect(screen.getByTestId('procmap-node-publish-plan').textContent).toContain('a stamp')
+    // The spine runs from the timing gate through the implementation gate.
+    expect(screen.queryByTestId('procmap-edge-publish-implementation')).toBeNull()
+    expect(screen.getByTestId('procmap-edge-implgate-implementation')).toBeTruthy()
+  })
+
+  it('never claims that open deviations do not gate the release', () => {
+    const { container } = wrap()
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('never gate')
+    expect(text).not.toContain('recorded customer new timing')
+    expect(screen.getByTestId('procmap-node-plan-deviation').textContent)
+      .toContain('open ones hold release')
+    expect(screen.getByTestId('procmap-deadline-rail').textContent)
+      .toContain('moved only with a reason (audited)')
+    expect(screen.getByTestId('procmap-checked').textContent)
+      .toContain('Checked against the running system on 1 Oct 2026')
   })
 
   it('draws the customer-question loop back into scoping', () => {
@@ -114,15 +183,15 @@ describe('ProcessMapPage', () => {
   it('keeps every way out of the flow on the chart', () => {
     wrap()
     for (const key of [
-      'rejected', 'rejected-not-feasible', 'rejected-declined', 'cancelled', 'closed',
+      'rejected', 'not-feasible', 'rejected-declined', 'cancelled', 'closed',
       'on-hold', 'deviation', 'negotiation', 'internal-approval', 'plan-concern',
       'plan-deviation', 'recovery', 'progress-report', 'nothing-impacted',
-      'release-checklist', 'lessons',
+      'release-checklist', 'lessons', 'bank-build', 'publish-plan',
     ]) {
       expect(screen.getByTestId(`procmap-node-${key}`)).toBeTruthy()
     }
     expect(screen.getByTestId('procmap-edge-captured-rejected')).toBeTruthy()
-    expect(screen.getByTestId('procmap-node-on-hold').textContent).toContain('parking state')
+    expect(screen.getByTestId('procmap-node-on-hold').textContent).toContain('resumes only where it left off')
     // The loops that send work back where it came from.
     expect(screen.getByTestId('procmap-loop-negotiation')).toBeTruthy()
     expect(screen.getByTestId('procmap-loop-recovery').getAttribute('marker-end'))
@@ -285,7 +354,7 @@ describe('ProcessMapPage', () => {
     expect(capture).toContain('Sales (can_start_change); PM may start')
     expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
-    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(8)
+    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(12)
     expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
   })
 
@@ -320,6 +389,13 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-rv-decision').textContent).toContain('Any impact?')
     expect(screen.getByTestId('procmap-rv-released').textContent).toContain('Released and closed')
     expect(lane.textContent).toContain('escalates to a full ECR')
+    expect(lane.textContent).toContain('or without one when it gives a note')
+    // Development owns the intake and the review lane, not "the team".
+    expect(screen.getByTestId('procmap-node-intake').textContent).toContain('Development')
+    for (const id of ['procmap-rv-triage', 'procmap-rv-lock', 'procmap-rv-review']) {
+      expect(screen.getByTestId(id).textContent).toContain('Development')
+      expect(screen.getByTestId(id).textContent).not.toContain('Team')
+    }
     expect(screen.getByTestId('procmap-detail-intake').textContent).toContain('Development picks the route alone')
   })
 
@@ -349,8 +425,17 @@ describe('ProcessMapPage', () => {
       expect(scoping).toContain('PM convenes')
       expect(scoping).toContain('kickoff gate')
       expect(scoping).toContain('meeting record with RASIC + cost carrier')
+      expect(scoping).toContain('change lead')
       const assessment = screen.getByTestId('procmap-ov-stage-assessment').textContent ?? ''
       expect(assessment).toContain('HARD impact set locked')
+      expect(assessment).toContain('cost carrier set')
+      // One gate per path into Timing: customer, internal, Weissenburg / Solingen.
+      const timing = screen.getByTestId('procmap-ov-stage-timing').textContent ?? ''
+      expect(timing).toContain('PM + Quality sign-off (two people)')
+      expect(timing).toContain('internal: PM approved costs + release deadline')
+      expect(timing).toContain('SOP date')
+      expect(screen.getByTestId('procmap-ov-stage-release').textContent).toContain('plan deviation')
+      expect(screen.getByTestId('procmap-overview').textContent).not.toContain('never gate')
       expect(screen.getByTestId('procmap-ov-stage-costing').textContent)
         .toContain('costing lines with rate snapshot')
       expect(screen.getByTestId('procmap-overview-audit').textContent).toContain('Audit trail on every stage')

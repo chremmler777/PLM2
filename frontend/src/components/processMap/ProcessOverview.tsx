@@ -83,11 +83,11 @@ export default function ProcessOverview({ onJump }: { onJump: (target: string) =
           data-testid="procmap-overview-deadlines">
           <div className="ov-bar ov-soft rounded border border-sky-500/60 bg-sky-950/60 px-1.5 py-0.5 text-sky-200"
             style={{ gridColumn: '2 / 7' }}>
-            Quote-by deadline active: Capture to Offer (customer changes); freezes the on-time fact
+            Quote-by deadline active: Capture to Offer (customer changes); after capture moved only by Push back with a reason; freezes the on-time fact
           </div>
           <div className="ov-bar ov-soft rounded border border-emerald-500/60 bg-emerald-950/60 px-1.5 py-0.5 text-emerald-200"
             style={{ gridColumn: '7 / 11' }}>
-            Release-due deadline active: Timing to Release; moved only with an audited reason
+            Release-due deadline active: Timing to Release; entered at acceptance, internal approval or from the SOP; moved only with a reason (audited)
           </div>
         </div>
 
@@ -125,7 +125,7 @@ export default function ProcessOverview({ onJump }: { onJump: (target: string) =
         </section>
 
         <footer className="ov-muted flex justify-between gap-3 text-[11px] text-slate-400">
-          <span>Source: docs/ECR_PROCESS_MAP.md, docs/CHANGE_MANAGEMENT_FLOW.md. The detailed flow on this page shows every decision, loop and exit.</span>
+          <span>Checked against the system on 1 Oct 2026. The detailed flow on this page shows every decision, loop and exit.</span>
           <span>PLM v2 · ECR process overview</span>
         </footer>
       </div>
