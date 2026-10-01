@@ -1463,7 +1463,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
   })
 
-  it('names in the "Close costing" warning exactly the departments the cockpit waits on (F-01)', async () => {
+  it('lists in the "Close costing" confirm exactly the departments the cockpit waits on, once (F-01)', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'costing' as ChangeDetail['status']
     const c = change as unknown as Record<string, unknown>
@@ -1480,8 +1480,14 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     } as never)
     try {
       wrap('/changes/1?tab=overview')
-      await waitFor(() => expect(screen.getByTestId('warns-to:quoting').textContent)
-        .toBe('Waiting on cost input from 1 department: Tool Engineer. Check that nothing was forgotten.'))
+      // Not repeated as a warning beside the step: the wait row names them.
+      await waitFor(() => expect(screen.getByTestId('warns-to:quoting').textContent).toBe('no warning'))
+      fireEvent.click(screen.getByText('mock-advance-quoting'))
+      const dialog = await screen.findByTestId('confirm-quoting')
+      expect(dialog.textContent).toContain('Tool Engineer: cost input not entered')
+      // Project Manager booked nothing but owes nothing: never named.
+      expect(dialog.textContent).not.toContain('Project Manager')
+      expect(screen.queryByTestId('confirm-warning')).toBeNull()
     } finally {
       delete c.costing_pending_department_ids
       vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)

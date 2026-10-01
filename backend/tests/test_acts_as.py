@@ -148,7 +148,7 @@ async def test_ordinary_requests_are_untouched(
     assert row.acting_as_department_id is None
 
 
-async def test_acting_admin_who_leads_cannot_decide_gates(client, admin_auth, seed, depts):
+async def test_acting_admin_who_leads_cannot_decide_gates(client, admin_auth, seed, depts, session_factory):
     """F-03: acting as a department is being that department. The admin is the
     change lead here, but while acting neither the admin bypass nor the lead
     right decides a D1 gate; stopping to act gives both back."""
@@ -157,10 +157,24 @@ async def test_acting_admin_who_leads_cannot_decide_gates(client, admin_auth, se
         "change_type": "physical_part", "lead_id": seed["admin_id"]}, headers=admin_auth)
     assert res.status_code in (200, 201), res.text
     cid = res.json()["id"]
-    denied = await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
+    # Approved: the D1 "Technical release?" gate (on every change from
+    # creation) guards the next hop, into implementation.
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status = "approved"
+        await s.commit()
+    # "Your actions" must not prompt for a gate the PUT then refuses.
+    acting = await client.get(f"/api/v1/changes/{cid}/my-actions",
+                              headers=_acting(admin_auth, depts["sales"]))
+    assert acting.status_code == 200, acting.text
+    assert not [a for a in acting.json()["actions"] if a["kind"] == "gate"]
+    plain = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=admin_auth)
+    assert [a for a in plain.json()["actions"] if a["kind"] == "gate"]
+    denied = await client.put(f"/api/v1/changes/{cid}/gates/release",
                               json={"decision": "yes"},
                               headers=_acting(admin_auth, depts["sales"]))
     assert denied.status_code == 403
-    ok = await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
+    ok = await client.put(f"/api/v1/changes/{cid}/gates/release",
                           json={"decision": "yes"}, headers=admin_auth)
     assert ok.status_code == 200, ok.text

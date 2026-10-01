@@ -157,6 +157,9 @@ export default function CostLineGrid({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cost-lines', changeId, assessmentId] });
       qc.invalidateQueries({ queryKey: ['change-summation', changeId] });
+      // costing_pending_department_ids rides on the change: the tab note and
+      // the cockpit's "Waiting on cost input" must drop this department now.
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
     },
     onError: (e: unknown) => toastError(e, 'Could not save the plant lines'),
   });

@@ -391,11 +391,10 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.getSummation(changeId),
     enabled: (confirmTo === 'quoting' || change?.status === 'costing') && canSeeCosts,
   });
-  // What is worth a second look before "Close costing", read like
-  // CostingBuckets reads it: a total of zero with nothing waiting for a rate,
-  // or departments with nothing booked. A warning only, never a hold: the
-  // backend counts a zero line as an answer (costing_pending_department_ids),
-  // so a change that legitimately costs nothing must still close.
+  // What is worth a second look before "Close costing": a total of zero with
+  // nothing waiting for a rate. A warning only, never a hold: the backend
+  // counts a zero line as an answer (costing_pending_department_ids), so a
+  // change that legitimately costs nothing must still close.
   const costingWarning = (() => {
     const sum = closingSummation;
     if (!change || change.status !== 'costing' || !sum || !canSeeCosts) return null;
@@ -403,13 +402,10 @@ export default function ChangeDetailPage() {
     if (Math.abs(sum.totals?.grand_total ?? 0) < 0.005 && unpricedDepts.size === 0) {
       return `The total is ${formatMoney(0, sum.currency ?? 'EUR')}. Check that nothing was forgotten.`;
     }
-    // The same list the cockpit's "Waiting on cost input" counts: only a
-    // department that owes an input is named, never one that was consulted.
-    const owing = change.costing_pending_department_ids ?? [];
-    if (owing.length === 0) return null;
-    return `${t('next.waitingCostInput').replace('{n}', String(owing.length))
-      .replace('{s}', owing.length === 1 ? '' : 's')}: ${owing.map(deptName).join(', ')}. `
-      + 'Check that nothing was forgotten.';
+    // Departments that still owe their input are not repeated here: the
+    // cockpit's "Waiting on cost input" row and the confirm dialog's open
+    // list name them, from costing_pending_department_ids (F-01).
+    return null;
   })();
   // Releasing past open guards asks for a deviation with the reason, here and
   // now, instead of a bare refusal and a second dialog.

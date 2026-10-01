@@ -1399,6 +1399,8 @@ export default function CostPositions({
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['costing-positions', changeId] })
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
+    // A position is an answer too: the change's costing_pending_department_ids moves.
+    qc.invalidateQueries({ queryKey: ['change', changeId] })
   }
   const mine = (positions ?? []).filter((p) => p.department_id === departmentId)
   // Each standing row binds to THE position of its kind. A department that

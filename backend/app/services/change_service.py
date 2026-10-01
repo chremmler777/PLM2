@@ -2779,8 +2779,10 @@ class ChangeService:
 
         # kind "gate": a gate that guards the currently-reachable transition,
         # not yet decided 'yes', decidable by this user. Mirrors put_gate's
-        # authz exactly (changes.py put_gate: admin or the change lead).
-        if user.effective_role == "admin" or user.id == change.lead_id:
+        # authz exactly (changes.py put_gate: admin or the change lead, the
+        # lead right stepping aside while acting as a department).
+        from app.services.change_people import holds_lead
+        if user.effective_role == "admin" or holds_lead(change, user):
             reachable = ALLOWED_TRANSITIONS.get(change.status, set())
             for gate in change.gates:
                 target = GATE_TARGET_STATUS.get(gate.gate_key)
