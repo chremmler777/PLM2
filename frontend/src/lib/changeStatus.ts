@@ -45,19 +45,26 @@ export function transitionLabel(to: ChangeStatus | string, from?: ChangeStatus |
 }
 
 /**
- * Statuses reachable from each status. Used both for the advance buttons and to
- * decide which gates are currently blocking, so it must stay a statement about
- * reachability — not about which buttons happen to be shown. See
- * DECIDED_BY_MEETING for the statuses whose buttons are deliberately withheld.
+ * Statuses reachable from each status: a mirror of ALLOWED_TRANSITIONS in
+ * backend/app/services/change_service.py, minus on_hold and cancelled (open
+ * from every active stage) and the resume out of on_hold. Backward moves are
+ * included (recall, reopen costing, back to implementation, reopen a rejected
+ * change). Checked against the backend on 2026-10-01; keep the two in step.
+ * Internal changes go costing -> approved, mother-plant changes scoping ->
+ * approved; quoting and quoted cannot be rejected directly.
  */
 export const NEXT_STATUS: Partial<Record<ChangeStatus, ChangeStatus[]>> = {
-  captured: ['scoping'], scoping: ['in_assessment', 'rejected'],
-  in_assessment: ['costing', 'rejected'],
-  costing: ['quoting', 'quoted', 'approved'],
-  quoting: ['quoted', 'approved', 'rejected'],
+  captured: ['scoping', 'rejected'],
+  scoping: ['in_assessment', 'approved', 'rejected'],
+  in_assessment: ['costing', 'scoping', 'rejected'],
+  costing: ['quoting', 'approved'],
+  quoting: ['quoted', 'costing'],
   quoted: ['approved', 'rejected'],
-  approved: ['in_implementation'], in_implementation: ['in_validation'],
-  in_validation: ['released'], released: ['closed'],
+  approved: ['in_implementation'],
+  in_implementation: ['in_validation'],
+  in_validation: ['released', 'in_implementation'],
+  released: ['closed'],
+  rejected: ['scoping', 'closed'],
 }
 
 /** pill classes per status, dark-slate theme */
