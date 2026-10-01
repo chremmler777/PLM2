@@ -21,6 +21,11 @@ from app.services.change_service import ChangeService, _org_scope
 
 TRANSITION_ACTIONS = ("status_changed", "deviated_transition")
 
+# ECR KPI targets, per organization in org_settings as a percent string.
+ECR_KPI_TARGET_KEYS = {"rfq": "ecr_kpi_target_rfq",
+                       "implementation": "ecr_kpi_target_implementation"}
+ECR_KPI_TARGET_DEFAULT = 90.0
+
 
 class ReportService:
 
@@ -112,6 +117,29 @@ class ReportService:
         }
 
     @staticmethod
+    async def ecr_kpi_targets(session: AsyncSession, org_id: Optional[int]) -> dict:
+        """{rfq, implementation} on-time targets in percent (0-100)."""
+        from app.services.cost_sheet_service import get_setting
+        out = {}
+        for kind, key in ECR_KPI_TARGET_KEYS.items():
+            raw = await get_setting(session, org_id, key) if org_id else None
+            try:
+                out[kind] = float(raw) if raw is not None else ECR_KPI_TARGET_DEFAULT
+            except ValueError:
+                out[kind] = ECR_KPI_TARGET_DEFAULT
+        return out
+
+    @staticmethod
+    async def set_ecr_kpi_targets(session: AsyncSession, user: User, targets: dict) -> dict:
+        from app.services.cost_sheet_service import set_setting
+        for kind, value in targets.items():
+            if value is not None:
+                await set_setting(session, user.organization_id, ECR_KPI_TARGET_KEYS[kind],
+                                  f"{float(value):g}", user.id)
+        await session.commit()
+        return await ReportService.ecr_kpi_targets(session, user.organization_id)
+
+    @staticmethod
     async def ecr_kpis(session: AsyncSession, viewer: Optional[User],
                        months: Optional[int] = 12) -> dict:
         """On-time KPIs for the two ECR deadlines.
@@ -152,7 +180,8 @@ class ReportService:
 
         def blank():
             return {"on_time": 0, "late": 0, "rate": None, "avg_days_late": None,
-                    "open_overdue": 0, "open_due_7d": 0, "open_total": 0}
+                    "open_overdue": 0, "open_due_7d": 0, "open_total": 0,
+                    "target": None, "target_met": None}
 
         kpi = {"rfq": blank(), "implementation": blank()}
         late_days: dict[str, list[int]] = {"rfq": [], "implementation": []}
@@ -207,10 +236,14 @@ class ReportService:
                     elif days_left <= 7:
                         k["open_due_7d"] += 1
 
+        targets = await ReportService.ecr_kpi_targets(
+            session, viewer.organization_id if viewer is not None else None)
         for kind, k in kpi.items():
             done_n = k["on_time"] + k["late"]
+            k["target"] = targets[kind] / 100
             if done_n:
                 k["rate"] = k["on_time"] / done_n
+            k["target_met"] = None if k["rate"] is None else k["rate"] >= k["target"]
             if late_days[kind]:
                 k["avg_days_late"] = round(mean(late_days[kind]), 1)
 
@@ -218,6 +251,15 @@ class ReportService:
         late_rows.sort(key=lambda r: (r["done"] is not None, -r["days_late"]))
         projects = sorted(by_project.values(),
                           key=lambda p: (p["project_number"] or "", p["project_id"] or 0))
+
+        for t in trend.values():
+            for short in ("rfq", "impl"):
+                n = t[f"{short}_on_time"] + t[f"{short}_late"]
+                t[f"{short}_rate"] = t[f"{short}_on_time"] / n if n else None
+        for p in projects:
+            for short in ("rfq", "impl"):
+                n = p[f"{short}_on_time"] + p[f"{short}_late"]
+                p[f"{short}_rate"] = p[f"{short}_on_time"] / n if n else None
 
         return {
             "window_months": months,

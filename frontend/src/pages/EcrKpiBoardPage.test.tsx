@@ -5,15 +5,18 @@ import { MemoryRouter } from 'react-router-dom'
 import EcrKpiBoardPage from './EcrKpiBoardPage'
 import { reportsApi } from '../api/reports'
 
+const auth = vi.hoisted(() => ({ isAdmin: false }))
+vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth }))
+
 
 vi.mock('../api/reports', () => ({
   reportsApi: {
     ecrKpis: vi.fn().mockResolvedValue({
       window_months: 12,
-      rfq: { on_time: 3, late: 1, rate: 0.75, avg_days_late: 3, open_overdue: 1, open_due_7d: 2, open_total: 5 },
-      implementation: { on_time: 0, late: 0, rate: null, avg_days_late: null, open_overdue: 0, open_due_7d: 0, open_total: 1 },
-      trend: [{ month: '2026-09', rfq_on_time: 3, rfq_late: 1, impl_on_time: 0, impl_late: 0 }],
-      by_project: [{ project_id: 1, project_number: '1994', project_name: 'Brose', rfq_on_time: 3, rfq_late: 1, impl_on_time: 0, impl_late: 0 }],
+      rfq: { on_time: 3, late: 1, rate: 0.75, avg_days_late: 3, open_overdue: 1, open_due_7d: 2, open_total: 5, target: 0.9, target_met: false },
+      implementation: { on_time: 0, late: 0, rate: null, avg_days_late: null, open_overdue: 0, open_due_7d: 0, open_total: 1, target: 0.95, target_met: null },
+      trend: [{ month: '2026-09', rfq_on_time: 3, rfq_late: 1, impl_on_time: 0, impl_late: 0, rfq_rate: 0.75, impl_rate: null }],
+      by_project: [{ project_id: 1, project_number: '1994', project_name: 'Brose', rfq_on_time: 3, rfq_late: 1, impl_on_time: 0, impl_late: 0, rfq_rate: 0.75, impl_rate: null }],
       late: [
         { id: 7, change_number: 'GB-CM-0007', title: 'Open quote', project_number: '1994', lead_name: 'Ann',
           status: 'costing', kind: 'rfq', due: '2026-09-20', done: null, days_late: 11 },
@@ -21,6 +24,7 @@ vi.mock('../api/reports', () => ({
           status: 'released', kind: 'implementation', due: '2026-09-01', done: '2026-09-05', days_late: 4 },
       ],
     }),
+    setEcrKpiTargets: vi.fn().mockResolvedValue({ rfq: 80, implementation: 95 }),
   },
 }))
 
@@ -34,7 +38,27 @@ function renderPage() {
 }
 
 describe('EcrKpiBoardPage', () => {
-  afterEach(() => cleanup())
+  afterEach(() => { cleanup(); auth.isAdmin = false })
+
+  it('shows each rate against its target, with the gap in points', async () => {
+    renderPage()
+    expect((await screen.findByTestId('rfq-target')).textContent).toBe('90%')
+    expect(screen.getByTestId('implementation-target').textContent).toBe('95%')
+    expect(screen.getByTestId('rfq-rate').className).toContain('text-red-400')
+    expect(screen.getByTestId('rfq-gap').textContent).toBe('below target (-15 pts)')
+    expect(screen.queryByTestId('implementation-gap')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+  })
+
+  it('lets an admin change a target', async () => {
+    auth.isAdmin = true
+    renderPage()
+    const rfq = await screen.findByRole('region', { name: 'RFQ on time' })
+    fireEvent.click(within(rfq).getByRole('button', { name: 'Edit' }))
+    fireEvent.change(within(rfq).getByLabelText('Target'), { target: { value: '80' } })
+    fireEvent.click(within(rfq).getByRole('button', { name: 'Save' }))
+    await vi.waitFor(() => expect(reportsApi.setEcrKpiTargets).toHaveBeenCalledWith({ rfq: 80 }))
+  })
 
   it('shows both on-time rates, with a dash when nothing completed', async () => {
     renderPage()

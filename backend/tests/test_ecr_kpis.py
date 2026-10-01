@@ -89,3 +89,25 @@ async def test_ecr_kpis_empty(client, eng_auth, seed):
     body = (await client.get("/api/v1/reports/ecr-kpis", headers=eng_auth)).json()
     assert body["rfq"]["rate"] is None and body["implementation"]["rate"] is None
     assert body["late"] == [] and body["by_project"] == []
+
+
+async def test_ecr_kpi_targets(client, eng_auth, admin_auth, seed, kpi_data):
+    body = (await client.get("/api/v1/reports/ecr-kpis", headers=eng_auth)).json()
+    assert body["rfq"]["target"] == 0.9            # default 90 %
+    assert body["rfq"]["target_met"] is False      # 50 % < 90 %
+    assert body["by_project"][0]["rfq_rate"] == 0.5
+    assert all(t["rfq_rate"] is None for t in body["trend"] if t["rfq_on_time"] + t["rfq_late"] == 0)
+
+    res = await client.put("/api/v1/reports/ecr-kpis/targets", json={"rfq": 50},
+                           headers=eng_auth)
+    assert res.status_code == 403
+    res = await client.put("/api/v1/reports/ecr-kpis/targets", json={"rfq": 50},
+                           headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json() == {"rfq": 50.0, "implementation": 90.0}
+    res = await client.put("/api/v1/reports/ecr-kpis/targets", json={"rfq": 150},
+                           headers=admin_auth)
+    assert res.status_code == 422
+
+    body = (await client.get("/api/v1/reports/ecr-kpis", headers=eng_auth)).json()
+    assert body["rfq"]["target"] == 0.5 and body["rfq"]["target_met"] is True

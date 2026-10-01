@@ -78,6 +78,15 @@ export interface EcrKpi {
   open_overdue: number;
   open_due_7d: number;
   open_total: number;
+  /** fraction 0-1 */
+  target: number;
+  target_met: boolean | null;
+}
+
+/** On-time targets in percent (0-100). */
+export interface EcrKpiTargets {
+  rfq: number;
+  implementation: number;
 }
 
 export interface EcrKpiTrendRow {
@@ -86,6 +95,8 @@ export interface EcrKpiTrendRow {
   rfq_late: number;
   impl_on_time: number;
   impl_late: number;
+  rfq_rate: number | null;
+  impl_rate: number | null;
 }
 
 export interface EcrKpiProjectRow {
@@ -96,6 +107,8 @@ export interface EcrKpiProjectRow {
   rfq_late: number;
   impl_on_time: number;
   impl_late: number;
+  rfq_rate: number | null;
+  impl_rate: number | null;
 }
 
 export interface EcrKpiMiss {
@@ -131,4 +144,6 @@ export const reportsApi = {
   /** months = 0 for all time */
   ecrKpis: (months: number): Promise<EcrKpiReport> =>
     client.get('/v1/reports/ecr-kpis', { params: { months } }).then((r) => r.data),
+  setEcrKpiTargets: (t: Partial<EcrKpiTargets>): Promise<EcrKpiTargets> =>
+    client.put('/v1/reports/ecr-kpis/targets', t).then((r) => r.data),
 };

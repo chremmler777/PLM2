@@ -2,14 +2,15 @@
  * EcrKpiBoardPage - the two ECR delivery KPIs side by side:
  *   RFQ on time:            quote sent by the customer's requested submission date
  *   Implementation on time: change released by the release deadline set at acceptance
- * Both judged by calendar day. Same hand-rolled Tailwind viz as ReportsPage /
- * LessonsKpiBoardPage (no chart library). No targets are drawn: they are still
- * to be defined (plan action KP), so rates stay neutral and only misses are red.
+ * Both judged by calendar day, each against a per-organization target (default
+ * 90 %, admins edit it here). Same hand-rolled Tailwind viz as ReportsPage /
+ * LessonsKpiBoardPage (no chart library).
  */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { reportsApi, type EcrKpi, type EcrKpiMiss, type EcrKpiTrendRow } from '../api/reports';
+import { useAuth } from '../contexts/AuthContext';
 import { formatCalendarDate, formatDays, formatPercent, MONTHS } from '../lib/format';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
@@ -27,36 +28,49 @@ const KIND_LABEL: Record<Kind, string> = { rfq: 'RFQ', implementation: 'Implemen
 
 const pct = (v: number | null) => (v === null ? '-' : formatPercent(v * 100, 0));
 const monthLabel = (mk: string) => MONTHS[Number(mk.slice(5, 7)) - 1] ?? mk;
+/** Green at or above target, red below, neutral without a rate. */
+const vsTarget = (rate: number | null, target: number) =>
+  rate === null ? 'text-slate-100' : rate >= target ? 'text-emerald-400' : 'text-red-400';
 
-/** On-time vs late per month as stacked columns (green on time, red late). */
-function MonthlyBars({ rows, kind }: { rows: EcrKpiTrendRow[]; kind: Kind }) {
+/** On-time % per month: one column per month (height = %), green at or above
+ *  the target, red below, the target as a dashed line. Months without a
+ *  completed deadline stay empty. */
+function MonthlyRates({ rows, kind, target }: { rows: EcrKpiTrendRow[]; kind: Kind; target: number }) {
   const k = kind === 'rfq' ? 'rfq' : 'impl';
   const data = rows.map((r) => ({
     month: r.month,
     onTime: r[`${k}_on_time` as const],
     late: r[`${k}_late` as const],
+    rate: r[`${k}_rate` as const],
   }));
-  const max = Math.max(1, ...data.map((d) => d.onTime + d.late));
-  if (data.every((d) => d.onTime + d.late === 0)) {
+  if (data.every((d) => d.rate === null)) {
     return <div className="text-sm text-slate-500">Nothing quoted or released against a deadline yet.</div>;
   }
   return (
     <div>
-      <div className="flex items-end gap-1 h-24" role="img"
-        aria-label={`${KIND_LABEL[kind]} on time and late per month, last 12 months`}>
-        {data.map((d) => (
-          <div key={d.month} className="flex-1 min-w-0 h-full flex flex-col justify-end"
-            title={`${d.month}: ${d.onTime} on time, ${d.late} late`}>
-            {d.late > 0 && (
-              <div className="bg-red-500/80 rounded-t-sm" style={{ height: `${(d.late / max) * 100}%` }} />
-            )}
-            {d.onTime > 0 && (
-              <div className={`bg-emerald-500/80 ${d.late > 0 ? '' : 'rounded-t-sm'}`}
-                style={{ height: `${(d.onTime / max) * 100}%` }} />
-            )}
-            {d.onTime + d.late === 0 && <div className="h-px bg-slate-700" />}
-          </div>
-        ))}
+      <div className="pt-5">
+      <div className="relative h-28" role="img"
+        aria-label={`${KIND_LABEL[kind]} on-time percentage per month against a ${pct(target)} target`}>
+        <div className="absolute inset-x-0 border-t border-dashed border-sky-400/70 z-10 pointer-events-none"
+          style={{ bottom: `${target * 100}%` }} />
+        <div className="absolute inset-0 flex items-end gap-1">
+          {data.map((d) => (
+            <div key={d.month} className="flex-1 min-w-0 h-full flex flex-col justify-end items-center"
+              title={d.rate === null ? `${d.month}: nothing due`
+                : `${d.month}: ${pct(d.rate)} (${d.onTime} of ${d.onTime + d.late} on time)`}>
+              {d.rate !== null ? (
+                <>
+                  <span className={`text-[10px] tabular-nums mb-0.5 ${vsTarget(d.rate, target)}`}>{pct(d.rate)}</span>
+                  <div className={`w-full rounded-t-sm ${d.rate >= target ? 'bg-emerald-500/80' : 'bg-red-500/80'}`}
+                    style={{ height: `${Math.max(2, d.rate * 100)}%` }} />
+                </>
+              ) : (
+                <div className="w-full h-px bg-slate-700" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
       </div>
       <div className="flex gap-1 mt-1">
         {data.map((d) => (
@@ -69,32 +83,97 @@ function MonthlyBars({ rows, kind }: { rows: EcrKpiTrendRow[]; kind: Kind }) {
   );
 }
 
-function KpiPanel({ title, question, kpi, kind, trend }: {
+/** "Target 90 %", with an inline editor for admins. */
+function TargetControl({ kind, target, canEdit }: { kind: Kind; target: number; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const save = useMutation({
+    mutationFn: (v: number) => reportsApi.setEcrKpiTargets({ [kind]: v }),
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ['reports', 'ecr-kpis'] });
+    },
+  });
+  const num = Number(value);
+  const valid = value.trim() !== '' && Number.isFinite(num) && num >= 0 && num <= 100;
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-slate-400">Target</span>
+        <span className="text-sky-300 font-semibold tabular-nums" data-testid={`${kind}-target`}>{pct(target)}</span>
+        {canEdit && (
+          <button type="button" onClick={() => { setValue(String(Math.round(target * 1000) / 10)); setEditing(true); }}
+            className="text-xs text-blue-400 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 rounded">
+            Edit
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <form className="flex items-center gap-2 text-sm"
+      onSubmit={(e) => { e.preventDefault(); if (valid) save.mutate(num); }}>
+      <label className="text-slate-400" htmlFor={`${kind}-target-input`}>Target</label>
+      <input id={`${kind}-target-input`} type="number" min={0} max={100} step={0.5} autoFocus
+        value={value} onChange={(e) => setValue(e.target.value)}
+        className="w-20 bg-slate-900 border border-slate-600 rounded px-2 py-0.5 text-slate-100 tabular-nums" />
+      <span className="text-slate-400">%</span>
+      <button type="submit" disabled={!valid || save.isPending}
+        className="text-xs px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-40">
+        {save.isPending ? 'Saving…' : 'Save'}
+      </button>
+      <button type="button" onClick={() => setEditing(false)} className="text-xs text-slate-400 hover:text-slate-200">
+        Cancel
+      </button>
+      {save.isError && <span className="text-xs text-red-400">Not saved.</span>}
+    </form>
+  );
+}
+
+function KpiPanel({ title, question, kpi, kind, trend, canEdit }: {
   title: string;
   question: string;
   kpi: EcrKpi;
   kind: Kind;
   trend: EcrKpiTrendRow[];
+  canEdit: boolean;
 }) {
   const done = kpi.on_time + kpi.late;
+  const gap = kpi.rate === null ? null : Math.round((kpi.rate - kpi.target) * 100);
   return (
     <section className="bg-slate-800 border border-slate-700 rounded-lg p-5" aria-label={title}>
-      <h2 className="text-base font-semibold text-slate-100">{title}</h2>
-      <p className="text-xs text-slate-400 mt-0.5">{question}</p>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div>
+          <h2 className="text-base font-semibold text-slate-100">{title}</h2>
+          <p className="text-xs text-slate-400 mt-0.5">{question}</p>
+        </div>
+        <TargetControl kind={kind} target={kpi.target} canEdit={canEdit} />
+      </div>
 
-      <div className="flex items-baseline gap-3 mt-4">
-        <span className="text-5xl font-bold text-slate-100 tabular-nums" data-testid={`${kind}-rate`}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-4">
+        <span className={`text-5xl font-bold tabular-nums ${vsTarget(kpi.rate, kpi.target)}`} data-testid={`${kind}-rate`}>
           {pct(kpi.rate)}
         </span>
         <span className="text-sm text-slate-400 tabular-nums">
           {done === 0 ? 'nothing completed in this period' : `${kpi.on_time} of ${done} on time`}
         </span>
+        {gap !== null && (
+          <span className={`text-sm font-medium tabular-nums ${gap >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+            data-testid={`${kind}-gap`}>
+            {kpi.target_met ? 'target met' : 'below target'} ({gap >= 0 ? '+' : ''}{gap} pts)
+          </span>
+        )}
       </div>
 
       {done > 0 && (
-        <div className="flex h-2 rounded-full overflow-hidden bg-slate-900 mt-3" aria-hidden>
-          <div className="bg-emerald-500" style={{ width: `${(kpi.on_time / done) * 100}%` }} />
-          <div className="bg-red-500" style={{ width: `${(kpi.late / done) * 100}%` }} />
+        <div className="relative mt-3" aria-hidden>
+          <div className="flex h-2 rounded-full overflow-hidden bg-slate-900">
+            <div className="bg-emerald-500" style={{ width: `${(kpi.on_time / done) * 100}%` }} />
+            <div className="bg-red-500" style={{ width: `${(kpi.late / done) * 100}%` }} />
+          </div>
+          <div className="absolute -top-1 h-4 w-0.5 bg-sky-300 rounded" style={{ left: `calc(${kpi.target * 100}% - 1px)` }} />
         </div>
       )}
 
@@ -124,8 +203,14 @@ function KpiPanel({ title, question, kpi, kind, trend }: {
       </dl>
 
       <div className="mt-5 pt-4 border-t border-slate-700/60">
-        <div className="text-xs text-slate-400 mb-2">Last 12 months</div>
-        <MonthlyBars rows={trend} kind={kind} />
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+          <span>On time per month, last 12 months</span>
+          <span className="flex items-center gap-1.5 text-sky-300">
+            <span className="w-4 border-t border-dashed border-sky-400" aria-hidden />
+            target {pct(kpi.target)}
+          </span>
+        </div>
+        <MonthlyRates rows={trend} kind={kind} target={kpi.target} />
       </div>
     </section>
   );
@@ -195,12 +280,12 @@ function MissesTable({ rows }: { rows: EcrKpiMiss[] }) {
   );
 }
 
-function ratio(onTime: number, late: number) {
+function ratio(onTime: number, late: number, target: number) {
   const n = onTime + late;
   if (n === 0) return <span className="text-slate-500">-</span>;
   return (
     <span className="tabular-nums">
-      <span className="text-slate-100">{pct(onTime / n)}</span>
+      <span className={vsTarget(onTime / n, target)}>{pct(onTime / n)}</span>
       <span className="text-slate-500 text-xs"> ({onTime}/{n})</span>
     </span>
   );
@@ -208,6 +293,7 @@ function ratio(onTime: number, late: number) {
 
 export default function EcrKpiBoardPage() {
   const [months, setMonths] = useState(12);
+  const { isAdmin } = useAuth();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['reports', 'ecr-kpis', months],
     queryFn: () => reportsApi.ecrKpis(months),
@@ -253,12 +339,12 @@ export default function EcrKpiBoardPage() {
             <KpiPanel
               title="RFQ on time"
               question="Quote submitted by the date the customer requested."
-              kpi={data.rfq} kind="rfq" trend={data.trend}
+              kpi={data.rfq} kind="rfq" trend={data.trend} canEdit={isAdmin}
             />
             <KpiPanel
               title="Implementation on time"
               question="Change released by the release deadline set at acceptance."
-              kpi={data.implementation} kind="implementation" trend={data.trend}
+              kpi={data.implementation} kind="implementation" trend={data.trend} canEdit={isAdmin}
             />
           </div>
 
@@ -287,8 +373,8 @@ export default function EcrKpiBoardPage() {
                           {p.project_number ?? 'No project'}
                           {p.project_name && <span className="text-slate-400"> · {p.project_name}</span>}
                         </td>
-                        <td className="py-1.5 pr-3 text-right">{ratio(p.rfq_on_time, p.rfq_late)}</td>
-                        <td className="py-1.5 text-right">{ratio(p.impl_on_time, p.impl_late)}</td>
+                        <td className="py-1.5 pr-3 text-right">{ratio(p.rfq_on_time, p.rfq_late, data.rfq.target)}</td>
+                        <td className="py-1.5 text-right">{ratio(p.impl_on_time, p.impl_late, data.implementation.target)}</td>
                       </tr>
                     ))}
                   </tbody>
