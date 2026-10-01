@@ -380,10 +380,12 @@ class ChangeRequest(Base):
     @property
     def quoted_on_time(self) -> bool | None:
         """Frozen once quoted: was the quote deadline met? None while not yet
-        quoted or when no quote deadline was ever set."""
+        quoted or when no quote deadline was ever set. Judged by calendar day:
+        the deadline is a date, so quoting on the day is on time (same rule as
+        the ECR KPI board)."""
         if self.quoted_at is None or self.required_by_date is None:
             return None
-        return self.quoted_at <= self.required_by_date
+        return self.quoted_at.date() <= self.required_by_date.date()
 
     @property
     def negotiated_final_price(self) -> float | None:

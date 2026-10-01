@@ -266,7 +266,12 @@ export default function ReportsPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6">
-      <h1 className="text-2xl font-semibold mb-6">{t('reports.title')}</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold">{t('reports.title')}</h1>
+        <Link to="/changes/kpis" className="text-sm text-blue-400 hover:text-blue-300">
+          ECR KPI board
+        </Link>
+      </div>
 
       {/* Pipeline */}
       <section className="mb-8">

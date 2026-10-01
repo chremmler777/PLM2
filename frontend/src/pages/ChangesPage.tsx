@@ -179,6 +179,10 @@ export default function ChangesPage() {
             className="text-sm text-sky-400 hover:underline">
             {t('procmap.link')}
           </Link>
+          <Link to="/changes/kpis" data-testid="ecr-kpi-link"
+            className="text-sm text-sky-400 hover:underline">
+            KPI board
+          </Link>
           <StartChangeButton label="New Change Request" onClick={() => setShowCreate(true)} />
         </div>
       </div>

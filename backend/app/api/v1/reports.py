@@ -1,6 +1,6 @@
 """Reports/analytics: pipeline funnel + throughput + cycle time, department/
 owner workload, and cost roll-ups - all live SQL aggregates, org-scoped."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
@@ -29,3 +29,13 @@ async def cost_report(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     return await ReportService.cost(db, current_user)
+
+
+@router.get("/ecr-kpis")
+async def ecr_kpis_report(
+    months: int = Query(12, ge=0, le=120),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """RFQ on-time and implementation-on-time KPIs over the last `months`
+    calendar months (0 = all time)."""
+    return await ReportService.ecr_kpis(db, current_user, months or None)

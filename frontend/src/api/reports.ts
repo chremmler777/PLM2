@@ -70,6 +70,57 @@ export interface CostReport {
   plants: CostPlantRow[];
 }
 
+export interface EcrKpi {
+  on_time: number;
+  late: number;
+  rate: number | null;
+  avg_days_late: number | null;
+  open_overdue: number;
+  open_due_7d: number;
+  open_total: number;
+}
+
+export interface EcrKpiTrendRow {
+  month: string;
+  rfq_on_time: number;
+  rfq_late: number;
+  impl_on_time: number;
+  impl_late: number;
+}
+
+export interface EcrKpiProjectRow {
+  project_id: number | null;
+  project_number: string | null;
+  project_name: string | null;
+  rfq_on_time: number;
+  rfq_late: number;
+  impl_on_time: number;
+  impl_late: number;
+}
+
+export interface EcrKpiMiss {
+  id: number;
+  change_number: string;
+  title: string;
+  project_number: string | null;
+  lead_name: string | null;
+  status: string;
+  kind: 'rfq' | 'implementation';
+  due: string;
+  /** null = still open and past its date */
+  done: string | null;
+  days_late: number;
+}
+
+export interface EcrKpiReport {
+  window_months: number | null;
+  rfq: EcrKpi;
+  implementation: EcrKpi;
+  trend: EcrKpiTrendRow[];
+  by_project: EcrKpiProjectRow[];
+  late: EcrKpiMiss[];
+}
+
 export const reportsApi = {
   pipeline: (): Promise<PipelineReport> =>
     client.get('/v1/reports/pipeline').then((r) => r.data),
@@ -77,4 +128,7 @@ export const reportsApi = {
     client.get('/v1/reports/workload').then((r) => r.data),
   cost: (): Promise<CostReport> =>
     client.get('/v1/reports/cost').then((r) => r.data),
+  /** months = 0 for all time */
+  ecrKpis: (months: number): Promise<EcrKpiReport> =>
+    client.get('/v1/reports/ecr-kpis', { params: { months } }).then((r) => r.data),
 };

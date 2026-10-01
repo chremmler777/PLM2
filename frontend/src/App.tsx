@@ -26,6 +26,7 @@ import LessonsKpiBoardPage from './pages/LessonsKpiBoardPage';
 import ChangesPage from './pages/ChangesPage';
 import ChangeDetailPage from './pages/ChangeDetailPage';
 import ReportsPage from './pages/ReportsPage';
+import EcrKpiBoardPage from './pages/EcrKpiBoardPage';
 import PnlPage from './pages/PnlPage';
 import CostSheetPage from './pages/CostSheetPage';
 import ProcessMapPage from './pages/ProcessMapPage';
@@ -176,6 +177,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <LessonsKpiBoardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/changes/kpis"
+        element={
+          <ProtectedRoute>
+            <EcrKpiBoardPage />
           </ProtectedRoute>
         }
       />

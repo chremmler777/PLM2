@@ -112,6 +112,123 @@ class ReportService:
         }
 
     @staticmethod
+    async def ecr_kpis(session: AsyncSession, viewer: Optional[User],
+                       months: Optional[int] = 12) -> dict:
+        """On-time KPIs for the two ECR deadlines.
+
+        RFQ: quoted_at vs required_by_date (the customer's requested quote
+        submission date). Implementation: released_at vs release_due_date
+        (set at acceptance / internal approval). Both are judged by calendar
+        day — a deadline is a date, so delivering on the day counts as on time.
+        `months` bounds the completed events by completion date (None = all
+        time); open overdue counts are always "as of today"."""
+        now = datetime.utcnow()
+        today = now.date()
+        since = None
+        if months:
+            y, m = today.year, today.month - (months - 1)
+            while m <= 0:
+                m += 12
+                y -= 1
+            since = datetime(y, m, 1)
+
+        changes = (await session.execute(_org_scope(
+            select(ChangeRequest).where(
+                ChangeRequest.required_by_date.is_not(None)
+                | ChangeRequest.release_due_date.is_not(None)),
+            viewer,
+        ))).scalars().all()
+
+        trend_months = []
+        y, m = today.year, today.month
+        for _ in range(12):
+            trend_months.append(f"{y:04d}-{m:02d}")
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+        trend = {mk: {"month": mk, "rfq_on_time": 0, "rfq_late": 0,
+                      "impl_on_time": 0, "impl_late": 0}
+                 for mk in reversed(trend_months)}
+
+        def blank():
+            return {"on_time": 0, "late": 0, "rate": None, "avg_days_late": None,
+                    "open_overdue": 0, "open_due_7d": 0, "open_total": 0}
+
+        kpi = {"rfq": blank(), "implementation": blank()}
+        late_days: dict[str, list[int]] = {"rfq": [], "implementation": []}
+        by_project: dict = {}
+        late_rows = []
+
+        def row(c, kind, due, done):
+            ref = done.date() if done is not None else today
+            return {
+                "id": c.id, "change_number": c.change_number, "title": c.title,
+                "project_number": c.project_number, "lead_name": c.lead_name,
+                "status": c.status, "kind": kind,
+                "due": due.date().isoformat(),
+                "done": done.date().isoformat() if done is not None else None,
+                "days_late": (ref - due.date()).days,
+            }
+
+        for c in changes:
+            pairs = []
+            if c.required_by_date is not None:
+                pairs.append(("rfq", c.required_by_date, c.quoted_at,
+                              c.active_deadline == "quote"))
+            if c.release_due_date is not None:
+                pairs.append(("implementation", c.release_due_date, c.released_at,
+                              c.released_at is None
+                              and c.status not in TERMINAL_STATUSES))
+            for kind, due, done, live in pairs:
+                k = kpi[kind]
+                if done is not None:
+                    if since is not None and done < since:
+                        continue
+                    on_time = done.date() <= due.date()
+                    k["on_time" if on_time else "late"] += 1
+                    mk = f"{done.year:04d}-{done.month:02d}"
+                    short = "rfq" if kind == "rfq" else "impl"
+                    if mk in trend:
+                        trend[mk][f"{short}_{'on_time' if on_time else 'late'}"] += 1
+                    p = by_project.setdefault(c.project_id, {
+                        "project_id": c.project_id, "project_number": c.project_number,
+                        "project_name": c.project_name,
+                        "rfq_on_time": 0, "rfq_late": 0, "impl_on_time": 0, "impl_late": 0})
+                    p[f"{short}_{'on_time' if on_time else 'late'}"] += 1
+                    if not on_time:
+                        late_days[kind].append((done.date() - due.date()).days)
+                        late_rows.append(row(c, kind, due, done))
+                elif live:
+                    k["open_total"] += 1
+                    days_left = (due.date() - today).days
+                    if days_left < 0:
+                        k["open_overdue"] += 1
+                        late_rows.append(row(c, kind, due, None))
+                    elif days_left <= 7:
+                        k["open_due_7d"] += 1
+
+        for kind, k in kpi.items():
+            done_n = k["on_time"] + k["late"]
+            if done_n:
+                k["rate"] = k["on_time"] / done_n
+            if late_days[kind]:
+                k["avg_days_late"] = round(mean(late_days[kind]), 1)
+
+        # Open overdue first (still burning), then the latest misses.
+        late_rows.sort(key=lambda r: (r["done"] is not None, -r["days_late"]))
+        projects = sorted(by_project.values(),
+                          key=lambda p: (p["project_number"] or "", p["project_id"] or 0))
+
+        return {
+            "window_months": months,
+            "rfq": kpi["rfq"],
+            "implementation": kpi["implementation"],
+            "trend": list(trend.values()),
+            "by_project": projects,
+            "late": late_rows[:100],
+        }
+
+    @staticmethod
     async def workload(session: AsyncSession, viewer: Optional[User]) -> dict:
         from app.models.part import PartRevision
         from app.models.workflow import Department, WfInstance, WfInstanceTask
