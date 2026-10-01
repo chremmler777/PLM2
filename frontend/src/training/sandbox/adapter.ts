@@ -129,7 +129,7 @@ on('post', /^\/v1\/changes$/, (s, config) => {
   if (!b.title?.trim()) fail(422, 'A change needs a title.', config)
   if (!b.reason?.trim()) fail(422, 'Say why the change is needed.', config)
   if (b.customer_relevant === false) {
-    fail(422, 'Internal changes are not open yet: start a customer change.', config)
+    fail(422, 'The practice tasks use customer changes: start a customer change.', config)
   }
   const parts = s.parts[project.id] ?? []
   const ids = b.impacted_part_ids ?? []

@@ -901,7 +901,11 @@ view.
   `scoping` is the single CCB-style review. A `needs_info` outcome produces a
   *follow-up meeting row*, not a second meeting type.
 - ⚠ **Workbook field mapping** — see §1.
-- ⚠ **External flow only, for now (2026-08-11).** The current shape — Sales/PM
+- **Internal changes switched on (2026-10-01, F-04).** The start form offers
+  "Internal change" (the plant pays): no quote deadline, no offer; costing
+  ends with "Approve internal costs" (Project Management, release deadline
+  required). Walked end to end before switching on.
+- ⚠ **External flow first (2026-08-11).** The current shape — Sales/PM
   as the only capturers, quote deadline, customer letters, Sales-owned
   loops — deliberately serves the *external* (customer-driven) change flow
   with safeguarding. When internal changes become a real volume, expect the

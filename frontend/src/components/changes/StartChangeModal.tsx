@@ -133,9 +133,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   // Change type is chosen up front and scopes the item picker. Only physical-part
   // changes are enabled today (see ENABLED_CHANGE_TYPES).
   const [changeType, setChangeType] = useState<ChangeType>('physical_part');
-  // Only the external flow is open for business: the internal branch is shown
-  // (so the distinction stays visible) but cannot be chosen, and the customer
-  // branch is preselected rather than forcing a choice with one legal answer.
+  // Who carries the cost: the customer branch is preselected (the common case);
+  // an internal change (the plant pays) goes through internal cost approval
+  // instead of a quote (switched on 2026-10-01, F-04).
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(true);
   // Third origin (spec §14): a change engineered and sold by the mother plant.
   const permissions = useChangePermissions();
@@ -237,7 +237,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   // A mother-plant change is handed over by the PM who starts it: the
   // kickoff needs its description, so the dialog asks for it up front.
   if (fromMotherPlant) missing.push(...(description.trim() ? [] : ['description']), ...motherPlantMissing(motherPlant));
-  else if (customerRelevant !== true) missing.push('cost carrier');
+  else if (customerRelevant === undefined) missing.push('cost carrier');
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
   const handOverMissing = fromMotherPlant ? [] : kickoffMissing({
@@ -246,7 +246,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
   const handleSubmit = async () => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
-    if (customerRelevant !== true && !fromMotherPlant) return;
+    if (customerRelevant === undefined && !fromMotherPlant) return;
     setSubmitting(true);
     setCreateError(null);
     try {
@@ -271,8 +271,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             mother_plant_ref: motherPlant.ref.trim() || undefined,
             mother_plant_sop: motherPlant.sop,
           }
-          // Never leaves as false — the backend refuses internal changes for now.
-          : { customer_relevant: true }),
+          : { customer_relevant: customerRelevant !== false }),
       });
       // The items went in the create request. A backend that ignored them
       // (older API) leaves some unattached: those are added one by one, lead
@@ -304,7 +303,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
       }
       // The create request takes no deadline: it is set right after, as the
       // deadline editor does. A refusal is named; the change itself stands.
-      if (!fromMotherPlant && quoteDeadline) {
+      // Customer changes only: an internal change has no quote deadline (a
+      // date typed before switching to internal is not sent).
+      if (!fromMotherPlant && customerRelevant === true && quoteDeadline) {
         try {
           await changesApi.update(change.id, { required_by_date: `${quoteDeadline}T23:59:59Z` });
         } catch (e) {
@@ -610,20 +611,17 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <span className="block text-xs text-slate-500">{t('start.customerRelevantYesHint')}</span>
               </span>
             </label>
-            <label className="flex items-start gap-2 text-sm cursor-not-allowed opacity-50"
-              title={t('start.internalLater')}>
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
               <input
                 type="radio"
                 name="sc-customer-relevant"
                 className="mt-1"
-                disabled
-                checked={customerRelevant === false}
-                onChange={() => setCustomerRelevant(false)}
+                checked={customerRelevant === false && !fromMotherPlant}
+                onChange={() => { setCustomerRelevant(false); setFromMotherPlant(false); }}
               />
               <span>
                 <span className="text-slate-100">{t('start.internalChange')}</span>
                 <span className="block text-xs text-slate-500">{t('start.customerRelevantNoHint')}</span>
-                <span className="block text-xs text-amber-300/80">{t('start.internalLater')}</span>
               </span>
             </label>
             {/* Mother plant (spec §14): started by Project Management (and

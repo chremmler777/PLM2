@@ -113,18 +113,6 @@ async def create_change(
                     f"change from {mp.plant_name(body)}" if mother_plant else
                     "Only an admin or a member of a department allowed to start "
                     "changes (e.g. Sales) may raise a change"))
-    # The system currently runs the customer (external) change flow only, so
-    # the entry point refuses to create internal ones — half-built internal
-    # changes stuck mid-flow are worse than not offering them. The SERVICE
-    # stays capable: the internal costing/approval path is real, tested
-    # functionality waiting on the decision to switch it on.
-    # A change from the mother plant is not customer relevant here either,
-    # but it is its own side track (spec §14), not the internal branch.
-    if body.customer_relevant is False and not mother_plant:
-        raise HTTPException(
-            status_code=400,
-            detail="Internal changes are not enabled yet — this system "
-                   "currently runs the customer (external) change flow")
     # The project must be one the caller can see (their organization; an
     # admin sees all), and the lead a live user of the project's organization.
     project_org = await _project_org_id(db, body.project_id)

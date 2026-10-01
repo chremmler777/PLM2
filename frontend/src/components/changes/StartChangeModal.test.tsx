@@ -323,7 +323,7 @@ describe('StartChangeModal', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('locks the cost carrier to the customer branch while internal changes wait', async () => {
+  it('offers the internal branch: no quote deadline, sent as customer_relevant false (F-04)', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{
       projectId: 1,
       part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
@@ -331,19 +331,23 @@ describe('StartChangeModal', () => {
     await screen.findByText('20-3450-001-0 - Clip')
     const customer = screen.getByRole('radio', { name: /^Customer change/ }) as HTMLInputElement
     const internal = screen.getByRole('radio', { name: /^Internal change/ }) as HTMLInputElement
-    // Customer is preselected; internal is visible but unavailable, and says why.
+    // Customer is preselected; internal is a real choice now.
     expect(customer.checked).toBe(true)
-    expect(internal.disabled).toBe(true)
-    expect(internal.checked).toBe(false)
-    expect(internal.closest('label')?.getAttribute('title')).toBe(t('start.internalLater'))
+    expect(internal.disabled).toBe(false)
+    expect(screen.getByLabelText(new RegExp(t('deadline.quote')))).toBeTruthy()
+
+    fireEvent.click(internal)
+    expect(internal.checked).toBe(true)
+    expect(customer.checked).toBe(false)
+    // An internal change has no quote deadline: the field goes away.
+    expect(screen.queryByLabelText(new RegExp(t('deadline.quote')))).toBeNull()
 
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ customer_relevant: true })))
-    // Nothing the modal can do sends the internal branch.
-    expect(changesApi.create).not.toHaveBeenCalledWith(
-      expect.objectContaining({ customer_relevant: false }))
+      expect.objectContaining({ customer_relevant: false })))
+    expect(changesApi.update).not.toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ required_by_date: expect.anything() }))
   })
 
   describe('kickoff needs and the one-request create (spec §16)', () => {

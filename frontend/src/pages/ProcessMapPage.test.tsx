@@ -203,9 +203,10 @@ describe('ProcessMapPage', () => {
     // The quote deadline freezes when quoted, not at approval.
     expect(screen.getByTestId('procmap-detail-approved').textContent)
       .toContain('froze into its permanent on-time or late fact when the offer was sent')
-    // Capture: internal is not a form choice.
+    // Capture: internal is a form choice again (F-04, 2026-10-01).
     expect(screen.getByTestId('procmap-detail-captured').textContent)
-      .toContain('"Internal change" is not offered on the form')
+      .toContain('internal change (the plant pays, no quote, no quote deadline)')
+    expect(screen.getByTestId('procmap-detail-captured').textContent).not.toContain('not offered')
     // Risks: every open risk becomes an optional offer row.
     expect(screen.getByTestId('procmap-chart').textContent).toContain('open risks → optional rows on the offer')
   })

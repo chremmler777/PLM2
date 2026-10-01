@@ -290,10 +290,10 @@ open by nature:
    framed as "when the scoping meeting routes Quality". Until the
    replacements run in the sandbox the old tasks stay active and the new ones
    are listed as coming (section 3). Agree?
-2. **Internal changes cannot be started** ("Internal change" is disabled on
-   the start form: "Internal changes come later"). The manual teaches the
-   customer path only and does not cover "Approve internal costs". Add a
-   section when internal changes open.
+2. **Internal changes can be started since 2026-10-01** ("Internal change"
+   on the start form, F-04). The manual still teaches the customer path only
+   and does not cover "Approve internal costs" (PM, with the release
+   deadline). Add that section; the practice sandbox keeps to customer changes.
 3. **Recording attendance as a practice task** was drafted and dropped:
    `/v1/training/*` passes through the sandbox containment
    (`sandbox/containment.ts`), so an attendance recorded in practice would

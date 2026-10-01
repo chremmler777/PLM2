@@ -133,15 +133,24 @@ async def test_capture_open_while_no_department_is_flagged(client, eng_auth, see
     assert res.status_code == 200, res.text
 
 
-async def test_internal_change_creation_is_refused(client, eng_auth, seed):
-    """External flow only for now: the endpoint refuses to create an internal
-    change, while the service keeps the capability."""
+async def test_internal_change_can_be_created(client, eng_auth, seed, session_factory):
+    """Internal changes are switched on (2026-10-01, F-04): the plant pays, no
+    quote and no quote deadline; the hand-over to scoping does not ask for one."""
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "internal", "reason": "r",
-        "change_type": "physical_part", "customer_relevant": False}, headers=eng_auth)
-    assert res.status_code == 400
-    assert "not enabled yet" in res.json()["detail"]
-    assert "external" in res.json()["detail"]
+        "change_type": "physical_part", "customer_relevant": False,
+        "lead_id": seed["engineer_id"]}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["customer_relevant"] is False
+    assert body["origin"] == "internal"
+    assert body["active_deadline"] is None
+    from app.models.change import ChangeRequest
+    from app.services.change_service import ChangeService
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, body["id"])
+        missing = await ChangeService.kickoff_missing(s, change)
+    assert not any("deadline" in m for m in missing), missing
 
 
 async def test_customer_relevant_change_is_still_accepted(client, eng_auth, seed):
