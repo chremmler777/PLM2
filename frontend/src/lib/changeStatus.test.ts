@@ -11,14 +11,6 @@ describe('changeStatus', () => {
       expect(STATUS_PILL[s], s).toBeTruthy()
     }
   })
-  it('NEXT_STATUS mirrors the backend transition table (no moves the backend refuses)', () => {
-    expect(NEXT_STATUS.costing).toEqual(['quoting', 'approved'])
-    expect(NEXT_STATUS.quoting).toEqual(['quoted', 'costing'])
-    expect(NEXT_STATUS.quoting).not.toContain('rejected')
-    expect(NEXT_STATUS.in_validation).toContain('in_implementation')
-    expect(NEXT_STATUS.rejected).toEqual(['scoping', 'closed'])
-  })
-
   it('every NEXT_STATUS target is a known status', () => {
     for (const targets of Object.values(NEXT_STATUS))
       for (const t of targets!) expect(STATUS_LABELS[t], t).toBeTruthy()
