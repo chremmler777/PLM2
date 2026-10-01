@@ -403,16 +403,13 @@ export default function ChangeDetailPage() {
     if (Math.abs(sum.totals?.grand_total ?? 0) < 0.005 && unpricedDepts.size === 0) {
       return `The total is ${formatMoney(0, sum.currency ?? 'EUR')}. Check that nothing was forgotten.`;
     }
-    const deptIds = [...new Set(change.assessments.map((a) => a.department_id))];
-    const unbooked = deptIds.filter((id) => {
-      const row = sum.by_department.find((d) => d.department_id === id);
-      const total = row ? row.one_time_internal + row.one_time_external
-        + row.lifecycle_internal + row.lifecycle_external : 0;
-      return total === 0 && !unpricedDepts.has(id);
-    });
-    if (unbooked.length === 0) return null;
-    return `${unbooked.length} of ${deptIds.length} department${deptIds.length === 1 ? '' : 's'} `
-      + `booked no cost: ${unbooked.map(deptName).join(', ')}. Check that nothing was forgotten.`;
+    // The same list the cockpit's "Waiting on cost input" counts: only a
+    // department that owes an input is named, never one that was consulted.
+    const owing = change.costing_pending_department_ids ?? [];
+    if (owing.length === 0) return null;
+    return `${t('next.waitingCostInput').replace('{n}', String(owing.length))
+      .replace('{s}', owing.length === 1 ? '' : 's')}: ${owing.map(deptName).join(', ')}. `
+      + 'Check that nothing was forgotten.';
   })();
   // Releasing past open guards asks for a deviation with the reason, here and
   // now, instead of a bare refusal and a second dialog.

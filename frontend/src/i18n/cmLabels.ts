@@ -2016,6 +2016,20 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'deadline.pushbackSave': { de: 'Verschieben', en: 'Push back' },
   'deadline.savedQuote': { de: 'Angebotstermin gespeichert', en: 'Quote deadline saved' },
   'deadline.savedRelease': { de: 'Freigabetermin gespeichert', en: 'Release deadline saved' },
+  'd1.gatesActing': {
+    de: 'Gates entscheidet der Change Lead oder ein Admin. Zum Entscheiden "Handeln als" beenden.',
+    en: 'Gates are decided by the change lead or an admin. Stop acting as a department to decide.',
+  },
+  'deadline.move': { de: 'Verschieben', en: 'Move' },
+  'deadline.moveTitleRelease': { de: 'Freigabetermin verschieben', en: 'Move the release deadline' },
+  'deadline.moveWhyRelease': {
+    de: 'Warum verschiebt sich der Freigabetermin? (Pflicht, protokolliert)',
+    en: 'Why does the release deadline move? (required, audited)',
+  },
+  'deadline.moveHintRelease': {
+    de: 'Wer hat den neuen Termin vereinbart, und warum',
+    en: 'Who agreed the new date, and why',
+  },
   'assessment.pickVerdict': { de: "Ergebnis wählen", en: "Pick a verdict" },
   'assessment.draftSaved': { de: "Entwurf gespeichert", en: "Draft saved" },
   'assessment.draftRestored': { de: "Entwurf vom Server wiederhergestellt", en: "Draft restored from the server" },

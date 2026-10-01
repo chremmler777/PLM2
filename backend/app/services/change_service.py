@@ -3928,6 +3928,13 @@ class ChangeService:
                 raise ChangeError("Release deadline cannot be cleared")
             reason = (fields.pop("release_due_reason")
                       if "release_due_reason" in fields else None)
+            # The release deadline is what the customer was promised and what
+            # "implemented on time" is measured against: moving it says why,
+            # in the same PATCH, like a quote-deadline pushback (F-02).
+            if new_date != change.release_due_date and not (reason or "").strip():
+                raise ChangeError(
+                    "Moving the release deadline requires a reason "
+                    "(release_due_reason)")
             await ChangeService._apply_release_deadline(
                 session, change, new_date, reason, user_id)
 

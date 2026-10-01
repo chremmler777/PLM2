@@ -10,6 +10,7 @@ import { COST_CARRIER_LABELS } from '../../lib/humanLabels';
 import { formatDate } from '../../lib/format';
 import { toastError } from '../../lib/apiError';
 import { useAuth } from '../../contexts/AuthContext';
+import { getActsAsDepartmentId } from '../../lib/actsAs';
 import Button from '../common/Button';
 import EmptyState from '../common/EmptyState';
 
@@ -160,7 +161,12 @@ export default function D1MasterPanel({
   const mayEditCarrier = canEditCustomerRelevant && !finished && !!change
     && CARRIER_OPEN.has(change.status) && change.origin !== 'mother_plant';
   // Gates are the change lead's decision (or an admin's); everyone else reads.
-  const mayDecide = !!change && (isAdmin || (userId != null && change.lead_id === userId));
+  // Acting as a department drops both personal rights, as the backend does
+  // (holds_lead / effective_role): showing the buttons and then refusing the
+  // click was finding F-03.
+  const actingAs = getActsAsDepartmentId() != null;
+  const wouldDecide = !!change && (isAdmin || (userId != null && change.lead_id === userId));
+  const mayDecide = wouldDecide && !actingAs;
 
   const togglePlant = (plantId: number) => {
     setFields((f) => {
@@ -342,6 +348,11 @@ export default function D1MasterPanel({
       {/* Gates */}
       <div>
         <h3 className="text-sm font-semibold text-slate-100 mb-2">Final assessment</h3>
+        {wouldDecide && actingAs && !finished && (
+          <p className="text-xs text-slate-400 mb-2" data-testid="d1-gates-acting">
+            {t('d1.gatesActing')}
+          </p>
+        )}
         <div className="space-y-2">
           {namedGates.map((g) => {
             const key = g.gate_key;

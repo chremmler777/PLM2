@@ -37,9 +37,9 @@ const wrap = (ui: React.ReactElement) => (
 describe('DeadlineEditor', () => {
   afterEach(() => { cleanup(); vi.mocked(changesApi.update).mockClear() })
 
-  it('edits release_due_date when kind is release', async () => {
+  it('sets a first release deadline plainly (no existing commitment to move)', async () => {
     const { container } = render(wrap(<DeadlineEditor change={change({
-      release_due_date: '2026-10-01T23:59:59', release_due_reason: null,
+      release_due_date: null, release_due_reason: null,
     })} kind="release" />))
     fireEvent.click(screen.getByTestId('deadline-edit'))
     typeDate(container, '15 Nov 2026')
@@ -103,16 +103,22 @@ describe('DeadlineEditor', () => {
     }))
   })
 
-  it('leaves the release deadline editable without a pushback reason', async () => {
+  it('moves an existing release deadline only with a reason (F-02)', async () => {
     const { container } = render(wrap(<DeadlineEditor change={change({
-      status: 'approved', release_due_date: '2026-10-01T23:59:59',
+      status: 'approved', release_due_date: '2026-10-01T23:59:59', release_due_reason: 'PO timing',
     })} kind="release" />))
+    expect(screen.getByTestId('deadline-edit').textContent).toBe(t('deadline.move'))
     fireEvent.click(screen.getByTestId('deadline-edit'))
+    expect(screen.getByText(t('deadline.moveTitleRelease'))).toBeTruthy()
+    // The previous reason is history, not a prefill to submit again.
+    expect((screen.getByTestId('deadline-reason') as HTMLTextAreaElement).value).toBe('')
     typeDate(container, '15 Nov 2026')
+    expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('deadline-reason'), { target: { value: 'customer agreed new SOP' } })
     expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByTestId('deadline-save'))
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
-      release_due_date: '2026-11-15T23:59:59Z', release_due_reason: null,
+      release_due_date: '2026-11-15T23:59:59Z', release_due_reason: 'customer agreed new SOP',
     }))
   })
 

@@ -524,6 +524,42 @@ async def test_release_deadline_editable_after_acceptance(client, eng_auth, seed
 
 
 @pytest.mark.asyncio
+async def test_release_deadline_move_requires_reason(client, eng_auth, seed, session_factory):
+    """F-02: the release deadline is the customer's commitment and the basis
+    of the implementation-on-time KPI: moving it without saying why is refused,
+    and the reason lands on the audited changelog row."""
+    cid = await _accepted_change(client, eng_auth, seed, "Move needs reason", session_factory)
+    new_due = (datetime.utcnow() + timedelta(days=70)).isoformat()
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": new_due}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "requires a reason" in res.json()["detail"]
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": new_due, "release_due_reason": "   "}, headers=eng_auth)
+    assert res.status_code == 400
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": new_due, "release_due_reason": "customer agreed new SOP in call 10/01",
+    }, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.field_name == "release_due_date",
+        ).order_by(ChangeChangelog.id))).scalars().all()
+        assert rows[-1].notes == "customer agreed new SOP in call 10/01"
+
+
+@pytest.mark.asyncio
+async def test_release_deadline_same_date_needs_no_reason(client, eng_auth, seed, session_factory):
+    """Re-sending the date it already has moves nothing, so asks for nothing."""
+    cid = await _accepted_change(client, eng_auth, seed, "Same date", session_factory)
+    cur = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()["release_due_date"]
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": cur}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.asyncio
 async def test_release_deadline_not_settable_before_acceptance(client, eng_auth, seed):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"],

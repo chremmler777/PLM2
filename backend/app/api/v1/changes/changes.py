@@ -2566,7 +2566,10 @@ async def put_gate(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if current_user.effective_role != "admin" and change.lead_id != current_user.id:
+    # Acting as a department is being that department: the admin bypass and
+    # the personal lead right both step aside (holds_lead), as everywhere.
+    from app.services.change_people import holds_lead
+    if current_user.effective_role != "admin" and not holds_lead(change, current_user):
         raise HTTPException(status_code=403,
                             detail="Only the change lead or an admin may decide gates")
     try:

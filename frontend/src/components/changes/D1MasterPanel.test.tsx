@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ACTS_AS_KEY } from '../../lib/actsAs';
 import D1MasterPanel from './D1MasterPanel';
 import SummationView from './SummationView';
 import { t } from '../../i18n/cmLabels';
@@ -305,6 +306,27 @@ describe('D1MasterPanel', () => {
     renderWith(CHANGE);
     await waitFor(() => screen.getByDisplayValue('Alice'));
     expect(screen.getAllByRole('button', { name: 'Yes' }).length).toBe(3);
+  });
+
+  it('hides the gate buttons from an admin acting as a department, and says how to decide (F-03)', async () => {
+    auth.current = { userId: 99, isAdmin: true };
+    sessionStorage.setItem(ACTS_AS_KEY, '6');
+    try {
+      renderWith(CHANGE);
+      await waitFor(() => screen.getByDisplayValue('Alice'));
+      expect(screen.queryByRole('button', { name: 'Yes' })).toBeNull();
+      expect(screen.getByTestId('d1-gate-value-feasibility').textContent).toBe('Yes');
+      expect(screen.getByTestId('d1-gates-acting').textContent).toBe(t('d1.gatesActing'));
+    } finally {
+      sessionStorage.removeItem(ACTS_AS_KEY);
+    }
+  });
+
+  it('says nothing about acting to someone who could not decide anyway', async () => {
+    auth.current = { userId: 99, isAdmin: false };
+    renderWith(CHANGE);
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect(screen.queryByTestId('d1-gates-acting')).toBeNull();
   });
 
   it('renders lead part indicator', async () => {

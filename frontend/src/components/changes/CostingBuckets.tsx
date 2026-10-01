@@ -131,14 +131,12 @@ export default function CostingBuckets({
     <CostingSheetBar changeId={changeId} summation={canSeeAll ? summation : undefined}
       editable={editable} />
   )
-  // Costing-side truth for the step button in the cockpit: a costing with no
-  // money in it is not a basis for a quote. Said here, where it can be fixed.
-  const unbooked = canSeeAll && summation
-    ? rows.filter((a) => {
-      const priced = deptCosted(a.department_id) === true
-      const unpriced = (summation.unpriced_lines ?? []).some((l) => l.department_id === a.department_id)
-      return !priced && !unpriced
-    }).map((a) => deptName(a.department_id))
+  // Who still owes a cost input: the backend's own list, the one the cockpit's
+  // "Waiting on cost input" counts, so the two never disagree. A department
+  // that is only consulted or informed owes nothing, and a zero line is an
+  // answer (ChangeService.costing_pending_department_ids).
+  const owing = change.status === 'costing'
+    ? (change.costing_pending_department_ids ?? []).map(deptName)
     : []
   const nothingCosted = !!summation && canSeeAll && change.status === 'costing'
     && Math.abs(summation.totals?.grand_total ?? 0) < 0.005
@@ -160,7 +158,7 @@ export default function CostingBuckets({
       {sheetBar}
       {/* Mexico (Silao) among the change's plants: not in use yet, said once. */}
       <PlantNotInUseNote plants={plants} />
-      {change.status === 'costing' && canSeeAll && summation && (nothingCosted || unbooked.length > 0) && (
+      {change.status === 'costing' && canSeeAll && (nothingCosted || owing.length > 0) && (
         <div role="status" data-testid="costing-readiness"
           className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${nothingCosted
             ? 'border-amber-700/70 bg-amber-950/40 text-amber-100'
@@ -170,8 +168,8 @@ export default function CostingBuckets({
             {nothingCosted
               ? `Nothing is costed yet: the total is ${summation.currency ? formatMoney(0, summation.currency) : '0.00'}. `
                 + 'Close costing once the departments have booked their lines, or Sales quotes from an empty basis.'
-              : `${unbooked.length} of ${rows.length} department${rows.length === 1 ? '' : 's'} `
-                + `ha${unbooked.length === 1 ? 's' : 've'} not costed yet: ${unbooked.join(', ')}.`}
+              : `${t('next.waitingCostInput').replace('{n}', String(owing.length))
+                .replace('{s}', owing.length === 1 ? '' : 's')}: ${owing.join(', ')}.`}
           </span>
         </div>
       )}

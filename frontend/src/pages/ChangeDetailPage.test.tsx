@@ -1463,6 +1463,32 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
   })
 
+  it('names in the "Close costing" warning exactly the departments the cockpit waits on (F-01)', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'costing' as ChangeDetail['status']
+    const c = change as unknown as Record<string, unknown>
+    c.costing_pending_department_ids = [27]
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 27, name: 'Tool Engineer', is_active: true }, { id: 6, name: 'Project Manager', is_active: true }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    const zero = { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 }
+    // Project Manager booked nothing but owes nothing: it must not be named.
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      currency: 'USD', unpriced_lines: [],
+      by_department: [{ department_id: 6, ...zero }, { department_id: 11, ...zero, one_time_internal: 100 }],
+      totals: { ...zero, grand_total: 100 }, effort_by_department: [],
+    } as never)
+    try {
+      wrap('/changes/1?tab=overview')
+      await waitFor(() => expect(screen.getByTestId('warns-to:quoting').textContent)
+        .toBe('Waiting on cost input from 1 department: Tool Engineer. Check that nothing was forgotten.'))
+    } finally {
+      delete c.costing_pending_department_ids
+      vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+      vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
+    }
+  })
+
   it('resuming from hold into validation asks a plain resume, not "Finish implementation"', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'on_hold' as ChangeDetail['status']

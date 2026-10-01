@@ -24,7 +24,14 @@ export function DeadlineEditor({ change, kind = 'quote' }:
   const curReason = change[reasonField]
   // The quote deadline is fixed once the change leaves capture: moving it is a
   // pushback, and the backend rejects the PATCH unless a reason rides along.
-  const pushback = kind === 'quote' && change.status !== 'captured'
+  // The release deadline is a commitment from the moment it exists (set at
+  // acceptance or internal approval), so moving it always says why (F-02).
+  const pushback = kind === 'quote' ? change.status !== 'captured' : !!curDate
+  const L = kind === 'release'
+    ? { link: 'deadline.move', title: 'deadline.moveTitleRelease', why: 'deadline.moveWhyRelease',
+        hint: 'deadline.moveHintRelease', next: 'deadline.newRelease', save: 'deadline.move' }
+    : { link: 'deadline.pushback', title: 'deadline.pushbackTitle', why: 'deadline.pushbackWhy',
+        hint: 'deadline.pushbackHint', next: 'deadline.newQuote', save: 'deadline.pushbackSave' }
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [date, setDate] = useState(curDate?.slice(0, 10) ?? '')
@@ -45,7 +52,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <DeadlineChip date={curDate} state={change.deadline_state} kind={kind} />
       <button type="button"
-        title={pushback ? t('deadline.pushbackTitle') : curDate ? `${t('deadline.set')}: ${what}` : undefined}
+        title={pushback ? t(L.title) : curDate ? `${t('deadline.set')}: ${what}` : undefined}
         aria-label={!pushback && curDate ? `${t('deadline.set')}: ${what}` : undefined}
         data-testid="deadline-edit"
         aria-expanded={open}
@@ -61,7 +68,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
           return !o
         })}
         className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">
-        {pushback ? t('deadline.pushback')
+        {pushback ? t(L.link)
           : curDate ? <Pencil aria-hidden="true" size={12} className="inline" />
           : `+ ${what}`}
       </button>
@@ -76,22 +83,22 @@ export function DeadlineEditor({ change, kind = 'quote' }:
         <span data-testid="deadline-form"
           className="basis-full mt-1 flex flex-col gap-2 rounded-lg border border-slate-600 bg-slate-900/60 p-2.5">
           {pushback && (
-            <span className="text-xs font-medium text-slate-200">{t('deadline.pushbackTitle')}</span>
+            <span className="text-xs font-medium text-slate-200">{t(L.title)}</span>
           )}
           <span className="flex flex-col gap-1">
             <span className="text-[11px] text-slate-400">
-              {pushback ? t('deadline.newQuote')
+              {pushback ? t(L.next)
                 : kind === 'release' ? t('deadline.newRelease') : t('deadline.quote')}
             </span>
             <DateInput value={date} onChange={setDate}
-              aria-label={pushback ? t('deadline.newQuote') : what}
+              aria-label={pushback ? t(L.next) : what}
               className="w-36 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
           </span>
           {pushback ? (
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-400">{t('deadline.pushbackWhy')}</span>
+              <span className="text-[11px] text-slate-400">{t(L.why)}</span>
               <textarea value={reason} rows={2} data-testid="deadline-reason"
-                placeholder={t('deadline.pushbackHint')}
+                placeholder={t(L.hint)}
                 onChange={(e) => setReason(e.target.value)}
                 className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 w-full" />
             </label>
@@ -111,7 +118,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
                 [dateField]: date ? `${date}T23:59:59Z` : null,
                 [reasonField]: reason.trim() || null,
               })}>
-              {pushback ? t('deadline.pushbackSave') : t('deadline.set')}
+              {pushback ? t(L.save) : t('deadline.set')}
             </button>
             <button type="button" className="text-xs text-slate-400 hover:text-slate-200 px-1"
               onClick={() => setOpen(false)}>

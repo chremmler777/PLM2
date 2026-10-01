@@ -170,10 +170,19 @@ describe('CostingBuckets', () => {
     expect(screen.getByText(t('costing.none'))).toBeTruthy()
   })
 
-  it('names the departments that have not costed yet (costing-side signal for the step button)', async () => {
-    buckets({ canSeeAll: true })
+  it('names the departments that still owe cost input, from the same list as the cockpit', async () => {
+    buckets({ canSeeAll: true, change: change({ costing_pending_department_ids: [4] }) })
     const note = await screen.findByTestId('costing-readiness')
-    expect(note.textContent).toContain('1 of 2 departments has not costed yet: Tool Engineer')
+    expect(note.textContent).toBe('Waiting on cost input from 1 department: Tool Engineer.')
+  })
+
+  it('does not name a department with nothing booked that owes no input (e.g. consulted)', async () => {
+    // Tool Engineer has no money booked, but the backend does not list it as
+    // owing: the tab must not count it either (F-01, header and tab disagreed).
+    buckets({ canSeeAll: true, change: change({ costing_pending_department_ids: [] }) })
+    await waitFor(() => expect(changesApi.getSummation).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 10))
+    expect(screen.queryByTestId('costing-readiness')).toBeNull()
   })
 
   it('says loudly when nothing is costed at all', async () => {
