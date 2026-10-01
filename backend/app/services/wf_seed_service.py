@@ -97,8 +97,12 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
                 ], {"four_eyes": True}),
             ]),
             ("Industrialization", [
+                # F-06 (2026-10-01): Production and Logistics are retired; the
+                # Tool Engineer carries the tool change and Scheduling the
+                # master data (it owns ERP and stock in the release checklist),
+                # PM accountable as for the other steps of this stage.
                 ("Implement tool change", [
-                    ("Production", "R"), ("Tool Engineer", "A"), ("Production control", "I"),
+                    ("Tool Engineer", "R"), ("Project Manager", "A"), ("Production control", "I"),
                 ], {}),
                 ("Adjust process / routing sheets", [
                     ("Manufacturing Engineer", "R"), ("Project Manager", "A"), ("Production", "C"),
@@ -107,7 +111,7 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
                     ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
                 ], {}),
                 ("Update master data & logistics", [
-                    ("Logistics", "R"), ("Project Manager", "A"),
+                    ("Scheduling", "R"), ("Project Manager", "A"),
                     ("Purchasing", "C"), ("Production control", "I"),
                 ], {}),
             ]),

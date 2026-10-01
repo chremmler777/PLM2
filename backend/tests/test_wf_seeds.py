@@ -35,6 +35,33 @@ async def test_seed_check_standards_creates_templates_and_mappings(session_facto
         assert [st.step_name for st in four_eyes] == ["Design review"]
 
 
+async def test_ecn_check_steps_route_no_retired_department(session_factory, seed):
+    """F-06: stage 3 of both ECN check workflows routes its acting rows (R/A)
+    to live departments: the tool change to the Tool Engineer (PM accountable),
+    the master data to Scheduling. Production and Logistics are retired."""
+    from app.models.workflow import Department, WfStage, WfStep, WfStepRasic, WfTemplate
+    from app.services.wf_seed_service import seed_check_standards
+
+    async with session_factory() as s:
+        await seed_check_standards(s)
+        await s.commit()
+
+    async with session_factory() as s:
+        for name in ("ECN Implementation (Article)", "ECN Implementation (Tool)"):
+            rows = (await s.execute(
+                select(WfStep.step_name, Department.name, WfStepRasic.rasic_letter)
+                .join(WfStage, WfStep.stage_id == WfStage.id)
+                .join(WfTemplate, WfStage.template_id == WfTemplate.id)
+                .join(WfStepRasic, WfStepRasic.step_id == WfStep.id)
+                .join(Department, Department.id == WfStepRasic.department_id)
+                .where(WfTemplate.name == name, WfStepRasic.rasic_letter.in_(("R", "A"))))).all()
+            acting = {(step, dept, letter) for step, dept, letter in rows}
+            assert ("Implement tool change", "Tool Engineer", "R") in acting
+            assert ("Implement tool change", "Project Manager", "A") in acting
+            assert ("Update master data & logistics", "Scheduling", "R") in acting
+            assert not {d for _, d, _ in acting} & {"Production", "Logistics"}, name
+
+
 async def test_seed_is_idempotent(session_factory, seed):
     from app.models.workflow import WfTemplate
     from app.services.wf_seed_service import seed_change_workflows
