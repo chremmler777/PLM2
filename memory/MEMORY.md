@@ -2,7 +2,7 @@
 - [Paint catalog 2026-09-21](paint-catalog-2026-09-21.md) — org-scoped paint master data, ordered layers per article (part-level, engineering only), Painted chip + Paint section on the project page; follow-ups listed
 - [Customer package receive 2026-09-18](customer-package-receive-2026-09-18.md) — merged to main: assembly+parts delivery in one step, unchanged parts keep their E (index-based, no hash), chosen E number, `E2 · B` everywhere, customer part number now editable; rulings + follow-ups listed
 
-- [Brose award import 2026-09-02](brose-award-import-2026-09-02.md) — RFQ 25/26 Brose Sitech loaded as projects 1994A/1994B (full RFQ scope: 25 articles, 18 tools) via backend/scripts/import_brose.py; open mismatches to confirm with Brose
+- [Brose award import 2026-09-02](brose-award-import-2026-09-02.md) — RFQ 25/26 Brose Sitech loaded as projects 1994A/1994B (now named 1994 Brose Seat Trim and 2277 Brose Backpanel) (full RFQ scope: 25 articles, 18 tools) via backend/scripts/import_brose.py; open mismatches to confirm with Brose
 - [Prod STEP converter libgomp incident](prod-step-converter-libgomp-2026-09-02.md) — server conversions gave placeholder cubes (missing libgomp.so.1 symlink); Dockerfile fixed ffbdf633; verify OCC import after every rebuild
 - [Scoping concerns & settle rights 2026-08-12](scoping-concerns-2026-08-12.md) — scoping team concerns (question/cancel vote) restored, risk raises are assessment-only; mark-solved = asker or PM, never Sales (attribution grants nothing, acts-as drops authorship); asker roles on cards; spec in docs/superpowers/specs/2026-08-12-…-settle-rights-design.md; pushed as c07cccb1
 - [Morning summary overnight run](morning-summary-2026-08-13.md) — READ FIRST: build order 1-6 DONE on feature/ecr-target-state (10 commits, not pushed), E2E-walked 54/55 on the live app; 9 parked business decisions listed
@@ -36,3 +36,18 @@
 - [Mirror parts relation](mirror-parts-relation-2026-09-22.md) — mirrors are a mirror_of relation, never copies; UI (chip, tree marker, red viewer banner) shipped 2026-09-22
 - [1994 nominated E1 reset 2026-09-22](1994-nominated-e1-reset-2026-09-22.md) — prod 1994 = 12 nominated articles 001-012, drawing names, E1 · index, mirrors as relations, E1.1 on 206.886.197
 - [1994 Brose volume sheet 2026-09-23](1994-brose-volume-sheet-2026-09-23.md) — Brose -110 finished-part volume sheet mapped to the 12 nominated parts; ISOFIX +90%, decor cover +151% lifetime; shots table per tool; open points for Brose; prod PLM 199403 cavity note wrong (2 vs 4)
+- [DFM flow + combined branch 2026-09-23](dfm-flow-and-integration-2026-09-23.md) — integrate/dfm-redesign ready (tool/DFM, redesign, nav bar, thumbnails, DFM flow), local test on :5181, deploy pending user go
+- [ECR checklist + risk work merged 2026-09-24](combined-branch-project-worksheet-2026-09-24.md) — pushed to main 2aea276e; prod lacks migrations 085/086 until a "deploy" go
+- [RFQ2 stale cavity tags](rfq2-stale-cavity-tags-2026-09-24.md) — header chip was seed text, cleaned on prod 2026-09-24
+- [Parallel + review on ship](parallel-and-review-on-ship.md) — max parallel subagents, review each commit immediately, progress bars in chat
+- [RAM limit with parallel agents](machine-ram-limit-parallel-agents.md) — 15 GB box; throttle agent test runs (vitest maxWorkers=2, pytest no -n), full suites only by supervisor
+- [Demo only when done](gantt-first-2026-09-25.md) — prepare hands-on demos for the user only once the feature is finished; build parallelism unchanged
+- [ECR costing-to-close build](ecr-costing-to-close-2026-09-25.md) — branch/worktree/test stack, what is built, queued follow-ups incl. final UI polish with design skills
+- [Project team responsibles](project-team-responsibles-2026-09-25.md) — one responsible per role per project leads tasks, others backup (not counted); project PM = default change lead
+- [Tool machine from RFQ2 picks](tool-machine-rfq2-picks-2026-09-29.md) — RFQ2 press picks live in tool_layout_json; PLM parts.tool_machine (109) set on prod for 1994/2277 2026-09-29, no live sync
+- [SharePoint ECC import 2026-09-29](sharepoint-ecc-import-2026-09-29.md) — BMW G6X ECC-0013..0015 -> prod 1748 CR-2026-0001..0003 (Weissenburg side track, in scoping); ECC-0014 mold 3349 vs 3351 mismatch
+- [Audit implementation plans 2026-09-30](audit-implementation-plans-2026-09-30.md) - TOC-PLM-00..05 + KTX LOP in docs/audit-plans; rebuild steps, open inputs (1994 SOP, approvers)
+- [Brose resin status 2026-09-30](brose-resin-status-2026-09-30.md) - 1994/2277 resin nomination: PC/ABS 40-0221 safe, PA66/PA6/PP/TPU/Romiloy open; Christine mails
+- [Tool shrinkage rule](tool-shrinkage-rule.md) - one value for unfilled resins, parallel/normal only for fibre-filled; 1994/2277 values set 2026-09-30
+- [ECR simulation prep 2026-10-01](ecr-simulation-prep-2026-10-01.md) - KPI board, F-01..F-03 fixes, Process Flow aligned, SIM parts on prod, TOC-PLM-06; F-06 open, deploy pending
+- [DFM day 2026-10-02](dfm-usability-project-scope-2026-10-02.md) - lost PPTs root cause, finish guards, PPT-first steps, General tooling DFM (mig 111), prod wipe+restart, deployed 36f7b74f

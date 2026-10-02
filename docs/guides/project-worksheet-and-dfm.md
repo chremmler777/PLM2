@@ -183,39 +183,77 @@ takes comments and flags like the worksheet cells.
 ## DFM archive on tools
 
 Open a tool (from the Tools group of the project, or its own page). The DFM
-tab holds one topic per question or study; each topic is a flow between
-Toolmaker, KTX and Tier 1.
+tab holds **one topic per DFM round or question**, for example "DFM rev 1" or
+"Gate position". Each topic is a flow between Toolmaker, KTX and Tier 1.
+The DFM content itself (findings and answers) lives **in the PPT**; PLM
+records which file went from whom to whom and when.
 
-![DFM topic list](img/pw-dfm-v2-list.png)
+### Recording a DFM, step by step
 
-![DFM flow](img/pw-dfm-v2-100.png)
+1. **+ topic**, give it a title (e.g. "DFM rev 1"), **Open topic**. The form
+   for the first step opens right away.
+2. Choose **From** and **To** (the toolmaker's DFM: From Toolmaker, To KTX),
+   drop the PPT on **DFM file**, set the **Mail date** if the mail is older
+   than today, and click **Record step**. A note is optional
+   (**+ Add note**); a step needs a file or a note.
+3. The step appears as a card in the sender's lane with an arrow to each
+   receiver. Continue from the card: **Forward to Tier 1** (KTX sends the
+   PPT with its additions on), **Answer** (send the answered PPT back),
+   **Ask again**, or **Update** (replace your own step, e.g. a corrected
+   file; the old version stays in the history).
+4. When the round is done, **Finish confirmed**. It asks first and says how
+   many messages still wait for an answer. **Reopen** opens it again.
+
+![DFM step form, file first](img/pw-dfm-v3-form.png)
+
+![DFM flow after the first step](img/pw-dfm-v3-flow.png)
+
+![Finish asks first](img/pw-dfm-v3-finish.png)
+
+### Reading the flow
 
 - Every message has a type: **Original** (blue), **Forward** (violet),
-  **Answer** (green), **Question** (amber, "ask again"). It sits in the
-  sender's lane with an arrow to each receiver; the arrow is dashed while an
-  answer is missing.
-- Each card says who sent it to whom ("Toolmaker → KTX · 09-20"), which
-  message it answers ("reply to #2 Original", click to jump there), and its
-  status: "Answered by KTX 09-23" or "Waiting on Tier 1 · 4 days".
-- Record the next step from the card: **Answer**, **Ask again**,
-  **Forward to Tier 1 / Toolmaker**, or **Update** your own message. The form
-  opens filled in and states the step in words. **+ New DFM** starts an
-  original. Attach files by drag and drop; PDFs open in the viewer.
+  **Answer** (green), **Question** (amber, "ask again"). The arrow is dashed
+  while the receiver still owes an answer and turns solid once answered.
+- Each card shows the route ("Toolmaker → KTX"), the file(s), which message
+  it answers ("reply to #2 Original", click to jump there) and its status:
+  "Answered by KTX 09-23" or "Waiting on Tier 1 · 4 days".
+- **Checking a file:** click its name on the card. PDFs open in the viewer
+  next to the flow; PPT and other files download and open in their program.
+  Every view and download is in the audit log.
 - The status line on top says what is pending, for example "Waiting on KTX
-  for 1 day: Original #7 from Toolmaker". **Finish confirmed** closes the
-  topic; **Reopen** opens it again.
+  for 1 day: Original #7 from Toolmaker".
 - **Zoom** (−, %, +, Fit, or Ctrl + mouse wheel). Below 75 % the cards turn
   into one-line summaries so a long exchange fits on one screen.
-- **Open in window** opens the DFM of the tool in its own window.
-- **Audit log** lists every step of the topic (messages, files attached,
-  viewed, downloaded, topic finished or reopened) with a checksum for each
-  file; export as CSV.
+- **Open in window** opens the DFM in its own window.
+- **Audit log** lists every step (messages, files attached, viewed,
+  downloaded, topic finished, reopened, renamed or deleted) with a checksum
+  for each file; export as CSV.
+
+### Guards (added 2026-10-02)
+
+- **Finish confirmed** is greyed out while the topic has no message and while
+  a step form is open: record or cancel the step first. (On prod, PPTs were
+  dropped into the form and then Finish was clicked instead of Record step,
+  so the files were never saved.)
+- **Rename** works on any topic. **Delete** shows only on an empty topic, for
+  the person who opened it or an admin; the audit log keeps a record.
+- A finished topic says who finished it and when, with **Reopen**.
 
 ![DFM at 70 % zoom](img/pw-dfm-v2-70.png)
 
-![DFM in its own window](img/pw-dfm-v2-popout.png)
-
 ![DFM audit log](img/pw-dfm-audit-topic.png)
+
+## General tooling DFM (per project)
+
+For topics that apply to **all tools of a project**, such as tooling
+standards, material info or general requirements. Open it with the
+**Tooling DFM** button in the project status bar (the number shows open
+topics; amber when something waits on KTX), or with the **General tooling
+DFM** link in any tool's DFM tab. It works exactly like a tool's DFM:
+topics, the three lanes, files, finish, audit log, own window.
+
+![General tooling DFM](img/pw-dfm-v3-general.png)
 
 ## FAQ
 
@@ -236,6 +274,14 @@ class picked there); it does not follow RFQ2 automatically.
 one, and only when the Image column is visible. The pictures are placed in
 the cells ("Place in Cell"), which needs Excel from Microsoft 365; older
 Excel versions and other viewers show an error or an empty cell there.
+
+**I uploaded a PPT but the topic is empty.** The file is only saved with
+**Record step**. Closing the form, or the page, before that drops it. Look
+for the card with the file name; if it is not there, record the step again.
+
+**Where do standards or material datasheets for all tools go?** In the
+project's General tooling DFM (Tooling DFM button in the status bar), not on
+one tool.
 
 **Why does a material say NEW, not in MaterialDB?** It was typed in because
 the material does not exist in MaterialDB yet. Create it in MaterialDB, then
