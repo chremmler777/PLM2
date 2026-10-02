@@ -1,0 +1,50 @@
+$ErrorActionPreference = "Stop"
+$D = "__WD__"
+$rows = Import-Csv -Path "$D\lop_rows.csv" -Header id,stream,task,desc,ie,owner,due,status,comments,cw -Encoding UTF8
+$x = New-Object -ComObject Excel.Application
+$x.Visible = $false; $x.DisplayAlerts = $false; $x.EnableEvents = $false
+try {
+$b = $x.Workbooks.Open("$D\tpl_lop.xlsm")
+$s = $b.Worksheets.Item("LOP")
+$n = $rows.Count
+if ($n -gt 1) { $s.Rows(8).Copy($s.Range("A9:A" + (7 + $n)).EntireRow) | Out-Null }
+$entry = Get-Date -Year 2026 -Month 9 -Day 30 -Hour 0 -Minute 0 -Second 0
+$r = 8; $i = 1
+foreach ($row in $rows) {
+  $s.Cells.Item($r,1).Value2 = $i
+  $s.Cells.Item($r,2).Value = $entry
+  $s.Cells.Item($r,3).Value2 = [string]$row.stream
+  $s.Cells.Item($r,4).Value2 = [string]$row.task
+  $s.Cells.Item($r,5).Value2 = [string]$row.desc
+  $s.Cells.Item($r,6).Value2 = [string]$row.ie
+  $s.Cells.Item($r,7).Value2 = [string]$row.owner
+  if ($row.due) { $s.Cells.Item($r,8).Value = [datetime]::ParseExact($row.due, "yyyy-MM-dd", $null) } else { $s.Cells.Item($r,8).Value2 = "to SOP" }
+  $s.Cells.Item($r,9).Value2 = [string]$row.status
+  $s.Cells.Item($r,11).NumberFormat = "@"
+  $s.Cells.Item($r,11).Value2 = [string]$row.cw
+  $r++; $i++
+}
+$last = 7 + $n
+$s.Range("B8:B$last").NumberFormat = "mm/dd/yyyy"
+$s.Range("H8:H$last").NumberFormat = "mm/dd/yyyy"
+$s.Range("A8:L$last").WrapText = $true
+$s.Range("A8:L$last").VerticalAlignment = -4160
+$s.Range("A8:L$last").EntireRow.AutoFit() | Out-Null
+$g = $s.Shapes.Item("Beschriftung").GroupItems.Item("REPORTING_Assembly")
+try { $g.TextFrame.Characters().Text = "                   Project: PLM2 implementation TOC" } catch { "chars failed: " + $_ ; try { $g.TextFrame2.TextRange.Text = "                   Project: PLM2 implementation TOC" } catch { "tf2 failed: " + $_ } }
+$h = $b.Worksheets.Item("Changehistory")
+$h.Cells.Item(3,1).Value = $entry
+$h.Cells.Item(3,2).Value2 = "LOP created from TOC-PLM-00 to TOC-PLM-05, owner C. Demmler, status 09/30/2026 (ECR, SEP, data management, lessons learned, TISAX)"
+$h.Cells.Item(3,3).Value2 = "Process Development"
+$x.Calculate()
+$ps = $s.PageSetup
+$ps.Orientation = 2
+$ps.Zoom = $false
+$ps.FitToPagesWide = 1
+$ps.FitToPagesTall = $false
+$ps.PrintTitleRows = '$7:$7'
+$ps.PrintArea = "A1:L$last"
+$b.SaveAs("$D\TOC-PLM-LOP Action Plan PLM2.xlsm", 52)
+$s.ExportAsFixedFormat(0, "$D\TOC-PLM-LOP Action Plan PLM2.pdf")
+"rows $n"
+} finally { if ($b) { $b.Close($false) }; $x.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($x) | Out-Null }
