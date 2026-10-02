@@ -1,6 +1,6 @@
 ---
 name: br167-project-91-import-2026-10-02
-description: BR167 Daimler / MBUSI (P: folder 1316) loaded as PLM project 91 from the Windows-built PLM package; local done, prod pending; data gaps and ideas to add
+description: BR167 Daimler / MBUSI (P: folder 1316) loaded as PLM project 91 from the Windows-built PLM package; live on prod; data gaps and ideas to add
 metadata:
   type: project
 ---
@@ -9,7 +9,7 @@ metadata:
 
 **Source:** package `C:\Users\christoph.demmler\Downloads\BR167_PLM` (index `00_BR167_PLM_INDEX.xlsx`, prompt `00_PLM_PROMPT.md`), built by a Windows session from a read-only P: scan. Scripts: `backend/scripts/br167_extract.py` (WSL host, openpyxl -> `br167_stage/br167.json` + drawings, git-ignored) and `import_br167.py` (backend container, idempotent).
 
-**Local 2026-10-02:** project id 36; 82 new parts (articles + 28 tools incl. capacity tools 0827-2..0830-2, 0841-2), revision `1` official/import with customer_index = Part-BOM E/Q level, 244 BOM lines (multi-level rebuilt: assembly -> painted 10-xxxx-243-n -> molded 10-xxxx-001-n -> material/paint/boxes), 37 relations (tool produces, 08xx-2 produce the same articles; 91-0013 welding device assembles both consoles), 26 drawings (kind DRW). 20 articles already in other projects (13 in 1888, 5 in 94, 65-0035 in 1642, 65-0021 in 1456) were left there and only linked; their empty BOMs were filled. WM94SW welding machine skipped (MachineDB). **Prod: not yet run** (prod matched local for BR167 on 2026-10-02, no 91 there).
+**Local 2026-10-02:** project id 36; 82 new parts (articles + 28 tools incl. capacity tools 0827-2..0830-2, 0841-2), revision `1` official/import with customer_index = Part-BOM E/Q level, 244 BOM lines (multi-level rebuilt: assembly -> painted 10-xxxx-243-n -> molded 10-xxxx-001-n -> material/paint/boxes), 37 relations (tool produces, 08xx-2 produce the same articles; 91-0013 welding device assembles both consoles), 26 drawings (kind DRW). 20 articles already in other projects (13 in 1888, 5 in 94, 65-0035 in 1642, 65-0021 in 1456) were left there and only linked; their empty BOMs were filled. WM94SW welding machine skipped (MachineDB). **PROD 2026-10-02 21:17:** same result as local (project id 36, 82 parts, 244 BOM lines, 37 relations, 26 drawings; rerun = 0). Ran via docker cp of the script + stage into `compose-plm2-backend-1` with `CREATED_BY=14 BR167_STAGE=/app/uploads/_stage_br167` (stage removed after with `docker exec -u 0`). Backup `db-backups/plm2-before-br167-20261002-211706.sql.gz`.
 
 **Source data issues found:** Part-BOM lists tool 0822 for lamellas 6-9 (real tools 0823/0824 exist on P:, created with 0822 data, flagged CHECK); LH rows of 0851/0841 had no children (copied from RH); BR167 MBUSI lamella/console articles sit in 1888 T167 (should probably move to 91); drawing file index vs Part-BOM E-level not reconciled (Smaragd is master, flag only).
 

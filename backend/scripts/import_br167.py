@@ -14,6 +14,7 @@ Rules (package prompt 00_PLM_PROMPT.md, 2026-10-02):
     linked (BOM, relations), and their BOM is filled only when empty.
 
     docker exec -e PYTHONPATH=/app claude-plm2-backend-1 python scripts/import_br167.py
+    prod: -e CREATED_BY=14 -e BR167_STAGE=/app/uploads/_stage_br167
 """
 import asyncio
 import hashlib
@@ -30,9 +31,9 @@ from app.models.entities import Plant, Project
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem, RevisionFile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STAGE = os.path.join(HERE, "br167_stage")
+STAGE = os.environ.get("BR167_STAGE", os.path.join(HERE, "br167_stage"))
 UPLOADS = os.path.join(os.getcwd(), "uploads", "revisions")
-CREATED_BY = 3            # chris
+CREATED_BY = int(os.environ.get("CREATED_BY", "3"))  # chris: 3 dev, 14 prod
 PLANT_CODE = "usa-toccoa"
 BASELINE = "1"            # imported series data = official 1 (see migration 072)
 SKIP = {"WM94SW": "welding machine, belongs in MachineDB (shared with G01)"}
