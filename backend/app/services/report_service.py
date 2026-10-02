@@ -25,6 +25,9 @@ TRANSITION_ACTIONS = ("status_changed", "deviated_transition")
 ECR_KPI_TARGET_KEYS = {"rfq": "ecr_kpi_target_rfq",
                        "implementation": "ecr_kpi_target_implementation"}
 ECR_KPI_TARGET_DEFAULT = 90.0
+# Projects whose changes never count on the KPI board: the simulation /
+# training project (ECR simulations, TOC-PLM-06).
+ECR_KPI_EXCLUDED_PROJECT_CODES = ("test-project",)
 
 
 class ReportService:
@@ -162,8 +165,10 @@ class ReportService:
 
         changes = (await session.execute(_org_scope(
             select(ChangeRequest).where(
-                ChangeRequest.required_by_date.is_not(None)
-                | ChangeRequest.release_due_date.is_not(None)),
+                (ChangeRequest.required_by_date.is_not(None)
+                 | ChangeRequest.release_due_date.is_not(None)),
+                ChangeRequest.project_id.is_(None) | ChangeRequest.project_id.not_in(
+                    select(Project.id).where(Project.code.in_(ECR_KPI_EXCLUDED_PROJECT_CODES)))),
             viewer,
         ))).scalars().all()
 

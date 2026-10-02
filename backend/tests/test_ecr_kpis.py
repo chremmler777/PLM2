@@ -111,3 +111,22 @@ async def test_ecr_kpi_targets(client, eng_auth, admin_auth, seed, kpi_data):
 
     body = (await client.get("/api/v1/reports/ecr-kpis", headers=eng_auth)).json()
     assert body["rfq"]["target"] == 0.5 and body["rfq"]["target_met"] is True
+
+
+async def test_ecr_kpis_leave_out_the_test_project(client, eng_auth, seed, kpi_data, session_factory):
+    """SIM changes in test-project never count on the KPI board."""
+    from datetime import datetime, timedelta
+    from sqlalchemy import select
+    from app.models.entities import Project
+    async with session_factory() as s:
+        plant_id = (await s.get(Project, seed["project_id"])).plant_id
+        tp = Project(plant_id=plant_id, name="Test Project", code="test-project", status="active")
+        s.add(tp)
+        await s.flush()
+        s.add(_mk({**seed, "project_id": tp.id}, "K-SIM", status="quoted",
+                  required_by_date=datetime.utcnow() - timedelta(days=30),
+                  quoted_at=datetime.utcnow() - timedelta(days=1)))
+        await s.commit()
+    body = (await client.get("/api/v1/reports/ecr-kpis", headers=eng_auth)).json()
+    assert (body["rfq"]["on_time"], body["rfq"]["late"]) == (1, 1)
+    assert "K-SIM" not in {r["change_number"] for r in body["late"]}
