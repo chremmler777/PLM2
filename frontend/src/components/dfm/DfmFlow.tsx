@@ -426,8 +426,9 @@ export default function DfmFlow({
               className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ New DFM</button>
           )}
           {open ? (
-            <button data-testid="dfm-finish" onClick={() => setConfirm('finish')} disabled={entries.length === 0 || finish.isPending}
-              title={entries.length === 0 ? 'Record at least one message before finishing the topic' : 'Mark the topic as finished confirmed'}
+            <button data-testid="dfm-finish" onClick={() => setConfirm('finish')} disabled={entries.length === 0 || form !== null || finish.isPending}
+              title={entries.length === 0 ? 'Record at least one message before finishing the topic'
+                : form !== null ? 'Record or cancel the open step first' : 'Mark the topic as finished confirmed'}
               className={outlineBtn}>Finish confirmed</button>
           ) : (
             <button data-testid="dfm-reopen" onClick={() => reopen.mutate()} disabled={reopen.isPending}

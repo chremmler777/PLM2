@@ -281,6 +281,14 @@ describe('DfmFlow', () => {
     expect(btn.className).not.toContain('bg-emerald')
   })
 
+  it('disables Finish confirmed while a step form is open, so a chosen file is never thrown away', async () => {
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-new-original'))
+    const btn = screen.getByTestId('dfm-finish') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.title).toBe('Record or cancel the open step first')
+  })
+
   it('shows Delete only when the topic can be deleted, confirms, deletes and goes back', async () => {
     wrap()
     await screen.findByTestId('dfm-flow')
