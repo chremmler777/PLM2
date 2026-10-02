@@ -1,5 +1,7 @@
 /**
- * DFM archive API: topics per tool, a flow of messages (original, forward,
+ * DFM archive API: topics per tool, or per project for the general tooling
+ * DFM (a DfmScope picks /v1/parts/{id}/dfm or /v1/projects/{id}/dfm; the
+ * shapes are identical), a flow of messages (original, forward,
  * answer, question) between toolmaker, KTX and Tier 1, with files and the
  * derived answered / waiting state.
  * Mirrors backend/app/api/v1/items/dfm.py.
@@ -78,13 +80,18 @@ export interface DfmEntry {
 
 export interface DfmTopicSummary {
   id: number;
-  tool_part_id: number;
+  tool_part_id: number | null;
+  project_id: number | null;
   title: string;
   status: 'open' | 'finished_confirmed';
   opened_by: number;
+  opened_by_name: string | null;
   opened_at: string;
   closed_by: number | null;
+  closed_by_name: string | null;
   closed_at: string | null;
+  /** Empty topic and the viewer opened it (or is an admin). */
+  can_delete: boolean;
   entry_count: number;
   last_activity: string;
   waiting_on: DfmWaitingOn[];
@@ -108,26 +115,45 @@ export interface DfmEntryInput {
   files: File[];
 }
 
-const base = (partId: number) => `/v1/parts/${partId}/dfm`;
+/** Whose DFM archive: one tool, or the project-wide general tooling DFM. */
+export type DfmScope = { kind: 'tool' | 'project'; id: number };
 
-export async function listTopics(partId: number): Promise<DfmTopicSummary[]> {
-  return (await client.get(`${base(partId)}/topics`)).data;
+export const toolScope = (id: number): DfmScope => ({ kind: 'tool', id });
+export const projectScope = (id: number): DfmScope => ({ kind: 'project', id });
+
+const base = (scope: DfmScope) => `/v1/${scope.kind === 'tool' ? 'parts' : 'projects'}/${scope.id}/dfm`;
+
+/** Stable react-query key prefix per scope, e.g. ['dfm-topics', 'tool', 7]. */
+export const dfmKey = (name: 'dfm-topics' | 'dfm-topic', scope: DfmScope, ...rest: (number | string)[]) =>
+  [name, scope.kind, scope.id, ...rest] as const;
+
+export async function listTopics(scope: DfmScope): Promise<DfmTopicSummary[]> {
+  return (await client.get(`${base(scope)}/topics`)).data;
 }
 
-export async function createTopic(partId: number, title: string): Promise<DfmTopicSummary> {
-  return (await client.post(`${base(partId)}/topics`, { title })).data;
+export async function createTopic(scope: DfmScope, title: string): Promise<DfmTopicSummary> {
+  return (await client.post(`${base(scope)}/topics`, { title })).data;
 }
 
-export async function getTopic(partId: number, topicId: number): Promise<DfmTopicDetail> {
-  return (await client.get(`${base(partId)}/topics/${topicId}`)).data;
+export async function getTopic(scope: DfmScope, topicId: number): Promise<DfmTopicDetail> {
+  return (await client.get(`${base(scope)}/topics/${topicId}`)).data;
 }
 
-export async function closeTopic(partId: number, topicId: number): Promise<DfmTopicDetail> {
-  return (await client.post(`${base(partId)}/topics/${topicId}/close`)).data;
+export async function renameTopic(scope: DfmScope, topicId: number, title: string): Promise<DfmTopicDetail> {
+  return (await client.patch(`${base(scope)}/topics/${topicId}`, { title })).data;
 }
 
-export async function reopenTopic(partId: number, topicId: number): Promise<DfmTopicDetail> {
-  return (await client.post(`${base(partId)}/topics/${topicId}/reopen`)).data;
+/** Soft delete; the backend allows it only for an empty topic, by its opener or an admin. */
+export async function deleteTopic(scope: DfmScope, topicId: number): Promise<void> {
+  await client.delete(`${base(scope)}/topics/${topicId}`);
+}
+
+export async function closeTopic(scope: DfmScope, topicId: number): Promise<DfmTopicDetail> {
+  return (await client.post(`${base(scope)}/topics/${topicId}/close`)).data;
+}
+
+export async function reopenTopic(scope: DfmScope, topicId: number): Promise<DfmTopicDetail> {
+  return (await client.post(`${base(scope)}/topics/${topicId}/reopen`)).data;
 }
 
 export function buildEntryFormData(input: DfmEntryInput): FormData {
@@ -143,17 +169,17 @@ export function buildEntryFormData(input: DfmEntryInput): FormData {
   return fd;
 }
 
-export async function createEntry(partId: number, topicId: number, input: DfmEntryInput): Promise<DfmEntry> {
-  return (await client.post(`${base(partId)}/topics/${topicId}/entries`, buildEntryFormData(input),
+export async function createEntry(scope: DfmScope, topicId: number, input: DfmEntryInput): Promise<DfmEntry> {
+  return (await client.post(`${base(scope)}/topics/${topicId}/entries`, buildEntryFormData(input),
     { headers: { 'Content-Type': 'multipart/form-data' } })).data;
 }
 
-export function dfmFileUrl(partId: number, fileId: number, mode: 'download' | 'inline'): string {
-  return `${API_BASE_URL}${base(partId)}/files/${fileId}/${mode}`;
+export function dfmFileUrl(scope: DfmScope, fileId: number, mode: 'download' | 'inline'): string {
+  return `${API_BASE_URL}${base(scope)}/files/${fileId}/${mode}`;
 }
 
 export type DfmAuditAction =
-  | 'topic_opened' | 'topic_closed' | 'topic_reopened'
+  | 'topic_opened' | 'topic_closed' | 'topic_reopened' | 'topic_renamed' | 'topic_deleted'
   | 'entry_recorded' | 'entry_updated'
   | 'file_attached' | 'file_downloaded' | 'file_viewed';
 
@@ -188,6 +214,9 @@ export interface DfmAuditEvent {
   file: DfmAuditFileRef | null;
   details: {
     title?: string;
+    /** topic_renamed: the old and the new title. */
+    from?: string;
+    to?: string;
     kind?: DfmKind;
     party?: DfmParty;
     addressed_to?: DfmParty[];
@@ -209,16 +238,16 @@ export interface DfmAuditQuery {
   beforeId?: number;
 }
 
-export async function getAudit(partId: number, query: DfmAuditQuery = {}): Promise<DfmAuditEvent[]> {
+export async function getAudit(scope: DfmScope, query: DfmAuditQuery = {}): Promise<DfmAuditEvent[]> {
   const params: Record<string, string | number> = {};
   if (query.topicId != null) params.topic_id = query.topicId;
   if (query.action) params.action = query.action;
   if (query.limit != null) params.limit = query.limit;
   if (query.beforeId != null) params.before_id = query.beforeId;
-  return (await client.get(`${base(partId)}/audit`, { params })).data;
+  return (await client.get(`${base(scope)}/audit`, { params })).data;
 }
 
-export function dfmAuditCsvUrl(partId: number, topicId?: number | null): string {
+export function dfmAuditCsvUrl(scope: DfmScope, topicId?: number | null): string {
   const qs = topicId != null ? `?topic_id=${topicId}` : '';
-  return `${API_BASE_URL}${base(partId)}/audit.csv${qs}`;
+  return `${API_BASE_URL}${base(scope)}/audit.csv${qs}`;
 }

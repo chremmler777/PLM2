@@ -21,7 +21,8 @@ export const AUDIT_GROUPS: DfmAuditGroup[] = ['all', 'messages', 'files', 'topic
 
 export function auditGroupOf(action: DfmAuditAction): Exclude<DfmAuditGroup, 'all'> {
   switch (action) {
-    case 'topic_opened': case 'topic_closed': case 'topic_reopened': return 'topic';
+    case 'topic_opened': case 'topic_closed': case 'topic_reopened':
+    case 'topic_renamed': case 'topic_deleted': return 'topic';
     case 'entry_recorded': case 'entry_updated': return 'messages';
     case 'file_attached': return 'files';
     case 'file_viewed': case 'file_downloaded': return 'views';
@@ -37,6 +38,8 @@ export const AUDIT_ACTION_STYLE: Record<DfmAuditAction, { label: string; badge: 
   topic_opened: { label: 'Topic opened', badge: 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/40', dot: 'bg-emerald-400' },
   topic_closed: { label: 'Topic finished', badge: 'bg-slate-600/40 text-slate-200 ring-slate-500', dot: 'bg-slate-400' },
   topic_reopened: { label: 'Topic reopened', badge: 'bg-amber-500/15 text-amber-200 ring-amber-400/40', dot: 'bg-amber-400' },
+  topic_renamed: { label: 'Topic renamed', badge: 'bg-slate-600/40 text-slate-200 ring-slate-500', dot: 'bg-slate-300' },
+  topic_deleted: { label: 'Topic deleted', badge: 'bg-red-500/15 text-red-200 ring-red-400/40', dot: 'bg-red-400' },
   entry_recorded: { label: 'Message recorded', badge: 'bg-blue-500/15 text-blue-200 ring-blue-400/40', dot: 'bg-blue-400' },
   entry_updated: { label: 'Message updated', badge: 'bg-blue-500/15 text-blue-200 ring-blue-400/40', dot: 'bg-blue-400' },
   file_attached: { label: 'File attached', badge: 'bg-violet-500/15 text-violet-200 ring-violet-400/40', dot: 'bg-violet-400' },
@@ -70,6 +73,11 @@ const route = (party: DfmParty | undefined, to: DfmParty[] | undefined): string 
   return `${PARTY_LABELS[party]} → ${(to ?? []).map((p) => PARTY_LABELS[p]).join(', ')}`;
 };
 
+/** "renamed DFM to DFM rev 1" from a topic_renamed event's {from, to}. */
+export function renamedText(e: DfmAuditEvent): string {
+  return `renamed ${e.details.from ?? ''} to ${e.details.to ?? e.topic?.title ?? ''}`;
+}
+
 /** One plain-word summary line for an event, used as a fallback / accessible text. */
 export function auditSummary(e: DfmAuditEvent): string {
   const style = AUDIT_ACTION_STYLE[e.action];
@@ -84,6 +92,9 @@ export function auditSummary(e: DfmAuditEvent): string {
     case 'file_viewed':
     case 'file_downloaded':
       return `${style.label}: ${e.details.filename ?? e.file?.filename ?? ''}`;
+    case 'topic_renamed':
+      return `${style.label}: ${renamedText(e)}`;
+    case 'topic_deleted':
     case 'topic_opened':
     case 'topic_closed':
     case 'topic_reopened':

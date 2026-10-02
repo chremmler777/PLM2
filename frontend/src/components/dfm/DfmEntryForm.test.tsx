@@ -4,20 +4,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import DfmEntryForm from './DfmEntryForm'
 import { cardActions, newOriginalStep, type DfmStep } from './dfmFlow'
-import { relayEntries } from './dfmFixtures'
+import { makeEntry, relayEntries } from './dfmFixtures'
+import { projectScope, toolScope } from '../../api/dfm'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
-function wrap(step: DfmStep = newOriginalStep()) {
+function wrap(step: DfmStep = newOriginalStep(), scope = toolScope(7)) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const onDone = vi.fn(); const onCancel = vi.fn()
   render(<QueryClientProvider client={qc}>
-    <DfmEntryForm partId={7} topicId={2} step={step} onDone={onDone} onCancel={onCancel} />
+    <DfmEntryForm scope={scope} topicId={2} step={step} onDone={onDone} onCancel={onCancel} />
   </QueryClientProvider>)
   return { onDone, onCancel }
 }
+const attach = (name = 'dfm_rev2.pptx') =>
+  fireEvent.change(screen.getByTestId('dfm-files-input'), { target: { files: [new File([new Uint8Array([1])], name)] } })
 const posted = () => clientMocks.post.mock.calls[0][1] as FormData
 const es = relayEntries()
 const action = (id: number, key: string) => cardActions(es.find((e) => e.id === id)!, es).find((a) => a.key === key)!.step
@@ -34,6 +37,8 @@ describe('DfmEntryForm', () => {
     fireEvent.click(screen.getByTestId('addressed-toolmaker'))
     fireEvent.click(screen.getByTestId('addressed-tier1'))
     expect(screen.getByTestId('dfm-step-sentence').textContent).toBe('Original from KTX to Toolmaker, Tier 1')
+    expect(screen.queryByTestId('dfm-note')).toBeNull()
+    fireEvent.click(screen.getByTestId('dfm-add-note'))
     fireEvent.change(screen.getByTestId('dfm-note'), { target: { value: 'DFM request rev A' } })
     fireEvent.change(screen.getByTestId('dfm-sent-at'), { target: { value: '2026-09-24' } })
     const file = new File([new Uint8Array([1])], 'dfm_request_A.pdf', { type: 'application/pdf' })
@@ -68,6 +73,7 @@ describe('DfmEntryForm', () => {
     expect(screen.queryByTestId('dfm-from-ktx')).toBeNull()
     expect((screen.getByTestId('addressed-toolmaker') as HTMLInputElement).disabled).toBe(true)
     fireEvent.click(screen.getByTestId('addressed-tier1'))
+    attach()
     fireEvent.click(screen.getByTestId('dfm-submit'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
     const fd = posted()
@@ -81,6 +87,7 @@ describe('DfmEntryForm', () => {
     wrap(action(5, 'forward-tier1'))
     expect(screen.getByTestId('dfm-step-sentence').textContent).toBe('Forward from KTX to Tier 1 of Question #5')
     expect(screen.queryByTestId('addressed-toolmaker')).toBeNull()
+    attach()
     fireEvent.click(screen.getByTestId('dfm-submit'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
     expect(posted().get('kind')).toBe('forward')
@@ -91,16 +98,56 @@ describe('DfmEntryForm', () => {
   it('records an update with supersedes_id and keeps kind and reply link', async () => {
     wrap(action(4, 'update'))
     expect(screen.getByTestId('dfm-step-sentence').textContent).toBe('Update of Answer #4 from KTX to Toolmaker')
+    // The updated entry had a note: the note field is open and prefilled.
+    expect((screen.getByTestId('dfm-note') as HTMLTextAreaElement).value).toBe('accepted by Tier 1')
     fireEvent.click(screen.getByTestId('dfm-submit'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
     expect(posted().get('supersedes_id')).toBe('4')
     expect(posted().get('kind')).toBe('answer')
     expect(posted().get('reply_to_id')).toBe('1')
+    expect(posted().get('note')).toBe('accepted by Tier 1')
+  })
+
+  it('keeps the note collapsed when updating an entry without a note', () => {
+    const bare = makeEntry({ id: 9, note: null })
+    wrap(cardActions(bare, [bare]).find((a) => a.key === 'update')!.step)
+    expect(screen.queryByTestId('dfm-note')).toBeNull()
+    expect(screen.getByTestId('dfm-add-note')).toBeTruthy()
+  })
+
+  it('requires the DFM file or a note', async () => {
+    wrap()
+    fireEvent.click(screen.getByTestId('dfm-submit'))
+    expect(clientMocks.post).not.toHaveBeenCalled()
+    expect(screen.getByTestId('dfm-form-error').textContent).toBe('Attach the DFM file or write a note')
+    fireEvent.click(screen.getByTestId('dfm-add-note'))
+    fireEvent.change(screen.getByTestId('dfm-note'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByTestId('dfm-submit'))
+    expect(clientMocks.post).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByTestId('dfm-note'), { target: { value: 'sent by phone, no file' } })
+    fireEvent.click(screen.getByTestId('dfm-submit'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
+  })
+
+  it('labels the dropzone as the DFM file and lists chosen files', () => {
+    wrap()
+    expect(screen.getByTestId('dfm-dropzone').textContent).toContain('DFM file (PPT, PDF, ...)')
+    attach('dfm_rev2.pptx')
+    expect(screen.getByTestId('dfm-chosen-files').textContent).toContain('dfm_rev2.pptx')
+  })
+
+  it('posts to the project for the general tooling DFM', async () => {
+    wrap(newOriginalStep(), projectScope(35))
+    attach()
+    fireEvent.click(screen.getByTestId('dfm-submit'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
+    expect(clientMocks.post.mock.calls[0][0]).toBe('/v1/projects/35/dfm/topics/2/entries')
   })
 
   it('shows a 422 array detail as a string toast', async () => {
     clientMocks.post.mockRejectedValue({ response: { status: 422, data: { detail: [{ loc: ['body', 'party'], msg: 'Field required', type: 'missing' }] } } })
     wrap(action(5, 'answer-ktx'))
+    attach()
     fireEvent.click(screen.getByTestId('dfm-submit'))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Field required'))
   })

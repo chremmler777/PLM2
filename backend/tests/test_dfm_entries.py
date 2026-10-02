@@ -127,11 +127,17 @@ async def test_bare_entry_and_blank_sent_at(client, eng_auth, seed, monkeypatch,
     monkeypatch.chdir(tmp_path)
     tool = await make_tool(client, eng_auth, seed)
     topic = await make_topic(client, eng_auth, tool)
+    # neither file nor note: nothing to record
     res = await post_entry(client, eng_auth, tool, topic, note="", sent_at="")
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Attach the DFM file or write a note"
+    # a file alone is enough; the blank note is stored as none
+    res = await post_entry(client, eng_auth, tool, topic, note="", sent_at="",
+                           files=[("dfm_r1.pptx", b"PK ppt", None)])
     assert res.status_code == 201, res.text
     assert res.json()["note"] is None
     assert res.json()["sent_at"] is None
-    assert res.json()["files"] == []
+    assert len(res.json()["files"]) == 1
     assert (await post_entry(client, eng_auth, tool, topic, sent_at="yesterday")).status_code == 400
 
 

@@ -47,6 +47,8 @@ AUDIT_ACTIONS: dict[str, AuditAction] = {
     "dfm_topic_opened": AuditAction("other", "dfm.status"),
     "dfm_topic_closed": AuditAction("other", "dfm.status"),
     "dfm_topic_reopened": AuditAction("other", "dfm.status"),
+    "dfm_topic_renamed": AuditAction("other", "dfm.status"),
+    "dfm_topic_deleted": AuditAction("other", "dfm.status"),
     "dfm_entry_recorded": AuditAction("other", "dfm.status"),
 }
 

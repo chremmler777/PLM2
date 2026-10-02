@@ -8,8 +8,9 @@ const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('../components/dfm/DfmArchive', () => ({
-  default: (p: { partId: number; initialTopic: number | null; inWindow: boolean }) => (
-    <div data-testid="archive">tool {p.partId} topic {String(p.initialTopic)} window {String(p.inWindow)}</div>
+  default: (p: { scope: { kind: string; id: number }; projectId: number | null; initialTopic: number | null; inWindow: boolean }) => (
+    <div data-testid="archive">{p.scope.kind} {p.scope.id} topic {String(p.initialTopic)} window {String(p.inWindow)}
+      <span data-testid="archive-project">{String(p.projectId)}</span></div>
   ),
 }))
 
@@ -21,7 +22,10 @@ function mount(path: string) {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[path]}>
-        <Routes><Route path="/parts/:partId/dfm" element={<DfmPopout />} /></Routes>
+        <Routes>
+          <Route path="/parts/:partId/dfm" element={<DfmPopout />} />
+          <Route path="/projects/:projectId/dfm" element={<DfmPopout />} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>)
 }
@@ -32,6 +36,7 @@ describe('DfmPopout', () => {
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/parts/7') return Promise.resolve({ data: TOOL })
       if (url === '/v1/parts/7/relations') return Promise.resolve({ data: relations })
+      if (url === '/v1/plants/projects') return Promise.resolve({ data: [{ id: 35, code: 'P1994', name: 'Brose door module', status: 'active' }] })
       return Promise.resolve({ data: [] })
     })
   })
@@ -43,11 +48,21 @@ describe('DfmPopout', () => {
     const header = screen.getByTestId('dfm-popout-header')
     expect(header.textContent).toContain('ISOFIX cover tool')
     expect(await screen.findByText('ISOFIX cover LH')).toBeTruthy()
-    expect(screen.getByTestId('archive').textContent).toBe('tool 7 topic 3 window true')
+    expect(screen.getByTestId('archive').textContent).toBe('tool 7 topic 3 window true35')
   })
 
   it('opens the topic list without a topic parameter', async () => {
     mount('/parts/7/dfm')
-    expect((await screen.findByTestId('archive')).textContent).toBe('tool 7 topic null window true')
+    expect((await screen.findByTestId('archive')).textContent).toMatch(/^tool 7 topic null window true/)
+  })
+
+  it('renders the general tooling DFM of a project with the project header', async () => {
+    mount('/projects/35/dfm?topic=4')
+    const header = screen.getByTestId('dfm-popout-header')
+    expect(header.textContent).toContain('General tooling DFM')
+    await screen.findByText('P1994')
+    expect(header.textContent).toContain('Brose door module')
+    expect(screen.getByTestId('archive').textContent).toBe('project 35 topic 4 window truenull')
+    expect(clientMocks.get).not.toHaveBeenCalledWith('/v1/parts/0')
   })
 })

@@ -1,16 +1,23 @@
 /**
- * DFM tab for a tool: the DFM archive plus a document pane for the PDF
- * opened from the ledger. Rendered keyed by part id so switching tools
+ * DFM tab for a tool (or, with a project scope, the general tooling DFM in
+ * the project status panel): the DFM archive plus a document pane for the
+ * PDF opened from the ledger. Rendered keyed by part id so switching tools
  * resets the open document. Opening a document scrolls the pane into view,
  * since the archive can be long and the pane would otherwise open off screen.
  */
 import { useEffect, useRef, useState } from 'react';
 import DocumentPane, { type PaneDocument } from '../parts/DocumentPane';
 import DfmArchive from '../dfm/DfmArchive';
+import { toolScope, type DfmScope } from '../../api/dfm';
 
-export default function ToolDfmTab({ partId }: { partId: number }) {
+type Props =
+  | { partId: number; scope?: never; projectId?: number | null }
+  | { scope: DfmScope; partId?: never; projectId?: number | null };
+
+export default function ToolDfmTab({ partId, scope, projectId = null }: Props) {
   const [openDoc, setOpenDoc] = useState<PaneDocument | null>(null);
   const paneRef = useRef<HTMLDivElement>(null);
+  const archiveScope = scope ?? toolScope(partId!);
 
   useEffect(() => {
     if (openDoc) paneRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
@@ -23,7 +30,7 @@ export default function ToolDfmTab({ partId }: { partId: number }) {
           <DocumentPane document={openDoc} onClose={() => setOpenDoc(null)} />
         </div>
       )}
-      <DfmArchive partId={partId} onOpenPdf={setOpenDoc} />
+      <DfmArchive scope={archiveScope} projectId={projectId} onOpenPdf={setOpenDoc} />
     </>
   );
 }

@@ -1,23 +1,26 @@
 /**
- * DfmArchive - the folder-like archive on a tool: one row per topic (title,
- * status, who it waits on, last step, message count) and "+ topic". Opening a
- * topic replaces the list with that topic's flow; its "DFM archive"
- * breadcrumb returns here. "Open in window" moves the archive into its own
+ * DfmArchive - the folder-like archive on a tool, or the project-wide general
+ * tooling DFM (scope): one row per topic (title, status, who it waits on, last
+ * step, message count) and "+ topic". Opening a topic replaces the list with
+ * that topic's flow; its breadcrumb returns here. A new topic opens with the
+ * first-step form ready. "Open in window" moves the archive into its own
  * browser window (inWindow is that window: fills it, no further pop-out).
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { createTopic, listTopics } from '../../api/dfm';
+import { createTopic, dfmKey, listTopics, projectScope, type DfmScope } from '../../api/dfm';
 import type { PaneDocument } from '../parts/DocumentPane';
 import DfmAuditLog from './DfmAuditLog';
 import DfmFlow from './DfmFlow';
-import { lastStepText, waitingSummary } from './dfmFlow';
+import { ARCHIVE_HINT, archiveLabel, lastStepText, TITLE_PLACEHOLDER, waitingSummary } from './dfmFlow';
 import { openDfmWindow } from './dfmWindow';
 import { apiErrorMessage } from '../../lib/apiError';
 
 interface Props {
-  partId: number;
+  scope: DfmScope;
+  /** Tool scope: the tool's project, for the "General tooling DFM" link; hidden when absent. */
+  projectId?: number | null;
   onOpenPdf(doc: PaneDocument): void;
   /** Topic to open first (the pop-out window's ?topic=). */
   initialTopic?: number | null;
@@ -25,12 +28,13 @@ interface Props {
   inWindow?: boolean;
 }
 
-export default function DfmArchive({ partId, onOpenPdf, initialTopic = null, inWindow = false }: Props) {
+export default function DfmArchive({ scope, projectId = null, onOpenPdf, initialTopic = null, inWindow = false }: Props) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<number | null>(initialTopic);
   const [newTitle, setNewTitle] = useState<string | null>(null);  // null = not adding
   const [showLog, setShowLog] = useState(false);  // tool-wide audit log, topic list level
-  const [jumpEntryId, setJumpEntryId] = useState<number | null>(null);  // "#N" from the tool-wide log
+  const [jumpEntryId, setJumpEntryId] = useState<number | null>(null);  // "#N" from the archive-wide log
+  const [justCreated, setJustCreated] = useState<number | null>(null);  // opens with the first-step form
 
   const jumpToEntry = (entryId: number, topicId: number) => {
     setShowLog(false);
@@ -39,19 +43,21 @@ export default function DfmArchive({ partId, onOpenPdf, initialTopic = null, inW
   };
 
   const { data: topics, isError } = useQuery({
-    queryKey: ['dfm-topics', partId],
-    queryFn: () => listTopics(partId),
+    queryKey: dfmKey('dfm-topics', scope),
+    queryFn: () => listTopics(scope),
     refetchOnWindowFocus: true,
   });
 
   const create = useMutation({
-    mutationFn: (title: string) => createTopic(partId, title),
+    mutationFn: (title: string) => createTopic(scope, title),
     onSuccess: (t) => {
       toast.success(`Topic "${t.title}" opened`);
       setNewTitle(null);
+      setJumpEntryId(null);
+      setJustCreated(t.id);
       setSelected(t.id);
-      queryClient.invalidateQueries({ queryKey: ['dfm-topics', partId] });
-      queryClient.invalidateQueries({ queryKey: ['changelog', String(partId)] });
+      queryClient.invalidateQueries({ queryKey: dfmKey('dfm-topics', scope) });
+      if (scope.kind === 'tool') queryClient.invalidateQueries({ queryKey: ['changelog', String(scope.id)] });
     },
     onError: (e) => toast.error(apiErrorMessage(e, 'Could not open the topic')),
   });
@@ -77,9 +83,10 @@ export default function DfmArchive({ partId, onOpenPdf, initialTopic = null, inW
   if (selected !== null) {
     return (
       <div data-testid="dfm-archive" className={frame}>
-        <DfmFlow partId={partId} topicId={selected} onOpenPdf={onOpenPdf} onBack={() => setSelected(null)}
-          onPopOut={inWindow ? undefined : () => openDfmWindow(partId, selected)} fill={inWindow}
-          initialJumpEntryId={jumpEntryId} />
+        <DfmFlow key={selected} scope={scope} topicId={selected} onOpenPdf={onOpenPdf}
+          onBack={() => { setJustCreated(null); setSelected(null); }}
+          onPopOut={inWindow ? undefined : () => openDfmWindow(scope, selected)} fill={inWindow}
+          initialJumpEntryId={jumpEntryId} autoOpenForm={justCreated === selected} />
       </div>
     );
   }
@@ -91,29 +98,37 @@ export default function DfmArchive({ partId, onOpenPdf, initialTopic = null, inW
       <div data-testid="dfm-archive" className={frame}>
         <nav data-testid="dfm-audit-breadcrumb" aria-label="Breadcrumb" className="flex items-baseline gap-1.5 min-w-0 mb-3">
           <button data-testid="dfm-audit-breadcrumb-archive" onClick={() => setShowLog(false)}
-            className="text-sm text-slate-400 hover:text-slate-100 hover:underline underline-offset-2">DFM archive</button>
+            className="text-sm text-slate-400 hover:text-slate-100 hover:underline underline-offset-2">{archiveLabel(scope)}</button>
           <span aria-hidden className="text-slate-600">/</span>
           <h2 className="text-lg font-semibold text-slate-100">Audit log</h2>
         </nav>
-        <DfmAuditLog partId={partId} onJumpToEntry={jumpToEntry} />
+        <DfmAuditLog scope={scope} onJumpToEntry={jumpToEntry} />
       </div>
     );
   }
 
+  const startNew = () => setNewTitle('');
+
   return (
-    <div data-testid="dfm-archive" className={frame}>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <h2 className="text-lg font-semibold text-slate-100 mr-auto">DFM archive</h2>
+    <div data-testid="dfm-archive" data-scope={scope.kind} className={frame}>
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <h2 className="text-lg font-semibold text-slate-100">{archiveLabel(scope)}</h2>
+        {scope.kind === 'tool' && projectId != null && (
+          <button data-testid="dfm-general-link" onClick={() => openDfmWindow(projectScope(projectId), null)}
+            title="Topics for all tools of this project, in its own window"
+            className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">General tooling DFM</button>
+        )}
+        <span className="mr-auto" />
         <button data-testid="dfm-tool-audit-log" onClick={() => setShowLog(true)}
           className="px-3 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm">Audit log</button>
         {newTitle === null ? (
-          <button data-testid="dfm-new-topic" onClick={() => setNewTitle('')}
+          <button data-testid="dfm-new-topic" onClick={startNew}
             className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ topic</button>
         ) : (
           <div className="flex items-center gap-2">
             <input data-testid="dfm-topic-title" autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setNewTitle(null); }}
-              placeholder="Topic, e.g. Gate position"
+              placeholder={TITLE_PLACEHOLDER[scope.kind]} aria-label="Topic title"
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm w-64" />
             <button data-testid="dfm-create-topic" onClick={submit} disabled={create.isPending}
               className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-sm">Open topic</button>
@@ -121,19 +136,40 @@ export default function DfmArchive({ partId, onOpenPdf, initialTopic = null, inW
           </div>
         )}
         {!inWindow && (
-          <button data-testid="dfm-popout" onClick={() => openDfmWindow(partId, null)} title="Open the DFM archive in its own window"
-            className="px-3 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm">Open in window</button>
+          <button data-testid="dfm-popout" onClick={() => openDfmWindow(scope, null)} title="Open this archive in its own window"
+            className="px-3 py-1 rounded-md ring-1 ring-inset ring-blue-400/60 text-blue-200 hover:bg-blue-500/10 text-sm">Open in window</button>
         )}
       </div>
+      <p data-testid="dfm-archive-hint" className="text-xs text-slate-400 mb-3">{ARCHIVE_HINT[scope.kind]}</p>
 
-      {topics.length === 0 && <p className="text-slate-500 text-sm">No DFM topic yet. Open one for the first request or study.</p>}
+      {topics.length === 0 && (
+        <div data-testid="dfm-archive-empty" className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-slate-600 px-3 py-3 text-sm text-slate-400">
+          <span>
+            {scope.kind === 'tool'
+              ? 'No DFM topic yet. When the toolmaker sends the first DFM, open a topic for it and attach the file.'
+              : 'No general topic yet. Open one for a tooling standard or material info that applies to every tool.'}
+          </span>
+          {newTitle === null && (
+            <button data-testid="dfm-empty-new-topic" onClick={startNew}
+              className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ topic</button>
+          )}
+        </div>
+      )}
       <div className={`divide-y divide-slate-700/70 ${inWindow ? 'overflow-auto min-h-0' : ''}`}>
         {topics.map((t) => {
           const waiting = waitingSummary(t);
+          const finished = t.status !== 'open';
           return (
-            <button key={t.id} data-testid={`dfm-topic-${t.id}`} onClick={() => { setJumpEntryId(null); setSelected(t.id); }}
-              className="w-full flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2.5 px-2 text-left text-sm rounded hover:bg-slate-700/50">
-              <span className="flex-1 min-w-[10rem] text-slate-100 font-medium">{t.title}</span>
+            <button key={t.id} data-testid={`dfm-topic-${t.id}`} data-finished={String(finished)}
+              onClick={() => { setJumpEntryId(null); setJustCreated(null); setSelected(t.id); }}
+              className={`w-full flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2.5 px-2 text-left text-sm rounded hover:bg-slate-700/50 ${finished ? 'opacity-60 hover:opacity-100' : ''}`}>
+              <span className={`flex-1 min-w-[10rem] ${finished ? 'text-slate-300' : 'text-slate-100 font-medium'}`}>
+                {t.title}
+                {t.entry_count === 0 && (
+                  <span data-testid={`dfm-topic-empty-${t.id}`} title="No message recorded yet"
+                    className="ml-2 align-middle text-[11px] font-normal px-1.5 py-px rounded ring-1 ring-inset ring-amber-400/40 text-amber-200">empty</span>
+                )}
+              </span>
               <span className={`text-xs px-2 py-0.5 rounded-full ring-1 ring-inset ${t.status === 'open' ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/40' : 'bg-slate-700 text-slate-300 ring-slate-500'}`}>
                 {t.status === 'open' ? 'Open' : 'Finished confirmed'}
               </span>

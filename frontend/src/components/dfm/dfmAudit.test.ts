@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { DfmAuditEvent } from '../../api/dfm'
-import { auditFileSize, auditGroupOf, auditLocalTime, auditShaShort, auditSummary, matchesAuditGroup } from './dfmAudit'
+import { auditFileSize, auditGroupOf, auditLocalTime, auditShaShort, auditSummary, matchesAuditGroup, renamedText } from './dfmAudit'
 
 const ev = (over: Partial<DfmAuditEvent>): DfmAuditEvent => ({
   id: 1, at: '2026-09-24T09:15:02.113400', action: 'entry_recorded',
@@ -53,5 +53,14 @@ describe('dfmAudit helpers', () => {
     expect(auditSummary(ev({ action: 'entry_recorded' }))).toContain('KTX')
     expect(auditSummary(ev({ action: 'file_attached', details: { filename: 'a.pdf' } }))).toBe('File attached: a.pdf')
     expect(auditSummary(ev({ action: 'topic_opened', details: { title: 'Gate position' } }))).toBe('Topic opened: Gate position')
+  })
+
+  it('groups and summarises rename and delete as topic changes', () => {
+    expect(auditGroupOf('topic_renamed')).toBe('topic')
+    expect(auditGroupOf('topic_deleted')).toBe('topic')
+    const renamed = ev({ action: 'topic_renamed', entry: null, details: { from: 'DFM', to: 'DFM rev 1' } })
+    expect(renamedText(renamed)).toBe('renamed DFM to DFM rev 1')
+    expect(auditSummary(renamed)).toBe('Topic renamed: renamed DFM to DFM rev 1')
+    expect(auditSummary(ev({ action: 'topic_deleted', entry: null, details: { title: 'DFM' } }))).toBe('Topic deleted: DFM')
   })
 })

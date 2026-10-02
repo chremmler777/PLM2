@@ -2,18 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import DfmFlow from './DfmFlow'
-import type { DfmTopicDetail } from '../../api/dfm'
+import { projectScope, toolScope, type DfmScope, type DfmTopicDetail } from '../../api/dfm'
 import { makeEntry, relayTopic } from './dfmFixtures'
 
-const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '/api' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 let current: DfmTopicDetail
-function wrap(onOpenPdf = vi.fn(), extra: { onBack?: () => void; onPopOut?: () => void } = {}) {
+function wrap(onOpenPdf = vi.fn(), extra: { onBack?: () => void; onPopOut?: () => void; scope?: DfmScope; autoOpenForm?: boolean } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={qc}>
-    <DfmFlow partId={7} topicId={1} onOpenPdf={onOpenPdf} onBack={extra.onBack ?? vi.fn()} onPopOut={extra.onPopOut} />
+    <DfmFlow scope={extra.scope ?? toolScope(7)} topicId={1} onOpenPdf={onOpenPdf} onBack={extra.onBack ?? vi.fn()}
+      onPopOut={extra.onPopOut} autoOpenForm={extra.autoOpenForm} />
   </QueryClientProvider>)
   return onOpenPdf
 }
@@ -27,7 +28,7 @@ const arrows = (id: number) =>
 describe('DfmFlow', () => {
   beforeEach(() => {
     current = relayTopic()
-    clientMocks.get.mockReset(); clientMocks.post.mockReset()
+    clientMocks.get.mockReset(); clientMocks.post.mockReset(); clientMocks.patch.mockReset(); clientMocks.delete.mockReset()
     clientMocks.get.mockImplementation((url: string) =>
       url === '/v1/parts/7/dfm/topics/1' ? Promise.resolve({ data: current }) : Promise.resolve({ data: [] }))
     Element.prototype.scrollIntoView = vi.fn()
@@ -179,6 +180,7 @@ describe('DfmFlow', () => {
     fireEvent.click(await screen.findByTestId('dfm-action-5-answer-ktx'))
     const form = screen.getByTestId('dfm-entry-form')
     expect(within(form).getByTestId('dfm-step-sentence').textContent).toBe('Answer from KTX to Toolmaker on Question #5')
+    fireEvent.change(within(form).getByTestId('dfm-files-input'), { target: { files: [new File([new Uint8Array([1])], 'dfm_rev2.pptx')] } })
     fireEvent.click(within(form).getByTestId('dfm-submit'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
     const fd = clientMocks.post.mock.calls[0][1] as FormData
@@ -249,15 +251,90 @@ describe('DfmFlow', () => {
     expect(screen.getByTestId('dfm-entry-5').textContent).toContain('reply to #6 Answer')
   })
 
-  it('finishes an open topic', async () => {
+  it('finishes an open topic only after a confirmation that names the waiting messages', async () => {
     clientMocks.post.mockResolvedValue({ data: relayTopic({ status: 'finished_confirmed' }) })
     wrap()
     fireEvent.click(await screen.findByTestId('dfm-finish'))
+    expect(clientMocks.post).not.toHaveBeenCalled()
+    const dialog = await screen.findByTestId('dfm-finish-confirm')
+    expect(dialog.textContent).toContain('1 message still waits for an answer')
+    fireEvent.click(within(dialog).getByTestId('confirm-ok'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/1/close'))
   })
 
+  it('cancelling the finish confirmation keeps the topic open', async () => {
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-finish'))
+    fireEvent.click(within(await screen.findByTestId('dfm-finish-confirm')).getByText('Cancel'))
+    await waitFor(() => expect(screen.queryByTestId('dfm-finish-confirm')).toBeNull())
+    expect(clientMocks.post).not.toHaveBeenCalled()
+  })
+
+  it('disables Finish confirmed on a topic without messages, with a reason', async () => {
+    current = relayTopic({ entries: [], waiting_on: [], last_step: null, next_step: null, entry_count: 0 })
+    wrap()
+    const btn = await screen.findByTestId('dfm-finish') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.title).toBe('Record at least one message before finishing the topic')
+    // + New DFM stays the primary action.
+    expect(screen.getByTestId('dfm-new-original').className).toContain('bg-blue-600')
+    expect(btn.className).not.toContain('bg-emerald')
+  })
+
+  it('shows Delete only when the topic can be deleted, confirms, deletes and goes back', async () => {
+    wrap()
+    await screen.findByTestId('dfm-flow')
+    expect(screen.queryByTestId('dfm-delete-topic')).toBeNull()
+    cleanup()
+    current = relayTopic({ entries: [], waiting_on: [], last_step: null, next_step: null, entry_count: 0, can_delete: true })
+    clientMocks.delete.mockResolvedValue({ status: 204 })
+    const onBack = vi.fn()
+    wrap(vi.fn(), { onBack })
+    fireEvent.click(await screen.findByTestId('dfm-delete-topic'))
+    expect(clientMocks.delete).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByTestId('dfm-delete-confirm')).getByTestId('confirm-ok'))
+    await waitFor(() => expect(clientMocks.delete).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/1'))
+    await waitFor(() => expect(onBack).toHaveBeenCalled())
+  })
+
+  it('renames the topic inline', async () => {
+    clientMocks.patch.mockResolvedValue({ data: relayTopic({ title: 'DFM rev 1' }) })
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-rename'))
+    const input = screen.getByTestId('dfm-rename-input') as HTMLInputElement
+    expect(input.value).toBe('Gate position')
+    fireEvent.change(input, { target: { value: 'DFM rev 1' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(clientMocks.patch).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/1', { title: 'DFM rev 1' }))
+    await waitFor(() => expect(screen.queryByTestId('dfm-rename-input')).toBeNull())
+  })
+
+  it('cancels a rename with Escape without saving', async () => {
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-rename'))
+    fireEvent.keyDown(screen.getByTestId('dfm-rename-input'), { key: 'Escape' })
+    expect(screen.queryByTestId('dfm-rename-input')).toBeNull()
+    expect(clientMocks.patch).not.toHaveBeenCalled()
+  })
+
+  it('opens the first-step form right away for a topic just created', async () => {
+    current = relayTopic({ entries: [], waiting_on: [], last_step: null, next_step: null, entry_count: 0 })
+    wrap(vi.fn(), { autoOpenForm: true })
+    const form = await screen.findByTestId('dfm-entry-form')
+    expect(form.getAttribute('data-kind')).toBe('original')
+  })
+
+  it('reads the topic from the project for the general tooling DFM', async () => {
+    clientMocks.get.mockImplementation((url: string) =>
+      url === '/v1/projects/35/dfm/topics/1' ? Promise.resolve({ data: current }) : Promise.resolve({ data: [] }))
+    wrap(vi.fn(), { scope: projectScope(35) })
+    await screen.findByTestId('dfm-flow-viewport')
+    expect(screen.getByTestId('dfm-breadcrumb-archive').textContent).toBe('General tooling DFM')
+    expect(screen.getByTestId('dfm-file-42').getAttribute('href')).toBe('/api/v1/projects/35/dfm/files/42/download')
+  })
+
   it('renders a finished topic read-only without waiting styling', async () => {
-    current = relayTopic({ status: 'finished_confirmed', closed_at: '2026-10-01T09:00:00' })
+    current = relayTopic({ status: 'finished_confirmed', closed_at: '2026-10-01T09:00:00', closed_by_name: 'Karl Huber' })
     clientMocks.post.mockResolvedValue({ data: relayTopic() })
     wrap()
     expect(await screen.findByTestId('dfm-reopen')).toBeTruthy()
@@ -266,7 +343,7 @@ describe('DfmFlow', () => {
     expect(screen.getByTestId('dfm-flow').querySelectorAll('[data-action]')).toHaveLength(0)
     expect(arrows(5)[0].dashed).toBe('false')
     expect(screen.getByTestId('dfm-entry-5').textContent).not.toContain('Waiting')
-    expect(screen.getByTestId('dfm-status-strip').textContent).toContain('Finished confirmed')
+    expect(screen.getByTestId('dfm-status-strip').textContent).toContain('Finished confirmed on 1 Oct 2026 by Karl Huber. Reopen to add messages.')
     expect(screen.getByTestId('dfm-lane-ktx').textContent).not.toContain('waiting')
     fireEvent.click(screen.getByTestId('dfm-reopen'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/1/reopen'))

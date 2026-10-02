@@ -23,8 +23,9 @@ export const relayEntries = (): DfmEntry[] => [
 ];
 
 export const relaySummary = (over: Partial<DfmTopicSummary> = {}): DfmTopicSummary => ({
-  id: 1, tool_part_id: 7, title: 'Gate position', status: 'open', opened_by: 2, opened_at: '2026-09-23T22:13:13',
-  closed_by: null, closed_at: null, entry_count: 5, last_activity: '2026-09-23T22:13:14',
+  id: 1, tool_part_id: 7, project_id: null, title: 'Gate position', status: 'open', opened_by: 2,
+  opened_by_name: 'Christoph Demmler', opened_at: '2026-09-23T22:13:13',
+  closed_by: null, closed_by_name: null, closed_at: null, can_delete: false, entry_count: 5, last_activity: '2026-09-23T22:13:14',
   waiting_on: [{ party: 'ktx', count: 1, oldest_days: 1 }],
   last_step: { kind: 'question', party: 'toolmaker', addressed_to: ['ktx'], date: '2026-09-22' },
   all_answered: false, ...over,

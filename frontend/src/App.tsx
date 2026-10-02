@@ -115,6 +115,15 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/* Pop-out general tooling DFM window: a project's DFM topics for all its tools. */}
+      <Route
+        path="/projects/:projectId/dfm"
+        element={
+          <ProtectedRoute bare>
+            <DfmPopout />
+          </ProtectedRoute>
+        }
+      />
       {/* Pop-out plan window: one change plan (quote or detailed) alone, no sidebar. */}
       <Route
         path="/changes/:changeId/plan/:plan"

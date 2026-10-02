@@ -30,13 +30,17 @@ async def _audit(client, auth, tool, **params):
 
 # ---- writes -----------------------------------------------------------------
 
-async def test_topic_open_close_reopen_write_one_event_each(client, eng_auth, seed, session_factory):
+async def test_topic_open_close_reopen_write_one_event_each(client, eng_auth, seed, session_factory,
+                                                           monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     tool = await make_tool(client, eng_auth, seed)
     topic = await make_topic(client, eng_auth, tool, title="Gate position")
+    # finishing needs at least one message
+    assert (await post_entry(client, eng_auth, tool, topic)).status_code == 201
     await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic}/close", headers=eng_auth)
     await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic}/reopen", headers=eng_auth)
 
-    events = await _events(session_factory, tool_part_id=tool)
+    events = [e for e in await _events(session_factory, tool_part_id=tool) if e.action.startswith("topic_")]
     assert [e.action for e in events] == ["topic_opened", "topic_closed", "topic_reopened"]
     for e in events:
         assert e.topic_id == topic
@@ -95,10 +99,18 @@ async def test_rejected_entries_write_no_event(client, eng_auth, seed, session_f
     topic = await make_topic(client, eng_auth, tool)
     res = await post_entry(client, eng_auth, tool, topic, party="nobody")
     assert res.status_code == 400
+    res = await post_entry(client, eng_auth, tool, topic, note="  ")
+    assert res.status_code == 400
+    # an empty topic cannot be finished: no event either
+    res = await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic}/close", headers=eng_auth)
+    assert res.status_code == 409
+    assert [e.action for e in await _events(session_factory)] == ["topic_opened"]
+    assert (await post_entry(client, eng_auth, tool, topic)).status_code == 201
     await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic}/close", headers=eng_auth)
     res = await post_entry(client, eng_auth, tool, topic, files=[("a.pdf", b"%PDF a", "application/pdf")])
     assert res.status_code == 409
-    assert [e.action for e in await _events(session_factory)] == ["topic_opened", "topic_closed"]
+    assert [e.action for e in await _events(session_factory)] == ["topic_opened", "entry_recorded",
+                                                                   "topic_closed"]
 
 
 async def test_storage_failure_writes_no_event(client, eng_auth, seed, session_factory, monkeypatch, tmp_path):

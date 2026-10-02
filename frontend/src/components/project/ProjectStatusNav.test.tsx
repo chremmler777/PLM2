@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import ProjectStatusNav from './ProjectStatusNav'
+import { relaySummary } from '../dfm/dfmFixtures'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -11,6 +12,9 @@ vi.mock('../../forms/FormPanel', () => ({ default: () => <div>form-panel</div> }
 vi.mock('../../forms/ProjectFormsTab', () => ({ default: () => <div>forms-tab</div> }))
 vi.mock('../ProjectChangesSection', () => ({ default: () => <div>changes-section</div> }))
 vi.mock('../ProjectLessonsSection', () => ({ default: () => <div>lessons-section</div> }))
+vi.mock('../dfm/DfmArchive', () => ({
+  default: (p: { scope: { kind: string; id: number } }) => <div data-testid="dfm-archive-stub">dfm {p.scope.kind} {p.scope.id}</div>,
+}))
 
 const gate = (id: number, code: string, status: string, pct: number, title: string) => ({
   id, project_id: 2, code, seq: id, phase_de: title, phase_en: title, status, color: 'green',
@@ -137,5 +141,51 @@ describe('ProjectStatusNav', () => {
     fireEvent.click(await screen.findByRole('button', { name: /K0\/RG1/ }))
     expect(panel().className).toContain('max-h-[45vh]')
     expect(panel().className).toContain('overflow-y-auto')
+  })
+
+  it('shows Tooling DFM without a count when no topic is open, neutral', async () => {
+    mount()
+    const btn = await screen.findByTestId('status-nav-dfm')
+    expect(btn.textContent).toContain('Tooling DFM')
+    expect(btn.textContent).not.toMatch(/Tooling DFM \d/)
+    expect(btn.className).toContain('border-slate-600')
+  })
+
+  it('counts open general DFM topics and turns amber while one waits on KTX', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/2/dfm/topics') return Promise.resolve({ data: [
+        relaySummary({ id: 1, project_id: 2, tool_part_id: null, waiting_on: [{ party: 'ktx', count: 1, oldest_days: 2 }] }),
+        relaySummary({ id: 2, project_id: 2, tool_part_id: null, waiting_on: [] }),
+        relaySummary({ id: 3, project_id: 2, tool_part_id: null, status: 'finished_confirmed', waiting_on: [] }),
+      ] })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    const btn = await screen.findByTestId('status-nav-dfm')
+    await vi.waitFor(() => expect(btn.textContent).toContain('Tooling DFM 2'))
+    expect(btn.className).toContain('amber')
+  })
+
+  it('stays neutral when open topics wait on others than KTX', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/2/dfm/topics') return Promise.resolve({ data: [
+        relaySummary({ id: 1, project_id: 2, tool_part_id: null, waiting_on: [{ party: 'tier1', count: 1, oldest_days: 2 }] }),
+      ] })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    const btn = await screen.findByTestId('status-nav-dfm')
+    await vi.waitFor(() => expect(btn.textContent).toContain('Tooling DFM 1'))
+    expect(btn.className).not.toContain('amber')
+  })
+
+  it('opens the project-wide DFM archive in the panel', async () => {
+    mount()
+    fireEvent.click(await screen.findByTestId('status-nav-dfm'))
+    expect(panel().hidden).toBe(false)
+    expect(within(panel()).getByTestId('dfm-archive-stub').textContent).toBe('dfm project 2')
+    expect(screen.getByTestId('status-nav-dfm').getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(navButton(/Changes/))
+    expect(within(panel()).queryByTestId('dfm-archive-stub')).toBeNull()
   })
 })

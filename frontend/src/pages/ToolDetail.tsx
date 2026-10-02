@@ -13,6 +13,7 @@ import PartThumbnail from '../components/parts/PartThumbnail';
 import ToolFieldsCard from '../components/tools/ToolFieldsCard';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
 import DfmArchive from '../components/dfm/DfmArchive';
+import { toolScope } from '../api/dfm';
 import { producedArticles, type ToolRelation } from '../components/tools/toolRelations';
 import FieldNoteMarker from '../components/fieldNotes/FieldNoteMarker';
 import { usePartFieldNoteIndex } from '../hooks/queries/useFieldNotes';
@@ -124,7 +125,7 @@ export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null,
           DFM status notes
           <FieldNoteMarker partId={part.id} fieldKey="dfm.status" label="DFM status" note={notes.get('dfm.status')} projectId={part.project_id} />
         </div>
-        <DfmArchive partId={part.id} onOpenPdf={setOpenDoc} />
+        <DfmArchive scope={toolScope(part.id)} projectId={part.project_id} onOpenPdf={setOpenDoc} />
 
         {showStartChange && (
           <StartChangeModal open onClose={() => setShowStartChange(false)}

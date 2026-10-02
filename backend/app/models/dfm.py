@@ -1,9 +1,9 @@
-"""DFM archive: per-tool topics, each a three-column ledger (toolmaker | KTX |
-Tier 1) of append-only entries with files. Nothing here is deleted; an update
+"""DFM archive: topics per tool (or project-wide, the "general tooling DFM"), each a three-column ledger (toolmaker | KTX |
+Tier 1) of append-only entries with files. Entries are never deleted; an update
 is a new entry that supersedes the old one, and the old one stays as history."""
 from datetime import date, datetime
 
-from sqlalchemy import String, Text, Date, DateTime, ForeignKey, Integer, JSON
+from sqlalchemy import CheckConstraint, String, Text, Date, DateTime, ForeignKey, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -19,11 +19,18 @@ DFM_KINDS = (DFM_KIND_ORIGINAL, "forward", "answer", "question")
 
 
 class DfmTopic(Base):
-    """One DFM question on one tool, closed by 'finished confirmed'."""
+    """One DFM question on one tool, or on a whole project (tooling standards,
+    material info for every tool), closed by 'finished confirmed'. Exactly one
+    of tool_part_id / project_id is set. An empty topic can be soft deleted
+    (deleted_at); its audit events stay."""
     __tablename__ = "dfm_topics"
+    __table_args__ = (
+        CheckConstraint("(tool_part_id IS NULL) <> (project_id IS NULL)", name="ck_dfm_topics_one_scope"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tool_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+    tool_part_id: Mapped[int | None] = mapped_column(ForeignKey("parts.id"), nullable=True, index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default=DFM_TOPIC_OPEN, server_default=DFM_TOPIC_OPEN)
 
@@ -31,6 +38,8 @@ class DfmTopic(Base):
     opened_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     closed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     entries: Mapped[list["DfmEntry"]] = relationship(
         back_populates="topic", cascade="all, delete-orphan",
@@ -69,7 +78,8 @@ class DfmEntryFile(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     entry_id: Mapped[int] = mapped_column(ForeignKey("dfm_entries.id"), index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
-    saved_filename: Mapped[str] = mapped_column(String(255))  # <uuid><ext> under uploads/dfm/<tool>/<entry>/
+    # <uuid><ext> under uploads/dfm/<tool>/<entry>/ or uploads/dfm/project-<project>/<entry>/
+    saved_filename: Mapped[str] = mapped_column(String(255))
     file_size: Mapped[int] = mapped_column(Integer)
     content_type: Mapped[str] = mapped_column(String(100))
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)  # hex; NULL for files before 081
@@ -81,20 +91,21 @@ class DfmEntryFile(Base):
 
 # Audit actions. Events are append-only: there is no update or delete path.
 DFM_AUDIT_ACTIONS = (
-    "topic_opened", "topic_closed", "topic_reopened",
+    "topic_opened", "topic_closed", "topic_reopened", "topic_renamed", "topic_deleted",
     "entry_recorded", "entry_updated",
     "file_attached", "file_downloaded", "file_viewed",
 )
 
 
 class DfmAuditEvent(Base):
-    """One thing that happened in a tool's DFM archive: who, when, what, on
+    """One thing that happened in a tool's (or project's) DFM archive: who, when, what, on
     which topic / entry / file. Written in the same transaction as the change
     it describes; file reads are written right after serving is authorised."""
     __tablename__ = "dfm_audit_events"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tool_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+    tool_part_id: Mapped[int | None] = mapped_column(ForeignKey("parts.id"), nullable=True, index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     topic_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_topics.id"), nullable=True, index=True)
     entry_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True)
     file_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entry_files.id"), nullable=True)

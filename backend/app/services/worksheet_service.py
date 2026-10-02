@@ -121,7 +121,8 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
     topics_by_tool: dict = defaultdict(list)
     if tools:
         for t in (await session.execute(
-                select(DfmTopic).where(DfmTopic.tool_part_id.in_(list(tools))))).scalars().all():
+                select(DfmTopic).where(DfmTopic.tool_part_id.in_(list(tools)),
+                                       DfmTopic.deleted_at.is_(None)))).scalars().all():
             topics_by_tool[t.tool_part_id].append(t)
 
     tools_of: dict = defaultdict(list)

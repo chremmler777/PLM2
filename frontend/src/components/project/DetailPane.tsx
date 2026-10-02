@@ -94,7 +94,7 @@ export default function DetailPane({
 
         {effectiveTab === 'dfm' && (
           // Keyed by part: the open DFM PDF never carries over to another tool.
-          <ToolDfmTab key={part.id} partId={part.id} />
+          <ToolDfmTab key={part.id} partId={part.id} projectId={projectId} />
         )}
 
         {effectiveTab === 'tool' && (

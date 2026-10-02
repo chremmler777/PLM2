@@ -34,6 +34,14 @@ async def test_open_list_close_reopen(client, eng_auth, seed):
     assert res.status_code == 200
     assert res.json()["entries"] == []
 
+    # finishing an empty topic is refused
+    res = await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic['id']}/close", headers=eng_auth)
+    assert res.status_code == 409
+    assert res.json()["detail"] == "Record at least one message before finishing the topic"
+    res = await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic['id']}/entries", data={
+        "party": "toolmaker", "addressed_to": '["ktx"]', "note": "DFM rev 1"}, headers=eng_auth)
+    assert res.status_code == 201, res.text
+
     res = await client.post(f"/api/v1/parts/{tool}/dfm/topics/{topic['id']}/close", headers=eng_auth)
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "finished_confirmed"

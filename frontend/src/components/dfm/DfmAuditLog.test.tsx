@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import DfmAuditLog from './DfmAuditLog'
-import type { DfmAuditEvent } from '../../api/dfm'
+import { projectScope, toolScope, type DfmAuditEvent } from '../../api/dfm'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '/api' }))
@@ -23,7 +23,7 @@ const events: DfmAuditEvent[] = [
 ]
 
 function wrap(props: { topicId?: number; onJumpToEntry?: (entryId: number, topicId: number) => void } = {}) {
-  return render(<DfmAuditLog partId={7} topicId={props.topicId} onJumpToEntry={props.onJumpToEntry ?? vi.fn()} />)
+  return render(<DfmAuditLog scope={toolScope(7)} topicId={props.topicId} onJumpToEntry={props.onJumpToEntry ?? vi.fn()} />)
 }
 
 describe('DfmAuditLog', () => {
@@ -148,5 +148,29 @@ describe('DfmAuditLog', () => {
     wrap({ topicId: 7 })
     await screen.findByTestId('dfm-audit-row-42')
     expect(screen.getByTestId('dfm-audit-csv').getAttribute('href')).toBe('/api/v1/parts/7/dfm/audit.csv?topic_id=7')
+  })
+
+  it('describes rename and delete events in plain words', async () => {
+    clientMocks.get.mockImplementation(() => Promise.resolve({ data: [
+      { id: 51, at: '2026-09-25T09:00:00', action: 'topic_renamed', actor: { id: 2, name: 'Engineer' },
+        topic: { id: 7, title: 'DFM rev 1' }, entry: null, file: null, details: { from: 'DFM', to: 'DFM rev 1' } },
+      { id: 50, at: '2026-09-25T08:00:00', action: 'topic_deleted', actor: { id: 2, name: 'Engineer' },
+        topic: { id: 8, title: 'DFM' }, entry: null, file: null, details: { title: 'DFM' } },
+    ] }))
+    wrap()
+    const renamed = await screen.findByTestId('dfm-audit-row-51')
+    expect(renamed.textContent).toContain('Topic renamed')
+    expect(within(renamed).getByTestId('dfm-audit-renamed').textContent).toBe('renamed DFM to DFM rev 1')
+    const deleted = screen.getByTestId('dfm-audit-row-50')
+    expect(deleted.textContent).toContain('Topic deleted')
+    expect(within(deleted).getByTestId('dfm-audit-deleted').textContent).toBe('DFM')
+  })
+
+  it('reads the project log and CSV for the general tooling DFM', async () => {
+    clientMocks.get.mockImplementation((url: string) =>
+      url === '/v1/projects/35/dfm/audit' ? Promise.resolve({ data: events }) : Promise.resolve({ data: [] }))
+    render(<DfmAuditLog scope={projectScope(35)} onJumpToEntry={vi.fn()} />)
+    await screen.findByTestId('dfm-audit-row-42')
+    expect(screen.getByTestId('dfm-audit-csv').getAttribute('href')).toBe('/api/v1/projects/35/dfm/audit.csv')
   })
 })

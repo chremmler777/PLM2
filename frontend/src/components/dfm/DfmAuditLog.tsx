@@ -1,6 +1,6 @@
 /**
  * DfmAuditLog - the compact, newest-first audit trail table for one topic
- * (topicId given) or the whole tool (topicId absent). Filters by action
+ * (topicId given) or the whole tool or project archive (topicId absent). Filters by action
  * group are applied client-side over the loaded page, since the API filters
  * by a single action at a time. "Load older" pages with before_id. Each
  * message/file row's "#N" link hands the entry id back to the caller, which
@@ -10,21 +10,22 @@
 import { useEffect, useState } from 'react';
 import { getAudit, KIND_LABELS, PARTY_LABELS, dfmAuditCsvUrl, type DfmAuditEvent } from '../../api/dfm';
 import { apiErrorMessage } from '../../lib/apiError';
+import type { DfmScope } from '../../api/dfm';
 import {
   AUDIT_ACTION_STYLE, AUDIT_GROUPS, AUDIT_GROUP_LABELS, auditFileSize, auditLocalTime, auditShaShort,
-  matchesAuditGroup, type DfmAuditGroup,
+  matchesAuditGroup, renamedText, type DfmAuditGroup,
 } from './dfmAudit';
 
 const PAGE_LIMIT = 100;
 
 interface Props {
-  partId: number;
-  /** Scope to one topic; absent shows the tool-wide log with a topic column. */
+  scope: DfmScope;
+  /** Scope to one topic; absent shows the archive-wide log with a topic column. */
   topicId?: number;
   onJumpToEntry(entryId: number, topicId: number): void;
 }
 
-export default function DfmAuditLog({ partId, topicId, onJumpToEntry }: Props) {
+export default function DfmAuditLog({ scope, topicId, onJumpToEntry }: Props) {
   const [events, setEvents] = useState<DfmAuditEvent[]>([]);
   const [group, setGroup] = useState<DfmAuditGroup>('all');
   const [hasMore, setHasMore] = useState(true);
@@ -35,7 +36,7 @@ export default function DfmAuditLog({ partId, topicId, onJumpToEntry }: Props) {
   const load = async (beforeId?: number) => {
     if (beforeId == null) setLoading(true); else setLoadingMore(true);
     try {
-      const page = await getAudit(partId, { topicId, limit: PAGE_LIMIT, beforeId });
+      const page = await getAudit(scope, { topicId, limit: PAGE_LIMIT, beforeId });
       setEvents((cur) => (beforeId == null ? page : [...cur, ...page]));
       setHasMore(page.length === PAGE_LIMIT);
       setError(null);
@@ -52,7 +53,7 @@ export default function DfmAuditLog({ partId, topicId, onJumpToEntry }: Props) {
     setHasMore(true);
     void load(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [partId, topicId]);
+  }, [scope.kind, scope.id, topicId]);
 
   const loadOlder = () => {
     const last = events[events.length - 1];
@@ -60,7 +61,7 @@ export default function DfmAuditLog({ partId, topicId, onJumpToEntry }: Props) {
   };
 
   const shown = events.filter((e) => matchesAuditGroup(e.action, group));
-  const csvHref = dfmAuditCsvUrl(partId, topicId);
+  const csvHref = dfmAuditCsvUrl(scope, topicId);
 
   if (error) {
     return <p data-testid="dfm-audit-error" className="text-red-400 text-sm">{error}</p>;
@@ -139,6 +140,12 @@ function Row({ e, showTopic, onJumpToEntry }: { e: DfmAuditEvent; showTopic: boo
           )}
           {isFile && (
             <span className="text-slate-300 font-mono break-all">{e.details.filename ?? e.file?.filename}</span>
+          )}
+          {e.action === 'topic_renamed' && (
+            <span data-testid="dfm-audit-renamed" className="text-slate-300">{renamedText(e)}</span>
+          )}
+          {e.action === 'topic_deleted' && (e.details.title ?? e.topic?.title) && (
+            <span data-testid="dfm-audit-deleted" className="text-slate-300">{e.details.title ?? e.topic?.title}</span>
           )}
           {e.action === 'file_attached' && e.details.size != null && (
             <span className="text-slate-500 tabular-nums">{auditFileSize(e.details.size)}</span>

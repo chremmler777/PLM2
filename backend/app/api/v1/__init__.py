@@ -19,7 +19,7 @@ from app.api.v1.items.customer_package import router as customer_package_router
 from app.api.v1.items.part_bom import router as part_bom_router
 from app.api.v1.items.part_relations import router as part_relations_router
 from app.api.v1.items.process_flow import router as process_flow_router
-from app.api.v1.items.dfm import router as dfm_router
+from app.api.v1.items.dfm import router as dfm_router, project_router as dfm_project_router
 from app.api.v1.items.field_notes import router as field_notes_router
 from app.api.v1.items.materials import router as materials_router
 from app.api.v1.items.worksheet import router as worksheet_router
@@ -86,6 +86,7 @@ api_router.include_router(part_bom_router)
 api_router.include_router(part_relations_router)
 api_router.include_router(process_flow_router)
 api_router.include_router(dfm_router)
+api_router.include_router(dfm_project_router)
 api_router.include_router(field_notes_router)
 api_router.include_router(materials_router)
 api_router.include_router(worksheet_router)

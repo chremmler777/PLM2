@@ -1,6 +1,10 @@
-"""DFM archive service: topics per tool, append-only entries in three columns,
-files on disk under uploads/dfm/<tool>/<entry>/. Nothing is deleted; an
-update is a new entry that supersedes the old one."""
+"""DFM archive service: topics per tool or per project (the project-wide
+"general tooling DFM"), append-only entries in three columns, files on disk
+under uploads/dfm/<tool>/<entry>/ or uploads/dfm/project-<project>/<entry>/.
+Entries are never deleted; an update is a new entry that supersedes the old
+one. Only an empty topic can be (soft) deleted.
+
+Every operation works on a DfmScope: exactly one of tool / project."""
 from __future__ import annotations
 
 import hashlib
@@ -9,6 +13,7 @@ import logging
 import mimetypes
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from sqlalchemy import select
@@ -16,10 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils.clock import business_date_of, business_today
 from app.models.dfm import (
-    DfmEntry, DfmEntryFile, DfmTopic, DFM_KIND_ORIGINAL, DFM_KINDS, DFM_PARTIES, DFM_TOPIC_FINISHED,
+    DfmAuditEvent, DfmEntry, DfmEntryFile, DfmTopic, DFM_KIND_ORIGINAL, DFM_KINDS, DFM_PARTIES, DFM_TOPIC_FINISHED,
     DFM_TOPIC_OPEN,
 )
-from app.models.entities import User
+from app.models.entities import Project, User
 from app.models.part import Part
 from app.services import dfm_audit
 from app.services.part_service import ChangelogService
@@ -28,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB, same as revision files
 TOPIC_CLOSED_MESSAGE = "Topic is finished, reopen it first"
+CLOSE_EMPTY_MESSAGE = "Record at least one message before finishing the topic"
+EMPTY_ENTRY_MESSAGE = "Attach the DFM file or write a note"
+DELETE_NOT_EMPTY_MESSAGE = "Only an empty topic can be deleted"
+DELETE_FORBIDDEN_MESSAGE = "Only the person who opened the topic or an admin can delete it"
 ALREADY_SUPERSEDED_MESSAGE = "This entry was already updated, refresh"
 MAX_FILENAME_LEN = 255
 MAX_CONTENT_TYPE_LEN = 100
@@ -49,12 +58,70 @@ class DfmClosed(DfmError):
     status = 409
 
 
-def dfm_dir(tool_part_id: int, entry_id: int) -> str:
-    return os.path.join(os.getcwd(), "uploads", "dfm", str(tool_part_id), str(entry_id))
+@dataclass(frozen=True)
+class DfmScope:
+    """Where a DFM archive lives: one tool, or one project. Exactly one is set."""
+    tool: Part | None = None
+    project: Project | None = None
+
+    def __post_init__(self):
+        if (self.tool is None) == (self.project is None):
+            raise ValueError("A DFM scope is exactly one of tool / project")
+
+    @property
+    def is_tool(self) -> bool:
+        return self.tool is not None
+
+    def topic_filter(self):
+        return (DfmTopic.tool_part_id == self.tool.id) if self.tool is not None \
+            else (DfmTopic.project_id == self.project.id)
+
+    def audit_filter(self):
+        return (DfmAuditEvent.tool_part_id == self.tool.id) if self.tool is not None \
+            else (DfmAuditEvent.project_id == self.project.id)
+
+    def kwargs(self) -> dict:
+        """Column values for a new topic or audit event."""
+        return {"tool_part_id": self.tool.id} if self.tool is not None else {"project_id": self.project.id}
+
+    @property
+    def dir_key(self) -> str:
+        """Folder under uploads/dfm/: the tool id (as before 111) or project-<id>."""
+        return str(self.tool.id) if self.tool is not None else f"project-{self.project.id}"
+
+    @property
+    def label(self) -> str:
+        """For file names: the tool's part number or the project's code, else the id."""
+        if self.tool is not None:
+            return self.tool.part_number or str(self.tool.id)
+        return self.project.code or str(self.project.id)
 
 
-def file_path(tool_part_id: int, f: DfmEntryFile) -> str:
-    return os.path.join(dfm_dir(tool_part_id, f.entry_id), f.saved_filename)
+def dfm_dir(scope: "DfmScope | int | str", entry_id: int) -> str:
+    key = scope.dir_key if isinstance(scope, DfmScope) else str(scope)
+    return os.path.join(os.getcwd(), "uploads", "dfm", key, str(entry_id))
+
+
+def file_path(scope: "DfmScope | int | str", f: DfmEntryFile) -> str:
+    return os.path.join(dfm_dir(scope, f.entry_id), f.saved_filename)
+
+
+def is_admin(user) -> bool:
+    if user is None:
+        return False
+    return (getattr(user, "effective_role", None) or getattr(user, "role", None)) == "admin"
+
+
+async def _changelog(session: AsyncSession, scope: DfmScope, action: str, description: str,
+                     user_id: int) -> None:
+    """The part changelog, tool scope only; a project topic has its audit events."""
+    if scope.tool is not None:
+        await ChangelogService.log_action(session, part_id=scope.tool.id, action=action,
+                                          action_description=description, performed_by=user_id)
+
+
+async def _audit(session: AsyncSession, scope: DfmScope, action: str, user_id: int, **kw) -> None:
+    await dfm_audit.record_event(session, action=action, actor_id=user_id, **scope.kwargs(), **kw)
 
 
 def _iso(v: datetime | date | None) -> str | None:
@@ -229,61 +296,90 @@ def parse_sent_at(raw: str | None) -> date | None:
 class DfmService:
 
     @staticmethod
-    async def load_topic(session: AsyncSession, tool_part_id: int, topic_id: int) -> DfmTopic:
+    async def load_topic(session: AsyncSession, scope: DfmScope, topic_id: int) -> DfmTopic:
+        """A deleted topic is not found."""
         topic = (await session.execute(select(DfmTopic).where(
-            DfmTopic.id == topic_id, DfmTopic.tool_part_id == tool_part_id))).scalar_one_or_none()
+            DfmTopic.id == topic_id, scope.topic_filter(), DfmTopic.deleted_at.is_(None)))).scalar_one_or_none()
         if topic is None:
             raise DfmError("Topic not found", status=404)
         return topic
 
     @staticmethod
-    async def list_topics(session: AsyncSession, tool_part_id: int) -> list[DfmTopic]:
+    async def list_topics(session: AsyncSession, scope: DfmScope) -> list[DfmTopic]:
         return list((await session.execute(
-            select(DfmTopic).where(DfmTopic.tool_part_id == tool_part_id)
+            select(DfmTopic).where(scope.topic_filter(), DfmTopic.deleted_at.is_(None))
             .order_by(DfmTopic.opened_at.desc(), DfmTopic.id.desc()))).scalars().all())
 
     @staticmethod
-    async def open_topic(session: AsyncSession, tool: Part, title: str, user_id: int) -> DfmTopic:
-        topic = DfmTopic(tool_part_id=tool.id, title=title.strip(), opened_by=user_id)
+    async def open_topic(session: AsyncSession, scope: DfmScope, title: str, user_id: int) -> DfmTopic:
+        topic = DfmTopic(**scope.kwargs(), title=title.strip(), opened_by=user_id)
         session.add(topic)
         await session.flush()
-        await ChangelogService.log_action(
-            session, part_id=tool.id, action="dfm_topic_opened",
-            action_description=f"DFM topic opened: {topic.title}", performed_by=user_id)
-        await dfm_audit.record_event(session, tool_part_id=tool.id, action="topic_opened", actor_id=user_id,
-                                     topic_id=topic.id, details={"title": topic.title})
+        await _changelog(session, scope, "dfm_topic_opened", f"DFM topic opened: {topic.title}", user_id)
+        await _audit(session, scope, "topic_opened", user_id, topic_id=topic.id, details={"title": topic.title})
         return topic
 
     @staticmethod
-    async def close_topic(session: AsyncSession, tool: Part, topic: DfmTopic, user_id: int) -> DfmTopic:
+    async def rename_topic(session: AsyncSession, scope: DfmScope, topic: DfmTopic, title: str,
+                           user_id: int) -> DfmTopic:
+        """Open or finished. The same title is a no-op (no event)."""
+        new = title.strip()
+        if not new:
+            raise DfmError("title must not be blank", status=422)
+        old = topic.title
+        if new == old:
+            return topic
+        topic.title = new
+        await _changelog(session, scope, "dfm_topic_renamed", f"DFM topic renamed: {old} -> {new}", user_id)
+        await _audit(session, scope, "topic_renamed", user_id, topic_id=topic.id,
+                     details={"from": old, "to": new})
+        return topic
+
+    @staticmethod
+    async def delete_topic(session: AsyncSession, scope: DfmScope, topic: DfmTopic, user) -> DfmTopic:
+        """Soft delete; only an empty topic, only by its opener or an admin.
+        Its audit events stay."""
+        if topic.opened_by != user.id and not is_admin(user):
+            raise DfmError(DELETE_FORBIDDEN_MESSAGE, status=403)
+        has_entry = (await session.execute(
+            select(DfmEntry.id).where(DfmEntry.topic_id == topic.id).limit(1))).scalar_one_or_none()
+        if has_entry is not None:
+            raise DfmClosed(DELETE_NOT_EMPTY_MESSAGE)
+        topic.deleted_at = datetime.utcnow()
+        topic.deleted_by = user.id
+        await _changelog(session, scope, "dfm_topic_deleted", f"DFM topic deleted: {topic.title}", user.id)
+        await _audit(session, scope, "topic_deleted", user.id, topic_id=topic.id, details={"title": topic.title})
+        return topic
+
+    @staticmethod
+    async def close_topic(session: AsyncSession, scope: DfmScope, topic: DfmTopic, user_id: int) -> DfmTopic:
         if topic.status == DFM_TOPIC_FINISHED:
             raise DfmClosed("Topic is already finished")
+        has_entry = (await session.execute(
+            select(DfmEntry.id).where(DfmEntry.topic_id == topic.id).limit(1))).scalar_one_or_none()
+        if has_entry is None:
+            raise DfmClosed(CLOSE_EMPTY_MESSAGE)
         topic.status = DFM_TOPIC_FINISHED
         topic.closed_by = user_id
         topic.closed_at = datetime.utcnow()
-        await ChangelogService.log_action(
-            session, part_id=tool.id, action="dfm_topic_closed",
-            action_description=f"DFM topic finished confirmed: {topic.title}", performed_by=user_id)
-        await dfm_audit.record_event(session, tool_part_id=tool.id, action="topic_closed", actor_id=user_id,
-                                     topic_id=topic.id, details={"title": topic.title})
+        await _changelog(session, scope, "dfm_topic_closed", f"DFM topic finished confirmed: {topic.title}",
+                         user_id)
+        await _audit(session, scope, "topic_closed", user_id, topic_id=topic.id, details={"title": topic.title})
         return topic
 
     @staticmethod
-    async def reopen_topic(session: AsyncSession, tool: Part, topic: DfmTopic, user_id: int) -> DfmTopic:
+    async def reopen_topic(session: AsyncSession, scope: DfmScope, topic: DfmTopic, user_id: int) -> DfmTopic:
         if topic.status == DFM_TOPIC_OPEN:
             raise DfmClosed("Topic is already open")
         topic.status = DFM_TOPIC_OPEN
         topic.closed_by = None
         topic.closed_at = None
-        await ChangelogService.log_action(
-            session, part_id=tool.id, action="dfm_topic_reopened",
-            action_description=f"DFM topic reopened: {topic.title}", performed_by=user_id)
-        await dfm_audit.record_event(session, tool_part_id=tool.id, action="topic_reopened", actor_id=user_id,
-                                     topic_id=topic.id, details={"title": topic.title})
+        await _changelog(session, scope, "dfm_topic_reopened", f"DFM topic reopened: {topic.title}", user_id)
+        await _audit(session, scope, "topic_reopened", user_id, topic_id=topic.id, details={"title": topic.title})
         return topic
 
     @staticmethod
-    async def record_entry(session: AsyncSession, tool: Part, topic: DfmTopic, *, party: str,
+    async def record_entry(session: AsyncSession, scope: DfmScope, topic: DfmTopic, *, party: str,
                            addressed_to: str | list | None, note: str | None, sent_at: str | None,
                            supersedes_id: int | None, files: list[tuple[str, bytes, str | None]],
                            user_id: int, kind: str | None = None, reply_to_id: int | None = None) -> DfmEntry:
@@ -322,6 +418,8 @@ class DfmService:
                 raise DfmError("A file needs a filename")
             if len(contents) > MAX_FILE_SIZE:
                 raise DfmError(f"File {name} is over 100MB")
+        if not files and not (note or "").strip():
+            raise DfmError(EMPTY_ENTRY_MESSAGE)
 
         entry = DfmEntry(topic_id=topic.id, party=party, addressed_to=targets,
                          note=(note or "").strip() or None, sent_at=sent,
@@ -330,7 +428,7 @@ class DfmService:
         session.add(entry)
         await session.flush()
 
-        target_dir = dfm_dir(tool.id, entry.id)
+        target_dir = dfm_dir(scope, entry.id)
         written: list[str] = []
         stored: list[DfmEntryFile] = []
         try:
@@ -357,18 +455,15 @@ class DfmService:
             await session.flush()
             await session.refresh(entry, attribute_names=["files"])
             what = "updated" if supersedes_id else "recorded"
-            await ChangelogService.log_action(
-                session, part_id=tool.id, action="dfm_entry_recorded",
-                action_description=f"DFM entry ({kind}) {what} in {topic.title} by {party} to {', '.join(targets)}"
-                                   + (f" with {len(files)} file(s)" if files else ""),
-                performed_by=user_id)
-            await dfm_audit.record_event(
-                session, tool_part_id=tool.id, action="entry_updated" if supersedes_id else "entry_recorded",
-                actor_id=user_id, topic_id=topic.id, entry_id=entry.id, details=dfm_audit.entry_details(entry))
+            await _changelog(
+                session, scope, "dfm_entry_recorded",
+                f"DFM entry ({kind}) {what} in {topic.title} by {party} to {', '.join(targets)}"
+                + (f" with {len(files)} file(s)" if files else ""), user_id)
+            await _audit(session, scope, "entry_updated" if supersedes_id else "entry_recorded", user_id,
+                         topic_id=topic.id, entry_id=entry.id, details=dfm_audit.entry_details(entry))
             for row in stored:
-                await dfm_audit.record_event(
-                    session, tool_part_id=tool.id, action="file_attached", actor_id=user_id, topic_id=topic.id,
-                    entry_id=entry.id, file_id=row.id, details=dfm_audit.file_details(row))
+                await _audit(session, scope, "file_attached", user_id, topic_id=topic.id,
+                             entry_id=entry.id, file_id=row.id, details=dfm_audit.file_details(row))
             await session.flush()
         except Exception:
             for path in written:
@@ -382,17 +477,27 @@ class DfmService:
     # ---- response shaping -------------------------------------------------
 
     @staticmethod
-    def topic_summary(topic: DfmTopic, today: date | None = None, flow: dict | None = None) -> dict:
+    def topic_summary(topic: DfmTopic, today: date | None = None, flow: dict | None = None,
+                      names: dict | None = None, user=None) -> dict:
+        """names: user_names for opener / closer (lists resolve them in one
+        query); user: the caller, for can_delete."""
         flow = flow or flow_state(topic, today)
+        names = names or {}
+        entry_count = len(topic.entries)
         stamps = [topic.opened_at] + [e.recorded_at for e in topic.entries]
         if topic.closed_at:
             stamps.append(topic.closed_at)
         return {
-            "id": topic.id, "tool_part_id": topic.tool_part_id, "title": topic.title,
+            "id": topic.id, "tool_part_id": topic.tool_part_id,
+            "project_id": getattr(topic, "project_id", None), "title": topic.title,
             "status": topic.status,
-            "opened_by": topic.opened_by, "opened_at": _iso(topic.opened_at),
-            "closed_by": topic.closed_by, "closed_at": _iso(topic.closed_at),
-            "entry_count": len(topic.entries),
+            "opened_by": topic.opened_by, "opened_by_name": names.get(topic.opened_by),
+            "opened_at": _iso(topic.opened_at),
+            "closed_by": topic.closed_by, "closed_by_name": names.get(topic.closed_by),
+            "closed_at": _iso(topic.closed_at),
+            "entry_count": entry_count,
+            "can_delete": entry_count == 0 and user is not None
+                          and (user.id == topic.opened_by or is_admin(user)),
             "last_activity": _iso(max(s for s in stamps if s is not None)),
             "waiting_on": flow["waiting_on"],
             "last_step": flow["last_step"],
@@ -425,7 +530,7 @@ class DfmService:
         }
 
     @staticmethod
-    def topic_detail(topic: DfmTopic, names: dict, today: date | None = None) -> dict:
+    def topic_detail(topic: DfmTopic, names: dict, today: date | None = None, user=None) -> dict:
         """Entries in the order they were received: by sent_at when it is
         set, else the date they were recorded, then recorded_at, then id.
         This lets a backfilled mail dated earlier sit above one recorded
@@ -445,7 +550,7 @@ class DfmService:
                 cursor = by_id.get(cursor.supersedes_id) if cursor.supersedes_id else None
             d["history"] = history
             entries.append(d)
-        return {**DfmService.topic_summary(topic, flow=flow), "next_step": flow["next_step"],
+        return {**DfmService.topic_summary(topic, flow=flow, names=names, user=user), "next_step": flow["next_step"],
                 "entries": entries}
 
     @staticmethod

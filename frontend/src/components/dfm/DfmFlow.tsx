@@ -8,32 +8,39 @@
  * the view needs no layout measurement to be correct. The canvas zooms
  * (50% to 150%, Ctrl+wheel, Fit) and shows compact cards below 75%.
  * Card actions open the guided form prefilled. A finished topic is read-only
- * with Reopen.
+ * with Reopen. The route and the files sent are the card's main content (the
+ * answers live inside the DFM files). "Finish confirmed" is a quiet button
+ * that needs at least one message and a confirmation; an empty topic can be
+ * renamed or deleted from the header.
  */
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  closeTopic, dfmFileUrl, getTopic, reopenTopic, KIND_LABELS, KINDS, PARTIES, PARTY_LABELS,
-  type DfmEntry,
+  closeTopic, deleteTopic, dfmFileUrl, dfmKey, getTopic, renameTopic, reopenTopic, KIND_LABELS, KINDS, PARTIES, PARTY_LABELS,
+  type DfmEntry, type DfmScope,
 } from '../../api/dfm';
+import ConfirmDialog from '../common/ConfirmDialog';
+import { formatDate } from '../../lib/format';
 import type { PaneDocument } from '../parts/DocumentPane';
 import { apiErrorMessage } from '../../lib/apiError';
 import DfmAuditLog from './DfmAuditLog';
 import DfmEntryForm from './DfmEntryForm';
 import {
-  arrowSpan, CARD_MARGIN_PX, CARD_MAX_PX, cardActions, cardLane, currentIds, dayLabel, flowRows, formatDays, initials,
+  archiveLabel, arrowSpan, CARD_MARGIN_PX, CARD_MAX_PX, cardActions, cardLane, currentIds, dayLabel, flowRows, formatDays, initials,
   KIND_STYLE, laneCenterPct, laneIndex, newOriginalStep, nextStepText, PARTY_STYLE, shortDate, sourceLabel,
   type DfmStep,
 } from './dfmFlow';
 import { fitZoom, isCompact, useDfmZoom, ZOOM_MAX, ZOOM_MIN } from './dfmZoom';
 
 interface Props {
-  partId: number;
+  scope: DfmScope;
   topicId: number;
   onOpenPdf(doc: PaneDocument): void;
-  /** Back to the topic list (the "DFM archive" breadcrumb). */
+  /** Back to the topic list (the "DFM archive" breadcrumb); also after a delete. */
   onBack(): void;
+  /** Open the "+ New DFM" form right away (a topic just created). */
+  autoOpenForm?: boolean;
   /** Opens the archive in its own window; hidden when absent (already in one). */
   onPopOut?: () => void;
   /** Fill the parent height (pop-out window) instead of a capped scroll box. */
@@ -52,9 +59,16 @@ const cardWidth = `min(${CARD_MAX_PX}px, calc(100% - ${CARD_MARGIN_PX * 2}px))`;
 
 const iconBtn = 'h-7 min-w-7 px-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-transparent';
 
-export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, fill = false, initialJumpEntryId = null }: Props) {
+const outlineBtn = 'px-3 py-1 rounded-md ring-1 ring-inset ring-slate-600 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed text-sm';
+
+export default function DfmFlow({
+  scope, topicId, onOpenPdf, onBack, onPopOut, fill = false, initialJumpEntryId = null, autoOpenForm = false,
+}: Props) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<{ step: DfmStep; n: number } | null>(null);
+  const [form, setForm] = useState<{ step: DfmStep; n: number } | null>(
+    () => (autoOpenForm ? { step: newOriginalStep(), n: 1 } : null));
+  const [confirm, setConfirm] = useState<'finish' | 'delete' | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);  // null = not renaming
   const [openHistory, setOpenHistory] = useState<Set<number>>(new Set());
   const [highlighted, setHighlighted] = useState<number | null>(null);
   const [menuFor, setMenuFor] = useState<number | null>(null);
@@ -92,22 +106,36 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
   }, [viewport, zoomBy]);
 
   const { data: topic } = useQuery({
-    queryKey: ['dfm-topic', partId, topicId],
-    queryFn: () => getTopic(partId, topicId),
+    queryKey: dfmKey('dfm-topic', scope, topicId),
+    queryFn: () => getTopic(scope, topicId),
     refetchOnWindowFocus: true,
   });
 
   const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['dfm-topic', partId, topicId] });
-    queryClient.invalidateQueries({ queryKey: ['dfm-topics', partId] });
+    queryClient.invalidateQueries({ queryKey: dfmKey('dfm-topic', scope, topicId) });
+    queryClient.invalidateQueries({ queryKey: dfmKey('dfm-topics', scope) });
   };
+  // Errors of finish and delete show inside the confirm dialog (it rethrows).
   const finish = useMutation({
-    mutationFn: () => closeTopic(partId, topicId),
+    mutationFn: () => closeTopic(scope, topicId),
     onSuccess: () => { toast.success('Topic finished confirmed'); setForm(null); refresh(); },
-    onError: (e) => toast.error(apiErrorMessage(e, 'Could not finish the topic')),
+  });
+  const remove = useMutation({
+    mutationFn: () => deleteTopic(scope, topicId),
+    onSuccess: () => {
+      toast.success('Topic deleted');
+      queryClient.invalidateQueries({ queryKey: dfmKey('dfm-topics', scope) });
+      queryClient.removeQueries({ queryKey: dfmKey('dfm-topic', scope, topicId) });
+      onBack();
+    },
+  });
+  const rename = useMutation({
+    mutationFn: (title: string) => renameTopic(scope, topicId, title),
+    onSuccess: () => { toast.success('Topic renamed'); setRenaming(null); refresh(); },
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not rename the topic')),
   });
   const reopen = useMutation({
-    mutationFn: () => reopenTopic(partId, topicId),
+    mutationFn: () => reopenTopic(scope, topicId),
     onSuccess: () => { toast.success('Topic reopened'); refresh(); },
     onError: (e) => toast.error(apiErrorMessage(e, 'Could not reopen the topic')),
   });
@@ -135,7 +163,6 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
       jumpTo(pendingHighlight);
       setPendingHighlight(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, pendingHighlight, topic]);
 
   const jumpFromLog = (entryId: number) => {
@@ -152,22 +179,29 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
   const byId = new Map(entries.map((e) => [e.id, e]));
   const waitingOn = open ? topic.waiting_on ?? [] : [];
   const waitingCount = (p: string) => waitingOn.find((w) => w.party === p)?.count ?? 0;
+  const waitingTotal = open ? entries.filter((e) => e.awaiting.length > 0).length : 0;
+  const submitRename = () => {
+    const title = (renaming ?? '').trim();
+    if (!title) { toast.error('Give the topic a title'); return; }
+    if (title === topic.title) { setRenaming(null); return; }
+    rename.mutate(title);
+  };
   const compact = isCompact(zoom);
   const canvasWidth = Math.max(MIN_CANVAS_PX, Math.floor((viewportWidth * 100) / zoom));
   const formWidth = viewportWidth > 0 ? Math.min(720, Math.max(320, viewportWidth - 96)) : 720;
 
   const formEl = form && open && (
-    <DfmEntryForm key={form.n} partId={partId} topicId={topicId} step={form.step}
+    <DfmEntryForm key={form.n} scope={scope} topicId={topicId} step={form.step}
       onDone={() => { setForm(null); refresh(); }} onCancel={() => setForm(null)} />
   );
 
   const fileLink = (e: Omit<DfmEntry, 'history'>, f: DfmEntry['files'][number]) =>
     f.original_filename.toLowerCase().endsWith('.pdf') ? (
       <button key={f.id} data-testid={`dfm-file-${f.id}`}
-        onClick={() => onOpenPdf({ fileId: f.id, filename: f.original_filename, kind: 'pdf', revisionName: topic.title, sourceLabel: sourceLabel(e), inlineUrl: dfmFileUrl(partId, f.id, 'inline') })}
+        onClick={() => onOpenPdf({ fileId: f.id, filename: f.original_filename, kind: 'pdf', revisionName: topic.title, sourceLabel: sourceLabel(e), inlineUrl: dfmFileUrl(scope, f.id, 'inline') })}
         className="font-mono text-xs text-blue-300 hover:underline text-left break-all">{f.original_filename}</button>
     ) : (
-      <a key={f.id} data-testid={`dfm-file-${f.id}`} href={dfmFileUrl(partId, f.id, 'download')}
+      <a key={f.id} data-testid={`dfm-file-${f.id}`} href={dfmFileUrl(scope, f.id, 'download')}
         className="font-mono text-xs text-blue-300 hover:underline break-all">{f.original_filename}</a>
     );
 
@@ -187,12 +221,12 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
         {route(e)}
         <span className="text-slate-500" title={e.recorded_by_name ? `Recorded by ${e.recorded_by_name}` : undefined}> · {initials(e.recorded_by_name)}</span>
       </div>
-      {e.note && <div className="text-slate-100 whitespace-pre-wrap mt-1 leading-snug">{e.note}</div>}
       {e.files.length > 0 && (
-        <div className="flex flex-col gap-0.5 mt-1.5">
+        <div data-testid={`dfm-files-${e.id}`} className="flex flex-col gap-0.5 mt-1.5">
           {e.files.map((f) => <span key={f.id}>{fileLink(e, f)}</span>)}
         </div>
       )}
+      {e.note && <div className="text-xs text-slate-300 whitespace-pre-wrap mt-1 leading-snug">{e.note}</div>}
     </>
   );
 
@@ -330,7 +364,11 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
 
   let strip: string;
   let stripTone = 'text-slate-300';
-  if (!open) strip = 'Finished confirmed, read only';
+  if (!open) {
+    const on = topic.closed_at ? ` on ${formatDate(topic.closed_at)}` : '';
+    const by = topic.closed_by_name ? ` by ${topic.closed_by_name}` : '';
+    strip = `Finished confirmed${on}${by}. Reopen to add messages.`;
+  }
   else if (entries.length === 0) strip = 'No messages yet. Record the first DFM with + New DFM.';
   else if (topic.next_step) strip = nextStepText(topic.next_step);
   else if (topic.all_answered) { strip = 'All answered'; stripTone = 'text-emerald-300 font-medium'; }
@@ -343,10 +381,27 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-2">
         <nav data-testid="dfm-breadcrumb" aria-label="Breadcrumb" className="flex items-baseline gap-1.5 min-w-0">
           <button data-testid="dfm-breadcrumb-archive" onClick={onBack}
-            className="text-sm text-slate-400 hover:text-slate-100 hover:underline underline-offset-2">DFM archive</button>
+            className="text-sm text-slate-400 hover:text-slate-100 hover:underline underline-offset-2">{archiveLabel(scope)}</button>
           <span aria-hidden className="text-slate-600">/</span>
-          <h2 className="text-lg font-semibold text-slate-100 truncate">{topic.title}</h2>
+          {renaming === null ? (
+            <h2 data-testid="dfm-topic-title-heading" className="text-lg font-semibold text-slate-100 truncate">{topic.title}</h2>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <input data-testid="dfm-rename-input" autoFocus value={renaming} aria-label="Topic title"
+                onChange={(e) => setRenaming(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') { e.preventDefault(); setRenaming(null); } }}
+                className="bg-slate-900 border border-slate-600 rounded px-2 py-0.5 text-slate-100 text-sm w-64" />
+              <button data-testid="dfm-rename-save" onClick={submitRename} disabled={rename.isPending}
+                className="px-2 py-0.5 rounded-md bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-xs">Save</button>
+              <button data-testid="dfm-rename-cancel" onClick={() => setRenaming(null)}
+                className="px-2 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs">Cancel</button>
+            </span>
+          )}
         </nav>
+        {renaming === null && (
+          <button data-testid="dfm-rename" onClick={() => setRenaming(topic.title)}
+            className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">Rename</button>
+        )}
         <span data-testid="dfm-topic-status"
           className={`text-xs px-2 py-0.5 rounded-full ring-1 ring-inset ${open ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-400/40' : 'bg-slate-700 text-slate-200 ring-slate-500'}`}>
           {open ? 'Open' : 'Finished confirmed'}
@@ -371,11 +426,16 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
               className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ New DFM</button>
           )}
           {open ? (
-            <button data-testid="dfm-finish" onClick={() => finish.mutate()} disabled={finish.isPending}
-              className="px-3 py-1 rounded-md bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-600 text-white text-sm">Finish confirmed</button>
+            <button data-testid="dfm-finish" onClick={() => setConfirm('finish')} disabled={entries.length === 0 || finish.isPending}
+              title={entries.length === 0 ? 'Record at least one message before finishing the topic' : 'Mark the topic as finished confirmed'}
+              className={outlineBtn}>Finish confirmed</button>
           ) : (
             <button data-testid="dfm-reopen" onClick={() => reopen.mutate()} disabled={reopen.isPending}
               className="px-3 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm">Reopen</button>
+          )}
+          {topic.can_delete && (
+            <button data-testid="dfm-delete-topic" onClick={() => setConfirm('delete')}
+              className="px-3 py-1 rounded-md text-sm text-red-300 hover:text-red-200 hover:bg-red-500/10">Delete</button>
           )}
           {onPopOut && (
             <button data-testid="dfm-popout" onClick={onPopOut} title="Open the DFM archive in its own window"
@@ -386,7 +446,7 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
 
       {view === 'log' ? (
         <div data-testid="dfm-topic-audit-log" className={fill ? 'flex-1 min-h-0 overflow-auto' : ''}>
-          <DfmAuditLog partId={partId} topicId={topicId} onJumpToEntry={(entryId) => jumpFromLog(entryId)} />
+          <DfmAuditLog scope={scope} topicId={topicId} onJumpToEntry={(entryId) => jumpFromLog(entryId)} />
         </div>
       ) : (
       <>
@@ -486,6 +546,17 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
       </div>
       </>
       )}
+
+      <ConfirmDialog data-testid="dfm-finish-confirm" open={confirm === 'finish'} onClose={() => setConfirm(null)}
+        title="Finish this topic?" confirmLabel="Finish confirmed" errorFallback="Could not finish the topic"
+        body={waitingTotal > 0
+          ? `${waitingTotal} ${waitingTotal === 1 ? 'message still waits' : 'messages still wait'} for an answer. Finished topics are read only until reopened.`
+          : 'Finished topics are read only until reopened.'}
+        onConfirm={() => finish.mutateAsync()} />
+      <ConfirmDialog data-testid="dfm-delete-confirm" open={confirm === 'delete'} onClose={() => setConfirm(null)} danger
+        title="Delete this topic?" confirmLabel="Delete topic" errorFallback="Could not delete the topic"
+        body={`"${topic.title}" has no messages. It is removed from the archive; the audit log keeps a record.`}
+        onConfirm={() => remove.mutateAsync()} />
     </div>
   );
 }

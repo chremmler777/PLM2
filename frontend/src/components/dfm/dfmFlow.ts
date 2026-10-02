@@ -6,7 +6,7 @@
  */
 import {
   KIND_LABELS, PARTIES, PARTY_LABELS,
-  type DfmEntry, type DfmKind, type DfmLastStep, type DfmNextStep, type DfmParty, type DfmTopicSummary,
+  type DfmEntry, type DfmKind, type DfmLastStep, type DfmNextStep, type DfmParty, type DfmScope, type DfmTopicSummary,
 } from '../../api/dfm';
 
 export function initials(name: string | null | undefined): string {
@@ -114,6 +114,20 @@ export function currentIds(entries: DfmEntry[]): Map<number, number> {
   return m;
 }
 
+/** Breadcrumb root and heading per archive scope. */
+export const archiveLabel = (scope: DfmScope) => (scope.kind === 'tool' ? 'DFM archive' : 'General tooling DFM');
+
+/** One-line explanation under the heading, per scope. */
+export const ARCHIVE_HINT: Record<DfmScope['kind'], string> = {
+  tool: 'One topic per DFM round or question, e.g. DFM rev 1 or Gate position. Each step records the file sent and who it went to; the answers stay in the PPT.',
+  project: 'Topics for all tools of this project: tooling standards, material info, general requirements.',
+};
+/** Placeholder for a new topic title, per scope. */
+export const TITLE_PLACEHOLDER: Record<DfmScope['kind'], string> = {
+  tool: 'e.g. DFM rev 1, Gate position',
+  project: 'e.g. Tooling standard, Material datasheets',
+};
+
 export const others = (p: DfmParty) => PARTIES.filter((x) => x !== p);
 
 /** One step for the guided form, prefilled from a card action or "+ New DFM". */
@@ -126,7 +140,8 @@ export interface DfmStep {
   /** Parties that may be addressed; the sender's two others when null. */
   allowedTo: DfmParty[] | null;
   replyTo: { id: number; kind: DfmKind } | null;
-  supersedes: { id: number; kind: DfmKind } | null;
+  /** The entry this step updates; its note prefills (and opens) the form's note. */
+  supersedes: { id: number; kind: DfmKind; note?: string | null } | null;
   /** The card the form opens under; null for a new original. */
   anchorId: number | null;
 }
@@ -181,7 +196,7 @@ export function cardActions(e: DfmEntry, entries: DfmEntry[]): DfmAction[] {
     step: { kind: e.kind, from: e.party, fromEditable: false, to: e.addressed_to, lockedTo: locked,
       allowedTo: e.kind === 'forward' ? e.addressed_to : null,
       replyTo: target ? { id: target.id, kind: target.kind } : null,
-      supersedes: { id: e.id, kind: e.kind }, anchorId: e.id } });
+      supersedes: { id: e.id, kind: e.kind, note: e.note }, anchorId: e.id } });
   return acts;
 }
 

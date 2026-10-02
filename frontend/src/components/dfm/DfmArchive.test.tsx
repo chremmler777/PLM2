@@ -3,14 +3,16 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import DfmArchive from './DfmArchive'
 import { relaySummary } from './dfmFixtures'
+import { projectScope, toolScope, type DfmScope } from '../../api/dfm'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('./DfmFlow', () => ({
-  default: (p: { topicId: number; onBack(): void; onPopOut?: () => void; initialJumpEntryId?: number | null }) => (
+  default: (p: { topicId: number; onBack(): void; onPopOut?: () => void; initialJumpEntryId?: number | null; autoOpenForm?: boolean }) => (
     <div data-testid="flow">
       <span data-testid="flow-topic">topic {p.topicId}</span>
+      <span data-testid="flow-autoform">{String(!!p.autoOpenForm)}</span>
       <span data-testid="flow-jump">jump {String(p.initialJumpEntryId ?? '')}</span>
       <button data-testid="flow-back" onClick={p.onBack}>back</button>
       {p.onPopOut && <button data-testid="flow-popout" onClick={p.onPopOut}>pop</button>}
@@ -28,9 +30,10 @@ const topics = [
   relaySummary({ id: 1, title: 'Draft angles', status: 'finished_confirmed', closed_by: 14, closed_at: '2026-09-20T09:00:00' }),
 ]
 
-function wrap(props: { initialTopic?: number; inWindow?: boolean } = {}) {
+function wrap(props: { initialTopic?: number; inWindow?: boolean; scope?: DfmScope; projectId?: number | null } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={qc}><DfmArchive partId={7} onOpenPdf={vi.fn()} {...props} /></QueryClientProvider>)
+  const { scope = toolScope(7), ...rest } = props
+  render(<QueryClientProvider client={qc}><DfmArchive scope={scope} onOpenPdf={vi.fn()} {...rest} /></QueryClientProvider>)
 }
 
 describe('DfmArchive', () => {
@@ -71,10 +74,10 @@ describe('DfmArchive', () => {
   it('opens the archive in its own window, with the open topic', async () => {
     wrap()
     fireEvent.click(await screen.findByTestId('dfm-popout'))
-    expect(windowMocks.openDfmWindow).toHaveBeenCalledWith(7, null)
+    expect(windowMocks.openDfmWindow).toHaveBeenCalledWith(toolScope(7), null)
     fireEvent.click(screen.getByTestId('dfm-topic-2'))
     fireEvent.click(screen.getByTestId('flow-popout'))
-    expect(windowMocks.openDfmWindow).toHaveBeenLastCalledWith(7, 2)
+    expect(windowMocks.openDfmWindow).toHaveBeenLastCalledWith(toolScope(7), 2)
   })
 
   it('in its own window: starts on the asked topic and offers no further pop-out', async () => {
@@ -94,12 +97,71 @@ describe('DfmArchive', () => {
     fireEvent.click(screen.getByTestId('dfm-create-topic'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/dfm/topics', { title: 'Cooling layout' }))
     await waitFor(() => expect(screen.getByTestId('flow-topic').textContent).toBe('topic 9'))
+    // A new topic opens with the first-step form ready.
+    expect(screen.getByTestId('flow-autoform').textContent).toBe('true')
   })
 
-  it('says when there is nothing yet', async () => {
+  it('opens an existing topic without the form', async () => {
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-topic-2'))
+    expect(screen.getByTestId('flow-autoform').textContent).toBe('false')
+  })
+
+  it('explains the tool archive, suggests titles and links the general tooling DFM', async () => {
+    wrap({ projectId: 35 })
+    await screen.findByTestId('dfm-topic-2')
+    expect(screen.getByTestId('dfm-archive-hint').textContent).toContain('One topic per DFM round or question')
+    expect(screen.getByTestId('dfm-archive-hint').textContent).toContain('the answers stay in the PPT')
+    fireEvent.click(screen.getByTestId('dfm-general-link'))
+    expect(windowMocks.openDfmWindow).toHaveBeenCalledWith(projectScope(35), null)
+    fireEvent.click(screen.getByTestId('dfm-new-topic'))
+    expect(screen.getByTestId('dfm-topic-title').getAttribute('placeholder')).toBe('e.g. DFM rev 1, Gate position')
+  })
+
+  it('hides the general tooling DFM link without a project id', async () => {
+    wrap()
+    await screen.findByTestId('dfm-topic-2')
+    expect(screen.queryByTestId('dfm-general-link')).toBeNull()
+  })
+
+  it('serves the project-wide general tooling DFM', async () => {
+    clientMocks.get.mockImplementation((url: string) =>
+      url === '/v1/projects/35/dfm/topics' ? Promise.resolve({ data: topics }) : Promise.resolve({ data: [] }))
+    clientMocks.post.mockResolvedValue({ data: { ...topics[0], id: 9, title: 'Tooling standard', entry_count: 0 } })
+    wrap({ scope: projectScope(35) })
+    await screen.findByTestId('dfm-topic-2')
+    const archive = screen.getByTestId('dfm-archive')
+    expect(archive.textContent).toContain('General tooling DFM')
+    expect(screen.getByTestId('dfm-archive-hint').textContent).toBe('Topics for all tools of this project: tooling standards, material info, general requirements.')
+    expect(screen.queryByTestId('dfm-general-link')).toBeNull()
+    fireEvent.click(screen.getByTestId('dfm-popout'))
+    expect(windowMocks.openDfmWindow).toHaveBeenCalledWith(projectScope(35), null)
+    fireEvent.click(screen.getByTestId('dfm-new-topic'))
+    expect(screen.getByTestId('dfm-topic-title').getAttribute('placeholder')).toBe('e.g. Tooling standard, Material datasheets')
+    fireEvent.change(screen.getByTestId('dfm-topic-title'), { target: { value: 'Tooling standard' } })
+    fireEvent.click(screen.getByTestId('dfm-create-topic'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/projects/35/dfm/topics', { title: 'Tooling standard' }))
+  })
+
+  it('marks empty topics and quiets finished ones', async () => {
+    clientMocks.get.mockImplementation(() => Promise.resolve({ data: [
+      relaySummary({ id: 4, title: 'DFM', entry_count: 0, waiting_on: [], last_step: null }),
+      ...topics,
+    ] }))
+    wrap()
+    expect((await screen.findByTestId('dfm-topic-empty-4')).textContent).toBe('empty')
+    expect(screen.queryByTestId('dfm-topic-empty-2')).toBeNull()
+    expect(screen.getByTestId('dfm-topic-1').getAttribute('data-finished')).toBe('true')
+    expect(screen.getByTestId('dfm-topic-1').className).toContain('opacity-60')
+    expect(screen.getByTestId('dfm-topic-2').className).not.toContain('opacity-60')
+  })
+
+  it('says when there is nothing yet and offers + topic there', async () => {
     clientMocks.get.mockImplementation(() => Promise.resolve({ data: [] }))
     wrap()
-    expect((await screen.findByTestId('dfm-archive')).textContent).toContain('No DFM topic yet')
+    expect((await screen.findByTestId('dfm-archive-empty')).textContent).toContain('No DFM topic yet')
+    fireEvent.click(screen.getByTestId('dfm-empty-new-topic'))
+    expect(screen.getByTestId('dfm-topic-title')).toBeTruthy()
   })
 
   it('shows an error line when the topics query fails', async () => {

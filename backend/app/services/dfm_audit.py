@@ -1,4 +1,4 @@
-"""DFM audit trail: append-only events per tool. record_event only adds to
+"""DFM audit trail: append-only events per tool or per project. record_event only adds to
 the session; the caller's commit makes the event part of the change it
 describes, so a failed change leaves no event. There is no update or delete."""
 from __future__ import annotations
@@ -38,22 +38,27 @@ def file_details(f: DfmEntryFile) -> dict:
             "sha256": f.sha256}
 
 
-async def record_event(session: AsyncSession, *, tool_part_id: int, action: str, actor_id: int,
-                       topic_id: int | None = None, entry_id: int | None = None, file_id: int | None = None,
-                       details: dict | None = None) -> DfmAuditEvent:
+async def record_event(session: AsyncSession, *, action: str, actor_id: int, tool_part_id: int | None = None,
+                       project_id: int | None = None, topic_id: int | None = None, entry_id: int | None = None,
+                       file_id: int | None = None, details: dict | None = None) -> DfmAuditEvent:
+    """Exactly one of tool_part_id / project_id."""
     if action not in DFM_AUDIT_ACTIONS:
         raise ValueError(f"Unknown DFM audit action '{action}'")
-    event = DfmAuditEvent(tool_part_id=tool_part_id, topic_id=topic_id, entry_id=entry_id, file_id=file_id,
+    if (tool_part_id is None) == (project_id is None):
+        raise ValueError("A DFM audit event belongs to exactly one tool or project")
+    event = DfmAuditEvent(tool_part_id=tool_part_id, project_id=project_id, topic_id=topic_id, entry_id=entry_id, file_id=file_id,
                           action=action, actor_id=actor_id, details=details or {})
     session.add(event)
     return event
 
 
-async def list_events(session: AsyncSession, tool_part_id: int, *, topic_id: int | None = None,
+async def list_events(session: AsyncSession, scope, *, topic_id: int | None = None,
                       action: str | None = None, limit: int | None = DEFAULT_LIMIT,
                       before_id: int | None = None) -> list[DfmAuditEvent]:
-    """Newest first (by id, which follows insertion order)."""
-    q = select(DfmAuditEvent).where(DfmAuditEvent.tool_part_id == tool_part_id)
+    """Newest first (by id, which follows insertion order). scope: a
+    DfmScope, or a tool part id (int)."""
+    where = (DfmAuditEvent.tool_part_id == scope) if isinstance(scope, int) else scope.audit_filter()
+    q = select(DfmAuditEvent).where(where)
     if topic_id is not None:
         q = q.where(DfmAuditEvent.topic_id == topic_id)
     if action is not None:
@@ -67,7 +72,8 @@ async def list_events(session: AsyncSession, tool_part_id: int, *, topic_id: int
 
 
 async def shape_events(session: AsyncSession, events: list[DfmAuditEvent]) -> list[dict]:
-    """Resolve actor, topic, entry and file in one query each."""
+    """Resolve actor, topic, entry and file in one query each. A deleted
+    topic still resolves (its title shows in the trail)."""
     from app.services.dfm_service import user_names
 
     names = await user_names(session, {e.actor_id for e in events})

@@ -12,7 +12,7 @@ def ago(days: int) -> str:
     return (date.today() - timedelta(days=days)).isoformat()
 
 
-async def step(client, eng_auth, tool, topic, party, to, kind=None, reply_to=None, note=None,
+async def step(client, eng_auth, tool, topic, party, to, kind=None, reply_to=None, note="DFM message",
                sent_at=None, supersedes_id=None):
     data = {"party": party, "addressed_to": json.dumps(list(to))}
     if kind is not None:
