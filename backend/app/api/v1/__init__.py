@@ -25,6 +25,7 @@ from app.api.v1.items.materials import router as materials_router
 from app.api.v1.items.worksheet import router as worksheet_router
 from app.api.v1.items.intakes import router as intakes_router
 from app.api.v1.equipment import router as equipment_router
+from app.api.v1.tool_revisions import router as tool_revisions_router
 
 # Module: workflows (RASIC templates and instances)
 from app.api.v1.workflows.workflow_templates import router as workflow_templates_router
@@ -92,6 +93,7 @@ api_router.include_router(materials_router)
 api_router.include_router(worksheet_router)
 api_router.include_router(intakes_router, dependencies=_TRAINING_GATE)
 api_router.include_router(equipment_router)
+api_router.include_router(tool_revisions_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(search_router)
