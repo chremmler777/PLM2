@@ -29,3 +29,5 @@ relations, delete the rest, names from drawings). Prod is truth, see
 
 **Next time:** viewer conversion runs one STEP per core-second, ~8 min for a
 120 MB file; parallelise the attach loop before the next bulk load.
+
+2026-09-29: all ten 1994 tools built at **FZ Tools** (user). Supplier "FZ Tools" created on prod (id 1, first supplier there, org 1, by user 14) and set as toolmaker via `scripts/set_1994_tool_fields.py --toolmaker "FZ Tools" --apply`; backup plm2-before-fz-tools-20260929-212813.sql.gz.

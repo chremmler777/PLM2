@@ -24,8 +24,8 @@ the one off). All 12 rows map onto the 12 nominated parts, nothing extra or miss
 
 | Tool | VW number | PLM name | Cav | Nominated LT | New LT | Shots nom. | Shots new |
 |---|---|---|---|---|---|---|---|
-| 199401 | 206.882.251/252 | Handle, height adjustment LH/RH | 2 (1+1) | 463,612 each | 413,006 each | 463,612 | 413,006 |
-| 199402 | 206.885.967/968 | Latch cover 40/60 | 2 (1+1) | 1,019,000 each | 966,000 each | 1,019,000 | 966,000 |
+| 199401 | 206.882.251/252 | Handle, height adjustment LH/RH | 4 (2+2) | 463,612 each | 413,006 each | 231,806 | 206,503 |
+| 199402 | 206.885.967/968 | Latch cover 40/60 | 4 (2+2) | 1,019,000 each | 966,000 each | 509,500 | 483,000 |
 | 199403 | 206.887.233 | Isofix cover | 4 | 4,076,000 | 7,728,000 | 1,019,000 | **1,932,000** |
 | 199404 | 206.881.800 | A-bracket inner trim | 2 | 163,017 | 143,475 | 81,509 | 71,738 |
 | 199405 | 206.885.219 | Cover trim, center back | 2 | 744,654 | 705,923 | 372,327 | 352,962 |
@@ -95,3 +95,5 @@ and an xlsx, toolmaker to ktx, an update superseding the first with 1 earlier ve
 correctly 415s, close then 409 on a new entry, reopen, changelog lists `dfm_topic_opened`,
 `dfm_entry_recorded` x4, `dfm_topic_closed`, `dfm_topic_reopened` in order.
 
+
+**Correction 2026-09-24:** RFQ2 `tooling_variant_items.cavities` is per ARTICLE, not per tool. Handles (199401) and latch covers (199402) are 2+2 family tools = 4 cavities (earlier "1+1 / 2" was wrong; shots in the table above corrected). Prod PLM tool_cavities fixed 2 -> 4, worksheet flags confirmed with a comment. ISOFIX 199403: RFQ 4, Excel says 2 - still an open flag. RFQ2 tooling_calc names ("raw (4-cavity)", "(8-cavity)") don't match the item cavities; don't trust them.

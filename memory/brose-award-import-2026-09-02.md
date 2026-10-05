@@ -36,3 +36,5 @@ U: paths: `RFQ\RFQ25_260112_Brose Backpanel\10_Deliveries\B-Release_2026-05-28\0
 `/data/appdata/plm2/revision-uploads:/app/uploads` mount (owned by uid 1000) so revision files and change
 attachments survive rebuilds. RFQ2 prod already had RFQ 25/26 and is newer than local: never push the local
 RFQ2 DB to prod. Runbook §11 in adminpanel/docs/plm2-prod-deploy-runbook.md has the log.
+
+**Naming update 2026-09-25 (user):** the former project 1994A is project **1994** (Brose Seat Trim), and 1994B is project **2277** (Brose Backpanel). The local DB already carries these codes. Use 1994 / 2277 in all new work.
