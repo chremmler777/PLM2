@@ -228,6 +228,34 @@ async def insert_legacy_concern(session_factory, change_id: int, *, kind: str,
         return c.id
 
 
+async def make_department_member(session_factory, user_id: int, name: str) -> int:
+    """Get-or-create the department by name and add the user to it."""
+    from sqlalchemy import select as _select
+    from app.models.workflow import Department, UserDepartment
+    async with session_factory() as s:
+        dept = (await s.execute(_select(Department).where(Department.name == name))).scalar_one_or_none()
+        if dept is None:
+            dept = Department(name=name, flow_type="action", is_active=True)
+            s.add(dept)
+            await s.flush()
+        if await s.get(UserDepartment, (user_id, dept.id)) is None:
+            s.add(UserDepartment(user_id=user_id, department_id=dept.id))
+        await s.commit()
+        return dept.id
+
+
+async def make_tool_engineer(session_factory, user_id: int) -> int:
+    """Tool data (tool fields, produces links, shrinkage, DFM) is Tool Engineer or admin only
+    (app/services/tool_rights.py); the seeded engineer is no admin."""
+    return await make_department_member(session_factory, user_id, "Tool Engineer")
+
+
+@pytest_asyncio.fixture
+async def tool_engineer(session_factory, seed):
+    """The seeded engineer as a Tool Engineer member (use with autouse in tool-data test modules)."""
+    return await make_tool_engineer(session_factory, seed["engineer_id"])
+
+
 async def make_development_member(session_factory, user_id: int) -> int:
     """Impact confirmation is Development-only (no admin shortcut), so any
     test confirming through the API needs the confirming user in Development.

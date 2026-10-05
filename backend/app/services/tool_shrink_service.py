@@ -183,6 +183,8 @@ async def decide(db: AsyncSession, tool: Part, user: User, *, parallel_pct: Opti
         action_description=f"Shrinkage {values_text(combined_pct, parallel_pct, normal_pct)} from {source_kind}"
                            f"{': ' + d.source_label if d.source_label else ''}",
         notes=d.rationale)
+    # MaterialDB shows the decided value as KTX tool experience right away; the trial updates it later
+    await report(db, tool, d, user)
     return d
 
 
@@ -221,7 +223,10 @@ async def verify(db: AsyncSession, tool: Part, decision_id: int, user: User, *,
 
 
 async def report(db: AsyncSession, tool: Part, d: ToolShrinkDecision, user: User) -> None:
-    """Send the verified decision to MaterialDB; the outcome is stored, never raised."""
+    """Send the tool's current decision to MaterialDB as its shrinkage experience: decided (not verified
+    yet) when it is taken, then again with the measured values and verdict after the trial. One
+    MaterialDB entry per tool (keyed by the tool's id), so a new decision updates it. The outcome is
+    stored on the decision, never raised."""
     d.feedback_at = datetime.utcnow()
     if not d.materialdb_id:
         d.feedback_status, d.feedback_error = "skipped", "No MaterialDB material on this decision"
@@ -243,12 +248,14 @@ async def report(db: AsyncSession, tool: Part, d: ToolShrinkDecision, user: User
         "planned_source": f"{planned_source}\nWhy: {d.rationale}"[:2000],
         "measured_flow": measured_flow, "measured_cross": measured_cross,
         "measured_ref": d.measured_ref, "verdict": d.verdict,
-        "recommendation": d.next_time_note or f"Keep {values_text(d.combined_pct, d.parallel_pct, d.normal_pct)}",
-        "source": f"PLM2 tool {tool.part_number}, shrinkage decision {d.id}",
+        "recommendation": d.next_time_note or (f"Keep {values_text(d.combined_pct, d.parallel_pct, d.normal_pct)}"
+                                               if d.verified_at else None),
+        "source": f"PLM2 tool {tool.part_number}, shrinkage decision {d.id}"
+                  + ("" if d.verified_at else ", decided, not verified yet"),
         "actor": user.full_name or user.username,
     }
     try:
-        await materialdb_client.put_shrink_experience(d.id, body)
+        await materialdb_client.put_shrink_experience(tool.id, body)
         d.feedback_status, d.feedback_error = "sent", None
     except MaterialDbUnavailable as e:
         d.feedback_status, d.feedback_error = "failed", str(e)[:500]
@@ -257,7 +264,7 @@ async def report(db: AsyncSession, tool: Part, d: ToolShrinkDecision, user: User
 
 async def resend(db: AsyncSession, tool: Part, decision_id: int, user: User) -> ToolShrinkDecision:
     d = await _current(db, tool.id, decision_id)
-    if d.verified_at is None:
-        raise ShrinkError("Verify the decision before reporting it")
+    if d.status != "current":
+        raise ShrinkError("Only the current decision is reported")
     await report(db, tool, d, user)
     return d

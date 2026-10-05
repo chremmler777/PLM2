@@ -90,7 +90,9 @@ export interface DfmTopicSummary {
   closed_by: number | null;
   closed_by_name: string | null;
   closed_at: string | null;
-  /** Empty topic and the viewer opened it (or is an admin). */
+  /** The viewer may change tool data (Tool Engineer or admin): open, record, finish, reopen, rename. */
+  can_edit?: boolean;
+  /** The viewer may delete the topic (a topic with messages needs a reason). */
   can_delete: boolean;
   entry_count: number;
   last_activity: string;
@@ -144,8 +146,11 @@ export async function renameTopic(scope: DfmScope, topicId: number, title: strin
 }
 
 /** Soft delete; the backend allows it only for an empty topic, by its opener or an admin. */
-export async function deleteTopic(scope: DfmScope, topicId: number): Promise<void> {
-  await client.delete(`${base(scope)}/topics/${topicId}`);
+/** Soft delete: hidden from the archive, entries / files / audit stay. A topic with messages needs a reason. */
+export async function deleteTopic(scope: DfmScope, topicId: number, reason?: string): Promise<void> {
+  const url = `${base(scope)}/topics/${topicId}`;
+  if (reason?.trim()) await client.delete(url, { data: { reason: reason.trim() } });
+  else await client.delete(url);
 }
 
 export async function closeTopic(scope: DfmScope, topicId: number): Promise<DfmTopicDetail> {

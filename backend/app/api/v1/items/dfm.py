@@ -24,10 +24,15 @@ from app.models.part import Part
 from app.services import dfm_audit
 from app.services.dfm_service import DfmError, DfmScope, DfmService, file_path, user_names
 from app.services.part_service import PartService
+from app.services.tool_rights import can_edit_tools, require_tool_editor
 
 logger = logging.getLogger(__name__)
 
 NOT_A_TOOL = "Only tools have a DFM archive"
+
+
+class TopicDelete(BaseModel):
+    reason: Optional[str] = Field(None, max_length=1000)
 
 
 class TopicCreate(BaseModel):
@@ -73,7 +78,7 @@ async def _topic(db: AsyncSession, scope: DfmScope, topic_id: int) -> DfmTopic:
 async def _detail(db: AsyncSession, topic: DfmTopic, user: User) -> dict:
     await db.refresh(topic, attribute_names=["entries"])
     names = await user_names(db, DfmService.user_ids(topic))
-    return DfmService.topic_detail(topic, names, user=user)
+    return DfmService.topic_detail(topic, names, user=user, can_edit=await can_edit_tools(db, user))
 
 
 async def _load_file(db: AsyncSession, scope: DfmScope, file_id: int) -> tuple[DfmEntryFile, str, int]:
@@ -121,16 +126,18 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
                           db: AsyncSession = Depends(get_db)):
         topics = await DfmService.list_topics(db, scope)
         names = await user_names(db, {i for t in topics for i in (t.opened_by, t.closed_by)})
-        return [DfmService.topic_summary(t, names=names, user=current_user) for t in topics]
+        can = await can_edit_tools(db, current_user)
+        return [DfmService.topic_summary(t, names=names, user=current_user, can_edit=can) for t in topics]
 
     @router.post(base + "/topics", response_model=dict, status_code=status.HTTP_201_CREATED)
     async def create_topic(body: TopicCreate, scope: DfmScope = Depends(scope_dep),
                            current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+        await require_tool_editor(db, current_user)
         topic = await DfmService.open_topic(db, scope, body.title, current_user.id)
         await db.commit()
         await db.refresh(topic, attribute_names=["entries"])
         names = await user_names(db, {topic.opened_by})
-        return DfmService.topic_summary(topic, names=names, user=current_user)
+        return DfmService.topic_summary(topic, names=names, user=current_user, can_edit=True)
 
     @router.get(base + "/topics/{topic_id}", response_model=dict)
     async def get_topic(topic_id: int, scope: DfmScope = Depends(scope_dep),
@@ -141,6 +148,7 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
     async def rename_topic(topic_id: int, body: TopicCreate, scope: DfmScope = Depends(scope_dep),
                            current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
         """Rename, open or finished. The same title is a no-op."""
+        await require_tool_editor(db, current_user)
         topic = await _topic(db, scope, topic_id)
         try:
             await DfmService.rename_topic(db, scope, topic, body.title, current_user.id)
@@ -150,12 +158,13 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
         return await _detail(db, topic, current_user)
 
     @router.delete(base + "/topics/{topic_id}", status_code=status.HTTP_204_NO_CONTENT)
-    async def delete_topic(topic_id: int, scope: DfmScope = Depends(scope_dep),
+    async def delete_topic(topic_id: int, body: Optional[TopicDelete] = None, scope: DfmScope = Depends(scope_dep),
                            current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-        """Soft delete of an empty topic, by its opener or an admin."""
+        """Soft delete (hidden; entries, files and audit stay). A topic with entries needs a reason."""
+        await require_tool_editor(db, current_user)
         topic = await _topic(db, scope, topic_id)
         try:
-            await DfmService.delete_topic(db, scope, topic, current_user)
+            await DfmService.delete_topic(db, scope, topic, current_user, reason=body.reason if body else None)
         except DfmError as e:
             raise _http(e)
         await db.commit()
@@ -164,6 +173,7 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
     @router.post(base + "/topics/{topic_id}/close", response_model=dict)
     async def close_topic(topic_id: int, scope: DfmScope = Depends(scope_dep),
                           current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+        await require_tool_editor(db, current_user)
         topic = await _topic(db, scope, topic_id)
         try:
             await DfmService.close_topic(db, scope, topic, current_user.id)
@@ -175,6 +185,7 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
     @router.post(base + "/topics/{topic_id}/reopen", response_model=dict)
     async def reopen_topic(topic_id: int, scope: DfmScope = Depends(scope_dep),
                            current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+        await require_tool_editor(db, current_user)
         topic = await _topic(db, scope, topic_id)
         try:
             await DfmService.reopen_topic(db, scope, topic, current_user.id)
@@ -202,6 +213,7 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
         """Record one ledger entry in `party`'s column, with the DFM file
         and / or a note, optionally as an update of one of that column's
         earlier entries."""
+        await require_tool_editor(db, current_user)
         topic = await _topic(db, scope, topic_id)
         payloads = [(f.filename or "", await f.read(), f.content_type) for f in files]
         try:

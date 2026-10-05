@@ -6,6 +6,11 @@ import pytest
 from app.models.part import Part
 from app.services.field_note_service import FieldNoteService
 
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """Tool data is Tool Engineer or admin only (tool_rights); the seeded engineer works as Tool Engineer."""
+
 pytestmark = pytest.mark.asyncio
 
 

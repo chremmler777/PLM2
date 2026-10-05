@@ -305,6 +305,32 @@ describe('DfmFlow', () => {
     await waitFor(() => expect(onBack).toHaveBeenCalled())
   })
 
+  it('deletes a topic with messages only with a reason', async () => {
+    current = relayTopic({ can_delete: true, can_edit: true })
+    clientMocks.delete.mockResolvedValue({ status: 204 })
+    const onBack = vi.fn()
+    wrap(vi.fn(), { onBack })
+    fireEvent.click(await screen.findByTestId('dfm-delete-topic'))
+    const dialog = await screen.findByTestId('dfm-delete-confirm')
+    expect(dialog.textContent).toContain('5 messages')
+    fireEvent.change(within(dialog).getByTestId('dfm-delete-reason'), { target: { value: 'Opened on the wrong tool' } })
+    fireEvent.click(within(dialog).getByTestId('confirm-ok'))
+    await waitFor(() => expect(clientMocks.delete).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/1',
+      { data: { reason: 'Opened on the wrong tool' } }))
+    await waitFor(() => expect(onBack).toHaveBeenCalled())
+  })
+
+  it('is view only without tool rights: no step, finish, rename or delete', async () => {
+    current = relayTopic({ can_edit: false, can_delete: false })
+    wrap()
+    await screen.findByTestId('dfm-flow')
+    expect(screen.getByTestId('dfm-view-only')).toBeTruthy()
+    for (const id of ['dfm-new-original', 'dfm-finish', 'dfm-reopen', 'dfm-rename', 'dfm-delete-topic']) {
+      expect(screen.queryByTestId(id)).toBeNull()
+    }
+    expect(actionKeys(5)).toEqual([])
+  })
+
   it('renames the topic inline', async () => {
     clientMocks.patch.mockResolvedValue({ data: relayTopic({ title: 'DFM rev 1' }) })
     wrap()

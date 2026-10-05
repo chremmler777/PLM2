@@ -1,5 +1,12 @@
 """DFM topics on a tool: open, list, close (finished confirmed), reopen.
+
 Only tools have an archive."""
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """DFM is Tool Engineer or admin only; the seeded engineer works as Tool Engineer."""
 
 
 async def make_tool(client, eng_auth, seed, number="199403", item_category="tool"):

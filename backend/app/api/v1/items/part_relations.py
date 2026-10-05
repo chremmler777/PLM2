@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 
 from app.dependencies import get_current_user
 from app.models import get_db, User, PartRelation
+from app.services.tool_rights import require_tool_editor
 from app.services.part_service import PartService, ChangelogService
 from app.services.relation_labels import RELATION_LABELS, VALID_RELATION_TYPES
 
@@ -67,6 +68,8 @@ async def create_relation(
         to_part = await PartService.get_part(db, body.to_part_id)
         if not from_part or not to_part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+        if body.relation_type == "produces":
+            await require_tool_editor(db, current_user)  # which articles a tool produces is tool data
         if from_part.project_id != to_part.project_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -172,6 +175,8 @@ async def delete_relation(
         rel = result.unique().scalar_one_or_none()
         if not rel:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relation not found")
+        if rel.relation_type == "produces":
+            await require_tool_editor(db, current_user)
 
         await ChangelogService.log_action(
             db,

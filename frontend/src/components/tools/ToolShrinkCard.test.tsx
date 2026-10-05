@@ -116,4 +116,12 @@ describe('ToolShrinkCard', () => {
     fireEvent.click(within(fb).getByText('Send again'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/shrinkage/decisions/4/report'))
   })
+
+  it('is view only without tool rights', async () => {
+    wrap({ ...base, can_edit: false, tool: { parallel_pct: 0.8, normal_pct: 1.1, combined_pct: null }, decisions: [decision] })
+    await screen.findByTestId('shrink-candidate')
+    expect(screen.queryByText('Use this')).toBeNull()
+    expect(screen.queryByTestId('shrink-own')).toBeNull()
+    expect(screen.queryByTestId('shrink-verify-open')).toBeNull()
+  })
 })

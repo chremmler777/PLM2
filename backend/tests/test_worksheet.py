@@ -9,6 +9,11 @@ from app.models.paint import Paint, PartPaint, PartPaintLayer
 from app.models.part import Part, PartRelation, PartRevision
 from app.models.supplier import Supplier
 
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """Tool data is Tool Engineer or admin only (tool_rights); the seeded engineer works as Tool Engineer."""
+
 pytestmark = pytest.mark.asyncio
 
 

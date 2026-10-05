@@ -6,6 +6,13 @@ from datetime import date, timedelta
 
 from tests.test_dfm_entries import make_topic
 from tests.test_dfm_topics import make_tool
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """DFM is Tool Engineer or admin only; the seeded engineer works as Tool Engineer."""
+
 
 
 def ago(days: int) -> str:

@@ -3,6 +3,13 @@ into history, closed topics refuse entries."""
 import json
 
 from tests.test_dfm_topics import make_tool
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """DFM is Tool Engineer or admin only; the seeded engineer works as Tool Engineer."""
+
 
 
 async def make_topic(client, eng_auth, tool, title="Gate position"):

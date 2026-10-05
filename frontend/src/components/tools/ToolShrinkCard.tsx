@@ -152,6 +152,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
   const current = data.decisions.find((d) => d.status === 'current') ?? null;
   const past = data.decisions.filter((d) => d.status !== 'current');
   const combinedNow = data.tool.combined_pct != null;
+  const canEdit = data.can_edit !== false;  // Tool Engineer or admin; others view only
   const reference = materialdbReference(data);
   const unrecorded = !current && (combinedNow || data.tool.parallel_pct != null || data.tool.normal_pct != null);
   const fibre = data.materials.some((m) => m.filler_type && FIBRE.has(m.filler_type.toUpperCase()));
@@ -244,22 +245,24 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
                 <span className="text-slate-400">Next tool</span>
                 <span className="text-slate-100">{current.next_time_note}</span>
               </>)}
+            </>)}
+            {current.feedback_status && (<>
               <span className="text-slate-400">MaterialDB</span>
               <span data-testid="shrink-feedback" className="text-slate-300">
-                {current.feedback_status === 'sent' && 'Reported to the material'}
+                {current.feedback_status === 'sent' && (current.verified_at ? 'Reported to the material' : 'On the material as decided, not verified yet')}
                 {current.feedback_status === 'skipped' && 'Not reported: no MaterialDB material on this decision'}
                 {current.feedback_status === 'failed' && (
                   <span className="text-amber-300">
                     Not reported ({current.feedback_error}){' '}
-                    <button onClick={() => resend.mutate(current.id)} disabled={resend.isPending}
-                      className="underline underline-offset-2 hover:text-amber-100">Send again</button>
+                    {canEdit && <button onClick={() => resend.mutate(current.id)} disabled={resend.isPending}
+                      className="underline underline-offset-2 hover:text-amber-100">Send again</button>}
                   </span>
                 )}
               </span>
             </>)}
           </div>
 
-          {!verifyDraft && (
+          {!verifyDraft && canEdit && (
             <div className="mt-4 flex gap-2">
               <button data-testid="shrink-verify-open" className={current.verified_at ? btnQuiet : btnPrimary}
                 onClick={() => setVerifyDraft({
@@ -331,7 +334,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
           <h3 className="text-sm font-semibold text-slate-200">
             {current ? 'Other values on record' : 'Values on record'}
           </h3>
-          {!draft && (
+          {!draft && canEdit && (
             <button data-testid="shrink-own" onClick={() => startFrom(null)} className="text-sm text-blue-300 hover:text-blue-200">
               Enter an own value
             </button>
@@ -368,10 +371,10 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
                     </td>
                     <td className="py-2 pr-4 text-xs text-slate-400">{[c.method, c.condition].filter(Boolean).join(' · ') || '-'}</td>
                     <td className="py-2 text-right">
-                      <button onClick={() => startFrom(c)} disabled={c.parallel_pct == null && c.normal_pct == null}
+                      {canEdit && <button onClick={() => startFrom(c)} disabled={c.parallel_pct == null && c.normal_pct == null}
                         className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-100 whitespace-nowrap">
                         Use this
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))}

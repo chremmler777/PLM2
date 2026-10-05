@@ -16,6 +16,7 @@ import DfmFlow from './DfmFlow';
 import { ARCHIVE_HINT, archiveLabel, lastStepText, TITLE_PLACEHOLDER, waitingSummary } from './dfmFlow';
 import { openDfmWindow } from './dfmWindow';
 import { apiErrorMessage } from '../../lib/apiError';
+import { useCanEditTools } from '../../hooks/queries/useToolRights';
 
 interface Props {
   scope: DfmScope;
@@ -32,6 +33,7 @@ export default function DfmArchive({ scope, projectId = null, onOpenPdf, initial
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<number | null>(initialTopic);
   const [newTitle, setNewTitle] = useState<string | null>(null);  // null = not adding
+  const canEdit = useCanEditTools();  // Tool Engineer or admin; others view only
   const [showLog, setShowLog] = useState(false);  // tool-wide audit log, topic list level
   const [jumpEntryId, setJumpEntryId] = useState<number | null>(null);  // "#N" from the archive-wide log
   const [justCreated, setJustCreated] = useState<number | null>(null);  // opens with the first-step form
@@ -121,7 +123,10 @@ export default function DfmArchive({ scope, projectId = null, onOpenPdf, initial
         <span className="mr-auto" />
         <button data-testid="dfm-tool-audit-log" onClick={() => setShowLog(true)}
           className="px-3 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm">Audit log</button>
-        {newTitle === null ? (
+        {!canEdit ? (
+          <span data-testid="dfm-archive-view-only" title="Only Tool Engineer or an admin can change DFM"
+            className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">View only</span>
+        ) : newTitle === null ? (
           <button data-testid="dfm-new-topic" onClick={startNew}
             className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ topic</button>
         ) : (
@@ -149,7 +154,7 @@ export default function DfmArchive({ scope, projectId = null, onOpenPdf, initial
               ? 'No DFM topic yet. When the toolmaker sends the first DFM, open a topic for it and attach the file.'
               : 'No general topic yet. Open one for a tooling standard or material info that applies to every tool.'}
           </span>
-          {newTitle === null && (
+          {canEdit && newTitle === null && (
             <button data-testid="dfm-empty-new-topic" onClick={startNew}
               className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ topic</button>
           )}

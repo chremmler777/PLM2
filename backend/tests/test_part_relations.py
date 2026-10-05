@@ -1,5 +1,11 @@
 """Item relation tests - tool/gauge/equipment to article links."""
 from tests.conftest import post_active
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """Tool data is Tool Engineer or admin only (tool_rights); the seeded engineer works as Tool Engineer."""
 
 
 async def _create(client, eng_auth, seed, part_number, name, item_category="article"):

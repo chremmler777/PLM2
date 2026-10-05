@@ -1,6 +1,12 @@
 """Tool fields: cavities, toolmaker, tonnage class and target cycle time live
 on the tool part (item_category = tool). They are refused on articles, and a
 PUT only touches them when the key is in the body."""
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """Tool data is Tool Engineer or admin only (tool_rights); the seeded engineer works as Tool Engineer."""
 
 
 async def _create(client, eng_auth, seed, item_category="tool", **extra):

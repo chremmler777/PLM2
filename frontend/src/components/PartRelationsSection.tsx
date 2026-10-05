@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import { useCanEditTools } from '../hooks/queries/useToolRights';
 
 interface Relation {
   id: number;
@@ -48,6 +49,8 @@ const DEFAULT_TYPE_BY_CATEGORY: Record<string, string> = {
 };
 
 export default function PartRelationsSection({ partId, itemCategory, projectParts, onSelectPart }: Props) {
+  // "produces" links are tool data: Tool Engineer or admin (others view them)
+  const canEditTools = useCanEditTools();
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
@@ -98,7 +101,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-slate-200">Relations</h3>
-        {!showAdd && (
+        {!showAdd && (itemCategory !== 'tool' || canEditTools) && (
           <button
             onClick={() => setShowAdd(true)}
             className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
@@ -129,14 +132,16 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
                 </span>
                 <span className="text-slate-500 text-xs font-mono ml-1">{rel.other_part_number}</span>
               </button>
-              <button
-                onClick={() => deleteMutation.mutate(rel.id)}
-                disabled={deleteMutation.isPending}
-                className="text-red-400 hover:text-red-300 text-xs ml-2 flex-shrink-0"
-                title="Remove relation"
-              >
-                ✕
-              </button>
+              {(rel.relation_type !== 'produces' || canEditTools) && (
+                <button
+                  onClick={() => deleteMutation.mutate(rel.id)}
+                  disabled={deleteMutation.isPending}
+                  className="text-red-400 hover:text-red-300 text-xs ml-2 flex-shrink-0"
+                  title="Remove relation"
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -150,7 +155,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
               onChange={(e) => setForm({ ...form, relation_type: e.target.value })}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-slate-100 text-xs"
             >
-              <option value="produces">produces</option>
+              {canEditTools && <option value="produces">produces</option>}
               <option value="checks">checks</option>
               <option value="assembles">assembles</option>
               <option value="related">related to</option>

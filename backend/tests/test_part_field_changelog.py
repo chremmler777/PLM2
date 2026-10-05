@@ -6,6 +6,11 @@ import pytest
 
 from app.services.worksheet_audit import audit_field_key
 
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """Tool data is Tool Engineer or admin only (tool_rights); the seeded engineer works as Tool Engineer."""
+
 pytestmark = pytest.mark.asyncio
 
 

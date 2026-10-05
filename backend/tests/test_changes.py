@@ -141,7 +141,7 @@ async def test_add_and_remove_impacted_item(client, eng_auth, seed):
     assert res.json()["impacted_items"] == []
 
 
-async def test_seed_impacted_from_relations(client, eng_auth, seed):
+async def test_seed_impacted_from_relations(client, eng_auth, seed, tool_engineer):
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     article = await _make_part(client, eng_auth, seed["project_id"], "ART-2", "article")

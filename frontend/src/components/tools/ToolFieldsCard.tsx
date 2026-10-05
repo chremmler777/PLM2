@@ -15,6 +15,7 @@ import { apiErrorMessage } from '../../lib/apiError';
 import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
 import { cavitiesFromNotes } from './toolCavities';
 import { focusField } from '../../hooks/useFieldFocus';
+import { useCanEditTools } from '../../hooks/queries/useToolRights';
 
 /** The chosen shrinkage: either one combined value, or parallel / normal. */
 function shrinkSummary(parallel: number | null, normal: number | null, combined: number | null | undefined) {
@@ -57,6 +58,7 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
   const queryClient = useQueryClient();
   const { data: suppliers } = useSuppliers();
   const notes = usePartFieldNoteIndex(partId);
+  const canEdit = useCanEditTools();  // Tool Engineer or admin; others view only
   // Same query as the Shrinkage card below (shared cache): the MaterialDB value as a reference.
   const shrinkage = useQuery({ queryKey: toolShrinkageKey(partId), queryFn: () => fetchToolShrinkage(partId) });
   const reference = materialdbReference(shrinkage.data);
@@ -86,7 +88,13 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
 
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
-      <h2 className="text-xl font-bold text-slate-100 mb-4">Tool</h2>
+      <div className="flex items-center gap-3 mb-4">
+        <h2 className="text-xl font-bold text-slate-100">Tool</h2>
+        {!canEdit && (
+          <span data-testid="tool-view-only" title="Only Tool Engineer or an admin can change tool data"
+            className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">View only</span>
+        )}
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {NUMERIC.map((field) => {
           const current = values[field.key];
@@ -112,12 +120,16 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
                     className="text-sm px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white">Save</button>
                   <button onClick={() => setEditing(null)} className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
                 </div>
-              ) : (
+              ) : canEdit ? (
                 <button data-testid={`edit-tool-${field.id}`} title={`Edit ${field.label.toLowerCase()}`}
                   onClick={() => setEditing({ key: field.key, value: current == null ? '' : String(current) })}
                   className="block font-medium text-slate-100 hover:text-blue-300 mt-1">
                   {shown == null ? <span className="text-slate-500">+ set</span> : shown}
                 </button>
+              ) : (
+                <div data-testid={`view-tool-${field.id}`} className="font-medium text-slate-100 mt-1">
+                  {shown == null ? <span className="text-slate-500">-</span> : shown}
+                </div>
               )}
               {field.key === 'tool_cavities' && current == null && fallbackCavities != null && (
                 <div data-testid="cavities-fallback" className="text-xs text-amber-300 mt-0.5">from the produces note, not confirmed</div>
@@ -143,7 +155,7 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
             Toolmaker
             <FieldNoteMarker partId={partId} fieldKey="tool.toolmaker" label="Toolmaker" note={notes.get('tool.toolmaker')} projectId={projectId} />
           </div>
-          <select data-testid="toolmaker-select" value={values.toolmaker_id ?? ''} disabled={save.isPending}
+          <select data-testid="toolmaker-select" value={values.toolmaker_id ?? ''} disabled={save.isPending || !canEdit}
             onChange={(e) => save.mutate({ toolmaker_id: e.target.value ? parseInt(e.target.value, 10) : null })}
             className="mt-1 w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm">
             <option value="">(not set)</option>
@@ -169,12 +181,14 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
                 className="text-sm px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white">Save</button>
               <button onClick={() => setEditing(null)} className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
             </div>
-          ) : (
+          ) : canEdit ? (
             <button data-testid="edit-tool-machine" title="Edit machine"
               onClick={() => setEditing({ key: 'tool_machine', value: values.tool_machine ?? '' })}
               className="block text-left font-medium text-slate-100 hover:text-blue-300 mt-1">
               {values.tool_machine || <span className="text-slate-500">+ set</span>}
             </button>
+          ) : (
+            <div data-testid="view-tool-machine" className="font-medium text-slate-100 mt-1">{values.tool_machine || '-'}</div>
           )}
         </div>
       </div>

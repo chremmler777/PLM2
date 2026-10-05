@@ -63,6 +63,8 @@ export interface ToolShrinkage {
   error: string | null;
   no_material: boolean;
   no_article: boolean;
+  /** Tool Engineer or admin; others view only */
+  can_edit?: boolean;
 }
 
 /** Either combined_pct, or parallel_pct and normal_pct. */

@@ -12,16 +12,19 @@ from app.models import User, get_db
 from app.models.part import Part
 from app.services import tool_shrink_service as svc
 from app.services.tool_shrink_service import ShrinkError
+from app.services.tool_rights import can_edit_tools, require_tool_editor
 
 router = APIRouter(tags=["tool-shrinkage"])
 
 
 
-async def _tool(db: AsyncSession, part_id: int, user: User) -> Part:
+async def _tool(db: AsyncSession, part_id: int, user: User, write: bool = False) -> Part:
     await _part_in_org(db, part_id, user.organization_id)
     part = await db.get(Part, part_id)
     if part.item_category != "tool":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Shrinkage decisions belong to tools")
+    if write:
+        await require_tool_editor(db, user)
     return part
 
 
@@ -34,7 +37,8 @@ def _values(tool: Part) -> dict:
 async def get_shrinkage(part_id: int, current_user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)) -> dict:
     tool = await _tool(db, part_id, current_user)
-    return {"tool": _values(tool), "decisions": await svc.history(db, tool.id), **await svc.candidates(db, tool)}
+    return {"tool": _values(tool), "decisions": await svc.history(db, tool.id), **await svc.candidates(db, tool),
+            "can_edit": await can_edit_tools(db, current_user)}
 
 
 class DecideIn(BaseModel):
@@ -67,7 +71,7 @@ async def _done(db: AsyncSession, tool: Part) -> dict:
 @router.post("/parts/{part_id}/shrinkage/decisions")
 async def decide(part_id: int, body: DecideIn, current_user: User = Depends(get_current_user),
                  db: AsyncSession = Depends(get_db)) -> dict:
-    tool = await _tool(db, part_id, current_user)
+    tool = await _tool(db, part_id, current_user, write=True)
     try:
         await svc.decide(db, tool, current_user, parallel_pct=body.parallel_pct, normal_pct=body.normal_pct,
                          combined_pct=body.combined_pct,
@@ -83,7 +87,7 @@ async def decide(part_id: int, body: DecideIn, current_user: User = Depends(get_
 @router.post("/parts/{part_id}/shrinkage/decisions/{decision_id}/verify")
 async def verify(part_id: int, decision_id: int, body: VerifyIn, current_user: User = Depends(get_current_user),
                  db: AsyncSession = Depends(get_db)) -> dict:
-    tool = await _tool(db, part_id, current_user)
+    tool = await _tool(db, part_id, current_user, write=True)
     try:
         await svc.verify(db, tool, decision_id, current_user, **body.model_dump())
     except LookupError as e:
@@ -98,7 +102,7 @@ async def verify(part_id: int, decision_id: int, body: VerifyIn, current_user: U
 async def report(part_id: int, decision_id: int, current_user: User = Depends(get_current_user),
                  db: AsyncSession = Depends(get_db)) -> dict:
     """Send a verified decision to MaterialDB again (after a failed report)."""
-    tool = await _tool(db, part_id, current_user)
+    tool = await _tool(db, part_id, current_user, write=True)
     try:
         await svc.resend(db, tool, decision_id, current_user)
     except LookupError as e:

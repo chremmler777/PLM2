@@ -12,6 +12,13 @@ from sqlalchemy import select
 from app.models.dfm import DfmAuditEvent, DfmEntry, DfmEntryFile, DfmTopic
 from tests.test_dfm_entries import make_topic, post_entry
 from tests.test_dfm_topics import make_tool
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """DFM is Tool Engineer or admin only; the seeded engineer works as Tool Engineer."""
+
 
 
 async def _events(session_factory, **where):

@@ -78,7 +78,7 @@ async def fetch_detail(material_id: int) -> dict:
 
 
 async def put_shrink_experience(record_id: int, body: dict) -> dict:
-    """Report a verified tool shrinkage; a resend with the same record id updates it."""
+    """Report a tool's shrinkage decision (keyed by the PLM tool id); a resend updates the same entry."""
     return await _call("PUT", f"/v1/shrink-experiences/plm/{record_id}", json=body)
 
 

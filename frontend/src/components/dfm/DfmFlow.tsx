@@ -68,6 +68,7 @@ export default function DfmFlow({
   const [form, setForm] = useState<{ step: DfmStep; n: number } | null>(
     () => (autoOpenForm ? { step: newOriginalStep(), n: 1 } : null));
   const [confirm, setConfirm] = useState<'finish' | 'delete' | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);  // null = not renaming
   const [openHistory, setOpenHistory] = useState<Set<number>>(new Set());
   const [highlighted, setHighlighted] = useState<number | null>(null);
@@ -121,7 +122,7 @@ export default function DfmFlow({
     onSuccess: () => { toast.success('Topic finished confirmed'); setForm(null); refresh(); },
   });
   const remove = useMutation({
-    mutationFn: () => deleteTopic(scope, topicId),
+    mutationFn: () => deleteTopic(scope, topicId, deleteReason),
     onSuccess: () => {
       toast.success('Topic deleted');
       queryClient.invalidateQueries({ queryKey: dfmKey('dfm-topics', scope) });
@@ -174,6 +175,7 @@ export default function DfmFlow({
 
   if (!topic) return <div className="text-slate-400 text-sm">Loading…</div>;
   const open = topic.status === 'open';
+  const canEdit = topic.can_edit !== false;  // Tool Engineer or admin; others view only
   const entries = topic.entries;
   const ids = currentIds(entries);
   const byId = new Map(entries.map((e) => [e.id, e]));
@@ -277,7 +279,7 @@ export default function DfmFlow({
     });
   };
 
-  const actionsFor = (e: DfmEntry) => (open ? cardActions(e, entries) : []);
+  const actionsFor = (e: DfmEntry) => (open && canEdit ? cardActions(e, entries) : []);
   const actionButton = (e: DfmEntry, a: ReturnType<typeof cardActions>[number], inMenu = false) => (
     <button key={a.key} data-testid={`dfm-action-${e.id}-${a.key}`} data-action={a.key} onClick={() => openStep(a.step)}
       className={inMenu
@@ -398,7 +400,7 @@ export default function DfmFlow({
             </span>
           )}
         </nav>
-        {renaming === null && (
+        {renaming === null && canEdit && (
           <button data-testid="dfm-rename" onClick={() => setRenaming(topic.title)}
             className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">Rename</button>
         )}
@@ -421,11 +423,15 @@ export default function DfmFlow({
             className={`px-3 py-1 rounded-md text-sm ${view === 'log' ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-100'}`}>
             Audit log
           </button>
-          {open && view === 'flow' && (
+          {!canEdit && (
+            <span data-testid="dfm-view-only" title="Only Tool Engineer or an admin can change DFM"
+              className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300">View only</span>
+          )}
+          {canEdit && open && view === 'flow' && (
             <button data-testid="dfm-new-original" onClick={() => openStep(newOriginalStep())}
               className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ New DFM</button>
           )}
-          {open ? (
+          {!canEdit ? null : open ? (
             <button data-testid="dfm-finish" onClick={() => setConfirm('finish')} disabled={entries.length === 0 || form !== null || finish.isPending}
               title={entries.length === 0 ? 'Record at least one message before finishing the topic'
                 : form !== null ? 'Record or cancel the open step first' : 'Mark the topic as finished confirmed'}
@@ -435,7 +441,7 @@ export default function DfmFlow({
               className="px-3 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm">Reopen</button>
           )}
           {topic.can_delete && (
-            <button data-testid="dfm-delete-topic" onClick={() => setConfirm('delete')}
+            <button data-testid="dfm-delete-topic" onClick={() => { setDeleteReason(''); setConfirm('delete'); }}
               className="px-3 py-1 rounded-md text-sm text-red-300 hover:text-red-200 hover:bg-red-500/10">Delete</button>
           )}
           {onPopOut && (
@@ -556,7 +562,20 @@ export default function DfmFlow({
         onConfirm={() => finish.mutateAsync()} />
       <ConfirmDialog data-testid="dfm-delete-confirm" open={confirm === 'delete'} onClose={() => setConfirm(null)} danger
         title="Delete this topic?" confirmLabel="Delete topic" errorFallback="Could not delete the topic"
-        body={`"${topic.title}" has no messages. It is removed from the archive; the audit log keeps a record.`}
+        body={entries.length === 0
+          ? `"${topic.title}" has no messages. It is removed from the archive; the audit log keeps a record.`
+          : (
+            <div className="space-y-2">
+              <p>"{topic.title}" has {entries.length} {entries.length === 1 ? 'message' : 'messages'}. It is removed from the
+                archive; its messages, files and the audit log are kept and can be restored.</p>
+              <label className="block text-sm text-slate-300">Why is it deleted? (required)
+                <textarea data-testid="dfm-delete-reason" rows={2} maxLength={1000} value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="e.g. opened on the wrong tool"
+                  className="mt-1 block w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm" />
+              </label>
+            </div>
+          )}
         onConfirm={() => remove.mutateAsync()} />
     </div>
   );

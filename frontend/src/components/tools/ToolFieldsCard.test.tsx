@@ -155,4 +155,16 @@ describe('cavitiesFromNotes', () => {
     wrap({ ...empty, tool_shrink_combined_pct: 0.65 })
     expect((await screen.findByTestId('tool-shrink-reference')).textContent).toBe('MaterialDB 0.5-0.7 %')
   })
+
+  it('is view only without tool rights: values shown, no edit, toolmaker locked', async () => {
+    cleanup()
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve({ data: url === '/v1/auth/me'
+      ? { can_edit_tools: false } : [{ id: 3, name: 'Toolshop Sued' }] }))
+    wrap({ ...empty, tool_cavities: 4, tool_machine: 'KM 350-1' })
+    expect(await screen.findByTestId('tool-view-only')).toBeTruthy()
+    expect(screen.queryByTestId('edit-tool-cavities')).toBeNull()
+    expect(screen.getByTestId('view-tool-cavities').textContent).toBe('4')
+    expect(screen.getByTestId('view-tool-machine').textContent).toBe('KM 350-1')
+    expect(screen.getByTestId('toolmaker-select')).toHaveProperty('disabled', true)
+  })
 })

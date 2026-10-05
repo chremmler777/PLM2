@@ -4,6 +4,13 @@ from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """DFM is Tool Engineer or admin only; the seeded engineer works as Tool Engineer."""
+
 
 
 async def _tool(session_factory, seed):

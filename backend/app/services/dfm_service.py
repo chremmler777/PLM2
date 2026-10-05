@@ -35,8 +35,7 @@ MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB, same as revision files
 TOPIC_CLOSED_MESSAGE = "Topic is finished, reopen it first"
 CLOSE_EMPTY_MESSAGE = "Record at least one message before finishing the topic"
 EMPTY_ENTRY_MESSAGE = "Attach the DFM file or write a note"
-DELETE_NOT_EMPTY_MESSAGE = "Only an empty topic can be deleted"
-DELETE_FORBIDDEN_MESSAGE = "Only the person who opened the topic or an admin can delete it"
+DELETE_REASON_MESSAGE = "Say why this topic is deleted: it already has entries"
 ALREADY_SUPERSEDED_MESSAGE = "This entry was already updated, refresh"
 MAX_FILENAME_LEN = 255
 MAX_CONTENT_TYPE_LEN = 100
@@ -336,19 +335,21 @@ class DfmService:
         return topic
 
     @staticmethod
-    async def delete_topic(session: AsyncSession, scope: DfmScope, topic: DfmTopic, user) -> DfmTopic:
-        """Soft delete; only an empty topic, only by its opener or an admin.
-        Its audit events stay."""
-        if topic.opened_by != user.id and not is_admin(user):
-            raise DfmError(DELETE_FORBIDDEN_MESSAGE, status=403)
+    async def delete_topic(session: AsyncSession, scope: DfmScope, topic: DfmTopic, user,
+                           reason: str | None = None) -> DfmTopic:
+        """Soft delete: the topic is hidden; its entries, files and audit events stay (restorable).
+        Who may delete is checked by the caller (tool_rights). A topic with entries needs a reason."""
+        reason = (reason or "").strip() or None
         has_entry = (await session.execute(
             select(DfmEntry.id).where(DfmEntry.topic_id == topic.id).limit(1))).scalar_one_or_none()
-        if has_entry is not None:
-            raise DfmClosed(DELETE_NOT_EMPTY_MESSAGE)
+        if has_entry is not None and reason is None:
+            raise DfmError(DELETE_REASON_MESSAGE)
         topic.deleted_at = datetime.utcnow()
         topic.deleted_by = user.id
-        await _changelog(session, scope, "dfm_topic_deleted", f"DFM topic deleted: {topic.title}", user.id)
-        await _audit(session, scope, "topic_deleted", user.id, topic_id=topic.id, details={"title": topic.title})
+        await _changelog(session, scope, "dfm_topic_deleted",
+                         f"DFM topic deleted: {topic.title}" + (f" ({reason})" if reason else ""), user.id)
+        await _audit(session, scope, "topic_deleted", user.id, topic_id=topic.id,
+                     details={"title": topic.title, **({"reason": reason} if reason else {})})
         return topic
 
     @staticmethod
@@ -478,9 +479,12 @@ class DfmService:
 
     @staticmethod
     def topic_summary(topic: DfmTopic, today: date | None = None, flow: dict | None = None,
-                      names: dict | None = None, user=None) -> dict:
+                      names: dict | None = None, user=None, can_edit: bool | None = None) -> dict:
         """names: user_names for opener / closer (lists resolve them in one
-        query); user: the caller, for can_delete."""
+        query); can_edit: the caller may change tool data (tool_rights), which
+        drives can_edit / can_delete; without it, admins only."""
+        if can_edit is None:
+            can_edit = is_admin(user)
         flow = flow or flow_state(topic, today)
         names = names or {}
         entry_count = len(topic.entries)
@@ -496,8 +500,8 @@ class DfmService:
             "closed_by": topic.closed_by, "closed_by_name": names.get(topic.closed_by),
             "closed_at": _iso(topic.closed_at),
             "entry_count": entry_count,
-            "can_delete": entry_count == 0 and user is not None
-                          and (user.id == topic.opened_by or is_admin(user)),
+            "can_edit": can_edit,
+            "can_delete": can_edit,
             "last_activity": _iso(max(s for s in stamps if s is not None)),
             "waiting_on": flow["waiting_on"],
             "last_step": flow["last_step"],
@@ -530,7 +534,8 @@ class DfmService:
         }
 
     @staticmethod
-    def topic_detail(topic: DfmTopic, names: dict, today: date | None = None, user=None) -> dict:
+    def topic_detail(topic: DfmTopic, names: dict, today: date | None = None, user=None,
+                     can_edit: bool | None = None) -> dict:
         """Entries in the order they were received: by sent_at when it is
         set, else the date they were recorded, then recorded_at, then id.
         This lets a backfilled mail dated earlier sit above one recorded
@@ -550,7 +555,8 @@ class DfmService:
                 cursor = by_id.get(cursor.supersedes_id) if cursor.supersedes_id else None
             d["history"] = history
             entries.append(d)
-        return {**DfmService.topic_summary(topic, flow=flow, names=names, user=user), "next_step": flow["next_step"],
+        return {**DfmService.topic_summary(topic, flow=flow, names=names, user=user, can_edit=can_edit),
+                "next_step": flow["next_step"],
                 "entries": entries}
 
     @staticmethod

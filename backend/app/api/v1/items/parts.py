@@ -11,8 +11,9 @@ from sqlalchemy import select
 from app.dependencies import get_current_user
 from app.models import get_db
 from app.models import User
-from app.models.part import PartFile
+from app.models.part import Part, PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
+from app.services.tool_rights import require_tool_editor
 from app.services.project_structure_service import project_structure
 from app.services.thumbnail_service import (
     set_thumbnail, clear_thumbnail, media_type_for, InvalidThumbnail, ThumbnailTooLarge,
@@ -118,7 +119,10 @@ async def update_part(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update part information."""
+    """Update part information. A tool's data is Tool Engineer or admin only (tool_rights)."""
+    target = await db.get(Part, part_id)
+    if target is not None and target.item_category == "tool":
+        await require_tool_editor(db, current_user)
     try:
         part = await PartService.update_part(
             session=db,

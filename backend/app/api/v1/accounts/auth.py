@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, plm2_roles
 from app.models import get_db
 from app.models.workflow import Department
+from app.services.tool_rights import can_edit_tools
 from app.version import SOFTWARE_VERSION
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -30,7 +31,7 @@ async def change_password_gone():
 
 
 @router.get("/me")
-async def me(request: Request, user=Depends(get_current_user)) -> dict:
+async def me(request: Request, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     payload = getattr(request.state, "hub_payload", {})
     dept = getattr(request.state, "acts_as_department", None)
     return {
@@ -46,6 +47,8 @@ async def me(request: Request, user=Depends(get_current_user)) -> dict:
         "acting_as": ({"id": dept.id, "name": dept.name} if dept else None),
         "is_real_admin": user.is_real_admin,
         "effective_role": user.effective_role,
+        # Tool data (tool fields, produces links, shrinkage, DFM): Tool Engineer or admin
+        "can_edit_tools": await can_edit_tools(db, user),
         # The user-facing version the training record is stamped with.
         "software_version": SOFTWARE_VERSION,
     }

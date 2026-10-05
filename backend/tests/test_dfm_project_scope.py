@@ -12,6 +12,13 @@ from app.models.entities import User
 from tests.conftest import login
 from tests.test_dfm_entries import make_topic, post_entry
 from tests.test_dfm_topics import make_tool
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _tool_engineer_member(tool_engineer):
+    """DFM is Tool Engineer or admin only; the seeded engineer works as Tool Engineer."""
+
 
 
 async def _other_user(session_factory, seed) -> int:
@@ -69,7 +76,8 @@ async def test_summary_names_and_can_delete(client, eng_auth, admin_auth, seed):
     assert rows[0]["can_delete"] is True
     await post_entry(client, eng_auth, tool, created["id"])
     d = (await client.post(f"/api/v1/parts/{tool}/dfm/topics/{created['id']}/close", headers=eng_auth)).json()
-    assert d["closed_by_name"] == "Engineer" and d["can_delete"] is False
+    # a tool editor (admin here) may still delete it, with a reason since it has entries
+    assert d["closed_by_name"] == "Engineer" and d["can_delete"] is True and d["can_edit"] is True
 
 
 async def test_rename(client, eng_auth, seed, session_factory):
@@ -131,31 +139,68 @@ async def test_delete_empty_topic_by_opener(client, eng_auth, seed, session_fact
     assert "dfm_topic_deleted" in [e["action"] for e in log]
 
 
+async def _dept(session_factory, name):
+    from sqlalchemy import select as _select
+    from app.models.workflow import Department
+    async with session_factory() as s:
+        d = (await s.execute(_select(Department).where(Department.name == name))).scalar_one_or_none()
+        if d is None:
+            d = Department(name=name, flow_type="action", is_active=True)
+            s.add(d)
+            await s.commit()
+        return d.id
+
+
 async def test_delete_rules(client, eng_auth, admin_auth, seed, session_factory):
-    await _other_user(session_factory, seed)
-    other_auth = await login(client, "other@test.io")
+    from app.services.tool_rights import TOOL_EDIT_DENIED
+    quality = await _dept(session_factory, "Quality")
+    tool_eng = await _dept(session_factory, "Tool Engineer")
+    as_quality = {**admin_auth, "X-Acts-As-Department": str(quality)}
+    as_tool_eng = {**admin_auth, "X-Acts-As-Department": str(tool_eng)}
     tool = await make_tool(client, eng_auth, seed)
     topic = await make_topic(client, eng_auth, tool)
     url = f"/api/v1/parts/{tool}/dfm/topics/{topic}"
 
-    rows = (await client.get(f"/api/v1/parts/{tool}/dfm/topics", headers=other_auth)).json()
-    assert rows[0]["can_delete"] is False
-    res = await client.delete(url, headers=other_auth)
-    assert res.status_code == 403
-    assert res.json()["detail"] == "Only the person who opened the topic or an admin can delete it"
+    # acting as another department: view only
+    rows = (await client.get(f"/api/v1/parts/{tool}/dfm/topics", headers=as_quality)).json()
+    assert (rows[0]["can_edit"], rows[0]["can_delete"]) == (False, False)
+    res = await client.delete(url, headers=as_quality)
+    assert res.status_code == 403 and res.json()["detail"] == TOOL_EDIT_DENIED
 
+    # a topic with entries needs a reason; hidden, entries and audit stay
     await post_entry(client, eng_auth, tool, topic)
-    res = await client.delete(url, headers=eng_auth)
-    assert res.status_code == 409
-    assert res.json()["detail"] == "Only an empty topic can be deleted"
+    res = await client.delete(url, headers=as_tool_eng)
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Say why this topic is deleted: it already has entries"
     assert await _events(session_factory, action="topic_deleted") == []
+    res = await client.request("DELETE", url, json={"reason": "  Opened on the wrong tool  "}, headers=as_tool_eng)
+    assert res.status_code == 204, res.text
+    ev = await _events(session_factory, action="topic_deleted")
+    assert len(ev) == 1 and ev[0].details["reason"] == "Opened on the wrong tool"
+    assert (await client.get(f"/api/v1/parts/{tool}/dfm/topics", headers=eng_auth)).json() == []
+    log = (await client.get(f"/api/v1/parts/{tool}/changelog", headers=eng_auth)).json()
+    assert any(e["action"] == "dfm_topic_deleted" and "Opened on the wrong tool" in e["action_description"] for e in log)
 
-    # an admin deletes someone else's empty topic
+    # an empty topic needs no reason
     second = await make_topic(client, eng_auth, tool, title="Second")
     res = await client.delete(f"/api/v1/parts/{tool}/dfm/topics/{second}", headers=admin_auth)
     assert res.status_code == 204
-    ev = await _events(session_factory, action="topic_deleted")
-    assert len(ev) == 1 and ev[0].actor_id == seed["admin_id"]
+
+
+async def test_view_only_outside_tool_engineer(client, eng_auth, admin_auth, seed, session_factory):
+    """Every DFM write is refused while acting as another department; reading still works."""
+    quality = await _dept(session_factory, "Quality")
+    as_quality = {**admin_auth, "X-Acts-As-Department": str(quality)}
+    tool = await make_tool(client, eng_auth, seed)
+    topic = await make_topic(client, eng_auth, tool)
+    base = f"/api/v1/parts/{tool}/dfm/topics"
+    assert (await client.post(base, json={"title": "x"}, headers=as_quality)).status_code == 403
+    assert (await client.patch(f"{base}/{topic}", json={"title": "y"}, headers=as_quality)).status_code == 403
+    assert (await client.post(f"{base}/{topic}/close", headers=as_quality)).status_code == 403
+    assert (await client.post(f"{base}/{topic}/reopen", headers=as_quality)).status_code == 403
+    data = {"party": "ktx", "addressed_to": json.dumps(["toolmaker"]), "note": "n"}
+    assert (await client.post(f"{base}/{topic}/entries", data=data, headers=as_quality)).status_code == 403
+    assert (await client.get(f"{base}/{topic}", headers=as_quality)).status_code == 200
 
 
 # ---- project scope ----------------------------------------------------------
@@ -192,14 +237,14 @@ async def test_project_topic_crud_entry_file_audit(client, eng_auth, seed, sessi
     assert res.status_code == 200 and res.headers["content-type"] == "application/pdf"
 
     d = (await client.get(proj_url(seed, f"/topics/{tid}"), headers=eng_auth)).json()
-    assert d["entry_count"] == 1 and d["can_delete"] is False
+    assert d["entry_count"] == 1 and d["can_delete"] is True
     assert (await client.patch(proj_url(seed, f"/topics/{tid}"), json={"title": "Tooling standards"},
                                headers=eng_auth)).json()["title"] == "Tooling standards"
     res = await client.post(proj_url(seed, f"/topics/{tid}/close"), headers=eng_auth)
     assert res.status_code == 200 and res.json()["status"] == "finished_confirmed"
     res = await client.post(proj_url(seed, f"/topics/{tid}/reopen"), headers=eng_auth)
     assert res.status_code == 200 and res.json()["status"] == "open"
-    assert (await client.delete(proj_url(seed, f"/topics/{tid}"), headers=eng_auth)).status_code == 409
+    assert (await client.delete(proj_url(seed, f"/topics/{tid}"), headers=eng_auth)).status_code == 400  # entries: reason needed
 
     audit = (await client.get(proj_url(seed, "/audit"), headers=eng_auth)).json()
     assert [e["action"] for e in audit] == [
