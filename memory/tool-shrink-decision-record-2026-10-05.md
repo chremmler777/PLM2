@@ -39,3 +39,10 @@ source); tool card shows the chosen value next to cycle time plus "MaterialDB" r
 EITHER combined OR parallel + normal, chosen per tool on the Shrinkage card. User: "combined is a choice, need to be
 able to either force normal and parallel or combined" - never derive combined from equal values (113 moves no data;
 199407/199409/227704 still 0.9/0.65/1.25 as parallel = normal until someone chooses).
+
+2026-10-05 20:38: all ten 1994 tools got a shrinkage decision on prod from the user's filled "1994 BOM - material and
+shrinkage.xlsx" (Desktop): Hostacom 199402/04/05/06/08/10 0.8/1.1 split (supplier), EPLAMID 199401/03 0.7/1.0 (datasheet),
+Bayblend 199409 0.65 combined (ktx_experience), Romiloy 199407 0.9 combined (datasheet). Script
+backend/scripts/record_1994_shrinkage_decisions.py (673c2765), backup plm2-before-1994-shrink-decisions-20261005-203815.sql.gz.
+Not yet done: the tool rights (Tool Engineer or admin) + DFM delete with reason work is uncommitted in the tree
+(backend full suite not finished; tests outside DFM may need the tool_engineer fixture).
