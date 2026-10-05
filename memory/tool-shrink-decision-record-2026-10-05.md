@@ -46,3 +46,8 @@ Bayblend 199409 0.65 combined (ktx_experience), Romiloy 199407 0.9 combined (dat
 backend/scripts/record_1994_shrinkage_decisions.py (673c2765), backup plm2-before-1994-shrink-decisions-20261005-203815.sql.gz.
 Not yet done: the tool rights (Tool Engineer or admin) + DFM delete with reason work is uncommitted in the tree
 (backend full suite not finished; tests outside DFM may need the tool_engineer fixture).
+
+2026-10-05 21:27 DEPLOYED 5a804043 (no migration, backup plm2-before-5a804043-*.sql.gz): tool rights (Tool Engineer or
+admin via app/services/tool_rights.py; all editors are plm2_Admin today, user: "Dale will be tooling eng in the future
+but now he keeps admin"), DFM delete with reason (soft), and shrinkage decisions reported to MaterialDB at decision time
+(one entry per tool, keyed by PLM tool id). Backfill: the 10 1994 decisions are on MaterialDB as "decided, not verified yet".
