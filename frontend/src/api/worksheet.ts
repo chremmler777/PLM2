@@ -21,6 +21,8 @@ export interface WorksheetTool {
   /** Shrinkage the tool is cut with, %, along / across the flow (engineering, not the datasheet). */
   shrink_parallel_pct: number | null;
   shrink_normal_pct: number | null;
+  /** Source of the current shrinkage decision; null when none is recorded. */
+  shrink_source?: string | null;
 }
 
 /** One datasheet shrinkage value, % (max set when the sheet gives a range). */

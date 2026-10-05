@@ -13,6 +13,17 @@ import { usePartFieldNoteIndex } from '../../hooks/queries/useFieldNotes';
 import { apiErrorMessage } from '../../lib/apiError';
 import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
 import { cavitiesFromNotes } from './toolCavities';
+import { focusField } from '../../hooks/useFieldFocus';
+
+/** The chosen shrinkage: one combined value when both directions are equal, else parallel / normal. */
+function shrinkSummary(parallel: number | null, normal: number | null) {
+  if (parallel == null && normal == null) return <span className="text-slate-500">not chosen</span>;
+  if (parallel === normal) return <>{parallel} <span className="text-sm font-normal text-slate-400">combined</span></>;
+  return (
+    <>{parallel ?? '-'} <span className="text-sm font-normal text-slate-400">parallel</span>
+      {' · '}{normal ?? '-'} <span className="text-sm font-normal text-slate-400">normal</span></>
+  );
+}
 
 export interface ToolFieldValues {
   tool_cavities: number | null;
@@ -109,6 +120,14 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
             </div>
           );
         })}
+        <div data-testid="tool-shrink-summary">
+          <div className="text-sm text-slate-400">Shrinkage (%)</div>
+          <button type="button" title="Chosen on the Shrinkage card below, with its source"
+            onClick={() => focusField('tool.shrink_parallel')}
+            className="block text-left font-medium text-slate-100 hover:text-blue-300 mt-1">
+            {shrinkSummary(values.tool_shrink_parallel_pct, values.tool_shrink_normal_pct)}
+          </button>
+        </div>
         <div data-field-key="tool.toolmaker">
           <div className="text-sm text-slate-400">
             Toolmaker

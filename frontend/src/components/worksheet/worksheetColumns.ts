@@ -205,6 +205,13 @@ function shrinkTitle(r: WorksheetRow, dir: ShrinkDir): string | null {
   return v ? [v.method, v.condition].filter(Boolean).join(', ') || null : null;
 }
 
+/** Where the tool's chosen shrinkage came from; flags a value with no recorded decision. */
+export function chosenShrinkTitle(r: WorksheetRow): string | null {
+  const t = r.tool;
+  if (!t || (t.shrink_parallel_pct == null && t.shrink_normal_pct == null)) return null;
+  return t.shrink_source ?? 'No source recorded: record the decision on the tool page';
+}
+
 /** Test method and specimen of the datasheet values, and the filler (glass fibre shrinks unevenly). */
 export function shrinkBasis(r: WorksheetRow): string | null {
   const s = r.material.shrinkage;
@@ -258,6 +265,13 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     editableOn: null, value: (r) => shrinkText(r, 'parallel'), title: (r) => shrinkTitle(r, 'parallel'), edit: nowhere }),
   def({ key: 'material.shrink_normal', label: 'Datasheet shrink normal (%)', group: 'Material', noteOwner: null,
     editableOn: null, value: (r) => shrinkText(r, 'normal'), title: (r) => shrinkTitle(r, 'normal'), edit: nowhere }),
+  // The shrinkage the tool steel is cut with, chosen on the tool page as a decision; the title names its source.
+  def({ key: 'tool.shrink_parallel', label: 'Chosen shrink parallel (%)', group: 'Tool', display: 'number', exportType: 'number',
+    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_parallel_pct ?? null, title: chosenShrinkTitle,
+    edit: onTool('tool.shrink_parallel') }),
+  def({ key: 'tool.shrink_normal', label: 'Chosen shrink normal (%)', group: 'Tool', display: 'number', exportType: 'number',
+    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_normal_pct ?? null, title: chosenShrinkTitle,
+    edit: onTool('tool.shrink_normal') }),
   def({ key: 'material.shrink_basis', label: 'Shrink basis', group: 'Material', noteOwner: null, editableOn: null,
     value: shrinkBasis, title: shrinkBasis, edit: nowhere }),
   def({ key: 'tool.number', label: 'Tool no.', group: 'Tool', display: 'mono', noteOwner: 'tool', editableOn: 'tool',
@@ -273,10 +287,6 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     edit: onTool('tool.tonnage_class') }),
   def({ key: 'tool.machine', label: 'Machine', group: 'Tool', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => r.tool?.machine ?? null, edit: onTool('tool.machine') }),
-  def({ key: 'tool.shrink_parallel', label: 'Tool shrink parallel (%)', group: 'Tool', display: 'number', exportType: 'number',
-    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_parallel_pct ?? null, edit: onTool('tool.shrink_parallel') }),
-  def({ key: 'tool.shrink_normal', label: 'Tool shrink normal (%)', group: 'Tool', display: 'number', exportType: 'number',
-    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_normal_pct ?? null, edit: onTool('tool.shrink_normal') }),
   def({ key: 'dfm.status', label: 'DFM', group: 'DFM', display: 'dfm', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => dfmLabel(r.dfm), edit: onTool('dfm.status') }),
   def({ key: 'notes.summary', label: 'Notes', group: 'Notes', display: 'notes', noteOwner: null, editableOn: null,

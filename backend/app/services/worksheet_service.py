@@ -13,6 +13,7 @@ from app.models.dfm import DFM_PARTIES, DFM_TOPIC_OPEN, DfmTopic
 from app.models.paint import PartPaint
 from app.models.part import Part, PartRelation, PartRevision
 from app.models.supplier import Supplier
+from app.models.tool_shrink import ToolShrinkDecision
 from app.services import materialdb_client
 from app.services.dfm_service import flow_state
 
@@ -81,12 +82,25 @@ def _paint(setup: Optional[PartPaint]) -> dict:
             "paint_system": " / ".join(layer.paint.name for layer in layers) or None}
 
 
-def _tool(t: Part, toolmakers: dict) -> dict:
+SHRINK_KIND_LABELS = {"datasheet": "Datasheet", "supplier": "Supplier statement",
+                      "ktx_experience": "KTX tool experience", "own": "Own value"}
+
+
+def shrink_source_text(d: Optional[ToolShrinkDecision]) -> Optional[str]:
+    """Where the tool's shrinkage came from, from its current decision; None: no decision recorded."""
+    if d is None:
+        return None
+    kind = SHRINK_KIND_LABELS.get(d.source_kind, d.source_kind)
+    return f"{kind}: {d.source_label}" if d.source_label else kind
+
+
+def _tool(t: Part, toolmakers: dict, shrink_sources: Optional[dict] = None) -> dict:
     return {"part_id": t.id, "part_number": t.part_number, "name": t.name, "cavities": t.tool_cavities,
             "toolmaker_id": t.toolmaker_id, "toolmaker_name": toolmakers.get(t.toolmaker_id),
             "cycle_time_s": t.tool_cycle_time_s, "tonnage_class": t.tool_tonnage_class,
             "machine": t.tool_machine, "shrink_parallel_pct": t.tool_shrink_parallel_pct,
-            "shrink_normal_pct": t.tool_shrink_normal_pct}
+            "shrink_normal_pct": t.tool_shrink_normal_pct,
+            "shrink_source": (shrink_sources or {}).get(t.id)}
 
 
 def _identity(p: Part, kind: str) -> dict:
@@ -139,6 +153,10 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
             mirror_of[src.id] = {"part_id": dst.id, "part_number": dst.part_number,
                                  "customer_part_number": dst.customer_part_number}
 
+    shrink_sources = {d.tool_id: shrink_source_text(d) for d in (await session.execute(
+        select(ToolShrinkDecision).where(ToolShrinkDecision.tool_id.in_(list(tools)),
+                                         ToolShrinkDecision.status == "current"))).scalars()} if tools else {}
+
     materials, materials_error = await _materials(
         {a.materialdb_id for a in articles if a.material_source == "materialdb" and a.materialdb_id})
 
@@ -158,7 +176,7 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
                          "phase": rev.phase.value if hasattr(rev.phase, "value") else rev.phase} if rev else None,
             "material": _material(a),
             "paint": _paint(paints.get(a.id)),
-            "tool": _tool(tool, toolmakers) if tool else None,
+            "tool": _tool(tool, toolmakers, shrink_sources) if tool else None,
             "other_tools": [t.part_number for t in made_by[1:]],
             "dfm": dfm_status(topics_by_tool.get(tool.id, []), today) if tool else None,
         })
@@ -166,6 +184,6 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
         if t.id in producing:
             continue
         rows.append({**_identity(t, "tool_only"), "mirror_of": None, "revision": None,
-                     "material": {**material_dict(t), "shrinkage": None}, "paint": _paint(None), "tool": _tool(t, toolmakers),
+                     "material": {**material_dict(t), "shrinkage": None}, "paint": _paint(None), "tool": _tool(t, toolmakers, shrink_sources),
                      "other_tools": [], "dfm": dfm_status(topics_by_tool.get(t.id, []), today)})
     return {"project_id": project_id, "rows": rows, "materialdb_error": materials_error}

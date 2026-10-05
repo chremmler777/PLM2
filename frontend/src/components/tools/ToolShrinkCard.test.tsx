@@ -58,11 +58,34 @@ describe('ToolShrinkCard', () => {
     })))
   })
 
+  it('records one combined value for both directions', async () => {
+    wrap(base)
+    fireEvent.click(await screen.findByTestId('shrink-own'))
+    // unfilled resin (no glass or carbon fibre): one combined value is the default
+    expect(screen.getByTestId('shrink-combined')).toHaveProperty('checked', true)
+    expect(screen.queryByTestId('shrink-normal')).toBeNull()
+    fireEvent.change(screen.getByTestId('shrink-parallel'), { target: { value: '0.65' } })
+    fireEvent.change(screen.getByTestId('shrink-rationale'), { target: { value: 'Painted Bayblend, KTX tooling note' } })
+    fireEvent.click(screen.getByTestId('shrink-decide-save'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/shrinkage/decisions', expect.objectContaining({
+      parallel_pct: 0.65, normal_pct: 0.65, source_kind: 'own',
+    })))
+  })
+
+  it('offers parallel and normal when the combined box is cleared', async () => {
+    wrap(base)
+    fireEvent.click(await screen.findByTestId('shrink-own'))
+    fireEvent.click(screen.getByTestId('shrink-combined'))
+    expect(screen.getByTestId('shrink-normal')).toBeTruthy()
+  })
+
   it('flags values that were entered without a decision', async () => {
     wrap({ ...base, tool: { parallel_pct: 0.9, normal_pct: 0.9 } })
     expect(await screen.findByTestId('shrink-unrecorded')).toBeTruthy()
+    // equal in both directions: one combined value
     expect(screen.getByTestId('shrink-current-parallel').textContent).toBe('0.9 %')
-    expect(screen.getByTestId('shrink-current-normal').textContent).toBe('0.9 %')
+    expect(screen.getByText('Combined')).toBeTruthy()
+    expect(screen.queryByTestId('shrink-current-normal')).toBeNull()
   })
 
   it('verifies after the trial and asks for a next-tool note unless correct', async () => {

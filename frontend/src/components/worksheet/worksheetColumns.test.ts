@@ -113,7 +113,7 @@ describe('worksheet colour and grain columns', () => {
     const at = (k: string) => keys.indexOf(k)
     expect(keys.includes('paint.colour')).toBe(false)
     const order = ['part.material', 'paint.painted', 'part.colour', 'part.grain', 'material.shrink_parallel',
-      'material.shrink_normal', 'material.shrink_basis', 'tool.number']
+      'material.shrink_normal', 'tool.shrink_parallel', 'tool.shrink_normal', 'material.shrink_basis', 'tool.number']
     expect(order.map(at)).toEqual(order.map((_, i) => at('part.material') + i))
     expect(col('part.colour').exportType).toBe('text')
     expect(col('part.grain').exportType).toBe('text')
@@ -211,5 +211,12 @@ describe('datasheet shrinkage columns', () => {
     const r = row({ tool: { ...row().tool!, shrink_parallel_pct: 0.7, shrink_normal_pct: 1.05 } })
     expect(col('tool.shrink_parallel').value(r, buildContext([]))).toBe(0.7)
     expect(col('tool.shrink_normal').edit(r)).toEqual({ partId: r.tool!.part_id, focus: 'tool.shrink_normal' })
+    expect(col('tool.shrink_parallel').title!(r)).toBe('No source recorded: record the decision on the tool page')
+    const sourced = row({ tool: { ...row().tool!, shrink_parallel_pct: 0.65, shrink_normal_pct: 0.65, shrink_source: 'Own value: painted' } })
+    expect(col('tool.shrink_normal').title!(sourced)).toBe('Own value: painted')
+    expect(col('tool.shrink_parallel').title!(row())).toBeNull()
+    // next to the datasheet shrinkage
+    const keys = WORKSHEET_COLUMNS.map((c) => c.key)
+    expect(keys.indexOf('tool.shrink_parallel')).toBe(keys.indexOf('material.shrink_normal') + 1)
   })
 })

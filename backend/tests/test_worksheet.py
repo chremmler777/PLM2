@@ -78,7 +78,8 @@ async def test_rows_carry_article_tool_revision_material_paint_and_dfm(client, e
     assert lh["tool"] == {"part_id": ids["tool"], "part_number": "199401", "name": "Name 199401", "cavities": 2,
                           "toolmaker_id": ids["maker"], "toolmaker_name": "Formenbau Nord",
                           "cycle_time_s": 55.0, "tonnage_class": None,
-                          "machine": None, "shrink_parallel_pct": None, "shrink_normal_pct": None}
+                          "machine": None, "shrink_parallel_pct": None, "shrink_normal_pct": None,
+                          "shrink_source": None}
     assert lh["material"]["shrinkage"] is None  # not linked to MaterialDB
     assert lh["dfm"] == {"status": "waiting", "waiting_on": ["ktx"], "open_topics": 1}
     assert lh["other_tools"] == []
@@ -156,3 +157,18 @@ async def test_empty_project_and_other_org(client, eng_auth, seed, session_facto
     assert r.json() == {"project_id": seed["project_id"], "rows": [], "materialdb_error": None}
     r = await client.get("/api/v1/projects/999999/worksheet", headers=eng_auth)
     assert r.status_code == 404
+
+
+async def test_tool_shrinkage_carries_its_decision_source(client, eng_auth, seed, session_factory):
+    """The chosen shrinkage shows where it came from (the tool's current decision)."""
+    ids = await _build(session_factory, seed)
+    r = await client.post(f"/api/v1/parts/{ids['tool']}/shrinkage/decisions", headers=eng_auth, json={
+        "parallel_pct": 0.65, "normal_pct": 0.65, "source_kind": "ktx_experience",
+        "source_label": "KTX tooling note, painted", "rationale": "Painted Bayblend"})
+    assert r.status_code == 200, r.text
+    rows = {row["part_id"]: row for row in
+            (await client.get(f"/api/v1/projects/{seed['project_id']}/worksheet", headers=eng_auth)).json()["rows"]}
+    tool = rows[ids["lh"]]["tool"]
+    assert (tool["shrink_parallel_pct"], tool["shrink_normal_pct"]) == (0.65, 0.65)
+    assert tool["shrink_source"] == "KTX tool experience: KTX tooling note, painted"
+    assert rows[ids["spare"]]["tool"]["shrink_source"] is None
