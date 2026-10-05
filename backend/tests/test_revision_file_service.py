@@ -7,7 +7,7 @@ import pytest
 
 from app.models.part import RevisionFile
 from app.services.part_service import PartService, RevisionService
-from app.services.revision_file_service import UnsupportedFile, store_revision_file
+from app.services.revision_file_service import UnsupportedFile, classify, store_revision_file
 
 
 async def _rev(session_factory, seed):
@@ -64,3 +64,8 @@ async def test_store_removes_the_written_file_when_the_database_step_fails(
         assert os.listdir(tmp_path / "uploads" / "revisions" / str(rid)) == []
         rows = (await s.execute(select(RevisionFile).where(RevisionFile.revision_id == rid))).scalars().all()
         assert rows == []
+
+
+def test_catia_drawing_is_a_drawing():
+    """VW releases its 2D drawings as CATIA .CATDrawing files."""
+    assert classify("3CR_807_425_DRW_POE.CATDrawing") == (".catdrawing", "drawing", "catia")

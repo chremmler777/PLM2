@@ -31,6 +31,7 @@ describe('defaultLevel', () => {
 describe('inferFileType', () => {
   it('maps extensions', () => {
     expect(inferFileType('a.CATPart')).toBe('cad')
+    expect(inferFileType('3CR_807_425_DRW_POE.CATDrawing')).toBe('drawing')
     expect(inferFileType('a.stp')).toBe('cad')
     expect(inferFileType('a.pdf')).toBe('drawing')
     expect(inferFileType('a.dxf')).toBe('drawing')

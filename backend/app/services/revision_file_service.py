@@ -29,6 +29,7 @@ EXTENSION_MAP = {
     ".jt": ("cad", "jt"),
     ".catpart": ("cad", "catia"),
     ".catproduct": ("cad", "catia"),
+    ".catdrawing": ("drawing", "catia"),
     ".dxf": ("drawing", None),
     ".dwg": ("drawing", None),
     ".pdf": ("document", None),

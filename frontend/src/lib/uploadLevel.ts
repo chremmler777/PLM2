@@ -28,7 +28,7 @@ export function defaultLevel(detected: string | null, current: string | null | u
 }
 
 const CAD = ['.step', '.stp', '.iges', '.igs', '.stl', '.jt', '.catpart', '.catproduct'];
-const DRAWING = ['.pdf', '.dxf', '.dwg'];
+const DRAWING = ['.pdf', '.catdrawing', '.dxf', '.dwg'];
 const PICTURE = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
 
 export function inferFileType(filename: string): 'cad' | 'drawing' | 'picture' | 'document' {

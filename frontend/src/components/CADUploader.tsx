@@ -16,7 +16,7 @@ interface CADUploaderProps {
 }
 
 const CAD_EXTENSIONS = ['.step', '.stp', '.iges', '.igs', '.stl', '.jt', '.catpart', '.catproduct'];
-const DOC_EXTENSIONS = ['.pdf', '.dxf', '.dwg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.docx', '.xlsx', '.pptx', '.txt', '.md', '.csv'];
+const DOC_EXTENSIONS = ['.pdf', '.catdrawing', '.dxf', '.dwg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.docx', '.xlsx', '.pptx', '.txt', '.md', '.csv'];
 
 export default function CADUploader({ partId, revisionId, compact = false, onUploadSuccess }: CADUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
