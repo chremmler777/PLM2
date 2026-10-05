@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
 import RevisionLabel from '../parts/RevisionLabel';
 import ToolFieldsCard from '../tools/ToolFieldsCard';
+import ToolShrinkCard from '../tools/ToolShrinkCard';
 import { producedArticles, type ToolRelation } from '../tools/toolRelations';
 import type { Part } from './projectTypes';
 
@@ -45,6 +46,7 @@ export default function ToolInfoTab({ part, onOpenPart }: { part: Part; onOpenPa
         }}
         producedNotes={produced.map((a) => a.notes)}
       />
+      <ToolShrinkCard partId={part.id} />
     </>
   );
 }

@@ -1,9 +1,11 @@
-"""Read-only client for the MaterialDB service API (bearer MATERIALDB_SERVICE_TOKEN).
+"""Client for the MaterialDB service API (bearer MATERIALDB_SERVICE_TOKEN).
 
-MaterialDB offers machine callers only GET /v1/materials (the full list) and
-GET /v1/materials/{ktx_number}; research materials have no KTX number. PLM
-therefore keeps the full list for CACHE_SECONDS and searches and looks up by
-id here, so the browser never sees the token."""
+MaterialDB offers machine callers GET /v1/materials (the full list), GET
+/v1/materials/{ktx_number} and /v1/materials/by-id/{id} (one material with its
+properties, documents and shrinkage experiences), and one write: PUT
+/v1/shrink-experiences/plm/{record_id}, the verified shrinkage of a tool. PLM
+keeps the full list for CACHE_SECONDS and searches and looks up by id here, so
+the browser never sees the token."""
 import time
 from typing import Optional
 
@@ -40,19 +42,54 @@ def hit(m: dict) -> dict:
             "classification": m.get("classification"), "label": label(m)}
 
 
-async def fetch_all(force: bool = False) -> list[dict]:
+def _base_and_headers() -> tuple[str, dict]:
     settings = get_settings()
     base = settings.materialdb_base_url.strip().rstrip("/")
     if not base or not settings.materialdb_service_token:
         raise MaterialDbUnavailable(
             "MaterialDB is not configured on this PLM server (MATERIALDB_BASE_URL, MATERIALDB_SERVICE_TOKEN)")
+    return base, {"Authorization": f"Bearer {settings.materialdb_service_token}"}
+
+
+async def _call(method: str, path: str, json: Optional[dict] = None) -> dict:
+    base, headers = _base_and_headers()
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=TRANSPORT) as client:
+            resp = await client.request(method, f"{base}{path}", headers=headers, json=json)
+    except httpx.HTTPError as e:
+        raise MaterialDbUnavailable(f"MaterialDB is unreachable ({type(e).__name__}); try again later") from e
+    if resp.status_code == 404:
+        raise MaterialDbUnavailable("MaterialDB does not know this material any more")
+    if resp.status_code != 200:
+        raise MaterialDbUnavailable(f"MaterialDB answered {resp.status_code}; try again later")
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise MaterialDbUnavailable("MaterialDB answered with something that is not JSON") from e
+    if not isinstance(data, dict):
+        raise MaterialDbUnavailable("MaterialDB answered with an unexpected shape")
+    return data
+
+
+async def fetch_detail(material_id: int) -> dict:
+    """One material with properties (value, method, condition, source document), documents and
+    shrinkage experiences."""
+    return await _call("GET", f"/v1/materials/by-id/{material_id}")
+
+
+async def put_shrink_experience(record_id: int, body: dict) -> dict:
+    """Report a verified tool shrinkage; a resend with the same record id updates it."""
+    return await _call("PUT", f"/v1/shrink-experiences/plm/{record_id}", json=body)
+
+
+async def fetch_all(force: bool = False) -> list[dict]:
+    base, headers = _base_and_headers()
     now = time.monotonic()
     if not force and _cache["items"] is not None and now - _cache["at"] < CACHE_SECONDS:
         return _cache["items"]
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=TRANSPORT) as client:
-            resp = await client.get(f"{base}/v1/materials",
-                                    headers={"Authorization": f"Bearer {settings.materialdb_service_token}"})
+            resp = await client.get(f"{base}/v1/materials", headers=headers)
     except httpx.HTTPError as e:
         raise MaterialDbUnavailable(f"MaterialDB is unreachable ({type(e).__name__}); try again later") from e
     if resp.status_code != 200:

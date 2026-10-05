@@ -51,6 +51,7 @@ from app.models.workflow import (
 from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile, DfmAuditEvent
 from app.models.field_note import FieldNote, FieldNoteComment
 from app.models.training import TrainingVersion, TrainingSignoff, TrainingAttempt
+from app.models.tool_shrink import ToolShrinkDecision
 
 __all__ = [
     "Base",
@@ -80,6 +81,7 @@ __all__ = [
     "TrainingVersion",
     "TrainingSignoff",
     "TrainingAttempt",
+    "ToolShrinkDecision",
     "DfmTopic",
     "DfmEntry",
     "DfmEntryFile",

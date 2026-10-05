@@ -24,16 +24,13 @@ export interface ToolFieldValues {
   tool_shrink_normal_pct: number | null;
 }
 
-type NumericKey = 'tool_cavities' | 'tool_tonnage_class' | 'tool_cycle_time_s'
-  | 'tool_shrink_parallel_pct' | 'tool_shrink_normal_pct';
+// Shrinkage is not edited here: it changes only through a recorded decision (ToolShrinkCard).
+type NumericKey = 'tool_cavities' | 'tool_tonnage_class' | 'tool_cycle_time_s';
 
 const NUMERIC: { key: NumericKey; fieldKey: string; id: string; label: string; unit: string; step: string; parse(v: string): number }[] = [
   { key: 'tool_cavities', fieldKey: 'tool.cavities', id: 'cavities', label: 'Cavities', unit: '', step: '1', parse: (v) => parseInt(v, 10) },
   { key: 'tool_tonnage_class', fieldKey: 'tool.tonnage_class', id: 'tonnage', label: 'Tonnage class', unit: 't', step: '1', parse: (v) => parseInt(v, 10) },
   { key: 'tool_cycle_time_s', fieldKey: 'tool.cycle_time_s', id: 'cycle', label: 'Target cycle time', unit: 's', step: '0.1', parse: (v) => parseFloat(v) },
-  // The shrinkage the steel is dimensioned with, along and across the flow (glass fibre shrinks less along it).
-  { key: 'tool_shrink_parallel_pct', fieldKey: 'tool.shrink_parallel', id: 'shrink-parallel', label: 'Shrinkage parallel', unit: '%', step: '0.01', parse: (v) => parseFloat(v) },
-  { key: 'tool_shrink_normal_pct', fieldKey: 'tool.shrink_normal', id: 'shrink-normal', label: 'Shrinkage normal', unit: '%', step: '0.01', parse: (v) => parseFloat(v) },
 ];
 
 interface Props {

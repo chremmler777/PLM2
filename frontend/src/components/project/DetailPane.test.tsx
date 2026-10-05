@@ -14,6 +14,7 @@ vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 const stub = vi.hoisted(() => (label: string) => ({ default: () => <div>{label}</div> }))
 vi.mock('../Viewer3D', () => stub('viewer'))
+vi.mock('../tools/ToolShrinkCard', () => stub('tool-shrinkage'))
 const dialogs = vi.hoisted(() => ({
   upload: null as Record<string, unknown> | null,
   customerData: null as Record<string, unknown> | null,

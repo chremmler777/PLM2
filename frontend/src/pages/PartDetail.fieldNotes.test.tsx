@@ -16,6 +16,7 @@ vi.mock('../components/parts/CustomerDataDialog', () => stub('customer-data'))
 vi.mock('../components/parts/CustomerPackageDialog', () => stub('customer-package'))
 vi.mock('../components/parts/BomTree', () => stub('bom-tree'))
 vi.mock('../components/dfm/DfmArchive', () => stub('dfm-archive'))
+vi.mock('../components/tools/ToolShrinkCard', () => stub('tool-shrinkage'))
 
 const article = { id: 5, part_number: '20-1994-005-0', customer_part_number: '206.887.233', tier1_part_number: 'S00H54-110',
   name: 'ISOFIX Cover', part_type: 'internal_mfg', data_classification: 'confidential', item_category: 'article',

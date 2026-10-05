@@ -11,6 +11,7 @@ import StartChangeButton from '../components/changes/StartChangeButton';
 import RevisionLabel from '../components/parts/RevisionLabel';
 import PartThumbnail from '../components/parts/PartThumbnail';
 import ToolFieldsCard from '../components/tools/ToolFieldsCard';
+import ToolShrinkCard from '../components/tools/ToolShrinkCard';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
 import DfmArchive from '../components/dfm/DfmArchive';
 import { toolScope } from '../api/dfm';
@@ -115,6 +116,7 @@ export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null,
             tool_shrink_parallel_pct: part.tool_shrink_parallel_pct ?? null,
             tool_shrink_normal_pct: part.tool_shrink_normal_pct ?? null }}
           producedNotes={produced.map((a) => a.notes)} projectId={part.project_id} />
+        <ToolShrinkCard partId={part.id} projectId={part.project_id} />
 
         {openDoc && (
           <div ref={paneRef} className="bg-slate-800 rounded-lg border border-slate-700 mb-8 overflow-hidden">

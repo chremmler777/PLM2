@@ -11,6 +11,7 @@ vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ isAdmin: true }) }
 const stub = vi.hoisted(() => (label: string) => ({ default: () => <div>{label}</div> }))
 vi.mock('../components/changes/StartChangeModal', () => stub('start-change'))
 vi.mock('../components/changes/StartChangeButton', () => stub('start-change-button'))
+vi.mock('../components/tools/ToolShrinkCard', () => stub('tool-shrinkage'))
 vi.mock('../components/dfm/DfmArchive', () => ({
   default: (p: { onOpenPdf: (d: unknown) => void }) => (
     <button data-testid="dfm-archive" onClick={() => p.onOpenPdf({
