@@ -32,3 +32,10 @@ the next tool with the same material learns from it.
 **How to apply:** local plm2 has no MATERIALDB_BASE_URL, so candidates only show on prod. Open: seed the
 3127/3128 Rautzenberg note as a shrink_experience; MaterialDB test_materials list-shape test was stale (fixed).
 Related: [[tool-shrinkage-rule]].
+
+Later 2026-10-05: worksheet "Chosen shrink combined / parallel / normal" sit next to the datasheet shrink (title = decision
+source); tool card shows the chosen value next to cycle time plus "MaterialDB" reference. Combined is its own field
+(parts.tool_shrink_combined_pct, migration 113, deployed 16:58, backup plm2-before-113-20261005-165752.sql.gz):
+EITHER combined OR parallel + normal, chosen per tool on the Shrinkage card. User: "combined is a choice, need to be
+able to either force normal and parallel or combined" - never derive combined from equal values (113 moves no data;
+199407/199409/227704 still 0.9/0.65/1.25 as parallel = normal until someone chooses).
