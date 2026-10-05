@@ -52,3 +52,5 @@
 - [Tool shrinkage rule](tool-shrinkage-rule.md) - one value for unfilled resins, parallel/normal only for fibre-filled; 1994/2277 values set 2026-09-30
 - [ECR simulation prep 2026-10-01](ecr-simulation-prep-2026-10-01.md) - KPI board, F-01..F-03 fixes, Process Flow aligned, SIM parts on prod, TOC-PLM-06; F-06 open, deploy pending
 - [DFM day 2026-10-02](dfm-usability-project-scope-2026-10-02.md) - lost PPTs root cause, finish guards, PPT-first steps, General tooling DFM (mig 111), prod wipe+restart, deployed 36f7b74f
+- [Project timing blocks 2026-10-02](project-timing-blocks-2026-10-02.md) - G6x/G67 pilot, TOC-PLM-07 requirements, docs/project-timing/TRACE.md living trace; automate in PLM2 + SEP
+- [Tool shrink decision record 2026-10-05](tool-shrink-decision-record-2026-10-05.md) - PLM2 shrinkage source+reason+verify per tool, reported to MaterialDB; deployed 10/05 (plm2 112, MaterialDB c3e4f5a6b7d8)
