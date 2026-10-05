@@ -1,5 +1,6 @@
-"""113 on SQLite: combined shrinkage on parts and decisions; equal parallel/normal pairs move to
-combined; repeatable; the downgrade writes combined back into both directions."""
+"""113 on SQLite: combined shrinkage on parts and decisions; existing values stay as entered
+(combined is a choice, never derived); repeatable; the downgrade writes combined back into both
+directions."""
 import importlib.util
 from pathlib import Path
 
@@ -54,9 +55,11 @@ def test_113_up_and_down_on_sqlite(tmp_path):
     with engine.begin() as conn:
         _run(conn, m113.upgrade)
         _run(conn, m113.upgrade)            # guarded
-        assert _parts(conn) == [(0.65, None, None), (None, 0.7, 1.0), (None, None, None)]
+        # equal parallel / normal stay as entered: combined is chosen on the tool, never derived
+        assert _parts(conn) == [(None, 0.65, 0.65), (None, 0.7, 1.0), (None, None, None)]
         row = conn.execute(sa.text("SELECT combined_pct, parallel_pct FROM tool_shrink_decisions")).one()
-        assert (float(row[0]), row[1]) == (0.65, None)
+        assert (row[0], float(row[1])) == (None, 0.65)
+        conn.exec_driver_sql("UPDATE parts SET tool_shrink_combined_pct = 0.9 WHERE id = 3")
         # a combined decision has no parallel / normal: the columns accept NULL now
         conn.exec_driver_sql(
             "INSERT INTO tool_shrink_decisions (tool_id, combined_pct, source_kind, rationale, decided_by, decided_at,"
@@ -64,7 +67,7 @@ def test_113_up_and_down_on_sqlite(tmp_path):
     with engine.begin() as conn:
         _run(conn, m113.downgrade)
         _run(conn, m113.downgrade)
-        assert [r[1:] for r in _parts_down(conn)] == [(0.65, 0.65), (0.7, 1.0), (None, None)]
+        assert [r[1:] for r in _parts_down(conn)] == [(0.65, 0.65), (0.7, 1.0), (0.9, 0.9)]
 
 
 def _parts_down(conn):

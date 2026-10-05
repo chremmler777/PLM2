@@ -5,9 +5,8 @@ with. A tool holds either combined or parallel + normal, never both.
 tool_shrink_decisions: combined_pct and measured_combined_pct; parallel_pct and
 normal_pct become nullable (a combined decision has none).
 
-Data: a tool whose parallel and normal are equal was a combined value entered in
-both fields; it moves to combined and parallel/normal are cleared. Same for
-decisions.
+Combined or parallel + normal is a choice made per tool on its Shrinkage card,
+so no data moves: equal parallel/normal values stay as they were entered.
 
 Guarded (what exists already is left alone), dialect-neutral.
 
@@ -35,10 +34,6 @@ def upgrade() -> None:
     tables = set(inspect(bind).get_table_names())
     if "parts" in tables and "tool_shrink_combined_pct" not in _cols(bind, "parts"):
         op.add_column("parts", sa.Column("tool_shrink_combined_pct", PCT, nullable=True))
-        op.execute("UPDATE parts SET tool_shrink_combined_pct = tool_shrink_parallel_pct, "
-                   "tool_shrink_parallel_pct = NULL, tool_shrink_normal_pct = NULL "
-                   "WHERE tool_shrink_parallel_pct IS NOT NULL "
-                   "AND tool_shrink_parallel_pct = tool_shrink_normal_pct")
     if "tool_shrink_decisions" in tables:
         have = _cols(bind, "tool_shrink_decisions")
         with op.batch_alter_table("tool_shrink_decisions") as batch:
@@ -50,13 +45,6 @@ def upgrade() -> None:
                 batch.alter_column("parallel_pct", existing_type=PCT, nullable=True)
             if not have["normal_pct"]["nullable"]:
                 batch.alter_column("normal_pct", existing_type=PCT, nullable=True)
-        if "combined_pct" not in have:
-            op.execute("UPDATE tool_shrink_decisions SET combined_pct = parallel_pct, parallel_pct = NULL, "
-                       "normal_pct = NULL WHERE parallel_pct IS NOT NULL AND parallel_pct = normal_pct")
-            op.execute("UPDATE tool_shrink_decisions SET measured_combined_pct = measured_parallel_pct, "
-                       "measured_parallel_pct = NULL, measured_normal_pct = NULL "
-                       "WHERE combined_pct IS NOT NULL AND measured_parallel_pct IS NOT NULL "
-                       "AND measured_parallel_pct = measured_normal_pct")
 
 
 def downgrade() -> None:
