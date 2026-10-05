@@ -422,3 +422,5 @@ DOCS.append({
 # ------------------------------------------------------------------ 06 (work instruction)
 from content_wi import WI  # noqa: E402
 DOCS.append(WI)
+from content_rs import RS  # noqa: E402
+DOCS.append(RS)

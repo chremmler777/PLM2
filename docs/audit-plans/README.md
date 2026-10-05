@@ -12,6 +12,7 @@ Internal, not document-controlled plans for IATF 16949 / VDA / TISAX audits: pul
 | TOC-PLM-05 Information Security TISAX | VDA ISA controls in place + tightening actions |
 | TOC-PLM-06 Work Instruction ECR Simulation | How Project Management simulates ECRs before go-live: admin picker, both change types, timing, Process Flow check (18 known differences), findings |
 | TOC-PLM-06 ECR Simulation Findings Log.xlsx | Findings, Process Flow check and simulations run; filled by the testers, due 10/16/2026 |
+| TOC-PLM-07 Requirements Project Timing | Project timing from standard blocks (PLM2 + SEP project database): G6x findings, 22 requirements with acceptance, SEP mapping, timing, traceability matrix. Living trace: `docs/project-timing/TRACE.md` |
 | TOC-PLM-LOP Action Plan PLM2.xlsm | All 43 actions in the KTX LOP (F-DVS-CORP-010), the live action plan |
 
 `pdf/` holds PDF copies. Word files take styles from the KTX template FM-QUA-0039-07 but carry a plain internal header/footer: no document number field, revision, approval block or revision history.

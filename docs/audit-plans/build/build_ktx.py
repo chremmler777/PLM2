@@ -130,7 +130,7 @@ def fill_header(doc, d):
     p = hdr.add_paragraph(); spacing(p, 0, 0)
     runs(p, d["title"], size=10, bold=True)
     p = hdr.add_paragraph(); spacing(p, 0, 8)
-    runs(p, f"{d['no']} \u00b7 status {C.DATE} \u00b7 {C.INTERNAL}", size=8, color="6B7280")
+    runs(p, f"{d['no']} \u00b7 status {d.get('date', C.DATE)} \u00b7 {C.INTERNAL}", size=8, color="6B7280")
     pPr = p._p.get_or_add_pPr(); bdr = OxmlElement("w:pBdr"); b = OxmlElement("w:bottom")
     for k, v in (("val", "single"), ("sz", "4"), ("space", "4"), ("color", "9CA3AF")):
         b.set(qn(f"w:{k}"), v)
