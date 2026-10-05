@@ -5,7 +5,8 @@
  * back to the "n cavities" note on the produces relation until set here.
  */
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchToolShrinkage, materialdbReference, toolShrinkageKey } from '../../api/toolShrink';
 import client from '../../api/client';
 import { toast } from 'sonner';
 import { useSuppliers } from '../../hooks/queries/useSuppliers';
@@ -56,6 +57,9 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
   const queryClient = useQueryClient();
   const { data: suppliers } = useSuppliers();
   const notes = usePartFieldNoteIndex(partId);
+  // Same query as the Shrinkage card below (shared cache): the MaterialDB value as a reference.
+  const shrinkage = useQuery({ queryKey: toolShrinkageKey(partId), queryFn: () => fetchToolShrinkage(partId) });
+  const reference = materialdbReference(shrinkage.data);
   const [editing, setEditing] = useState<{ key: NumericKey | 'tool_machine'; value: string } | null>(null);
 
   const save = useMutation({
@@ -128,6 +132,11 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
             className="block text-left font-medium text-slate-100 hover:text-blue-300 mt-1">
             {shrinkSummary(values.tool_shrink_parallel_pct, values.tool_shrink_normal_pct, values.tool_shrink_combined_pct)}
           </button>
+          {reference && (
+            <div data-testid="tool-shrink-reference" title={reference.title} className="text-xs text-slate-400 mt-0.5">
+              MaterialDB {reference.text}
+            </div>
+          )}
         </div>
         <div data-field-key="tool.toolmaker">
           <div className="text-sm text-slate-400">

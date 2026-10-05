@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  decideShrinkage, fetchToolShrinkage, reportShrinkage, verifyShrinkage,
+  decideShrinkage, fetchToolShrinkage, materialdbReference, reportShrinkage, toolShrinkageKey, verifyShrinkage,
   type ShrinkCandidate, type ShrinkDecision, type ShrinkSourceKind, type ShrinkVerdict,
 } from '../../api/toolShrink';
 import { apiErrorMessage } from '../../lib/apiError';
@@ -89,7 +89,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
   const qc = useQueryClient();
   const notes = usePartFieldNoteIndex(partId);
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['tool-shrinkage', partId],
+    queryKey: toolShrinkageKey(partId),
     queryFn: () => fetchToolShrinkage(partId),
   });
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -97,7 +97,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
   const [showHistory, setShowHistory] = useState(false);
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ['tool-shrinkage', partId] });
+    qc.invalidateQueries({ queryKey: toolShrinkageKey(partId) });
     qc.invalidateQueries({ queryKey: ['part'] });
     qc.invalidateQueries({ queryKey: ['parts'] });
     qc.invalidateQueries({ queryKey: ['project-parts'] });
@@ -152,6 +152,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
   const current = data.decisions.find((d) => d.status === 'current') ?? null;
   const past = data.decisions.filter((d) => d.status !== 'current');
   const combinedNow = data.tool.combined_pct != null;
+  const reference = materialdbReference(data);
   const unrecorded = !current && (combinedNow || data.tool.parallel_pct != null || data.tool.normal_pct != null);
   const fibre = data.materials.some((m) => m.filler_type && FIBRE.has(m.filler_type.toUpperCase()));
 
@@ -208,6 +209,11 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
           )}
         </div>
       </div>
+      {reference && (
+        <p data-testid="shrink-reference" title={reference.title} className="text-sm text-slate-400 text-right">
+          MaterialDB reference <span className="text-slate-200 tabular-nums">{reference.text}</span>
+        </p>
+      )}
 
       {unrecorded && (
         <p data-testid="shrink-unrecorded" className="mt-3 text-sm text-amber-300">

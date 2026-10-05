@@ -140,4 +140,19 @@ describe('cavitiesFromNotes', () => {
     wrap()
     expect(screen.getByTestId('tool-shrink-summary').textContent).toBe('Shrinkage (%)not chosen')
   })
+
+  it('shows the MaterialDB shrinkage as a reference under the chosen value', async () => {
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve({ data: url === '/v1/parts/7/shrinkage'
+      ? { tool: { parallel_pct: null, normal_pct: null, combined_pct: 0.65 }, decisions: [], materials: [], error: null,
+          no_material: false, no_article: false, candidates: [
+            { key: 'a', kind: 'datasheet', materialdb_id: 4, material_label: '40-0011 Bayblend T85 XF', parallel_pct: 0.5,
+              normal_pct: 0.7, parallel_text: '0.5-0.7', normal_text: '0.5-0.7', method: 'ISO 294-4', condition: null,
+              source_label: 'Datasheet', doc_date: null, origin: null },
+            { key: 'b', kind: 'ktx_experience', materialdb_id: 4, material_label: '40-0011 Bayblend T85 XF', parallel_pct: 0.65,
+              normal_pct: 0.65, parallel_text: '0.65', normal_text: '0.65', method: null, condition: null,
+              source_label: 'Tool 3127', doc_date: null, origin: null }] }
+      : [] }))
+    wrap({ ...empty, tool_shrink_combined_pct: 0.65 })
+    expect((await screen.findByTestId('tool-shrink-reference')).textContent).toBe('MaterialDB 0.5-0.7 %')
+  })
 })

@@ -44,6 +44,8 @@ describe('ToolShrinkCard', () => {
   it('shows each value with its source and records a decision with a reason', async () => {
     wrap(base)
     const row = await screen.findByTestId('shrink-candidate')
+    // the MaterialDB value stays visible as a reference
+    expect(screen.getByTestId('shrink-reference').textContent).toBe('MaterialDB reference 0.8 / 1.1 %')
     expect(row.textContent).toContain('Supplier statement')
     expect(row.textContent).toContain('Mail K. Reinert')
     expect(row.textContent).toContain('plaque 2.5 mm')

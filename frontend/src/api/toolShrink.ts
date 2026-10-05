@@ -98,3 +98,24 @@ export const verifyShrinkage = async (partId: number, decisionId: number, body: 
 
 export const reportShrinkage = async (partId: number, decisionId: number) =>
   (await client.post(`/v1/parts/${partId}/shrinkage/decisions/${decisionId}/report`)).data;
+
+/** The shrinkage MaterialDB holds for the tool's material(s) (datasheet or supplier value), as a reference
+ *  next to the chosen value. KTX tool experience is left out: it is history, not the material's value. */
+export function materialdbReference(data: ToolShrinkage | undefined): { text: string; title: string } | null {
+  const refs = (data?.candidates ?? []).filter((c) => c.kind !== 'ktx_experience'
+    && (c.parallel_text != null || c.normal_text != null));
+  if (!refs.length) return null;
+  const one = (c: ShrinkCandidate) => {
+    const p = c.parallel_text ?? '-';
+    const n = c.normal_text ?? '-';
+    return p === n ? `${p} %` : `${p} / ${n} %`;
+  };
+  const many = new Set(refs.map((c) => c.materialdb_id)).size > 1;
+  return {
+    text: refs.map((c) => (many ? `${c.material_label}: ` : '') + one(c)).join(' · '),
+    title: refs.map((c) => `${c.material_label}: ${one(c)} parallel / normal, ${c.kind === 'datasheet' ? 'datasheet' : 'supplier statement'}`
+      + ` (${c.source_label})${c.method || c.condition ? `, ${[c.method, c.condition].filter(Boolean).join(', ')}` : ''}`).join('\n'),
+  };
+}
+
+export const toolShrinkageKey = (partId: number) => ['tool-shrinkage', partId] as const;
