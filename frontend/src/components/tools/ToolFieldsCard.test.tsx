@@ -130,8 +130,8 @@ describe('cavitiesFromNotes', () => {
     expect(cavitiesFromNotes([])).toBeNull()
   })
 
-  it('shows the chosen shrinkage next to cycle time: combined when equal, else parallel and normal', () => {
-    wrap({ ...empty, tool_shrink_parallel_pct: 0.65, tool_shrink_normal_pct: 0.65 })
+  it('shows the chosen shrinkage next to cycle time: either combined or parallel and normal', () => {
+    wrap({ ...empty, tool_shrink_combined_pct: 0.65 })
     expect(screen.getByTestId('tool-shrink-summary').textContent).toBe('Shrinkage (%)0.65 combined')
     cleanup()
     wrap({ ...empty, tool_shrink_parallel_pct: 0.7, tool_shrink_normal_pct: 1 })

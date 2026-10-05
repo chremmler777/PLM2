@@ -115,7 +115,7 @@ async def test_decide_sets_tool_fields_and_supersedes(client, eng_auth, seed, se
     tool = await _tool_with_article(session_factory, client, eng_auth, seed)
     r = await client.post(f"/api/v1/parts/{tool}/shrinkage/decisions", json=DECISION, headers=eng_auth)
     assert r.status_code == 200, r.text
-    assert r.json()["tool"] == {"parallel_pct": 0.8, "normal_pct": 1.1}
+    assert r.json()["tool"] == {"parallel_pct": 0.8, "normal_pct": 1.1, "combined_pct": None}
     part = (await client.get(f"/api/v1/parts/{tool}", headers=eng_auth)).json()
     assert (part["tool_shrink_parallel_pct"], part["tool_shrink_normal_pct"]) == (0.8, 1.1)
 
@@ -174,4 +174,41 @@ async def test_failed_report_is_kept_and_can_be_resent(client, eng_auth, seed, s
     mdb["fail"] = None
     d = (await client.post(f"{base}/report", headers=eng_auth)).json()["decisions"][0]
     assert d["feedback_status"] == "sent"
-    assert mdb["puts"][0][1]["recommendation"] == "Keep 0.8 / 1.1 %"
+    assert mdb["puts"][0][1]["recommendation"] == "Keep 0.8 / 1.1 % parallel / normal"
+
+
+async def test_combined_or_parallel_normal_never_both(client, eng_auth, seed, session_factory, mdb):
+    tool = await _tool_with_article(session_factory, client, eng_auth, seed)
+    url = f"/api/v1/parts/{tool}/shrinkage/decisions"
+    base = {"source_kind": "own", "rationale": "Painted Bayblend"}
+    for bad in ({}, {"combined_pct": 0.65, "parallel_pct": 0.6, "normal_pct": 0.7}, {"parallel_pct": 0.6},
+                {"combined_pct": 0.65, "normal_pct": 0.7}):
+        assert (await client.post(url, json={**base, **bad}, headers=eng_auth)).status_code == 400, bad
+
+    # split first, then combined: the tool holds only the combined value afterwards
+    await client.post(url, json={**DECISION}, headers=eng_auth)
+    body = (await client.post(url, json={**base, "combined_pct": 0.65}, headers=eng_auth)).json()
+    assert body["tool"] == {"parallel_pct": None, "normal_pct": None, "combined_pct": 0.65}
+    d = body["decisions"][0]
+    assert (d["combined_pct"], d["parallel_pct"], d["normal_pct"]) == (0.65, None, None)
+    part = (await client.get(f"/api/v1/parts/{tool}", headers=eng_auth)).json()
+    assert (part["tool_shrink_combined_pct"], part["tool_shrink_parallel_pct"]) == (0.65, None)
+    log = (await client.get(f"/api/v1/parts/{tool}/changelog", headers=eng_auth)).json()
+    assert any(e["action"] == "shrink_decided" and "0.65 % combined" in e["action_description"] for e in log)
+
+
+async def test_combined_decision_reports_one_value_both_directions(client, eng_auth, seed, session_factory, mdb):
+    tool = await _tool_with_article(session_factory, client, eng_auth, seed)
+    did = (await client.post(f"/api/v1/parts/{tool}/shrinkage/decisions", headers=eng_auth, json={
+        **DECISION, "parallel_pct": None, "normal_pct": None, "combined_pct": 0.9})).json()["decisions"][0]["id"]
+    url = f"/api/v1/parts/{tool}/shrinkage/decisions/{did}/verify"
+    both = {"measured_combined_pct": 0.95, "measured_parallel_pct": 0.9, "measured_ref": "TH1", "verdict": "correct"}
+    assert (await client.post(url, json=both, headers=eng_auth)).status_code == 400
+    r = await client.post(url, json={"measured_combined_pct": 0.95, "measured_ref": "TH1", "verdict": "correct"},
+                          headers=eng_auth)
+    assert r.status_code == 200, r.text
+    assert r.json()["decisions"][0]["measured_combined_pct"] == 0.95
+    sent = mdb["puts"][0][1]
+    assert (sent["planned_flow"], sent["planned_cross"], sent["measured_flow"], sent["measured_cross"]) == (0.9, 0.9, 0.95, 0.95)
+    assert sent["planned_source"].startswith("combined value; supplier")
+    assert sent["recommendation"] == "Keep 0.9 % combined"

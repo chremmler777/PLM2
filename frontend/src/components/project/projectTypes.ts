@@ -38,6 +38,7 @@ export interface Part {
   tool_machine?: string | null;
   tool_shrink_parallel_pct?: number | null;
   tool_shrink_normal_pct?: number | null;
+  tool_shrink_combined_pct?: number | null;
   /** /api/v1/parts/{id}/thumbnail?v=..., null when the part has no picture. */
   thumbnail_url?: string | null;
 }

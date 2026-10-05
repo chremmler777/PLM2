@@ -1,7 +1,7 @@
 """Tool shrinkage decision record: which shrinkage a tool's steel is cut with, where that value
 came from and why it was chosen, and after the first trials whether it was right.
 
-One row per decision. A new decision supersedes the current one (history stays). The current
+A decision holds either one combined value or parallel + normal. One row per decision. A new decision supersedes the current one (history stays). The current
 decision's values are what parts.tool_shrink_parallel_pct / _normal_pct hold. After the
 trial the decision is verified with the measured shrinkage; the result is reported back to
 MaterialDB as a shrinkage experience of the material, so the next tool sees it."""
@@ -24,8 +24,10 @@ class ToolShrinkDecision(Base):
     tool_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
     status: Mapped[str] = mapped_column(String(12), default="current")  # current | superseded
 
-    parallel_pct: Mapped[float] = mapped_column(Numeric(5, 3, asdecimal=False))
-    normal_pct: Mapped[float] = mapped_column(Numeric(5, 3, asdecimal=False))
+    # Either one combined value, or parallel + normal (113)
+    parallel_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
+    normal_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
+    combined_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
     # Where the value came from: datasheet, supplier statement, KTX tool experience, own value
     source_kind: Mapped[str] = mapped_column(String(20))
     source_label: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -40,6 +42,7 @@ class ToolShrinkDecision(Base):
     # After the trial: the shrinkage the parts really showed
     measured_parallel_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
     measured_normal_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
+    measured_combined_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
     measured_ref: Mapped[str | None] = mapped_column(String(300), nullable=True)
     verdict: Mapped[str | None] = mapped_column(String(10), nullable=True)
     next_time_note: Mapped[str | None] = mapped_column(Text, nullable=True)

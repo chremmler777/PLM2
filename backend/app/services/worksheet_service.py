@@ -100,6 +100,7 @@ def _tool(t: Part, toolmakers: dict, shrink_sources: Optional[dict] = None) -> d
             "cycle_time_s": t.tool_cycle_time_s, "tonnage_class": t.tool_tonnage_class,
             "machine": t.tool_machine, "shrink_parallel_pct": t.tool_shrink_parallel_pct,
             "shrink_normal_pct": t.tool_shrink_normal_pct,
+            "shrink_combined_pct": t.tool_shrink_combined_pct,
             "shrink_source": (shrink_sources or {}).get(t.id)}
 
 

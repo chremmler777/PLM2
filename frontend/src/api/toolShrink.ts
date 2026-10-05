@@ -23,8 +23,9 @@ export interface ShrinkCandidate {
 export interface ShrinkDecision {
   id: number;
   status: 'current' | 'superseded';
-  parallel_pct: number;
-  normal_pct: number;
+  parallel_pct: number | null;
+  normal_pct: number | null;
+  combined_pct: number | null;
   source_kind: ShrinkSourceKind;
   source_label: string | null;
   materialdb_id: number | null;
@@ -35,6 +36,7 @@ export interface ShrinkDecision {
   decided_at: string | null;
   measured_parallel_pct: number | null;
   measured_normal_pct: number | null;
+  measured_combined_pct: number | null;
   measured_ref: string | null;
   verdict: ShrinkVerdict | null;
   next_time_note: string | null;
@@ -54,7 +56,7 @@ export interface ShrinkMaterial {
 }
 
 export interface ToolShrinkage {
-  tool: { parallel_pct: number | null; normal_pct: number | null };
+  tool: { parallel_pct: number | null; normal_pct: number | null; combined_pct: number | null };
   decisions: ShrinkDecision[];
   materials: ShrinkMaterial[];
   candidates: ShrinkCandidate[];
@@ -63,9 +65,11 @@ export interface ToolShrinkage {
   no_article: boolean;
 }
 
+/** Either combined_pct, or parallel_pct and normal_pct. */
 export interface DecideBody {
-  parallel_pct: number;
-  normal_pct: number;
+  parallel_pct: number | null;
+  normal_pct: number | null;
+  combined_pct: number | null;
   source_kind: ShrinkSourceKind;
   source_label: string | null;
   rationale: string;
@@ -77,6 +81,7 @@ export interface DecideBody {
 export interface VerifyBody {
   measured_parallel_pct: number | null;
   measured_normal_pct: number | null;
+  measured_combined_pct: number | null;
   measured_ref: string;
   verdict: ShrinkVerdict;
   next_time_note: string | null;

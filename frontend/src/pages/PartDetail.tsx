@@ -60,6 +60,7 @@ interface Part extends Partial<PartMaterial> {
   tool_machine?: string | null;
   tool_shrink_parallel_pct?: number | null;
   tool_shrink_normal_pct?: number | null;
+  tool_shrink_combined_pct?: number | null;
   thumbnail_url?: string | null;
 }
 
@@ -218,6 +219,7 @@ export default function PartDetail() {
           tool_machine: part.tool_machine ?? null,
           tool_shrink_parallel_pct: part.tool_shrink_parallel_pct ?? null,
           tool_shrink_normal_pct: part.tool_shrink_normal_pct ?? null,
+          tool_shrink_combined_pct: part.tool_shrink_combined_pct ?? null,
           thumbnail_url: part.thumbnail_url ?? null,
         }}
         onOpenPart={(id) => navigate(`/parts/${id}`)}

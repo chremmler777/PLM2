@@ -18,16 +18,16 @@ const SUPPLIER = {
 }
 
 const base: ToolShrinkage = {
-  tool: { parallel_pct: null, normal_pct: null }, decisions: [],
+  tool: { parallel_pct: null, normal_pct: null, combined_pct: null }, decisions: [],
   materials: [{ materialdb_id: 19, label: '40-0223 Hostacom TRC 352N', articles: ['5A65DF8'], filler_type: 'TD', notes: null }],
   candidates: [SUPPLIER], error: null, no_material: false, no_article: false,
 }
 
 const decision: ShrinkDecision = {
-  id: 4, status: 'current', parallel_pct: 0.8, normal_pct: 1.1, source_kind: 'supplier',
+  id: 4, status: 'current', parallel_pct: 0.8, normal_pct: 1.1, combined_pct: null, source_kind: 'supplier',
   source_label: SUPPLIER.source_label, materialdb_id: 19, material_label: SUPPLIER.material_label, candidates: [SUPPLIER],
   rationale: 'Supplier measured along/across', decided_by: 'C. Demmler', decided_at: '2026-10-05T10:00:00',
-  measured_parallel_pct: null, measured_normal_pct: null, measured_ref: null, verdict: null, next_time_note: null,
+  measured_parallel_pct: null, measured_normal_pct: null, measured_combined_pct: null, measured_ref: null, verdict: null, next_time_note: null,
   verified_by: null, verified_at: null, feedback_status: null, feedback_error: null, feedback_at: null,
 }
 
@@ -62,34 +62,34 @@ describe('ToolShrinkCard', () => {
     wrap(base)
     fireEvent.click(await screen.findByTestId('shrink-own'))
     // unfilled resin (no glass or carbon fibre): one combined value is the default
-    expect(screen.getByTestId('shrink-combined')).toHaveProperty('checked', true)
+    expect(screen.getByTestId('shrink-mode-combined')).toHaveProperty('checked', true)
     expect(screen.queryByTestId('shrink-normal')).toBeNull()
     fireEvent.change(screen.getByTestId('shrink-parallel'), { target: { value: '0.65' } })
     fireEvent.change(screen.getByTestId('shrink-rationale'), { target: { value: 'Painted Bayblend, KTX tooling note' } })
     fireEvent.click(screen.getByTestId('shrink-decide-save'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/shrinkage/decisions', expect.objectContaining({
-      parallel_pct: 0.65, normal_pct: 0.65, source_kind: 'own',
+      combined_pct: 0.65, parallel_pct: null, normal_pct: null, source_kind: 'own',
     })))
   })
 
   it('offers parallel and normal when the combined box is cleared', async () => {
     wrap(base)
     fireEvent.click(await screen.findByTestId('shrink-own'))
-    fireEvent.click(screen.getByTestId('shrink-combined'))
+    fireEvent.click(screen.getByTestId('shrink-mode-split'))
     expect(screen.getByTestId('shrink-normal')).toBeTruthy()
   })
 
   it('flags values that were entered without a decision', async () => {
-    wrap({ ...base, tool: { parallel_pct: 0.9, normal_pct: 0.9 } })
+    wrap({ ...base, tool: { parallel_pct: null, normal_pct: null, combined_pct: 0.9 } })
     expect(await screen.findByTestId('shrink-unrecorded')).toBeTruthy()
-    // equal in both directions: one combined value
-    expect(screen.getByTestId('shrink-current-parallel').textContent).toBe('0.9 %')
-    expect(screen.getByText('Combined')).toBeTruthy()
+    // a combined value shows alone, no parallel / normal
+    expect(screen.getByTestId('shrink-current-combined').textContent).toBe('0.9 %')
+    expect(screen.queryByTestId('shrink-current-parallel')).toBeNull()
     expect(screen.queryByTestId('shrink-current-normal')).toBeNull()
   })
 
   it('verifies after the trial and asks for a next-tool note unless correct', async () => {
-    wrap({ ...base, tool: { parallel_pct: 0.8, normal_pct: 1.1 }, decisions: [decision] })
+    wrap({ ...base, tool: { parallel_pct: 0.8, normal_pct: 1.1, combined_pct: null }, decisions: [decision] })
     fireEvent.click(await screen.findByTestId('shrink-verify-open'))
     fireEvent.change(screen.getByTestId('shrink-measured-parallel'), { target: { value: '0.86' } })
     fireEvent.change(screen.getByTestId('shrink-measured-normal'), { target: { value: '1.15' } })
@@ -99,13 +99,13 @@ describe('ToolShrinkCard', () => {
     fireEvent.change(screen.getByTestId('shrink-next-note'), { target: { value: 'Use 0.85 / 1.15' } })
     fireEvent.click(screen.getByTestId('shrink-verify-save'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/shrinkage/decisions/4/verify', {
-      measured_parallel_pct: 0.86, measured_normal_pct: 1.15, measured_ref: 'TH1 6-pc CMM', verdict: 'offset',
+      measured_combined_pct: null, measured_parallel_pct: 0.86, measured_normal_pct: 1.15, measured_ref: 'TH1 6-pc CMM', verdict: 'offset',
       next_time_note: 'Use 0.85 / 1.15',
     }))
   })
 
   it('offers to send a failed report again', async () => {
-    wrap({ ...base, tool: { parallel_pct: 0.8, normal_pct: 1.1 }, decisions: [{
+    wrap({ ...base, tool: { parallel_pct: 0.8, normal_pct: 1.1, combined_pct: null }, decisions: [{
       ...decision, verified_at: '2026-10-22T10:00:00', verified_by: 'C. Demmler', verdict: 'correct',
       measured_parallel_pct: 0.8, measured_normal_pct: 1.1, measured_ref: 'TH1', feedback_status: 'failed',
       feedback_error: 'MaterialDB is unreachable',

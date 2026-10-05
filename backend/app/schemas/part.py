@@ -34,6 +34,8 @@ class PartBase(BaseModel):
     tool_machine: Optional[str] = Field(None, max_length=255, description="Press the tool is planned on")
     tool_shrink_parallel_pct: Optional[float] = Field(None, ge=0, le=5, description="Tool shrinkage parallel to flow, %")
     tool_shrink_normal_pct: Optional[float] = Field(None, ge=0, le=5, description="Tool shrinkage across flow, %")
+    tool_shrink_combined_pct: Optional[float] = Field(None, ge=0, le=5,
+                                                      description="Tool shrinkage, one combined value, %. Set by a shrinkage decision")
 
     # Article fields
     colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")

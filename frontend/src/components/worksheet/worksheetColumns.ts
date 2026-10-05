@@ -208,7 +208,7 @@ function shrinkTitle(r: WorksheetRow, dir: ShrinkDir): string | null {
 /** Where the tool's chosen shrinkage came from; flags a value with no recorded decision. */
 export function chosenShrinkTitle(r: WorksheetRow): string | null {
   const t = r.tool;
-  if (!t || (t.shrink_parallel_pct == null && t.shrink_normal_pct == null)) return null;
+  if (!t || (t.shrink_parallel_pct == null && t.shrink_normal_pct == null && t.shrink_combined_pct == null)) return null;
   return t.shrink_source ?? 'No source recorded: record the decision on the tool page';
 }
 
@@ -265,7 +265,11 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     editableOn: null, value: (r) => shrinkText(r, 'parallel'), title: (r) => shrinkTitle(r, 'parallel'), edit: nowhere }),
   def({ key: 'material.shrink_normal', label: 'Datasheet shrink normal (%)', group: 'Material', noteOwner: null,
     editableOn: null, value: (r) => shrinkText(r, 'normal'), title: (r) => shrinkTitle(r, 'normal'), edit: nowhere }),
-  // The shrinkage the tool steel is cut with, chosen on the tool page as a decision; the title names its source.
+  // The shrinkage the tool steel is cut with, chosen on the tool page as a decision: either one combined value or
+  // parallel / normal. The title names the decision's source.
+  def({ key: 'tool.shrink_combined', label: 'Chosen shrink combined (%)', group: 'Tool', display: 'number', exportType: 'number',
+    noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_combined_pct ?? null, title: chosenShrinkTitle,
+    edit: onTool('tool.shrink_combined') }),
   def({ key: 'tool.shrink_parallel', label: 'Chosen shrink parallel (%)', group: 'Tool', display: 'number', exportType: 'number',
     noteOwner: 'tool', editableOn: 'tool', value: (r) => r.tool?.shrink_parallel_pct ?? null, title: chosenShrinkTitle,
     edit: onTool('tool.shrink_parallel') }),

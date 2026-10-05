@@ -77,6 +77,8 @@ class Part(Base):
     # across the flow (glass-filled resins differ). Set by engineering, not the datasheet.
     tool_shrink_parallel_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
     tool_shrink_normal_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
+    # Either one combined value (unfilled resins) or parallel + normal (fibre-filled), never both (113).
+    tool_shrink_combined_pct: Mapped[float | None] = mapped_column(Numeric(5, 3, asdecimal=False), nullable=True)
     # The press tonnage of the tool as the source systems know it (108),
     # kept by the tool tonnage sync (tool_tonnage_service), one set per
     # source so a failed MachineDB fetch never downgrades a tool to TWOS.

@@ -124,10 +124,12 @@ async def candidates(db: AsyncSession, tool: Part) -> dict:
 def to_dict(d: ToolShrinkDecision, names: dict) -> dict:
     return {
         "id": d.id, "status": d.status, "parallel_pct": d.parallel_pct, "normal_pct": d.normal_pct,
+        "combined_pct": d.combined_pct,
         "source_kind": d.source_kind, "source_label": d.source_label, "materialdb_id": d.materialdb_id,
         "material_label": d.material_label, "candidates": d.candidates or [], "rationale": d.rationale,
         "decided_by": names.get(d.decided_by), "decided_at": d.decided_at.isoformat() if d.decided_at else None,
         "measured_parallel_pct": d.measured_parallel_pct, "measured_normal_pct": d.measured_normal_pct,
+        "measured_combined_pct": d.measured_combined_pct,
         "measured_ref": d.measured_ref, "verdict": d.verdict, "next_time_note": d.next_time_note,
         "verified_by": names.get(d.verified_by), "verified_at": d.verified_at.isoformat() if d.verified_at else None,
         "feedback_status": d.feedback_status, "feedback_error": d.feedback_error,
@@ -143,12 +145,19 @@ async def history(db: AsyncSession, tool_id: int) -> list[dict]:
     return [to_dict(d, names) for d in rows]
 
 
-async def decide(db: AsyncSession, tool: Part, user: User, *, parallel_pct: float, normal_pct: float,
-                 source_kind: str, source_label: Optional[str], rationale: str,
+def values_text(combined, parallel, normal) -> str:
+    return f"{combined} % combined" if combined is not None else f"{parallel} / {normal} % parallel / normal"
+
+
+async def decide(db: AsyncSession, tool: Part, user: User, *, parallel_pct: Optional[float] = None,
+                 normal_pct: Optional[float] = None, combined_pct: Optional[float] = None, source_kind: str, source_label: Optional[str], rationale: str,
                  materialdb_id: Optional[int], material_label: Optional[str],
                  shown: Optional[list]) -> ToolShrinkDecision:
     if tool.item_category != "tool":
         raise ShrinkError("Shrinkage decisions belong to tools")
+    split = parallel_pct is not None or normal_pct is not None
+    if (combined_pct is None) == (not split) or (split and (parallel_pct is None or normal_pct is None)):
+        raise ShrinkError("Give either one combined value or both parallel and normal")
     if not (rationale or "").strip():
         raise ShrinkError("Say why this value was chosen")
     if source_kind != "own" and not (source_label or "").strip():
@@ -158,7 +167,7 @@ async def decide(db: AsyncSession, tool: Part, user: User, *, parallel_pct: floa
         old.status = "superseded"
     d = ToolShrinkDecision(
         tool_id=tool.id, status="current", parallel_pct=parallel_pct, normal_pct=normal_pct,
-        source_kind=source_kind, source_label=(source_label or "").strip() or None,
+        combined_pct=combined_pct, source_kind=source_kind, source_label=(source_label or "").strip() or None,
         materialdb_id=materialdb_id, material_label=material_label, candidates=shown,
         rationale=rationale.strip(), decided_by=user.id, decided_at=datetime.utcnow())
     db.add(d)
@@ -166,11 +175,12 @@ async def decide(db: AsyncSession, tool: Part, user: User, *, parallel_pct: floa
     await PartService.update_part(
         session=db, part_id=tool.id, updated_by=user.id,
         tool_shrink_parallel_pct=parallel_pct, update_tool_shrink_parallel_pct=True,
-        tool_shrink_normal_pct=normal_pct, update_tool_shrink_normal_pct=True)
+        tool_shrink_normal_pct=normal_pct, update_tool_shrink_normal_pct=True,
+        tool_shrink_combined_pct=combined_pct, update_tool_shrink_combined_pct=True)
     await db.flush()
     await ChangelogService.log_action(
         db, part_id=tool.id, action="shrink_decided", performed_by=user.id,
-        action_description=f"Shrinkage {parallel_pct} / {normal_pct} % from {source_kind}"
+        action_description=f"Shrinkage {values_text(combined_pct, parallel_pct, normal_pct)} from {source_kind}"
                            f"{': ' + d.source_label if d.source_label else ''}",
         notes=d.rationale)
     return d
@@ -184,24 +194,28 @@ async def _current(db: AsyncSession, tool_id: int, decision_id: int) -> ToolShri
 
 
 async def verify(db: AsyncSession, tool: Part, decision_id: int, user: User, *,
-                 measured_parallel_pct: Optional[float], measured_normal_pct: Optional[float],
-                 measured_ref: str, verdict: str, next_time_note: Optional[str]) -> ToolShrinkDecision:
+                 measured_parallel_pct: Optional[float] = None, measured_normal_pct: Optional[float] = None,
+                 measured_combined_pct: Optional[float] = None, measured_ref: str, verdict: str, next_time_note: Optional[str]) -> ToolShrinkDecision:
     d = await _current(db, tool.id, decision_id)
-    if measured_parallel_pct is None and measured_normal_pct is None:
+    if measured_parallel_pct is None and measured_normal_pct is None and measured_combined_pct is None:
         raise ShrinkError("Enter the measured shrinkage")
+    if measured_combined_pct is not None and (measured_parallel_pct is not None or measured_normal_pct is not None):
+        raise ShrinkError("Give either one combined measured value or parallel and normal")
     if not (measured_ref or "").strip():
         raise ShrinkError("Name the measurement (e.g. TH1 6-pc CMM report)")
     if verdict != "correct" and not (next_time_note or "").strip():
         raise ShrinkError("Say what the next tool should use")
     d.measured_parallel_pct, d.measured_normal_pct = measured_parallel_pct, measured_normal_pct
+    d.measured_combined_pct = measured_combined_pct
     d.measured_ref, d.verdict = measured_ref.strip(), verdict
     d.next_time_note = (next_time_note or "").strip() or None
     d.verified_by, d.verified_at = user.id, datetime.utcnow()
     await db.flush()
     await ChangelogService.log_action(
         db, part_id=tool.id, action="shrink_verified", performed_by=user.id,
-        action_description=f"Shrinkage verified: {verdict} (measured {measured_parallel_pct} / "
-                           f"{measured_normal_pct} %, {d.measured_ref})", notes=d.next_time_note)
+        action_description=f"Shrinkage verified: {verdict} (measured "
+                           f"{values_text(measured_combined_pct, measured_parallel_pct, measured_normal_pct)}, "
+                           f"{d.measured_ref})", notes=d.next_time_note)
     await report(db, tool, d, user)
     return d
 
@@ -215,15 +229,21 @@ async def report(db: AsyncSession, tool: Part, d: ToolShrinkDecision, user: User
     articles = await produced_articles(db, tool.id)
     project = await db.get(Project, tool.project_id)
     planned_source = f"{d.source_kind}: {d.source_label}" if d.source_label else d.source_kind
+    if d.combined_pct is not None:
+        planned_source = f"combined value; {planned_source}"
+    planned_flow = d.combined_pct if d.combined_pct is not None else d.parallel_pct
+    planned_cross = d.combined_pct if d.combined_pct is not None else d.normal_pct
+    measured_flow = d.measured_combined_pct if d.measured_combined_pct is not None else d.measured_parallel_pct
+    measured_cross = d.measured_combined_pct if d.measured_combined_pct is not None else d.measured_normal_pct
     body = {
         "material_id": d.materialdb_id, "tool_number": tool.part_number,
         "article": ", ".join(f"{a.part_number} {a.name}" for a in articles)[:300] or None,
         "project": (project.code if project else None),
-        "planned_flow": d.parallel_pct, "planned_cross": d.normal_pct,
+        "planned_flow": planned_flow, "planned_cross": planned_cross,
         "planned_source": f"{planned_source}\nWhy: {d.rationale}"[:2000],
-        "measured_flow": d.measured_parallel_pct, "measured_cross": d.measured_normal_pct,
+        "measured_flow": measured_flow, "measured_cross": measured_cross,
         "measured_ref": d.measured_ref, "verdict": d.verdict,
-        "recommendation": d.next_time_note or f"Keep {d.parallel_pct} / {d.normal_pct} %",
+        "recommendation": d.next_time_note or f"Keep {values_text(d.combined_pct, d.parallel_pct, d.normal_pct)}",
         "source": f"PLM2 tool {tool.part_number}, shrinkage decision {d.id}",
         "actor": user.full_name or user.username,
     }

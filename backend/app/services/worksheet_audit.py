@@ -68,6 +68,7 @@ FIELD_NAME_KEYS: dict[str, str] = {
     "tool_cavities": "tool.cavities",
     "tool_cycle_time_s": "tool.cycle_time_s",
     "tool_machine": "tool.machine",
+    "tool_shrink_combined_pct": "tool.shrink_combined",
     "tool_shrink_normal_pct": "tool.shrink_normal",
     "tool_shrink_parallel_pct": "tool.shrink_parallel",
     "tool_tonnage_class": "tool.tonnage_class",

@@ -113,7 +113,8 @@ describe('worksheet colour and grain columns', () => {
     const at = (k: string) => keys.indexOf(k)
     expect(keys.includes('paint.colour')).toBe(false)
     const order = ['part.material', 'paint.painted', 'part.colour', 'part.grain', 'material.shrink_parallel',
-      'material.shrink_normal', 'tool.shrink_parallel', 'tool.shrink_normal', 'material.shrink_basis', 'tool.number']
+      'material.shrink_normal', 'tool.shrink_combined', 'tool.shrink_parallel', 'tool.shrink_normal', 'material.shrink_basis',
+      'tool.number']
     expect(order.map(at)).toEqual(order.map((_, i) => at('part.material') + i))
     expect(col('part.colour').exportType).toBe('text')
     expect(col('part.grain').exportType).toBe('text')
@@ -217,6 +218,9 @@ describe('datasheet shrinkage columns', () => {
     expect(col('tool.shrink_parallel').title!(row())).toBeNull()
     // next to the datasheet shrinkage
     const keys = WORKSHEET_COLUMNS.map((c) => c.key)
-    expect(keys.indexOf('tool.shrink_parallel')).toBe(keys.indexOf('material.shrink_normal') + 1)
+    expect(keys.indexOf('tool.shrink_combined')).toBe(keys.indexOf('material.shrink_normal') + 1)
+    const combined = row({ tool: { ...row().tool!, shrink_combined_pct: 0.65 } })
+    expect(col('tool.shrink_combined').value(combined, buildContext([]))).toBe(0.65)
+    expect(col('tool.shrink_combined').edit(combined)).toEqual({ partId: combined.tool!.part_id, focus: 'tool.shrink_combined' })
   })
 })

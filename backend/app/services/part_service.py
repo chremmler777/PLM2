@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "eoat", "gauge"}
 
 TOOL_FIELDS = ("tool_cavities", "toolmaker_id", "tool_tonnage_class", "tool_cycle_time_s", "tool_machine",
-               "tool_shrink_parallel_pct", "tool_shrink_normal_pct")
+               "tool_shrink_parallel_pct", "tool_shrink_normal_pct", "tool_shrink_combined_pct")
 TOOL_FIELDS_ONLY_ON_TOOLS = ("Tool fields (cavities, toolmaker, tonnage class, cycle time, machine, shrinkage) "
                              "only apply to tools")
 ARTICLE_FIELDS_ONLY_ON_ARTICLES = "Colour code and grain only apply to articles"
@@ -181,6 +181,8 @@ class PartService:
         update_tool_shrink_parallel_pct: bool = False,
         tool_shrink_normal_pct: Optional[float] = None,
         update_tool_shrink_normal_pct: bool = False,
+        tool_shrink_combined_pct: Optional[float] = None,
+        update_tool_shrink_combined_pct: bool = False,
         colour_code: Optional[str] = None,
         update_colour_code: bool = False,
         grain: Optional[str] = None,
@@ -258,6 +260,7 @@ class PartService:
             "tool_machine": (update_tool_machine, clean_text(tool_machine)),
             "tool_shrink_parallel_pct": (update_tool_shrink_parallel_pct, tool_shrink_parallel_pct),
             "tool_shrink_normal_pct": (update_tool_shrink_normal_pct, tool_shrink_normal_pct),
+            "tool_shrink_combined_pct": (update_tool_shrink_combined_pct, tool_shrink_combined_pct),
         }
         if any(flag for flag, _ in tool_updates.values()):
             if (item_category or part.item_category) != "tool":

@@ -43,6 +43,7 @@ export default function ToolInfoTab({ part, onOpenPart }: { part: Part; onOpenPa
           tool_machine: part.tool_machine ?? null,
           tool_shrink_parallel_pct: part.tool_shrink_parallel_pct ?? null,
           tool_shrink_normal_pct: part.tool_shrink_normal_pct ?? null,
+          tool_shrink_combined_pct: part.tool_shrink_combined_pct ?? null,
         }}
         producedNotes={produced.map((a) => a.notes)}
       />

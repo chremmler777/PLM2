@@ -38,7 +38,32 @@ const btnPrimary = 'text-sm px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 di
 const btnQuiet = 'text-sm px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100';
 
 const pct = (a: number | null | undefined, b: number | null | undefined) =>
-  a == null && b == null ? '-' : a === b ? `${a} % combined` : `${a ?? '-'} / ${b ?? '-'} %`;
+  a == null && b == null ? '-' : a === b ? `${a} %` : `${a ?? '-'} / ${b ?? '-'} %`;
+
+/** Either one combined value or parallel / normal. */
+const valuesText = (combined: number | null | undefined, a: number | null | undefined, b: number | null | undefined) =>
+  combined != null ? `${combined} % combined` : a == null && b == null ? '-' : `${a ?? '-'} / ${b ?? '-'} % parallel / normal`;
+
+const FIELD_KEYS = ['tool.shrink_combined', 'tool.shrink_parallel', 'tool.shrink_normal'] as const;
+
+/** Either one combined value or parallel + normal, never both. */
+function ModeSwitch({ combined, onChange }: { combined: boolean; onChange(combined: boolean): void }) {
+  return (
+    <fieldset className="text-sm">
+      <legend className="text-slate-400">Value</legend>
+      <div role="radiogroup" className="mt-1 inline-flex rounded border border-slate-600 overflow-hidden">
+        {([[true, 'Combined'], [false, 'Parallel / normal']] as const).map(([v, label]) => (
+          <label key={label} className={`px-3 py-1 cursor-pointer ${combined === v
+            ? 'bg-slate-600 text-slate-100' : 'text-slate-300 hover:bg-slate-700'}`}>
+            <input type="radio" className="sr-only" checked={combined === v} onChange={() => onChange(v)}
+              data-testid={v ? 'shrink-mode-combined' : 'shrink-mode-split'} />
+            {label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
 
 interface Draft {
   combined: boolean;
@@ -52,6 +77,7 @@ interface Draft {
 }
 
 interface VerifyDraft {
+  combined: boolean;
   parallel: string;
   normal: string;
   ref: string;
@@ -79,8 +105,9 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
 
   const decide = useMutation({
     mutationFn: (d: Draft) => decideShrinkage(partId, {
-      parallel_pct: parseNumberInput(d.parallel) as number,
-      normal_pct: parseNumberInput(d.combined ? d.parallel : d.normal) as number,
+      combined_pct: d.combined ? parseNumberInput(d.parallel) : null,
+      parallel_pct: d.combined ? null : parseNumberInput(d.parallel),
+      normal_pct: d.combined ? null : parseNumberInput(d.normal),
       source_kind: d.kind, source_label: d.source.trim() || null, rationale: d.rationale.trim(),
       materialdb_id: d.materialdb_id, material_label: d.material_label, candidates: data?.candidates ?? [],
     }),
@@ -90,7 +117,9 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
 
   const verify = useMutation({
     mutationFn: ({ id, v }: { id: number; v: VerifyDraft }) => verifyShrinkage(partId, id, {
-      measured_parallel_pct: parseNumberInput(v.parallel), measured_normal_pct: parseNumberInput(v.normal),
+      measured_combined_pct: v.combined ? parseNumberInput(v.parallel) : null,
+      measured_parallel_pct: v.combined ? null : parseNumberInput(v.parallel),
+      measured_normal_pct: v.combined ? null : parseNumberInput(v.normal),
       measured_ref: v.ref.trim(), verdict: v.verdict as ShrinkVerdict, next_time_note: v.note.trim() || null,
     }),
     onSuccess: (res: { decisions: ShrinkDecision[] }) => {
@@ -122,8 +151,8 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
 
   const current = data.decisions.find((d) => d.status === 'current') ?? null;
   const past = data.decisions.filter((d) => d.status !== 'current');
-  const combinedNow = data.tool.parallel_pct != null && data.tool.parallel_pct === data.tool.normal_pct;
-  const unrecorded = !current && (data.tool.parallel_pct != null || data.tool.normal_pct != null);
+  const combinedNow = data.tool.combined_pct != null;
+  const unrecorded = !current && (combinedNow || data.tool.parallel_pct != null || data.tool.normal_pct != null);
   const fibre = data.materials.some((m) => m.filler_type && FIBRE.has(m.filler_type.toUpperCase()));
 
   const startFrom = (c: ShrinkCandidate | null) => setDraft(c ? {
@@ -131,8 +160,8 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
     parallel: numberEditText(c.parallel_pct ?? c.normal_pct), normal: numberEditText(c.normal_pct ?? c.parallel_pct),
     kind: c.kind, source: c.source_label, rationale: '', materialdb_id: c.materialdb_id, material_label: c.material_label,
   } : {
-    combined: !fibre && data.tool.parallel_pct === data.tool.normal_pct,
-    parallel: numberEditText(data.tool.parallel_pct), normal: numberEditText(data.tool.normal_pct),
+    combined: combinedNow || (!fibre && data.tool.parallel_pct == null && data.tool.normal_pct == null),
+    parallel: numberEditText(data.tool.combined_pct ?? data.tool.parallel_pct), normal: numberEditText(data.tool.normal_pct),
     kind: 'own', source: '', rationale: '',
     materialdb_id: data.materials[0]?.materialdb_id ?? null, material_label: data.materials[0]?.label ?? null,
   });
@@ -144,7 +173,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
     && parseNumberInput(draft.parallel) != null && parseNumberInput(draft.parallel) !== parseNumberInput(draft.normal);
 
   const verifyValid = verifyDraft != null && verifyDraft.verdict != null && verifyDraft.ref.trim() !== ''
-    && (parseNumberInput(verifyDraft.parallel) != null || parseNumberInput(verifyDraft.normal) != null)
+    && (parseNumberInput(verifyDraft.parallel) != null || (!verifyDraft.combined && parseNumberInput(verifyDraft.normal) != null))
     && (verifyDraft.verdict === 'correct' || verifyDraft.note.trim() !== '');
 
   return (
@@ -156,7 +185,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
         </div>
         <div className="shrink-0 flex items-start gap-6">
           {(combinedNow
-            ? [['parallel', 'Combined', data.tool.parallel_pct]] as const
+            ? [['combined', 'Combined', data.tool.combined_pct]] as const
             : [['parallel', 'Parallel', data.tool.parallel_pct], ['normal', 'Normal', data.tool.normal_pct]] as const
           ).map(([dir, label, v]) => (
             <div key={dir} data-field-key={`tool.shrink_${dir}`} className="text-right">
@@ -170,13 +199,10 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
               </div>
             </div>
           ))}
-          {combinedNow && (
-            // the normal note marker stays reachable (worksheet Edit on the normal column lands here)
-            <span data-field-key="tool.shrink_normal" className="self-center">
-              <FieldNoteMarker partId={partId} fieldKey="tool.shrink_normal" label="Shrinkage normal"
-                note={notes.get('tool.shrink_normal')} projectId={projectId} />
-            </span>
-          )}
+          {/* the worksheet's Edit on the other columns lands here too */}
+          {FIELD_KEYS.filter((k) => combinedNow ? k !== 'tool.shrink_combined' : k === 'tool.shrink_combined').map((k) => (
+            <span key={k} data-field-key={k} className="sr-only">{k}</span>
+          ))}
           {current?.verdict && (
             <span className={`self-center text-xs px-2 py-0.5 rounded ${VERDICT[current.verdict].cls}`}>{VERDICT[current.verdict].label}</span>
           )}
@@ -205,7 +231,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
             {current.verified_at && (<>
               <span className="text-slate-400">Measured</span>
               <span className="text-slate-100 tabular-nums">
-                {pct(current.measured_parallel_pct, current.measured_normal_pct)}
+                {valuesText(current.measured_combined_pct, current.measured_parallel_pct, current.measured_normal_pct)}
                 <span className="text-slate-400"> · {current.measured_ref} · {current.verified_by}, {formatDate(current.verified_at)}</span>
               </span>
               {current.next_time_note && (<>
@@ -231,7 +257,9 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
             <div className="mt-4 flex gap-2">
               <button data-testid="shrink-verify-open" className={current.verified_at ? btnQuiet : btnPrimary}
                 onClick={() => setVerifyDraft({
-                  parallel: numberEditText(current.measured_parallel_pct), normal: numberEditText(current.measured_normal_pct),
+                  combined: current.combined_pct != null,
+                  parallel: numberEditText(current.measured_combined_pct ?? current.measured_parallel_pct),
+                  normal: numberEditText(current.measured_normal_pct),
                   ref: current.measured_ref ?? '', verdict: current.verdict, note: current.next_time_note ?? '',
                 })}>
                 {current.verified_at ? 'Edit verification' : 'Verify after trial'}
@@ -244,14 +272,17 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
               onSubmit={(e) => { e.preventDefault(); if (verifyValid) verify.mutate({ id: current.id, v: verifyDraft }); }}>
               <p className="text-sm text-slate-400">What shrinkage did the parts really show (e.g. from the 6-pc dimensional of TH1/TH2)?</p>
               <div className="flex flex-wrap gap-4">
-                <label className="text-sm text-slate-400">Measured parallel (%)
+                <ModeSwitch combined={verifyDraft.combined} onChange={(combined) => setVerifyDraft({ ...verifyDraft, combined })} />
+                <label className="text-sm text-slate-400">{verifyDraft.combined ? 'Measured combined (%)' : 'Measured parallel (%)'}
                   <input data-testid="shrink-measured-parallel" inputMode="decimal" value={verifyDraft.parallel}
                     onChange={(e) => setVerifyDraft({ ...verifyDraft, parallel: e.target.value })} className={`${input} block w-28 mt-1`} />
                 </label>
-                <label className="text-sm text-slate-400">Measured normal (%)
-                  <input data-testid="shrink-measured-normal" inputMode="decimal" value={verifyDraft.normal}
-                    onChange={(e) => setVerifyDraft({ ...verifyDraft, normal: e.target.value })} className={`${input} block w-28 mt-1`} />
-                </label>
+                {!verifyDraft.combined && (
+                  <label className="text-sm text-slate-400">Measured normal (%)
+                    <input data-testid="shrink-measured-normal" inputMode="decimal" value={verifyDraft.normal}
+                      onChange={(e) => setVerifyDraft({ ...verifyDraft, normal: e.target.value })} className={`${input} block w-28 mt-1`} />
+                  </label>
+                )}
                 <label className="text-sm text-slate-400 flex-1 min-w-[16rem]">Measurement
                   <input data-testid="shrink-measured-ref" maxLength={300} placeholder="TH1 6-pc CMM report, 10/22/2026"
                     value={verifyDraft.ref} onChange={(e) => setVerifyDraft({ ...verifyDraft, ref: e.target.value })}
@@ -357,6 +388,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
         <form data-testid="shrink-decide-form" className="mt-4 rounded-md bg-slate-900/60 p-4 space-y-3"
           onSubmit={(e) => { e.preventDefault(); if (draftValid) decide.mutate(draft); }}>
           <div className="flex flex-wrap gap-4">
+            <ModeSwitch combined={draft.combined} onChange={(combined) => setDraft({ ...draft, combined })} />
             <label className="text-sm text-slate-400">{draft.combined ? 'Combined (%)' : 'Parallel (%)'}
               <input data-testid="shrink-parallel" inputMode="decimal" value={draft.parallel}
                 onChange={(e) => setDraft({ ...draft, parallel: e.target.value })} className={`${input} block w-28 mt-1`} />
@@ -367,11 +399,6 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
                   onChange={(e) => setDraft({ ...draft, normal: e.target.value })} className={`${input} block w-28 mt-1`} />
               </label>
             )}
-            <label className="self-end mb-1.5 flex items-center gap-2 text-sm text-slate-300">
-              <input data-testid="shrink-combined" type="checkbox" checked={draft.combined}
-                onChange={(e) => setDraft({ ...draft, combined: e.target.checked })} className="accent-blue-500" />
-              One combined value
-            </label>
             <label className="text-sm text-slate-400">Source
               <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as ShrinkSourceKind })}
                 className={`${input} block mt-1`}>
@@ -414,7 +441,7 @@ export default function ToolShrinkCard({ partId, projectId = null }: { partId: n
             <ul className="mt-2 space-y-2 text-sm">
               {past.map((d) => (
                 <li key={d.id} className="text-slate-300">
-                  <span className="tabular-nums text-slate-100">{pct(d.parallel_pct, d.normal_pct)}</span>
+                  <span className="tabular-nums text-slate-100">{valuesText(d.combined_pct, d.parallel_pct, d.normal_pct)}</span>
                   {' '}· {KIND[d.source_kind]}{d.source_label ? `: ${d.source_label}` : ''}
                   <span className="text-slate-400"> · {d.decided_by}, {formatDate(d.decided_at)}</span>
                   <div className="text-xs text-slate-400">{d.rationale}</div>
