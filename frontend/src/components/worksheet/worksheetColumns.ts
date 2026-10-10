@@ -280,7 +280,8 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     value: shrinkBasis, title: shrinkBasis, edit: nowhere }),
   def({ key: 'tool.number', label: 'Tool no.', group: 'Tool', display: 'mono', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => r.tool ? [r.tool.part_number, ...r.other_tools].join(', ') : null, edit: onTool('tool.number') }),
-  def({ key: 'tool.cavities', label: 'Cavities', group: 'Tool', display: 'number', exportType: 'number', noteOwner: 'tool',
+  // A layout as written ("2+2" for a family tool), never summed: text, also in the export.
+  def({ key: 'tool.cavities', label: 'Cavities', group: 'Tool', noteOwner: 'tool',
     editableOn: 'tool', value: (r) => r.tool?.cavities ?? null, edit: onTool('tool.cavities') }),
   def({ key: 'tool.toolmaker', label: 'Toolmaker', group: 'Tool', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => r.tool?.toolmaker_name ?? null, edit: onTool('tool.toolmaker') }),

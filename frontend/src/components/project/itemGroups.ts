@@ -97,7 +97,7 @@ export function tableRow(part: Part, parts: Part[], structure: ProjectStructure 
   const toolLinks = (article?.related ?? []).filter((r) => r.item_category === 'tool');
   const linkedCavities = toolLinks
     .map((r) => parts.find((p) => p.id === r.part_id)?.tool_cavities)
-    .filter((c): c is number => c !== null && c !== undefined);
+    .filter((c): c is string => c !== null && c !== undefined);
   const ownCavities = part.item_category === 'tool' && part.tool_cavities != null ? [part.tool_cavities] : [];
   return {
     id: part.id,

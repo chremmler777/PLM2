@@ -10,7 +10,7 @@ const col = (key: string) => WORKSHEET_COLUMNS.find((c) => c.key === key)!
 const ctx = buildContext([])
 const a = row({ part_id: 1, part_number: '20-1994-010-0', name: 'Side shield', part_type: 'internal_mfg' })
 const b = row({ part_id: 2, part_number: '20-1994-002-0', name: 'Handle RH', part_type: 'purchased', row_kind: 'purchased',
-  tool: { part_id: 91, part_number: '199409', name: 't', cavities: 8, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null } })
+  tool: { part_id: 91, part_number: '199409', name: 't', cavities: '8', toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null } })
 const c = row({ part_id: 3, part_number: '199413', name: 'Tool only', row_kind: 'tool_only', tool: null, dfm: null })
 
 describe('worksheet table helpers', () => {
@@ -101,14 +101,14 @@ describe('worksheet table helpers', () => {
       { key: 'part.thumbnail', label: 'Image', type: 'image' },
       { key: 'part.part_number', label: 'KTX no.', type: 'text' },
       { key: 'part.customer_part_number', label: 'OEM no.', type: 'text' },
-      { key: 'tool.cavities', label: 'Cavities', type: 'number' },
+      { key: 'tool.cavities', label: 'Cavities', type: 'text' },
     ])
     expect(payload.frozen_columns).toBe(3)
     expect(payload.rows[0].cells).toEqual([
       { value: 1, flag: null, comments: 0 },
       { value: '20-1994-010-0', flag: null, comments: 0 },
       { value: '206.882.251', flag: null, comments: 0 },
-      { value: 2, flag: 'open', comments: 2 },
+      { value: '2', flag: 'open', comments: 2 },
     ])
     expect(payload.rows[1].cells[0]).toEqual({ value: null, flag: null, comments: 0 })
   })

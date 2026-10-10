@@ -53,7 +53,7 @@ interface Part extends Partial<PartMaterial> {
   nominated_at?: string | null;
   sop_at?: string | null;
   revisions: Revision[];
-  tool_cavities?: number | null;
+  tool_cavities?: string | null;
   toolmaker_id?: number | null;
   tool_tonnage_class?: number | null;
   tool_cycle_time_s?: number | null;

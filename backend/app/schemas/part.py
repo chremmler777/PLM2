@@ -1,9 +1,10 @@
 """Pydantic schemas for parts and revisions."""
 from datetime import date, datetime
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import NaiveUtcDatetime
+from app.services.cavity_layout import normalize_cavity_layout
 
 
 # Part Schemas
@@ -27,7 +28,7 @@ class PartBase(BaseModel):
     next_calibration_due: Optional[datetime] = None
 
     # Tool fields (item_category = tool only)
-    tool_cavities: Optional[int] = Field(None, ge=1, le=256, description="Cavities in the tool, total")
+    tool_cavities: Optional[str] = Field(None, max_length=40, description='Cavity layout as written: "4", or "2+2" for a family tool. Never summed')
     toolmaker_id: Optional[int] = Field(None, description="Supplier building the tool")
     tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
     tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
@@ -40,6 +41,11 @@ class PartBase(BaseModel):
     # Article fields
     colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")
     grain: Optional[str] = Field(None, max_length=80, description="Grain, e.g. KF8")
+
+    @field_validator("tool_cavities", mode="before")
+    @classmethod
+    def _cavity_layout(cls, v):
+        return normalize_cavity_layout(v)
 
 
 class PartCreate(PartBase):
@@ -68,7 +74,7 @@ class PartUpdate(BaseModel):
     last_calibrated_at: Optional[NaiveUtcDatetime] = None
 
     # Tool fields (item_category = tool only)
-    tool_cavities: Optional[int] = Field(None, ge=1, le=256, description="Cavities in the tool, total")
+    tool_cavities: Optional[str] = Field(None, max_length=40, description='Cavity layout as written: "4", or "2+2" for a family tool. Never summed')
     toolmaker_id: Optional[int] = Field(None, description="Supplier building the tool")
     tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
     tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
@@ -79,6 +85,11 @@ class PartUpdate(BaseModel):
     # Article fields (item_category = article only); empty clears
     colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")
     grain: Optional[str] = Field(None, max_length=80, description="Grain, e.g. KF8")
+
+    @field_validator("tool_cavities", mode="before")
+    @classmethod
+    def _cavity_layout(cls, v):
+        return normalize_cavity_layout(v)
 
 
 class PartResponse(PartBase):

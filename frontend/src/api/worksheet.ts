@@ -11,7 +11,7 @@ export interface WorksheetTool {
   part_id: number;
   part_number: string;
   name: string;
-  cavities: number | null;
+  cavities: string | null;  // layout as written: "4", "2+2"
   toolmaker_id: number | null;
   toolmaker_name: string | null;
   cycle_time_s: number | null;

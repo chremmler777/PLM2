@@ -18,18 +18,35 @@ function wrap(values: ToolFieldValues = empty, notes: (string | null)[] = [], pr
 
 describe('ToolFieldsCard', () => {
   beforeEach(() => {
-    clientMocks.get.mockReset(); clientMocks.put.mockReset()
+    clientMocks.get.mockReset(); clientMocks.put.mockReset(); vi.mocked(toast.error).mockClear()
     clientMocks.get.mockResolvedValue({ data: [{ id: 3, name: 'Toolshop Sued' }, { id: 4, name: 'Formenbau Nord' }] })
     clientMocks.put.mockResolvedValue({ data: {} })
   })
   afterEach(cleanup)
 
-  it('saves cavities as an integer', async () => {
+  it('saves a family layout as written, never summed', async () => {
+    wrap(empty)
+    fireEvent.click(screen.getByTestId('edit-tool-cavities'))
+    fireEvent.change(screen.getByTestId('tool-cavities-input'), { target: { value: '2 + 2' } })
+    fireEvent.click(screen.getByTestId('save-tool-cavities'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7', { tool_cavities: '2+2' }))
+  })
+
+  it('refuses cavities that are no layout', () => {
+    wrap(empty)
+    fireEvent.click(screen.getByTestId('edit-tool-cavities'))
+    fireEvent.change(screen.getByTestId('tool-cavities-input'), { target: { value: '2x2' } })
+    fireEvent.click(screen.getByTestId('save-tool-cavities'))
+    expect(clientMocks.put).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('Cavities must be a number or a layout like 2+2')
+  })
+
+  it('saves cavities as text', async () => {
     wrap()
     fireEvent.click(screen.getByTestId('edit-tool-cavities'))
     fireEvent.change(screen.getByTestId('tool-cavities-input'), { target: { value: '4' } })
     fireEvent.click(screen.getByTestId('save-tool-cavities'))
-    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7', { tool_cavities: 4 }))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7', { tool_cavities: '4' }))
   })
 
   it('clears a field when emptied and saves cycle time as a decimal', async () => {
@@ -75,7 +92,7 @@ describe('ToolFieldsCard', () => {
   })
 
   it('prefers the stored cavities over the note', () => {
-    wrap({ ...empty, tool_cavities: 4 }, ['2 cavities'])
+    wrap({ ...empty, tool_cavities: '4' }, ['2 cavities'])
     expect(screen.getByTestId('edit-tool-cavities').textContent).toContain('4')
     expect(screen.queryByTestId('cavities-fallback')).toBeNull()
   })
@@ -124,8 +141,9 @@ describe('ToolFieldsCard', () => {
 })
 
 describe('cavitiesFromNotes', () => {
-  it('sums the cavity counts it finds and ignores the rest', () => {
-    expect(cavitiesFromNotes(['2 cavities', '1 cavity', 'RFQ2 bom_item 12', null])).toBe(3)
+  it('joins the cavity counts per article as a layout, never sums them', () => {
+    expect(cavitiesFromNotes(['2 cavities', '2 cavities'])).toBe('2+2')
+    expect(cavitiesFromNotes(['2 cavities', '1 cavity', 'RFQ2 bom_item 12', null])).toBe('2+1')
     expect(cavitiesFromNotes(['per RFQ'])).toBeNull()
     expect(cavitiesFromNotes([])).toBeNull()
   })
@@ -160,7 +178,7 @@ describe('cavitiesFromNotes', () => {
     cleanup()
     clientMocks.get.mockImplementation((url: string) => Promise.resolve({ data: url === '/v1/auth/me'
       ? { can_edit_tools: false } : [{ id: 3, name: 'Toolshop Sued' }] }))
-    wrap({ ...empty, tool_cavities: 4, tool_machine: 'KM 350-1' })
+    wrap({ ...empty, tool_cavities: '4', tool_machine: 'KM 350-1' })
     expect(await screen.findByTestId('tool-view-only')).toBeTruthy()
     expect(screen.queryByTestId('edit-tool-cavities')).toBeNull()
     expect(screen.getByTestId('view-tool-cavities').textContent).toBe('4')

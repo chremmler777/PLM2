@@ -34,7 +34,7 @@ describe('worksheet column registry', () => {
     expect(col('part.colour').value(r, empty)).toBe('VM0 Skyscraper / Base / Clear')
     expect(col('part.grain').value(r, empty)).toBe('KF8')
     expect(col('tool.number').value(r, empty)).toBe('199401, 199409')
-    expect(col('tool.cavities').value(r, empty)).toBe(2)
+    expect(col('tool.cavities').value(r, empty)).toBe('2')
     expect(col('tool.toolmaker').value(r, empty)).toBe('Formenbau Nord')
     expect(col('dfm.status').value(r, empty)).toBe('Waiting on KTX, Tier 1')
     expect(col('tool.cavities').value(row({ tool: null, dfm: null }), empty)).toBeNull()
@@ -89,7 +89,7 @@ describe('worksheet column registry', () => {
 
 describe('worksheet notes on tool-only rows', () => {
   const toolOnly = row({ part_id: 95, part_number: '199413', row_kind: 'tool_only', item_category: 'tool', part_type: 'purchased',
-    tool: { part_id: 95, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null } })
+    tool: { part_id: 95, part_number: '199413', name: 't', cavities: '2', toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null } })
 
   it('offers no note where the backend would refuse the field key for the owner', () => {
     expect(notePartId(col('paint.painted'), toolOnly)).toBeNull()

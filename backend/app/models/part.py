@@ -65,8 +65,9 @@ class Part(Base):
 
     # Tool fields (item_category = tool only). The sold state the DFM answers
     # rest on. tool_cavities is the source of truth over the "n cavities" note
-    # on the produces relation.
-    tool_cavities: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # on the produces relation. A layout as written ("4", "2+2" for a family
+    # tool), never summed: see app/services/cavity_layout.py.
+    tool_cavities: Mapped[str | None] = mapped_column(String(40), nullable=True)
     toolmaker_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True, index=True)
     tool_tonnage_class: Mapped[int | None] = mapped_column(Integer, nullable=True)  # clamping force class, t
     tool_cycle_time_s: Mapped[float | None] = mapped_column(Numeric(6, 1, asdecimal=False), nullable=True)

@@ -3,7 +3,7 @@ import type { WorksheetRow } from '../../api/worksheet';
 import { materialOf } from '../../lib/material';
 
 const tool = {
-  part_id: 90, part_number: '199401', name: 'TOOL Handle', cavities: 2, toolmaker_id: 3,
+  part_id: 90, part_number: '199401', name: 'TOOL Handle', cavities: '2', toolmaker_id: 3,
   toolmaker_name: 'Formenbau Nord', cycle_time_s: 55, tonnage_class: null, machine: null, shrink_parallel_pct: null, shrink_normal_pct: null,
 };
 

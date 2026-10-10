@@ -153,8 +153,8 @@ def tool_desc(t) -> str:
     proj, _, name, cavs, mold, rfq_tool = t
     rfq_id = PROJECTS[proj][1]
     cav_txt = ", ".join(f"{pn} x{n}" for pn, n in cavs)
-    total = sum(n for _, n in cavs)
-    return (f"Injection mold, {mold}, {total} cavities: {cav_txt}. "
+    layout = "+".join(str(n) for _, n in cavs)  # "2+2" for a family tool, never summed
+    return (f"Injection mold, {mold}, {layout} cavities: {cav_txt}. "
             f"Customer {CUSTOMER}. Awarded 2026-09-02 (RFQ {rfq_id} REV8, tooling_calc {rfq_tool}).")
 
 

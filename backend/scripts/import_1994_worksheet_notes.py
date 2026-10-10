@@ -55,6 +55,7 @@ from app.models.part import Part
 from app.services.field_note_service import FieldNoteService
 from app.services.part_material_service import PartMaterialService
 from app.services.part_service import ChangelogService
+from app.services.cavity_layout import normalize_cavity_layout
 
 SHEET = "BOM"
 FIRST_DATA_ROW = 4
@@ -195,7 +196,7 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
                     _f(cells, "K") or _f(cells, "J"))
         excel = _cavities(cells)
         if tool is not None and excel is None and _s(cells, "C"):
-            warnings.append(f"row {row_no}: cavities '{_s(cells, 'C')}' is not a number, skipped")
+            warnings.append(f"row {row_no}: cavities '{_s(cells, 'C')}' is no number or layout, skipped")
         if tool is not None and excel is not None:
             check = "Check against RFQ 26 loop 37; PLM not changed."
             if tool.tool_cavities is not None and excel != tool.tool_cavities:
@@ -251,12 +252,17 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
     return pending, warnings
 
 
-def _cavities(cells: dict) -> Optional[int]:
+def _cavities(cells: dict) -> Optional[str]:
+    """The cavity layout in column C: "4", "2+2" (never summed); None when it is none."""
+    raw = _s(cells, "C")
     try:
-        f = float(_s(cells, "C").replace(",", "."))
+        f = float(raw.replace(",", "."))
     except ValueError:
-        return None
-    return int(f) if f.is_integer() else None
+        try:
+            return normalize_cavity_layout(raw)
+        except ValueError:
+            return None
+    return str(int(f)) if f.is_integer() and f > 0 else None
 
 
 async def _pending(session: AsyncSession, a: Action) -> bool:

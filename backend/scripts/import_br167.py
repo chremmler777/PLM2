@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.models.entities import Plant, Project
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem, RevisionFile
+from app.services.cavity_layout import layout_from_text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STAGE = os.environ.get("BR167_STAGE", os.path.join(HERE, "br167_stage"))
@@ -95,9 +96,8 @@ def cycle_s(v):
 
 
 def cavities(v):
-    import re
-    n = sum(int(x) for x in re.findall(r"\d+", v or ""))
-    return n or None
+    """The layout as written ("1+1" stays "1+1"), never summed."""
+    return layout_from_text(v)
 
 
 def sha256(path):

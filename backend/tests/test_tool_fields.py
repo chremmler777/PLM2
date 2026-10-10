@@ -34,7 +34,7 @@ async def test_tool_fields_created_and_returned(client, eng_auth, seed):
                         tool_tonnage_class=650, tool_cycle_time_s=32.5)
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["tool_cavities"] == 4
+    assert body["tool_cavities"] == "4"
     assert body["toolmaker_id"] == toolmaker
     assert body["tool_tonnage_class"] == 650
     assert body["tool_cycle_time_s"] == 32.5
@@ -58,13 +58,21 @@ async def test_tool_fields_update_only_when_key_present(client, eng_auth, seed):
 
     res = await client.put(f"/api/v1/parts/{pid}", json={"tool_cavities": 4}, headers=eng_auth)
     assert res.status_code == 200, res.text
-    assert res.json()["tool_cavities"] == 4
+    assert res.json()["tool_cavities"] == "4"
 
     res = await client.put(f"/api/v1/parts/{pid}", json={"name": "ISOFIX Cover 4-cav"}, headers=eng_auth)
-    assert res.json()["tool_cavities"] == 4
+    assert res.json()["tool_cavities"] == "4"
 
     res = await client.put(f"/api/v1/parts/{pid}", json={"tool_cavities": None}, headers=eng_auth)
     assert res.json()["tool_cavities"] is None
+
+
+async def test_family_tool_cavities_stay_a_layout(client, eng_auth, seed):
+    pid = (await _create(client, eng_auth, seed, tool_cavities="2 + 2")).json()["id"]
+    res = await client.get(f"/api/v1/parts/{pid}", headers=eng_auth)
+    assert res.json()["tool_cavities"] == "2+2"  # never summed to 4
+    res = await client.put(f"/api/v1/parts/{pid}", json={"tool_cavities": "1+1+2"}, headers=eng_auth)
+    assert res.json()["tool_cavities"] == "1+1+2"
 
 
 async def test_tool_fields_rejected_on_article(client, eng_auth, seed):
@@ -89,7 +97,9 @@ async def test_toolmaker_must_be_a_supplier(client, eng_auth, seed):
 
 async def test_tool_field_bounds(client, eng_auth, seed):
     pid = (await _create(client, eng_auth, seed)).json()["id"]
-    assert (await client.put(f"/api/v1/parts/{pid}", json={"tool_cavities": 0}, headers=eng_auth)).status_code == 422
+    for bad in (0, "0", "2x2", "2+", "+2", "2+0", "four", 2.5):
+        res = await client.put(f"/api/v1/parts/{pid}", json={"tool_cavities": bad}, headers=eng_auth)
+        assert res.status_code == 422, bad
     assert (await client.put(f"/api/v1/parts/{pid}", json={"tool_cycle_time_s": -1}, headers=eng_auth)).status_code == 422
 
 

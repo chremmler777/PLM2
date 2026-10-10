@@ -31,7 +31,7 @@ export interface Part {
   last_calibrated_at?: string | null;
   next_calibration_due?: string | null;
   lifecycle_phase?: string;
-  tool_cavities?: number | null;
+  tool_cavities?: string | null;
   toolmaker_id?: number | null;
   tool_tonnage_class?: number | null;
   tool_cycle_time_s?: number | null;

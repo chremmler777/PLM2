@@ -21,19 +21,19 @@ from app.models.supplier import Supplier
 from app.services.part_service import ChangelogService
 
 # tool part_number -> (cavities, cycle_time_s, tonnage_class)
-# Cavities: total per tool. RFQ 26 loop 37 REV8 on prod stores cavities per article;
-# the handles and latch covers are family tools with 2 per side (2+2 = 4).
+# Cavities: layout per tool, never summed. RFQ 26 loop 37 REV8 on prod stores cavities
+# per article; the handles and latch covers are family tools with 2 per side ("2+2").
 FIELDS = {
-    "199401": (4, 55.0, None),   # Handle, height adjustment LH/RH, 2+2
-    "199402": (4, 50.0, None),   # Latch cover 40/60, 2+2
-    "199403": (4, 55.0, None),   # Isofix cover, 4 cavities per nominated RFQ (prod relation note still says 2)
-    "199404": (2, 50.0, None),   # A-bracket inner trim
-    "199405": (2, 55.0, None),   # Cover trim, center back
-    "199406": (2, 50.0, None),   # Center bearing cover
-    "199407": (2, 50.0, None),   # Belt exit cover
-    "199408": (2, 50.0, None),   # Inner side shield
-    "199409": (8, 55.0, None),   # Decor cover
-    "199410": (2, 50.0, None),   # A-bracket outer trim
+    "199401": ("2+2", 55.0, None),   # Handle, height adjustment LH/RH, 2+2
+    "199402": ("2+2", 50.0, None),   # Latch cover 40/60, 2+2
+    "199403": ("4", 55.0, None),   # Isofix cover, 4 cavities per nominated RFQ (prod relation note still says 2)
+    "199404": ("2", 50.0, None),   # A-bracket inner trim
+    "199405": ("2", 55.0, None),   # Cover trim, center back
+    "199406": ("2", 50.0, None),   # Center bearing cover
+    "199407": ("2", 50.0, None),   # Belt exit cover
+    "199408": ("2", 50.0, None),   # Inner side shield
+    "199409": ("8", 55.0, None),   # Decor cover
+    "199410": ("2", 50.0, None),   # A-bracket outer trim
 }
 REASON = "Sold state from the nominated RFQ 26 loop 37 (REV8), set 2026-09"
 

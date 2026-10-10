@@ -27,7 +27,7 @@ export interface ToolPart {
   project_id: number;
   item_category: string;
   lifecycle_phase: 'rfq' | 'nominated' | 'dfm' | 'preseries' | 'series';
-  tool_cavities: number | null;
+  tool_cavities: string | null;
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;

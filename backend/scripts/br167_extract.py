@@ -62,7 +62,9 @@ def cavities(v):
     v = s(v)
     if v is None:
         return None
-    return sum(int(x) for x in re.findall(r"\d+", v)) or None
+    # The layout as written ("1+1"), never summed.
+    m = re.search(r"\d+(?:\s*\+\s*\d+)*", v)
+    return re.sub(r"\s+", "", m.group(0)) if m else None
 
 
 SOP_MONTHS = {"Jan": 1, "Feb": 2, "Mrz": 3, "Mär": 3, "Apr": 4, "Mai": 5, "Jun": 6, "Jul": 7,

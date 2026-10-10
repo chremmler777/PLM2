@@ -67,7 +67,7 @@ describe('tableRow', () => {
     mirror_of: null, mirrored_by: [],
   }] }
   const lh = part(5, { part_number: '20-1994-001-0', customer_part_number: '206.882.251', tier1_part_number: 'S00H4X-110', name: '206.882.251 Handle LH' })
-  const tool = part(30, { part_number: '199401', name: '1994 TOOL Handle', item_category: 'tool', lifecycle_phase: 'rfq', tool_cavities: 2 })
+  const tool = part(30, { part_number: '199401', name: '1994 TOOL Handle', item_category: 'tool', lifecycle_phase: 'rfq', tool_cavities: '2' })
 
   it('fills the table cells from the part, its structure and its tools', () => {
     expect(tableRow(lh, [lh, tool], structure, '1994')).toEqual({

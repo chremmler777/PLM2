@@ -13,7 +13,7 @@ import { useSuppliers } from '../../hooks/queries/useSuppliers';
 import { usePartFieldNoteIndex } from '../../hooks/queries/useFieldNotes';
 import { apiErrorMessage } from '../../lib/apiError';
 import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
-import { cavitiesFromNotes } from './toolCavities';
+import { cavitiesFromNotes, normalizeCavityLayout } from './toolCavities';
 import { focusField } from '../../hooks/useFieldFocus';
 import { useCanEditTools } from '../../hooks/queries/useToolRights';
 
@@ -28,7 +28,7 @@ function shrinkSummary(parallel: number | null, normal: number | null, combined:
 }
 
 export interface ToolFieldValues {
-  tool_cavities: number | null;
+  tool_cavities: string | null;
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;
@@ -41,8 +41,9 @@ export interface ToolFieldValues {
 // Shrinkage is not edited here: it changes only through a recorded decision (ToolShrinkCard).
 type NumericKey = 'tool_cavities' | 'tool_tonnage_class' | 'tool_cycle_time_s';
 
+// Cavities are a layout ("2+2" for a family tool), typed as text and never summed.
 const NUMERIC: { key: NumericKey; fieldKey: string; id: string; label: string; unit: string; step: string; parse(v: string): number }[] = [
-  { key: 'tool_cavities', fieldKey: 'tool.cavities', id: 'cavities', label: 'Cavities', unit: '', step: '1', parse: (v) => parseInt(v, 10) },
+  { key: 'tool_cavities', fieldKey: 'tool.cavities', id: 'cavities', label: 'Cavities', unit: '', step: '', parse: () => NaN },
   { key: 'tool_tonnage_class', fieldKey: 'tool.tonnage_class', id: 'tonnage', label: 'Tonnage class', unit: 't', step: '1', parse: (v) => parseInt(v, 10) },
   { key: 'tool_cycle_time_s', fieldKey: 'tool.cycle_time_s', id: 'cycle', label: 'Target cycle time', unit: 's', step: '0.1', parse: (v) => parseFloat(v) },
 ];
@@ -77,6 +78,12 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
   const submitNumeric = (field: (typeof NUMERIC)[number], raw: string) => {
     const trimmed = raw.trim();
     if (trimmed === '') { save.mutate({ [field.key]: null }); return; }
+    if (field.key === 'tool_cavities') {
+      const layout = normalizeCavityLayout(trimmed);
+      if (layout == null) { toast.error('Cavities must be a number or a layout like 2+2'); return; }
+      save.mutate({ tool_cavities: layout });
+      return;
+    }
     const n = field.parse(trimmed);
     if (Number.isNaN(n) || n <= 0) { toast.error(`${field.label} must be a positive number`); return; }
     save.mutate({ [field.key]: n });
@@ -108,7 +115,10 @@ export default function ToolFieldsCard({ partId, values, producedNotes, projectI
               </div>
               {isEditing ? (
                 <div className="flex items-center gap-2 mt-1">
-                  <input data-testid={`tool-${field.id}-input`} autoFocus type="number" step={field.step} min="0"
+                  <input data-testid={`tool-${field.id}-input`} autoFocus
+                    {...(field.key === 'tool_cavities'
+                      ? { type: 'text', inputMode: 'numeric' as const, placeholder: '4 or 2+2' }
+                      : { type: 'number', step: field.step, min: '0' })}
                     value={editing.value} onChange={(e) => setEditing({ key: field.key, value: e.target.value })}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') submitNumeric(field, editing.value);

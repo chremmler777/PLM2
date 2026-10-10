@@ -33,7 +33,7 @@ async def _build(session_factory, seed):
                   colour_code="NM0", grain="KF8")
         rh = part("20-1994-002-0", customer_part_number="206.882.252")
         bought = part("20-1994-050-0", part_type="purchased")
-        tool = part("199401", "tool", "purchased", tool_cavities=2, tool_cycle_time_s=55.0, toolmaker_id=maker.id)
+        tool = part("199401", "tool", "purchased", tool_cavities="2", tool_cycle_time_s=55.0, toolmaker_id=maker.id)
         spare = part("199413", "tool", "purchased")
         gauge = part("1994-G1", "gauge", "purchased")
         await s.flush()
@@ -80,7 +80,7 @@ async def test_rows_carry_article_tool_revision_material_paint_and_dfm(client, e
     assert lh["material"]["material_new_text"] == "PA6-GF15 acc. VW 50125"
     assert (lh["colour_code"], lh["grain"]) == ("NM0", "KF8")
     assert lh["paint"] == {"painted": False, "colour": None, "colour_hex": None, "paint_system": None}
-    assert lh["tool"] == {"part_id": ids["tool"], "part_number": "199401", "name": "Name 199401", "cavities": 2,
+    assert lh["tool"] == {"part_id": ids["tool"], "part_number": "199401", "name": "Name 199401", "cavities": "2",
                           "toolmaker_id": ids["maker"], "toolmaker_name": "Formenbau Nord",
                           "cycle_time_s": 55.0, "tonnage_class": None,
                           "machine": None, "shrink_parallel_pct": None, "shrink_normal_pct": None,

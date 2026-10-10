@@ -63,8 +63,8 @@ async def _parts(session_factory, seed):
         ids = {
             "lh": part("20-1994-001-0", "article", customer_part_number="206.882.251"),
             "iso": part("20-1994-005-0", "article", customer_part_number="206.887.233", tier1_part_number="S00H54-110"),
-            "t01": part("199401", "tool", tool_cavities=2),
-            "t03": part("199403", "tool", tool_cavities=4),
+            "t01": part("199401", "tool", tool_cavities="2"),
+            "t03": part("199403", "tool", tool_cavities="4"),
         }
         await s.commit()
         return {k: p.id for k, p in ids.items()}
@@ -107,7 +107,7 @@ async def test_plan_then_apply_once(session_factory, seed, tmp_path):
         t01 = await s.get(Part, ids["t01"])
         assert lh.tier1_part_number == "S00H4X-110"
         assert (lh.material_source, lh.material_new_text) == ("new", "PA6-GF15 acc. VW 50125")
-        assert t01.tool_cavities == 2  # never overwritten
+        assert t01.tool_cavities == "2"  # never overwritten
         assert (lh.colour_code, lh.grain) == ("NM0", "KF8")
         notes = (await s.execute(select(FieldNote))).scalars().all()
         count = sum(len(n.comments) for n in notes)
@@ -330,8 +330,20 @@ async def test_non_numeric_cavities_are_a_warning(session_factory, seed, tmp_pat
     rows[0]["C"] = mod.Cell("tbd", None)
     async with session_factory() as s:
         actions, warnings = await mod.plan_actions(s, seed["project_id"], rows)
-    assert warnings == ["row 4: cavities 'tbd' is not a number, skipped"]
+    assert warnings == ["row 4: cavities 'tbd' is no number or layout, skipped"]
     assert not any(a.part_id == ids["t01"] and a.field_key == "tool.cavities" for a in actions)
+
+
+async def test_family_layout_is_compared_as_written(session_factory, seed, tmp_path):
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    rows = mod.read_rows(_xlsx(tmp_path))
+    rows[0]["C"] = mod.Cell("1 + 1", None)
+    async with session_factory() as s:
+        actions, warnings = await mod.plan_actions(s, seed["project_id"], rows)
+    assert warnings == []
+    flag = [a for a in actions if a.part_id == ids["t01"] and a.field_key == "tool.cavities"]
+    assert flag and "1+1 cavities, PLM has 2" in flag[0].text  # 1+1 is not 2: never summed
 
 
 async def test_docstring_shows_user_as_required():
