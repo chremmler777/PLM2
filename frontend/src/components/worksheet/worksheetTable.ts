@@ -67,16 +67,66 @@ export function sortRows(
   rows: WorksheetRow[], col: WorksheetColumn | undefined, dir: 'asc' | 'desc', ctx: WorksheetContext,
 ): WorksheetRow[] {
   const out = [...rows];
-  if (!col) return out.sort((x, y) => comparePartNumbers(x.part_number, y.part_number));
+  if (!col) return groupByTool(out.sort((x, y) => comparePartNumbers(x.part_number, y.part_number)));
   const sign = dir === 'asc' ? 1 : -1;
+  // On a tool column, ties stay together per tool, so the tool's articles stay one group.
+  const byTool = (x: WorksheetRow, y: WorksheetRow) =>
+    col.editableOn === 'tool' ? comparePartNumbers(x.tool?.part_number ?? '', y.tool?.part_number ?? '') : 0;
   return out.sort((x, y) => {
     const vx = col.value(x, ctx);
     const vy = col.value(y, ctx);
     const emptyX = vx === null || vx === '';
     const emptyY = vy === null || vy === '';
-    if (emptyX || emptyY) return compareValues(vx, vy); // empties stay last in both directions
-    return sign * compareValues(vx, vy) || comparePartNumbers(x.part_number, y.part_number);
+    if (emptyX || emptyY) return compareValues(vx, vy) || byTool(x, y); // empties stay last in both directions
+    return sign * compareValues(vx, vy) || byTool(x, y) || comparePartNumbers(x.part_number, y.part_number);
   });
+}
+
+/** Articles made by the same tool next to each other, groups in the order of their first article. */
+export function groupByTool(rows: WorksheetRow[]): WorksheetRow[] {
+  const groups = new Map<number | string, WorksheetRow[]>();
+  for (const r of rows) {
+    const key = r.tool?.part_id ?? `row-${r.part_id}`;
+    const g = groups.get(key);
+    if (g) g.push(r); else groups.set(key, [r]);
+  }
+  return [...groups.values()].flat();
+}
+
+/**
+ * Row spans for tool cells: consecutive rows of the same tool show a tool column once.
+ * Key `${index}|${colKey}`: the first row of a run gets the run length, the rows it covers 0.
+ * Absent: a plain cell.
+ */
+export function toolCellSpans(rows: WorksheetRow[], cols: WorksheetColumn[], ctx: WorksheetContext): Map<string, number> {
+  const spans = new Map<string, number>();
+  const toolCols = cols.filter((c) => c.editableOn === 'tool');
+  let start = 0;
+  while (start < rows.length) {
+    const tool = rows[start].tool?.part_id;
+    let end = start + 1;
+    while (tool !== undefined && end < rows.length && rows[end].tool?.part_id === tool) end++;
+    if (end - start > 1) {
+      for (const c of toolCols) {
+        // Only one cell when every row shows the same value (Tool no. can differ by a second tool).
+        const first = String(c.value(rows[start], ctx));
+        if (rows.slice(start + 1, end).some((r) => String(c.value(r, ctx)) !== first)) continue;
+        spans.set(`${start}|${c.key}`, end - start);
+        for (let i = start + 1; i < end; i++) spans.set(`${i}|${c.key}`, 0);
+      }
+    }
+    start = end;
+  }
+  return spans;
+}
+
+/** Index of the rows that start a new tool group (for a divider line). */
+export function toolGroupStarts(rows: WorksheetRow[]): Set<number> {
+  const starts = new Set<number>();
+  rows.forEach((r, i) => {
+    if (i > 0 && (r.tool?.part_id === undefined || r.tool.part_id !== rows[i - 1].tool?.part_id)) starts.add(i);
+  });
+  return starts;
 }
 
 export function enumOptions(col: WorksheetColumn, rows: WorksheetRow[], ctx: WorksheetContext): string[] {

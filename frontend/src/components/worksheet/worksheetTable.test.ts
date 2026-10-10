@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   HIDDEN_COLUMNS_KEY, applyFilters, buildExportPayload, compareValues, enumOptions, frozenOffsets, loadHiddenColumns,
-  filterOptions, offeredFilters, rowKindVisible, saveHiddenColumns, sortRows, visibleColumns,
+  filterOptions, offeredFilters, rowKindVisible, saveHiddenColumns, sortRows, toolCellSpans, toolGroupStarts, visibleColumns,
 } from './worksheetTable'
 import { WORKSHEET_COLUMNS, buildContext } from './worksheetColumns'
 import { row } from './worksheetFixtures'
@@ -28,6 +28,31 @@ describe('worksheet table helpers', () => {
     const flagged = buildContext([{ id: 1, part_id: 91, field_key: 'tool.cavities', flag_status: 'open', flag_set_by: null,
       flag_set_by_name: null, flag_set_at: null, created_at: null, comment_count: 0, last_comment: null }])
     expect(applyFilters([a, b], [col('part.name')], {}, flagged, true)).toEqual([b])
+  })
+
+  it('keeps a tool\'s articles together and shows its tool cells once', () => {
+    const tool = { ...b.tool!, part_id: 90, part_number: '199401', cavities: '2+2' }
+    const lh = row({ part_id: 11, part_number: '20-1994-001-0', tool })
+    const rh = row({ part_id: 12, part_number: '20-1994-005-0', tool })
+    const mid = row({ part_id: 13, part_number: '20-1994-003-0', tool: { ...tool, part_id: 92, part_number: '199403', cavities: '4' } })
+    const shown = sortRows([rh, mid, lh], undefined, 'asc', ctx)
+    expect(shown.map((r) => r.part_id)).toEqual([11, 12, 13])  // 005 moves up next to 001: same tool
+    const cols = [col('part.name'), col('tool.number'), col('tool.cavities')]
+    const spans = toolCellSpans(shown, cols, ctx)
+    expect(spans.get('0|tool.cavities')).toBe(2)
+    expect(spans.get('1|tool.cavities')).toBe(0)
+    expect(spans.get('0|part.name')).toBeUndefined()  // article cells stay per row
+    expect(spans.get('2|tool.cavities')).toBeUndefined()
+    expect([...toolGroupStarts(shown)]).toEqual([2])
+  })
+
+  it('does not merge a tool cell whose value differs between the rows', () => {
+    const tool = { ...b.tool!, part_id: 90, part_number: '199401' }
+    const one = row({ part_id: 11, part_number: '1', tool, other_tools: [] })
+    const two = row({ part_id: 12, part_number: '2', tool, other_tools: ['199499'] })
+    const spans = toolCellSpans([one, two], [col('tool.number'), col('tool.cavities')], ctx)
+    expect(spans.get('0|tool.number')).toBeUndefined()
+    expect(spans.get('0|tool.cavities')).toBe(2)
   })
 
   it('sorts numbers numerically with empty values last, and part numbers by default', () => {

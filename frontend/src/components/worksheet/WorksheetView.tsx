@@ -18,7 +18,7 @@ import { flagTint } from '../../lib/fieldNotes';
 import { WORKSHEET_COLUMNS, activeNoteFor, buildContext, cellNoteKey, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
 import {
   applyFilters, buildExportPayload, filterOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible,
-  saveHiddenColumns, sortRows, visibleColumns, type RowKindFilter, type SortState,
+  saveHiddenColumns, sortRows, toolCellSpans, toolGroupStarts, visibleColumns, type RowKindFilter, type SortState,
 } from './worksheetTable';
 import WorksheetAuditView from './WorksheetAuditView';
 import WorksheetCell from './WorksheetCell';
@@ -68,6 +68,8 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
     const sortCol = sort ? cols.find((c) => c.key === sort.key) : undefined;
     return sortRows(filtered, sortCol, sort?.dir ?? 'asc', ctx);
   }, [kindRows, cols, activeFilters, ctx, onlyOpen, sort]);
+  const spans = useMemo(() => toolCellSpans(shown, cols, ctx), [shown, cols, ctx]);
+  const groupStarts = useMemo(() => toolGroupStarts(shown), [shown]);
 
   const exportXlsx = useMutation({
     mutationFn: () => downloadWorksheetXlsx(projectId, buildExportPayload(cols, shown, ctx)),
@@ -193,9 +195,12 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
                 </tr>
               </thead>
               <tbody>
-                {shown.map((row) => (
+                {shown.map((row, index) => (
                   <tr key={row.part_id} data-testid={`ws-row-${row.part_id}`} className="hover:bg-slate-800/40">
                     {cols.map((c) => {
+                      // A tool's articles share one tool cell (Tool no., Cavities, ...): the first row spans the rest.
+                      const span = spans.get(`${index}|${c.key}`);
+                      if (span === 0) return null;
                       // Tint and data-flag use the combined note (worst of both colour keys); the
                       // marker itself gets only its own key's note - see noteFor / activeNoteFor.
                       const note = noteFor(c, row, ctx);
@@ -203,9 +208,9 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
                       const id = `${row.part_id}|${c.key}`;
                       return (
                         <td key={c.key} data-testid={`ws-cell-${row.part_id}-${c.key}`} data-flag={note?.flag_status ?? ''}
-                          style={frozenStyle(c)}
+                          style={frozenStyle(c)} rowSpan={span}
                           onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, row, col: c }); }}
-                          className={`group p-0 border-b border-slate-800 whitespace-nowrap ${frozenClass(c)}`}>
+                          className={`group p-0 border-b border-slate-800 whitespace-nowrap ${frozenClass(c)} ${groupStarts.has(index) ? 'border-t border-t-slate-500' : ''} ${span ? flagTint(note?.flag_status) : ''}`}>
                           <div data-testid={`ws-tint-${row.part_id}-${c.key}`} style={frozenBox(c)}
                             className={`${cellPad(c)} py-1 ${flagTint(note?.flag_status)}`}>
                             <WorksheetCell row={row} col={c} ctx={ctx} note={activeNote}

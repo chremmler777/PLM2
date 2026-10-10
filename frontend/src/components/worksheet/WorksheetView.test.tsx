@@ -55,7 +55,8 @@ describe('WorksheetView', () => {
     await screen.findByTestId('ws-row-1')
     expect(screen.getAllByTestId(/^ws-row-/).map((r) => r.dataset.testid)).toEqual(['ws-row-3', 'ws-row-1'])
     fireEvent.click(screen.getByTestId('ws-kind-purchased'))
-    expect(screen.getAllByTestId(/^ws-row-/).map((r) => r.dataset.testid)).toEqual(['ws-row-2', 'ws-row-3', 'ws-row-1'])
+    // 2 and 1 share the fixture tool 199401, so 1 sits with 2 (articles grouped by tool)
+    expect(screen.getAllByTestId(/^ws-row-/).map((r) => r.dataset.testid)).toEqual(['ws-row-2', 'ws-row-1', 'ws-row-3'])
     expect(screen.getByTestId('ws-count').textContent).toBe('3 rows')
   })
 
