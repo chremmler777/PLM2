@@ -101,11 +101,13 @@ export interface WorksheetExportCell {
   value: string | number | null;
   flag: FieldFlag | null;
   comments: number;
+  /** Tool group as on screen: >1 merges over that many rows, 0 = covered by the cell above. */
+  span?: number;
 }
 
 export interface WorksheetExportPayload {
   columns: WorksheetExportColumn[];
-  rows: { cells: WorksheetExportCell[] }[];
+  rows: { cells: WorksheetExportCell[]; group_start?: boolean }[];
   frozen_columns: number;
 }
 

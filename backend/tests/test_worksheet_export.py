@@ -149,3 +149,25 @@ async def test_export_places_thumbnails_in_their_cells(client, eng_auth, seed, m
     assert len([n for n in names if n.startswith("xl/media/")]) == 2
     ws = openpyxl.load_workbook(BytesIO(r.content)).active
     assert [ws.cell(row=i, column=2).value for i in range(2, 6)] == ["20-TH-0", "20-TH-1", "foreign", "none"]
+
+
+async def test_export_merges_tool_cells_and_marks_tool_groups(client, eng_auth, seed):
+    payload = {
+        "columns": [{"key": "part.part_number", "label": "KTX no.", "type": "text"},
+                    {"key": "tool.cavities", "label": "Cavities", "type": "text"}],
+        "rows": [
+            {"cells": [{"value": "20-1994-001-0"}, {"value": "2+2", "span": 2}]},
+            {"cells": [{"value": "20-1994-005-0"}, {"value": None, "span": 0}]},
+            {"cells": [{"value": "20-1994-003-0"}, {"value": "4"}]},
+        ],
+        "frozen_columns": 1,
+    }
+    payload["rows"][2]["group_start"] = True
+    r = await _export(client, eng_auth, seed["project_id"], payload)
+    assert r.status_code == 200, r.text
+    ws = openpyxl.load_workbook(BytesIO(r.content)).active
+    assert "B2:B3" in [str(m) for m in ws.merged_cells.ranges]
+    assert ws["B2"].value == "2+2"            # a family layout stays text, never 4
+    assert ws["B2"].alignment.vertical == "center"
+    assert ws["A4"].border.top.style == "medium" and ws["B4"].border.top.style == "medium"
+    assert ws["A3"].border.top.style is None

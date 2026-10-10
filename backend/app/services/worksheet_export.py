@@ -74,10 +74,16 @@ def embeddable(data: bytes) -> Optional[bytes]:
 
 
 def build_xlsx(columns: list[dict], rows: list[list[dict]], frozen_columns: int,
-               sheet_title: str = "Worksheet", images: Optional[dict[int, bytes]] = None) -> bytes:
+               sheet_title: str = "Worksheet", images: Optional[dict[int, bytes]] = None,
+               group_starts: Optional[set[int]] = None) -> bytes:
     """images: part id -> picture bytes for the cells of "image" columns
-    (their value is the part id)."""
+    (their value is the part id).
+
+    Tool groups as on screen: a cell's "span" > 1 merges it over that many
+    rows, 0 marks a cell covered by the merge above; group_starts (0-based row
+    indexes) get a divider line above them."""
     images = images or {}
+    group_starts = group_starts or set()
     buf = BytesIO()
     # Not in_memory: in that mode XlsxWriter 3.2.9 zips the in-cell picture
     # rels as "/xl/richData/_rels/..." (leading slash) and Excel drops them.
@@ -89,14 +95,18 @@ def build_xlsx(columns: list[dict], rows: list[list[dict]], frozen_columns: int,
     header = wb.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": HEADER_FILL})
     fmt_cache: dict = {}
 
-    def fmt(flag: Optional[str], is_date: bool):
-        key = (flag, is_date)
+    def fmt(flag: Optional[str], is_date: bool, top: bool = False, merged: bool = False):
+        key = (flag, is_date, top, merged)
         if key not in fmt_cache:
             props = {}
             if flag in FLAG_FILLS:
                 props["bg_color"] = FLAG_FILLS[flag]
             if is_date:
                 props["num_format"] = "yyyy-mm-dd"
+            if top:
+                props["top"] = 2
+            if merged:
+                props["valign"] = "vcenter"
             fmt_cache[key] = wb.add_format(props) if props else None
         return fmt_cache[key]
 
@@ -108,16 +118,25 @@ def build_xlsx(columns: list[dict], rows: list[list[dict]], frozen_columns: int,
 
     for i, cells in enumerate(rows, start=1):
         has_image = False
+        top = (i - 1) in group_starts
         for j, (col, data) in enumerate(zip(columns, cells)):
             flag = data.get("flag")
+            span = data.get("span")
+            if span == 0:
+                continue  # covered by the merged tool cell above
             if j in image_cols:
                 pic = images.get(data.get("value")) if isinstance(data.get("value"), int) else None
+                if top:
+                    ws.write_blank(i, j, None, fmt(None, False, top=True))
                 if pic:
                     ws.embed_image(i, j, "thumbnail.png", {"image_data": BytesIO(pic)})
                     has_image = True
                 continue
             value = _typed(col.get("type", "text"), data.get("value"))
-            f = fmt(flag, isinstance(value, datetime))
+            merged = bool(span and span > 1)
+            f = fmt(flag, isinstance(value, datetime), top, merged)
+            if merged:
+                ws.merge_range(i, j, i + span - 1, j, "", f)  # value written below, typed
             if value is None:
                 if f is not None:
                     ws.write_blank(i, j, None, f)

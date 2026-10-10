@@ -46,6 +46,17 @@ describe('worksheet table helpers', () => {
     expect([...toolGroupStarts(shown)]).toEqual([2])
   })
 
+  it('exports the tool groups: merged tool cells and a divider per group', () => {
+    const tool = { ...b.tool!, part_id: 90, part_number: '199401', cavities: '2+2' }
+    const lh = row({ part_id: 11, part_number: '1', tool })
+    const rh = row({ part_id: 12, part_number: '2', tool })
+    const other = row({ part_id: 13, part_number: '3', tool: { ...tool, part_id: 92, cavities: '4' } })
+    const payload = buildExportPayload([col('part.name'), col('tool.cavities')], [lh, rh, other], ctx)
+    expect(payload.rows.map((r) => r.cells[1].span)).toEqual([2, 0, undefined])
+    expect(payload.rows.map((r) => r.cells[0].span)).toEqual([undefined, undefined, undefined])
+    expect(payload.rows.map((r) => r.group_start ?? false)).toEqual([false, false, true])
+  })
+
   it('does not merge a tool cell whose value differs between the rows', () => {
     const tool = { ...b.tool!, part_id: 90, part_number: '199401' }
     const one = row({ part_id: 11, part_number: '1', tool, other_tools: [] })

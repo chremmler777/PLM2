@@ -170,14 +170,20 @@ export function buildExportPayload(
   cols: WorksheetColumn[], rows: WorksheetRow[], ctx: WorksheetContext,
 ): WorksheetExportPayload {
   const exported = cols;
+  // Same tool groups as on screen: merged tool cells and a divider per group.
+  const spans = toolCellSpans(rows, exported, ctx);
+  const starts = toolGroupStarts(rows);
   return {
     columns: exported.map((c) => ({ key: c.key, label: c.label, type: c.exportType })),
-    rows: rows.map((row) => ({
+    rows: rows.map((row, i) => ({
       cells: exported.map((c) => {
-        if (c.exportType === 'image') return { value: row.thumbnail_url ? row.part_id : null, flag: null, comments: 0 };
+        const span = spans.get(`${i}|${c.key}`);
+        const merge = span === undefined ? {} : { span };
+        if (c.exportType === 'image') return { value: row.thumbnail_url ? row.part_id : null, flag: null, comments: 0, ...merge };
         const note = noteFor(c, row, ctx);
-        return { value: c.value(row, ctx), flag: note?.flag_status ?? null, comments: note?.comment_count ?? 0 };
+        return { value: c.value(row, ctx), flag: note?.flag_status ?? null, comments: note?.comment_count ?? 0, ...merge };
       }),
+      ...(starts.has(i) ? { group_start: true } : {}),
     })),
     frozen_columns: exported.filter((c) => c.frozenWidth).length,
   };

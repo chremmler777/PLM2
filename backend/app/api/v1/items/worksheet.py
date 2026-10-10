@@ -45,10 +45,13 @@ class ExportCell(BaseModel):
     value: Union[int, float, Annotated[str, Field(max_length=MAX_CELL_TEXT)], None] = None
     flag: Optional[Literal["open", "confirmed", "rejected"]] = None
     comments: int = Field(0, ge=0, le=MAX_COMMENTS)
+    # Tool group (as on screen): >1 merges this cell over that many rows, 0 = covered by the cell above.
+    span: Optional[int] = Field(None, ge=0, le=5000)
 
 
 class ExportRow(BaseModel):
     cells: List[ExportCell]
+    group_start: bool = False  # first row of the next tool's group: a divider line above it
 
 
 class ExportIn(BaseModel):
@@ -98,6 +101,7 @@ async def export_worksheet(project_id: int, body: ExportIn, current_user: User =
     data = build_xlsx([c.model_dump() for c in body.columns],
                       [[cell.model_dump() for cell in r.cells] for r in body.rows],
                       body.frozen_columns, sheet_title=f"{code} worksheet",
+                      group_starts={i for i, r in enumerate(body.rows) if r.group_start},
                       images=await _thumbnails(db, project_id, body))
     filename = f"{code}-worksheet-{date.today().isoformat()}.xlsx"
     return Response(content=data, media_type=XLSX_MEDIA_TYPE,
