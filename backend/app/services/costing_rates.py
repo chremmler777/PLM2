@@ -1103,8 +1103,10 @@ def machine_class_open(change, user) -> bool:
 
 
 async def may_set_machine_class(db: AsyncSession, change, user) -> bool:
-    """Admins always; PM and a routed department's member (while it may
-    write its own costing) only while the change is in costing."""
+    """Admins always (not acting: effective_role); PM while costing is open;
+    a routed department's member (while it may write its own costing) only
+    while the change is in costing. In assessment the class is change-wide
+    while departments finalize one by one, so only PM and admin move it."""
     from app.models.change import ChangeAssessment
     from app.services.costing_position_service import CostingPositionService
     from app.services.meeting_service import MeetingService
@@ -1115,6 +1117,8 @@ async def may_set_machine_class(db: AsyncSession, change, user) -> bool:
         return False
     if await MeetingService.user_is_pm_member(db, user):
         return True
+    if change.status == "in_assessment":
+        return False
     mine = set(await WorkflowService.effective_department_ids(db, user))
     routed = set((await db.execute(select(ChangeAssessment.department_id).where(
         ChangeAssessment.change_id == change.id))).scalars().all())
@@ -1165,6 +1169,14 @@ async def set_machine_class(db: AsyncSession, change, machine_class_id: Optional
     if repriced:
         await db.flush()
     from app.services.change_service import ChangeService
+    # A finalized department whose lines just moved reviews them: its
+    # finalization reopens, audited, whoever set the class.
+    from app.services import early_costing
+    moved_depts = sorted({p.department_id for p in lines
+                          if p.id in {r["position_id"] for r in repriced}})
+    for dept_id in moved_depts:
+        await early_costing.clear_finalization(
+            db, change, dept_id, user.id, "machine class changed")
     await ChangeService.append_changelog(
         db, change, "machine_class_set",
         f"Machine class set to {names.get(machine_class_id, 'the tonnage default')}"

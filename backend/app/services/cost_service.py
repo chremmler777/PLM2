@@ -311,9 +311,16 @@ class CostService:
         # per-plant matrix stays exactly what the cost lines said. All of them
         # are one-off money: a position priced per part for the life of the
         # programme is a lifecycle cost LINE, which already exists.
-        positions = (await session.execute(
+        # Positions outlive a back to scoping (they hang off the change, not
+        # the rows) and stay as a draft, but a superseded department's price
+        # nothing until it answers feasible again (early_costing).
+        from app.services import early_costing
+        uncounted = await early_costing.uncounted_position_department_ids(
+            session, change.id)
+        positions = [p for p in (await session.execute(
             select(CostingPosition).where(
                 CostingPosition.change_id == change.id))).scalars().all()
+            if p.department_id not in uncounted]
         # A position's HOURS are money too: the department's own time at the
         # cost sheet's effective labour rate, a machine_time line's hours at
         # the machine class rate, a sampling line's trials at the price of a

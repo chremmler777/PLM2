@@ -2055,6 +2055,20 @@ class ChangeService:
                 or await ChangeService._tool_costing_open(session, change)):
             raise ChangeError(
                 "The part weight is quoted while the change is in costing")
+        if user.effective_role != "admin":
+            # The weight is the Tool department's costing figure: once it
+            # finalized, it reopens its costing to change it (PM still may).
+            from app.services import early_costing
+            from app.services.meeting_service import MeetingService
+            tool_id = (await session.execute(
+                select(Department.id).where(
+                    Department.name == ChangeService.TOOL_DEPARTMENT))).scalar()
+            if (tool_id is not None
+                    and early_costing.is_finalized(change, tool_id)
+                    and not await MeetingService.user_is_pm_member(session, user)):
+                raise ChangeError(
+                    "The Tool Engineer costing is finalized: reopen it to "
+                    "change the part weight")
         old = (float(change.estimated_part_weight_g)
                if change.estimated_part_weight_g is not None else None)
         if weight_g is None:
@@ -2607,8 +2621,21 @@ class ChangeService:
             # plus Sales and Project Management, who may answer it too. Shown
             # with the asking department as owner. Cleared per question by
             # answering it. Same rule as MeetingService.can_answer_question.
+            # The asking-side rule holds in captured/scoping only; from
+            # assessment on a question is Sales' errand as it was before
+            # (Sales owns the customer relationship), one task per change.
             questions = ChangeService.unanswered_questions(c)
-            if questions:
+            if questions and c.status not in ("captured", "scoping"):
+                if in_sales:
+                    newest = questions[-1]
+                    tasks.append({
+                        **await _base(c), "kind": "obtain_info",
+                        "reason": newest.note,
+                        "question_count": len(questions),
+                        "concern_id": newest.id,
+                        "department_id": newest.department_id,
+                    })
+            elif questions:
                 am_author = getattr(user, "acts_as_department_id", None) is None
                 answerable = [
                     q for q in questions

@@ -1124,6 +1124,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Wartet auf {d} - offene Frage: {x}',
     en: 'Waiting on {d} - open question: {x}',
   },
+  /** From assessment on a question waits on Sales (the asking-side rule is scoping's). */
+  'wait.onSales.customerInfo': {
+    de: 'Wartet auf Vertrieb - Kundeninfo wird eingeholt: {x}',
+    en: 'Waiting on Sales - obtaining customer info: {x}',
+  },
   'wait.onReview': {
     de: 'Antwort liegt vor - wartet auf Prüfung: {x}',
     en: 'Answer received - awaiting review: {x}',

@@ -671,12 +671,16 @@ class OfferService:
             })
         names = {i: n for i, n in (await session.execute(
             select(Department.id, Department.name))).all()}
-        positions = list((await session.execute(
+        # The same departments the summation counts (early_costing).
+        from app.services import early_costing
+        uncounted = await early_costing.uncounted_position_department_ids(
+            session, change.id)
+        positions = [p for p in (await session.execute(
             select(CostingPosition).where(
                 CostingPosition.change_id == change.id,
                 CostingPosition.kind == "external")
             .order_by(CostingPosition.department_id, CostingPosition.id)
-        )).scalars().all())
+        )).scalars().all() if p.department_id not in uncounted]
         ext_by_dept: dict[int, float] = {}
         for p in positions:
             ext_by_dept[p.department_id] = (

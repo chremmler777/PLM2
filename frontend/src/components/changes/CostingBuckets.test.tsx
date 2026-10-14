@@ -260,6 +260,17 @@ describe('CostingBuckets', () => {
       await waitFor(() => expect(changesApi.finalizeDepartmentCosting).toHaveBeenCalledWith(7, 2))
     })
 
+    it('offers no Finalize to a department that owes no cost input', async () => {
+      buckets({ myDepartmentIds: [2], change: change({
+        status: 'costing', costing_owed_department_ids: [],
+        costing_pending_department_ids: [], costing_finalized_department_ids: [],
+      }) })
+      fireEvent.click(screen.getByTestId('costing-toggle-2'))
+      await screen.findByTestId('costing-bucket-2')
+      expect(screen.queryByTestId('costing-finalize-bar-2')).toBeNull()
+      expect(screen.queryByTestId('costing-finalize-2')).toBeNull()
+    })
+
     it('a finalized part reads only for the department and offers Reopen', async () => {
       buckets({ myDepartmentIds: [2], change: change({
         costing_owed_department_ids: [2, 4], costing_pending_department_ids: [4],

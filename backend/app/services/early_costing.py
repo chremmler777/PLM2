@@ -11,9 +11,17 @@ the change enters it.
 Finalized is the department's answer, stored on its assessment row
 (details.costing_finalized_at / _by, no migration). The row is the right
 home: when the assessment is superseded (back to scoping after a "not
-feasible") the rows go and with them every finalization, so early costing is
-back to draft with the answer it was built on. Positions and lines stay as
-the department's draft.
+feasible") the rows go and with them every finalization and every cost line
+(lines hang off the rows and are deleted with them). Positions hang off the
+change and stay as the department's draft, but the summation and the quote
+basis leave out the positions of a department whose answer was superseded
+until it answers feasible again (uncounted_position_department_ids), so a
+torn-down routing prices nothing it no longer stands behind.
+
+A finalization covers the answers it was given on: a later-stage row of the
+same department submitted after costing_finalized_at (stages wake at
+costing, EarlyStageService.wake_later_stages) makes the department draft
+again, back in costing_pending with a costing_input task.
 
 Rules:
 - window: the change is in costing, or in assessment and the department owes
@@ -21,14 +29,14 @@ Rules:
 - a finalized department's members no longer write its figures (PM and admin
   still may, as everywhere in costing); the department reopens its own input
   while costing is open (in assessment or costing);
-- finalizing needs at least one cost line or position: a zero line is an
-  answer, nothing at all is silence.
+- finalizing needs at least one cost line with non-zero hours or money, or
+  one position: the zero lines seeded from the checklist are not an answer.
 """
 from datetime import datetime
 import json
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeAssessment, ChangeRequest
@@ -70,9 +78,26 @@ def costing_open_for(change: ChangeRequest, department_id: int) -> bool:
     return change.status == "in_assessment" and owes(change, department_id)
 
 
+def _parse(ts) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(ts) if ts else None
+    except (TypeError, ValueError):
+        return None
+
+
 def finalized_row(change: ChangeRequest, department_id: int) -> Optional[ChangeAssessment]:
-    return next((a for a in _rows(change, department_id)
-                 if a.details_dict.get("costing_finalized_at")), None)
+    """The row carrying the department's finalization, while it still holds:
+    no row of the department was submitted after it (a later stage woken at
+    costing reopens the answer the finalization was given on)."""
+    rows = _rows(change, department_id)
+    row = next((a for a in rows if a.details_dict.get("costing_finalized_at")), None)
+    if row is None:
+        return None
+    at = _parse(row.details_dict.get("costing_finalized_at"))
+    if at is not None and any(a.submitted_at is not None and a.submitted_at > at
+                              for a in rows):
+        return None
+    return row
 
 
 def is_finalized(change: ChangeRequest, department_id: int) -> bool:
@@ -88,7 +113,58 @@ def owed_department_ids(change: ChangeRequest) -> list[int]:
 
 def finalized_department_ids(change: ChangeRequest) -> list[int]:
     return sorted({a.department_id for a in change.assessments
-                   if a.details_dict.get("costing_finalized_at")})
+                   if is_finalized(change, a.department_id)})
+
+
+async def uncounted_position_department_ids(session: AsyncSession,
+                                            change_id: int) -> set[int]:
+    """Departments whose positions the summation and the quote basis leave
+    out: their assessment was superseded (back to scoping after a "not
+    feasible", see EarlyStageService.supersede_assessments) and they have no
+    feasible answer on record since. The positions stay as the department's
+    draft and count again once it answers feasible on the rebuilt routing.
+    A department never routed (a position Project Management filed for it)
+    is not affected: nothing of it was superseded."""
+    from app.models.change import ChangeChangelog
+    superseded: set[int] = set()
+    for raw in (await session.execute(
+            select(ChangeChangelog.old_value).where(
+                ChangeChangelog.change_id == change_id,
+                ChangeChangelog.action == "assessment_superseded"))).scalars():
+        try:
+            dept = (json.loads(raw) or {}).get("department_id") if raw else None
+        except (TypeError, ValueError):
+            dept = None
+        if isinstance(dept, int):
+            superseded.add(dept)
+    if not superseded:
+        return set()
+    answered = set((await session.execute(
+        select(ChangeAssessment.department_id).where(
+            ChangeAssessment.change_id == change_id,
+            ChangeAssessment.verdict.in_(COSTING_VERDICTS)))).scalars().all())
+    return superseded - answered
+
+
+async def clear_finalization(session: AsyncSession, change: ChangeRequest,
+                             department_id: int, actor_id: Optional[int],
+                             reason: str) -> bool:
+    """Reopen a department's finalization as a side effect (no rights check:
+    the caller already holds the right for the act that caused it). Audited
+    as costing_input_reopened with the reason. False: nothing to reopen."""
+    from app.services.change_service import ChangeService
+    if not is_finalized(change, department_id):
+        return False
+    for a in _rows(change, department_id):
+        if a.details_dict.get("costing_finalized_at"):
+            _set_details(a, costing_finalized_at=None, costing_finalized_by=None)
+    await session.flush()
+    await ChangeService.append_changelog(
+        session, change, "costing_input_reopened",
+        f"Costing input reopened for dept {department_id}: {reason}",
+        actor_id, new_value={"department_id": department_id, "reason": reason},
+        notes=reason, for_department_id=department_id)
+    return True
 
 
 def _set_details(a: ChangeAssessment, **kv) -> None:
@@ -114,12 +190,20 @@ async def _may_act(session: AsyncSession, change: ChangeRequest,
 
 async def _has_answer(session: AsyncSession, change: ChangeRequest,
                       department_id: int) -> bool:
+    """A cost line with hours or money, or a position. The zero-hour lines
+    seeded from the checklist (CostService.seed_from_checklist) are a
+    starting grid, not an answer."""
     from app.models.change_cost import AssessmentCostLine, CostingPosition
+    L = AssessmentCostLine
     lines = (await session.execute(
-        select(func.count(AssessmentCostLine.id))
-        .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
+        select(func.count(L.id))
+        .join(ChangeAssessment, ChangeAssessment.id == L.assessment_id)
         .where(ChangeAssessment.change_id == change.id,
-               ChangeAssessment.department_id == department_id))).scalar() or 0
+               ChangeAssessment.department_id == department_id,
+               or_(func.coalesce(L.demand_hours, 0) != 0,
+                   func.coalesce(L.internal_cost, 0) != 0,
+                   func.coalesce(L.external_cost, 0) != 0,
+                   func.coalesce(L.minutes_per_part, 0) != 0)))).scalar() or 0
     if lines:
         return True
     positions = (await session.execute(
@@ -142,7 +226,10 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError(
             "The department has not submitted a feasible assessment: there is "
             "no costing to finalize")
-    if not costing_open_for(change, department_id):
+    # owes() itself, not costing_open_for: in costing the window is open for
+    # everybody, but a department whose checklist marked nothing impacted
+    # still has nothing to finalize.
+    if not owes(change, department_id):
         raise EarlyCostingError(
             "The department's assessment marked nothing impacted: it owes no "
             "costing input")
@@ -150,8 +237,9 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError("The department's costing is already finalized")
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
-            "Enter at least one cost line or position before you finalize "
-            "(a zero line says the department costs nothing)")
+            "Nothing to finalize yet: enter hours or an amount on at least one "
+            "cost line, or add a position (the zero lines seeded from the "
+            "checklist are not an answer)")
     anchor = next((a for a in _rows(change, department_id)
                    if a.verdict in COSTING_VERDICTS), None)
     _set_details(anchor, costing_finalized_at=datetime.utcnow().isoformat(),
@@ -182,7 +270,7 @@ async def reopen(session: AsyncSession, change: ChangeRequest,
             "Costing is closed: reopen costing for the change first")
     rows = [a for a in _rows(change, department_id)
             if a.details_dict.get("costing_finalized_at")]
-    if not rows:
+    if not rows or not is_finalized(change, department_id):
         raise EarlyCostingError("The department's costing is not finalized")
     for a in rows:
         _set_details(a, costing_finalized_at=None, costing_finalized_by=None)

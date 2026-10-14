@@ -53,6 +53,14 @@ describe('resolveWaitStates', () => {
     expect(w.text).not.toContain('Sales')
   })
 
+  it('waits on Sales, not the asking department, once in assessment', () => {
+    const [w] = resolveWaitStates(change({ status: 'in_assessment' }),
+      [concern({ department_id: 4, asking_department_name: 'APQP' })], deptName)
+    expect(w.text).toBe(t('wait.onSales.customerInfo')
+      .replace('{x}', 'What is the target price?'))
+    expect(w.text).not.toContain('APQP')
+  })
+
   it('waits on review once the answer is in', () => {
     const [w] = resolveWaitStates(change(),
       [concern({ answer_note: '12.50', answered_at: '2026-08-02T00:00:00' })], deptName)

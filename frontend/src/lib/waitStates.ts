@@ -197,7 +197,10 @@ export function resolveWaitStates(
   // needs-info, whatever it is attributed to and whichever meeting (if any)
   // raised it. A narrower rule here would put a task in someone's list that the
   // change page then denies is outstanding. The question waits on the ASKING
-  // side (2026-10-14): its department, else the person who asked.
+  // side (2026-10-14): its department, else the person who asked, but only in
+  // captured/scoping; from assessment on it waits on Sales as before (the
+  // backend's obtain_info task follows the same split).
+  const askingSide = change.status === 'captured' || change.status === 'scoping'
   const questions = concerns.filter((c) => c.is_open && c.kind === 'needs_info')
   for (const c of questions) {
     waits.push(c.answered_at
@@ -208,7 +211,9 @@ export function resolveWaitStates(
       }
       : {
         key: `sales-info-${c.id}`,
-        text: t('wait.onSales.info')
+        text: !askingSide
+          ? t('wait.onSales.customerInfo').replace('{x}', excerpt(c.note))
+          : t('wait.onSales.info')
           .replace('{d}', c.asking_department_name
             ?? (c.department_id != null ? departmentName(c.department_id) : null)
             ?? c.raised_by_name ?? `#${c.raised_by}`)

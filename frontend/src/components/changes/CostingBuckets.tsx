@@ -169,6 +169,10 @@ export default function CostingBuckets({
   const live = early || change.status === 'costing'
   const finalizedIds = change.costing_finalized_department_ids ?? []
   const isFinalized = (id: number) => finalizedIds.includes(id)
+  // Finalize / reopen only for a department that owes a cost input: one whose
+  // checklist marked nothing impacted has nothing to finalize (the backend
+  // refuses it with a 400 in assessment and in costing alike).
+  const owesInput = (id: number) => (change.costing_owed_department_ids ?? []).includes(id)
   // In assessment only the departments whose costing is open: submitted
   // feasible, owing a cost input (or already finalized).
   const earlyIds = new Set([...(change.costing_owed_department_ids ?? []), ...finalizedIds])
@@ -300,7 +304,7 @@ export default function CostingBuckets({
                     {/* What this department books against the change, above the
                         old grid — the grid keeps working, position by position
                         is how departments actually think about it. */}
-                    {editable && (
+                    {editable && owesInput(id) && (
                       <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}
@@ -344,7 +348,7 @@ export default function CostingBuckets({
                     )}
                     {/* PM may still fix another department's positions; Sales
                         and the lead only read them. */}
-                    {editable && isPm && (
+                    {editable && isPm && owesInput(id) && (
                       <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}

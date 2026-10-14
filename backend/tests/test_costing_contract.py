@@ -212,13 +212,21 @@ async def test_costing_pending_lists_feasible_departments_until_finalized(
     # a line is a draft until the department finalizes it
     assert sorted(detail["costing_pending_department_ids"]) == sorted(
         [costing["tool"], costing["dev"]])
+    # a zero line (what seed_from_checklist writes) is no answer yet
+    res = await client.post(fin, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    assert "zero lines" in res.json()["detail"]
 
+    await client.put(url, json={"lines": [
+        {"plant_id": costing["home_plant"], "activity_label": "Insert rework",
+         "cost_kind": "one_time", "demand_hours": 2.0},
+    ]}, headers=admin_auth)
     res = await client.post(fin, headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["pending_department_ids"] == [costing["dev"]]
     detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
                                headers=admin_auth)).json()
-    # a zero line, finalized, is an answer
+    # a line with hours, finalized, is an answer
     assert detail["costing_pending_department_ids"] == [costing["dev"]]
     assert detail["costing_finalized_department_ids"] == [costing["tool"]]
 
