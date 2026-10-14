@@ -136,6 +136,11 @@ def redact_changelog_text(action: str, description: str,
         # The reopen reason names the numbers that were wrong.
         desc = "Costing reopened"
         notes = None
+    elif action == "costing_input_reopened":
+        # A department's own reopen (per-department pipeline): its reason
+        # may name the numbers too.
+        desc = desc.split(":", 1)[0]
+        notes = None
     elif action in NOTE_ONLY_ACTIONS:
         notes = None
     return desc, notes

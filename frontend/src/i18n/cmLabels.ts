@@ -49,6 +49,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impact.empty': { de: 'Keine Teile im Projekt. Teile zuerst im Projekt anlegen.', en: 'No parts in this project. Create parts on the project page first.' },
   'impact.confirm': { de: 'Umfang bestätigen (Entwicklung)', en: 'Confirm impact (Development)' },
   'impact.confirmed': { de: 'Bestätigt von', en: 'Confirmed by' },
+  'impact.lockedBy': { de: 'Festgeschrieben von', en: 'Locked by' },
+  'impact.autoLockHint': {
+    de: 'Wird mit der Scoping-Entscheidung "Freigeben" festgeschrieben.',
+    en: 'Locks when the scoping meeting decides "proceed".',
+  },
   'impact.developmentOnly': {
     de: 'Nur Entwicklung bestätigt den Umfang',
     en: 'Only Development confirms the impacted set',
@@ -120,14 +125,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Antwort prüfen und die Frage schließen',
     en: 'Judge the answer and close the question',
   },
-  'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
+  'tasks.kind.obtain_info': { de: 'Offene Frage beantworten', en: 'Answer the open question' },
+  'tasks.hint.askedBy': { de: 'Frage von {x}', en: 'Asked by {x}' },
   'tasks.hint.questionsOpen': {
     de: '{n} offene Fragen, neueste:',
     en: '{n} questions open, newest:',
   },
   'tasks.hint.obtain_info': {
-    de: 'Offene Rückfrage beim Kunden klären',
-    en: 'Clear the open question with the customer',
+    de: 'Offene Frage klären und beantworten',
+    en: 'Clear the open question and answer it',
   },
   'tasks.hint.customer_response': {
     de: 'Kundenantwort einholen',
@@ -488,9 +494,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.updateAnswer': { de: 'Antwort aktualisieren', en: 'Update answer' },
   'concern.answeredBy': { de: 'beantwortet von', en: 'answered by' },
   'concern.salesAnswers': {
-    de: 'Nur der Vertrieb beantwortet Kundenfragen',
-    en: 'Only Sales answers customer questions',
+    de: 'Der fragende Bereich, Vertrieb oder PM beantworten Fragen',
+    en: 'The asking department, Sales or PM answer questions',
   },
+  'concern.kind.question': { de: 'Frage', en: 'Question' },
+  'concern.kind.cancelVote': { de: 'Abbruch-Votum', en: 'Cancel vote' },
   'concern.closerOnly': {
     de: 'Nur der fragende Bereich oder PM schließt die Frage',
     en: 'Only the asking side or PM closes the question',
@@ -976,13 +984,45 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Build the quote from the costing wrap-up',
   },
   'tasks.hint.costing_input': {
-    de: 'Aufwände und Vorlaufzeit eintragen',
-    en: 'Enter your effort and lead time',
+    de: 'Aufwände und Vorlaufzeit eintragen, dann die Kalkulation abschließen',
+    en: 'Enter your effort and lead time, then finalize your costing',
   },
   'wait.onCosting': {
     de: 'Wartet auf Kostenerfassung: {x}',
     en: 'Waiting on cost input: {x}',
   },
+  // Per-department costing pipeline (2026-10-14): progress of the departments
+  // that owe a cost input, also while the change is still in assessment.
+  'wait.costingProgress': {
+    de: 'Kalkulation: {n}/{m} abgeschlossen, offen: {x}',
+    en: 'Costing: {n}/{m} finalized, waiting on {x}',
+  },
+  'wait.costingProgressDone': {
+    de: 'Kalkulation: {n}/{m} abgeschlossen',
+    en: 'Costing: {n}/{m} finalized',
+  },
+  'costing.finalize': { de: 'Kalkulation abschließen', en: 'Finalize costing' },
+  'costing.finalizeHint': {
+    de: 'Ihre Zahlen sind vollständig. Danach ist Ihr Teil schreibgeschützt, bis Sie ihn wieder öffnen.',
+    en: 'Your figures are complete. Your part is then read-only until you reopen it.',
+  },
+  'costing.finalized': { de: 'Abgeschlossen', en: 'Finalized' },
+  'costing.finalizedSaved': { de: 'Kalkulation abgeschlossen', en: 'Costing finalized' },
+  'costing.reopenInput': { de: 'Wieder öffnen', en: 'Reopen' },
+  'costing.reopenInputSaved': { de: 'Kalkulation wieder offen', en: 'Costing reopened for changes' },
+  'costing.finalizedBody': {
+    de: 'Ihre Kalkulation ist abgeschlossen. Öffnen Sie sie wieder, um etwas zu ändern.',
+    en: 'Your costing is finalized. Reopen it to change anything.',
+  },
+  'costing.earlyBody': {
+    de: 'Die Bewertung läuft noch. Jeder Fachbereich kalkuliert, sobald er seine Bewertung als machbar abgegeben hat, und schließt seinen Teil ab, ohne auf die anderen zu warten.',
+    en: 'Assessment is still running. Each department costs its part as soon as it has submitted its assessment as feasible, and finalizes it without waiting for the others.',
+  },
+  'costing.earlyNone': {
+    de: 'Noch kein Fachbereich kalkuliert: die Kalkulation öffnet für einen Fachbereich, sobald er seine Bewertung als machbar abgegeben hat.',
+    en: 'No department is costing yet: costing opens for a department once it has submitted its assessment as feasible.',
+  },
+  'bucket.continueCosting': { de: 'Weiter zur Kalkulation', en: 'Continue to costing' },
   'bucket.waiting': { de: 'Wartet', en: 'Waiting' },
   'bucket.inWork': { de: 'In Arbeit', en: 'In work' },
   'bucket.submitted': { de: 'Eingereicht', en: 'Submitted' },
@@ -1081,8 +1121,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.solvedBy': { de: 'geklärt von', en: 'solved by' },
   'concern.fromMeeting': { de: 'aus Termin vom', en: 'from meeting of' },
   'wait.onSales.info': {
-    de: 'Wartet auf Vertrieb - Kundeninfo wird eingeholt: {x}',
-    en: 'Waiting on Sales - obtaining customer info: {x}',
+    de: 'Wartet auf {d} - offene Frage: {x}',
+    en: 'Waiting on {d} - open question: {x}',
   },
   'wait.onReview': {
     de: 'Antwort liegt vor - wartet auf Prüfung: {x}',
@@ -1206,10 +1246,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'What is missing before the change can start? (required, audited)',
   },
   'meeting.needsInfoWarning': {
-    de: 'Die Änderung bleibt im Scoping. Vertrieb ist verantwortlich, die fehlenden '
-      + 'Informationen beim Kunden zu beschaffen, und erhält dies als Aufgabe.',
-    en: 'The change stays in scoping. Sales is accountable for obtaining the missing '
-      + 'information from the customer, and gets this as an action.',
+    de: 'Die Änderung bleibt im Scoping. Die Frage wird Aufgabe deines Bereichs; '
+      + 'dein Bereich, Vertrieb oder PM beantworten sie.',
+    en: 'The change stays in scoping. The question becomes your department\'s task; '
+      + 'your department, Sales or PM answer it.',
   },
   'meeting.shareRejection': {
     de: 'Ablehnung an den Kunden kommunizieren',
@@ -1230,8 +1270,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // Reads as what it is — an open question going out to the customer — not as a
   // validation error about the meeting form.
   'meeting.missingInfo': {
-    de: 'Offene Rückfrage. Vertrieb holt die Info beim Kunden ein:',
-    en: 'Open info request. Sales obtains this from the customer:',
+    de: 'Offene Frage:',
+    en: 'Open question:',
   },
   'start.salesOnly': {
     de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an',
@@ -1949,6 +1989,47 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'meeting.proceedCarrier': { de: 'Kostenträger: {x}', en: 'Cost carrier: {x}' },
   'meeting.proceedConfirm': { de: 'Bewertung starten', en: 'Start assessment' },
+  'meeting.proceedLocksImpact': {
+    de: 'Die betroffenen Teile ({n}) werden damit festgeschrieben, auf deinen Namen.',
+    en: 'This locks the impacted parts ({n}), on your name.',
+  },
+  'meeting.proceedBlockedTitle': {
+    de: 'Bewertung kann noch nicht starten',
+    en: 'The assessment cannot start yet',
+  },
+  'meeting.proceedBlocked': {
+    de: 'Offene Punkte blockieren "Freigeben". Jeder muss zuerst zurückgezogen oder '
+      + 'geklärt werden (vom Autor oder PM), oder mit einer Entscheidung "Info fehlt" '
+      + 'oder "Ablehnen" beantwortet werden.',
+    en: 'Open flags block "proceed". Each must be withdrawn or settled first (by its '
+      + 'author or PM), or answered by a "needs info" or "reject" decision.',
+  },
+  'meeting.proceedBlockedServer': {
+    de: 'Der Server hat "Freigeben" abgelehnt:',
+    en: 'The server refused "proceed":',
+  },
+  'meeting.noImpactedParts': {
+    de: 'Erst die betroffenen Teile wählen (Reiter Betroffene Teile)',
+    en: 'Pick the impacted parts first, on the Impacted tab',
+  },
+  'scope.title': { de: 'Umfang (vom PM festgelegt)', en: 'Scope (defined by PM)' },
+  'scope.empty': { de: 'Noch kein Umfang festgelegt.', en: 'No scope defined yet.' },
+  'scope.placeholder': {
+    de: 'Was gehört zu dieser Änderung, was nicht?',
+    en: 'What is in scope of this change, and what is not?',
+  },
+  'scope.edit': { de: 'Umfang bearbeiten', en: 'Edit scope' },
+  'scope.define': { de: 'Umfang festlegen', en: 'Define the scope' },
+  'scope.save': { de: 'Speichern', en: 'Save' },
+  'scope.saved': { de: 'Umfang gespeichert', en: 'Scope saved' },
+  'scope.rights': {
+    de: 'PM, der Change Lead oder ein Admin legen den Umfang im Scoping fest.',
+    en: 'PM, the change lead or an admin define the scope during scoping.',
+  },
+  'scope.readOnly': {
+    de: 'Im Scoping festgelegt, jetzt nur lesbar.',
+    en: 'Defined in scoping, read only now.',
+  },
   'reject.sendTitle': { de: 'Absageschreiben senden', en: 'Send rejection letter' },
   'reject.step1': { de: '1. Absageschreiben anhängen', en: '1. Attach the rejection letter' },
   'reject.step2': {
@@ -1981,8 +2062,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.missingType': { de: 'Risikoart', en: 'a risk type' },
   'concern.missingDept': { de: 'Abteilung', en: 'a department' },
   'concern.salesAnswersHint': {
-    de: 'Der Vertrieb beantwortet diese Frage.',
-    en: 'Sales answers this question.',
+    de: '{x}, Vertrieb oder PM beantworten diese Frage.',
+    en: '{x}, Sales or PM answer this question.',
   },
   'concern.closerHint': {
     de: 'Der fragende Bereich oder PM schließt die Frage.',

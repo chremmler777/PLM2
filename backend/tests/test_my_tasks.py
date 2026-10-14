@@ -88,6 +88,7 @@ async def test_sales_sees_kickoff_with_the_unmet_parts(client, seed, roles):
     assert row["missing"] == []
 
 
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_pm_sees_scoping_wrapup_with_flags(client, seed, roles,
                                                  session_factory):
     sales = await _auth(client, "Sales")
@@ -105,6 +106,7 @@ async def test_pm_sees_scoping_wrapup_with_flags(client, seed, roles,
     assert not [t for t in await _tasks(client, pm) if t["kind"] == "kickoff"]
 
 
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_impact_confirm_row_disappears_once_locked(
         client, seed, roles, part, session_factory):
     sales = await _auth(client, "Sales")

@@ -357,8 +357,9 @@ async def test_a_document_in_the_container_is_content_enough(
     assert res.status_code == 200, res.text
 
 
-async def test_only_sales_may_answer(client, admin_auth, eng_auth, seed,
-                                     session_factory):
+async def test_an_outsider_may_not_answer(client, admin_auth, eng_auth, seed,
+                                         session_factory):
+    """Not the asking side, not Sales, not PM: refused (2026-10-14 rule)."""
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "10")
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
@@ -838,9 +839,9 @@ async def test_only_the_raising_department_or_pm_closes_the_loop(
     assert res.json()["is_open"] is False
 
 
-async def test_customer_questions_stay_sales_only(
+async def test_sales_still_answers_a_team_flag_an_outsider_does_not(
         client, admin_auth, eng_auth, seed, session_factory):
-    """The scoping-phase rule is untouched: words are enough, Sales answers."""
+    """Words are enough; Sales may answer any question, an outsider not."""
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "26")
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
@@ -854,10 +855,10 @@ async def test_customer_questions_stay_sales_only(
     assert res.status_code == 200, res.text
 
 
-async def test_a_department_attribution_during_scoping_stays_sales_only(
+async def test_a_scoping_question_is_answered_by_its_asking_department(
         client, admin_auth, eng_auth, seed, session_factory):
-    """Attribution at scoping is a label on a customer question, not a hold —
-    so it keeps the Sales rule while the change is still in scoping."""
+    """2026-10-14: the question stays the ASKING department's. Outside it the
+    engineer is refused; once a member of APQP, they may answer it."""
     from app.models.workflow import Department
     cid = await _change_in_scoping(client, admin_auth, seed, "27")
     async with session_factory() as s:
@@ -872,4 +873,12 @@ async def test_a_department_attribution_during_scoping_stays_sales_only(
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                             json={"note": "Class 2"}, headers=eng_auth)
     assert res.status_code == 400
-    assert "Sales" in res.json()["detail"]
+    assert "asking department" in res.json()["detail"]
+
+    from app.models.workflow import UserDepartment
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
+        await s.commit()
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Class 2"}, headers=eng_auth)
+    assert res.status_code == 200, res.text

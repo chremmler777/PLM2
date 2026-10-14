@@ -93,11 +93,27 @@ async def test_the_weight_is_quoted_in_costing_only(
         client, admin_auth, session_factory, seed, weighing):
     auth = await _member(client, session_factory, seed, weighing["tool"],
                          "wtool2@test.io")
-    await _set_status(session_factory, weighing["change_id"], "in_assessment")
+    await _set_status(session_factory, weighing["change_id"], "quoting")
 
     res = await client.put(_url(weighing), json={"weight_g": 100.0}, headers=auth)
     assert res.status_code == 400
     assert "costing" in res.json()["detail"]
+    # In assessment the Tool Engineer quotes it with its early costing, once
+    # it submitted feasible (per-department pipeline, 2026-10-14) ...
+    await _set_status(session_factory, weighing["change_id"], "in_assessment")
+    early = await client.put(_url(weighing), json={"weight_g": 100.0}, headers=auth)
+    assert early.status_code == 200, early.text
+    # ... and not before.
+    async with session_factory() as s:
+        from sqlalchemy import select as _select
+        row = (await s.execute(_select(ChangeAssessment).where(
+            ChangeAssessment.change_id == weighing["change_id"],
+            ChangeAssessment.department_id == weighing["tool"]))).scalar_one()
+        row.verdict = "pending"
+        await s.commit()
+    res = await client.put(_url(weighing), json={"weight_g": 120.0}, headers=auth)
+    assert res.status_code == 400
+    await _set_status(session_factory, weighing["change_id"], "quoting")
     # Admins fill numbers in after the fact and are not held to the window.
     late = await client.put(_url(weighing), json={"weight_g": 100.0},
                             headers=admin_auth)

@@ -109,11 +109,36 @@ Run these when discussing any stage's implementation:
   `change_service.py::kickoff_missing`, read by `_guard`.
   Rationale: Sales captures, the project team scopes — kickoff means handing
   over a request someone can actually work on. The impacted set is **no longer**
-  required here: it is defined during scoping (Development picks and confirms
-  it; the lead and PM may pick too) and stays hard-locked before assessment,
-  as before.
+  required here: it is defined during scoping (Development, the lead and PM
+  pick it) and stays hard-locked before assessment, as before. Since
+  2026-10-14 the lock happens automatically at the meeting's `proceed`
+  (see "Inside `scoping`").
 
 ### Inside `scoping`
+- **Scope (defined by PM)** (2026-10-14): the project manager writes down what
+  is in scope of the change, as free text (`change_requests.scope_definition`,
+  migration 115). Editable while the change is `captured` or in `scoping` by
+  Project Management members, the change lead and admins (acts-as aware),
+  audited in the changelog on every change (`scope_defined`), read only
+  afterwards. Shown prominently on the Scoping tab and read only on Overview,
+  Assessment and Costing so the departments see what is in scope. Optional,
+  not a gate. `PUT /changes/{id}/scope-definition`,
+  `ChangeService.set_scope_definition`.
+- **Impacted parts are picked here, and locked by `proceed`** (2026-10-14):
+  Development, the change lead and PM pick the impacted parts in scoping.
+  Development's separate "confirm the impacted parts" step is **switched off**
+  (`app/services/cm_switches.py::IMPACT_CONFIRM_STEP_ENABLED = False`, served
+  to the UI as `impact_confirm_step` on every change). Its code, task and
+  button stay for a later reuse. While it is off: the meeting's `proceed`
+  locks the impacted set automatically (who/when = the decider, changelog
+  `impact_locked`); an empty set refuses `proceed` (*"No impacted parts
+  picked: pick the impacted parts on the Impacted tab before proceeding"*);
+  the confirm task leaves My Tasks; `POST /impact/confirm` is refused. An edit
+  by the lead, PM or an admin after the lock keeps the set locked on the
+  editor's name (nobody confirms by hand any more). A mother-plant change
+  locks its set when it goes `scoping -> approved` (empty set refused); an
+  engineering review keeps Development's lock, because there the lock is the
+  act that opens the review.
 - The onward move is **the meeting's call, not a button**. The cockpit offers no
   advance button at `scoping`; it points at the scoping tab.
   `changeStatus.ts::DECIDED_BY_MEETING`.
@@ -125,14 +150,20 @@ Run these when discussing any stage's implementation:
   and the acts-as switch sets personal authorship aside. One open concern per
   person per kind. `meeting_service.py::raise_concern` / `withdraw_concern`; see
   `superpowers/specs/2026-08-12-scoping-concerns-and-settle-rights-design.md`.
-- **Open concerns block `proceed`** — the decision must either be answered by
-  the author withdrawing, or by a negative decision that consumes it.
+- **Open concerns block `proceed`**: the decision must either be answered by
+  the author withdrawing (or PM settling it), or by a negative decision that
+  consumes it. Pressing `proceed` with open flags opens a warning dialog that
+  lists each flag (kind, author and department, note) and says how it is
+  cleared; the backend refusal lists them too (2026-10-14,
+  `MeetingService.open_flags_refusal`).
 - Meeting decision `reject` requires a reason; `needs_info` requires stating
   what is missing. `proceed` needs no justification.
 - A negative decision **resolves** the open concerns and its reason becomes the
   change's `rejection_reason` — one decision, one justification.
-- `needs_info` keeps the change in `scoping` and raises a **Sales-accountable
-  action** ("obtain missing information"). Sales owns the customer relationship.
+- `needs_info` keeps the change in `scoping` and raises a tracked question for
+  the **decider's department** (acting as a department: that one; else Project
+  Management when the decider sits there; else their only department; else
+  the decider personally). It follows the question rule below.
 - After a negative decision, an **attachment slot** appears for Sales/PM to file
   what they send the customer — rejection letter, open questions, or a
   counter-proposal.
@@ -147,17 +178,23 @@ note nobody owns:
    the prior flag is resolved by the decision, a fresh one is raised — the
    change always visibly owes exactly one answer
    (`meeting_service.py::decide_meeting`).
-2. **Sales gets the task** — my-tasks kind `obtain_info` with the reason, for
-   Sales members, while `ChangeService.pending_info_request` holds.
+2. **The question stays the asking department's task** (2026-10-14, was
+   Sales-only): my-tasks kind `obtain_info` goes to the members of the asking
+   department (the concern's `department_id`; with none, its author) **and**
+   to Sales **and** Project Management, shown with the asking department as
+   owner. Any of them may answer
+   (`MeetingService.can_answer_question`); acting as a department means
+   exactly that department's rights, personal authorship steps aside. The
+   UI says who it waits on (*"Waiting on APQP - open question: ..."*).
 3. **Documents are classified**: attachments carry `kind`
    (`general | info_request | info_response`) and a response links to its
    request (`responds_to_id`, migration 046). The needs-info slot uploads as
    `info_request`; the UI pairs responses under their requests.
-4. **Answer vs. closure are two acts** (2026-08-12): Sales *answers* the
-   question (`answer_concern` — a comment; the flag stays open, and the
-   `close_question` task goes to the asker and PM). **Closure** is the asker's
-   or a PM member's call — whoever asked the question judges the answer;
-   Sales never marks solved. Question cards name the asker with their
+4. **Answer vs. closure are two acts** (2026-08-12): the asking department,
+   Sales or PM *answer* the question (`answer_concern`, a comment; the flag
+   stays open, and the `close_question` task goes to the asker and PM).
+   **Closure** is the asker's or a PM member's call, unchanged: whoever asked
+   the question judges the answer; Sales never marks solved. Question cards name the asker with their
    department role(s), not just the username. All steps audited.
 
 ### The two deadlines (2026-08-11)
@@ -298,7 +335,9 @@ Three typed containers, three responsibilities:
 
 ### Costing & timing shape (2026-08-11, in build; positions added 2026-08-12)
 
-- **Per-department cost buckets at `costing`** — same accordion philosophy as
+- **Per-department cost buckets at `costing`** (since 2026-10-14 already in
+  `in_assessment`, per department from its own feasible submit: see
+  "Per-department pipeline" below): same accordion philosophy as
   assessment: each participating department files one-time lines (activity
   from its catalog or free label, per plant, hours × rate snapshot + external
   cost) and lifecycle lines as **production-time deltas** (± min/part, per
@@ -338,11 +377,69 @@ Three typed containers, three responsibilities:
   customer accepts (release deadline born there). Costing may carry an
   estimate line; the plan itself belongs to implementation planning.
 
+### Per-department pipeline: assessment and costing (2026-10-14)
+Live ECR test finding: "assessment and costs should not have a blocker for
+team members; team members should finalize both, to save time and not wait
+for the whole team." Decision: a pipeline per department.
+- **All assessment departments work at once.** The assessment is the first
+  routing stage, and every department routed to it is open from the start
+  of `in_assessment`; nobody's assessment waits on another department's.
+  Checked 2026-10-14: no assessment template has a later stage that reviews
+  an earlier stage's output (the only four-eyes step is the ECN check
+  workflow's Design review, which belongs to implementation and is
+  unchanged). The later stages of the shared "ECM Assessment" template
+  (Summation & Budget, Customer activities) are Project Management's and
+  Sales' process roles, not assessments; they stay dormant until `costing`
+  (spec §16 P1-2) and never block a department.
+- **Costing opens per department on its own submit.** A department that
+  submitted `feasible` or `feasible_with_conditions` and whose checklist
+  marked something impacted (`ChangeService.owes_costing_input`) opens, fills
+  and **finalizes** its own costing while the change is still in
+  `in_assessment` (`app/services/early_costing.py`, `costing_open_for`;
+  `CostingPositionService.may_write`, cost lines, lead time, part weight and
+  machine class follow it). Not feasible or nothing impacted: no costing
+  owed, as before.
+- **Finalize.** `POST /changes/{id}/costing/departments/{dept}/finalize`
+  (members of the department, Project Management, admin) needs at least one
+  cost line or position (a zero line is an answer, nothing is silence) and
+  is recorded as `costing_finalized`. A finalized part is read-only for the
+  department's members; PM and admin may still fix it. The department
+  reopens its own input with `.../reopen` while costing is open (assessment
+  or costing), recorded as `costing_input_reopened`. Stored on the
+  department's assessment row (`details.costing_finalized_at/_by`, no
+  migration).
+- **Back to draft with the assessment.** When the assessments are superseded
+  (back to scoping after a "not feasible") the rows go and every
+  finalization with them; positions stay as the department's draft. Costing
+  closed (`quoting`): neither finalize nor reopen; reopening costing for the
+  change (reason, `costing_reopened`) keeps the finalizations, and a
+  department that must change a number reopens its own part.
+- **Who still owes.** `costing_pending_department_ids` = departments that
+  owe a cost input and have not finalized, in `in_assessment` and `costing`
+  (before 2026-10-14: in costing only, and any line counted). The change
+  detail also carries `costing_owed_department_ids` and
+  `costing_finalized_department_ids`.
+- **The hop is unchanged.** `in_assessment -> costing` still waits on every
+  R/A assessment, no not-feasible and no pending routing deviation. A
+  department that finalized early stays finalized, so when every department
+  has, costing is complete on entry and PM, Sales, the lead or admin may
+  close it into `quoting` at once. Visibility (a department sees only its own
+  figures; PM, Sales, the lead and admin see all), rate pricing by the ECR's
+  creation date and Sales-only quoting are unchanged.
+- **Surfaces.** My Tasks shows `costing_input` ("Enter costs") for the
+  department right after its own submit, until it finalizes. The Costing tab
+  opens with the assessment and lists only the departments already costing;
+  the department's assessment bucket offers **Continue to costing**. The
+  cockpit reads "Costing: 3/5 finalized, waiting on ..." (muted, as
+  information, during assessment; a wait in costing).
+
 ### Entering `in_assessment`
-- **Hard, unbypassable:** impacted set must be Development-locked.
-  *"Impacted set is not locked — confirm impacted items before starting
-  assessment"*. Not even an approved deviation clears it.
-- **Soft:** ≥1 impacted item, lead assigned, deadline set, meeting with decision
+- **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
+  meeting's `proceed` locks it on the decider's name (switch off, see "Inside
+  `scoping`"); with the switch on, Development confirms it by hand. Not even
+  an approved deviation clears it.
+- **Soft:** ≥1 impacted item (with the switch off, `proceed` refuses an empty
+  set outright), lead assigned, deadline set, meeting with decision
   `proceed`.
 - The **lead item pins here** — departments are routed against it. Editable in
   `captured`/`scoping` only.
@@ -404,8 +501,9 @@ data** and a new name typed there is stored as a supplier on save (best
 effort), so the list grows the way the department categories do. Suppliers
 are managed (renamed, deactivated) on the Suppliers page.
 
-**Closing and reopening costing.** Departments enter lines while the change
-is in `costing`. Costing closes when it moves to `quoting` — **Project
+**Closing and reopening costing.** Departments enter lines while their
+costing is open: in `costing`, or in `in_assessment` from their own
+feasible submit on (per-department pipeline, 2026-10-14). Costing closes when it moves to `quoting`: **Project
 Management, Sales, the change lead or admin** may close it (PM runs costing
 and says when the numbers are complete). Sending the quote (`quoting →
 quoted`) stays Sales/lead/admin. While in `quoting` the commercial tab says
@@ -718,12 +816,15 @@ default **KTX Weissenburg (WUG)**, second **KTX Solingen**, list in
 - **Flow**: `captured -> scoping -> approved -> in_implementation ->
   in_validation -> released -> closed`. No assessment, costing, offer or
   quote deadline (`customer_relevant` stays false).
-- **Scoping-lite**: impact lock (Development) as usual, then "Send
+- **Scoping-lite**: the impacted parts picked (since 2026-10-14 no manual
+  Development lock: the move to `approved` locks the picked set, on the
+  mover's name, and refuses an empty one), then "Send
   information" to the chosen departments: one `change_info_receipts` row
   each and a "Read and understood" task; open receipts show in Blocked by as
   information, not a gate.
 - **Gate**: `scoping -> approved` only for origin `mother_plant`, hard-gated
-  on the impact lock, the team informed (information sent) and the SOP date
+  on picked impacted parts (the impact lock while the confirm switch is
+  on), the team informed (information sent) and the SOP date
   set (`MotherPlantService.approval_blocker`).
 - **Approved**: `release_due_date = mother_plant_sop` (reason "Mother plant
   timing"); detailed plan from their MS Project file, else empty with the SOP

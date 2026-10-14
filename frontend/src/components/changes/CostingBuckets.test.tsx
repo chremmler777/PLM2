@@ -18,6 +18,8 @@ vi.mock('../../api/changes', () => ({
     referenceActivities: vi.fn().mockResolvedValue([]),
     listCostPositions: vi.fn().mockResolvedValue([]),
     costingTags: vi.fn().mockResolvedValue({ items: [] }),
+    finalizeDepartmentCosting: vi.fn().mockResolvedValue({}),
+    reopenDepartmentCosting: vi.fn().mockResolvedValue({}),
   },
 }))
 
@@ -226,5 +228,50 @@ describe('CostingBuckets', () => {
     await waitFor(() => expect(changesApi.getSummation).toHaveBeenCalled())
     await new Promise((r) => setTimeout(r, 10))
     expect(screen.queryByTestId('costing-readiness')).toBeNull()
+  })
+
+  describe('per-department pipeline', () => {
+    it('in assessment lists only the departments already costing', () => {
+      buckets({ canSeeAll: true, change: change({
+        status: 'in_assessment',
+        assessments: [assessment(), assessment({ id: 2, department_id: 4, verdict: 'pending' })],
+        costing_owed_department_ids: [2], costing_pending_department_ids: [2],
+        costing_finalized_department_ids: [],
+      }) })
+      expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
+      expect(screen.queryByTestId('costing-bucket-4')).toBeNull()
+      expect(screen.getByTestId('costing-readiness').textContent)
+        .toContain(t('wait.costingProgress').replace('{n}', '0').replace('{m}', '1')
+          .replace('{x}', 'Development'))
+    })
+
+    it('in assessment with nobody costing yet says when costing opens', () => {
+      buckets({ change: change({ status: 'in_assessment', costing_owed_department_ids: [] }) })
+      expect(screen.getByTestId('costing-none').textContent).toBe(t('costing.earlyNone'))
+    })
+
+    it('the department finalizes its own costing from its bucket', async () => {
+      buckets({ myDepartmentIds: [2], change: change({
+        status: 'in_assessment', costing_owed_department_ids: [2],
+        costing_pending_department_ids: [2], costing_finalized_department_ids: [],
+      }) })
+      fireEvent.click(screen.getByTestId('costing-toggle-2'))
+      fireEvent.click(await screen.findByTestId('costing-finalize-2'))
+      await waitFor(() => expect(changesApi.finalizeDepartmentCosting).toHaveBeenCalledWith(7, 2))
+    })
+
+    it('a finalized part reads only for the department and offers Reopen', async () => {
+      buckets({ myDepartmentIds: [2], change: change({
+        costing_owed_department_ids: [2, 4], costing_pending_department_ids: [4],
+        costing_finalized_department_ids: [2],
+      }) })
+      expect(screen.getByTestId('costing-state-2').textContent).toBe(t('costing.finalized'))
+      fireEvent.click(screen.getByTestId('costing-toggle-2'))
+      expect(await screen.findByTestId('costing-reopen-2')).toBeTruthy()
+      expect(screen.queryByTestId('costing-finalize-2')).toBeNull()
+      expect(screen.queryByTestId('lead-time-2')).toBeNull()
+      fireEvent.click(screen.getByTestId('costing-reopen-2'))
+      await waitFor(() => expect(changesApi.reopenDepartmentCosting).toHaveBeenCalledWith(7, 2))
+    })
   })
 })

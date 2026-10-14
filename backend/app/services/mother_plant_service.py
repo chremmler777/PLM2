@@ -313,9 +313,14 @@ class MotherPlantService:
     async def approval_blocker(session: AsyncSession,
                                change: ChangeRequest) -> Optional[str]:
         """The hard gates on scoping -> approved, in words; None when clear."""
-        if change.impact_confirmed_at is None:
-            return ("Impacted set is not locked - Development confirms the "
-                    "impacted items first")
+        from app.services.cm_switches import impact_confirm_step
+        if impact_confirm_step(change):
+            if change.impact_confirmed_at is None:
+                return ("Impacted set is not locked - Development confirms the "
+                        "impacted items first")
+        elif change.impact_confirmed_at is None and not change.impacted_items:
+            # Switch off: the move to approved locks the picked set itself.
+            return "No impacted parts picked - pick the impacted parts first"
         if not await MotherPlantService.receipts(session, change):
             return "The team is not informed yet - send the information first"
         if change.mother_plant_sop is None:

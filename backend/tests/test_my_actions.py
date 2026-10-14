@@ -130,6 +130,7 @@ async def test_lead_with_pending_deviation_gets_deviation_decision(
     assert "deviation_decision" in kinds
 
 
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_rd_member_on_unlocked_scoping_change_gets_impact_confirm(
         client, eng_auth, rd_member_auth, seed, part, session_factory):
     from app.models.change import ChangeRequest

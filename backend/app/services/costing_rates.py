@@ -1094,9 +1094,12 @@ class MachineClassLocked(ValueError):
 
 
 def machine_class_open(change, user) -> bool:
-    """The class moves prices, so it changes only while the change is in
-    costing; admins are exempt (a correction after the fact is audited)."""
-    return change.status == "costing" or user.effective_role == "admin"
+    """The class moves prices, so it changes only while costing is open: in
+    costing, or in assessment once departments cost early (per-department
+    pipeline, 2026-10-14); admins are exempt (a correction after the fact is
+    audited)."""
+    return (change.status in ("in_assessment", "costing")
+            or user.effective_role == "admin")
 
 
 async def may_set_machine_class(db: AsyncSession, change, user) -> bool:
@@ -1108,7 +1111,7 @@ async def may_set_machine_class(db: AsyncSession, change, user) -> bool:
     from app.services.workflow_service import WorkflowService
     if user.effective_role == "admin":
         return True
-    if change.status != "costing":
+    if change.status not in ("in_assessment", "costing"):
         return False
     if await MeetingService.user_is_pm_member(db, user):
         return True

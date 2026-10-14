@@ -210,7 +210,10 @@ export const TAB_UNLOCK_STATUS: Partial<Record<ChangeTab, ChangeStatus>> = {
   impacted: 'scoping',
   review: 'scoping',
   assessments: 'in_assessment',
-  costing: 'costing',
+  // Per-department costing pipeline (2026-10-14): a department costs its part
+  // right after its own feasible assessment submit, so the tab opens with
+  // the assessment.
+  costing: 'in_assessment',
   // The quote plan can be prepared while costing still runs.
   offer: 'costing',
   timing: 'approved',
@@ -262,7 +265,7 @@ export function resolveChangeTab(raw: string | null | undefined, status: string,
   if (isEngineeringReview(origin)
     && ['assessments', 'costing', 'offer', 'commercial', 'quote', 'quoting', 'timing',
       'implementation', 'release', 'validation'].includes(raw)) return 'review'
-  if (raw === 'commercial') return status === 'costing' ? 'costing' : 'offer'
+  if (raw === 'commercial') return status === 'costing' || status === 'in_assessment' ? 'costing' : 'offer'
   if (raw === 'implementation') return RELEASE_STAGE.includes(status) ? 'release' : 'timing'
   if (raw === 'quote' || raw === 'quoting') return 'offer'
   if (raw === 'validation') return 'release'

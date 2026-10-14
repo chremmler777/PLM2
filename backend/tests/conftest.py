@@ -534,3 +534,12 @@ async def materialdb(monkeypatch):
     materialdb_client.clear_cache()
     yield state
     materialdb_client.clear_cache()
+
+
+@pytest_asyncio.fixture
+async def impact_confirm_on(monkeypatch):
+    """Switch Development's manual impact confirm back on
+    (cm_switches.IMPACT_CONFIRM_STEP_ENABLED, off since 2026-10-14) for the
+    tests that cover the parked step."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "IMPACT_CONFIRM_STEP_ENABLED", True)

@@ -1098,3 +1098,36 @@ describe('AssessmentBuckets — declining responsibility', () => {
     expect(screen.queryByTestId('not-responsible-2')).toBeNull()
   })
 })
+
+describe('AssessmentBuckets: continue to costing (per-department pipeline)', () => {
+  afterEach(cleanup)
+
+  it('offers the submitted department its costing right away', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    const go = vi.fn()
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable
+      onContinueCosting={go}
+      change={change({
+        assessments: [assessment({ status: 'submitted', verdict: 'feasible',
+          submitted_at: '2026-10-14T08:00:00Z' })],
+        costing_owed_department_ids: [2], costing_pending_department_ids: [2],
+      })} />)
+    fireEvent.click(await screen.findByTestId('bucket-continue-costing-2'))
+    expect(go).toHaveBeenCalled()
+  })
+
+  it('offers nothing to a department that owes no costing', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable
+      onContinueCosting={vi.fn()}
+      change={change({
+        assessments: [assessment({ status: 'submitted', verdict: 'feasible',
+          submitted_at: '2026-10-14T08:00:00Z' })],
+        costing_owed_department_ids: [],
+      })} />)
+    await screen.findByTestId('bucket-answer-2')
+    expect(screen.queryByTestId('bucket-continue-costing-2')).toBeNull()
+  })
+})

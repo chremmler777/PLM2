@@ -7,6 +7,12 @@
  * ordinary member gets their own bucket and nothing else, the same way the
  * assessment board works. PM, Sales, the lead and admins see every bucket and
  * the money in the summation below, which is where the whole picture belongs.
+ *
+ * Per-department pipeline (2026-10-14): a department costs and FINALIZES its
+ * part as soon as it has submitted its assessment as feasible (and owes a cost
+ * input), while the change is still in assessment. A finalized part is
+ * read-only for the department until it reopens it; PM and admin may still fix
+ * it. While in assessment the board lists only the departments already costing.
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -22,6 +28,48 @@ import PlantNotInUseNote from '../common/PlantNotInUseNote'
 import { t } from '../../i18n/cmLabels'
 import { formatDays, formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeDetail, DeptRollup, Summation } from '../../types/change'
+
+/** Finalize / reopen the department's own costing (the backend refuses a
+ *  finalize with nothing entered: a zero line is an answer, nothing is not). */
+function FinalizeBar({ changeId, departmentId, finalized }: {
+  changeId: number; departmentId: number; finalized: boolean
+}) {
+  const qc = useQueryClient()
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['change', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
+  }
+  const finalize = useMutation({
+    mutationFn: () => changesApi.finalizeDepartmentCosting(changeId, departmentId),
+    onSuccess: () => { toast.success(t('costing.finalizedSaved')); refresh() },
+    onError: (e: unknown) => toastError(e, 'Could not finalize the costing'),
+  })
+  const reopen = useMutation({
+    mutationFn: () => changesApi.reopenDepartmentCosting(changeId, departmentId),
+    onSuccess: () => { toast.success(t('costing.reopenInputSaved')); refresh() },
+    onError: (e: unknown) => toastError(e, 'Could not reopen the costing'),
+  })
+  return (
+    <div data-testid={`costing-finalize-bar-${departmentId}`}
+      className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
+      <span>{finalized ? t('costing.finalizedBody') : t('costing.finalizeHint')}</span>
+      {finalized ? (
+        <button type="button" data-testid={`costing-reopen-${departmentId}`}
+          disabled={reopen.isPending} onClick={() => reopen.mutate()}
+          className={btnSm.secondary}>
+          {t('costing.reopenInput')}
+        </button>
+      ) : (
+        <button type="button" data-testid={`costing-finalize-${departmentId}`}
+          disabled={finalize.isPending} onClick={() => finalize.mutate()}
+          className={btnSm.primary}>
+          {t('costing.finalize')}
+        </button>
+      )}
+    </div>
+  )
+}
 
 function LeadTimeField({ changeId, departmentId, initial }: {
   changeId: number; departmentId: number; initial: number | null | undefined
@@ -117,15 +165,24 @@ export default function CostingBuckets({
       ?? change.assessments.find((a) => a.department_id === id)?.lead_time_impact_days
       ?? null
 
+  const early = change.status === 'in_assessment'
+  const live = early || change.status === 'costing'
+  const finalizedIds = change.costing_finalized_department_ids ?? []
+  const isFinalized = (id: number) => finalizedIds.includes(id)
+  // In assessment only the departments whose costing is open: submitted
+  // feasible, owing a cost input (or already finalized).
+  const earlyIds = new Set([...(change.costing_owed_department_ids ?? []), ...finalizedIds])
   // One bucket per department: a department routed on several stages (or
   // re-routed) still has one costing table, bound to its earliest row.
   const rows = [...change.assessments]
     .sort((a, b) => a.stage_order - b.stage_order
       || deptName(a.department_id).localeCompare(deptName(b.department_id)))
     .filter((a, i, all) => all.findIndex((x) => x.department_id === a.department_id) === i)
+    .filter((a) => !early || earlyIds.has(a.department_id))
 
   if (rows.length === 0) {
-    return <p className="text-sm text-slate-400">{t('costing.none')}</p>
+    return <p data-testid="costing-none" className="text-sm text-slate-400">
+      {t(early ? 'costing.earlyNone' : 'costing.none')}</p>
   }
   const sheetBar = (
     <CostingSheetBar changeId={changeId} summation={canSeeAll ? summation : undefined}
@@ -135,9 +192,12 @@ export default function CostingBuckets({
   // "Waiting on cost input" counts, so the two never disagree. A department
   // that is only consulted or informed owes nothing, and a zero line is an
   // answer (ChangeService.costing_pending_department_ids).
-  const owing = change.status === 'costing'
+  const owing = live
     ? (change.costing_pending_department_ids ?? []).map(deptName)
     : []
+  const owedTotal = change.costing_owed_department_ids?.length
+  const finalizedOwed = finalizedIds.filter((d) =>
+    (change.costing_owed_department_ids ?? finalizedIds).includes(d)).length
   const nothingCosted = !!summation && canSeeAll && change.status === 'costing'
     && Math.abs(summation.totals?.grand_total ?? 0) < 0.005
     && Object.values(summation.totals_by_currency ?? {}).every((g) => Math.abs(g.grand_total ?? 0) < 0.005)
@@ -149,7 +209,7 @@ export default function CostingBuckets({
   const visible = canSeeAll ? rows : rows.filter((r) => myDepartmentIds.includes(r.department_id))
   // Who is still costing: the backend's own list (costing_pending_department_ids),
   // the one the cockpit's "waiting on" reads, less the viewer's departments.
-  const others = change.status !== 'costing' ? 0
+  const others = !live ? 0
     : (change.costing_pending_department_ids ?? [])
       .filter((id) => !myDepartmentIds.includes(id)).length
 
@@ -158,7 +218,7 @@ export default function CostingBuckets({
       {sheetBar}
       {/* Mexico (Silao) among the change's plants: not in use yet, said once. */}
       <PlantNotInUseNote plants={plants} />
-      {change.status === 'costing' && canSeeAll && (nothingCosted || owing.length > 0) && (
+      {live && canSeeAll && (nothingCosted || owing.length > 0) && (
         <div role="status" data-testid="costing-readiness"
           className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${nothingCosted
             ? 'border-amber-700/70 bg-amber-950/40 text-amber-100'
@@ -168,8 +228,11 @@ export default function CostingBuckets({
             {nothingCosted
               ? `Nothing is costed yet: the total is ${summation.currency ? formatMoney(0, summation.currency) : '0.00'}. `
                 + 'Close costing once the departments have booked their lines, or Sales quotes from an empty basis.'
-              : `${t('next.waitingCostInput').replace('{n}', String(owing.length))
-                .replace('{s}', owing.length === 1 ? '' : 's')}: ${owing.join(', ')}.`}
+              : owedTotal != null
+                ? t('wait.costingProgress').replace('{n}', String(finalizedOwed))
+                  .replace('{m}', String(owedTotal)).replace('{x}', owing.join(', '))
+                : `${t('next.waitingCostInput').replace('{n}', String(owing.length))
+                  .replace('{s}', owing.length === 1 ? '' : 's')}: ${owing.join(', ')}.`}
           </span>
         </div>
       )}
@@ -182,6 +245,10 @@ export default function CostingBuckets({
         // Entered, but no cost sheet rate: not "Empty" (the department did
         // its part), and not a price either.
         const noRate = !filled && (summation?.unpriced_lines ?? []).some((l) => l.department_id === id)
+        const finalized = isFinalized(id)
+        // The department's own figures close with its finalize; PM (and admin)
+        // still fix them, as everywhere in costing.
+        const writable = editable && (isPm || !finalized)
         return (
           <section key={id} data-testid={`costing-bucket-${id}`}
             className={`rounded-lg border ${
@@ -201,12 +268,14 @@ export default function CostingBuckets({
               )}
               <span data-testid={`costing-state-${id}`}
                 className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0 ${
-                  noRate ? 'bg-amber-900/70 text-amber-200'
+                  finalized ? 'bg-emerald-900/70 text-emerald-200'
+                  : noRate ? 'bg-amber-900/70 text-amber-200'
                   : filled === null ? 'bg-slate-700 text-slate-400'
                   : filled ? 'bg-emerald-900/70 text-emerald-200'
                   : 'bg-slate-700 text-slate-300'}`}
                 title={noRate ? t('costing.noRateHint') : filled === null ? t('costing.hiddenHint') : undefined}>
-                {noRate ? t('costing.noRate') : filled === null ? t('costing.hidden')
+                {finalized ? t('costing.finalized')
+                  : noRate ? t('costing.noRate') : filled === null ? t('costing.hidden')
                   : filled ? t('costing.filled') : t('costing.empty')}
               </span>
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs text-slate-400">
@@ -231,10 +300,13 @@ export default function CostingBuckets({
                     {/* What this department books against the change, above the
                         old grid — the grid keeps working, position by position
                         is how departments actually think about it. */}
+                    {editable && (
+                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
+                    )}
                     <CostPositions changeId={changeId} departmentId={id}
                       departmentName={deptName(id)}
                       partWeightG={change.estimated_part_weight_g}
-                      editable={editable && (isMine || isPm)} />
+                      editable={writable} />
                     {/* The per-plant workbook matrix: lifecycle cycle-time
                         deltas and hours × rate per plant. Kept under the
                         table, one click away, for the departments that
@@ -244,12 +316,14 @@ export default function CostingBuckets({
                       <summary className="cursor-pointer text-[11px] uppercase tracking-wide text-slate-500 select-none">
                         {t('costpos.plantLines')}
                       </summary>
-                      <div className="pt-2">
+                      {/* A finalized part reads only: the grid has no read-only
+                          mode of its own, the fieldset disables its controls. */}
+                      <fieldset className="pt-2" disabled={!writable}>
                         <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={id}
                           plants={plants} projectPlantId={projectPlantId} />
-                      </div>
+                      </fieldset>
                     </details>
-                    {editable && (
+                    {writable && (
                       <LeadTimeField changeId={changeId} departmentId={id}
                         initial={leadTimeOf(id)} />
                     )}
@@ -270,6 +344,9 @@ export default function CostingBuckets({
                     )}
                     {/* PM may still fix another department's positions; Sales
                         and the lead only read them. */}
+                    {editable && isPm && (
+                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
+                    )}
                     <CostPositions changeId={changeId} departmentId={id}
                       departmentName={deptName(id)}
                       partWeightG={change.estimated_part_weight_g}

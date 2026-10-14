@@ -12,7 +12,9 @@ from sqlalchemy import select, update
 from tests.conftest import login
 from tests.test_changes import departments  # noqa: F401 (reused fixture)
 
-pytestmark = pytest.mark.asyncio
+# The Development confirm step is parked behind a switch (2026-10-14);
+# these tests cover the step itself, so they run with it switched on.
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("impact_confirm_on")]
 
 # Customer acceptance now requires a release ("released-by") deadline.
 _RELEASE_DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()

@@ -374,7 +374,10 @@ async def test_attach_after_the_quote_flags_the_scope_change(
         change = await s.get(ChangeRequest, cid)
         assert change.scope_changed_after_quote is True
         assert change.scope_change_reason == "customer sent index B"
-        assert change.impact_confirmed_at is None
+        # Development's confirm is switched off (2026-10-14): past scoping an
+        # edit keeps the set locked (nobody confirms by hand any more); see
+        # test_impact_confirmation for the cleared lock with the switch on.
+        assert change.impact_confirmed_at is not None
         kinds = (await s.execute(select(ChangeChangelog.action).where(
             ChangeChangelog.change_id == cid))).scalars().all()
         assert "scope_changed_after_quote" in kinds

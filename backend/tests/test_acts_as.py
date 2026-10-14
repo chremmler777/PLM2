@@ -99,6 +99,7 @@ async def test_acting_as_sales_may_capture_but_not_confirm_impact(
     assert "Development" in res.json()["detail"]
 
 
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_acting_as_development_may_confirm_but_not_capture(
         client, admin_auth, seed, part, depts):
     # build the change as the plain admin first

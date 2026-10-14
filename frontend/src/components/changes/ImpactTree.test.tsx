@@ -186,6 +186,25 @@ describe('ImpactTree', () => {
     expect(changesApi.confirmImpact).not.toHaveBeenCalled()
   })
 
+  it('with the confirm switched off, offers no button and says proceed locks the set', async () => {
+    wrap(<ImpactTree changeId={7} status="scoping" confirmStep={false} />)
+    await screen.findByText('Child')
+    expect(screen.queryByTestId('impact-confirm')).toBeNull()
+    expect(screen.getByTestId('impact-auto-lock').textContent).toBe(t('impact.autoLockHint'))
+  })
+
+  it('with the confirm switched off, applies an edit to a locked set without the warning', async () => {
+    vi.mocked(changesApi.applyImpactSelection).mockClear()
+    wrap(<ImpactTree changeId={7} status="in_assessment" confirmStep={false}
+      impactConfirmedByName="PM Jane" impactConfirmedAt="2026-10-14T08:00:00" />)
+    await screen.findByText('Child')
+    expect(screen.getByTestId('impact-confirmed').textContent).toContain(t('impact.lockedBy'))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    fireEvent.click(screen.getByTestId('impact-apply-bar'))
+    expect(screen.queryByTestId('impact-lock-confirm')).toBeNull()
+    await waitFor(() => expect(changesApi.applyImpactSelection).toHaveBeenCalled())
+  })
+
   it('shows a confirmed badge with who/when instead of the button once confirmed', async () => {
     wrap(<ImpactTree changeId={7} status="captured"
       impactConfirmedByName="RD Member" impactConfirmedAt="2026-07-01T12:00:00" />)

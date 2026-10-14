@@ -14,6 +14,13 @@ import type {
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
+/** Who owes, who finalized and who is still open after a finalize/reopen. */
+export interface DepartmentCostingState {
+  owed_department_ids: number[];
+  finalized_department_ids: number[];
+  pending_department_ids: number[];
+}
+
 export const changesApi = {
   list: (params: { project_id?: number; status?: string; change_type?: string }) =>
     client.get<ChangeRequest[]>('/v1/changes', { params }).then((r) => r.data),
@@ -203,6 +210,16 @@ export const changesApi = {
       department_id: departmentId, lead_time_days: days,
     }).then((r) => r.data),
 
+  // Per-department costing pipeline: a department finalizes its own costing
+  // (also during assessment, once it submitted feasible) and reopens it while
+  // costing is open.
+  finalizeDepartmentCosting: (id: number, departmentId: number) =>
+    client.post(`/v1/changes/${id}/costing/departments/${departmentId}/finalize`)
+      .then((r) => r.data as DepartmentCostingState),
+  reopenDepartmentCosting: (id: number, departmentId: number, reason?: string) =>
+    client.post(`/v1/changes/${id}/costing/departments/${departmentId}/reopen`,
+      reason ? { reason } : {}).then((r) => r.data as DepartmentCostingState),
+
   // What the part will weigh, as the Tool Engineer quotes it during costing.
   // An estimate by contract: the validated figure is a separate field the
   // backend fills later, so this endpoint only ever writes the guess.
@@ -342,6 +359,10 @@ export const changesApi = {
     client.delete<RiskTemplate>(`/v1/changes/reference/risk-templates/${id}`).then((r) => r.data),
   // Answering records what the customer said; it does not close the question —
   // the asking side (or PM) still decides whether it is settled.
+  setScopeDefinition: (id: number, scopeDefinition: string | null): Promise<ChangeDetail> =>
+    client.put(`/v1/changes/${id}/scope-definition`, { scope_definition: scopeDefinition })
+      .then((r) => r.data),
+
   answerConcern: (id: number, concernId: number, note: string) =>
     client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/answer`, { note })
       .then((r) => r.data),

@@ -211,6 +211,27 @@ async def test_never_enters_costing_or_quote(client, session_factory, mp, status
     assert "no assessment, costing or quote" in r.json()["detail"]
 
 
+async def test_scoping_to_approved_needs_picked_parts_and_locks_them(
+        client, session_factory, mp, part):
+    """Switch off (2026-10-14): no manual Development lock on this track;
+    the move to approved refuses an empty set and locks a picked one on the
+    mover's name."""
+    cid = await _to_scoping(client, session_factory, mp)
+    assert (await _send(client, mp, cid)).status_code == 200
+    r = await _approve(client, cid)
+    assert r.status_code == 400 and "No impacted parts picked" in r.json()["detail"]
+    res = await client.post(f"{URL}/{cid}/impacted-items", headers=await _auth(client, "pm"),
+                            json={"part_id": part["part_id"], "is_lead": True})
+    assert res.status_code == 200, res.text
+    r = await _approve(client, cid)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        assert c.impact_confirmed_at is not None
+        assert c.impact_confirmed_by == mp["users"]["pm"]
+
+
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_scoping_to_approved_needs_the_impact_lock(client, session_factory, mp):
     cid = await _to_scoping(client, session_factory, mp)
     assert (await _send(client, mp, cid)).status_code == 200

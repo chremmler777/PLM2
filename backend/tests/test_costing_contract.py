@@ -184,12 +184,22 @@ async def test_empty_summation_reports_zeroes_not_nulls(client, admin_auth, cost
 
 # --- (4) who still owes a number -------------------------------------------
 
-async def test_costing_pending_lists_feasible_departments_without_lines(
+async def test_costing_pending_lists_feasible_departments_until_finalized(
         client, admin_auth, costing):
     detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
                                headers=admin_auth)).json()
     assert sorted(detail["costing_pending_department_ids"]) == sorted(
         [costing["tool"], costing["dev"]])
+    assert detail["costing_owed_department_ids"] == sorted(
+        [costing["tool"], costing["dev"]])
+    assert detail["costing_finalized_department_ids"] == []
+
+    fin = (f"/api/v1/changes/{costing['change_id']}/costing/departments/"
+           f"{costing['tool']}/finalize")
+    # nothing entered: silence cannot be finalized
+    res = await client.post(fin, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    assert "at least one cost line" in res.json()["detail"]
 
     url = (f"/api/v1/changes/{costing['change_id']}"
            f"/assessments/{costing['assessments']['Tool Engineer']}/cost-lines")
@@ -197,22 +207,48 @@ async def test_costing_pending_lists_feasible_departments_without_lines(
         {"plant_id": costing["home_plant"], "activity_label": "Nothing to do",
          "cost_kind": "one_time", "demand_hours": 0.0},
     ]}, headers=admin_auth)
-
     detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
                                headers=admin_auth)).json()
-    # a zero line is an answer; silence is not
+    # a line is a draft until the department finalizes it
+    assert sorted(detail["costing_pending_department_ids"]) == sorted(
+        [costing["tool"], costing["dev"]])
+
+    res = await client.post(fin, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["pending_department_ids"] == [costing["dev"]]
+    detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                               headers=admin_auth)).json()
+    # a zero line, finalized, is an answer
     assert detail["costing_pending_department_ids"] == [costing["dev"]]
+    assert detail["costing_finalized_department_ids"] == [costing["tool"]]
 
 
-async def test_pending_is_empty_outside_costing(
+async def test_pending_is_empty_outside_assessment_and_costing(
         client, admin_auth, costing, session_factory):
+    for status in ("scoping", "quoting"):
+        async with session_factory() as s:
+            c = await s.get(ChangeRequest, costing["change_id"])
+            c.status = status
+            await s.commit()
+        detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                                   headers=admin_auth)).json()
+        assert detail["costing_pending_department_ids"] == []
+
+
+async def test_pending_runs_in_assessment_for_submitted_departments(
+        client, admin_auth, costing, session_factory):
+    """Per-department pipeline: a department owes its cost input from its
+    own feasible submit on, not from the change entering costing."""
     async with session_factory() as s:
         c = await s.get(ChangeRequest, costing["change_id"])
         c.status = "in_assessment"
+        dev = await s.get(ChangeAssessment, costing["assessments"]["Development"])
+        dev.verdict = "pending"
         await s.commit()
     detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
                                headers=admin_auth)).json()
-    assert detail["costing_pending_department_ids"] == []
+    assert detail["costing_pending_department_ids"] == [costing["tool"]]
+    assert detail["costing_owed_department_ids"] == [costing["tool"]]
 
 
 async def test_costing_input_task_reaches_the_department(
@@ -238,6 +274,12 @@ async def test_costing_input_task_reaches_the_department(
         {"plant_id": costing["home_plant"], "activity_label": "Priced",
          "cost_kind": "one_time", "demand_hours": 2.0},
     ]}, headers=tool_member)
+    # lines alone are a draft: the task stays until the department finalizes
+    assert len(await rows()) == 1
+    res = await client.post(
+        f"/api/v1/changes/{costing['change_id']}/costing/departments/"
+        f"{costing['tool']}/finalize", headers=tool_member)
+    assert res.status_code == 200, res.text
     assert await rows() == []
 
 

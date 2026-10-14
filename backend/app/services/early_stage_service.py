@@ -256,7 +256,9 @@ class EarlyStageService:
             return None
         if (change.status == "scoping"
                 and await ChangeService.user_can_confirm_impact(session, user)):
-            if change.impact_confirmed_at is None:
+            # Switch off (cm_switches): no manual lock to respect in scoping,
+            # the set locks at the 'proceed' decision.
+            if change.impact_confirmed_at is None or not change.impact_confirm_step:
                 return None
             return ("The impacted set is locked (confirmed by Development). "
                     "Only the change lead, Project Management or an admin may "
@@ -782,11 +784,14 @@ class EarlyStageService:
                           "target_tab": "scoping"})
         unanswered = [c for c in ChangeService.unanswered_questions(change)] if live else []
         if unanswered:
+            # The kind keeps its old name for the UI; the question is the
+            # asking side's, answered by them, Sales or Project Management.
             waits.append({"kind": "waiting_on_sales_answer",
-                          "text": f"Waiting on Sales to answer {len(unanswered)} question(s)",
+                          "text": f"Waiting on an answer to {len(unanswered)} open question(s)",
                           "concern_ids": [c.id for c in unanswered],
                           "target_tab": "scoping"})
-        if change.status == "scoping" and change.impact_confirmed_at is None:
+        if (change.status == "scoping" and change.impact_confirmed_at is None
+                and change.impact_confirm_step):
             from app.services import mother_plants as mp
             if mp.is_mother_plant(change):
                 # no proceed meeting on this track: the lock is what

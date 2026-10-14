@@ -48,6 +48,7 @@ from app.schemas.change import (
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
+    ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
@@ -238,8 +239,10 @@ async def my_change_tasks(
                         question clears it, settling stays with the asker
       send_rejection    rejected and customer-relevant, not yet sent, for
                         Sales — with has_letter saying what is still missing
-      costing_input     the change is in costing and this caller's department
-                        found it feasible but has priced nothing yet
+      costing_input     this caller's department found the change feasible
+                        (something impacted) and has not finalized its
+                        costing yet: from its own assessment submit on, in
+                        assessment or in costing
       create_quote      quoting, for Sales — build the offer out of the
                         costing wrap-up, price it, then send it
       close_question    an ANSWERED question still open, for the department
@@ -847,6 +850,10 @@ async def get_change(
     change.deadline_state = await ChangeService.deadline_state(db, change)
     change.costing_pending_department_ids = (
         await ChangeService.costing_pending_department_ids(db, change))
+    from app.services import early_costing
+    _ec = early_costing.state(change)
+    change.costing_owed_department_ids = _ec["owed"]
+    change.costing_finalized_department_ids = _ec["finalized"]
     change.costing_unpriced = []
     if change.status in ("costing", "quoting"):
         from app.services import costing_rates
@@ -2795,10 +2802,20 @@ async def list_concerns(
     # Risk types read as words, a department's own types included (§16).
     from app.services.risk_types import labels_for_keys
     type_labels = await labels_for_keys(db, {c.risk_type for c in change.concerns})
+    concern_dept_ids = {c.department_id for c in change.concerns if c.department_id}
+    concern_depts = dict((await db.execute(
+        select(Department.id, Department.name).where(
+            Department.id.in_(concern_dept_ids)))).all()) if concern_dept_ids else {}
     # A risk deleted by its raiser is gone from the register; the changelog
     # keeps the record.
     for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
+        if c.kind == "needs_info":
+            # The question is the asking side's (2026-10-14): who that is, and
+            # whether the caller may answer it (same check as POST .../answer).
+            row.asking_department_name = concern_depts.get(c.department_id)
+            row.can_answer = c.is_open and await MeetingService.can_answer_question(
+                db, change, c, current_user)
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
             row.answered_by_name = names.get(c.answered_by)
@@ -2848,14 +2865,39 @@ async def _withdraw_concern(
     return concern
 
 
+@router.put("/{change_id}/scope-definition", response_model=ChangeResponse)
+async def put_scope_definition(
+    change_id: int, body: ScopeDefinitionIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The scope of the change in the project manager's words (2026-10-14).
+    Project Management members, the change lead or an admin, while the change
+    is captured or in scoping; audited, read-only afterwards. No gate."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.set_scope_definition(
+            db, change, current_user, body.scope_definition)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
+
+
 @router.post("/{change_id}/concerns/{concern_id}/answer",
              response_model=ConcernResponse)
 async def answer_concern(
     change_id: int, concern_id: int, body: ConcernAnswerIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Sales answers an open question. The concern stays OPEN — the side that
-    asked decides whether the answer settles it (POST .../withdraw)."""
+    """Answer an open question: the asking department (or the author), Sales
+    or Project Management. The concern stays OPEN, the side that asked
+    decides whether the answer settles it (POST .../withdraw)."""
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")

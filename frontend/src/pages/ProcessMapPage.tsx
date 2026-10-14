@@ -6,7 +6,7 @@
  * each stage owes, the tasks each role receives, the two deadlines running
  * alongside it all, the validation-issue branch with its escalation ladder, and
  * the mother-plant side track, and the intake of every new customer index with
- * its engineering-review lane. Checked against the system on 2026-10-01: the
+ * its engineering-review lane. Checked against the system on 2026-10-14: the
  * transitions, hard gates and soft guards of backend change_service.py, and the
  * plan, offer, release and mother-plant services. Background in
  * docs/ECR_PROCESS_MAP.md (stages, responsibles, build status),
@@ -84,24 +84,24 @@ const STAGES: Stage[] = [
   {
     key: 'scoping', name: 'Scoping', badge: 'PM', state: 'built',
     sub: 'Meeting: RASIC, cost carrier, decision',
-    task: 'tasks: scoping_wrapup · impact_confirm',
-    responsible: 'PM convenes; the change lead, Project Management or an admin records and decides the meeting',
-    artifacts: 'meeting decision + reason; RASIC per department; cost carrier (fixed here); concerns; impact lock (hard gate)',
-    what: 'The team decides proceed, needs info, or reject. Proceed needs at least one department marked R or A, the cost carrier and no open concern; the cost carrier is fixed at this meeting and cannot change after scoping. A negative decision resolves the open concerns and its reason becomes the rejection reason. A needs-info outcome raises a Sales-accountable task and a tracked question and answer cycle. Into assessment the soft checks are impacted items, a change lead and the quote deadline (customer changes); the impacted set must also be Development-locked, the one gate no deviation clears.',
+    task: 'tasks: scoping_wrapup · obtain_info · close_question',
+    responsible: 'PM convenes and defines the scope (free text); the change lead, Project Management or an admin records and decides the meeting',
+    artifacts: 'scope (defined by PM); meeting decision + reason; RASIC per department; cost carrier (fixed here); concerns; impact lock at proceed (hard gate)',
+    what: 'The project manager writes down what is in scope; every later tab shows it read only. The lead, PM or Development pick the impacted parts. The team decides proceed, needs info, or reject. Proceed needs at least one department marked R or A, the cost carrier, picked impacted parts and no open concern (an open flag is listed in a warning dialog); the cost carrier is fixed at this meeting and cannot change after scoping, and proceed locks the impacted set on the decider\'s name. A negative decision resolves the open concerns and its reason becomes the rejection reason. A question (needs info) stays the asking department\'s task: that department (or the person who asked), Sales or PM answer it, the asker or PM closes it. Into assessment the soft checks are a change lead and the quote deadline (customer changes); the locked impacted set is the one gate no deviation clears.',
   },
   {
     key: 'in_assessment', name: 'Assessment', badge: 'Team', state: 'built',
     sub: 'Verdict, risks, documents per department', task: 'task: assessment',
     responsible: 'Routed departments (Sales exempt)',
     artifacts: 'verdict; risk register; Change PPT / RFQ / customer mails',
-    what: 'Each routed department answers the impact checklist and submits a verdict: feasible, feasible with conditions, or not feasible, the last hard-requiring the Change PPT. A not-feasible verdict does not reject the change: it holds costing (soft) and the cockpit offers to reject, to go back to scoping with a reason (the answers are superseded) or to override with a reason (a deviation somebody else approves). Risks are a register, not a hold: typed, rated 1 to 3; every open risk travels to Sales as an optional row of the offer. Routing deviations wait for approval. A recall to scoping is possible only while no assessment has started, or after a not-feasible verdict.',
+    what: 'Each routed department answers the impact checklist and submits a verdict: feasible, feasible with conditions, or not feasible, the last hard-requiring the Change PPT. A not-feasible verdict does not reject the change: it holds costing (soft) and the cockpit offers to reject, to go back to scoping with a reason (the answers are superseded) or to override with a reason (a deviation somebody else approves). Risks are a register, not a hold: typed, rated 1 to 3; every open risk travels to Sales as an optional row of the offer. Routing deviations wait for approval. A recall to scoping is possible only while no assessment has started, or after a not-feasible verdict. All routed departments assess at the same time; nobody waits on another department. A department that submitted feasible with something impacted goes straight on to its own costing (Continue to costing) and may finalize it while the others still assess.',
   },
   {
     key: 'costing', name: 'Costing', badge: 'Team', state: 'built',
     sub: 'Cost lines, lead times, vendor offers', task: 'task: costing_input',
     responsible: 'Departments; PM runs it; PM and Sales see all',
     artifacts: 'cost lines with lead time; vendor quotes + favorite vote; internal hours; weight estimate (compared with the weighed part at validation)',
-    what: 'Into costing (soft): every R and A assessment submitted, none not feasible, no routing change pending. Each department states its internal hours and external positions, an estimate or vendor quotes with document, cost, shipping and lead time, and votes a favorite vendor. A department whose assessment marked nothing impacted owes no costing input; cost inputs are a to-do, not a gate. The planned P&L starts here. The cost carrier fixed at scoping decides the branch: a customer change goes to the offer once costing is closed (PM, Sales or lead; the same checks again), an internal change to Project Management approving the internal costs with the release deadline.',
+    what: 'Costing runs per department (2026-10-14): a department costs its part right after its own feasible assessment submit, while the change is still in assessment, and finalizes it (at least one line or position; finalized is read-only for the department until it reopens it, PM and admin may still fix it). The cockpit shows "Costing: 3/5 finalized". Into costing (soft): every R and A assessment submitted, none not feasible, no routing change pending; departments that finalized early stay finalized, so costing can be complete on entry. Each department states its internal hours and external positions, an estimate or vendor quotes with document, cost, shipping and lead time, and votes a favorite vendor. A department whose assessment marked nothing impacted owes no costing input; cost inputs are a to-do, not a gate. The planned P&L starts here. The cost carrier fixed at scoping decides the branch: a customer change goes to the offer once costing is closed (PM, Sales or lead; the same checks again), an internal change to Project Management approving the internal costs with the release deadline.',
   },
   {
     key: 'quoting', name: 'Offer', badge: 'Sales', state: 'built',
@@ -151,6 +151,7 @@ const STAGES: Stage[] = [
 
 const RULES = [
   'Scoped views everywhere: a department sees its own input only, at assessment AND costing. PM and Sales see all blocks.',
+  'A pipeline per department: assessments run in parallel, and each department costs and finalizes its own part right after its own feasible submit, without waiting for the team. The step into costing still waits on every R and A assessment.',
   'Tasks are mandatory: no accept or claim step; submitting names the owner.',
   'Sales owns the customer: mails tracked on the change and filed into each validation issue; escalations to the customer go through Sales.',
   'Two deadlines, one active: quote-by until quoted (freezes the on-time fact; after capture it moves only by Push back with a reason); release-due entered at acceptance, at internal approval or from the SOP of KTX Weissenburg / Solingen, moved only with a reason, recorded in the audit trail.',
@@ -579,15 +580,15 @@ function MotherPlantLane() {
         task="or KTX Solingen · ref · SOP" testId="procmap-mp-capture" />
       {arrow(xs[0] + bw, xs[1], 'capture-scoping')}
       <Box x={xs[1]} y={y} w={bw} h={NH} stroke={MP} badge="PM"
-        name="Scoping-lite" sub="impacted set, Development lock"
-        task="task: impact_confirm" testId="procmap-mp-scoping" />
+        name="Scoping-lite" sub="impacted set picked, scope defined"
+        task="locks at the move to approved" testId="procmap-mp-scoping" />
       {arrow(xs[1] + bw, xs[2], 'scoping-inform')}
       <Box x={xs[2]} y={y} w={bw} h={NH} stroke={MP} badge="Team"
         name="Inform the team" sub="one receipt per department"
         task="task: read and understood" testId="procmap-mp-inform" />
       {arrow(xs[2] + bw, gx, 'inform-gate')}
       <Gate x={gx} w={gw} y={m - GH2 / 2} h={GH2} hard
-        name="Scoping → Approved | impact locked, team informed | SOP date set"
+        name="Scoping → Approved | parts picked (locked here), team informed | SOP date set"
         testId="procmap-mp-gate" />
       {arrow(gx + gw, ax, 'gate-approved')}
       <Box x={ax} y={y} w={bw} h={NH} stroke={MP} badge="PM"
@@ -739,8 +740,8 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         {spine(Y.captured, NH, Y.kickoff, 'captured-kickoff')}
         {spine(Y.kickoff, GH, Y.scoping, 'kickoff-scoping', 'capture complete (soft, deviation-overridable)')}
         {spine(Y.scoping, NH, Y.meeting, 'scoping-meeting')}
-        {spine(Y.meeting, DH, Y.impactLock, 'meeting-impactlock', 'proceed: an R or A department, cost carrier set, no open concern')}
-        {spine(Y.impactLock, GH, Y.assessment, 'impactlock-assessment', 'impact set locked (hard) · soft: impacted items, lead, quote deadline (customer)')}
+        {spine(Y.meeting, DH, Y.impactLock, 'meeting-impactlock', 'proceed: an R or A department, cost carrier set, parts picked, no open concern')}
+        {spine(Y.impactLock, GH, Y.assessment, 'impactlock-assessment', 'impact set locked by proceed (hard) · soft: lead, quote deadline (customer)')}
         {spine(Y.assessment, NH, Y.verdict, 'assessment-verdict')}
         {spine(Y.verdict, DH, Y.costing, 'verdict-costing', 'soft: all R/A submitted, none not feasible, no routing change pending')}
         {spine(Y.costing, NH, Y.carrier, 'costing-carrier')}
@@ -790,13 +791,13 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         <Edge testId="procmap-edge-meeting-obtaininfo" color={LOOP}
           d={`M ${CX0} ${mid(Y.meeting, DH)} L ${LX + LW} ${mid(Y.meeting, DH)}`}
           label="needs info" lx={LX + LW + 6} ly={mid(Y.meeting, DH) - 7} />
-        <Box x={LX} y={Y.meeting - 30} w={LW} h={62} stroke={LOOP} badge="Sales"
-          name="Obtain information" sub="the question goes to the customer"
+        <Box x={LX} y={Y.meeting - 30} w={LW} h={62} stroke={LOOP} badge="Team"
+          name="Answer the question" sub="asking dept, Sales or PM"
           task="task: obtain_info" testId="procmap-node-obtain-info" />
         <Edge testId="procmap-edge-obtaininfo-answer" color={LOOP}
           d={`M ${lcx} ${Y.meeting + 32} L ${lcx} ${Y.meeting + 40}`} />
-        <Box x={LX} y={Y.meeting + 40} w={LW} h={62} stroke={LOOP} badge="Customer"
-          name="Customer answers" sub="info_request → info_response"
+        <Box x={LX} y={Y.meeting + 40} w={LW} h={62} stroke={LOOP} badge="Team"
+          name="Answer recorded" sub="info_request → info_response"
           testId="procmap-node-customer-answer" />
         <Edge testId="procmap-edge-answer-close" color={LOOP}
           d={`M ${lcx} ${Y.meeting + 102} L ${lcx} ${Y.meeting + 110}`} />
@@ -812,7 +813,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           name="Kickoff gate (soft) | description, attachment, quote-by date (customer), change lead"
           testId="procmap-gate-kickoff" />
         <Gate y={Y.impactLock} hard
-          name="HARD GATE | impacted set Development-locked (no deviation clears it)"
+          name="HARD GATE | impacted set locked by the proceed decision (no deviation clears it)"
           testId="procmap-gate-impact-lock" />
 
         {/* --- assessment: register, deviation, recall, not feasible ---- */}
@@ -1178,7 +1179,7 @@ export default function ProcessMapPage() {
       <div>
         <h1 className="text-2xl font-semibold text-slate-100">{t('procmap.title')}</h1>
         <p data-testid="procmap-checked" className="mt-1 text-xs text-slate-400">
-          Checked against the running system on 1 Oct 2026: every stage, gate, loop and exit below is what PLM2 enforces.
+          Checked against the running system on 14 Oct 2026: every stage, gate, loop and exit below is what PLM2 enforces.
         </p>
       </div>
 
@@ -1323,7 +1324,7 @@ export default function ProcessMapPage() {
 
       {showKeys && (
         <p data-testid="procmap-sources" className="text-[11px] text-slate-400">
-          Checked against the code on 1 Oct 2026 (<span className="font-mono">change_service.py</span> transitions,
+          Checked against the code on 14 Oct 2026 (<span className="font-mono">change_service.py</span> transitions,
           hard gates and soft guards). Background: <span className="font-mono">docs/ECR_PROCESS_MAP.md</span> (stages, status),
           {' '}<span className="font-mono">docs/CHANGE_MANAGEMENT_FLOW.md</span> and the ECR costing-to-close spec
           (<span className="font-mono">docs/superpowers/specs</span>); where they differ, the system wins.

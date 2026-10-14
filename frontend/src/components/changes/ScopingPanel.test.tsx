@@ -782,6 +782,62 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(screen.getByTestId('rasic-4-C').getAttribute('aria-pressed')).toBe('true')
   })
 
+  it('warns in a dialog listing the open flags instead of proceeding (2026-10-14)', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 31, change_id: 7, kind: 'needs_info', note: 'Tolerance class?', raised_by: 9,
+        raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z', is_open: true,
+        department_id: 4, asking_department_name: 'APQP' },
+      { id: 32, change_id: 7, kind: 'reject_proposal', note: 'Too costly', raised_by: 10,
+        raised_by_name: 'Ben', raised_at: '2026-07-04T09:30:00Z', is_open: true, department_id: null },
+      { id: 33, change_id: 7, kind: 'risk', note: 'never listed', raised_by: 10,
+        raised_by_name: 'Ben', raised_at: '2026-07-04T09:30:00Z', is_open: true, department_id: 2 },
+    ] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true })} />))
+    await screen.findByTestId('needs-info-card-31')
+    fireEvent.click(await screen.findByTestId('meeting-proceed-21'))
+    const dialog = screen.getByTestId('confirm-in_assessment')
+    expect(dialog.textContent).toContain(t('meeting.proceedBlockedTitle'))
+    expect(dialog.textContent).toContain(t('meeting.proceedBlocked'))
+    const open = screen.getByTestId('confirm-open').textContent ?? ''
+    expect(open).toContain('Question · Ann (APQP): Tolerance class?')
+    expect(open).toContain('Cancel vote · Ben: Too costly')
+    expect(open).not.toContain('never listed')
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+    expect(changesApi.decideMeeting).not.toHaveBeenCalled()
+  })
+
+  it('shows a refused proceed in a dialog with the server message', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
+    vi.mocked(changesApi.decideMeeting).mockRejectedValueOnce({
+      response: { status: 400, data: { detail: "1 open concern(s) block 'proceed': question by Ann: x" } },
+    })
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true })} />))
+    fireEvent.click(await screen.findByTestId('meeting-proceed-21'))
+    fireEvent.click(screen.getByTestId('confirm-go'))
+    await waitFor(() => expect(screen.getByTestId('confirm-in_assessment').textContent)
+      .toContain(t('meeting.proceedBlockedServer')))
+    expect(screen.getByTestId('confirm-open').textContent).toContain('question by Ann')
+  })
+
+  it('with the confirm switched off, needs picked parts, not a lock, and says proceed locks them', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
+    vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)
+    const { unmount } = render(wrap(<ScopingPanel change={change({
+      impact_confirm_step: false, impact_confirmed_at: null, impacted_items: [] })} />))
+    const held = await screen.findByTestId('meeting-proceed-21') as HTMLButtonElement
+    expect(held.disabled).toBe(true)
+    expect(held.getAttribute('title')).toBe(t('meeting.noImpactedParts'))
+    unmount()
+    render(wrap(<ScopingPanel change={change({
+      impact_confirm_step: false, impact_confirmed_at: null, impacted_items: [{ id: 1 }, { id: 2 }] })} />))
+    const proceed = await screen.findByTestId('meeting-proceed-21') as HTMLButtonElement
+    expect(proceed.disabled).toBe(false)
+    fireEvent.click(proceed)
+    expect(screen.getByTestId('confirm-info').textContent)
+      .toContain(t('meeting.proceedLocksImpact').replace('{n}', '2'))
+  })
+
   it('confirms Proceed with the departments, their letters and the cost carrier', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided()] as never)
     vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)

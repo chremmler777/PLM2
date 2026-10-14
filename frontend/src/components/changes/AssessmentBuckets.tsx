@@ -29,6 +29,7 @@ import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
+import { btnSm } from '../common/buttonStyles'
 import type {
   ChangeConcern,
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects, StageAssessment,
@@ -166,6 +167,7 @@ function ObjectList({ objects, partName }: {
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
   canAddDepartment = false, userId = null, isChangeLead = false, declinedIds, round,
+  onContinueCosting,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -186,8 +188,14 @@ export default function AssessmentBuckets({
   /** The assessment round as "Blocked by" counts it (stage-state, else
    *  derived): the progress line reads the same numbers. */
   round?: StageAssessment | null
+  /** Per-department pipeline: a department whose costing is open (submitted
+   *  feasible, owes a cost input) goes straight on to its costing. */
+  onContinueCosting?: () => void
 }) {
   const changeId = change.id
+  const costingOpen = (id: number) => (change.status === 'in_assessment' || change.status === 'costing')
+    && [...(change.costing_owed_department_ids ?? []), ...(change.costing_finalized_department_ids ?? [])]
+      .includes(id)
   // `undefined` means the user has not touched a row yet, so their own bucket
   // may open itself. Once they click anything, their choice stands.
   const [openDept, setOpenDept] = useState<number | null | undefined>(undefined)
@@ -447,6 +455,14 @@ export default function AssessmentBuckets({
                     <p className={VERDICT_TONE[a!.verdict] ?? 'text-slate-200'}>{assessmentVerdictLabel(a)}</p>
                     {a!.conditions && <p className="text-slate-300">{a!.conditions}</p>}
                     {a!.notes && <p className="text-slate-400 whitespace-pre-wrap">{a!.notes}</p>}
+                    {isMine && onContinueCosting && costingOpen(row.id) && (
+                      <div className="pt-2">
+                        <button type="button" data-testid={`bucket-continue-costing-${row.id}`}
+                          onClick={onContinueCosting} className={btnSm.primary}>
+                          {t('bucket.continueCosting')}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : canSubmit ? (
                   <>

@@ -618,6 +618,14 @@ describe('ChangeDetailPage capture phase', () => {
     expect(locked(screen.getByRole('tab', { name: /Assessments/ }))).toBe(true)
   })
 
+  it('opens the costing tab with the assessment (per-department pipeline)', async () => {
+    change.status = 'in_assessment' as ChangeDetail['status']
+    wrap('/changes/1')
+    const costing = await screen.findByRole('tab', { name: /Costing/ })
+    expect(locked(costing)).toBe(false)
+    expect(locked(screen.getByRole('tab', { name: /Timing/ }))).toBe(true)
+  })
+
   it('unlocks the costing tab once the change reaches costing', async () => {
     change.status = 'costing' as ChangeDetail['status']
     wrap('/changes/1')
@@ -789,6 +797,21 @@ describe('ChangeDetailPage impacted-tab attention dot', () => {
     wrap('/changes/1')
     await screen.findByRole('tab', { name: /Impacted/ })
     expect(screen.queryByTestId('tab-open-work')).toBeNull()
+  })
+
+  it('with the confirm switched off, marks picking, not confirming', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    change.impact_confirmed_at = null
+    ;(change as { impact_confirm_step?: boolean }).impact_confirm_step = false
+    change.impacted_items = [{ id: 1, part_id: 2 }] as never
+    wrap('/changes/1')
+    await screen.findByRole('tab', { name: /Impacted/ })
+    expect(screen.queryByTestId('tab-open-work')).toBeNull()
+    cleanup()
+    change.impacted_items = []
+    wrap('/changes/1')
+    expect((await screen.findByTestId('tab-open-work')).closest('button')?.textContent).toContain('Impacted')
+    ;(change as { impact_confirm_step?: boolean }).impact_confirm_step = undefined
   })
 
   it('drops the mark once the phase moves on', async () => {
@@ -1484,7 +1507,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
       await waitFor(() => expect(screen.getByTestId('warns-to:quoting').textContent).toBe('no warning'))
       fireEvent.click(screen.getByText('mock-advance-quoting'))
       const dialog = await screen.findByTestId('confirm-quoting')
-      expect(dialog.textContent).toContain('Tool Engineer: cost input not entered')
+      expect(dialog.textContent).toContain('Tool Engineer: costing not finalized')
       // Project Manager booked nothing but owes nothing: never named.
       expect(dialog.textContent).not.toContain('Project Manager')
       expect(screen.queryByTestId('confirm-warning')).toBeNull()

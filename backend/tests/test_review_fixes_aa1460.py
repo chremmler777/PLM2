@@ -154,6 +154,7 @@ async def test_acting_lead_may_not_patch_or_run_meetings(client, session_factory
 
 
 # 5 -------------------------------------------------------------------------
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_impact_lock_wait_on_a_mother_plant_change(client, session_factory, mp):
     cid = await _to_scoping(client, session_factory, mp)
     kinds = [w["kind"] for w in (await _stage(client, cid, "pm"))["waits"]]

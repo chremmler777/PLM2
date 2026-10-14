@@ -271,7 +271,9 @@ KIND_DEPARTMENT: dict[str, str] = {
     "intake_triage": DEVELOPMENT,
     "send_rejection": SALES, "create_quote": SALES, "customer_response": SALES,
     "publish_plan": SALES, "offer_expiring": SALES, "escalate_risk": SALES,
-    "update_quote": SALES, "obtain_info": SALES, "offer_build": SALES,
+    # obtain_info is not here (2026-10-14): a question is the ASKING
+    # department's task and the row carries it in role_department_id.
+    "update_quote": SALES, "offer_build": SALES,
     "needs_info": SALES, "validation_issue_customer": SALES,
     "validation_issue_quote": SALES,
     "bank_build": SCHEDULING,

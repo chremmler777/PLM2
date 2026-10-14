@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from tests.conftest import (
     approve_gates, force_complete_check_workflows, advance_to_assessment, login,
-    satisfy_capture_gate, make_development_member, make_internal,
+    satisfy_capture_gate, lock_impact, make_internal,
     validate_timing, complete_release_step,
 )
 
@@ -281,11 +281,9 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
-    # Task 18: Development must confirm the impacted-item set before kickoff —
-    # Development membership only, so put the confirming admin in it.
-    await make_development_member(session_factory, seed["admin_id"])
-    conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
-    assert conf.status_code == 200, conf.text
+    # The impacted set must be locked before kickoff. Development's manual
+    # confirm is switched off (2026-10-14), the lock is stamped directly.
+    await lock_impact(session_factory, cid)
     await validate_timing(session_factory, cid)   # the approved -> in_implementation soft guard
     res = await _transition(client, eng_auth, cid, "in_implementation")
     assert res.status_code == 200, res.text
@@ -305,9 +303,7 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
-    await make_development_member(session_factory, seed["admin_id"])
-    conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
-    assert conf.status_code == 200, conf.text
+    await lock_impact(session_factory, cid)
     await validate_timing(session_factory, cid)
     await _transition(client, eng_auth, cid, "in_implementation")
     res = await _transition(client, eng_auth, cid, "in_validation")

@@ -22,7 +22,9 @@ import { formatDate } from '../../lib/format'
 import type {
   Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier, MeetingParticipant, RasicLetter,
 } from '../../types/change'
-import { carrierOf, isPersonContact } from '../../lib/scopingRules'
+import {
+  askingSide, canAnswerQuestion, carrierOf, isPersonContact, openFlagLines,
+} from '../../lib/scopingRules'
 import { departmentLabel, pickableDepartments } from '../../lib/departments'
 import { plantText } from '../../lib/plantName'
 
@@ -80,7 +82,8 @@ export default function ScopingPanel(
     canRecordMeeting?: boolean
     /** The viewer's departments: a new flag is filed under their own. */
     myDepartmentIds?: number[]
-    /** Sales membership: Sales writes the answer of record. */
+    /** Sales membership: Sales may answer any question (so may PM and the
+     *  asking department; the backend serves the verdict per question). */
     canAnswerConcerns?: boolean
     /** Project Management may close a question the asking side left hanging. */
     isPm?: boolean
@@ -235,6 +238,7 @@ export default function ScopingPanel(
   // A refused decision names the open concerns that blocked it — that detail is
   // the whole answer, so it is shown in place and not only as a toast.
   const [decideError, setDecideError] = useState<string | null>(null)
+  const [refusal, setRefusal] = useState<string | null>(null)
   // Closing a rejected customer change is an act with a record: the letter is
   // attached, then Sales confirms it went out and the backend closes the ECR.
   const markSent = useMutation({
@@ -256,9 +260,14 @@ export default function ScopingPanel(
       meetingId: number; decision: 'proceed' | 'reject' | 'needs_info'; reason?: string
     }) => changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason),
     onSuccess: () => { setDecideError(null); invalidate() },
-    onError: (e: unknown) => {
-      setDecideError(apiErrorMessage(e, 'Could not record the decision'))
-      toastError(e, 'Could not record the decision')
+    onError: (e: unknown, vars) => {
+      const msg = apiErrorMessage(e, 'Could not record the decision')
+      setDecideError(msg)
+      // A refused 'proceed' is shown as the warning dialog, not only a toast:
+      // the server's message names the open flags (or the missing parts).
+      if (vars.decision === 'proceed') setRefusal(msg)
+      else toastError(e, 'Could not record the decision')
+      invalidate()
     },
   })
   // Reject and needs-info both owe the originator an answer, so both collect
@@ -311,15 +320,20 @@ export default function ScopingPanel(
   const latestMeeting: ChangeMeeting | null =
     meetings.length > 0 ? meetings[meetings.length - 1] : null
   const olderMeetings: ChangeMeeting[] = meetings.slice(0, Math.max(0, meetings.length - 1))
-  // Both paths — meeting-raised and hand-raised — render the same card with the
-  // same gates. Closing belongs to the asker (or PM); answering to Sales.
+  // Both paths, meeting-raised and hand-raised, render the same card with the
+  // same gates. Closing belongs to the asker (or PM); answering to the asking
+  // department (or the author), Sales or PM (2026-10-14, served per question).
   // While an admin acts as a department, their personal asker right steps
-  // aside with their real memberships — the card shows that department's view.
+  // aside with their real memberships: the card shows that department's view.
   const actingAs = getActsAsDepartmentId() != null
+  const deptName = (id: number) => departments.find((d) => d.id === id)?.name
   const questionCard = (c: ChangeConcern) => (
     <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
       attachments={attachments} editable={open}
-      canAnswer={canAnswerConcerns}
+      canAnswer={canAnswerQuestion(c, {
+        userId, actingAs, isSales: canAnswerConcerns, isPm, myDepartmentIds,
+      })}
+      askingSide={askingSide(c, deptName)}
       canSettle={(!actingAs && c.raised_by === userId) || isPm}
       origin={originOf(c)} onChanged={invalidate} />
   )
@@ -353,8 +367,16 @@ export default function ScopingPanel(
     ...(carrier || motherPlant ? [] : [t('meeting.costCarrier')]),
   ]
   // The backend refuses to start the assessment on an unlocked impacted
-  // set: the step says so instead of answering 400.
-  const impactUnlocked = !change.impact_confirmed_at
+  // set: the step says so instead of answering 400. With Development's
+  // confirm switched off (served `impact_confirm_step`), 'proceed' locks the
+  // set itself, so only an empty set holds it.
+  const confirmStep = change.impact_confirm_step !== false
+  const impactedCount = (change as { impacted_items?: unknown[] }).impacted_items?.length
+  const impactUnlocked = confirmStep && !change.impact_confirmed_at
+  const noImpactedParts = !confirmStep && impactedCount === 0
+  // Open flags block 'proceed' (risks never do): the decision says so in a
+  // dialog that lists them rather than failing on the server.
+  const openFlags = openFlagLines(concerns, (id) => departments.find((d) => d.id === id)?.name)
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptRasic((prev) => {
@@ -372,7 +394,8 @@ export default function ScopingPanel(
   // Why "Proceed & start assessment" cannot be pressed yet, in words.
   const proceedBlockedWhy = (m: ChangeMeeting): string | undefined =>
     carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing')
-      : impactUnlocked ? t('meeting.impactNotLocked') : undefined
+      : impactUnlocked ? t('meeting.impactNotLocked')
+        : noImpactedParts ? t('meeting.noImpactedParts') : undefined
 
   // "25.09.2026 · Anna, Ben", or what is known when the record is thin.
   const meetingHeadline = (m: ChangeMeeting): string => {
@@ -428,7 +451,8 @@ export default function ScopingPanel(
             )}
             <button type="button" className={btnSm.primary}
               data-testid={`meeting-proceed-${m.id}`}
-              disabled={decide.isPending || carrierOfMeeting(m) === '' || impactUnlocked}
+              disabled={decide.isPending || carrierOfMeeting(m) === '' || impactUnlocked
+                || noImpactedParts}
               title={proceedBlockedWhy(m)}
               aria-describedby={proceedBlockedWhy(m) ? `meeting-proceed-why-${m.id}` : undefined}
               onClick={() => setConfirmProceed(m)}>
@@ -508,6 +532,18 @@ export default function ScopingPanel(
     const assessors = Object.values(rasic).filter((l) => l === 'R' || l === 'A').length
     const c = carrierOfMeeting(m)
     const flipped = c !== '' && carrierOf(change.customer_relevant) !== '' && c !== carrierOf(change.customer_relevant)
+    // Open flags hold the step: the same dialog becomes the warning, listing
+    // each flag and how it is cleared, and its confirm stays disabled.
+    if (openFlags.length > 0) {
+      return {
+        to: 'in_assessment',
+        title: t('meeting.proceedBlockedTitle'),
+        consequence: t('meeting.proceedBlocked'),
+        open: openFlags,
+        holdWhileOpen: true,
+        confirmLabel: t('meeting.proceedConfirm'),
+      }
+    }
     return {
       to: 'in_assessment',
       title: t('meeting.proceedTitle'),
@@ -518,7 +554,10 @@ export default function ScopingPanel(
           .replace('{from}', carrierName(carrierOf(change.customer_relevant))).replace('{to}', carrierName(c))] : []),
       ],
       allClear: undefined,
-      info: [t('meeting.proceedCarrier').replace('{x}', carrierName(c)), ...lines],
+      info: [t('meeting.proceedCarrier').replace('{x}', carrierName(c)),
+        ...(!confirmStep && !change.impact_confirmed_at && impactedCount
+          ? [t('meeting.proceedLocksImpact').replace('{n}', String(impactedCount))] : []),
+        ...lines],
       confirmLabel: t('meeting.proceedConfirm'),
     }
   })()
@@ -532,6 +571,14 @@ export default function ScopingPanel(
           setConfirmProceed(null)
           decide.mutate({ meetingId: m.id, decision: 'proceed' })
         }} />
+      <TransitionConfirmDialog busy={false}
+        confirm={refusal ? {
+          to: 'in_assessment', title: t('meeting.proceedBlockedTitle'),
+          consequence: t('meeting.proceedBlockedServer'),
+          open: [refusal], holdWhileOpen: true, confirmLabel: t('meeting.proceedConfirm'),
+        } : null}
+        onClose={() => setRefusal(null)}
+        onConfirm={() => setRefusal(null)} />
       <TransitionConfirmDialog busy={markSent.isPending}
         confirm={confirmSent ? {
           to: 'closed', title: t('reject.closeTitle'),

@@ -106,6 +106,10 @@ class ChangeRequest(Base):
 
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What is in scope of the change, in the project manager's words
+    # (migration 115). Written during captured/scoping by Project Management,
+    # the change lead or an admin; read-only afterwards. Optional, no gate.
+    scope_definition: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     change_type: Mapped[str] = mapped_column(String(30), default="physical_part")
@@ -324,6 +328,13 @@ class ChangeRequest(Base):
     @property
     def lead_name(self) -> Optional[str]:
         return self.lead.full_name if self.lead is not None else None
+
+    @property
+    def impact_confirm_step(self) -> bool:
+        """Served flag: does this change use Development's manual impact
+        confirm (app/services/cm_switches.py)?"""
+        from app.services.cm_switches import impact_confirm_step
+        return impact_confirm_step(self)
 
     @property
     def impact_confirmed_by_name(self) -> Optional[str]:

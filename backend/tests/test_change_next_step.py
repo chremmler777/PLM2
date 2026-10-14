@@ -55,6 +55,21 @@ async def test_scoping_needs_meeting_and_impacted_set(client, admin_auth, seed, 
                             json={"part_id": part["part_id"], "is_lead": True},
                             headers=admin_auth)
     assert res.status_code == 200, res.text
+    # Development's confirm is switched off (2026-10-14): 'proceed' locks the
+    # picked set, so nothing more is owed on the impact.
+    after = keys(await next_step(client, admin_auth, change["id"]))
+    assert "impact_confirmed" not in after and "impacted_items" not in after
+
+
+@pytest.mark.usefixtures("impact_confirm_on")
+async def test_scoping_needs_impact_confirm_while_switched_on(client, admin_auth, seed, part):
+    change = await create_change(client, admin_auth, seed["project_id"])
+    await satisfy_capture_gate(client, admin_auth, change["id"])
+    await to_scoping(client, admin_auth, change["id"])
+    res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                            json={"part_id": part["part_id"], "is_lead": True},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
     assert "impact_confirmed" in keys(await next_step(client, admin_auth, change["id"]))
 
 

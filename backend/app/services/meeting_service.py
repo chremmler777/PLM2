@@ -523,6 +523,52 @@ class MeetingService:
         return concern
 
     @staticmethod
+    async def _decider_department_id(session: AsyncSession, user: User) -> Optional[int]:
+        """The department a meeting-decision question is asked for: the
+        decider's. Acting as a department, that one; else Project Management
+        when the decider sits there; else their only department. None when it
+        cannot be told (no or several memberships): the decider is the asker."""
+        acting = getattr(user, "acts_as_department_id", None)
+        if acting is not None:
+            return acting
+        mine = await WorkflowService.effective_department_ids(session, user)
+        pm_dept = (await session.execute(
+            select(Department.id).where(Department.name == "Project Manager"))
+        ).scalar_one_or_none()
+        if pm_dept is not None and pm_dept in mine:
+            return pm_dept
+        return mine[0] if len(mine) == 1 else None
+
+    @staticmethod
+    async def can_answer_question(
+        session: AsyncSession, change: ChangeRequest, concern: ChangeConcern,
+        user: User,
+    ) -> bool:
+        """Who may answer a scoping question (needs_info, 2026-10-14).
+
+        The question stays the ASKING side's task: members of the department
+        it was asked for (department_id) or, with none, its author. Sales
+        (the customer's contact) and Project Management may answer too.
+        Acts-as is exactly that department: the acting admin's personal
+        authorship and real memberships step aside, and so does the admin
+        bypass (effective_role). Answering is not closing: see
+        withdraw_concern."""
+        if user.effective_role == "admin":
+            return True
+        mine = set(await WorkflowService.effective_department_ids(session, user))
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if concern.department_id is not None:
+            if concern.department_id in mine:
+                return True
+        elif not acting and concern.raised_by == user.id:
+            return True
+        if not mine:
+            return False
+        names = set((await session.execute(
+            select(Department.name).where(Department.id.in_(mine)))).scalars().all())
+        return bool(names & {"Sales", "Project Manager"})
+
+    @staticmethod
     async def _flag_missing_information(
         session: AsyncSession, change: ChangeRequest, user: User, reason: str,
         meeting_id: Optional[int] = None,
@@ -538,12 +584,15 @@ class MeetingService:
         raise_concern) because the decision has already been authorized and
         validated — re-running those checks here could only reject a decision
         that has already been written."""
-        if any(c.is_open and c.kind == "needs_info" and c.department_id is None
+        # The question is the decider's department's (2026-10-14): they own
+        # the task, and they, Sales or Project Management answer it.
+        dept_id = await MeetingService._decider_department_id(session, user)
+        if any(c.is_open and c.kind == "needs_info" and c.department_id == dept_id
                and c.raised_by == user.id for c in change.concerns):
             return None
         concern = ChangeConcern(
             change_id=change.id, kind="needs_info", note=reason.strip(),
-            raised_by=user.id, department_id=None,
+            raised_by=user.id, department_id=dept_id,
             raised_by_meeting_id=meeting_id)
         session.add(concern)
         await session.flush()
@@ -551,7 +600,7 @@ class MeetingService:
             session, change, "concern_raised",
             f"Concern (needs_info): {concern.note}", user.id,
             new_value={"concern_id": concern.id, "kind": "needs_info",
-                       "department_id": None, "meeting_id": meeting_id},
+                       "department_id": dept_id, "meeting_id": meeting_id},
             notes=concern.note)
         return concern
 
@@ -560,8 +609,9 @@ class MeetingService:
         session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
         note: Optional[str] = None,
     ) -> ChangeConcern:
-        """Sales writes the answer to an open question — a COMMENT on it, not a
-        verdict on it.
+        """Somebody writes the answer to an open question: a COMMENT on it,
+        not a verdict on it. In scoping: the asking department (or the
+        author), Sales or Project Management (can_answer_question).
 
         Deliberately separate from withdrawal: the side that asked decides
         whether the answer settles the point, so answering leaves the concern
@@ -577,8 +627,9 @@ class MeetingService:
         note = (note or "").strip()
         # Two shapes of answer, told apart by where the change is standing.
         #
-        # A CUSTOMER question (scoping) is Sales' to answer: they own the
-        # relationship, and words are enough.
+        # A scoping QUESTION stays the asking side's (2026-10-14): the asking
+        # department or the author answers it, or Sales (the customer's
+        # contact) or Project Management. Words are enough.
         #
         # A DEPARTMENT hold during assessment is a technical problem, and the
         # answer is a PROPOSAL — anyone on the team may put one forward, but it
@@ -597,9 +648,11 @@ class MeetingService:
                 raise ChangeError(
                     "A proposal needs its documentation attached (PPT)")
         else:
-            if not await ChangeService._user_in_department(session, user, "Sales"):
+            if not await MeetingService.can_answer_question(
+                    session, change, concern, user):
                 raise ChangeError(
-                    "Only a Sales department member may answer a concern")
+                    "Only the asking department (or the person who asked), "
+                    "Sales or Project Management may answer this question")
             # An answer needs content — either words, or the document that
             # carries them filed into this question's container.
             if not note and not await ChangeService.has_info_response(
@@ -640,6 +693,29 @@ class MeetingService:
         return [c for c in change.concerns if c.is_open and c.kind != "risk"]
 
     @staticmethod
+    async def open_flags_refusal(
+        session: AsyncSession, open_concerns: list[ChangeConcern],
+    ) -> str:
+        """Why 'proceed' is refused, naming every open flag: kind, author,
+        department, note. The UI shows the same list in its warning dialog."""
+        dept_ids = {c.department_id for c in open_concerns if c.department_id}
+        names = dict((await session.execute(
+            select(Department.id, Department.name).where(
+                Department.id.in_(dept_ids)))).all()) if dept_ids else {}
+        kinds = {"needs_info": "question", "reject_proposal": "cancel vote"}
+        lines = []
+        for c in sorted(open_concerns, key=lambda c: c.id):
+            who = c.raised_by_name or f"user #{c.raised_by}"
+            if c.department_id:
+                who += f" ({names.get(c.department_id, c.department_id)})"
+            lines.append(f"{kinds.get(c.kind, c.kind)} by {who}: {c.note}")
+        return (f"{len(open_concerns)} open concern(s) block 'proceed': "
+                + "; ".join(lines)
+                + ". Each must be withdrawn or settled first (its author or "
+                "Project Management), or answered by a 'needs info' or "
+                "'reject' decision")
+
+    @staticmethod
     async def decide_meeting(
         session: AsyncSession, change: ChangeRequest, meeting_id: int,
         decision: str, user: User, reason: Optional[str] = None,
@@ -664,12 +740,15 @@ class MeetingService:
         # stop. Either its author withdraws it, or the decision answers it.
         open_concerns = MeetingService.open_concerns(change)
         if decision == "proceed" and open_concerns:
-            who = ", ".join(sorted({c.raised_by_name or f"user #{c.raised_by}"
-                                    for c in open_concerns}))
             raise ChangeError(
-                f"{len(open_concerns)} open concern(s) from {who}. They must be "
-                "withdrawn by their author, or answered by rejecting / asking "
-                "for more information")
+                await MeetingService.open_flags_refusal(session, open_concerns))
+        # Picked parts are still required: proceeding locks the set they make
+        # up (switch off, cm_switches), and an empty set locks nothing.
+        if (decision == "proceed" and not change.impacted_items
+                and change.impact_confirmed_at is None):
+            raise ChangeError(
+                "No impacted parts picked: pick the impacted parts on the "
+                "Impacted tab before proceeding")
         # The room re-confirms the cost carrier (spec §16): it selects the
         # whole commercial branch, so nobody proceeds without saying it.
         if decision == "proceed" and meeting.cost_carrier is None:
@@ -704,6 +783,10 @@ class MeetingService:
             notes=reason or meeting.notes)
         if decision == "proceed":
             await MeetingService._apply_cost_carrier(session, change, meeting, user)
+            # The room's 'proceed' locks the impacted set, on the decider's
+            # name (no-op while Development's manual confirm is switched on).
+            await ChangeService.auto_lock_impact(
+                session, change, user.id, "the scoping decision 'proceed'")
         if decision in ("proceed", "reject"):
             # Meetings only exist in scoping now, so proceed always goes
             # straight to assessment; reject goes straight out.

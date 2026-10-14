@@ -75,3 +75,50 @@ export function deviationWaitKey(
   if (proposedBy != null && proposedBy === leadId) return 'routingDev.waitingForPm'
   return 'routingDev.waitingForLead'
 }
+
+/**
+ * Who may answer a scoping question (2026-10-14): the question stays the
+ * ASKING side's task. Members of the department it was asked for (with none,
+ * its author), Sales and Project Management answer it. The backend serves the
+ * verdict per question (`can_answer`, MeetingService.can_answer_question);
+ * the rest mirrors it for an older payload. Acting as a department is exactly
+ * that department: personal authorship steps aside.
+ */
+export function canAnswerQuestion(
+  c: ChangeConcern,
+  viewer: {
+    userId?: number | null; actingAs?: boolean; isSales?: boolean; isPm?: boolean
+    myDepartmentIds?: number[]
+  },
+): boolean {
+  if (c.can_answer != null) return c.can_answer
+  if (!c.is_open) return false
+  if (viewer.isSales || viewer.isPm) return true
+  if (c.department_id != null) return (viewer.myDepartmentIds ?? []).includes(c.department_id)
+  return !viewer.actingAs && viewer.userId != null && c.raised_by === viewer.userId
+}
+
+/** The side a question is waiting on, in words: its department, else its author. */
+export function askingSide(c: ChangeConcern, departmentName?: (id: number) => string | undefined): string {
+  return c.asking_department_name
+    ?? (c.department_id != null ? departmentName?.(c.department_id) : undefined)
+    ?? c.raised_by_name ?? `#${c.raised_by}`
+}
+
+/** Open flags that block 'proceed' (risks never do), as dialog lines:
+ *  "Question · Anna (APQP): tolerance?" */
+export function openFlagLines(
+  concerns: ChangeConcern[], departmentName?: (id: number) => string | undefined,
+): string[] {
+  return concerns
+    .filter((c) => c.is_open && c.kind !== 'risk')
+    .sort((a, b) => a.id - b.id)
+    .map((c) => {
+      const kind = c.kind === 'needs_info' ? t('concern.kind.question')
+        : c.kind === 'reject_proposal' ? t('concern.kind.cancelVote') : c.kind
+      const dept = c.asking_department_name
+        ?? (c.department_id != null ? departmentName?.(c.department_id) : undefined)
+      const who = `${c.raised_by_name ?? `#${c.raised_by}`}${dept ? ` (${dept})` : ''}`
+      return `${kind} · ${who}: ${c.note}`
+    })
+}

@@ -260,7 +260,7 @@ const TASK_TAB: Record<string, string> = {
   impact_confirm: '?tab=impacted', customer_response: '',
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
   send_rejection: '?tab=scoping',
-  costing_input: '?tab=commercial',
+  costing_input: '?tab=costing',
   create_quote: '?tab=commercial',
   // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
   // publishes from the same card.
@@ -292,7 +292,8 @@ const taskHint = (task: ChangeTask): string | null => {
       return kickoffHint(task.missing);
     case 'scoping_wrapup': {
       const open = [
-        ...(task.impact_confirmed ? [] : [t('tasks.hint.impactOpen')]),
+        // null: no manual confirm (switch off), nothing to confirm.
+        ...(task.impact_confirmed === false ? [t('tasks.hint.impactOpen')] : []),
         ...(task.has_decision ? [] : [t('tasks.hint.decisionOpen')]),
       ];
       return open.length > 0 ? open.join(', ') : t('tasks.hint.wrapup');
@@ -501,6 +502,11 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
           )}
           {isBackup(task) && <BackupChip mainName={task.main_name} className="ml-2" />}
           {hint && <span className="block text-xs text-slate-400">{hint}</span>}
+          {task.kind === 'obtain_info' && task.asking_side && (
+            <span data-testid="task-asking-side" className="block text-xs text-slate-500">
+              {t('tasks.hint.askedBy').replace('{x}', task.asking_side)}
+            </span>
+          )}
         </span>
       </td>
       <td data-testid="task-stage" className="px-4 py-3 align-top text-slate-300 whitespace-nowrap">

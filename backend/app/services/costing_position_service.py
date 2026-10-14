@@ -48,18 +48,27 @@ class CostingPositionService:
     @staticmethod
     async def may_write(session: AsyncSession, change: ChangeRequest,
                         department_id: int, actor: User) -> bool:
-        """A member of that department while the change is in costing, or the
-        people who run costing (PM, admin) at any time.
+        """A member of that department while its costing is open and not
+        finalized, or the people who run costing (PM, admin) at any time.
+
+        Open (early_costing.costing_open_for): the change is in costing, or
+        in assessment and the department has submitted a feasible answer
+        that owes a cost input (per-department pipeline, 2026-10-14). A
+        finalized department reopens its input before it writes again.
 
         The status window is deliberate: positions are the costing phase's
         working numbers, and letting them move after the total was approved
         would make the approved total a lie."""
+        from app.services import early_costing
         from app.services.meeting_service import MeetingService
         from app.services.workflow_service import WorkflowService
         if (actor.effective_role == "admin"
                 or await MeetingService.user_is_pm_member(session, actor)):
             return True
-        if change.status != "costing":
+        if early_costing.costing_open_for(change, department_id):
+            if early_costing.is_finalized(change, department_id):
+                return False
+        else:
             # Spec §16: an impact edit after the quote reopens costing for
             # the departments it touched, until a newer offer or an
             # approved deviation covers it.

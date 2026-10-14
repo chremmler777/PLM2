@@ -153,6 +153,7 @@ async def test_intake_rows_carry_the_development_role(client, seed, team, sessio
 
 # --- cockpit: main actions vs "As backup" --------------------------------------
 
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_cockpit_items_carry_role(client, seed, team, session_factory):
     await _set_responsible(session_factory, seed["project_id"],
                            team["dept"]["Development"], team["user"]["development.one"])

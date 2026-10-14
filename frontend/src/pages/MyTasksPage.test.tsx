@@ -147,6 +147,22 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=scoping')
   })
 
+  it('names the asking department that owns an obtain-info row (2026-10-14)', async () => {
+    await renderWith(changeTask({
+      kind: 'obtain_info', reason: 'tolerance class', asking_side: 'APQP',
+    }))
+    expect(screen.getByTestId('task-asking-side').textContent)
+      .toBe(t('tasks.hint.askedBy').replace('{x}', 'APQP'))
+  })
+
+  it('owes no impact confirm on a wrap-up row while the confirm is switched off', async () => {
+    await renderWith(changeTask({
+      kind: 'scoping_wrapup', impact_confirmed: null, has_decision: false,
+    }))
+    const hint = screen.getByText(new RegExp(t('tasks.hint.decisionOpen')))
+    expect(hint.textContent).not.toContain(t('tasks.hint.impactOpen'))
+  })
+
   it('says how many questions are open when the row stands for several', async () => {
     await renderWith(changeTask({
       kind: 'obtain_info', reason: 'target price for the new gauge',
@@ -203,12 +219,12 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=commercial')
   })
 
-  it('sends a costing-input row to the commercial tab', async () => {
+  it('sends a costing-input row to the costing tab', async () => {
     await renderWith(changeTask({ kind: 'costing_input' }))
     expect(screen.getByText(t('tasks.kind.costing_input'))).toBeDefined()
     expect(screen.getByText(t('tasks.hint.costing_input'))).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
-    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=commercial')
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=costing')
   })
 
   it('sends a bank-build row to the implementation tab', async () => {

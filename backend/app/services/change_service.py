@@ -114,7 +114,7 @@ STAGE_TASK_TAB = {
     "kickoff": "overview", "scoping_wrapup": "scoping", "impact_confirm": "impacted",
     "customer_response": "overview", "obtain_info": "scoping",
     "close_question": "scoping", "send_rejection": "scoping",
-    "costing_input": "commercial", "costing_update": "commercial",
+    "costing_input": "costing", "costing_update": "commercial",
     "create_quote": "commercial", "bank_build": "implementation",
     "publish_plan": "implementation", "progress_report": "implementation",
     "escalate_risk": "implementation", "update_quote": "implementation",
@@ -773,9 +773,10 @@ class ChangeService:
         elif to == "approved" and change.status == "scoping":
             # Mother plant: MotherPlantService.approval_blocker, all hard.
             from app.services.mother_plant_service import MotherPlantService
+            from app.services.cm_switches import impact_confirm_step
             if not change.impacted_items:
                 add("impacted_items", "hard")
-            elif change.impact_confirmed_at is None:
+            elif change.impact_confirmed_at is None and impact_confirm_step(change):
                 add("impact_confirmed", "hard")
             if not await MotherPlantService.receipts(session, change):
                 add("team_informed", "hard")
@@ -787,9 +788,11 @@ class ChangeService:
             if latest is None or latest.decision is not None:
                 add("follow_up_meeting" if latest is not None
                     and latest.decision == "needs_info" else "meeting", "hard")
+            from app.services.cm_switches import impact_confirm_step
             if not change.impacted_items:
                 add("impacted_items", "hard")
-            elif change.impact_confirmed_at is None:
+            elif change.impact_confirmed_at is None and impact_confirm_step(change):
+                # Switch off: the set locks itself at the 'proceed' decision.
                 add("impact_confirmed", "hard")
             if change.lead_id is None:
                 add("lead", "soft")
@@ -1167,6 +1170,10 @@ class ChangeService:
             blocker = await MotherPlantService.approval_blocker(session, change)
             if blocker is not None:
                 raise ChangeError(blocker)
+            # No manual confirm on this track while the switch is off: going
+            # to approved locks the picked set (the mother plant's 'proceed').
+            await ChangeService.auto_lock_impact(
+                session, change, user_id, "the move to approved")
 
         # HARD gates: the approval decision cannot be forced.
         if to_status == "approved" and not mother_plant:
@@ -1308,9 +1315,12 @@ class ChangeService:
                     "(POST /rejection-sent) before closing")
 
         if to_status == "in_assessment" and change.impact_confirmed_at is None:
+            from app.services.cm_switches import impact_confirm_step
             raise ChangeError(
                 "Impacted set is not locked: confirm impacted items before "
-                "starting assessment")
+                "starting assessment" if impact_confirm_step(change) else
+                "Impacted set is not locked: it locks when the scoping "
+                "meeting decides 'proceed'")
 
         if deviation is not None:
             deviation.status = "consumed"
@@ -1712,6 +1722,19 @@ class ChangeService:
         confirmed it - invalidate the confirmation so it must be redone."""
         if change.impact_confirmed_at is None:
             return
+        from app.services.cm_switches import impact_confirm_step
+        if not impact_confirm_step(change) and change.status != "scoping":
+            # Switch off, past scoping: nobody confirms by hand any more, so
+            # clearing the lock would leave a set nobody can lock again. The
+            # edit (made by the lead, PM or an admin) keeps it locked, now on
+            # the editor's name.
+            change.impact_confirmed_by = user_id
+            change.impact_confirmed_at = datetime.utcnow()
+            await ChangeService.append_changelog(
+                session, change, "impact_locked",
+                "Impacted-item set changed and locked again by the editor",
+                user_id)
+            return
         change.impact_confirmed_by = None
         change.impact_confirmed_at = None
         await ChangeService.append_changelog(
@@ -1769,7 +1792,15 @@ class ChangeService:
         """Task 18: Development confirms the lead-proposed impacted-item
         set. Idempotent by design - re-confirming (e.g. by a different Development
         member) simply refreshes who/when; it does not error, since the set
-        may legitimately be re-reviewed without having changed."""
+        may legitimately be re-reviewed without having changed.
+
+        Parked behind cm_switches.IMPACT_CONFIRM_STEP_ENABLED (2026-10-14):
+        while it is off, the set locks at the scoping 'proceed' decision
+        (auto_lock_impact) and this manual confirm is refused."""
+        if not change.impact_confirm_step:
+            raise ChangeError(
+                "Development no longer confirms the impacted set by hand: it "
+                "locks when the scoping meeting decides 'proceed'")
         if not change.impacted_items:
             raise ChangeError("No impacted items to confirm")
         change.impact_confirmed_by = user_id
@@ -1783,6 +1814,65 @@ class ChangeService:
         from app.services.engineering_review_service import EngineeringReviewService
         await EngineeringReviewService.on_impact_locked(session, change, user_id)
         return change
+
+    @staticmethod
+    async def set_scope_definition(
+        session: AsyncSession, change: ChangeRequest, user: User,
+        text: Optional[str],
+    ) -> ChangeRequest:
+        """The project manager defines what is in scope (2026-10-14).
+        Project Management members, the change lead or an admin (acts-as
+        aware: an acting admin is that department, the lead right steps
+        aside), while the change is captured or in scoping; read-only
+        afterwards. Audited when it changes. Optional: nothing gates on it.
+        Raises PermissionError (403) or ChangeError (400)."""
+        from app.services.change_people import holds_lead
+        from app.services.meeting_service import MeetingService
+        if change.status not in ("captured", "scoping"):
+            raise ChangeError(
+                "The scope is defined during capture and scoping; it is read "
+                "only now")
+        if not (user.effective_role == "admin" or holds_lead(change, user)
+                or await MeetingService.user_is_pm_member(session, user)):
+            raise PermissionError(
+                "Only Project Management, the change lead or an admin may "
+                "define the scope")
+        new = (text or "").strip() or None
+        old = change.scope_definition
+        if new == old:
+            return change
+        change.scope_definition = new
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "scope_defined",
+            "Scope cleared" if new is None else
+            ("Scope defined" if old is None else "Scope changed"),
+            user.id, field_name="scope_definition", old_value=old,
+            new_value=new, notes=new)
+        return change
+
+    @staticmethod
+    async def auto_lock_impact(
+        session: AsyncSession, change: ChangeRequest, user_id: int, why: str,
+    ) -> None:
+        """Lock the impacted set as part of a decision (switch off, see
+        app/services/cm_switches.py): the scoping meeting's 'proceed', or a
+        mother-plant change going to approved. The decider is recorded as
+        who locked it. An already locked set stays as it is; an empty set is
+        refused, picked parts are still required."""
+        from app.services.cm_switches import impact_confirm_step
+        if impact_confirm_step(change) or change.impact_confirmed_at is not None:
+            return
+        if not change.impacted_items:
+            raise ChangeError(
+                "No impacted parts picked: pick the impacted parts on the "
+                "Impacted tab before " + why)
+        change.impact_confirmed_by = user_id
+        change.impact_confirmed_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "impact_locked",
+            f"Impacted-item set locked by {why} "
+            f"({len(change.impacted_items)} item(s))", user_id)
 
     @staticmethod
     async def user_can_confirm_impact(session: AsyncSession, user: User) -> bool:
@@ -1920,6 +2010,22 @@ class ChangeService:
             session, user, ChangeService.TOOL_DEPARTMENT)
 
     @staticmethod
+    async def _tool_costing_open(session: AsyncSession,
+                                 change: ChangeRequest) -> bool:
+        """In assessment, the Tool Engineer quotes the weight with its early
+        costing (per-department pipeline): open once it submitted a
+        feasible answer that owes a cost input, until it finalizes."""
+        if change.status != "in_assessment":
+            return False
+        from app.services import early_costing
+        dept_id = (await session.execute(
+            select(Department.id).where(
+                Department.name == ChangeService.TOOL_DEPARTMENT))).scalar()
+        return (dept_id is not None
+                and early_costing.costing_open_for(change, dept_id)
+                and not early_costing.is_finalized(change, dept_id))
+
+    @staticmethod
     async def set_weight_estimate(
         session: AsyncSession, change: ChangeRequest, weight_g: float,
         user: User,
@@ -1944,7 +2050,9 @@ class ChangeService:
         """
         if weight_g is not None and weight_g <= 0:
             raise ChangeError("Part weight must be greater than zero")
-        if change.status != "costing" and user.effective_role != "admin":
+        if user.effective_role != "admin" and not (
+                change.status == "costing"
+                or await ChangeService._tool_costing_open(session, change)):
             raise ChangeError(
                 "The part weight is quoted while the change is in costing")
         old = (float(change.estimated_part_weight_g)
@@ -2270,11 +2378,14 @@ class ChangeService:
                 if is_pm:
                     tasks.append({
                         **await _base(c), "kind": "scoping_wrapup",
-                        "impact_confirmed": c.impact_confirmed_at is not None,
+                        # None: no manual confirm (switch off), nothing owed.
+                        "impact_confirmed": (c.impact_confirmed_at is not None
+                                             if c.impact_confirm_step else None),
                         "has_decision": any(m.decision in ("proceed", "reject")
                                             for m in c.meetings),
                     })
-                if can_confirm and c.impact_confirmed_at is None:
+                if (can_confirm and c.impact_confirmed_at is None
+                        and c.impact_confirm_step):
                     tasks.append({**await _base(c), "kind": "impact_confirm"})
 
             elif (c.status == "rejected" and in_sales and c.customer_relevant
@@ -2420,8 +2531,10 @@ class ChangeService:
                     })
 
             # Costing is a queue too: a department that called the change feasible
-            # owes a number, and "no lines at all" is silence rather than a zero.
-            if c.status == "costing" and dep_ids:
+            # owes a number until it finalizes it. Per department (2026-10-14):
+            # the task appears right after its own assessment submit, while
+            # the change is still in assessment.
+            if c.status in ("in_assessment", "costing") and dep_ids:
                 pending = await ChangeService.costing_pending_department_ids(db, c)
                 for dept_id in sorted(set(pending) & dep_ids):
                     tasks.append({
@@ -2487,19 +2600,42 @@ class ChangeService:
                                 "estimate — update the quote or record the decision",
                     })
 
-            # Independent of the stage chain: a question can be waiting on Sales at
-            # any live status, and it is one errand per change however many people
-            # asked. Cleared per question by answering it.
-            if in_sales:
-                questions = ChangeService.unanswered_questions(c)
-                if questions:
-                    newest = questions[-1]
+            # Independent of the stage chain: a question can be waiting at any
+            # live status, and it is one errand per change however many people
+            # asked. The question stays the ASKING side's task (2026-10-14):
+            # the asking department's members (the author, with no department),
+            # plus Sales and Project Management, who may answer it too. Shown
+            # with the asking department as owner. Cleared per question by
+            # answering it. Same rule as MeetingService.can_answer_question.
+            questions = ChangeService.unanswered_questions(c)
+            if questions:
+                am_author = getattr(user, "acts_as_department_id", None) is None
+                answerable = [
+                    q for q in questions
+                    if in_sales or is_pm_member
+                    or (q.department_id in dep_ids if q.department_id is not None
+                        else am_author and q.raised_by == user.id)]
+                if answerable:
+                    newest = answerable[-1]
                     tasks.append({
                         **await _base(c), "kind": "obtain_info",
                         "reason": newest.note,
-                        "question_count": len(questions),
+                        "question_count": len(answerable),
                         "concern_id": newest.id,
                         "department_id": newest.department_id,
+                        # the owner on the row: the asking department
+                        "role_department_id": newest.department_id,
+                        "asker_name": newest.raised_by_name,
+                        # who owns it, in words: the asking department, else
+                        # the person who asked
+                        "asking_side": next(
+                            (n for n, i in dept_by_name.items()
+                             if i == newest.department_id), None)
+                        if newest.department_id is not None
+                        else newest.raised_by_name,
+                        # a question of your own, asked for no department
+                        "mine": (newest.department_id is None and am_author
+                                 and newest.raised_by == user.id),
                     })
 
             # The other half of the same loop: an answer is waiting on the side
@@ -2734,6 +2870,7 @@ class ChangeService:
         # ChangeService.user_can_confirm_impact / POST
         # /changes/{id}/impact/confirm's authz (changes.py confirm_impact).
         if (change.status == "scoping" and change.impact_confirmed_at is None
+                and change.impact_confirm_step
                 and await ChangeService.user_can_confirm_impact(session, user)):
             actions.append({
                 "kind": "impact_confirm",
@@ -2744,19 +2881,27 @@ class ChangeService:
             })
 
         # kind "needs_info": the scoping meeting could not decide because
-        # something is missing. Sales owns the customer relationship, so Sales
-        # is accountable for going and getting it — the action is addressed to
-        # them by name rather than left as a note nobody owns. Cleared by
+        # something is missing. The question its decision raised is the
+        # decider's department's (2026-10-14); whoever may answer it (that
+        # department, Sales, Project Management) gets the action. Cleared by
         # recording a follow-up meeting that reaches a real decision.
         latest = ChangeService.pending_info_request(change)
-        if (latest is not None
-                and await ChangeService._user_in_department(session, user, "Sales")):
-            actions.append({
-                "kind": "needs_info",
-                "label": "Sales: obtain missing information: "
-                         + (latest.decision_reason or "see meeting note"),
-                "target_tab": "scoping",
-            })
+        if latest is not None:
+            from app.services.meeting_service import MeetingService
+            flag = next((c for c in change.concerns
+                         if c.is_open and c.kind == "needs_info"
+                         and c.raised_by_meeting_id == latest.id), None)
+            may = (await MeetingService.can_answer_question(
+                       session, change, flag, user) if flag is not None
+                   else await ChangeService._user_in_department(
+                       session, user, "Sales"))
+            if may:
+                actions.append({
+                    "kind": "needs_info",
+                    "label": "Obtain missing information: "
+                             + (latest.decision_reason or "see meeting note"),
+                    "target_tab": "scoping",
+                })
 
         actions += await ChangeService._costing_to_close_actions(
             session, change, user, dept_ids)
@@ -3149,6 +3294,11 @@ class ChangeService:
             raise ChangeError(
                 "Only a member of that department, the change lead, Project "
                 "Management, Sales or an admin may set its lead time")
+        from app.services import early_costing
+        if not privileged and early_costing.is_finalized(change, department_id):
+            raise ChangeError(
+                "The department's costing is finalized: reopen it to change "
+                "the lead time")
         a = rows[0]
         old_value = a.lead_time_impact_days
         a.lead_time_impact_days = lead_time_days
@@ -3191,41 +3341,20 @@ class ChangeService:
     async def costing_pending_department_ids(
         session: AsyncSession, change: ChangeRequest,
     ) -> list[int]:
-        """Departments that said the change is feasible but have priced
-        nothing yet — the costing phase's open work.
+        """Departments that owe a cost input and have not finalized it yet:
+        the costing pipeline's open work (2026-10-14, per department).
 
-        Only while the change is IN costing: before that nobody owes a number,
-        and afterwards the totals are already snapshotted. A department that
-        genuinely costs nothing says so with a zero line, which is an answer;
-        no lines at all is silence — unless its checklist already said the
-        change does not touch it (see owes_costing_input).
-
-        Priced = a cost line OR a costing position: a supplier quote filed as a
-        position is an answer just as much as an hours line is."""
-        if change.status != "costing":
+        A department owes once it said the change is feasible and its
+        checklist marked something impacted (owes_costing_input); it may
+        finalize right after its own assessment submit, while the change is
+        still in assessment, so the list runs in assessment AND in costing.
+        Before that nobody owes a number, and afterwards the totals are
+        already snapshotted. Finalizing needs a line or a position (a zero
+        line is an answer, nothing is silence: early_costing.finalize)."""
+        if change.status not in ("in_assessment", "costing"):
             return []
-        line_counts = dict((await session.execute(
-            select(ChangeAssessment.department_id,
-                   func.count(AssessmentCostLine.id))
-            .outerjoin(AssessmentCostLine,
-                       AssessmentCostLine.assessment_id == ChangeAssessment.id)
-            .where(ChangeAssessment.change_id == change.id)
-            .group_by(ChangeAssessment.department_id))).all())
-        position_counts = dict((await session.execute(
-            select(CostingPosition.department_id, func.count(CostingPosition.id))
-            .where(CostingPosition.change_id == change.id)
-            .group_by(CostingPosition.department_id))).all())
-        # A department can carry several assessment rows (multi-stage routing);
-        # one row still owing keeps the whole department on the hook.
-        owed: dict[int, bool] = {}
-        for a in change.assessments:
-            if a.verdict not in ("feasible", "feasible_with_conditions"):
-                continue
-            owed[a.department_id] = (owed.get(a.department_id, False)
-                                     or ChangeService.owes_costing_input(a))
-        return sorted(d for d, still_owes in owed.items()
-                      if still_owes and not line_counts.get(d)
-                      and not position_counts.get(d))
+        from app.services import early_costing
+        return early_costing.state(change)["pending"]
 
     @staticmethod
     async def _validate_impacts(

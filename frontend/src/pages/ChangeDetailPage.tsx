@@ -36,6 +36,7 @@ import { releaseKey } from '../components/changes/release/releaseKeys';
 import PnlCard from '../components/changes/PnlCard';
 import IssuesPanel from '../components/changes/validation/IssuesPanel';
 import { releaseOpenByIssues } from '../lib/issueTabs';
+import ScopeDefinitionBlock from '../components/changes/ScopeDefinitionBlock';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import ChangeAttachments from '../components/changes/ChangeAttachments';
 import MotherPlantTab from '../components/changes/motherPlant/MotherPlantTab';
@@ -68,8 +69,10 @@ import { formatDate, formatMoney } from '../lib/format';
 const LIVE = { refetchOnWindowFocus: true } as const;
 
 type Tab = ChangeTab;
-// F2: before costing there's no cost basis yet: the costing tab is locked and
-// PnlCard hides itself for the same statuses.
+// F2: before costing there's no cost basis yet: the summation, quote basis and
+// PnlCard stay hidden for these statuses. The costing tab itself opens with the
+// assessment (per-department pipeline, 2026-10-14): a department costs its part
+// right after its own feasible submit.
 const BEFORE_COSTING: string[] = ['captured', 'scoping', 'in_assessment'];
 // Statuses from which a change can still be cancelled (mirrors the backend's
 // allowed transitions): released only closes, closed/cancelled/rejected are done.
@@ -618,7 +621,7 @@ export default function ChangeDetailPage() {
         consequence: 'Closing costing freezes every department\'s numbers and hands the change to Sales for the offer. '
           + 'Reopening costing later needs a reason and is recorded.',
         open: [
-          ...(change.costing_pending_department_ids ?? []).map((d) => `${deptName(d)}: cost input not entered`),
+          ...(change.costing_pending_department_ids ?? []).map((d) => `${deptName(d)}: costing not finalized`),
           ...unpriced.map((u) => `${u.message}: the total is too low`),
         ],
         allClear: 'Every department has entered its cost input, and every line has a rate.',
@@ -716,7 +719,10 @@ export default function ChangeDetailPage() {
       && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
     // Scoping leaves two jobs on the impact tab: pick the impacted items,
     // then confirm the set. Both are done when the confirmation lands.
-    const openWork = tb === 'impacted' && change.status === 'scoping' && !change.impact_confirmed_at;
+    // With Development's confirm switched off, the open work is picking.
+    const openWork = tb === 'impacted' && change.status === 'scoping' && (
+      change.impact_confirm_step === false
+        ? (change.impacted_items?.length ?? 0) === 0 : !change.impact_confirmed_at);
     const lockReason = locked ? t(stoppedLocked(tb) ? 'tab.lockedStopped' : lockedTitleKey(tb)) : null;
     const state = openWork ? t('tab.openWork') : isActivePhase ? t('tab.activePhase') : null;
     const label = governance ? changeTabLabel(tb)
@@ -1053,6 +1059,7 @@ export default function ChangeDetailPage() {
             decidableIds={(myActions?.actions ?? []).filter((a) => a.kind === 'deviation_decision')
               .map((a) => a.deviation_id).filter((x): x is number => x != null)}
             focusId={focusDeviation} onFocused={() => setFocusDeviation(undefined)} />
+          <ScopeDefinitionBlock change={change} hideWhenEmpty />
           <p><span className="text-slate-400">Type:</span> {changeTypeLabel(change.change_type)}</p>
           <p className="flex items-center gap-2">
             <span className="text-slate-400">Priority:</span>
@@ -1074,12 +1081,16 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'scoping' && change && (
+        <div className="space-y-4">
+        <ScopeDefinitionBlock change={change}
+          canEdit={!readOnly && (isAdmin || isChangeLead || isPmMember)} />
         <ScopingPanel change={change}
           canSendRejection={!myActions ? true : isSalesMember}
           canAnswerConcerns={isSalesMember} isPm={isPmMember}
           canRecordMeeting={canRecordMeeting}
           onInformTeam={motherPlant ? () => setTab('mother') : undefined}
           myDepartmentIds={myActions?.memberships ?? []} />
+        </div>
       )}
 
       {effectiveTab === 'impacted' && change && (
@@ -1087,6 +1098,7 @@ export default function ChangeDetailPage() {
           impactConfirmedByName={change.impact_confirmed_by_name}
           impactConfirmedAt={change.impact_confirmed_at}
           canConfirm={canConfirmImpact}
+          confirmStep={change.impact_confirm_step !== false}
           // Lead, PM and admin edit the set; Development picks it too while it
           // is at scoping and not locked, then confirms it. The backend's
           // can_edit_impact is the answer; the fallback mirrors it.
@@ -1138,6 +1150,7 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'assessments' && (
         <div className="space-y-4">
+          <ScopeDefinitionBlock change={change} hideWhenEmpty />
           <ScopingMappingHint changeId={changeId} assessments={change.assessments} departments={departments} />
           {/* One bucket per routed department: status board collapsed, that
               department's workplace expanded. Everything that used to be a
@@ -1149,15 +1162,21 @@ export default function ChangeDetailPage() {
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
             userId={userId ?? null} isChangeLead={isChangeLead}
             declinedIds={stage?.assessment?.declined_pending.map((d) => d.department_id)}
-            round={assessmentState} />
+            round={assessmentState}
+            onContinueCosting={() => setTab('costing')} />
         </div>
       )}
 
       {effectiveTab === 'costing' && (
         <div className="space-y-3 text-sm">
+          <ScopeDefinitionBlock change={change} hideWhenEmpty />
           {/* The tab names itself; while departments price, one line says how costing works. */}
           {change.status === 'costing' && (
             <p data-testid="costing-stage" className="text-xs text-slate-400">{t('costing.stageBody')}</p>
+          )}
+          {/* Per-department pipeline: costing runs alongside the assessment. */}
+          {change.status === 'in_assessment' && (
+            <p data-testid="costing-early" className="text-xs text-slate-400">{t('costing.earlyBody')}</p>
           )}
           {/* Costing closed: departments read only; whoever may close it may
               reopen it, with a reason on the record. */}
@@ -1182,7 +1201,7 @@ export default function ChangeDetailPage() {
           {/* Costing is department work first: each bucket holds its own lines
               and lead time; the whole picture lives in the summation below, for
               the people entitled to see it. */}
-          {!BEFORE_COSTING.includes(change.status) && (
+          {(!BEFORE_COSTING.includes(change.status) || change.status === 'in_assessment') && (
             <CostingBuckets change={change} departments={departments}
               myDepartmentIds={myActions?.memberships ?? []}
               plants={(change.affected_plant_ids && change.affected_plant_ids.length > 0
@@ -1191,7 +1210,8 @@ export default function ChangeDetailPage() {
                 .filter((p) => p.is_active !== false)
                 .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active, code: p.code, location: p.location }))}
               projectPlantId={projectPlantId}
-              canSeeAll={canSeeCosts} editable={change.status === 'costing'}
+              canSeeAll={canSeeCosts}
+              editable={change.status === 'costing' || change.status === 'in_assessment'}
               isPm={isPmMember || isAdmin} />
           )}
           {/* The whole picture, for the people who answer for it; at quoting

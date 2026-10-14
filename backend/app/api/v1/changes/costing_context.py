@@ -93,3 +93,56 @@ async def refresh_tool_tonnage(change_id: int,
                              await costing_rates.costing_context(db, change))
     ctx["tool_tonnage_refresh"] = report
     return ctx
+
+
+# --- per-department costing pipeline (2026-10-14) ---------------------------
+# A department finalizes its own costing as soon as its window is open (in
+# costing, or in assessment once it submitted a feasible answer that owes a
+# cost input), and reopens it while costing is open. See early_costing.
+
+class CostingReopenIn(BaseModel):
+    reason: Optional[str] = None
+
+
+async def _costing_state(db, change_id: int, user) -> dict:
+    from app.services import early_costing
+    change = await _change(db, change_id, user)
+    st = early_costing.state(change)
+    return {"owed_department_ids": st["owed"],
+            "finalized_department_ids": st["finalized"],
+            "pending_department_ids":
+                await ChangeService.costing_pending_department_ids(db, change)}
+
+
+@router.post("/{change_id}/costing/departments/{department_id}/finalize")
+async def finalize_department_costing(change_id: int, department_id: int,
+                                      current_user: User = Depends(get_current_user),
+                                      db: AsyncSession = Depends(get_db)):
+    from app.services import early_costing
+    change = await _change(db, change_id, current_user)
+    try:
+        await early_costing.finalize(db, change, department_id, current_user)
+    except early_costing.EarlyCostingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except early_costing.EarlyCostingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _costing_state(db, change_id, current_user)
+
+
+@router.post("/{change_id}/costing/departments/{department_id}/reopen")
+async def reopen_department_costing(change_id: int, department_id: int,
+                                    body: Optional[CostingReopenIn] = None,
+                                    current_user: User = Depends(get_current_user),
+                                    db: AsyncSession = Depends(get_db)):
+    from app.services import early_costing
+    change = await _change(db, change_id, current_user)
+    try:
+        await early_costing.reopen(db, change, department_id, current_user,
+                                   body.reason if body else None)
+    except early_costing.EarlyCostingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except early_costing.EarlyCostingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _costing_state(db, change_id, current_user)

@@ -146,7 +146,8 @@ export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
     | 'rejection_sent_at' | 'costing_pending_department_ids'
     | 'bank_build_mode' | 'plan_published_at' | 'timing_validated_at'>
-    & Partial<Pick<ChangeRequest, 'origin' | 'info_sent_at' | 'info_open_department_ids' | 'mother_plant_name'>>,
+    & Partial<Pick<ChangeRequest, 'origin' | 'info_sent_at' | 'info_open_department_ids' | 'mother_plant_name'
+      | 'costing_owed_department_ids' | 'costing_finalized_department_ids'>>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
@@ -192,10 +193,11 @@ export function resolveWaitStates(
   const releaseBlockers = change.status === 'in_validation' ? more.releaseBlockers ?? null : null
 
   // Customer questions: first nobody has answered, then nobody has closed it.
-  // Same predicate the backend uses for the Sales task — open and needs-info,
-  // whatever it is attributed to and whichever meeting (if any) raised it. A
-  // narrower rule here would put a task in someone's list that the change page
-  // then denies is outstanding.
+  // Same predicate the backend uses for the obtain_info task: open and
+  // needs-info, whatever it is attributed to and whichever meeting (if any)
+  // raised it. A narrower rule here would put a task in someone's list that the
+  // change page then denies is outstanding. The question waits on the ASKING
+  // side (2026-10-14): its department, else the person who asked.
   const questions = concerns.filter((c) => c.is_open && c.kind === 'needs_info')
   for (const c of questions) {
     waits.push(c.answered_at
@@ -206,7 +208,11 @@ export function resolveWaitStates(
       }
       : {
         key: `sales-info-${c.id}`,
-        text: t('wait.onSales.info').replace('{x}', excerpt(c.note)),
+        text: t('wait.onSales.info')
+          .replace('{d}', c.asking_department_name
+            ?? (c.department_id != null ? departmentName(c.department_id) : null)
+            ?? c.raised_by_name ?? `#${c.raised_by}`)
+          .replace('{x}', excerpt(c.note)),
         tab: 'scoping',
       })
   }
@@ -246,14 +252,35 @@ export function resolveWaitStates(
     })
   }
 
-  // Costing waits on the departments that have not entered their numbers.
-  if (change.status === 'costing' && (change.costing_pending_department_ids?.length ?? 0) > 0) {
-    waits.push({
-      key: 'costing-input',
-      text: t('wait.onCosting').replace('{x}',
-        change.costing_pending_department_ids!.map(departmentName).join(', ')),
-      tab: 'costing',
-    })
+  // Costing is a per-department pipeline (2026-10-14): a department costs and
+  // finalizes its part right after its own feasible assessment submit. In
+  // costing the change waits on whoever has not finalized; in assessment the
+  // same progress is worth knowing but holds nothing up yet (info).
+  if (change.status === 'costing' || change.status === 'in_assessment') {
+    const pending = change.costing_pending_department_ids ?? []
+    const owed = change.costing_owed_department_ids
+    const done = (change.costing_finalized_department_ids ?? [])
+      .filter((d) => !owed || owed.includes(d)).length
+    const total = owed ? owed.length : done + pending.length
+    const info = change.status === 'in_assessment'
+    if (pending.length > 0) {
+      waits.push({
+        key: 'costing-input',
+        text: owed
+          ? t('wait.costingProgress').replace('{n}', String(done)).replace('{m}', String(total))
+            .replace('{x}', pending.map(departmentName).join(', '))
+          : t('wait.onCosting').replace('{x}', pending.map(departmentName).join(', ')),
+        tab: 'costing',
+        ...(info ? { info: true } : {}),
+      })
+    } else if (info && total > 0) {
+      waits.push({
+        key: 'costing-input',
+        text: t('wait.costingProgressDone').replace('{n}', String(done)).replace('{m}', String(total)),
+        tab: 'costing',
+        info: true,
+      })
+    }
   }
 
   // An approved change is not moving until Scheduling has said how it reaches

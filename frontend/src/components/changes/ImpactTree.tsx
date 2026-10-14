@@ -50,6 +50,10 @@ interface Props {
   onChanged?: () => void
   /** 'engineering_review': the lock opens the review, no assessment is routed. */
   origin?: string | null
+  /** Served switch (change.impact_confirm_step): false while Development's
+      manual confirm is parked and the set locks itself at the scoping
+      'proceed' decision. Defaults to true (prior behaviour). */
+  confirmStep?: boolean
 }
 
 const sortedKey = (ids: Iterable<number>) => [...ids].sort((a, b) => a - b).join(',')
@@ -57,7 +61,7 @@ const sortedKey = (ids: Iterable<number>) => [...ids].sort((a, b) => a - b).join
 export default function ImpactTree({
   changeId, status, impactConfirmedByName, impactConfirmedAt, canConfirm = true,
   canEdit = true, titleAuto = false, scopeChangedAfterQuote = false, quoted = false, onChanged,
-  origin = null,
+  origin = null, confirmStep = true,
 }: Props) {
   const qc = useQueryClient()
   const phaseOpen = !LOCKED.includes(status)
@@ -230,7 +234,7 @@ export default function ImpactTree({
 
   const startApply = () => {
     if (quoted) setAsking('reason')
-    else if (impactConfirmedAt) setAsking('lock')
+    else if (impactConfirmedAt && confirmStep) setAsking('lock')
     else applyWithToast(undefined)
   }
   const discard = () => setSelected(new Set(data.impacted_part_ids))
@@ -349,7 +353,7 @@ export default function ImpactTree({
     removed.length > 0 ? `-${removed.map((id) => nameOf.get(id) ?? '?').join(', -')}` : '',
   ].filter(Boolean).join('  ')
 
-  const lockWarning = impactConfirmedAt
+  const lockWarning = impactConfirmedAt && confirmStep
     ? t('impact.lockWarning')
       .replace('{who}', impactConfirmedByName ?? 'Development')
       .replace('{when}', formatDateTime(impactConfirmedAt))
@@ -382,7 +386,13 @@ export default function ImpactTree({
             <span data-testid="impact-confirmed"
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-200 ring-1 ring-inset ring-emerald-800/70">
               <Check aria-hidden="true" size={14} />
-              {t('impact.confirmed')} {impactConfirmedByName ?? '-'} · {formatDateTime(impactConfirmedAt)}
+              {t(confirmStep ? 'impact.confirmed' : 'impact.lockedBy')} {impactConfirmedByName ?? '-'} · {formatDateTime(impactConfirmedAt)}
+            </span>
+          ) : !confirmStep ? (
+            // No manual confirm (switch off): the set locks itself when the
+            // scoping meeting decides 'proceed'.
+            <span data-testid="impact-auto-lock" className="text-xs text-slate-400 max-w-[28ch]">
+              {t('impact.autoLockHint')}
             </span>
           ) : (
             // Shown to everyone, actionable only by Development: a greyed button

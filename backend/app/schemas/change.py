@@ -338,9 +338,14 @@ class ChangeResponse(BaseModel):
     active_deadline: Optional[str] = None  # quote | release | None
     # Departments soft-held by an open assessment concern (badge source).
     blocked_department_ids: List[int] = []
-    # Departments that found the change feasible but have priced nothing yet.
-    # Populated only while the change is in costing (see the endpoint).
+    # Departments that owe a cost input and have not finalized it yet.
+    # Populated while the change is in assessment or costing (per-department
+    # pipeline, early_costing).
     costing_pending_department_ids: List[int] = []
+    # Who owes a cost input at all (feasible, something impacted) and who
+    # has finalized it: the "Costing: 3/5 finalized" line.
+    costing_owed_department_ids: List[int] = []
+    costing_finalized_department_ids: List[int] = []
     # Departments with costing lines the cost sheet cannot price (no rate):
     # [{department_id, department_name, subject, count, message}], message =
     # "No cost sheet rate for <department>: 12 h unpriced", or for a machine
@@ -352,6 +357,12 @@ class ChangeResponse(BaseModel):
     impact_confirmed_by: Optional[int] = None
     impact_confirmed_by_name: Optional[str] = None
     impact_confirmed_at: Optional[datetime] = None
+    # Served switch (app/services/cm_switches.py): False while the impacted
+    # set locks automatically at the scoping 'proceed' decision instead of
+    # Development's manual confirm. Frontend and backend read this one flag.
+    impact_confirm_step: bool = False
+    # The scope of the change, in the project manager's words (migration 115).
+    scope_definition: Optional[str] = None
     # The part weight, quoted at costing and weighed at validation. Both halves
     # ride on every change response: the estimate is what Sales priced, the
     # validated number is what the tool actually makes, and the delta between
@@ -418,6 +429,7 @@ class ChangeResponse(BaseModel):
             row["affected_plant_ids"] = plant_ids
             row["lead_name"] = data.lead_name
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
+            row["impact_confirm_step"] = data.impact_confirm_step
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
             row["validated_weight_by_name"] = data.validated_weight_by_name
             row["bank_build_set_by_name"] = data.bank_build_set_by_name
@@ -1156,6 +1168,12 @@ class ConcernAnswerIn(BaseModel):
     note: Optional[str] = None
 
 
+class ScopeDefinitionIn(BaseModel):
+    # The scope of the change in the project manager's words; empty or null
+    # clears it.
+    scope_definition: Optional[str] = Field(None, max_length=20000)
+
+
 class ConcernWithdrawIn(BaseModel):
     # Required to withdraw a department-scoped (assessment-phase) concern.
     resolution_note: Optional[str] = None
@@ -1182,6 +1200,11 @@ class ConcernResponse(BaseModel):
     severity: Optional[int] = None
     checklist_key: Optional[str] = None
     raised_by_meeting_id: Optional[int] = None
+    # Scoping questions (2026-10-14): the question stays the ASKING side's
+    # task. The list endpoint serves who that is and whether the caller may
+    # answer (asking department or author, Sales, Project Management).
+    asking_department_name: Optional[str] = None
+    can_answer: Optional[bool] = None
     answer_note: Optional[str] = None
     answered_at: Optional[datetime] = None
     answered_by: Optional[int] = None

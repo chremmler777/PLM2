@@ -210,8 +210,13 @@ export interface ChangeRequest {
   /** The project the change belongs to, denormalised for lists and headers. */
   project_number?: string | null;
   project_name?: string | null;
-  /** Departments that still owe their cost input while the change is costing. */
+  /** Departments that owe a cost input and have not finalized it yet: in
+   *  assessment (from their own feasible submit on) and in costing. */
   costing_pending_department_ids?: number[];
+  /** Departments that owe a cost input at all (feasible, something impacted). */
+  costing_owed_department_ids?: number[];
+  /** Departments that have finalized their costing. */
+  costing_finalized_department_ids?: number[];
   /** Departments with an open assessment concern — their submit is blocked. */
   blocked_department_ids?: number[];
   quoted_at: string | null;
@@ -222,6 +227,11 @@ export interface ChangeRequest {
   impact_confirmed_by?: number | null;
   impact_confirmed_by_name?: string | null;
   impact_confirmed_at?: string | null;
+  /** Served switch: true while Development confirms the impacted set by hand;
+   *  false while the set locks itself at the scoping 'proceed' decision. */
+  impact_confirm_step?: boolean;
+  /** The scope of the change in the project manager's words (2026-10-14). */
+  scope_definition?: string | null;
   internal_approved_by?: number | null;
   internal_approved_at?: string | null;
   internal_approved_amount?: number | null;
@@ -439,11 +449,14 @@ export interface ChangeTask {
   // kickoff rows: which of description / attachment / date is still missing
   missing?: string[];
   // scoping wrap-up rows
-  impact_confirmed?: boolean;
+  impact_confirmed?: boolean | null;
   has_decision?: boolean;
   // obtain_info rows: what the customer was asked for, and how much of it
   reason?: string | null;
   question_count?: number;
+  /** obtain_info: who owns the question, the asking department (else the
+   *  person who asked). */
+  asking_side?: string | null;
   concern_id?: number;
   // send_rejection rows: whether the letter is already attached
   has_letter?: boolean;
@@ -1042,8 +1055,14 @@ export interface ChangeConcern {
   withdrawn_at?: string | null;
   resolved_by_meeting_id?: number | null;
   is_open: boolean;
-  /** Sales' stored answer to the question. Answering does not close the card. */
+  /** The stored answer to the question. Answering does not close the card. */
   answer_note?: string | null;
+  /** Questions (2026-10-14): the department the question was asked for (it
+   *  owns the task), and whether the viewer may answer it (the asking
+   *  department or the author, Sales, Project Management). Served by the list
+   *  endpoint. */
+  asking_department_name?: string | null;
+  can_answer?: boolean | null;
   answered_at?: string | null;
   answered_by?: number | null;
   answered_by_name?: string | null;

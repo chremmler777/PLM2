@@ -6,10 +6,11 @@
  * questions are parallel cards, so nothing can be misread as belonging to a
  * different one.
  *
- * Three states, and two different acts: Sales writes the answer (a record of
- * what the customer said — it does not close anything), and the side that asked
- * — or PM — decides the point is settled. Splitting them keeps the person who
- * needed the information in charge of when they have enough of it.
+ * Three states, and two different acts: somebody writes the answer (the asking
+ * department or the author, Sales or PM; a record, it does not close anything),
+ * and the side that asked, or PM, decides the point is settled. Splitting them
+ * keeps the person who needed the information in charge of when they have
+ * enough of it. The question stays the asking side's task (2026-10-14).
  */
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
@@ -24,13 +25,17 @@ import type { Attachment, ChangeConcern } from '../../types/change'
 
 export default function NeedsInfoCard({
   changeId, concern: c, attachments, canAnswer, canSettle, editable, onChanged, origin,
+  askingSide,
 }: {
   changeId: number
   concern: ChangeConcern
   /** Every attachment on the change; the card takes only its own. */
   attachments: Attachment[]
-  /** Sales: may write and rewrite the answer while the question is open. */
+  /** The asking department (or the author), Sales or PM: may write and
+   *  rewrite the answer while the question is open. */
   canAnswer: boolean
+  /** Who the question waits on, in words: its department, else its author. */
+  askingSide?: string
   /** The asking side or a PM: may declare the point settled. */
   canSettle: boolean
   editable: boolean
@@ -197,7 +202,8 @@ export default function NeedsInfoCard({
 
         {!solved && editable && !canAnswer && (
           <p className="text-[11px] text-slate-500" data-testid={`needs-info-answer-readonly-${c.id}`}>
-            {t('concern.salesAnswersHint')}
+            {t('concern.salesAnswersHint').replace(
+              '{x}', askingSide ?? c.asking_department_name ?? c.raised_by_name ?? `#${c.raised_by}`)}
           </p>
         )}
         {!solved && editable && canAnswer && (

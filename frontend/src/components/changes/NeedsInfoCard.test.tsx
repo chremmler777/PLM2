@@ -124,12 +124,18 @@ describe('NeedsInfoCard roles', () => {
       .toBe(t('concern.updateAnswer'))
   })
 
-  it('offers no answer controls to anyone but Sales, only who answers', () => {
-    card({ canSettle: true })
+  it('offers no answer controls to anyone else, only who answers (the asking side, Sales, PM)', () => {
+    card({ canSettle: true, askingSide: 'APQP' })
     expect(screen.queryByTestId('needs-info-answer-submit-1')).toBeNull()
     expect(screen.queryByTestId('needs-info-answer-note-1')).toBeNull()
     expect(screen.getByTestId('needs-info-answer-readonly-1').textContent)
-      .toBe(t('concern.salesAnswersHint'))
+      .toBe('APQP, Sales or PM answer this question.')
+  })
+
+  it('names the asking department served by the backend when no side is passed', () => {
+    card({ concern: concern({ department_id: 4, asking_department_name: 'Quality' }) })
+    expect(screen.getByTestId('needs-info-answer-readonly-1').textContent)
+      .toBe('Quality, Sales or PM answer this question.')
   })
 
   it('closes only for the asking side or PM, with a note', async () => {

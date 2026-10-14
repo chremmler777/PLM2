@@ -45,6 +45,14 @@ describe('resolveWaitStates', () => {
     expect(w.tab).toBe('scoping')
   })
 
+  it('waits on the asking department, not Sales (2026-10-14)', () => {
+    const [w] = resolveWaitStates(change(),
+      [concern({ department_id: 4, asking_department_name: 'APQP' })], deptName)
+    expect(w.text).toBe(t('wait.onSales.info').replace('{d}', 'APQP')
+      .replace('{x}', 'What is the target price?'))
+    expect(w.text).not.toContain('Sales')
+  })
+
   it('waits on review once the answer is in', () => {
     const [w] = resolveWaitStates(change(),
       [concern({ answer_note: '12.50', answered_at: '2026-08-02T00:00:00' })], deptName)
@@ -93,6 +101,32 @@ describe('resolveWaitStates', () => {
     // Only while costing is the live phase.
     expect(resolveWaitStates(
       change({ status: 'quoted', costing_pending_department_ids: [2] }), [], deptName)).toEqual([])
+  })
+
+  it('counts finalized departments: "Costing: 1/3 finalized" (per-department pipeline)', () => {
+    const waits = resolveWaitStates(change({
+      status: 'costing', costing_pending_department_ids: [2, 4],
+      costing_owed_department_ids: [2, 3, 4], costing_finalized_department_ids: [3],
+    }), [], deptName)
+    expect(waits[0].text).toBe(t('wait.costingProgress').replace('{n}', '1').replace('{m}', '3')
+      .replace('{x}', 'Development, Tool Engineer'))
+    expect(waits[0].info).toBeUndefined()
+  })
+
+  it('shows costing progress during assessment as info, not as a blocker', () => {
+    const open = resolveWaitStates(change({
+      status: 'in_assessment', costing_pending_department_ids: [4],
+      costing_owed_department_ids: [3, 4], costing_finalized_department_ids: [3],
+    }), [], deptName)
+    const row = open.find((w) => w.key === 'costing-input')!
+    expect(row.info).toBe(true)
+    expect(row.text).toContain('1/2')
+    const done = resolveWaitStates(change({
+      status: 'in_assessment', costing_pending_department_ids: [],
+      costing_owed_department_ids: [3, 4], costing_finalized_department_ids: [3, 4],
+    }), [], deptName)
+    expect(done.find((w) => w.key === 'costing-input')?.text)
+      .toBe(t('wait.costingProgressDone').replace('{n}', '2').replace('{m}', '2'))
   })
 
   it('waits on the rejection letter until the customer has been told', () => {

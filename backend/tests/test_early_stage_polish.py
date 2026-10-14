@@ -285,6 +285,7 @@ async def test_impact_edits_lead_pm_admin(client, auth, seed, depts, session_fac
     assert res.status_code == 200, res.text
 
 
+@pytest.mark.usefixtures("impact_confirm_on")
 async def test_development_picks_then_confirms_impact(client, auth, seed, depts,
                                                      session_factory):
     """Development picks the impacted set itself at scoping (no PM pick

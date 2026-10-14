@@ -162,8 +162,21 @@ async def test_positions_are_writable_only_while_the_change_is_in_costing(
         client, admin_auth, session_factory, seed, costing):
     tool_member = await _member(client, session_factory, seed, costing["tool"],
                                 "posstool2@test.io")
-    await _set_status(session_factory, costing["change_id"], "in_assessment")
+    await _set_status(session_factory, costing["change_id"], "quoting")
 
+    denied = await _add_position(client, tool_member, costing, est_cost=10.0)
+    assert denied.status_code == 403
+    # In assessment the window is the department's own: closed until it has
+    # submitted a feasible answer (per-department pipeline, 2026-10-14).
+    await _set_status(session_factory, costing["change_id"], "in_assessment")
+    async with session_factory() as s:
+        from sqlalchemy import select as _select
+        from app.models.change import ChangeAssessment
+        row = (await s.execute(_select(ChangeAssessment).where(
+            ChangeAssessment.change_id == costing["change_id"],
+            ChangeAssessment.department_id == costing["tool"]))).scalar_one()
+        row.verdict = "pending"
+        await s.commit()
     denied = await _add_position(client, tool_member, costing, est_cost=10.0)
     assert denied.status_code == 403
     # PM/admin run costing and are not held to the window.
@@ -585,6 +598,12 @@ async def test_the_costing_input_task_disappears_for_a_nothing_impacted_departme
 async def test_a_position_answers_the_costing_queue(
         client, admin_auth, costing):
     await _add_position(client, admin_auth, costing, est_cost=42.0)
+    # A position is a finalizable answer like a line (per-department
+    # pipeline: the queue clears on finalize, not on the first entry).
+    res = await client.post(
+        f"/api/v1/changes/{costing['change_id']}/costing/departments/"
+        f"{costing['tool']}/finalize", headers=admin_auth)
+    assert res.status_code == 200, res.text
     detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
                                headers=admin_auth)).json()
     assert detail["costing_pending_department_ids"] == [costing["dev"]]

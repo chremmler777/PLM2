@@ -492,7 +492,7 @@ export default function ConcernStrip({
                 </span>
               )}
               {withdrawing === c.id && (() => {
-                // Sales answering owes the answer itself; a department flag owes
+                // Someone else answering owes the answer itself; a department flag owes
                 // its resolution; a plain team withdrawal may go unexplained.
                 const answering = !isAuthor(c)
                 const noteRequired = answering || c.department_id != null

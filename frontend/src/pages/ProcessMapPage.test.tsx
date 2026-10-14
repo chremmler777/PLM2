@@ -65,8 +65,8 @@ describe('ProcessMapPage', () => {
     wrap()
     const chart = screen.getByTestId('procmap-chart').textContent ?? ''
     for (const guard of [
-      'proceed: an R or A department, cost carrier set, no open concern',
-      'impact set locked (hard) · soft: impacted items, lead, quote deadline (customer)',
+      'proceed: an R or A department, cost carrier set, parts picked, no open concern',
+      'impact set locked by proceed (hard) · soft: lead, quote deadline (customer)',
       'soft: all R/A submitted, none not feasible, no routing change pending',
       'Close costing (PM, Sales, lead)',
       'offer v1 sent (auto)',
@@ -170,7 +170,7 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-deadline-rail').textContent)
       .toContain('moved only with a reason (audited)')
     expect(screen.getByTestId('procmap-checked').textContent)
-      .toContain('Checked against the running system on 1 Oct 2026')
+      .toContain('Checked against the running system on 14 Oct 2026')
   })
 
   it('states who decides what as the code does (review 2026-10-01)', () => {
@@ -221,11 +221,15 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-node-cancelled').textContent).toContain('not after release')
   })
 
-  it('draws the customer-question loop back into scoping', () => {
+  it('draws the question loop back into scoping', () => {
     authMock.current = { role: 'admin' }
     window.localStorage.setItem('plm2.procmap.taskKeys', 'on')
     wrap()
     expect(screen.getByTestId('procmap-node-obtain-info').textContent).toContain('obtain_info')
+    // 2026-10-14: the question stays the asking department's, not Sales-only.
+    expect(screen.getByTestId('procmap-node-obtain-info').textContent)
+      .toContain('asking dept, Sales or PM')
+    expect(screen.getByTestId('procmap-role-scoping').textContent).toContain('defines the scope')
     expect(screen.getByTestId('procmap-node-customer-answer').textContent)
       .toContain('info_request → info_response')
     expect(screen.getByTestId('procmap-node-close-question').textContent)
@@ -354,7 +358,7 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-sources')).toBeTruthy()
     expect(screen.getByTestId('procmap-node-captured').textContent).toContain('task: kickoff')
     expect(screen.getByTestId('procmap-node-scoping').textContent)
-      .toContain('scoping_wrapup · impact_confirm')
+      .toContain('scoping_wrapup · obtain_info · close_question')
     expect(screen.getByTestId('procmap-node-costing').textContent).toContain('task: costing_input')
     expect(screen.getByTestId('procmap-node-quoting').textContent).toContain('task: create_quote')
     expect(screen.getByTestId('procmap-node-quoted').textContent).toContain('customer_response')
@@ -408,7 +412,7 @@ describe('ProcessMapPage', () => {
     expect(capture).toContain('Sales (can_start_change); PM may start')
     expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
-    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(12)
+    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(13)
     expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
   })
 
