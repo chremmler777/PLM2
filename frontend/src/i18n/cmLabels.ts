@@ -2382,8 +2382,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.needsYou': { de: 'Braucht dich', en: 'Needs you' },
   'tasks.late': { de: 'Verspätet', en: 'Late' },
   'tasks.lateHint': {
-    de: 'Einen Arbeitstag über fällig: die Abteilung und der Lead sehen es jetzt',
-    en: 'One working day past due: the department and the lead see it now' },
+    de: 'Einen Arbeitstag über fällig: der Lead sieht es jetzt unter „Überfällig“, und es steht im täglichen Überfällig-Bericht',
+    en: "One working day past due: the lead sees it in 'Overdue' now, and it is in the daily overdue digest" },
+  'tasks.lateHintDigest': {
+    de: 'Einen Arbeitstag über fällig: es steht jetzt im täglichen Überfällig-Bericht',
+    en: 'One working day past due: it is in the daily overdue digest now' },
+  'tasks.lateHintOwn': {
+    de: 'Einen Arbeitstag über fällig', en: 'One working day past due' },
   'tasks.dueUrgent': { de: '(dringend)', en: '(urgent)' },
   'tasks.dueQuoteDeadline': { de: '(Angebotstermin {d})', en: '(quote deadline {d})' },
   'tasks.dueNeedBy': { de: '(benötigt bis {d})', en: '(need-by {d})' },
@@ -2413,8 +2418,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'This task is done or no longer yours.' },
   'taskcard.close': { de: 'Schließen', en: 'Close' },
   'taskcard.help': {
-    de: 'Diese Karte zeigt deinen Teil an dieser Änderung und bis wann. Der Knopf führt dorthin, wo du ihn erledigst. Fällig: 2 Arbeitstage (dringend 1); einen Arbeitstag danach sehen es deine Abteilung und der Lead.',
-    en: 'This card shows your part in this change and by when. The button takes you to where you do it. Due: 2 working days (urgent 1); one working day later your department and the lead see it.' },
+    de: 'Diese Karte zeigt deinen Teil an dieser Änderung und bis wann. Der Knopf führt dorthin, wo du ihn erledigst. Das Fälligkeitsdatum folgt dem Termin der Änderung; einen Arbeitstag danach gilt es als verspätet.',
+    en: "This card shows your part in this change and by when. The button takes you to where you do it. The due date follows the change's deadline; one working day later it counts as late." },
+  'taskcard.below': { de: '{x} (unten)', en: '{x} (below)' },
   'taskcard.gotIt': { de: 'Verstanden', en: 'Got it' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

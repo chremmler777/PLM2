@@ -17,7 +17,7 @@ import { toastError } from '../lib/apiError';
 import { BookOpen, ClipboardList, FileText } from 'lucide-react';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
-import { dueNote, foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
+import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
 import BackupChip from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
@@ -373,7 +373,7 @@ const taskHint = (task: ChangeTask): string | null => {
  *  department and the lead see it then). */
 function DueCell({ due, overdue, task }: {
   due: string | null; overdue: boolean;
-  task?: Pick<ChangeTask, 'deadline_date' | 'deadline_kind' | 'urgent' | 'late'>;
+  task?: Pick<ChangeTask, 'deadline_date' | 'deadline_kind' | 'urgent' | 'late' | 'escalation'>;
 }) {
   if (!due) return <span className="text-slate-500">-</span>;
   const note = task ? dueNote(task) : null;
@@ -382,7 +382,7 @@ function DueCell({ due, overdue, task }: {
       <span className="inline-flex items-center gap-1">
         <DeadlineChip date={due} state={overdue ? 'overdue' : 'on_track'} />
         {task?.late && (
-          <span data-testid="task-late" title={t('tasks.lateHint')}
+          <span data-testid="task-late" title={lateHint(task.escalation)}
             className="rounded bg-red-900/60 px-1.5 text-[11px] font-semibold text-red-200">
             {t('tasks.late')}
           </span>

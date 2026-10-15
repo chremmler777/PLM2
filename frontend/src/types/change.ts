@@ -504,8 +504,11 @@ export interface ChangeTask {
   main_name?: string | null;
   /** C3: a decision only this person gives; listed under "Needs you". */
   needs_you?: boolean;
-  /** C20: past due + 1 working day: shown to the department and the lead. */
+  /** C20: past due + 1 working day. */
   late?: boolean;
+  /** Who sees a late row besides its owner: the lead's "Overdue" group and
+   *  the digest (assessments), the digest (Sales' stage rows), nobody else. */
+  escalation?: 'lead' | 'digest' | null;
   /** C20: the deadline the row runs against ("due Thu (quote deadline Mon)"). */
   deadline_date?: string | null;
   deadline_kind?: 'quote' | 'need_by' | null;
@@ -768,6 +771,8 @@ export interface MyAction {
   count?: number | null;
   /** Extra context beyond the label (shown as the button's tooltip). */
   hint?: string | null;
+  /** advance: the onward status the step moves the change to. */
+  to_status?: ChangeStatus | null;
   /** Project team (spec §18): backup items show in a muted "As backup" group. */
   role?: TeamRole;
   main_name?: string | null;

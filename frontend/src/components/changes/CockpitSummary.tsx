@@ -553,7 +553,10 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     // A deviation is decided in its own panel, not just "somewhere on Overview".
     : a.kind === 'deviation_decision' && onDecideDeviation
       ? onDecideDeviation(a.deviation_id ?? undefined)
-      : onAction?.(a.target_tab))
+      // "Ready: move it on" makes the move, like the Next step button
+      : a.kind === 'advance' && a.to_status
+        ? onAdvance(a.to_status)
+        : onAction?.(a.target_tab))
   // A gate constrains its target transition hard (backend: no row decided
   // 'yes', no move). A step it holds is not a live button: it is disabled with
   // the gate's reason, and the way to D1 is right under it.

@@ -1101,6 +1101,8 @@ export default function ChangeDetailPage() {
         <TaskCard changeId={changeId} kind={taskParam}
           departmentId={Number.isInteger(taskDeptParam) && taskDeptParam > 0 ? taskDeptParam : null}
           actions={myActions?.actions ?? []}
+          currentTab={effectiveTab}
+          onAdvance={advance}
           onGo={(tab) => goTab(tab)}
           onClose={() => setSearchParams({ tab: effectiveTab }, { replace: true })} />
       )}

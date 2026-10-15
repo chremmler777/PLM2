@@ -47,6 +47,29 @@ describe('TaskCard (spec §0 task links)', () => {
     expect(screen.queryByTestId('task-card-help')).toBeNull()
   })
 
+  it('"Ready: move it on" makes the move, named like the Next step button', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([row({
+      kind: 'advance', department_id: null, status: 'in_assessment', to_status: 'costing',
+      target_tab: 'overview' })] as never)
+    const onGo = vi.fn(); const onAdvance = vi.fn()
+    wrap(<TaskCard changeId={7} kind="advance" actions={[]} onGo={onGo} onAdvance={onAdvance}
+      currentTab="overview" onClose={vi.fn()} />)
+    const next = await screen.findByTestId('task-card-next')
+    expect(next.textContent).toBe('Close assessment')
+    fireEvent.click(next)
+    expect(onAdvance).toHaveBeenCalledWith('costing')
+    expect(onGo).not.toHaveBeenCalled()
+  })
+
+  it('on the tab where the work is, the card names the step instead of a second button', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([row({
+      kind: 'internal_approval', department_id: null, target_tab: 'commercial' })] as never)
+    wrap(<TaskCard changeId={7} kind="internal_approval" currentTab="commercial" onGo={vi.fn()}
+      onClose={vi.fn()} actions={[{ kind: 'internal_approval', label: 'Approve the internal costs', target_tab: 'commercial' }]} />)
+    expect((await screen.findByTestId('task-card-here')).textContent).toBe('Approve the internal costs (below)')
+    expect(screen.queryByTestId('task-card-next')).toBeNull()
+  })
+
   it('a task that is no longer yours says so and offers no next step', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([row({ department_id: 5 })] as never)
     wrap(<TaskCard changeId={7} kind="assessment" departmentId={2} actions={[]}

@@ -1,8 +1,11 @@
 /**
  * The task card (spec §0 "Task links"): a My Tasks link opens the change with
  * the viewer's part on top: "Your part: Assess, due Thu (quote deadline Mon).
- * Next: <button>". The button goes where the work is done. A first-use help
- * line explains it once and is dismissed for good (per browser).
+ * Next: <button>". The button goes where the work is done; "Ready: move it
+ * on" makes the move itself, named like the Next step button ("Close
+ * assessment"). On the tab where the work already is, the card names the
+ * step instead of repeating that tab's own button. A first-use help line
+ * explains it once and is dismissed for good (per browser).
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -12,6 +15,7 @@ import { t } from '../../i18n/cmLabels';
 import { formatCalendarDateShort } from '../../lib/format';
 import { taskKindLabel } from '../../lib/humanLabels';
 import { dueNote } from '../../lib/myTasks';
+import { transitionLabel } from '../../lib/changeStatus';
 import { btnSm } from '../common/buttonStyles';
 import type { ChangeTask } from '../../types/change';
 
@@ -30,9 +34,13 @@ interface Props {
   actions: { kind: string; label: string; target_tab?: string | null; department_id?: number | null }[];
   onGo: (tab: string) => void;
   onClose: () => void;
+  /** The tab on screen: there the card does not repeat the tab's button. */
+  currentTab?: string;
+  /** Runs an onward hop the way the Next step button does (confirm included). */
+  onAdvance?: (to: string) => void;
 }
 
-export default function TaskCard({ changeId, kind, departmentId, actions, onGo, onClose }: Props) {
+export default function TaskCard({ changeId, kind, departmentId, actions, onGo, onClose, currentTab, onAdvance }: Props) {
   const [help, setHelp] = useState(() => !helpDismissed());
   const { data: tasks, isLoading } = useQuery({
     queryKey: ['change-my-tasks'],
@@ -44,6 +52,11 @@ export default function TaskCard({ changeId, kind, departmentId, actions, onGo, 
   const action = actions.find((a) => (a.kind === kind || (kind === 'create_quote' && a.kind === 'offer_build'))
     && (departmentId == null || a.department_id == null || a.department_id === departmentId));
   if (isLoading) return null;
+  const advanceTo = task?.kind === 'advance' && onAdvance ? task.to_status ?? null : null;
+  const target = action?.target_tab ?? task?.target_tab ?? 'overview';
+  const nextLabel = !task ? ''
+    : advanceTo ? transitionLabel(advanceTo, task.status)
+      : action?.label ?? taskKindLabel(task.kind, task.kind_label ?? task.label);
 
   const dismissHelp = () => {
     setHelp(false);
@@ -74,10 +87,16 @@ export default function TaskCard({ changeId, kind, departmentId, actions, onGo, 
           {task && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="text-slate-400">{t('taskcard.next')}</span>
-              <button type="button" data-testid="task-card-next" className={btnSm.primary}
-                onClick={() => onGo(action?.target_tab ?? task.target_tab ?? 'overview')}>
-                {action?.label ?? taskKindLabel(task.kind, task.kind_label ?? task.label)}
-              </button>
+              {!advanceTo && currentTab === target ? (
+                <span data-testid="task-card-here" className="text-slate-200">
+                  {t('taskcard.below').replace('{x}', nextLabel)}
+                </span>
+              ) : (
+                <button type="button" data-testid="task-card-next" className={btnSm.primary}
+                  onClick={() => (advanceTo ? onAdvance?.(advanceTo) : onGo(target))}>
+                  {nextLabel}
+                </button>
+              )}
             </div>
           )}
           {help && (

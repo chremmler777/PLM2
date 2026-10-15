@@ -19,6 +19,13 @@ export function dueNote(task: Pick<ChangeTask, 'deadline_date' | 'deadline_kind'
     .replace('{d}', formatDayMonth(task.deadline_date))
 }
 
+/** The Late chip's tooltip: who sees the late row besides its owner, as the
+ *  backend escalates it (one escalation rule, spec §0); never more. */
+export function lateHint(escalation: ChangeTask['escalation']): string {
+  return t(escalation === 'lead' ? 'tasks.lateHint'
+    : escalation === 'digest' ? 'tasks.lateHintDigest' : 'tasks.lateHintOwn')
+}
+
 const earlier = (a: string | null | undefined, b: string | null | undefined) =>
   !a ? (b ?? null) : !b ? a : (a < b ? a : b)
 
