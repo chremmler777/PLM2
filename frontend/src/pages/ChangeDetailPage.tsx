@@ -293,7 +293,7 @@ export default function ChangeDetailPage() {
   // already routed to keeps its name.
   const routedIds = new Set((change?.assessments ?? []).map((a) => a.department_id));
   const departments = allDepartments.filter((d) => d.is_active !== false || routedIds.has(d.id));
-  const { isAdmin: isRealAdmin, userId } = useAuth();
+  const { isAdmin: isRealAdmin, userId, canWrite } = useAuth();
   // The whole point of acts-as is walking the flow through a department's
   // eyes: the backend already drops the admin bypass then (spec D2), so the
   // page must drop every personal privilege too — admin AND change-lead.
@@ -319,7 +319,8 @@ export default function ChangeDetailPage() {
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
   const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
   const schedulingDeptId = departments.find((d) => d.name === 'Scheduling')?.id;
-  const isChangeLead = !actingAs
+  // A viewer (no department) is read-only even when named as lead.
+  const isChangeLead = !actingAs && canWrite
     && userId != null && change?.lead_id != null && userId === change.lead_id;
   const isQualityMember = !!myActions && qualityDeptId !== undefined
     && myActions.memberships.includes(qualityDeptId);
@@ -773,7 +774,9 @@ export default function ChangeDetailPage() {
 
   const isOverview = effectiveTab === 'overview';
   // Closed and canceled changes are records: nothing on them is editable.
-  const readOnly = change.status === 'closed' || change.status === 'cancelled';
+  const isRecord = change.status === 'closed' || change.status === 'cancelled';
+  // A viewer may not write anywhere (the backend answers 403): same lock.
+  const readOnly = isRecord || !canWrite;
   const closedOn = change.status === 'closed'
     ? [...(changelog ?? [])].reverse().find((e) => e.field_name === 'status'
       && decodeLogValue(e.new_value) === 'closed')?.performed_at ?? null
@@ -948,7 +951,7 @@ export default function ChangeDetailPage() {
           </p>
         </div>
       )}
-      {readOnly && (
+      {isRecord && (
         <p role="status" data-testid="closed-banner"
           className="mt-3 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-300">
           <Lock aria-hidden="true" size={14} className="shrink-0 text-slate-400" />
@@ -1157,7 +1160,7 @@ export default function ChangeDetailPage() {
               separate routing list or loose submit form lives inside it. */}
           <AssessmentBuckets change={change} departments={departments}
             myDepartmentIds={myActions?.memberships ?? []}
-            editable={change.status === 'in_assessment'} isPm={isPmMember}
+            editable={canWrite && change.status === 'in_assessment'} isPm={isPmMember}
             canSeeAll={canSeeCosts}
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
             userId={userId ?? null} isChangeLead={isChangeLead}
@@ -1211,7 +1214,7 @@ export default function ChangeDetailPage() {
                 .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active, code: p.code, location: p.location }))}
               projectPlantId={projectPlantId}
               canSeeAll={canSeeCosts}
-              editable={change.status === 'costing' || change.status === 'in_assessment'}
+              editable={canWrite && (change.status === 'costing' || change.status === 'in_assessment')}
               isPm={isPmMember || isAdmin} />
           )}
           {/* The whole picture, for the people who answer for it; at quoting

@@ -115,7 +115,7 @@ vi.mock('../hooks/queries/useWorkflows', () => ({
   useDepartments: vi.fn(() => ({ data: [] })),
 }))
 const authState = vi.hoisted(() => ({
-  current: { isAdmin: false, role: 'engineer', userId: null as number | null },
+  current: { isAdmin: false, role: 'engineer', canWrite: true, userId: null as number | null },
 }))
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => authState.current,
@@ -208,11 +208,11 @@ function wrap(initialPath: string) {
 describe('ChangeDetailPage URL-driven tabs', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
   it('renders with the D1 tab active when ?tab=d1 for an admin', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1?tab=d1')
     const d1Button = await screen.findByRole('tab', { name: 'D1' })
     expect(d1Button.getAttribute('aria-selected')).toBe('true')
@@ -239,7 +239,7 @@ describe('ChangeDetailPage URL-driven tabs', () => {
 describe('ChangeDetailPage governance tab gating', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     change.lead_id = null
     vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
@@ -254,7 +254,7 @@ describe('ChangeDetailPage governance tab gating', () => {
   })
 
   it('shows the Governance group with D1 and Audit for an admin', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1')
     await screen.findByRole('tab', { name: 'Overview' })
     expect(screen.getByText('Governance')).toBeDefined()
@@ -272,7 +272,7 @@ describe('ChangeDetailPage governance tab gating', () => {
 
   it('shows the Governance group with D1 and Audit for the change lead', async () => {
     change.lead_id = 42
-    authState.current = { isAdmin: false, role: 'engineer', userId: 42 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 42 }
     wrap('/changes/1')
     await screen.findByRole('tab', { name: 'Overview' })
     expect(screen.getByText('Governance')).toBeDefined()
@@ -285,7 +285,7 @@ describe('ChangeDetailPage governance tab gating', () => {
       data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     wrap('/changes/1')
     await screen.findByRole('tab', { name: 'Overview' })
     expect(screen.getByText('Governance')).toBeDefined()
@@ -297,7 +297,7 @@ describe('ChangeDetailPage governance tab gating', () => {
 describe('ChangeDetailPage offer tab rights', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     change.status = 'in_assessment'
     change.customer_relevant = undefined
     change.lead_id = null
@@ -310,7 +310,7 @@ describe('ChangeDetailPage offer tab rights', () => {
       data: [{ id: 3, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [3] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'quoted'
     change.customer_relevant = true
     wrap('/changes/1?tab=offer')
@@ -323,7 +323,7 @@ describe('ChangeDetailPage offer tab rights', () => {
       data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'quoted'
     change.customer_relevant = true
     wrap('/changes/1?tab=offer')
@@ -336,7 +336,7 @@ describe('ChangeDetailPage offer tab rights', () => {
       data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'quoted'
     change.customer_relevant = true
     wrap('/changes/1?tab=offer')
@@ -356,7 +356,7 @@ describe('ChangeDetailPage offer tab rights', () => {
 describe('ChangeDetailPage tab model (costing to close)', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     change.status = 'in_assessment'
     change.customer_relevant = undefined
     vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
@@ -423,7 +423,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
       data: [{ id: 11, name: 'Scheduling', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [11] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'approved' as ChangeDetail['status']
     wrap('/changes/1?tab=timing')
     await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
@@ -437,7 +437,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
       data: [{ id: 12, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [12] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'approved' as ChangeDetail['status']
     wrap('/changes/1?tab=timing')
     await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
@@ -450,14 +450,14 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
       data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'approved' as ChangeDetail['status']
     wrap('/changes/1?tab=timing')
     await waitFor(() => expect(screen.getByTestId('timing-rights-2').textContent)
       .toBe('bank=true decide=true admin=false'))
     cleanup()
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
-    authState.current = { isAdmin: true, role: 'admin', userId: 1 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 1 }
     wrap('/changes/1?tab=timing')
     await waitFor(() => expect(screen.getByTestId('timing-rights-2').textContent)
       .toBe('bank=true decide=true admin=true'))
@@ -470,7 +470,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
         data: [{ id: 44, name: 'Tool Engineer', flow_type: 'action', is_active: true, sort_order: 1 }],
       } as unknown as ReturnType<typeof useDepartments>)
       vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [44] })
-      authState.current = { isAdmin: true, role: 'admin', userId: 1 }
+      authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 1 }
       change.status = 'approved' as ChangeDetail['status']
       wrap('/changes/1?tab=timing')
       await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
@@ -517,7 +517,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
       data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'in_validation' as ChangeDetail['status']
     wrap('/changes/1?tab=release')
     await waitFor(() => expect(screen.getByTestId('mock-release-tab').textContent).toBe('manage=true'))
@@ -527,7 +527,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
 describe('ChangeDetailPage rejection', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     vi.mocked(changesApi.get).mockResolvedValue(change)
   })
 
@@ -537,13 +537,13 @@ describe('ChangeDetailPage rejection', () => {
       status: 'rejected' as ChangeDetail['status'],
       rejection_reason: 'Customer withdrew the request',
     })
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1')
     expect(await screen.findByRole('alert')).toBeDefined()
     expect(screen.getByText(/the flow is stopped/i)).toBeDefined()
     expect(screen.getByText('Customer withdrew the request')).toBeDefined()
     expect(screen.getByRole('button', { name: /Reopen/ })).toBeDefined()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
   it('offers Reopen only to the lead, PM or admin (spec §16 P1 4)', async () => {
@@ -566,14 +566,14 @@ describe('ChangeDetailPage rejection', () => {
 describe('ChangeDetailPage capture phase', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     change.status = 'in_assessment'
     change.description = null
     vi.mocked(changesApi.update).mockClear()
   })
 
   it('saves an edited description with a PATCH', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1')
     fireEvent.change(await screen.findByTestId('description-input'),
@@ -679,13 +679,13 @@ describe('ChangeDetailPage capture phase', () => {
 describe('ChangeDetailPage costing tab', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     change.status = 'in_assessment'
     change.customer_relevant = undefined
   })
 
   it('states the stage and no longer carries the timeline placeholder', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'costing' as ChangeDetail['status']
     change.customer_relevant = true
     wrap('/changes/1?tab=costing')
@@ -694,7 +694,7 @@ describe('ChangeDetailPage costing tab', () => {
   })
 
   it('offers PM, Sales, the lead and admin the reopen of costing while quoting, with a reason', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'quoting' as ChangeDetail['status']
     change.customer_relevant = true
     wrap('/changes/1?tab=costing')
@@ -704,7 +704,7 @@ describe('ChangeDetailPage costing tab', () => {
   })
 
   it('tells a bystander costing is closed without offering the reopen', async () => {
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'quoting' as ChangeDetail['status']
     wrap('/changes/1?tab=costing')
     await screen.findByTestId('costing-closed')
@@ -713,13 +713,13 @@ describe('ChangeDetailPage costing tab', () => {
 
   it('mounts the full P&L card (which reads /summation) only for the cost roles; others get their department part', async () => {
     change.status = 'costing' as ChangeDetail['status']
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     wrap('/changes/1?tab=costing')
     await screen.findByTestId('costing-stage')
     expect(screen.queryByText('mock-pnl-card')).toBeNull()
     expect(screen.getByText('mock-pnl-department-only')).toBeDefined()
     cleanup()
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1?tab=costing')
     expect(await screen.findByText('mock-pnl-card')).toBeDefined()
   })
@@ -737,7 +737,7 @@ describe('ChangeDetailPage costing tab', () => {
 describe('ChangeDetailPage description authz', () => {
   afterEach(() => {
     cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     change.status = 'in_assessment'
     change.lead_id = null
     vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
@@ -749,7 +749,7 @@ describe('ChangeDetailPage description authz', () => {
       data: [{ id: 3, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [3] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1')
     expect(await screen.findByTestId('description-input')).toBeDefined()
@@ -760,7 +760,7 @@ describe('ChangeDetailPage description authz', () => {
       data: [{ id: 3, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [3] })
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'scoping' as ChangeDetail['status']
     wrap('/changes/1')
     await screen.findByRole('tab', { name: /Overview/ })
@@ -768,7 +768,7 @@ describe('ChangeDetailPage description authz', () => {
   })
 
   it('shows the description read-only to an unrelated viewer', async () => {
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1')
     await screen.findByRole('tab', { name: /Overview/ })
@@ -926,7 +926,7 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
   afterEach(() => { cleanup(); change.status = 'in_assessment' as ChangeDetail['status'] })
 
   it('asks before closing and only then moves the change', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'released' as ChangeDetail['status']
     wrap('/changes/1?tab=release')
     fireEvent.click(await screen.findByText('mock-close'))
@@ -938,7 +938,7 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
   })
 
   it('takes a change back to scoping only with a reason, and sends it', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'in_assessment' as ChangeDetail['status']
     vi.mocked(changesApi.transition).mockClear()
     wrap('/changes/1')
@@ -952,11 +952,11 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     fireEvent.click(go)
     await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(
       1, 'scoping', { to: 'scoping', reason: 'Scope needs the carrier too' }))
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
   it('holds the mother-plant hand-over while anything is missing and takes the description inline', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     const c = change as unknown as Record<string, unknown>
     change.status = 'captured' as ChangeDetail['status']
     c.origin = 'mother_plant'
@@ -970,12 +970,12 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
       expect(screen.getByTestId('kickoff-description').querySelector('[data-testid="description-input"]')).toBeTruthy()
     } finally {
       delete c.origin
-      authState.current = { isAdmin: false, role: 'engineer', userId: null }
+      authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     }
   })
 
   it('offers no Cancel once the change is released or closed', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'released' as ChangeDetail['status']
     wrap('/changes/1')
     await screen.findByText('mock-cockpit-summary')
@@ -987,7 +987,7 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     const item = await screen.findByTestId('header-cancel')
     expect(item.getAttribute('role')).toBe('menuitem')
     expect(item.closest('details')?.querySelector('summary')?.getAttribute('aria-label')).toBe('More actions')
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
   it('hides Cancel from a viewer without the right, and follows stage-state (spec §16 P1 4)', async () => {
@@ -1001,11 +1001,11 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
   })
 
   it('states that canceling is final', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1')
     fireEvent.click(await screen.findByTestId('header-cancel'))
     expect(screen.getByTestId('reason-open-Cancel change').textContent).toMatch(/^Canceling is final/)
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 })
 
@@ -1015,7 +1015,7 @@ describe('ChangeDetailPage needs("signoff") gates only the missing side (finding
     change.status = 'in_assessment' as ChangeDetail['status']
     change.pm_signed_by = null
     change.quality_signed_by = null
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
   })
@@ -1024,7 +1024,7 @@ describe('ChangeDetailPage needs("signoff") gates only the missing side (finding
     change.status = 'quoted' as ChangeDetail['status']
     change.pm_signed_by = null
     change.quality_signed_by = 2 // Quality already signed
-    authState.current = { isAdmin: false, role: 'engineer', userId: 7 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 7 }
     vi.mocked(useDepartments).mockReturnValue({
       data: [{ id: 5, name: 'Project Manager' }],
     } as never)
@@ -1037,7 +1037,7 @@ describe('ChangeDetailPage needs("signoff") gates only the missing side (finding
     change.status = 'quoted' as ChangeDetail['status']
     change.pm_signed_by = 7 // this PM member already signed
     change.quality_signed_by = null // Quality is the one still missing
-    authState.current = { isAdmin: false, role: 'engineer', userId: 7 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 7 }
     vi.mocked(useDepartments).mockReturnValue({
       data: [{ id: 5, name: 'Project Manager' }],
     } as never)
@@ -1051,13 +1051,13 @@ describe('ChangeDetailPage validate-timing step follows the Timing tab', () => {
   afterEach(() => {
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     vi.mocked(planApi.feedback).mockResolvedValue({ revision: 1, required: [], all_confirmed: true, validated_at: null, validated_by_name: null } as never)
   })
 
   it('is held while a team has not confirmed, like the tab button', async () => {
     change.status = 'approved' as ChangeDetail['status']
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     vi.mocked(planApi.feedback).mockResolvedValue({ revision: 1, all_confirmed: false, validated_at: null,
       validated_by_name: null, required: [
         { department_id: 4, department_name: 'APQP', verdict: null, stale: false },
@@ -1070,7 +1070,7 @@ describe('ChangeDetailPage validate-timing step follows the Timing tab', () => {
 
   it('is offered once every team confirmed', async () => {
     change.status = 'approved' as ChangeDetail['status']
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1')
     await waitFor(() => expect(planApi.feedback).toHaveBeenCalled())
     expect((await screen.findByTestId('needs-validate-timing')).textContent).toBe('allowed')
@@ -1081,14 +1081,14 @@ describe('ChangeDetailPage internal-approval step gating (finding 3)', () => {
   afterEach(() => {
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
   })
 
   it('needs("internal-approval") is open for a PM member, refused for anyone else', async () => {
     change.status = 'costing' as ChangeDetail['status']
-    authState.current = { isAdmin: false, role: 'engineer', userId: 7 }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 7 }
     vi.mocked(useDepartments).mockReturnValue({
       data: [{ id: 5, name: 'Project Manager' }],
     } as never)
@@ -1209,7 +1209,7 @@ describe('ChangeDetailPage validation issues after the loop back (review F1)', (
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
     issuesList.mockReset()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
   it('keeps the Release tab open in implementation once an issue exists, and shows the issues on Timing', async () => {
@@ -1240,7 +1240,7 @@ describe('ChangeDetailPage validation issues after the loop back (review F1)', (
   })
 
   it('the end-implementation dialog names the issues still fixing', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'in_implementation' as ChangeDetail['status']
     issuesList.mockResolvedValue([issue()])
     vi.mocked(planApi.get).mockResolvedValue({ tasks: [] } as never)
@@ -1260,11 +1260,11 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] } as never)
     vi.mocked(changesApi.getImplementation).mockResolvedValue({ ready_to_go: false } as never)
     vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
   it('release with open guards asks for a deviation with the reason instead of a bare refusal', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'in_validation' as ChangeDetail['status']
     releaseMock.blockers = ['Not ready to go: 4 impacted revisions have not completed their check workflow']
     vi.mocked(changesApi.transition).mockClear()
@@ -1284,7 +1284,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
   })
 
   it('a pending release deviation holds the dialog and says whose decision it waits on', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'in_validation' as ChangeDetail['status']
     releaseMock.blockers = ['6 moves with plan deviations still open']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
@@ -1297,7 +1297,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
   })
 
   it('an approved release deviation lets the release go ahead as a transition', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'in_validation' as ChangeDetail['status']
     releaseMock.blockers = ['6 moves with plan deviations still open']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
@@ -1312,7 +1312,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
   })
 
   it('"Decide deviation #n" opens the decision panel on Overview, where the approver decides', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'in_validation' as ChangeDetail['status']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
       { id: 5, to_status: 'released', reason: 'Covered by the customer timing', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
@@ -1329,7 +1329,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
   })
 
   it('close costing names hours without a cost sheet rate instead of "every department entered"', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'costing' as ChangeDetail['status']
     change.customer_relevant = true
     vi.mocked(changesApi.getSummation).mockResolvedValue({ unpriced_lines: [
@@ -1373,7 +1373,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
   afterEach(() => {
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     vi.mocked(changesApi.changelog).mockResolvedValue([])
   })
 
@@ -1431,7 +1431,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
   })
 
   it('asks once more before recording the approval of a change from KTX Weissenburg', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     const c = change as unknown as Record<string, unknown>
     change.status = 'scoping' as ChangeDetail['status']
     c.origin = 'mother_plant'
@@ -1448,12 +1448,12 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     } finally {
       delete c.origin
       delete c.mother_plant_name
-      authState.current = { isAdmin: false, role: 'engineer', userId: null }
+      authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
     }
   })
 
   it('never holds "Close costing" on the costing total: a zero total is a warning beside the step and in the confirm', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'costing' as ChangeDetail['status']
     const zero = { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 }
     // A department that legitimately costs nothing booked a zero line: the
@@ -1487,7 +1487,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
   })
 
   it('lists in the "Close costing" confirm exactly the departments the cockpit waits on, once (F-01)', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'costing' as ChangeDetail['status']
     const c = change as unknown as Record<string, unknown>
     c.costing_pending_department_ids = [27]
@@ -1519,7 +1519,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
   })
 
   it('resuming from hold into validation asks a plain resume, not "Finish implementation"', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     change.status = 'on_hold' as ChangeDetail['status']
     vi.mocked(changesApi.changelog).mockResolvedValue([
       { id: 1, action: 'status', action_description: '', performed_by: 1, performed_at: '2026-09-25T10:00:00',
@@ -1543,7 +1543,7 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
   })
 
   it('"More actions": arrow keys reach the items, Escape closes and returns focus', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1?tab=overview')
     const cancel = await screen.findByTestId('header-cancel')
     const details = cancel.closest('details') as HTMLDetailsElement
@@ -1564,5 +1564,34 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     await screen.findByTestId('confirm-in_validation')
     expect(screen.getByRole('dialog', { name: 'Finish implementation' })).toBeDefined()
     expect(screen.getByTestId('confirm-go').textContent).toBe('Finish implementation')
+  })
+})
+
+describe('ChangeDetailPage for a read-only viewer (roles audit issue 4)', () => {
+  afterEach(() => {
+    cleanup()
+    change.lead_id = null
+    change.status = 'in_assessment'
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
+  })
+
+  it('offers no write controls to a viewer, even one named as lead', async () => {
+    change.lead_id = 7
+    change.status = 'captured' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'viewer', canWrite: false, userId: 7 }
+    wrap('/changes/1?tab=overview')
+    await screen.findByRole('tab', { name: /Overview/ })
+    expect(screen.queryByText(/Attach document|Dokument anhängen/)).toBeNull()
+    expect(screen.queryByTestId('description-input')).toBeNull()
+    // read-only by role is not "closed": no closed/cancelled banner
+    expect(screen.queryByTestId('closed-banner')).toBeNull()
+  })
+
+  it('still offers the upload to a writer on the same change', async () => {
+    change.status = 'captured' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
+    wrap('/changes/1?tab=overview')
+    await screen.findByRole('tab', { name: /Overview/ })
+    expect(await screen.findByText(/Attach document|Dokument anhängen/)).toBeDefined()
   })
 })
