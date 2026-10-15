@@ -116,6 +116,12 @@ async def delete_milestone(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # A hard delete of the project's timing: Project Management or an admin
+    # (acts-as aware through _user_in_department), not any engineer.
+    from app.services.change_service import ChangeService
+    if not await ChangeService._user_in_department(db, current_user, "Project Manager"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only Project Management or an admin may delete a milestone")
     result = await db.execute(select(ProjectMilestone).where(ProjectMilestone.id == milestone_id))
     milestone = result.scalar_one_or_none()
     if not milestone:

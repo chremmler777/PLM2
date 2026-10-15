@@ -1,7 +1,7 @@
 """Project milestone (timing gate) tests."""
 
 
-async def test_milestone_lifecycle(client, eng_auth, seed):
+async def test_milestone_lifecycle(client, eng_auth, seed, session_factory):
     pid = seed["project_id"]
 
     # Create two gates: one overdue, one future
@@ -38,7 +38,11 @@ async def test_milestone_lifecycle(client, eng_auth, seed):
     names = [m["name"] for m in res.json()["milestones"]]
     assert "Design Freeze" not in names  # done
 
-    # Delete
+    # Delete: Project Management (or an admin) only
+    res = await client.delete(f"/api/v1/timing/milestones/{overdue_id}", headers=eng_auth)
+    assert res.status_code == 403
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Project Manager")
     res = await client.delete(f"/api/v1/timing/milestones/{overdue_id}", headers=eng_auth)
     assert res.status_code == 200
     res = await client.get(f"/api/v1/timing/projects/{pid}/milestones", headers=eng_auth)
