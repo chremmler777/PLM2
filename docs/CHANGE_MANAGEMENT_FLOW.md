@@ -461,7 +461,8 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   wrong; the confirm item goes to the Sales owner, else the lead, +5 wd, as
   for a scoping answer). Stored as `check_outcome` and the resolution note;
   logged `concern_withdrawn`, so the raiser's and the lead's daily digest
-  count it as closed. A free resolution note no longer closes a check item
+  count it as closed (the raiser of a check item closed since yesterday gets
+  that change's digest line even when not otherwise involved). A free resolution note no longer closes a check item
   in assessment: not for a member of an owning department (a raiser in that
   department included), not for Project Management or an admin. Project
   Management closes it through the same form (`settled_as` pm). Only a

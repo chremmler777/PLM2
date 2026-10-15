@@ -99,8 +99,14 @@ async def send_change_digest(session: AsyncSession,
     changes = (await session.execute(select(ChangeRequest).where(
         ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()
     involved: dict[int, list] = {}
+    since = now - WINDOW
     for c in changes:
-        for uid in {c.lead_id, c.raised_by, c.sales_owner_id} - {None}:
+        # spec §4: the raiser of a check item its department closed since
+        # yesterday reads it here (they may reopen it), R21
+        raisers = {q.raised_by for q in c.concerns
+                   if q.is_check and q.withdrawn_at is not None
+                   and q.withdrawn_at >= since and q.withdrawn_by != q.raised_by}
+        for uid in ({c.lead_id, c.raised_by, c.sales_owner_id} | raisers) - {None}:
             involved.setdefault(uid, []).append(c)
     if not involved:
         return 0

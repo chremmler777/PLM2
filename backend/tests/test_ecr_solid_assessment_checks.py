@@ -292,6 +292,34 @@ async def test_a_consulted_department_owning_check_items_gets_the_task(
                 and t["change_id"] == a["cid"]]
 
 
+async def test_the_raiser_of_a_closed_check_item_reads_it_in_the_digest(
+        client, assess, seed, session_factory):
+    """R21: the raiser (here a Process colleague who is neither lead, change
+    raiser nor Sales owner) is the one who may reopen it: the digest tells."""
+    from app.services.change_digest import DIGEST_KIND, send_change_digest
+    a = assess
+    q_id, _, q_auth = await _user(client, session_factory, seed, "qa", "Quality")
+    async with session_factory() as s:
+        chk = ChangeConcern(change_id=a["cid"], kind="needs_info",
+                            note="Check the rib", raised_by=q_id,
+                            department_id=a["proc"], flag_type="check",
+                            check_what="drawing")
+        s.add(chk)
+        await s.commit()
+        cid = chk.id
+    res = await client.post(_url(a, f"/concerns/{cid}/check"),
+                            json={"outcome": "answered", "ref": "DRW-4471 rev C"},
+                            headers=a["pe"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        await send_change_digest(s)
+        await s.commit()
+        got = (await s.execute(select(Notification.body).where(
+            Notification.kind == DIGEST_KIND,
+            Notification.user_id == q_id))).scalars().all()
+    assert got and "C-AC-1" in got[0] and "closed" in got[0]
+
+
 # --- C8: questions from the assessment ---------------------------------------
 
 def _q(dept, **extra):
