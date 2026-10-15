@@ -285,6 +285,9 @@ describe('verdict evidence (spec §4)', () => {
       { key: 'cycle_time_change', answer: 'yes', impacted: true, remark: 'ok' },
       { key: 'threed_change', answer: 'no', impacted: false }] }
     expect(verdictEvidence(DEFS, value)).toEqual({ impact: 'yes', missing: ['Cycle time change'] })
+    // R4: words alone are no evidence
+    ;(value.impacts[0] as { remark: string }).remark = 'tool change needed'
+    expect(verdictEvidence(DEFS, value).missing).toEqual(['Cycle time change'])
     ;(value.impacts[0] as { remark: string }).remark = 'cycle +0.4 s, trial TR-22'
     expect(verdictEvidence(DEFS, value).missing).toEqual([])
   })

@@ -64,6 +64,11 @@ async def test_impact_yes_needs_what_and_evidence_per_yes(client, tab):
     res = await _submit(client, tab, rows)
     assert res.status_code == 400
     assert "Impact yes" in res.json()["detail"]
+    # R4: words alone are no evidence (review L5 loop 2)
+    rows = answered(DEPT, yes={"tool_modification"},
+                    remarks={"tool_modification": "tool change needed"}, refs=False)
+    res = await _submit(client, tab, rows)
+    assert res.status_code == 400 and "drawing or document number" in res.json()["detail"]
     # the No rows owe no reference once something is impacted
     rows = answered(DEPT, yes={"tool_modification"},
                     remarks={"tool_modification": "insert 3 re-cut, DRW-4471 rev C"},

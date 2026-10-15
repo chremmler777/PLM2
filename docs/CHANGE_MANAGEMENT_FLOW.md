@@ -501,7 +501,11 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
 - **Verdict evidence** (spec §4, `_validate_verdict_evidence`), nothing
   preselected: **impact yes** (any Yes row) = each Yes says in its remark
   what changes (part, tool, process sheet) and the evidence ("insert 3
-  re-cut, DRW-4471 rev C"; a free line's label counts); **impact no** (every
+  re-cut, DRW-4471 rev C"; a free line's label counts). Words alone are no
+  evidence (review L5 loop 2): a Yes names a drawing or document number or
+  a value with its unit, except on a row that owes filed documents
+  (external modification: presentation + RFQ), whose files are the
+  evidence; the form flags the same rows; **impact no** (every
   row No) = each No of the department's current checklist carries its
   reference (`ref`: checklist, drawing or report; the form offers one
   reference for every No without one). "ok", "checked" and the like are

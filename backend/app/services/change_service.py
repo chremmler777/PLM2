@@ -5270,15 +5270,24 @@ class ChangeService:
                     if isinstance(e, dict) and e.get("answer") in ("yes", "no")]
         yes = [e for e in answered if e["answer"] == "yes"]
         if yes:
-            # a free line's own label says what; its remark may add the rest
-            thin = [name(e) for e in yes if not says_what(
-                e.get("remark") if e.get("key")
-                else f"{e.get('label') or ''} {e.get('remark') or ''}")]
+            # a free line's own label says what; its remark may add the rest.
+            # R4: words alone ("tool change needed") are no evidence: a Yes
+            # names a drawing or document number, or a value with its unit;
+            # on a row that owes filed documents (external modification),
+            # those files are the evidence and the submit holds for them.
+            def evidenced(e: dict) -> bool:
+                text = ((e.get("remark") or "") if e.get("key")
+                        else f"{e.get('label') or ''} {e.get('remark') or ''}")
+                return says_what(text) and (
+                    any(c.isdigit() for c in text)
+                    or bool(e.get("key") and checklist.required_documents(e["key"])))
+            thin = [name(e) for e in yes if not evidenced(e)]
             if thin:
                 raise ChangeError(
                     "Impact yes: say for each Yes what changes (part, tool, "
-                    "process sheet) and the evidence, e.g. 'insert re-cut, DRW-4471 "
-                    "rev C': " + ", ".join(thin))
+                    "process sheet) and the evidence (a drawing or document "
+                    "number, or a value with its unit), e.g. 'insert re-cut, "
+                    "DRW-4471 rev C': " + ", ".join(thin))
             return
         # the rows the current checklist asks (a legacy key rides along as
         # it was stored)

@@ -135,8 +135,14 @@ export function verdictEvidence(
   const label = (i: ImpactItem) => defs.find((d) => d.key === i.key)?.label_en ?? i.label ?? i.key ?? ''
   const yes = rows.filter((i) => i.answer === 'yes')
   if (yes.length) {
-    return { impact: 'yes', missing: yes.filter((i) => !saysWhat(
-      i.key ? i.remark : `${i.label ?? ''} ${i.remark ?? ''}`)).map(label) }
+    // R4: a Yes names a drawing/document number or a value with its unit;
+    // a row that owes filed documents has them as its evidence
+    const evidenced = (i: ImpactItem) => {
+      const v = i.key ? (i.remark ?? '') : `${i.label ?? ''} ${i.remark ?? ''}`
+      const filed = !!defs.find((d) => d.key === i.key)?.requires_documents?.length
+      return saysWhat(v) && (/\d/.test(v) || filed)
+    }
+    return { impact: 'yes', missing: yes.filter((i) => !evidenced(i)).map(label) }
   }
   const served = new Set(defs.map((d) => d.key))
   const shown = new Set(rows.filter((i) => i.key && saysWhat(i.ref)).map((i) => i.key))
