@@ -5558,18 +5558,19 @@ class ChangeService:
             raise ChangeError(
                 "Customer-relevant can only be changed during capture or scoping"
             )
+        if cust_rel is False and change.customer_relevant:
+            # HARD #7: a flip (ppap 'yes', a customer index) goes back to
+            # internal only by Sales' 'notification only'
+            from app.services.ppap_decision_service import back_to_internal_refusal
+            why = back_to_internal_refusal(change)
+            if why:
+                raise ChangeError(why)
         if cust_rel is not None and not mp.is_mother_plant(change):
             change.origin = "customer" if cust_rel else "internal"
             # C10: an internal change has no Sales owner; one that becomes a
             # customer change gets the project's Sales contact.
             if not cust_rel:
                 change.sales_owner_id = None
-                if change.customer_relevant and change.customer_flip_at is not None \
-                        and change.flip_answer is None:
-                    # back to internal before Sales answered the flip: no
-                    # customer to tell, nothing for proceed to wait on
-                    change.customer_flip_at = None
-                    change.customer_flip_reason = None
             elif change.sales_owner_id is None and "sales_owner_id" not in fields:
                 change.sales_owner_id = await ChangeService.default_sales_owner_id(
                     session, change.project_id, True, change.origin)

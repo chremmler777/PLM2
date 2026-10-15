@@ -1973,6 +1973,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'meeting.costCarrier.customer': { de: 'Kunde (kundenrelevant)', en: 'Customer (customer relevant)' },
   'meeting.costCarrier.internal': { de: 'Intern (Werk trägt)', en: 'Internal (plant pays)' },
+  'flip.holdsCustomer': {
+    de: 'Wurde zur Kundenänderung: nur die Antwort des Vertriebs „nur Information“ macht sie wieder intern.',
+    en: "Became a customer change: only Sales' answer 'notification only' takes it back to internal.",
+  },
   'meeting.costCarrierFlip': {
     de: 'Das ändert den Kostenträger von {from} auf {to}. Die Änderung wird protokolliert und der Vertrieb benachrichtigt.',
     en: 'This changes the cost carrier from {from} to {to}. The change is audited and Sales is notified.',
@@ -2703,6 +2707,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'followup.leadYes': { de: 'Ja: welche?', en: 'Yes: which?' },
   'followup.leadNotePlaceholder': { de: 'Teile oder Abteilungen, die dazukommen', en: 'Parts or departments it adds' },
   'followup.leadAnswered': { de: 'Weitere Teile/Abteilungen: {x}', en: 'Adds parts or departments: {x}' },
+  'followup.deadlineFileMail': {
+    de: 'Neues Datum: erst die Mail des Kunden an der Änderung ablegen.',
+    en: "New date: file the customer's mail on the change first.",
+  },
   'followup.deadline': { de: '{to} ersetzt {from}: hält der Angebotstermin?', en: '{to} replaces {from}: does the quote deadline hold?' },
   'followup.deadlineOwes': { de: '{x} beantwortet das.', en: '{x} answers this.' },
   'followup.deadline.holds': { de: 'Hält (Mail oder Ref.)', en: 'Holds (mail or ref)' },

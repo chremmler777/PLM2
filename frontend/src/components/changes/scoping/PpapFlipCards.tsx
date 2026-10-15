@@ -141,7 +141,8 @@ export function CustomerFlipCard({ change, isSales, editable, attachments, onCha
   })
   if (!change.customer_flip_at) return null
   const answered = change.flip_answer != null
-  const ready = answer === 'offer' ? !!deadline
+  const today = new Date().toISOString().slice(0, 10)
+  const ready = answer === 'offer' ? !!deadline && deadline >= today
     : answer === 'notification' ? (mailId !== '' || ref.trim().length >= 5) : false
   return (
     <div data-testid="flip-card"
@@ -194,7 +195,7 @@ export function CustomerFlipCard({ change, isSales, editable, attachments, onCha
           {answer === 'offer' && (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-slate-400">{t('deadline.quote')}</span>
-              <DateInput value={deadline} onChange={setDeadline} aria-label={t('deadline.quote')}
+              <DateInput value={deadline} onChange={setDeadline} aria-label={t('deadline.quote')} min={today}
                 className={`${input} w-36`} />
             </div>
           )}

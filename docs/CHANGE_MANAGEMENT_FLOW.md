@@ -313,16 +313,24 @@ Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
   asks nothing); all of Sales see *"Customer notification or offer needed?"*
   (`customer_flip`, 1 wd, owner named). **Notification only** needs a filed
   customer mail or a reference: the customer is told, the money stays ours,
-  so the change goes on as **internal** again (`customer_relevant` false,
-  origin internal, no Sales owner, the open meeting's carrier internal; the
-  internal approval, HARD #8, before `costing -> approved`), the
-  notification on the record (`flip_ref`). **Offer needed** sets the quote
-  deadline (`POST /changes/{id}/customer-flip/answer`, Sales members) and the
-  change takes the customer path. `proceed` waits for this answer (part of
-  HARD #7). **At approved or later** only *offer needed* sets `price_open`
-  (HARD #9 at close: a supplement accepted, or Absorb); *notification only*
-  opens nothing. A lead's PATCH back to internal before Sales answered drops
-  the open flip. A PATCH internal -> customer by Sales or PM during capture
+  so the change goes back to **what it was before the flip** (Claude's
+  decision, for Christoph's review): `customer_relevant`, origin and Sales
+  owner as before (an internal change: false, internal, none), the lead
+  before the flip (the raiser) while that person is active, the meetings the
+  flip moved back to internal (`customer_flip` changelog row, `old_value`;
+  the internal approval, HARD #8, before `costing -> approved`), the
+  notification on the record (`flip_ref`). A flip from a customer index left
+  the PPAP decision unanswered: it is owed again and Quality is told.
+  **Offer needed** sets the quote deadline (`POST /changes/{id}/customer-flip/answer`,
+  Sales members; a date from today on) and the change takes the customer
+  path. `proceed` waits for this answer (part of HARD #7). **At approved or
+  later** only *offer needed* sets `price_open` (HARD #9 at close: a
+  supplement accepted, or Absorb); *notification only* opens nothing.
+  *Notification only* is the **only** way back to internal: the lead's PATCH
+  `customer_relevant=false` and a meeting's cost carrier *internal* are
+  refused while a flip holds (`flip_holds`: flipped, not answered
+  *notification only*; HARD #7, no override; the carrier editors say so).
+  A PATCH internal -> customer by Sales or PM during capture
   or scoping is a cost-carrier correction, not a flip: no lead move, no Sales
   question (the quote tells the customer).
 

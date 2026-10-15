@@ -167,6 +167,7 @@ class MeetingService:
                 "Scoping decisions can only be recorded while the change is in scoping")
         if channel not in MEETING_CHANNELS:
             raise ChangeError(f"Invalid channel '{channel}'")
+        MeetingService._refuse_internal_after_flip(change, cost_carrier)
         rasic, rasic_ids = await MeetingService._validate_rasic(session, department_rasic)
         # The letter map is authoritative when given: the id list follows it.
         dept_ids = rasic_ids if rasic is not None else \
@@ -188,6 +189,18 @@ class MeetingService:
         from app.services.ppap_decision_service import PpapDecisionService
         await PpapDecisionService.notify_owed(session, change, user.id)
         return meeting
+
+    @staticmethod
+    def _refuse_internal_after_flip(change: ChangeRequest,
+                                    carrier: Optional[str]) -> None:
+        """HARD #7: the room may not set a flipped change back to internal;
+        only Sales' 'notification only' does."""
+        if carrier != "internal":
+            return
+        from app.services.ppap_decision_service import back_to_internal_refusal
+        why = back_to_internal_refusal(change)
+        if why:
+            raise ChangeError(why)
 
     @staticmethod
     def _validate_cost_carrier(value: Optional[str]) -> Optional[str]:
@@ -272,6 +285,7 @@ class MeetingService:
         if "cost_carrier" in fields:
             fields["cost_carrier"] = MeetingService._validate_cost_carrier(
                 fields["cost_carrier"])
+            MeetingService._refuse_internal_after_flip(change, fields["cost_carrier"])
         for k in ("meeting_date", "participants", "notes", "selected_department_ids",
                   "department_rasic", "cost_carrier"):
             if k in fields and fields[k] is not None:

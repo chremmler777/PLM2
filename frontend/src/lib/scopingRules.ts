@@ -29,6 +29,19 @@ export const carrierOf = (customerRelevant?: boolean | null): CostCarrier | '' =
   customerRelevant === true ? 'customer' : customerRelevant === false ? 'internal' : ''
 
 /**
+ * HARD #7 mirror of ppap_decision_service.flip_holds: the change flipped
+ * (PPAP 'yes' or a customer index) and Sales did not answer 'notification
+ * only': it stays a customer change; neither the lead's carrier edit nor
+ * the room's cost carrier takes it back to internal.
+ */
+export function flipHolds(
+  change: Pick<ChangeRequest, 'customer_flip_at' | 'flip_answer' | 'scoping_v2'>,
+): boolean {
+  return change.scoping_v2 !== false && !!change.customer_flip_at
+    && change.flip_answer !== 'notification'
+}
+
+/**
  * HARD #7 mirror of ppap_decision_service.applies: a change of ours
  * (customer or internal origin) that goes on as internal owes Quality's
  * PPAP decision. While captured or scoped an undecided meeting's cost

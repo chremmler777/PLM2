@@ -1223,8 +1223,8 @@ class IndexDeadlineIn(BaseModel):
     answer: str            # holds | new_date | not_asked
     ref: Optional[str] = Field(default=None, max_length=255)
     mail_id: Optional[int] = None
-    new_date: Optional[datetime] = None
-    confirm_by: Optional[datetime] = None
+    new_date: Optional[NaiveUtcDatetime] = None
+    confirm_by: Optional[NaiveUtcDatetime] = None
 
 
 class CustomerFlipAnswerIn(BaseModel):
@@ -1232,7 +1232,7 @@ class CustomerFlipAnswerIn(BaseModel):
     answer: str            # notification | offer
     ref: Optional[str] = Field(default=None, max_length=255)
     mail_id: Optional[int] = None
-    quote_deadline: Optional[datetime] = None
+    quote_deadline: Optional[NaiveUtcDatetime] = None
 
 
 class ConcernTypeIn(BaseModel):

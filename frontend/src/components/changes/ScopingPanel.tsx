@@ -29,7 +29,7 @@ import {
   type ImpactedItem, type MeetingParticipant, type RasicLetter,
 } from '../../types/change'
 import {
-  askingSide, canAnswerQuestion, carrierOf, isPersonContact, openFlagLines, ppapApplies,
+  askingSide, canAnswerQuestion, carrierOf, flipHolds, isPersonContact, openFlagLines, ppapApplies,
 } from '../../lib/scopingRules'
 import { departmentLabel, pickableDepartments } from '../../lib/departments'
 import { plantText } from '../../lib/plantName'
@@ -104,6 +104,8 @@ export default function ScopingPanel(
   // record says which departments are informed; the backend refuses
   // "proceed" (it would enter assessment) and there is no cost carrier.
   const motherPlant = change.origin === 'mother_plant'
+  // HARD #7: a held flip goes back to internal only by Sales' answer
+  const flipLocked = flipHolds(change)
   // C33 (served switch SCOPING_V2): questions and check items, 'Not yet'.
   const v2 = change.scoping_v2 === true && !motherPlant
   const qc = useQueryClient()
@@ -476,7 +478,7 @@ export default function ScopingPanel(
                 className="h-7 bg-slate-800 border border-amber-600 rounded-lg px-2 text-xs text-slate-100">
                 <option value="">{t('meeting.costCarrierPick')}</option>
                 <option value="customer">{t('meeting.costCarrier.customer')}</option>
-                <option value="internal">{t('meeting.costCarrier.internal')}</option>
+                <option value="internal" disabled={flipLocked}>{t('meeting.costCarrier.internal')}</option>
               </select>
             )}
             <button type="button" className={btnSm.primary}
@@ -1040,11 +1042,17 @@ export default function ScopingPanel(
               {(['customer', 'internal'] as CostCarrier[]).map((c) => (
                 <label key={c} className="flex items-center gap-1.5 cursor-pointer">
                   <input type="radio" name="meeting-carrier" data-testid={`meeting-carrier-${c}`}
+                    disabled={c === 'internal' && flipLocked}
                     checked={carrier === c} onChange={() => setCarrier(c)} />
                   <span className="text-slate-200">{t(`meeting.costCarrier.${c}`)}</span>
                 </label>
               ))}
             </div>
+            {flipLocked && (
+              <p data-testid="meeting-carrier-flip-lock" className="mt-1 text-xs text-slate-400">
+                {t('flip.holdsCustomer')}
+              </p>
+            )}
             {carrier && carrierOf(change.customer_relevant) && carrier !== carrierOf(change.customer_relevant) && (
               <p data-testid="meeting-carrier-flip" className="mt-1 text-xs text-amber-300">
                 {t('meeting.costCarrierFlip')

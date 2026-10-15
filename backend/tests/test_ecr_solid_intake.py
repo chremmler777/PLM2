@@ -379,8 +379,26 @@ async def test_sales_answers_whether_the_deadline_holds(client, session_factory,
     assert r.json()[0]["deadline_open"] is True
     rows = await _tasks(client, "sales", "index_deadline_confirm", cid)
     assert len(rows) == 1 and rows[0]["due_date"]
+    # a new date stands on the customer's filed mail (R17): a typed
+    # reference is refused, so is a date in the past; an aware date is fine
     r = await client.post(url, json={"answer": "new_date", "ref": "Mail from buyer 10-16",
                                      "new_date": "2026-12-20T12:00:00"},
+                          headers=await _auth(client, "sales"))
+    assert r.status_code == 400 and "mail" in r.json()["detail"]
+    from app.models.change import ChangeAttachment
+    async with session_factory() as s:
+        mail = ChangeAttachment(change_id=cid, filename="new-date.msg", stored_path="x",
+                                content_type="application/vnd.ms-outlook", size_bytes=1,
+                                sha256="0" * 64, kind="customer_email", uploaded_by=1)
+        s.add(mail)
+        await s.commit()
+        mail_id = mail.id
+    r = await client.post(url, json={"answer": "new_date", "mail_id": mail_id,
+                                     "new_date": "2020-01-10T12:00:00"},
+                          headers=await _auth(client, "sales"))
+    assert r.status_code == 400 and "past" in r.json()["detail"]
+    r = await client.post(url, json={"answer": "new_date", "mail_id": mail_id,
+                                     "new_date": "2026-12-20T12:00:00Z"},
                           headers=await _auth(client, "sales"))
     assert r.status_code == 200, r.text
     assert r.json()[0]["deadline_open"] is False

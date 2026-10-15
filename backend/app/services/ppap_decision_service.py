@@ -12,8 +12,10 @@
   PM as lead; the Sales owner answers "notification only" (filed mail or a
   reference) or "offer needed" (the quote deadline). Proceed waits for that
   answer. "Notification only": the customer is told, the money stays ours,
-  so the change goes on as internal (internal_approval, HARD #8) with the
-  notification on the record. "Offer needed" at approved or later leaves the
+  so the change goes back to what it was before the flip (lead, cost
+  carrier; internal_approval, HARD #8) with the notification on the record.
+  That answer is the only way back: the lead's PATCH and the room's cost
+  carrier cannot drop a flip (HARD #7). "Offer needed" at approved or later leaves the
   price open (HARD #9 at close) until a supplement is accepted or the money
   is absorbed.
 """
@@ -67,6 +69,26 @@ def applies(change: ChangeRequest) -> bool:
 def flip_open(change: ChangeRequest) -> bool:
     """A flip whose Sales answer is still owed."""
     return change.customer_flip_at is not None and change.flip_answer is None
+
+
+def flip_holds(change: ChangeRequest) -> bool:
+    """The change flipped (ppap 'yes' or a customer index) and Sales did not
+    answer 'notification only': it stays a customer change. Only that answer
+    takes it back to internal; the lead's PATCH and the room's cost carrier
+    may not (else HARD #7's consequence is dropped and the customer is never
+    told)."""
+    return change.customer_flip_at is not None and change.flip_answer != "notification"
+
+
+def back_to_internal_refusal(change: ChangeRequest) -> Optional[str]:
+    """Why the change may not be set back to internal here, or None."""
+    if not cm_switches.on("SCOPING_V2") or not flip_holds(change):
+        return None
+    why = f" ({change.customer_flip_reason})" if change.customer_flip_reason else ""
+    who = change.sales_owner_name or "Sales"
+    return (f"{change.change_number} became a customer change{why}. Only "
+            f"{who}'s answer 'notification only' takes it back to internal. "
+            "No override lifts it")
 
 
 class PpapDecisionService:
@@ -196,6 +218,9 @@ class PpapDecisionService:
             raise ChangeError(f"A {change.status} change does not flip")
         from app.services.project_team_service import ProjectTeamService
         old_lead = change.lead_id
+        before = {"customer_relevant": bool(change.customer_relevant),
+                  "origin": change.origin, "lead_id": old_lead,
+                  "sales_owner_id": change.sales_owner_id}
         change.customer_relevant = True
         change.origin = "customer"
         change.sales_owner_id = await ChangeService.default_sales_owner_id(
@@ -213,15 +238,18 @@ class PpapDecisionService:
         after_approval = change.status in AFTER_APPROVAL
         # the room's cost carrier follows: an undecided meeting that said
         # 'internal' would flip it back at proceed
+        rooms = []
         for m in change.meetings:
             if m.decision is None and m.cost_carrier == "internal":
                 m.cost_carrier = "customer"
+                rooms.append(m.id)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "customer_flip",
             f"Internal change became a customer change: {why}", user_id,
             field_name="customer_relevant",
-            old_value={"customer_relevant": False, "lead_id": old_lead},
+            # what 'notification only' restores (answer_flip)
+            old_value={**before, "meeting_ids": rooms},
             new_value={"customer_relevant": True, "lead_id": change.lead_id,
                        "sales_owner_id": change.sales_owner_id})
         await PpapDecisionService._notify_flip(session, change, after_approval)
@@ -300,18 +328,16 @@ class PpapDecisionService:
                     raise ChangeError(why)
                 evidence = ref.strip()
             change.flip_ref = evidence[:255]
-            # the customer is told; the money stays ours: the change goes on
-            # as internal (internal_approval, HARD #8), the room's carrier
-            # with it, and an internal change has no Sales owner (C10)
-            change.customer_relevant = False
-            change.origin = "internal"
-            change.sales_owner_id = None
-            for m in change.meetings:
-                if m.decision is None and m.cost_carrier == "customer":
-                    m.cost_carrier = "internal"
+            # the customer is told; the money stays ours: the change goes
+            # back to what it was before the flip (internal_approval, HARD
+            # #8): its lead, cost carrier, origin and the room's carrier
+            await PpapDecisionService._undo_flip(session, change)
         else:
             if quote_deadline is None:
                 raise ChangeError("Offer needed: set the quote deadline")
+            if quote_deadline.date() < datetime.utcnow().date():
+                raise ChangeError("The quote deadline is in the past: pick today "
+                                  "or a later date")
             if change.required_by_date != quote_deadline:
                 old = change.required_by_date
                 change.required_by_date = quote_deadline
@@ -331,10 +357,14 @@ class PpapDecisionService:
         change.flip_answered_by = user.id
         change.flip_answered_at = datetime.utcnow()
         await session.flush()
+        if answer == "notification":
+            # a flip from a customer index left the decision unanswered: back
+            # to internal it is owed again (HARD #7), so Quality is told
+            await PpapDecisionService.notify_owed(session, change, user.id)
         await ChangeService.append_changelog(
             session, change, "customer_flip_answered",
             f"Customer flip: {'notification only' if answer == 'notification' else 'offer needed'}"
-            + (f" ({change.flip_ref}); the money stays ours: goes on as internal"
+            + (f" ({change.flip_ref}); the money stays ours: back to before the flip"
                if answer == "notification" else "")
             + ("; price open until the supplement is accepted or absorbed"
                if answer == "offer" and change.price_open else ""), user.id,
@@ -342,3 +372,40 @@ class PpapDecisionService:
                        "customer_relevant": change.customer_relevant,
                        "price_open": change.price_open})
         return change
+
+    @staticmethod
+    async def _undo_flip(session: AsyncSession, change: ChangeRequest) -> None:
+        """'Notification only': restore what the flip changed, from its
+        changelog row (customer_relevant, origin, Sales owner, the lead while
+        that person is still active, the rooms it moved to customer). A flip
+        logged before that record existed goes back to internal, no Sales
+        owner (C10), the lead kept when unknown."""
+        import json
+        from app.models.change import ChangeChangelog
+        row = (await session.execute(
+            select(ChangeChangelog.old_value).where(
+                ChangeChangelog.change_id == change.id,
+                ChangeChangelog.action == "customer_flip")
+            .order_by(ChangeChangelog.id.desc()).limit(1))).scalar_one_or_none()
+        try:
+            before = json.loads(row) if row else {}
+        except ValueError:
+            before = {}
+        if not isinstance(before, dict):
+            before = {}
+        change.customer_relevant = bool(before.get("customer_relevant", False))
+        change.origin = before.get("origin") or (
+            "customer" if change.customer_relevant else "internal")
+        change.sales_owner_id = (before.get("sales_owner_id")
+                                 if change.customer_relevant else None)
+        old_lead = before.get("lead_id")
+        if old_lead is not None and old_lead != change.lead_id:
+            lead = await session.get(User, old_lead)
+            if lead is not None and lead.is_active:
+                change.lead_id = old_lead
+        rooms = before.get("meeting_ids")
+        for m in change.meetings:
+            if m.decision is not None or m.cost_carrier != "customer":
+                continue
+            if rooms is None or m.id in rooms:
+                m.cost_carrier = "internal"

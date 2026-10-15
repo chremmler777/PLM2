@@ -170,8 +170,12 @@ async def test_offer_needed_sets_the_quote_deadline(
     assert (await _ppap(client, quality, cid, answer="yes", part_ids=[pid])).status_code == 200
     url = f"/api/v1/changes/{cid}/customer-flip/answer"
     assert (await client.post(url, json={"answer": "offer"}, headers=sales)).status_code == 400
+    # a past date is refused; an aware date is read as UTC (no 500)
     res = await client.post(url, json={"answer": "offer",
-                                       "quote_deadline": "2026-11-20T12:00:00"}, headers=sales)
+                                       "quote_deadline": "2020-01-10T12:00:00"}, headers=sales)
+    assert res.status_code == 400 and "past" in res.json()["detail"]
+    res = await client.post(url, json={"answer": "offer",
+                                       "quote_deadline": "2026-11-20T12:00:00Z"}, headers=sales)
     assert res.status_code == 200, res.text
     assert res.json()["required_by_date"].startswith("2026-11-20")
 
@@ -333,16 +337,93 @@ async def test_flip_past_approval_opens_the_price_only_with_offer_needed(
     assert res.json()["price_open"] is True
 
 
-async def test_back_to_internal_drops_an_open_flip(
-        client, admin_auth, seed, session_factory):
+async def test_lead_cannot_drop_a_flip(client, admin_auth, seed, session_factory):
+    """L4 review 2: after Quality's 'yes' neither the lead's PATCH nor the
+    room's cost carrier takes the change back to internal (HARD #7: the
+    customer must be told); only Sales' 'notification only' does."""
     cid, pid = await _internal_in_scoping(client, admin_auth, seed, "10")
     _, qid, quality = await _user(client, session_factory, seed, "q10", "Quality")
+    _, _, sales = await _user(client, session_factory, seed, "s10", "Sales")
     mid = await _meeting(client, admin_auth, cid, qid, carrier="internal")
     assert (await _ppap(client, quality, cid, answer="yes", part_ids=[pid])).status_code == 200
     res = await client.patch(f"/api/v1/changes/{cid}",
                              json={"customer_relevant": False}, headers=admin_auth)
-    assert res.status_code == 200, res.text
-    assert res.json()["customer_flip_at"] is None
-    # nothing waits on Sales any more: proceed goes (the room says internal)
+    assert res.status_code == 400 and "notification only" in res.json()["detail"]
+    res = await client.patch(f"/api/v1/changes/{cid}/meetings/{mid}",
+                             json={"cost_carrier": "internal"}, headers=admin_auth)
+    assert res.status_code == 400 and "notification only" in res.json()["detail"]
+    res = await client.post(f"/api/v1/changes/{cid}/meetings", json={
+        "channel": "meeting", "participants": [{"name": "Eva"}],
+        "department_rasic": {str(qid): "R"}, "cost_carrier": "internal"},
+        headers=admin_auth)
+    assert res.status_code == 400
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert ch["customer_relevant"] is True and ch["customer_flip_at"] is not None
     res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 400 and "notification only, or offer" in res.json()["detail"]
+    # offer needed: still a customer change, the lead still may not undo it
+    res = await client.post(f"/api/v1/changes/{cid}/customer-flip/answer", json={
+        "answer": "offer", "quote_deadline": "2026-11-20T12:00:00"}, headers=sales)
     assert res.status_code == 200, res.text
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"customer_relevant": False}, headers=admin_auth)
+    assert res.status_code == 400
+
+
+async def test_back_to_internal_without_a_flip_is_the_leads(
+        client, admin_auth, seed, session_factory):
+    """No flip: an internal change a starter made customer goes back by the
+    lead's PATCH as before."""
+    cid, _ = await _internal_in_scoping(client, admin_auth, seed, "10b")
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"customer_relevant": True}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"customer_relevant": False}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_notification_only_restores_the_lead_and_owes_ppap_again(
+        client, admin_auth, seed, session_factory):
+    """A flip from a customer index (no PPAP decision yet), then 'notification
+    only': the raiser leads again, the change is internal, the PPAP decision
+    is owed again (HARD #7) and Quality is told."""
+    cid, _ = await _internal_in_scoping(client, admin_auth, seed, "11")
+    q_uid, qid, _quality = await _user(client, session_factory, seed, "q11", "Quality")
+    sally, sales_id, sales = await _user(client, session_factory, seed, "s11", "Sales")
+    pm_uid, pm_id, _pm = await _user(client, session_factory, seed, "pm11", "Project Manager")
+    await _responsible(session_factory, seed, sales_id, sally)
+    await _responsible(session_factory, seed, pm_id, pm_uid)
+    mid = await _meeting(client, admin_auth, cid, qid, carrier="internal")
+    await _flip_at(session_factory, cid, "scoping")
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert ch["lead_id"] == pm_uid and ch["customer_relevant"] is True
+    res = await client.post(f"/api/v1/changes/{cid}/customer-flip/answer", json={
+        "answer": "notification", "ref": "Mail to customer 2026-10-15"}, headers=sales)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["lead_id"] == seed["admin_id"]
+    assert body["customer_relevant"] is False and body["origin"] == "internal"
+    assert body["sales_owner_id"] is None and body["ppap_decision"] is None
+    res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 400 and "PPAP decision" in res.json()["detail"]
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        told = [u for (u,) in await s.execute(select(Notification.user_id).where(
+            Notification.title.like("PPAP decision needed%"),
+            Notification.link.like(f"/changes/{cid}?%")))]
+    assert q_uid in told
+
+
+async def test_direct_hop_refused_without_ppap_decision(
+        client, admin_auth, seed, session_factory):
+    """HARD #7 on scoping -> in_assessment by the transition endpoint: an
+    admin with an override reason is refused too."""
+    cid, _ = await _internal_in_scoping(client, admin_auth, seed, "12")
+    for body in ({"to_status": "in_assessment"},
+                 {"to_status": "in_assessment", "deviation_reason": "urgent customer line stop",
+                  "deviation_reason_code": "in_parallel"}):
+        res = await client.post(f"/api/v1/changes/{cid}/transition", json=body,
+                                headers=admin_auth)
+        assert res.status_code == 400, res.text
+        assert "PPAP decision" in res.json()["detail"]

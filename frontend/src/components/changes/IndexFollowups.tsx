@@ -291,8 +291,10 @@ function DeadlineQuestion({ f, changeId, mayAnswer, salesOwnerName, attachments,
   })
   const q = t('followup.deadline').replace('{to}', f.to_revision ?? '?').replace('{from}', f.from_revision ?? '?')
   const evidenceOk = mailId !== '' || okRef(ref)
+  // a new date stands on the customer's filed mail (spec §1, R17)
+  const today = new Date().toISOString().slice(0, 10)
   const ready = answer === 'not_asked' || (answer === 'holds' && evidenceOk)
-    || (answer === 'new_date' && evidenceOk && !!date)
+    || (answer === 'new_date' && mailId !== '' && !!date && date >= today)
   // once "not asked yet" was given, only holds / new date close it
   const options = (f.deadline_answer === 'not_asked' ? ['holds', 'new_date'] : ['holds', 'new_date', 'not_asked']) as
     ('holds' | 'new_date' | 'not_asked')[]
@@ -332,13 +334,18 @@ function DeadlineQuestion({ f, changeId, mayAnswer, salesOwnerName, attachments,
                   {mails.map((m) => <option key={m.id} value={m.id}>{m.filename}</option>)}
                 </select>
               )}
-              {mailId === '' && (
+              {answer === 'new_date' && mails.length === 0 && (
+                <span className="text-[11px] text-amber-300" data-testid="dl-file-mail">
+                  {t('followup.deadlineFileMail')}
+                </span>
+              )}
+              {mailId === '' && answer === 'holds' && (
                 <input value={ref} onChange={(e) => setRef(e.target.value)} data-testid="dl-ref"
                   aria-label={t('answer.ref')} placeholder={t('answer.refPlaceholder')}
                   className={`${input} flex-1 min-w-[12rem]`} />
               )}
               {answer === 'new_date' && (
-                <DateInput value={date} onChange={setDate} aria-label={t('deadline.quote')}
+                <DateInput value={date} onChange={setDate} aria-label={t('deadline.quote')} min={today}
                   className={`${input} w-36`} />
               )}
             </div>

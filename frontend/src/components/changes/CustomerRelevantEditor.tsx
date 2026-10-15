@@ -6,6 +6,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeRequest } from '../../types/change'
+import { flipHolds } from '../../lib/scopingRules'
+import { t } from '../../i18n/cmLabels'
 
 
 /**
@@ -27,7 +29,10 @@ export function CustomerRelevantEditor({ change, canEdit }: {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(!!change.customer_relevant)
-  const editable = canEdit && (change.status === 'captured' || change.status === 'scoping')
+  // HARD #7: a flipped change goes back to internal only by Sales'
+  // 'notification only'; the editor says so instead of offering it
+  const locked = !!change.customer_relevant && flipHolds(change)
+  const editable = canEdit && !locked && (change.status === 'captured' || change.status === 'scoping')
 
   const save = useMutation({
     mutationFn: (customer_relevant: boolean) =>
@@ -44,6 +49,11 @@ export function CustomerRelevantEditor({ change, canEdit }: {
     <p className="flex items-center gap-2">
       <span className="text-slate-400">Cost carrier:</span>
       <span>{change.customer_relevant ? 'Customer change' : 'Internal change'}</span>
+      {locked && (change.status === 'captured' || change.status === 'scoping') && (
+        <span data-testid="customer-relevant-flip-lock" className="text-xs text-slate-400">
+          {t('flip.holdsCustomer')}
+        </span>
+      )}
       {editable && !open && (
         <button type="button" data-testid="customer-relevant-edit"
           onClick={() => { setValue(!!change.customer_relevant); setOpen(true) }}

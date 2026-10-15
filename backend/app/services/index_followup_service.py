@@ -336,7 +336,7 @@ class IndexFollowupService:
                               new_date: Optional[datetime] = None,
                               confirm_by: Optional[datetime] = None) -> RevisionIntake:
         """Sales (any member; the owner is named): holds (mail or ref) / new
-        date (date + mail or ref) / not asked yet (confirm by a date, +5 wd
+        date (date + the customer's filed mail) / not asked yet (confirm by a date, +5 wd
         by default; the task stays until it is confirmed)."""
         from app.services import due_rules
         from app.services.cm_rules import reference_refusal
@@ -347,6 +347,11 @@ class IndexFollowupService:
         if answer not in DEADLINE_ANSWERS:
             raise ChangeError("Answer holds, new_date or not_asked")
         evidence = None
+        if answer == "new_date" and mail_id is None:
+            # spec §1 "new date (date + mail)": a moved deadline is on the
+            # change by the customer's own mail (R17), not a typed reference
+            raise ChangeError("New date: pick the customer's mail with the new "
+                              "date (file it on the change first)")
         if answer in ("holds", "new_date"):
             if mail_id is not None:
                 mail = await session.get(ChangeAttachment, mail_id)
@@ -363,6 +368,9 @@ class IndexFollowupService:
         if answer == "new_date":
             if new_date is None:
                 raise ChangeError("New date: set the new quote deadline")
+            if new_date.date() < datetime.utcnow().date():
+                raise ChangeError("The new quote deadline is in the past: pick "
+                                  "today or a later date")
             old = change.required_by_date
             change.required_by_date = new_date
             change.required_by_set_by = user.id
