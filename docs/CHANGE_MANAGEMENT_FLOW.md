@@ -1007,7 +1007,14 @@ project PM default applies, else PM picks one).
 A customer change from them is refused (403, "Your department starts
 internal changes only"); the start dialog preselects "Internal change" and
 greys the customer option. `GET /changes/permissions` answers
-`can_start_internal_change`. Everyone else's rules are unchanged (Sales and
+`can_start_internal_change`. A caller from any other department gets 403
+naming who starts what ("Your department does not start changes: Sales,
+Project Manager start customer changes; Development, Process Engineer, Tool
+Engineer start internal changes. Ask one of them to raise it.", read from the
+department flags). A `POST /changes` that omits `customer_relevant` raises
+what the caller's department starts: a customer change for a Sales or PM
+member (with its Sales owner), else an internal one (the UI always sends the
+flag). Everyone else's rules are unchanged (Sales and
 PM start any change; an internal one raised by Sales is led by the project's
 PM). Turning an internal change into a customer change (`PATCH
 customer_relevant=true`, capture or scoping) is a starter's call: a Sales or

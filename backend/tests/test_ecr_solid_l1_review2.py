@@ -255,3 +255,31 @@ async def test_pm_backs_up_the_kickoff_of_a_led_internal_change(
     rows = await _rows(client, pam, c["id"], "kickoff")
     assert rows and rows[0]["role"] == "backup"
     assert rows[0]["main_name"] == "Devon"
+
+
+# --- P3: who starts what; the API default -------------------------------------
+
+async def test_non_starter_hears_who_starts_what(client, seed, depts, session_factory):
+    _, mail = await _user(session_factory, seed, "Quinn", depts["Quality"])
+    q = await login(client, mail, admin=False)
+    res = await client.post("/api/v1/changes", json=_body(seed, False), headers=q)
+    assert res.status_code == 403
+    detail = res.json()["detail"]
+    assert "Sales, Project Manager" in detail and "customer" in detail
+    assert "Development, Process Engineer" in detail and "internal" in detail
+
+
+async def test_omitted_carrier_follows_the_raiser(client, seed, depts, session_factory):
+    sid, smail = await _user(session_factory, seed, "Sally", depts["Sales"])
+    sales = await login(client, smail, admin=False)
+    res = await client.post("/api/v1/changes", json=_body(seed), headers=sales)
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["customer_relevant"] is True
+    assert res.json()["sales_owner_id"] == sid
+    did, dmail = await _user(session_factory, seed, "Devon", depts["Development"])
+    dev = await login(client, dmail, admin=False)
+    res = await client.post("/api/v1/changes", json=_body(seed),
+                            headers={**dev, KEEP_LEAD_RULE: "1"})
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["customer_relevant"] is False
+    assert res.json()["lead_id"] == did

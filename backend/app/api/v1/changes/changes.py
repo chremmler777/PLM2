@@ -105,6 +105,12 @@ async def create_change(
     from app.services import mother_plants as mp
     from app.services.mother_plant_service import MotherPlantService
     mother_plant = body.origin == mp.MOTHER_PLANT
+    if body.customer_relevant is None and not mother_plant:
+        # An API caller that leaves the cost carrier out raises what its
+        # department starts: Sales / PM a customer change (with its Sales
+        # owner), everyone else an internal one. The UI always sends it.
+        body.customer_relevant = await ChangeService.in_starter_department(
+            db, current_user)
     internal = not mother_plant and not body.customer_relevant
     allowed = (await MotherPlantService.may_start(db, current_user) if mother_plant
                else await ChangeService.user_can_start_change(db, current_user))
@@ -124,8 +130,7 @@ async def create_change(
                     "Your department starts internal changes only: a customer "
                     "change is raised by Sales or Project Management"
                     if may_internal else
-                    "Only an admin or a member of a department allowed to start "
-                    "changes (e.g. Sales) may raise a change"))
+                    await ChangeService.who_starts_changes(db)))
     # The project must be one the caller can see (their organization; an
     # admin sees all), and the lead a live user of the project's organization.
     project_org = await _project_org_id(db, body.project_id)

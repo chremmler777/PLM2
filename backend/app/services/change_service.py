@@ -2001,6 +2001,41 @@ class ChangeService:
             ))).scalar())
 
     @staticmethod
+    async def in_starter_department(session: AsyncSession, user: User) -> bool:
+        """Member of a department flagged can_start_change (Sales, Project
+        Manager): membership only, no admin and no "nothing flagged"
+        shortcut. Decides the cost carrier a caller gets when it omits it."""
+        from app.services.workflow_service import WorkflowService
+        dept_ids = await WorkflowService.effective_department_ids(session, user)
+        if not dept_ids:
+            return False
+        return bool((await session.execute(
+            select(func.count()).select_from(Department).where(
+                Department.id.in_(dept_ids),
+                Department.can_start_change.is_(True),
+            ))).scalar())
+
+    @staticmethod
+    async def who_starts_changes(session: AsyncSession) -> str:
+        """The refusal for a caller who may start no change: names the
+        departments that start customer and internal changes (P3)."""
+        rows = (await session.execute(
+            select(Department.name, Department.can_start_change,
+                   Department.can_start_internal_change)
+            .where(Department.is_active.is_(True))
+            .order_by(Department.sort_order, Department.id))).all()
+        cust = [n for n, c, _ in rows if c]
+        internal = [n for n, c, i in rows if i and not c]
+        parts = []
+        if cust:
+            parts.append(f"{', '.join(cust)} start customer changes")
+        if internal:
+            parts.append(f"{', '.join(internal)} start internal changes")
+        return ("Your department does not start changes: "
+                + ("; ".join(parts) if parts else "only an admin may")
+                + ". Ask one of them to raise it.")
+
+    @staticmethod
     async def user_can_start_internal_change(session: AsyncSession,
                                              user: User) -> bool:
         """P3: an internal change (the plant pays, no quote) may be started
