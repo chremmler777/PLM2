@@ -79,9 +79,11 @@ interface Props {
   /** A "Decide deviation #n" action or the pending-deviations line was
       clicked: the page opens the decision panel on that deviation. */
   onDecideDeviation?: (deviationId?: number) => void
-  /** Target statuses of the change's transition deviations by state. A gate
-      is a soft guard on the backend: an approved deviation to its target
-      lets the held step through, so the step stays live. */
+  /** The change's overrides by state, as `${to_status}|${guard_key}` (`*`
+      for a row from before the rule binding, which covers its whole
+      target). A gate is a soft rule on the backend (`gate:<key>`): only an
+      approved override bound to it (or a legacy one) lets the held step
+      through (C6), so the step stays live. */
   deviationTargets?: { approved: string[]; pending: string[] }
   /** "Ask for a deviation" on a gate held step: the page asks for one to
       that status (the gate's key names what holds it). */
@@ -354,14 +356,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const ended = hasEnded(change)
   // The gate is a soft guard (ChangeService._guard): an approved transition
   // deviation to its target lets the step through.
-  const deviationCovers = (to: string) => deviationTargets?.approved.includes(to) ?? false
-  const deviationAsked = (to: string) => deviationTargets?.pending.includes(to) ?? false
+  // C6: an override covers its own rule only (a legacy row: its target)
+  const overrideIn = (list: string[] | undefined, to: string, gateKey: string) =>
+    !!list?.some((k) => k === `${to}|gate:${gateKey}` || k === `${to}|*`)
+  const deviationCovers = (to: string, gateKey: string) => overrideIn(deviationTargets?.approved, to, gateKey)
+  const deviationAsked = (to: string, gateKey: string) => overrideIn(deviationTargets?.pending, to, gateKey)
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available
   // and no approved deviation covers it; gates seeded 'na' but guarding a
   // later transition are just "outstanding later".
   const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key])
-    && !deviationCovers(GATE_TARGET_STATUS[g.gate_key]))
+    && !deviationCovers(GATE_TARGET_STATUS[g.gate_key], g.gate_key))
   // A gate nobody has set ("NA") guarding a later step is noise, not news:
   // only a later gate that was actually answered No is worth a line.
   const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key])
@@ -546,7 +551,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   /** Why a step cannot be taken by this viewer right now, or null. */
   const deniedFor = (st: Exclude<NextStep, { kind: 'wait' }>): string | null => {
     const key = st.kind === 'go' || st.kind === 'action' ? st.key : `to:${st.to}`
-    const gate = st.kind === 'advance' && !deviationCovers(st.to) ? gateHolding(st.to) : undefined
+    const held = st.kind === 'advance' ? gateHolding(st.to) : undefined
+    const gate = held && st.kind === 'advance' && !deviationCovers(st.to, held.gate_key) ? held : undefined
     return st.kind === 'action' ? null : needs(key) ?? (gate ? gateWhy(gate) : null)
   }
   /** One next-step button; the same in the cockpit and the compact bar. */
@@ -915,7 +921,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               const g = st.kind === 'advance' ? gateHolding(st.to) : undefined
               return g && st.kind === 'advance' ? [[g.gate_key, { g, to: st.to }] as const] : []
             })).values()].map(({ g, to }) => {
-              if (deviationCovers(to)) {
+              if (deviationCovers(to, g.gate_key)) {
                 return (
                   <p key={g.gate_key} data-testid={`next-gate-${g.gate_key}`}
                     className="flex items-start gap-1.5 text-xs text-emerald-300">
@@ -939,7 +945,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                       <Ban aria-hidden="true" size={12} className="mt-0.5 shrink-0" /><span>{gateWhy(g, false)}</span>
                     </p>
                   )}
-                  {deviationAsked(to) ? (
+                  {deviationAsked(to, g.gate_key) ? (
                     <p className="mt-1 flex items-start gap-1.5 text-slate-400">
                       <Hourglass aria-hidden="true" size={12} className="mt-0.5 shrink-0" />
                       <span>{t('cockpit.gateDeviationPending')}</span>

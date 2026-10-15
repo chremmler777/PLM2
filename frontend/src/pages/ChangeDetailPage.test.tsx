@@ -1395,11 +1395,13 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     change.status = 'approved' as ChangeDetail['status']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
       { id: 8, to_status: 'in_implementation', reason: 'x', status: 'approved', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
-      { id: 9, to_status: 'released', reason: 'y', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+      { id: 9, to_status: 'released', reason: 'y', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00',
+        guard_key: 'gate:release' },
     ] as never)
     wrap('/changes/1?tab=overview')
+    // C6: per rule; a row from before the binding covers its whole target
     await waitFor(() => expect(screen.getByTestId('mock-deviation-targets').textContent)
-      .toBe(JSON.stringify({ approved: ['in_implementation'], pending: ['released'] })))
+      .toBe(JSON.stringify({ approved: ['in_implementation|*'], pending: ['released|gate:release'] })))
     expect(screen.queryByText('mock-deviation-banner')).toBeNull()
     fireEvent.click(screen.getByText('mock-ask-deviation'))
     expect(await screen.findByText('mock-deviation-banner')).toBeDefined()

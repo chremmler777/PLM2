@@ -856,11 +856,11 @@ describe('CockpitSummary gate held step and deviations (review M1)', () => {
   afterEach(cleanup)
   const approved = () => change({ status: 'approved', timing_validated_at: '2026-09-20T00:00:00', customer_relevant: true })
 
-  it('an approved deviation covering the step keeps it live (the gate is a soft guard)', () => {
+  it('an approved override of the gate keeps the step live (the gate is a soft rule)', () => {
     const onAdvance = vi.fn()
     render(wrap(<CockpitSummary change={approved()}
       gates={[{ gate_key: 'release', decision: 'no' }]} pendingDeviations={0}
-      deviationTargets={{ approved: ['in_implementation'], pending: [] }}
+      deviationTargets={{ approved: ['in_implementation|gate:release'], pending: [] }}
       onAdvance={onAdvance} advancing={false} onResolveGate={() => {}} />))
     const step = screen.getByTestId('next-to-in_implementation') as HTMLButtonElement
     expect(step.disabled).toBe(false)
@@ -868,6 +868,27 @@ describe('CockpitSummary gate held step and deviations (review M1)', () => {
     expect(onAdvance).toHaveBeenCalledWith('in_implementation')
     expect(screen.getByTestId('next-gate-release').textContent).toContain('approved deviation')
     expect(screen.queryByTestId('next-ask-deviation-in_implementation')).toBeNull()
+  })
+
+  it('C6: an override of another rule into the same status does not cover the gate', () => {
+    const onAskDeviation = vi.fn()
+    render(wrap(<CockpitSummary change={approved()}
+      gates={[{ gate_key: 'release', decision: 'no' }]} pendingDeviations={1}
+      deviationTargets={{ approved: ['in_implementation|timing_not_validated'],
+        pending: ['in_implementation|impact_not_confirmed'] }}
+      onAskDeviation={onAskDeviation} onAdvance={() => {}} advancing={false} onResolveGate={() => {}} />))
+    expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('next-gate-release').textContent).not.toContain('approved')
+    fireEvent.click(screen.getByTestId('next-ask-deviation-in_implementation'))
+    expect(onAskDeviation).toHaveBeenCalledWith('in_implementation', 'release')
+  })
+
+  it('a legacy override (no rule) still covers its whole target', () => {
+    render(wrap(<CockpitSummary change={approved()}
+      gates={[{ gate_key: 'release', decision: 'no' }]} pendingDeviations={0}
+      deviationTargets={{ approved: ['in_implementation|*'], pending: [] }}
+      onAdvance={() => {}} advancing={false} onResolveGate={() => {}} />))
+    expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('offers "Ask for a deviation" next to the D1 link on a gate held step', () => {
@@ -884,7 +905,7 @@ describe('CockpitSummary gate held step and deviations (review M1)', () => {
   it('a pending deviation is named instead of a second ask', () => {
     render(wrap(<CockpitSummary change={approved()}
       gates={[{ gate_key: 'release', decision: 'na' }]} pendingDeviations={1}
-      deviationTargets={{ approved: [], pending: ['in_implementation'] }} onAskDeviation={() => {}}
+      deviationTargets={{ approved: [], pending: ['in_implementation|gate:release'] }} onAskDeviation={() => {}}
       onAdvance={() => {}} advancing={false} onResolveGate={() => {}} />))
     expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByTestId('next-ask-deviation-in_implementation')).toBeNull()

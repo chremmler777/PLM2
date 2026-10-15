@@ -832,9 +832,10 @@ export default function ChangeDetailPage() {
     maySign: (side: 'pm' | 'quality') => (side === 'pm' ? canSignPm : canSignQuality),
     // Absorb is asked by Sales (customer change), the lead, PM or an admin.
     canAbsorb: isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember),
+    // C6: per rule (`${to}|${rule}`; `*` = a row from before the binding)
     deviationTargets: {
-      approved: deviations.filter((d) => d.status === 'approved').map((d) => d.to_status),
-      pending: deviations.filter((d) => d.status === 'pending').map((d) => d.to_status),
+      approved: deviations.filter((d) => d.status === 'approved').map((d) => `${d.to_status}|${d.guard_key ?? '*'}`),
+      pending: deviations.filter((d) => d.status === 'pending').map((d) => `${d.to_status}|${d.guard_key ?? '*'}`),
     },
     // A gate held step: the deviation banner asks for the deviation (the
     // gate is a soft guard; an approved one lets the step through).
