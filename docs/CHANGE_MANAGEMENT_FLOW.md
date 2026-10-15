@@ -1105,20 +1105,24 @@ Switch `SCOPING_V2` (`revision_intake_service.py`,
     "something else changed"; nothing preselected; only that department
     answers (`POST /changes/{id}/rechecks/{rid}/answer`). An effect before
     the offer is sent reopens the department's finalized costing (in quoting
-    the change first steps back to costing, the correction path, logged);
+    the change first steps back to costing, the correction path, logged; it
+    is a system consequence of the department's answer, not a run-team hop,
+    and the Sales owner (else Sales) and the lead are told once: "Offer on
+    hold: <dept> recosts for index D", `recheck_back:<id>`);
     from quoted on it is a scope change of type customer index
     (`scope_changed_after_quote` + `costing_update` for that department).
     No visible change: no rechecks. A department that had not submitted sees
     "Index changed to D: assess on D".
-  - **Lead** (task `index_decision`, 1 wd, past scoping): "Index D adds
-    parts or departments?" no / yes + which
+  - **Lead** (task `index_decision`, 1 wd, past scoping; the notice names
+    the due weekday): "Index D adds parts or departments?" no / yes + which
     (`POST /changes/{id}/index-followups/{intake}/scope`, run team; PM rows
     name the lead as main). An index attached during capture or scoping
     makes it owed from the entry into assessment: the row starts then (never
     overdue at birth), names the new index ("C -> D") and the lead is told
     once at proceed.
   - **Sales** (an open quote, task `index_deadline`): "D replaces C; deadline
-    holds?" holds (filed mail or ref) / new date (date + mail or ref) / not
+    holds?" holds (filed mail or ref) / new date (date, today or later, +
+    the customer's filed mail; a typed ref is refused, R17) / not
     asked yet (Assumed, confirm by +5 wd: `index_deadline_confirm` until
     holds or new date) (`.../deadline`, Sales members).
   - **Internal change**: triage asks "Customer-driven?" (yes for a customer

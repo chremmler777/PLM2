@@ -485,6 +485,13 @@ async def test_an_effect_while_quoting_reopens_costing(client, session_factory, 
         assert change.status == "costing"
         assert not change.scope_changed_after_quote
         assert not early_costing.is_finalized(change, world["depts"]["Tool Engineer"])
+        # Sales (no owner named: its members) and the lead hear it once
+        notes = (await s.execute(select(Notification).where(
+            Notification.subject_key.like("recheck_back:%"),
+            Notification.link.like(f"/changes/{cid}?%")))).scalars().all()
+    told = {n.user_id for n in notes}
+    assert world["users"]["sales"] in told and world["seed"]["admin_id"] in told
+    assert len(notes) == len(told) and notes[0].title.startswith("Offer on hold: Tool Engineer")
 
 
 async def test_every_live_change_on_the_part_is_named_and_its_lead_told(

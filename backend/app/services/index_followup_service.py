@@ -35,7 +35,8 @@ from app.models.revision_intake import (
     DEADLINE_ANSWERS, NO_VISIBLE_CHANGE, ChangeRecheck, RevisionIntake,
 )
 from app.models.workflow import Department
-from app.services import cm_switches
+from app.services import cm_switches, due_rules
+from app.services.change_people import department_members_of_change_org
 from app.services.change_service import ChangeError, ChangeService
 
 #: The statuses with an open quote: Sales asks whether the deadline holds.
@@ -148,7 +149,8 @@ class IndexFollowupService:
                 session, [change.lead_id], kind="index_decision",
                 subject_key=f"index_decision:{intake.id}",
                 title=f"Index {to_name} adds parts or departments? {change.change_number}"[:255],
-                body=f"{intake.replaced_revision} -> {to_name}: answer by tomorrow",
+                body=(f"{intake.replaced_revision} -> {to_name}: answer due "
+                      f"{due_rules.task_due(datetime.utcnow(), change, 'index_decision'):%a}"),
                 link=f"/changes/{change.id}?tab=assessments")
         if deadline_open(intake):
             ids = [change.sales_owner_id] if change.sales_owner_id else []
@@ -257,6 +259,34 @@ class IndexFollowupService:
         return recheck
 
     @staticmethod
+    async def _tell_offer_on_hold(session: AsyncSession, change: ChangeRequest,
+                                  recheck: ChangeRecheck, dept: str,
+                                  actor_id: int) -> None:
+        """The offer Sales was writing waits for a department's new costing:
+        the Sales owner (else Sales) and the lead hear it once, with the
+        reason (spec §0: a decision that moves their task)."""
+        from app.services.notification_service import NotificationService
+        ids = [change.sales_owner_id] if change.sales_owner_id else []
+        if not ids:
+            sales = (await session.execute(select(Department.id).where(
+                Department.name == "Sales"))).scalar_one_or_none()
+            if sales is not None:
+                ids = await department_members_of_change_org(session, change, [sales])
+        if change.lead_id is not None:
+            ids.append(change.lead_id)
+        ids = [i for i in dict.fromkeys(ids) if i != actor_id]
+        if ids:
+            await NotificationService.notify_once(
+                session, ids, kind="assessment_recheck",
+                subject_key=f"recheck_back:{recheck.id}",
+                title=(f"Offer on hold: {dept} recosts for index {recheck.to_revision} "
+                       f"({change.change_number})")[:255],
+                body=(f"'{change.title}': {dept} sees an effect of index "
+                      f"{recheck.to_revision}, so the change is back in costing until "
+                      f"{dept} finalizes its costing again. The offer waits for it."),
+                link=f"/changes/{change.id}?tab=assessments")
+
+    @staticmethod
     async def _apply_effect(session: AsyncSession, change: ChangeRequest,
                             recheck: ChangeRecheck, dept: str, user: User) -> None:
         """Before quoted (spec §1 [R4]): the department's finalized costing
@@ -270,6 +300,8 @@ class IndexFollowupService:
             await ChangeService.transition(
                 session, change, "costing", user.id,
                 reason=f"{why}: its costing reopens before the offer goes out")
+            await IndexFollowupService._tell_offer_on_hold(
+                session, change, recheck, dept, user.id)
         if change.status in COSTING_OPEN:
             await session.refresh(change, ["assessments"])
             rows = [a for a in change.assessments
@@ -479,7 +511,8 @@ class IndexFollowupService:
                 session, [change.lead_id], kind="index_decision",
                 subject_key=f"index_decision:{i.id}",
                 title=f"Index {to_name} adds parts or departments? {change.change_number}"[:255],
-                body=f"{i.replaced_revision} -> {to_name}: answer by tomorrow",
+                body=(f"{i.replaced_revision} -> {to_name}: answer due "
+                      f"{due_rules.task_due(datetime.utcnow(), change, 'index_decision'):%a}"),
                 link=f"/changes/{change.id}?tab=assessments")
 
     @staticmethod
