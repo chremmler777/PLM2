@@ -113,9 +113,9 @@ export const basicsChapter: ContentChapter = {
         {
           points: [
             ['"Needs you"', 'Decisions only you can give sit on top: an override to approve or reject, your sign-off, the internal cost approval. The soonest due comes first.'],
-            ['Every step is a task', 'When nothing holds a change any more, the lead gets "Ready: move it on". Nobody has to notice it on their own.'],
+            ['Every step is a task', 'When nothing holds a change any more, the lead gets "Ready: move it on". Its button makes the move, for example "Close assessment". Nobody has to notice it on their own.'],
             ['Due dates', 'A task is due 2 working days after it reached you, 1 when the change is urgent. An assessment is due 7 days out, earlier when the quote deadline is close. The row says what it runs against, for example "(quote deadline 20 Oct)" or "(urgent)".'],
-            ['"Late"', 'One working day after the due date the row says "Late". Your department and the change lead see it then, and it goes into the daily overdue digest.'],
+            ['"Late"', 'One working day after the due date the row says "Late". For a department assessment the change lead sees it then in "Overdue", and it goes into the daily overdue digest; Sales\' late quote steps go into the digest. Point at "Late" to see who else sees it.'],
             ['"is working on this"', 'There is no claim button. The first person in the department who edits the assessment owns it, and the row names them. Hand over with "Assign".'],
           ],
         },

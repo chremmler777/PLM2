@@ -1239,37 +1239,60 @@ one, and "Absorb" on an open price for who may ask it.
   under C5; never the raiser), `validation_check` (an implementing
   department's open checks, Release tab) and `advance` ("Ready: move it on":
   the lead, else Project Management, once `next_step_missing` lists nothing;
-  a released change's close too). The cockpit lists the same rows.
+  a released change's close too; its button is the hop's own verb, "Close
+  assessment", and makes the move from the task card and "Your actions"
+  alike). The cockpit lists the same rows. A read-only account (viewer, no
+  active PLM department) gets none of these rows; a configured internal
+  approver who cannot write is skipped, so the Project Management fallback
+  decides (R24). Sign-off rows follow the gates: bound to the latest offer
+  with `COMMERCIAL_V2` (a signature only without it), after approval only
+  while `RELEASE_V2` checks them at release.
 - **"Needs you"** (`due_rules.NEEDS_YOU_KINDS`): overrides, sign-offs, the
   internal approval, `ppap_decision` (when lane L4 adds it) and a concession
   to decide (`validation_issue_customer` on a `customer_concession` route) sit
   in their own group on top, by due. Backup rows never do.
 - **Two due rules (C20, `ASSESSMENT_V2`, `app/services/due_rules.py`).** A
   task row is due 2 working days after it became owed (the question asked,
-  the override proposed, the customer's yes, else when the change entered its
-  status, else its capture); 1 working day when the change is urgent
+  the override proposed, the customer's yes or the newer offer to re-sign,
+  the department's own submit for its costing, the last costing finalized for
+  the internal approval, the scope change for a costing update, the last plan
+  edit for plan feedback, the change's newest logged step for "Ready: move it
+  on"; else when the change entered its status, else its capture); 1 working day when the change is urgent
   (priority critical) or others wait on it (triage, new-index decision,
   `ppap_decision`, customer flip). Waiting on the customer (`customer_response`)
   is due at the next contact, +5 working days. An assessment is due
-  min(now + 7 d, deadline - 3 wd), deadline = the quote deadline (until the
-  offer went out) or the need-by date, whichever is earlier; floor 2 wd
+  min(now + 7 d, deadline - 3 wd), deadline = the quote deadline (customer
+  changes, until the offer went out) or the need-by date, whichever is
+  earlier (deliberately: the header shows the phase's one, `active_deadline`); floor 2 wd
   (urgent 1). Set when the change enters assessment and when a department is
   added. Rows carry `deadline_date`/`deadline_kind` ("due Thu (quote deadline
   Mon)"), `urgent` and `late`. Switch off: rows keep the change's deadline as
   their due date, the assessment a flat 7 days.
-- **One escalation rule.** The owner is reminded on the due date ("Task due
-  today"); at due + 1 working day (`late`) the owner hears it is late, the
-  item escalates to the change lead (notification and the "Overdue" group,
-  `lead_escalations`) and the department sees it marked "Late" (a late backup
-  row is no longer muted). Quote and release deadline alerts reach the Sales
-  owner too. Switch off: the earlier timing (due-soon 2 days ahead, escalation
-  at the due date). Supplier and customer waits pausing the clock come with
-  lanes L5/L6.
+- **One escalation rule.** The owner of a department assessment or engine
+  task (owned unlinked assessments included) is reminded on the due date
+  ("Task due today", "Assessment due today"); at due + 1 working day the
+  owner hears it is late, the item escalates to the change lead (notification
+  and the "Overdue" group, `lead_escalations`) and the digest. One test
+  decides "late" everywhere (`notification_sweep.escalated` = `due_rules.is_late`,
+  so a Friday due date is late on Monday after its time, never over the
+  weekend). Sales' late stage rows reach the digest. Every other row (sign-off,
+  internal approval, override, costing input, plan feedback, checks, "Ready:
+  move it on") is marked "Late" for its owner only in cut 1; the row's
+  `escalation` ('lead' / 'digest' / none) words the Late chip, so it never
+  promises more. Quote and release deadline alerts reach the Sales owner too.
+  A sweep notice is sent once per item and person, read or not
+  (`notify_once(include_read=True)`); the reminder loop commits each run
+  (`sweep_once`). Switch off: the earlier timing (due-soon 2 days ahead,
+  escalation at the due date). Supplier and customer waits pausing the clock
+  come with lanes L5/L6.
 - **Overdue digest (C27/P6 cut 1, `RELEASE_V2`, `overdue_digest.py`).** Once
   a day to `settings.overdue_digest_recipients` (default `christoph.demmler`),
   one line per change: late assessments and change tasks, Sales' late
   hand-over, quote or customer answer, passed deadlines. Nothing late, no
-  digest; never twice a day, read or not. Cut 2: a manager per department.
+  digest; never twice a day, read or not. A non-admin recipient sees only
+  their organization's changes. Cut 2: a manager per department, and the
+  per-change digest for involved people (spec §0 "one line per change", §4
+  "lead's digest told").
 - **Stage entry notice (C3, `RELEASE_V2`).** Entering `in_implementation` or
   `in_validation` tells the implementing departments (the ones that priced
   the work) once per change and stage.
@@ -1279,13 +1302,19 @@ one, and "Absorb" on an open price for who may ask it.
   nothing; routing or "Assign" (hand over) still name someone first.
 - **Task card.** Every My Tasks link opens the change with `?task=<kind>`:
   "Your part: <task>, due <date> (deadline). Next: <button>" to where the work
-  is done, with a first-use help line dismissed once per browser.
+  is done ("Ready: move it on" makes the move itself); on the tab where the
+  work already is it names the step ("... (below)") instead of a second
+  button. A first-use help line is dismissed once per browser.
 - **Mail (`mail_outbox.py`, migration 120).** The notice channel stays the
   in-app notification (one per item: `notify_once`, involved people only).
   While `smtp_enabled` (default off) a one-minute loop mails each new one once,
   plain text ending "Answer in PLM2: <link>" (`plm2_public_url`, else
-  `frontend_url` + `/plm2`). Read, older than 24 h or addressless ones are
-  skipped; existing notifications were stamped mailed by the migration.
+  `frontend_url` + `/plm2`). Only the immediate class is mailed
+  (`mail_outbox.MAIL_KINDS`: task newly yours, decision needed, escalation to
+  acknowledge, the digest); due reminders, late notices, deadline alerts,
+  stage and FYI notices and a backup's info copy stay badges. Read, older than
+  24 h or addressless ones are skipped; existing notifications were stamped
+  mailed by the migration.
   Batching and reply-to answers: cut 2.
 
 **Acts-as (admin testing):** an admin can pick any role from a header dropdown
