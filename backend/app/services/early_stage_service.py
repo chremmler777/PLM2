@@ -454,7 +454,7 @@ class EarlyStageService:
                     title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
             else:
                 await NotificationService.notify_departments_once(
-                    session, [did], kind="impact_edited", subject_key=key,
+                    session, [did], change=change, kind="impact_edited", subject_key=key,
                     title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
 
     @staticmethod

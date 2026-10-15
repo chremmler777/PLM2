@@ -105,21 +105,21 @@ class NotificationService:
         db: AsyncSession,
         department_ids: list[int],
         *,
+        change,
         kind: str,
         subject_key: str,
         title: str,
         body: str | None = None,
         link: str | None = None,
     ) -> int:
-        """Expand department membership, then dedup-notify each member."""
+        """Expand department membership, then dedup-notify each member. Only
+        ACTIVE members in the change's organization (change_people's rule):
+        never a namesake department elsewhere, never a disabled account."""
+        from app.services.change_people import department_members_of_change_org
         if not department_ids:
             return 0
-        result = await db.execute(
-            select(UserDepartment.user_id).where(
-                UserDepartment.department_id.in_(department_ids)
-            )
-        )
-        member_ids = [u for (u,) in result.all()]
+        member_ids = await department_members_of_change_org(
+            db, change, department_ids)
         return await NotificationService.notify_once(
             db, member_ids, kind=kind, subject_key=subject_key,
             title=title, body=body, link=link)

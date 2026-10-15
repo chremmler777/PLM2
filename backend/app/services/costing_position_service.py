@@ -820,7 +820,7 @@ class CostingPositionService:
                 session, actor, position.department_id):
             return
         await NotificationService.notify_departments_once(
-            session, [position.department_id], kind="task_new",
+            session, [position.department_id], change=change, kind="task_new",
             subject_key=f"estimate_check:{position.id}",
             title=f"Quote vs your estimate: {change.change_number}"[:255],
             body=(f"A supplier quote came in on '{position.label}', estimated at "
@@ -922,7 +922,7 @@ class CostingPositionService:
                         Department.name == "Sales"))).scalar_one_or_none()
                     if sales is not None:
                         await NotificationService.notify_departments_once(
-                            session, [sales], kind="task_new", subject_key=key,
+                            session, [sales], change=change, kind="task_new", subject_key=key,
                             title=title[:255], body=body, link=link)
             else:
                 ids = list(await ChangeService.internal_approver_ids(session, change))

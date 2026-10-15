@@ -613,7 +613,7 @@ class MeetingService:
             ).scalar_one_or_none()
             if sales is not None:
                 await NotificationService.notify_departments_once(
-                    session, [sales], kind="task_new", subject_key=key,
+                    session, [sales], change=change, kind="task_new", subject_key=key,
                     title=title, body=body, link=link)
             return
         if change.lead_id and change.lead_id != user.id:
@@ -626,7 +626,7 @@ class MeetingService:
         ).scalar_one_or_none()
         if pm is not None:
             await NotificationService.notify_departments_once(
-                session, [pm], kind="task_new", subject_key=key,
+                session, [pm], change=change, kind="task_new", subject_key=key,
                 title=title, body=body, link=link)
 
     @staticmethod

@@ -218,7 +218,7 @@ async def close(session: AsyncSession, change: ChangeRequest, wait_id: int,
     if reason == "price_on_estimate":
         from app.services.notification_service import NotificationService
         await NotificationService.notify_departments_once(
-            session, [w.department_id], kind="task_new",
+            session, [w.department_id], change=change, kind="task_new",
             subject_key=f"wait:{w.id}:estimate",
             title=f"Price on your estimate: {change.change_number}"[:255],
             body=(f"The lead does not wait for {w.vendor_name}: finalize your "

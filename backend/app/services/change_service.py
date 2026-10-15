@@ -2317,7 +2317,7 @@ class ChangeService:
                 ).scalar_one_or_none()
                 if sales is not None:
                     await NotificationService.notify_departments_once(
-                        session, [sales], kind="task_new",
+                        session, [sales], change=change, kind="task_new",
                         subject_key=f"ready_to_quote:{change.id}", title=title,
                         body=body, link=link)
         if to_status == "costing":
