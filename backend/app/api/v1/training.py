@@ -967,6 +967,9 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("DELETE", "/changes/{change_id}/costing/offers/{oid}"),
     ("POST", "/changes/{change_id}/cost-lead-time"),
     ("PUT", "/changes/{change_id}/costing/machine-class"),
+    ("POST", "/changes/{change_id}/costing/departments/{department_id}/finalize"),
+    ("POST", "/changes/{change_id}/costing/departments/{department_id}/reopen"),
+    ("PUT", "/changes/{change_id}/scope-definition"),
     ("POST", "/changes/{change_id}/actual-costs"),
     ("DELETE", "/changes/{change_id}/actual-costs/{cost_id}"),
     # meetings, negotiations, concerns
