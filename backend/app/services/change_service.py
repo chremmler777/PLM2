@@ -1544,6 +1544,11 @@ class ChangeService:
             if n:
                 add("resulting_revisions", "soft", n=n,
                     rule="resulting_revisions_missing")
+            # C21: the Tool Engineer's tool change is done for every tool
+            open_tools = await ChangeService.open_tool_changes(session, change)
+            if open_tools:
+                add("tool_change", "soft", n=len(open_tools), rule="tool_change_open",
+                    who="Tool Engineer: " + ", ".join(open_tools))
         if to == "released":
             from app.services.validation_service import ValidationService
             checks = await ValidationService.list_checks(session, change)
@@ -1752,6 +1757,11 @@ class ChangeService:
             if missing:
                 out.append(R("resulting_revisions_missing",
                              "Some impacted items have no resulting revision"))
+            open_tools = await ChangeService.open_tool_changes(session, change)
+            if open_tools:
+                out.append(R("tool_change_open",
+                             "Tool change not done (Tool Engineer): "
+                             + ", ".join(open_tools)))
         if to_status == "in_implementation":
             if change.impact_confirmed_at is None:
                 out.append(R("impact_not_confirmed", "impact_not_confirmed"))
@@ -4978,6 +4988,32 @@ class ChangeService:
             actor.id, field_name="lead_time_impact_days",
             old_value=old_value, new_value=lead_time_days)
         return a
+
+    @staticmethod
+    async def open_tool_changes(session: AsyncSession, change: ChangeRequest) -> list[str]:
+        """C21 (spec §8-9 SOFT "tool change done per tool"): the part numbers
+        whose check workflow still has its "Implement tool change" step
+        open (its R/A task not approved). One query."""
+        from app.models.workflow import WfInstance, WfInstanceTask, WfStep
+        from app.services.wf_seed_service import TOOL_CHANGE_STEP
+        rev_ids = [i.resulting_revision_id for i in change.impacted_items
+                   if i.resulting_revision_id is not None]
+        if not rev_ids:
+            return []
+        from app.models.part import PartRevision
+        rows = (await session.execute(
+            select(Part.part_number)
+            .select_from(WfInstanceTask)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .join(WfStep, WfStep.id == WfInstanceTask.step_id)
+            .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+            .join(Part, Part.id == PartRevision.part_id)
+            .where(WfInstance.part_revision_id.in_(rev_ids),
+                   WfInstance.status.in_(("active", "completed")),
+                   WfStep.step_name == TOOL_CHANGE_STEP,
+                   WfInstanceTask.is_actionable.is_(True),
+                   WfInstanceTask.status.not_in(("approved", "noted"))))).scalars().all()
+        return sorted(set(rows))
 
     @staticmethod
     async def _positions_above(session: AsyncSession, change: ChangeRequest) -> list:

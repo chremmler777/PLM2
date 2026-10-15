@@ -93,6 +93,7 @@ RULE_LABELS = {
     "validation_failed": "Validation check failed",
     "validation_issues_open": "Validation issues open",
     "check_workflows_open": "Check workflows not finished",
+    "tool_change_open": "Tool change not done",
     "release_checklist_open": "Release checklist open",
     "lessons_missing": "Lessons learned missing",
     "plan_deviations_open": "Plan deviations open",

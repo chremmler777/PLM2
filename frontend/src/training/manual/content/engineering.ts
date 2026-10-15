@@ -223,6 +223,7 @@ export const engineeringChapter: ContentChapter = {
             ['Progress on your blocks:', 'open a block in the plan and set "Progress", "Actual start", "Actual finish". Members of the block\'s owner department may; everything else is read only.'],
             ['Booked time:', 'under "Reports and time booking", "Hours" and "What for?", then "Book time". Actual cost is booked hours times the rate.'],
             ['Progress reports:', '"What happened?", and "This is at risk" with what is at risk. The chip says when a report is due.'],
+            ['The tool change and the trial are the Tool Engineer\'s', '(the Toolshop supports, Quality is accountable for the trial); Process owns the process and parameter sheets. While a tool\'s "Implement tool change" is open, moving to validation warns "Tool change not done (Tool Engineer): <tool>".'],
             ['A date that will not hold:', 'tell PM. After the baseline only PM, Sales, Scheduling and the lead move dates, and each move is a deviation with a reason. The move and the blocks it pushes are decided as one group.'],
           ],
         },
@@ -240,7 +241,7 @@ export const engineeringChapter: ContentChapter = {
             'validated", "Packaging validated with the changed part". "Pass", or "Fail" with what ' +
             'is not in order. A fail without a reason is not a check. "Measured cycle time" and ' +
             '"Part weight validated" pass only with the measured value entered; both are the ' +
-            'Tool Engineer\'s. A cycle time another department measured earlier stays readable, ' +
+            'Tool Engineer\'s, and so is "Tool sampled". A cycle time another department measured earlier stays readable, ' +
             'marked "No longer asked". Type numbers with a dot for decimals (41.5, not 41,5).',
         },
         {

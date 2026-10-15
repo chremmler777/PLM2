@@ -785,6 +785,29 @@ assessment"): the department checks its answer from the notice and its
 reopened costing; a recall stays the lead's (open question for Christoph).
 From `quoted` on: the scope change below, unchanged.
 
+### Who owns the tool change (ECR-solid C21, 2026-10-15)
+No switch (spec: C21 has none). The ECN check workflows (both templates,
+`wf_seed_service.INDUSTRIALIZATION_STEPS` / `READY_TO_GO_STEPS`; migration
+129 rewrites the live rows, new instances follow; running ones keep their
+tasks):
+| Step | R | A | S / C / I |
+|---|---|---|---|
+| Implement tool change | Tool Engineer | Project Manager | Toolshop S, Process Engineer C |
+| Adjust process / parameter sheets (was "routing sheets") | Process Engineer | Project Manager | Manufacturing Engineer C |
+| Clarify inspection plan / PPAP need | Quality | Project Manager | Sales C |
+| Update master data & logistics | Scheduling | Project Manager | |
+| Sampling / trial | Tool Engineer | Quality | Process Engineer S |
+| Final release | Project Manager | Quality | Sales I |
+The retired Production, Production control, Purchasing and Logistics own
+nothing. **"Tool sampled"** is asked of the Tool Engineer only
+(`validation_checklist.SAMPLED_BY`; older rows of Manufacturing / Process
+Engineer stay readable, not owed). **Soft guard into validation**
+(`tool_change_open`, "Tool change not done (Tool Engineer): T-3454"): every
+impacted tool whose check workflow still has its *Implement tool change*
+task open; override as for any soft rule into validation. **Toolshop**
+(P7) has typical cost positions (toolmaker hours, in-house rework, EDM /
+wire, steel / material, polishing / texture).
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside

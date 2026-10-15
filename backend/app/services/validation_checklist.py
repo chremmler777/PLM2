@@ -6,7 +6,8 @@ cycle time did you measure?"), so they live in code where a diff shows the
 change, rather than in rows somebody can quietly edit for one department.
 
 The departments working on the tool and the line (Tool Engineer,
-Manufacturing Engineer, Process Engineer) answer the COMMON checks. The
+Manufacturing Engineer, Process Engineer) answer the COMMON checks; the
+tool is sampled by the Tool Engineer alone (C21, 2026-10-15). The
 cycle time is measured by the Tool Engineer alone (decision 2026-09-26): a
 cycle time Manufacturing or Process Engineer recorded under the older
 catalog stays on the record, read-only and not counted. APQP answers for
@@ -37,6 +38,10 @@ COMMON_CHECKS = [
     ("sampled", "Werkzeug abgemustert", "Tool sampled", False, None),
     ("measured", "Teil vermessen", "Part measured", False, None),
 ]
+# ECR-solid C21: the tool is sampled by its owner, the Tool Engineer alone
+# (a 'sampled' row Manufacturing or Process Engineer holds from the older
+# catalog stays on the record, not counted).
+SAMPLED_BY = ("Tool Engineer",)
 
 # The departments whose work is on the tool and the line: they sample and
 # measure it (the Tool Engineer also times it, below). Everyone else answers only for their own scope below
@@ -87,7 +92,8 @@ def items_for(department_name: str | None) -> list[dict]:
     validation check (its rows, if an older catalog seeded some, stay on
     the record but no longer count; see ValidationService)."""
     name = department_name or ""
-    items = ([_entry(i, False) for i in COMMON_CHECKS]
+    items = ([_entry(i, False) for i in COMMON_CHECKS
+              if i[0] != "sampled" or name in SAMPLED_BY]
              if name in COMMON_DEPARTMENTS else [])
     have = {i["key"] for i in items}
     items += [_entry(i, True) for i in DEPARTMENT_CHECKS.get(name, [])

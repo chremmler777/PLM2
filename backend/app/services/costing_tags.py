@@ -35,6 +35,14 @@ DEPARTMENT_CATEGORIES = {
         ("moldflow", "Moldflow", "Moldflow", "money"),
         ("trial_support", "Versuchsbegleitung", "Trial support", "time"),
     ],
+    # P7: the Toolshop is its own department; its typical positions (C21).
+    "Toolshop": [
+        ("toolmaker_hours", "Werkzeugmacherstunden", "Toolmaker hours", "time"),
+        ("in_house_rework", "Nacharbeit im Haus", "In-house rework", "time"),
+        ("edm_wire", "Erodieren / Draht", "EDM / wire cut", "time"),
+        ("steel_material", "Stahl / Material", "Steel / material", "money"),
+        ("polishing_texture", "Polieren / Narbung", "Polishing / texture", "money"),
+    ],
     "Process Engineer": [
         ("automation", "Automation / EOAT", "Automation / EOAT", "money"),
         ("trial_equipment", "Versuchsausrüstung", "Process trial equipment", "money"),

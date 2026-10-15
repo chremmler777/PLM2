@@ -590,12 +590,12 @@ async def test_actuals_extras_carry_the_scrap_quote_and_the_weight_delta(
 
 async def test_catalog_departments():
     from app.services import validation_checklist as cat
-    for name in ("Tool Engineer", "Manufacturing Engineer", "Process Engineer"):
-        assert cat.keys_for(name)[:2] == ["sampled", "measured"]
+    assert cat.keys_for("Tool Engineer")[:2] == ["sampled", "measured"]
     # the cycle time is measured by the Tool Engineer only (2026-09-26)
     assert cat.keys_for("Tool Engineer")[2:] == ["cycle_time", "weight"]
-    assert cat.keys_for("Manufacturing Engineer") == ["sampled", "measured"]
-    assert cat.keys_for("Process Engineer") == ["sampled", "measured"]
+    # ECR-solid C21: the tool is sampled by the Tool Engineer alone
+    assert cat.keys_for("Manufacturing Engineer") == ["measured"]
+    assert cat.keys_for("Process Engineer") == ["measured"]
     assert cat.CYCLE_TIME_DEPARTMENT == "Tool Engineer"
     assert cat.label_for("cycle_time", "Process Engineer") == "Measured cycle time"
     assert cat.keys_for("APQP") == ["measured"]
@@ -660,12 +660,12 @@ async def test_cycle_time_measured_by_other_departments_stays_readable(
     state = await _state(client, admin_auth, val)
     by_name = {d["department_name"]: d for d in state["departments"]}
     pe = by_name["Process Engineer"]
-    # the current catalog first (sampled, measured), the retired answer last
+    # the current catalog first (measured; C21: sampling is the Tool
+    # Engineer's), the retired answer last
     assert [(c["check_key"], c["retired"], c["value"]) for c in pe["checks"]] == [
-        ("sampled", False, None), ("measured", False, None),
-        ("cycle_time", True, 41.0)]
+        ("measured", False, None), ("cycle_time", True, 41.0)]
     assert pe["checks"][-1]["label_en"] == "Measured cycle time"
-    assert pe["open_count"] == 2          # the retired cycle time is not owed
+    assert pe["open_count"] == 1          # the retired cycle time is not owed
     # an unanswered one is not owed and not shown
     assert "cycle_time" not in {
         c["check_key"] for c in by_name["Manufacturing Engineer"]["checks"]}

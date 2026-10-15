@@ -78,6 +78,36 @@ ECM_BEWERTUNG_PHYSICAL = {
 ASSESSMENT_STANDARD_BY_TYPE = {"physical_part": ECM_BEWERTUNG_PHYSICAL}
 
 
+# ECR-solid C21: who owns the industrialization and the trial of a check
+# workflow (both ECN templates). Migration 129 rewrites the live rows to this.
+INDUSTRIALIZATION_STEPS = [
+    ("Implement tool change", [
+        ("Tool Engineer", "R"), ("Project Manager", "A"), ("Toolshop", "S"),
+        ("Process Engineer", "C"),
+    ], {}),
+    ("Adjust process / parameter sheets", [
+        ("Process Engineer", "R"), ("Project Manager", "A"),
+        ("Manufacturing Engineer", "C"),
+    ], {}),
+    ("Clarify inspection plan / PPAP need", [
+        ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
+    ], {}),
+    ("Update master data & logistics", [
+        ("Scheduling", "R"), ("Project Manager", "A"),
+    ], {}),
+]
+READY_TO_GO_STEPS = [
+    ("Sampling / trial", [
+        ("Tool Engineer", "R"), ("Quality", "A"), ("Process Engineer", "S"),
+    ], {}),
+    ("Final release", [
+        ("Project Manager", "R"), ("Quality", "A"), ("Sales", "I"),
+    ], {}),
+]
+#: The step a tool change is done in (the soft guard into validation).
+TOOL_CHANGE_STEP = "Implement tool change"
+
+
 def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
     return {
         "name": name,
@@ -97,32 +127,15 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
                 ], {"four_eyes": True}),
             ]),
             ("Industrialization", [
-                # F-06 (2026-10-01): Production and Logistics are retired. The
-                # acting rows follow the role remap of the activity catalogs
-                # (CHANGE_MANAGEMENT_FLOW.md): Production -> Process Engineer,
-                # Logistics (stock/flow) -> Scheduling.
-                ("Implement tool change", [
-                    ("Process Engineer", "R"), ("Tool Engineer", "A"), ("Production control", "I"),
-                ], {}),
-                ("Adjust process / routing sheets", [
-                    ("Manufacturing Engineer", "R"), ("Project Manager", "A"), ("Production", "C"),
-                ], {}),
-                ("Clarify inspection plan / PPAP need", [
-                    ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
-                ], {}),
-                ("Update master data & logistics", [
-                    ("Scheduling", "R"), ("Project Manager", "A"),
-                    ("Purchasing", "C"), ("Production control", "I"),
-                ], {}),
+                # ECR-solid C21 (spec §8-9, migration 129 reseeds live rows):
+                # the Tool Engineer owns the tool change and the trial (P7: the
+                # Toolshop supports it), Process the parameter sheets; the
+                # retired Production, Production control, Purchasing and
+                # Logistics own nothing any more.
+                *INDUSTRIALIZATION_STEPS,
             ]),
             ("Ready to go", [
-                ("Sampling / trial", [
-                    ("Quality", "R"), ("Project Manager", "A"), ("Production", "S"),
-                ], {}),
-                ("Final release", [
-                    ("Project Manager", "R"), ("Quality", "A"),
-                    ("Sales", "I"), ("Logistics", "I"), ("Production control", "I"),
-                ], {}),
+                *READY_TO_GO_STEPS,
             ]),
         ],
     }
@@ -165,7 +178,9 @@ RENAMES = {
     "Konstruktionsprüfung": "Design review",
     "Industrialisierung": "Industrialization",
     "Werkzeugänderung umsetzen": "Implement tool change",
-    "Prozess/Arbeitspläne anpassen": "Adjust process / routing sheets",
+    # C21: the process owns its parameter sheets
+    "Adjust process / routing sheets": "Adjust process / parameter sheets",
+    "Prozess/Arbeitspläne anpassen": "Adjust process / parameter sheets",
     "Prüfplan / PPAP-Bedarf klären": "Clarify inspection plan / PPAP need",
     "Stammdaten & Logistik aktualisieren": "Update master data & logistics",
     "Bemusterung / Trial": "Sampling / trial",
