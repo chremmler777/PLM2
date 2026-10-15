@@ -1021,6 +1021,20 @@ class EarlyStageService:
                           "target_tab": "offer"})
 
         from app.services.price_redaction import PriceViewer
+        # HARD #8 (P9): the internal approval's button follows the rule
+        can_approve_internal = (
+            not change.customer_relevant and change.status in ("costing", "quoted")
+            and change.internal_approved_at is None
+            and await ChangeService.user_can_approve_internal_costs(
+                session, user, change))
+        # §5 card: whether volume, saving and basis are asked (any cost at
+        # all), served so an approver without price view (P9 deputy) gets
+        # the fields the backend requires, without the money (R24)
+        internal_needs_money = None
+        if can_approve_internal and _v2():
+            from app.services.cost_service import CostService
+            summ = await CostService.summation(session, change)
+            internal_needs_money = abs(summ["totals"]["grand_total"] or 0) > 0.004
         return {
             "change_id": change.id,
             "status": change.status,
@@ -1040,12 +1054,8 @@ class EarlyStageService:
             "lead_assigned": change.lead_id is not None,
             # One price rule (PriceViewer) for the API and the cost cards.
             "can_see_prices": await PriceViewer(session, user).may_read(change),
-            # HARD #8 (P9): the internal approval's button follows the rule
-            "can_approve_internal": (
-                not change.customer_relevant and change.status in ("costing", "quoted")
-                and change.internal_approved_at is None
-                and await ChangeService.user_can_approve_internal_costs(
-                    session, user, change)),
+            "can_approve_internal": can_approve_internal,
+            "internal_needs_money": internal_needs_money,
             # ... and names who approves (never the raiser), for the card
             "internal_approvers": (
                 await ChangeService.internal_approver_text(session, change)

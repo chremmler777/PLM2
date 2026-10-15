@@ -1354,6 +1354,7 @@ export default function ChangeDetailPage() {
           canSignPm={canSignPm} canSignQuality={canSignQuality}
           canApproveInternalCosts={canApproveInternalCosts}
           internalApprovers={stage?.internal_approvers}
+          internalNeedsMoney={stage?.internal_needs_money}
           userId={userId ?? null}
           costSummary={canSeeCosts ? <SummationView changeId={changeId}
                 status={change.status} canQuote={canEditQuotedPrice}

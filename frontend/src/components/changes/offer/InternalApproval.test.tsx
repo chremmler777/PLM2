@@ -52,6 +52,22 @@ describe('InternalApproval card (spec §5)', () => {
         saving_basis: 'calculated' })))
   })
 
+  it('an approver without price view still gets the money fields (served flag)', async () => {
+    vi.mocked(changesApi.getSummation).mockRejectedValueOnce(new Error('403'))
+    render(wrap(<InternalApproval change={change} canApprove needsMoney />))
+    fireEvent.click(screen.getByRole('button', { name: /approve internal costs/i }))
+    expect(await screen.findByTestId('internal-volume')).toBeTruthy()
+    expect(screen.queryByTestId('internal-cost')).toBeNull()       // no amount shown
+    fireEvent.change(screen.getByTestId('due'), { target: { value: '2027-02-01' } })
+    fireEvent.change(screen.getByTestId('internal-rationale'), { target: { value: 'saving' } })
+    fireEvent.change(screen.getByTestId('internal-volume'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByTestId('internal-saving'), { target: { value: '500' } })
+    fireEvent.click(screen.getByTestId('internal-basis-estimate'))
+    fireEvent.click(screen.getByTestId('internal-approve-confirm'))
+    await waitFor(() => expect(changesApi.approveInternalCosts).toHaveBeenCalledWith(7,
+      expect.objectContaining({ volume: 1000, saving: 500, saving_basis: 'estimate' })))
+  })
+
   it('at no cost: one click and the rationale', async () => {
     total = 0
     render(wrap(<InternalApproval change={change} canApprove />))

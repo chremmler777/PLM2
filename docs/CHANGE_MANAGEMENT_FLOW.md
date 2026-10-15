@@ -792,7 +792,11 @@ Switch `ASSESSMENT_V2` (migration 128).
   (months = cost / saving × 12) is computed in the card. All at no cost:
   one click + the rationale. `POST /internal-approval` refuses a missing
   part of the case in plain words; stored on the change and shown on the
-  approved card. Switch off: release deadline only, as before.
+  approved card. Whether the money part is asked comes from stage-state
+  `internal_needs_money` (any cost at all), so an approver without price
+  view (the P9 deputy) gets the fields without the amount. The saving per
+  year is a price: non-price readers get it blanked. Switch off: release
+  deadline only, as before.
 
 ### Impact edits after the lock (ECR-solid C16, 2026-10-15)
 Switch `ASSESSMENT_V2`. Before C16 the run team changed the impacted set in

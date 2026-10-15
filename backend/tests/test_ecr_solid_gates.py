@@ -620,6 +620,7 @@ async def test_approver_who_raised_the_change_falls_back_to_pm(
                            headers=people["Project Manager"][1])).json()
     assert st["can_approve_internal"] is True
     assert st["internal_approvers"] == "a Project Management member or an admin"
+    assert st["internal_needs_money"] is False      # no cost: one click
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
                           json={"release_due_date": _DUE, "rationale": "quality"}, headers=mgmt)
     assert r.status_code == 403  # NEGATIVE: the raiser, although the approver

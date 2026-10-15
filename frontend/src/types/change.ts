@@ -1592,6 +1592,9 @@ export interface StageStateResponse {
   /** HARD #8: who approves this internal change, in words (the configured
    * approvers other than the raiser, else the PM/admin fallback). */
   internal_approvers?: string | null;
+  /** §5 card: any cost at all, so volume, saving and basis are asked (served
+   *  for an approver without price view, R24). */
+  internal_needs_money?: boolean | null;
   title_auto: boolean;
   assessment: StageAssessment | null;
   routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;

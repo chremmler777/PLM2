@@ -300,3 +300,15 @@ async def test_a_costing_wait_leaves_the_header_when_costing_closes(
     await _set(session_factory, cc["cid"], status="costing")
     detail = (await client.get(_u(cc["cid"]), headers=cc["dale"])).json()
     assert [w["vendor_name"] for w in detail["open_supplier_waits"]] == ["FZ"]
+
+
+async def test_the_approval_card_is_told_money_is_needed(client, cc, session_factory):
+    """R24: the card asks volume, saving and basis from this flag, not from
+    /summation, which an approver without price view cannot read."""
+    await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"])
+    await _set(session_factory, cc["cid"], customer_relevant=False)
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["lead"])).json()
+    assert st["can_approve_internal"] is True and st["internal_needs_money"] is True
+    # negative: not an approver, nothing served
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["dale"])).json()
+    assert st["internal_needs_money"] is None

@@ -30,11 +30,14 @@ export function paybackMonths(cost: number, savingPerYear: number): number | nul
   return Math.round((cost / savingPerYear) * 12 * 10) / 10
 }
 
-export default function InternalApproval({ change, canApprove, approvers }: {
+export default function InternalApproval({ change, canApprove, approvers, needsMoney }: {
   change: ChangeDetail
   canApprove: boolean
   /** Who approves, in words (stage-state internal_approvers). */
   approvers?: string | null
+  /** stage-state internal_needs_money: the fields an approver without price
+   *  view must fill, whose /summation is refused (R24). */
+  needsMoney?: boolean | null
 }) {
   const qc = useQueryClient()
   const v2 = !!change.assessment_v2
@@ -56,7 +59,7 @@ export default function InternalApproval({ change, canApprove, approvers }: {
     enabled: v2 && canApprove && open, retry: false,
   })
   const total = summation?.totals?.grand_total ?? null
-  const withMoney = total != null && Math.abs(total) > 0.004
+  const withMoney = total != null ? Math.abs(total) > 0.004 : !!needsMoney
   const estimated = positions.filter((p) => p.estimated)
   const payback = withMoney ? paybackMonths(total!, Number(saving)) : null
   const approve = useMutation({

@@ -56,6 +56,8 @@ export interface OfferTabProps {
   canApproveInternalCosts: boolean
   /** HARD #8: who approves the internal costs, in words. */
   internalApprovers?: string | null
+  /** stage-state internal_needs_money */
+  internalNeedsMoney?: boolean | null
   userId: number | null
   /** Internal changes: the cost summary (SummationView) the page renders. */
   costSummary?: ReactNode
@@ -536,7 +538,7 @@ export default function OfferTab(props: OfferTabProps) {
         </StepSection>
         <StepSection id="offer-approval" n={2} title="Approval" done={!!change.internal_approved_at}>
           <InternalApproval change={change} canApprove={props.canApproveInternalCosts}
-            approvers={props.internalApprovers} />
+            approvers={props.internalApprovers} needsMoney={props.internalNeedsMoney} />
         </StepSection>
       </div>
     )
