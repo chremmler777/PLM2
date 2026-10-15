@@ -140,3 +140,31 @@ async def test_management_reads_every_position(client, seed, depts, session_fact
     res = await client.get(f"/api/v1/changes/{c['id']}/costing/positions",
                            headers=await login(client, "viewer@test.io", admin=False))
     assert res.status_code == 200, res.text
+
+
+# --- P4: Management and retired departments are never routed ---------------
+
+async def test_management_and_retired_departments_are_never_routed(
+        client, seed, depts, session_factory, admin):
+    pm = {**admin, ACTS: str(depts["Project Manager"])}
+    c = (await client.post("/api/v1/changes", json=_body(seed, True), headers=pm)).json()
+    url = f"/api/v1/changes/{c['id']}/routing/deviation"
+    body = {"op": "add", "rasic_letter": "R", "reason": "need them"}
+    res = await client.post(url, json={**body, "department_id": depts["Management"]},
+                            headers=admin)
+    assert res.status_code == 400
+    assert "never routed" in res.json()["detail"]
+    # a Management member adding itself: the same answer
+    _, mail = await _user(session_factory, seed, "Boss", depts["Management"])
+    boss = await login(client, mail, admin=False)
+    res = await client.post(url, json={**body, "department_id": depts["Management"]},
+                            headers=boss)
+    assert res.status_code == 400
+    async with session_factory() as s:
+        await s.execute(update(Department).where(Department.id == depts["Quality"])
+                        .values(is_active=False))
+        await s.commit()
+    res = await client.post(url, json={**body, "department_id": depts["Quality"]},
+                            headers=admin)
+    assert res.status_code == 400
+    assert "retired" in res.json()["detail"]

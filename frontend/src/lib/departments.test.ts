@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { departmentLabel, pickableDepartments, preferredDepartmentId } from './departments'
+import { departmentLabel, isRoutable, pickableDepartments, preferredDepartmentId } from './departments'
 
 const depts = [
   { id: 2, name: 'Quality' },
@@ -39,5 +39,14 @@ describe('retired departments in pickers', () => {
   it('marks a retired one "(retired)"', () => {
     expect(departmentLabel(all[0])).toBe('Quality')
     expect(departmentLabel(all[1])).toBe('Old Lab (retired)')
+  })
+})
+
+describe('isRoutable (P4)', () => {
+  it('never offers Management or a retired department for routing', () => {
+    expect(isRoutable({ name: 'Management' })).toBe(false)
+    expect(isRoutable({ name: 'Quality', is_active: false })).toBe(false)
+    expect(isRoutable({ name: 'Quality', is_active: true })).toBe(true)
+    expect(isRoutable({ name: 'Toolshop' })).toBe(true)
   })
 })

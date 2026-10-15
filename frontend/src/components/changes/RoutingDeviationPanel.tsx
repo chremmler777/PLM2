@@ -22,6 +22,7 @@ import { toastError } from '../../lib/apiError'
 import { useAuth } from '../../contexts/AuthContext'
 import { deviationWaitKey } from '../../lib/scopingRules'
 import { getActsAsDepartmentId, setActsAsDepartmentId } from '../../lib/actsAs'
+import { isRoutable } from '../../lib/departments'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeRouting, DeviationRequest } from '../../types/change'
 
@@ -162,7 +163,7 @@ export default function RoutingDeviationPanel({
     .map((d) => ({ ...d, stage_order: s.stage_order }))) : []
   const nameOf = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
   const candidates = departments
-    .filter((d) => d.is_active !== false && !routedIds.includes(d.id))
+    .filter((d) => isRoutable(d) && !routedIds.includes(d.id))
     .sort((a, b) => a.name.localeCompare(b.name))
 
   if (!pending && !canAdd) return null

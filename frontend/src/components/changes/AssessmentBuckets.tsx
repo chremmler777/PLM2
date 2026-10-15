@@ -29,6 +29,7 @@ import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
+import { isRoutable } from '../../lib/departments'
 import { btnSm } from '../common/buttonStyles'
 import type {
   ChangeConcern,
@@ -493,7 +494,7 @@ export default function AssessmentBuckets({
                       <NotResponsibleDialog changeId={changeId} departmentId={row.id}
                         stageOrder={Number.isFinite(assessStage) ? assessStage : 1}
                         candidates={departments
-                          .filter((d) => d.is_active !== false && !ids.includes(d.id))
+                          .filter((d) => isRoutable(d) && !ids.includes(d.id))
                           .sort((x, y) => x.name.localeCompare(y.name))}
                         onClose={() => setDeclining(null)} />
                     )}

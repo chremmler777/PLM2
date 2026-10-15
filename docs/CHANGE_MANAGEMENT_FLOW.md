@@ -962,8 +962,14 @@ no tool-data or price rights. **Management** gives the OK on price drops and
 Absorb (P4) and therefore reads prices. One price rule serves every read:
 `PriceViewer` (change detail and list redaction); `NegotiationService.may_read`
 (summation, counter prices, offers, P&L) delegates to it, and stage-state
-serves it as `can_see_prices` for the cost cards. Management is never routed
-and gets no cost-sheet rate row (`cost_sheet_service.NON_ROUTABLE_DEPARTMENTS`).
+serves it as `can_see_prices` for the cost cards; the all-department costing
+and implementation views (`CostingPositionService` / `ImplementationService.
+readable_department_ids`) ask it too, so whoever reads the summation reads
+every position, and everyone else their own departments' rows. Management is
+never routed and gets no cost-sheet rate row
+(`cost_sheet_service.NON_ROUTABLE_DEPARTMENTS`): a routing deviation that adds
+Management, or a retired department, is refused (400), and the add pickers do
+not offer them.
 Until it has members, a Project Management member gives that OK. Quality still
 signs without price.
 Migration 117 also adds the columns later lanes fill: `sales_owner_id`,

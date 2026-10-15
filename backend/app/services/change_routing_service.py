@@ -863,6 +863,19 @@ class ChangeRoutingService:
                               stage_order: Optional[int] = None,
                               reason: Optional[str] = None) -> ChangeRouting:
         from app.services.change_service import ChangeService  # local import avoids cycle
+        if op == "add":
+            # P4: Management gives OKs and books no hours (no cost-sheet
+            # rate), and a retired department takes no new work: neither is
+            # ever routed, whoever asks.
+            from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+            dept = await session.get(Department, department_id)
+            if dept is None:
+                raise ValueError("Department not found")
+            if dept.name in NON_ROUTABLE_DEPARTMENTS:
+                raise ValueError(f"{dept.name} gives OKs and books no hours: "
+                                 "it is never routed")
+            if not dept.is_active:
+                raise ValueError(f"{dept.name} is retired: it cannot be routed")
         # One lock order with the engine: the instance first, then rows.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
         # No active instance: the completed one (every stage passed) still
