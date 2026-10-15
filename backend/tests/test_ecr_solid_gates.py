@@ -585,3 +585,58 @@ async def test_price_open_switch_off_closes(client, admin, seed, depts,
     r = await client.post(f"/api/v1/changes/{cid}/transition",
                           json={"to_status": "closed"}, headers=admin)
     assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------------------
+# L2 review loop 1
+# ---------------------------------------------------------------------------
+
+async def _told(session_factory, subject_key):
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        return {n.user_id for n in (await s.execute(select(Notification).where(
+            Notification.subject_key == subject_key))).scalars()}
+
+
+async def test_approver_who_raised_the_change_falls_back_to_pm(
+        client, admin, seed, depts, people, session_factory, monkeypatch):
+    """HARD #8: the only configured approver raised the internal change. A
+    PM member (or an admin) approves instead, the row names who, and the
+    raiser still cannot (no dead end, R18)."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "internal_approvers", "u_management")
+    mgmt_id, mgmt = people["Management"]
+    cid = await _change(client, admin, seed, session_factory, "costing",
+                        customer=False, raised_by=mgmt_id)
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
+    item = next(i for i in ch["next_step"]["items"] if i["key"] == "internal_approval")
+    assert item["who"] == "a Project Management member or an admin"
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state",
+                           headers=people["Project Manager"][1])).json()
+    assert st["can_approve_internal"] is True
+    assert st["internal_approvers"] == "a Project Management member or an admin"
+    r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
+                          json={"release_due_date": _DUE}, headers=mgmt)
+    assert r.status_code == 403  # NEGATIVE: the raiser, although the approver
+    r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
+                          json={"release_due_date": _DUE},
+                          headers=people["Project Manager"][1])
+    assert r.status_code == 200, r.text
+
+
+async def test_internal_absorb_tells_the_fallback_deciders(
+        client, admin, seed, depts, people, session_factory, monkeypatch):
+    """With no configured approver for the change, the PM members decide
+    an internal Absorb, so they are the ones told (never the raiser)."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "internal_approvers", "nobody@x.io")
+    cid = await _change(client, admin, seed, session_factory, "approved",
+                        customer=False, price_open=True, raised_by=seed["engineer_id"])
+    lead = await login(client, "eng@test.io", admin=False)
+    dev = (await client.post(f"/api/v1/changes/{cid}/absorb", json={
+        "reason_code": "our_error", "note": "estimate low on the insert"},
+        headers=lead)).json()
+    told = await _told(session_factory, f"dev:{dev['id']}")
+    assert people["Project Manager"][0] in told
+    assert seed["engineer_id"] not in told
+    assert people["Sales"][0] not in told

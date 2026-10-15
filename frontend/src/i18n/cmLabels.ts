@@ -1500,6 +1500,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'internal.approved': { de: 'Interne Kosten freigegeben', en: 'Internal costs approved' },
   'internal.note': { de: 'Anmerkung', en: 'Note' },
   'internal.amount': { de: 'Freigegebener Betrag', en: 'Approved amount' },
+  'internal.approvedBy': { de: 'Interne Kosten gibt frei: {who} (nie der Ersteller)', en: 'Internal costs are approved by {who} (never the raiser)' },
+  'internal.approverFallback': { de: 'ein PM-Mitglied oder ein Admin', en: 'a Project Management member or an admin' },
   // The ECR process flow page (docs/ECR_PROCESS_MAP.md). The page itself is
   // English throughout — the flow is discussed in English across the team.
   'procmap.title': { de: 'ECR Process Flow', en: 'ECR Process Flow' },

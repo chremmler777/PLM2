@@ -907,6 +907,10 @@ class EarlyStageService:
                 and change.internal_approved_at is None
                 and await ChangeService.user_can_approve_internal_costs(
                     session, user, change)),
+            # ... and names who approves (never the raiser), for the card
+            "internal_approvers": (
+                await ChangeService.internal_approver_text(session, change)
+                if not change.customer_relevant else None),
             "can_record_meeting": (
                 change.status == "scoping"
                 and await EarlyStageService._may_record_meeting(session, change, user)),

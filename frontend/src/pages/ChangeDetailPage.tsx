@@ -518,7 +518,8 @@ export default function ChangeDetailPage() {
       // not Quality is still let through once PM is the only side left open.
       case 'signoff': return ((!change.pm_signed_by && canSignPm) || (!change.quality_signed_by && canSignQuality))
         ? null : 'Needs the Project Manager and Quality';
-      case 'internal-approval': return canApproveInternalCosts ? null : 'Needs the Project Manager';
+      case 'internal-approval': return canApproveInternalCosts ? null
+        : t('internal.approvedBy').replace('{who}', stage?.internal_approvers || t('internal.approverFallback'));
       case 'validate-timing': {
         if (!(canEditPlan || canPublishTiming)) return 'Needs the Project Manager, Scheduling or Sales';
         // The Timing tab holds its "Validate timing" until every team has
@@ -1273,6 +1274,7 @@ export default function ChangeDetailPage() {
           canWrite={canEditQuotedPrice} canSeePrices={canSeeCosts}
           canSignPm={canSignPm} canSignQuality={canSignQuality}
           canApproveInternalCosts={canApproveInternalCosts}
+          internalApprovers={stage?.internal_approvers}
           userId={userId ?? null}
           costSummary={canSeeCosts ? <SummationView changeId={changeId}
                 status={change.status} canQuote={canEditQuotedPrice}

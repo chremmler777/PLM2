@@ -1,7 +1,7 @@
 /**
- * Internal changes are not offered: PM approves the costs, which starts the
- * release phase and therefore collects the release deadline. Same behaviour
- * as before the Approval tab existed.
+ * Internal changes are not offered: an engineering approver (HARD #8, never
+ * the raiser) approves the costs, which starts the release phase and
+ * therefore collects the release deadline.
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -16,9 +16,11 @@ import type { ChangeDetail } from '../../../types/change'
 import { inputCls } from './offerFormat'
 import { formatDate, formatMoney } from '../../../lib/format'
 
-export default function InternalApproval({ change, canApprove }: {
+export default function InternalApproval({ change, canApprove, approvers }: {
   change: ChangeDetail
   canApprove: boolean
+  /** Who approves, in words (stage-state internal_approvers). */
+  approvers?: string | null
 }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -52,8 +54,8 @@ export default function InternalApproval({ change, canApprove }: {
   }
   if (!canApprove) {
     return (
-      <p className="text-xs text-slate-400">
-        Only a Project Manager department member or an admin may approve internal costs.
+      <p data-testid="internal-approvers" className="text-xs text-slate-400">
+        {t('internal.approvedBy').replace('{who}', approvers || t('internal.approverFallback'))}
       </p>
     )
   }

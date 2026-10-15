@@ -344,7 +344,9 @@ class ChangeService:
                                                 Department.is_active.is_(True)))).all()]
                 ids.update(await department_members_of_change_org(session, change, dept_ids))
             if group == APPROVER:
-                ids.update(u.id for u in await ChangeService.internal_approver_users(session))
+                # the same set that may decide (is_internal_approver): the
+                # configured approvers, else Project Management members
+                ids.update(await ChangeService.internal_approver_ids(session, change))
             ids.discard(proposer_id)
             if group == APPROVER:
                 ids.discard(change.raised_by)
@@ -674,16 +676,58 @@ class ChangeService:
         return list(users)
 
     @staticmethod
+    async def change_approvers(session: AsyncSession,
+                               change: Optional[ChangeRequest]) -> list[User]:
+        """The configured approvers who may approve THIS change: active here
+        and not its raiser. Empty = the fallback rule decides (a Project
+        Manager member or an admin), so a change raised by the only
+        configured approver never stalls (R18)."""
+        approvers = await ChangeService.internal_approver_users(session)
+        if change is None:
+            return approvers
+        return [u for u in approvers if u.id != change.raised_by]
+
+    @staticmethod
+    async def internal_approver_ids(session: AsyncSession,
+                                    change: ChangeRequest) -> set[int]:
+        """Who to tell when the internal approver's OK is needed: the
+        approvers of this change, else the Project Manager members of its
+        organisation (the fallback deciders; admins are not paged). Never
+        the raiser."""
+        approvers = await ChangeService.change_approvers(session, change)
+        if approvers:
+            ids = {u.id for u in approvers}
+        else:
+            from app.services.change_people import department_members_of_change_org
+            dept_ids = [i for (i,) in (await session.execute(
+                select(Department.id).where(Department.name == "Project Manager",
+                                            Department.is_active.is_(True)))).all()]
+            ids = set(await department_members_of_change_org(session, change, dept_ids))
+        ids.discard(change.raised_by)
+        return ids
+
+    @staticmethod
+    async def internal_approver_text(session: AsyncSession,
+                                     change: ChangeRequest) -> str:
+        """The owner of HARD #8 in words, for the why-blocked row and the
+        approval card: the approvers' names, else the fallback rule."""
+        approvers = await ChangeService.change_approvers(session, change)
+        if approvers:
+            return ", ".join(u.full_name or u.username for u in approvers)
+        return "a Project Management member or an admin"
+
+    @staticmethod
     async def is_internal_approver(session: AsyncSession, user: User,
                                    change: Optional[ChangeRequest] = None) -> bool:
         """HARD #8 (P9): an engineering approver (settings.internal_approvers),
         never the change's raiser, never while acting as a department. With
-        no configured approver active here, the earlier rule stands in: a
-        Project Manager member or an admin."""
+        no configured approver for this change (none active here, or the
+        only one raised it), the earlier rule stands in: a Project Manager
+        member or an admin, still never the raiser."""
         from app.services.change_people import is_acting
         if change is not None and change.raised_by == user.id:
             return False
-        approvers = await ChangeService.internal_approver_users(session)
+        approvers = await ChangeService.change_approvers(session, change)
         if approvers:
             return not is_acting(user) and any(u.id == user.id for u in approvers)
         return await ChangeService._user_in_department(session, user, "Project Manager")
@@ -1254,10 +1298,8 @@ class ChangeService:
                 else:
                     add("costing_input", "todo", n=len(pending))
             if to == "approved" and change.internal_approved_at is None:
-                approvers = await ChangeService.internal_approver_users(session)
                 add("internal_approval", "hard",
-                    who=", ".join(u.full_name or u.username for u in approvers
-                                  if u.id != change.raised_by) or None)
+                    who=await ChangeService.internal_approver_text(session, change))
         if to == "quoted" and change.quoted_price is None:
             add("quoted_price", "soft", rule="no_quoted_price")
         if to == "approved" and change.status == "quoted":

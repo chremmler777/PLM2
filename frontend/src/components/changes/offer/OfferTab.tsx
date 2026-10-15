@@ -54,6 +54,8 @@ export interface OfferTabProps {
   canSignPm: boolean
   canSignQuality: boolean
   canApproveInternalCosts: boolean
+  /** HARD #8: who approves the internal costs, in words. */
+  internalApprovers?: string | null
   userId: number | null
   /** Internal changes: the cost summary (SummationView) the page renders. */
   costSummary?: ReactNode
@@ -533,7 +535,8 @@ export default function OfferTab(props: OfferTabProps) {
           <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
         <StepSection id="offer-approval" n={2} title="Approval" done={!!change.internal_approved_at}>
-          <InternalApproval change={change} canApprove={props.canApproveInternalCosts} />
+          <InternalApproval change={change} canApprove={props.canApproveInternalCosts}
+            approvers={props.internalApprovers} />
         </StepSection>
       </div>
     )

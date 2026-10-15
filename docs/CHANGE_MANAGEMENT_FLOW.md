@@ -213,7 +213,8 @@ One quote-by, one release-by; at any moment at most one is *active*
   mouths — a meeting outcome, or a department flagging timing in its
   assessment answer, feeds the owner, who records the pushback.
 - **Release deadline** (`release_due_*`): born mandatorily at the moment of
-  commitment: customer acceptance (Sales) or internal cost approval (PM); the
+  commitment: customer acceptance (Sales) or internal cost approval (the
+  engineering approver, HARD #8); the
   API refuses the acceptance/approval without it. A mother-plant change takes
   it from their SOP at approval. Moving it afterwards needs a reason in the
   same PATCH (`release_due_reason`, required since 2026-10-01, UI: cockpit
@@ -1112,8 +1113,11 @@ mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (built with
 the card in lane L4); (8) internal: the internal approval before
 `costing → approved`, given by an engineering approver who is not the raiser
 (`settings.internal_approvers`, env `INTERNAL_APPROVERS`, default
-`christoph.demmler`; with none of them an active user, a Project Manager
-member or an admin, still never the raiser; no switch); (9) at release the
+`christoph.demmler`; when no configured approver other than the raiser is an
+active user, a Project Manager member or an admin, still never the raiser,
+so a change the approver raised never stalls; the why-blocked row, the
+approval card and the "decision needed" notice name the same people; no
+switch); (9) at release the
 PM and Quality sign-offs bound to the latest offer sent
 (`pm_signed_offer_id`/`quality_signed_offer_id`, set by the sign-off,
 `RELEASE_V2`), at close no `price_open` (`COMMERCIAL_V2`), exits: the
@@ -1188,8 +1192,8 @@ view.
 - ⚠ **Workbook field mapping** — see §1.
 - **Internal changes switched on (2026-10-01, F-04).** The start form offers
   "Internal change" (the plant pays): no quote deadline, no offer; costing
-  ends with "Approve internal costs" (Project Management, release deadline
-  required). Walked end to end before switching on.
+  ends with "Approve internal costs" (since ECR-solid: an engineering
+  approver who is not the raiser, HARD #8; release deadline required). Walked end to end before switching on.
 - ⚠ **External flow first (2026-08-11).** The current shape — Sales/PM
   as the only capturers, quote deadline, customer letters, Sales-owned
   loops — deliberately serves the *external* (customer-driven) change flow

@@ -1356,6 +1356,9 @@ export interface StageStateResponse {
   /** HARD #8: may the viewer give the internal approval (an engineering
    * approver, never the raiser; only an internal change in costing). */
   can_approve_internal?: boolean;
+  /** HARD #8: who approves this internal change, in words (the configured
+   * approvers other than the raiser, else the PM/admin fallback). */
+  internal_approvers?: string | null;
   title_auto: boolean;
   assessment: StageAssessment | null;
   routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;

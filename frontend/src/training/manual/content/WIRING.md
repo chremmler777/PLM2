@@ -292,7 +292,7 @@ open by nature:
    are listed as coming (section 3). Agree?
 2. **Internal changes can be started since 2026-10-01** ("Internal change"
    on the start form, F-04). The manual still teaches the customer path only
-   and does not cover "Approve internal costs" (PM, with the release
+   and does not cover "Approve internal costs" (the engineering approver, never the raiser, HARD #8, with the release
    deadline). Add that section; the practice sandbox keeps to customer changes.
 3. **Recording attendance as a practice task** was drafted and dropped:
    `/v1/training/*` passes through the sandbox containment
