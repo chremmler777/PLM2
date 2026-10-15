@@ -1295,6 +1295,15 @@ class OfferService:
             outdated = _issue("cost_sheet_outdated",
                               outdated_message(old_versions, current_v))
         quote_empty = not await ChangePlanService.tasks(session, change, "quote")
+        # spec §4 (C25): a supplier quote that expires before the customer
+        # may accept this offer: the price under it can move (warning only)
+        from app.models.change_cost import CostingOffer
+        supplier_quotes = (await session.execute(
+            select(CostingOffer.vendor_name, CostingOffer.quote_ref,
+                   CostingOffer.valid_until)
+            .join(CostingPosition, CostingPosition.id == CostingOffer.position_id)
+            .where(CostingPosition.change_id == change.id,
+                   CostingOffer.valid_until.is_not(None)))).all()
         users = await ChangePlanService._user_names(
             session, [o.created_by for o in offers] + [o.sent_by for o in offers])
         all_offers = await OfferService.list_offers(session, change)
@@ -1371,6 +1380,20 @@ class OfferService:
                 warnings.extend(dict(w) for w in costing_issues)
             if outdated is not None:
                 warnings.append(dict(outdated))
+            # a draft is valid OFFER_VALIDITY_DAYS from its send
+            offer_until = (o.valid_until if o.valid_until is not None
+                           else business_today() + timedelta(days=OFFER_VALIDITY_DAYS)
+                           if o.status == "draft" else None)
+            short = [q for q in supplier_quotes
+                     if offer_until is not None and q.valid_until < offer_until]
+            if short:
+                warnings.append(_issue(
+                    "supplier_quote_expires",
+                    "A supplier quote runs out before this offer: "
+                    + ", ".join(f"{q.vendor_name} {q.quote_ref or ''}".strip()
+                                + f" until {fmt_date(q.valid_until)}" for q in short)
+                    + f" (offer valid until {fmt_date(offer_until)}): ask the "
+                    "supplier to extend it, or keep the price risk in mind"))
             expired = OfferService.is_expired(o)
             if expired:
                 warnings.append(_issue(

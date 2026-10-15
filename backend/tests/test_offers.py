@@ -932,3 +932,32 @@ async def test_lenient_reading_falls_back_to_legacy_german_strict_does_not():
     for text in ("1.234,5", "12,5", "1.234"):
         with pytest.raises(ChangeError):
             parse_number(text, "amount")
+
+
+async def test_a_supplier_quote_running_out_before_the_offer_warns(
+        client, offer_world, session_factory):
+    """Spec §4 (C25): warning only, never a block."""
+    from datetime import timedelta
+    from app.models.change_cost import CostingOffer
+    from app.utils.clock import business_today
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    async with session_factory() as s:
+        s.add(CostingOffer(position_id=offer_world["position_id"], vendor_name="Hasco",
+                           cost=1000, quote_ref="HQ-4471",
+                           valid_until=business_today() + timedelta(days=5),
+                           created_by=offer_world["users"]["tool"]))
+        await s.commit()
+    o = await _create(client, sales, cid)
+    w = {x["code"]: x for x in o["warnings"]}
+    assert "supplier_quote_expires" in w
+    assert "Hasco HQ-4471" in w["supplier_quote_expires"]["message"]
+    # negative: a quote valid long enough says nothing
+    async with session_factory() as s:
+        from sqlalchemy import update
+        await s.execute(update(CostingOffer).values(
+            valid_until=business_today() + timedelta(days=400)))
+        await s.commit()
+    got = (await client.get(_url(cid), headers=sales)).json()
+    assert all("supplier_quote_expires" not in {x["code"] for x in g["warnings"]}
+               for g in got)

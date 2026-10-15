@@ -770,6 +770,11 @@ Switch `ASSESSMENT_V2` (migration 127).
   customer's acceptance) clears `price_open` and marks those positions
   `settled`, so a later open price for another cause does not bring their
   task back. The automatic comparison is cut 2.
+- **Supplier quote runs out first** (warning, never a block): an offer
+  (draft: valid 30 days from its send) whose validity outlasts a supplier
+  quote's *valid until* on the change warns `supplier_quote_expires`
+  ("ask the supplier to extend it, or keep the price risk in mind").
+  Quantity + unit per position stays an open question (cut 1 or 2).
 
 ### Close costing: ready to quote, the internal approval card (ECR-solid §5, 2026-10-15)
 Switch `ASSESSMENT_V2` (migration 128).
