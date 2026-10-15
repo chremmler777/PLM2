@@ -16,6 +16,15 @@ from app.services.change_service import ChangeService
 from app.services.notification_sweep import run_notification_sweep
 
 
+@pytest.fixture(autouse=True)
+def _pre_c20_timing(monkeypatch):
+    """These pin the earlier timing (escalation at the due date, due-soon two
+    days ahead): ASSESSMENT_V2 off. The one escalation rule (due + 1 working
+    day) is covered in test_ecr_solid_escalation.py."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+
+
 async def _mk_change(session, seed, number: str, **kw) -> ChangeRequest:
     chg = ChangeRequest(change_number=number, title="x", reason="y",
                         change_type="physical_part",
@@ -346,7 +355,7 @@ async def test_sweep_due_soon_overdue_and_at_risk_dedup(session_factory, seed):
         await session.commit()
         assert counts2 == {"due_soon": 0, "overdue": 0,
                            "deadline_at_risk": 0, "deadline_overdue": 0,
-                           "validation_issue_escalated": 0}
+                           "validation_issue_escalated": 0, "overdue_digest": 0}
 
 
 @pytest.mark.asyncio

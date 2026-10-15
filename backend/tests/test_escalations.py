@@ -9,6 +9,16 @@ from tests.test_assessment_ownership import _routed_change
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def _pre_c20_timing(monkeypatch):
+    """These pin the earlier timing (escalation at the due date, due-soon two
+    days ahead): ASSESSMENT_V2 off. The one escalation rule (due + 1 working
+    day) is covered in test_ecr_solid_escalation.py."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+
+
+
 async def test_my_tasks_are_owner_aware(client, eng_auth, seed, session_factory,
                                         part):
     from app.models.workflow import (

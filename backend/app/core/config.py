@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     # an active user here, the earlier rule stands in (a Project Manager
     # member or an admin), so no internal change stalls on the setting.
     internal_approvers: str = "christoph.demmler"
+    # C27 / P6 (cut 1): who gets the daily overdue digest (usernames or
+    # e-mails, comma separated). Cut 2 adds a manager per department.
+    overdue_digest_recipients: str = "christoph.demmler"
+    # Absolute base of the PLM2 UI for links in mails ("Answer in PLM2:
+    # <link>"); empty = frontend_url + "/plm2".
+    plm2_public_url: str = ""
 
     notification_task_assigned: bool = True
     notification_task_completed: bool = True

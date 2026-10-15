@@ -1,6 +1,13 @@
 """Periodic notification sweep: due-soon/overdue tasks, at-risk/overdue change
 deadlines. Deduped via NotificationService.notify_once — safe to run repeatedly
-(e.g. from main.py's reminder loop) without spamming already-unread rows."""
+(e.g. from main.py's reminder loop) without spamming already-unread rows.
+
+ECR-solid one escalation rule (spec §0, ASSESSMENT_V2): the owner is reminded
+on the due date; at due + 1 working day the owner hears it is late and the
+item escalates to the change lead (the lead's "Overdue" group); the deadline
+alerts reach the Sales owner too (C20). RELEASE_V2 adds the daily overdue
+digest (C27/P6, app/services/overdue_digest.py). Switched off: the earlier
+timing (due-soon 2 days ahead, escalation at the due date)."""
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
@@ -9,9 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.display import fmt_date
 from app.models.workflow import WfInstance, WfInstanceTask
 from app.models.change import ChangeAssessment, ChangeRequest, TERMINAL_STATUSES
+from app.services import cm_switches, due_rules
 from app.services.notification_service import NotificationService
 
 DUE_SOON_WINDOW = timedelta(days=2)
+
+
+def _escalation_cutoff(now: datetime) -> datetime:
+    """Due before this = escalated: due + 1 wd under the one escalation
+    rule (ASSESSMENT_V2), else the due date itself."""
+    return due_rules.sub_wd(now, due_rules.LATE_AFTER_WD) \
+        if cm_switches.on("ASSESSMENT_V2") else now
 
 
 async def run_notification_sweep(session: AsyncSession) -> dict:
@@ -21,6 +36,8 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     from app.services.change_service import ChangeService
 
     now = datetime.utcnow()
+    one_rule = cm_switches.on("ASSESSMENT_V2")
+    cutoff = _escalation_cutoff(now)
     counts = {"due_soon": 0, "overdue": 0, "deadline_at_risk": 0, "deadline_overdue": 0}
 
     tasks = (await session.execute(
@@ -32,6 +49,26 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         ))).scalars().all()
 
     for task in tasks:
+        if one_rule:
+            # reminded on the due date; "overdue" only once it is late
+            if task.due_date < cutoff:
+                n = await NotificationService.notify_once(
+                    session, [task.owner_id], kind="overdue",
+                    subject_key=f"task:{task.id}:overdue",
+                    title="Task late",
+                    body=f"Your task is late (was due {fmt_date(task.due_date)}); "
+                         "your department and the change lead see it now.",
+                    link="/my-tasks")
+                counts["overdue"] += n
+            elif task.due_date.date() <= now.date():
+                n = await NotificationService.notify_once(
+                    session, [task.owner_id], kind="due_soon",
+                    subject_key=f"task:{task.id}:due_soon",
+                    title="Task due today",
+                    body=f"Your task is due today ({fmt_date(task.due_date)}).",
+                    link="/my-tasks")
+                counts["due_soon"] += n
+            continue
         if task.due_date < now:
             n = await NotificationService.notify_once(
                 session, [task.owner_id], kind="overdue",
@@ -67,7 +104,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             WfInstanceTask.status == "active",
             WfInstanceTask.is_actionable.is_(True),
             WfInstanceTask.due_date.is_not(None),
-            WfInstanceTask.due_date < now,
+            WfInstanceTask.due_date < cutoff,
             ChangeRequest.lead_id.is_not(None),
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
         ))).all()
@@ -100,7 +137,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             ChangeAssessment.status == "active",
             ChangeAssessment.wf_instance_task_id.is_(None),
             ChangeAssessment.due_date.is_not(None),
-            ChangeAssessment.due_date < now,
+            ChangeAssessment.due_date < cutoff,
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
         ))).all()
 
@@ -133,13 +170,17 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         ))).scalars().all()
 
     for change in changes:
-        if change.lead_id is None:
+        # C20: the Sales owner who promised the date hears it too
+        recipients = [u for u in (change.lead_id,
+                                  change.sales_owner_id if one_rule else None)
+                      if u is not None]
+        if not recipients:
             continue
         state = await ChangeService.deadline_state(session, change)
         if state not in ("at_risk", "overdue"):
             continue
         n = await NotificationService.notify_once(
-            session, [change.lead_id], kind=f"deadline_{state}",
+            session, recipients, kind=f"deadline_{state}",
             subject_key=f"chg:{change.id}:{state}",
             title=f"Change deadline {state.replace('_', ' ')}: {change.change_number}",
             body=f"Required by {fmt_date(change.required_by_date)}.",
@@ -153,5 +194,9 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     from app.services.validation_issue_service import ValidationIssueService
     counts["validation_issue_escalated"] = \
         await ValidationIssueService.reevaluate_all(session)
+
+    # C27 / P6: the daily overdue digest for the configured managers.
+    from app.services.overdue_digest import send_overdue_digest
+    counts["overdue_digest"] = await send_overdue_digest(session, now=now)
 
     return counts
