@@ -222,7 +222,8 @@ export const engineeringChapter: ContentChapter = {
           points: [
             ['Progress on your blocks:', 'open a block in the plan and set "Progress", "Actual start", "Actual finish". Members of the block\'s owner department may; everything else is read only.'],
             ['Booked time:', 'under "Reports and time booking", "Hours" and "What for?", then "Book time". Actual cost is booked hours times the rate.'],
-            ['Progress reports:', '"What happened?", and "This is at risk" with what is at risk. The chip says when a report is due.'],
+            ['Progress reports:', '"What happened?", and "This is at risk" with what is at risk. The chip says when a report is due. Only departments with real work (priced, or "impact yes") are asked.'],
+            ['Waiting on a supplier or done:', '"Waiting on a supplier" (supplier, asked on, expected by) pauses your reports until that date. "Our part is done" on your last report ends them; a later report starts them again.'],
             ['The tool change and the trial are the Tool Engineer\'s', '(the Toolshop supports, Quality is accountable for the trial); Process owns the process and parameter sheets. While a tool\'s "Implement tool change" is open, moving to validation warns "Tool change not done (Tool Engineer): <tool>".'],
             ['A date that will not hold:', 'tell PM. After the baseline only PM, Sales, Scheduling and the lead move dates, and each move is a deviation with a reason. The move and the blocks it pushes are decided as one group.'],
           ],

@@ -463,7 +463,9 @@ async def test_state_payload_shape_and_totals(client, impl):
     assert by_id[impl["dept"]["Development"]]["booked_hours"] == 2.0
     assert set(body["departments"][0]) == {
         "department_id", "department_name", "booked_hours", "report_count",
-        "last_report_at", "at_risk_open", "owes_report"}
+        "last_report_at", "at_risk_open", "owes_report",
+        # ECR-solid C23: the cadence state
+        "cadence", "part_done", "waiting_on", "waiting_until"}
 
 
 async def test_state_is_scoped_to_the_callers_department(client, impl):

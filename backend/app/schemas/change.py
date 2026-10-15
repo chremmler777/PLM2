@@ -1638,6 +1638,8 @@ class ImplementationReportCreate(BaseModel):
     # justification before a department may raise its hand is how at-risk
     # flags stop being raised.
     risk_note: Optional[str] = None
+    # C23: "our part done" ends the department's report cadence.
+    part_done: bool = False
 
 
 class ImplementationReportResponse(BaseModel):
@@ -1647,6 +1649,7 @@ class ImplementationReportResponse(BaseModel):
     note: str
     at_risk: bool
     risk_note: Optional[str] = None
+    part_done: bool = False
     reported_by: int
     reported_by_name: Optional[str] = None
     reported_at: datetime
@@ -1695,6 +1698,11 @@ class ImplementationDepartmentState(BaseModel):
     last_report_at: Optional[datetime] = None
     at_risk_open: bool
     owes_report: bool
+    # C23: reporting | waiting (on a supplier, until a date) | done
+    cadence: str = "reporting"
+    part_done: bool = False
+    waiting_on: Optional[str] = None
+    waiting_until: Optional[date] = None
 
 
 class ImplementationStateResponse(BaseModel):

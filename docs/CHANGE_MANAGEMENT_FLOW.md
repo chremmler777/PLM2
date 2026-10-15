@@ -808,6 +808,22 @@ task open; override as for any soft rule into validation. **Toolshop**
 (P7) has typical cost positions (toolmaker hours, in-house rework, EDM /
 wire, steel / material, polishing / texture).
 
+### Progress cadence asks only who works (ECR-solid C23, 2026-10-15)
+Switch `ASSESSMENT_V2` (migration 130). `ImplementationService.
+implementing_department_ids`: a department implements when it priced real
+work (a position with money, hours, trials or a supplier offer; a cost line
+with hours or money: a seeded zero line is no work) or its assessment said
+*impact yes* (feasible with an impacted row, priced or not). Implementing
+departments owe the progress report (twice a week), book hours and answer
+their validation checks, as before. Per department the state serves
+`cadence`: **reporting**, **waiting** (an open implementation-phase
+supplier wait, "Waiting on FZ until 3 Nov", pauses it until the expected
+date; the block offers *Waiting on a supplier*) or **done** (the latest
+report says *Our part is done*, `implementation_reports.part_done`, which
+cannot be at risk too; a later report without it restarts the cadence).
+`owes_report` is false while waiting or done. Switch off: any line or
+position counts, no pause.
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside

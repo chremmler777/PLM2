@@ -1436,6 +1436,11 @@ export interface ImplDepartmentState {
   last_report_at: string | null;
   at_risk_open: boolean;
   owes_report: boolean;
+  /** C23: reporting | waiting (on a supplier, until a date) | done. */
+  cadence?: 'reporting' | 'waiting' | 'done';
+  part_done?: boolean;
+  waiting_on?: string | null;
+  waiting_until?: string | null;
 }
 
 // ── Stage 9: validation ─────────────────────────────────────────────────────

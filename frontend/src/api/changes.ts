@@ -531,6 +531,8 @@ export const changesApi = {
     client.get<ImplReport[]>(`/v1/changes/${id}/implementation/reports`).then((r) => r.data),
   addImplReport: (id: number, body: {
     department_id: number; note: string; at_risk: boolean; risk_note?: string;
+    /** C23: our part is done, the cadence ends. */
+    part_done?: boolean;
   }) => client.post<ImplReport>(`/v1/changes/${id}/implementation/reports`, body)
     .then((r) => r.data),
 

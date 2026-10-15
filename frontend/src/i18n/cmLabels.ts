@@ -2879,6 +2879,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'internal.basis.estimate': { de: 'geschätzt', en: 'estimate' },
   'internal.payback': { de: 'Amortisation', en: 'Payback' },
   'internal.months': { de: '{n} Monate', en: '{n} months' },
+  // --- C23 progress cadence -------------------------------------------------------
+  'impl2.partDoneChip': { de: 'Unser Teil erledigt', en: 'Our part done' },
+  'impl2.waitingChip': { de: 'Warten auf {v} bis {d}', en: 'Waiting on {v} until {d}' },
+  'impl2.partDoneToggle': { de: 'Unser Teil ist erledigt (keine Berichte mehr fällig)', en: 'Our part is done (no more reports due)' },
   'verdict.noRefApply': { de: 'Für alle Nein ohne Referenz', en: 'Use for every No without one' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

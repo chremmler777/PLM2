@@ -113,18 +113,44 @@ class ImplementationService:
         position is a commitment to work exactly as much as an hours line is.
         Sorted so every payload built off this list has a stable order.
         """
+        from sqlalchemy import or_
+        from app.services import cm_switches
+        v2 = cm_switches.on("ASSESSMENT_V2")
         dept_ids: set[int] = set()
-        rows = (await session.execute(
-            select(CostingPosition.department_id).where(
-                CostingPosition.change_id == change.id).distinct())).scalars()
-        dept_ids.update(rows.all())
-        rows = (await session.execute(
-            select(ChangeAssessment.department_id)
-            .join(AssessmentCostLine,
-                  AssessmentCostLine.assessment_id == ChangeAssessment.id)
-            .where(ChangeAssessment.change_id == change.id)
-            .distinct())).scalars()
-        dept_ids.update(rows.all())
+        q = select(CostingPosition.department_id).where(
+            CostingPosition.change_id == change.id)
+        if v2:
+            # C23: a zero line is no work. A position with money, hours or
+            # trials, or with a supplier offer, is.
+            from app.models.change_cost import CostingOffer
+            q = q.where(or_(
+                func.coalesce(CostingPosition.est_cost, 0) != 0,
+                func.coalesce(CostingPosition.hours, 0) != 0,
+                func.coalesce(CostingPosition.trials, 0) != 0,
+                CostingPosition.id.in_(select(CostingOffer.position_id))))
+        dept_ids.update((await session.execute(q.distinct())).scalars().all())
+        L = AssessmentCostLine
+        q = (select(ChangeAssessment.department_id)
+             .join(L, L.assessment_id == ChangeAssessment.id)
+             .where(ChangeAssessment.change_id == change.id))
+        if v2:
+            q = q.where(or_(func.coalesce(L.demand_hours, 0) != 0,
+                            func.coalesce(L.internal_cost, 0) != 0,
+                            func.coalesce(L.external_cost, 0) != 0,
+                            func.coalesce(L.minutes_per_part, 0) != 0))
+        dept_ids.update((await session.execute(q.distinct())).scalars().all())
+        if v2:
+            # spec §8-9: a department whose assessment said "impact yes"
+            # does work too, priced or not (Process' parameter sheets)
+            rows = (await session.execute(
+                select(ChangeAssessment).where(
+                    ChangeAssessment.change_id == change.id,
+                    ChangeAssessment.verdict.in_(
+                        ("feasible", "feasible_with_conditions"))))).scalars().all()
+            for a in rows:
+                if any(isinstance(i, dict) and i.get("impacted")
+                       for i in a.details_dict.get("impacts") or []):
+                    dept_ids.add(a.department_id)
         # A mother-plant change (spec §14) prices nothing here: the informed
         # departments are the ones doing the local work.
         from app.services import mother_plants as mp
@@ -261,6 +287,11 @@ class ImplementationService:
             select(Department.id, Department.name))).all())
         cutoff = now - timedelta(hours=REPORT_CADENCE_HOURS)
         in_implementation = change.status == IMPLEMENTATION_STATUS
+        # C23: a supplier wait pauses the cadence until its expected date
+        from app.services import cm_switches, supplier_wait_service as _sw
+        v2 = cm_switches.on("ASSESSMENT_V2")
+        waits = (await _sw.open_by_department(session, [change.id], "implementation")
+                 if v2 else {})
 
         departments = []
         for dept_id in implementing:
@@ -281,6 +312,13 @@ class ImplementationService:
             at_risk_open = bool(
                 latest is not None and latest.at_risk
                 and (answered is None or latest.reported_at > answered))
+            # C23: "our part done" (the latest report says so) ends the
+            # cadence; a supplier wait pauses it until its expected date.
+            done = bool(v2 and latest is not None and latest.part_done)
+            wait = waits.get((change.id, dept_id))
+            waiting = bool(wait is not None
+                           and datetime.combine(wait.expected_by, datetime.min.time())
+                           >= now.replace(hour=0, minute=0, second=0, microsecond=0))
             departments.append({
                 "department_id": dept_id,
                 "department_name": names.get(dept_id),
@@ -288,10 +326,14 @@ class ImplementationService:
                 "report_count": len(mine),
                 "last_report_at": last_at,
                 "at_risk_open": at_risk_open,
+                "part_done": done,
+                "waiting_on": wait.vendor_name if wait is not None else None,
+                "waiting_until": wait.expected_by if wait is not None else None,
+                "cadence": "done" if done else "waiting" if waiting else "reporting",
                 # Silence is the debt, not lateness: a department that has
                 # never reported owes one from the moment the stage starts.
                 "owes_report": bool(
-                    in_implementation
+                    in_implementation and not done and not waiting
                     and (last_at is None or last_at < cutoff)),
             })
         return {
@@ -403,9 +445,15 @@ class ImplementationService:
             raise ImplementationError("A progress report needs a note")
         at_risk = bool(spec.get("at_risk") or False)
         risk_note = (spec.get("risk_note") or None)
+        part_done = bool(spec.get("part_done") or False)
+        if part_done and at_risk:
+            raise ImplementationError(
+                "A part that is done is not at risk: report the risk, or say "
+                "your part is done")
         report = ImplementationReport(
             change_id=change.id, department_id=department_id, note=note,
             at_risk=at_risk, risk_note=risk_note if at_risk else None,
+            part_done=part_done,
             reported_by=actor.id, reported_at=datetime.utcnow(),
         )
         session.add(report)
@@ -424,10 +472,13 @@ class ImplementationService:
                            "risk_note": risk_note})
         else:
             await ChangeService.append_changelog(
-                session, change, "implementation_reported",
-                f"Progress report from dept {department_id}", actor.id,
+                session, change,
+                "implementation_part_done" if part_done else "implementation_reported",
+                (f"Dept {department_id}: our part done" if part_done
+                 else f"Progress report from dept {department_id}"), actor.id,
                 new_value={"report_id": report.id,
-                           "department_id": department_id})
+                           "department_id": department_id,
+                           "part_done": part_done})
         return report
 
     @staticmethod

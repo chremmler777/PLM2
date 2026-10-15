@@ -17,6 +17,9 @@ vi.mock('../../api/changes', () => ({
     addImplReport: vi.fn(),
     addImplEscalation: vi.fn(),
     resolveImplEscalation: vi.fn(),
+    listSupplierWaits: vi.fn().mockResolvedValue([]),
+    startSupplierWait: vi.fn(),
+    closeSupplierWait: vi.fn(),
   },
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
@@ -332,5 +335,30 @@ describe('ImplementationTracking escalations', () => {
     expect(await screen.findByTestId('impl-escalations-change')).toBeTruthy()
     expect(screen.getByTestId('impl-escalation-change-41')).toBeTruthy()
     expect(screen.queryByTestId('impl-escalation-2-41')).toBeNull()
+  })
+})
+
+describe('C23 cadence', () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks() })
+
+  it('says waiting or done instead of report due', async () => {
+    setData({ state: [
+      stateRow({ cadence: 'waiting', waiting_on: 'FZ', waiting_until: '2026-11-03' }),
+      stateRow({ department_id: 4, cadence: 'done', part_done: true })] })
+    render_({ canSeeAll: true })
+    expect((await screen.findByTestId('impl-cadence-2')).textContent).toContain('Waiting on FZ')
+    expect(screen.getByTestId('impl-cadence-4').textContent).toBe(t('impl2.partDoneChip'))
+  })
+
+  it('our part done is sent with the report and excludes at risk', async () => {
+    setData({ state: [stateRow({ owes_report: true })] })
+    vi.mocked(changesApi.addImplReport).mockResolvedValue({} as never)
+    render_()
+    fireEvent.click(await screen.findByTestId('impl-report-done-2'))
+    expect((screen.getByTestId('impl-report-atrisk-2') as HTMLInputElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('impl-report-note-2'), { target: { value: 'Sheets updated' } })
+    fireEvent.click(screen.getByTestId('impl-report-add-2'))
+    await waitFor(() => expect(changesApi.addImplReport).toHaveBeenCalledWith(7,
+      expect.objectContaining({ department_id: 2, part_done: true, at_risk: false })))
   })
 })

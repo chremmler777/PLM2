@@ -31,6 +31,8 @@ function useRefresh(changeId: number) {
     qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
     qc.invalidateQueries({ queryKey: ['change-my-tasks'] })
+    qc.invalidateQueries({ queryKey: ['change', changeId, 'supplier-waits'] })
+    qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-state'] })
   }
 }
 

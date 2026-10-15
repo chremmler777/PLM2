@@ -85,6 +85,10 @@ class ImplementationReport(Base):
     at_risk: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())
     risk_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # C23 (migration 130): "our part done" ends the department's cadence; a
+    # later report without it starts it again.
+    part_done: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false())
 
     reported_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     reported_at: Mapped[datetime] = mapped_column(

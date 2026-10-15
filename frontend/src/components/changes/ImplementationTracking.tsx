@@ -21,7 +21,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
+import { SupplierWaitPanel } from './costing/NoCostAndWaits'
 import type {
+  SupplierWait,
   CostPosition, ImplBooking, ImplDepartmentState, ImplEscalation,
   ImplEscalationDirection, ImplReport,
 } from '../../types/change'
@@ -149,8 +151,10 @@ function EscalationList({ items, changeId, editable, canEscalate, testPrefix }: 
 
 function DepartmentBlock({
   changeId, state, name, isMine, editable, canEscalate,
-  bookings, reports, escalations,
+  bookings, reports, escalations, waits = [],
 }: {
+  /** C23: open supplier waits (the department's pause the cadence). */
+  waits?: SupplierWait[]
   changeId: number
   state: ImplDepartmentState
   name: string
@@ -171,6 +175,7 @@ function DepartmentBlock({
   const [bookingNote, setBookingNote] = useState('')
   const [reportNote, setReportNote] = useState('')
   const [atRisk, setAtRisk] = useState(false)
+  const [partDone, setPartDone] = useState(false)
   const [riskNote, setRiskNote] = useState('')
   const [escalating, setEscalating] = useState(false)
   const [direction, setDirection] = useState<ImplEscalationDirection>('customer')
@@ -200,8 +205,11 @@ function DepartmentBlock({
     mutationFn: () => changesApi.addImplReport(changeId, {
       department_id: id, note: reportNote.trim(), at_risk: atRisk,
       ...(atRisk && riskNote.trim() !== '' ? { risk_note: riskNote.trim() } : {}),
+      ...(partDone ? { part_done: true } : {}),
     }),
-    onSuccess: () => { setReportNote(''); setAtRisk(false); setRiskNote(''); invalidate() },
+    onSuccess: () => {
+      setReportNote(''); setAtRisk(false); setRiskNote(''); setPartDone(false); invalidate()
+    },
     onError: (e: unknown) => toastError(e, 'Could not save the report'),
   })
   // The escalation answers the newest at-risk report of this department — that
@@ -240,11 +248,17 @@ function DepartmentBlock({
             ? t('impl2.lastReport').replace('{d}', onDay(state.last_report_at))
             : undefined}
           className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium ${
-            state.owes_report
+            state.cadence === 'done' ? 'bg-emerald-900/70 text-emerald-200'
+              : state.cadence === 'waiting' ? 'bg-sky-900/70 text-sky-200'
+              : state.owes_report
               ? 'bg-amber-900/70 text-amber-200'
               : neverReported ? 'bg-slate-700 text-slate-300'
               : 'bg-emerald-900/70 text-emerald-200'}`}>
-          {state.owes_report ? t('impl2.reportDue')
+          {state.cadence === 'done' ? t('impl2.partDoneChip')
+            : state.cadence === 'waiting'
+              ? t('impl2.waitingChip').replace('{v}', state.waiting_on ?? '')
+                .replace('{d}', onDay(state.waiting_until ?? ''))
+            : state.owes_report ? t('impl2.reportDue')
             : neverReported ? t('impl2.noReportChip') : t('impl2.reported')}
         </span>
         {state.at_risk_open && (
@@ -308,6 +322,12 @@ function DepartmentBlock({
         )}
       </div>
 
+      {/* C23: waiting on a supplier pauses the cadence until its date */}
+      {(mayWrite || waits.some((w) => w.department_id === id && w.is_open)) && (
+        <SupplierWaitPanel changeId={changeId} departmentId={id} waits={waits}
+          editable={mayWrite} />
+      )}
+
       {/* Progress reports */}
       <div className="space-y-1 border-t border-slate-700 pt-2">
         <p className="text-xs font-medium text-slate-400">{t('impl2.reports')}</p>
@@ -349,8 +369,17 @@ function DepartmentBlock({
               className={`w-full ${fieldCls}`} />
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input type="checkbox" data-testid={`impl-report-atrisk-${id}`}
-                checked={atRisk} onChange={(e) => setAtRisk(e.target.checked)} />
+                checked={atRisk} disabled={partDone}
+                onChange={(e) => setAtRisk(e.target.checked)} />
               <span className="text-slate-300">{t('impl2.atRiskToggle')}</span>
+            </label>
+            {/* C23: our part is done, the cadence ends (a later report without
+                it starts it again) */}
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" data-testid={`impl-report-done-${id}`}
+                checked={partDone} disabled={atRisk}
+                onChange={(e) => setPartDone(e.target.checked)} />
+              <span className="text-slate-300">{t('impl2.partDoneToggle')}</span>
             </label>
             {/* The flag opens the field that justifies it, and nothing sends
                 until it is filled. */}
@@ -467,6 +496,11 @@ export default function ImplementationTracking({
   const state = Array.isArray(statePayload)
     ? statePayload
     : statePayload?.departments ?? []
+  const { data: waits = [] } = useQuery({
+    queryKey: ['change', changeId, 'supplier-waits'],
+    queryFn: () => changesApi.listSupplierWaits(changeId),
+    retry: false,
+  })
   const { data: bookings = [] } = useQuery({
     queryKey: ['change', changeId, 'impl-bookings'],
     queryFn: () => changesApi.listImplBookings(changeId),
@@ -538,6 +572,7 @@ export default function ImplementationTracking({
 
       {visible.map((s) => (
         <DepartmentBlock key={s.department_id} changeId={changeId} state={s}
+          waits={waits}
           name={deptName(s.department_id)}
           isMine={myDepartmentIds.includes(s.department_id)}
           editable={editable} canEscalate={canEscalate}
