@@ -63,6 +63,17 @@ describe('Why blocked (spec §0)', () => {
     expect(onSign).toHaveBeenCalledWith('quality')
   })
 
+  it('a hard row says "No override" in words; a pending routing change is decided, not overridden', () => {
+    const c = change({ status: 'in_assessment', next_step: { to: 'costing', items: [
+      { key: 'routing_deviation', kind: 'soft', rule: 'routing_deviation_pending', who: 'Project Management' },
+      { key: 'impacted_items', kind: 'hard', who: 'Eva Eng' },
+    ] } })
+    render(wrap(<CockpitSummary change={c} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onOverride={vi.fn()} />))
+    expect(screen.queryByTestId('why-override-routing_deviation_pending')).toBeNull()
+    expect(screen.getByTestId('why-impacted_items').textContent).toContain('No override.')
+  })
+
   it('offers one Override per rule, not one per row', () => {
     const capture = change({ status: 'captured', next_step: { to: 'scoping', items: [
       { key: 'description', kind: 'soft', rule: 'capture_incomplete' },

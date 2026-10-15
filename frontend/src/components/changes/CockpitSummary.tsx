@@ -397,6 +397,9 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const whyExit = (i: NextStepItem, idx: number): ReactNode => {
     if (i.kind === 'soft' && i.rule && nextStep) {
       if (lastOfRule.get(i.rule) !== idx) return null
+      // A routing change waiting for its decision is decided, not skipped:
+      // "Decide added department" in Your actions is the way (one road).
+      if (i.rule === 'routing_deviation_pending') return null
       if (i.override) {
         return (
           <span data-testid={`why-override-state-${i.rule}`} className="block pl-4 text-slate-400">
@@ -413,7 +416,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         </button>
       ) : null
     }
-    if (i.kind !== 'hard' || !i.exits?.length) return null
+    if (i.kind !== 'hard') return null
+    // Said in words, not by colour alone (the scoping list is a to-do list)
+    if (!i.exits?.length) {
+      return isScoping ? null : <span className="text-slate-400"> · {t('why.noOverride')}</span>
+    }
     return (
       <span className="block pl-4 text-slate-400">
         {t('why.noOverride')} {i.exits.map((e) => t('why.exit.' + e)).join(' ')}
