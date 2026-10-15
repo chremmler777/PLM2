@@ -470,11 +470,16 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   note. Nobody else "answers" it (`can_answer` is false on it). **Reopen** (`POST /concerns/{id}/reopen`, reason
   5+ characters): any closed check item, by the raiser or the lead, while an
   owning department still has its assessment open (after the submit there
-  is nothing left to hold: ask a question or have the assessment sent back).
-  The served `can_reopen` uses the same rule. The closer is told. A
+  is nothing left to hold: the refusal names the exit that exists, see C16
+  below). The served `can_reopen` uses the same rule. The closer is told. A
   department routed C or S owes no submit, but while it owns open check
-  items its assessment row is its task (*"Close your check items (n)"*, in
-  My Tasks and the cockpit) until they are closed.
+  items its assessment row is its task (*"2 check items to close for
+  Toolshop (no assessment owed)"*, served `checks_open` + `department_name`,
+  button "Open" not "Assess", in My Tasks and the cockpit) until they are
+  closed. A check item is due with its department's open assessment row,
+  else (a C row has none) with the change's assessment due, the earliest
+  R/A row's (`MeetingService.check_due`); the C row and the check card
+  (`owner_due`, "due 22 Oct") show it (R5).
 - **"Blocked? Ask a question" (C8).** A department raises `needs_info` with
   `flag_type` question from its own open assessment: one line, what it is
   about (check-what, part or whole change) and who can answer (customer /

@@ -1007,6 +1007,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Angebot aus der Kostenzusammenfassung erstellen',
     en: 'Build the quote from the costing wrap-up',
   },
+  'tasks.hint.checkItems': {
+    de: '{n} Prüfpunkte für {x} schließen (keine Bewertung fällig)',
+    en: '{n} check items to close for {x} (no assessment owed)',
+  },
   'tasks.hint.costing_input': {
     de: 'Aufwände und Vorlaufzeit eintragen, dann die Kalkulation abschließen',
     en: 'Enter your effort and lead time, then finalize your costing',

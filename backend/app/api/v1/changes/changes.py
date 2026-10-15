@@ -382,6 +382,7 @@ async def my_change_tasks(
                 select(ChangeAssessment.change_id, _f.min(ChangeAssessment.stage_order))
                 .where(ChangeAssessment.change_id.in_({c.id for _, c in pairs}))
                 .group_by(ChangeAssessment.change_id))).all())
+        check_dept_names: dict[int, str] = {}
         for a, c in pairs:
             if not EarlyStageService.is_assessment_row(a, firsts.get(c.id)):
                 continue
@@ -404,9 +405,21 @@ async def my_change_tasks(
             if (a.rasic_letter not in BLOCKING_LETTERS
                     and a.effective_owner_id != current_user.id and not checks):
                 continue
+            # R5/R18: a consulted department's check-item row names what it
+            # owes (checks_open, rendered by the UI), its department as the
+            # owner, and a due date (the change's assessment due)
+            check_row = bool(checks) and a.rasic_letter not in BLOCKING_LETTERS
+            if check_row and a.department_id not in check_dept_names:
+                check_dept_names[a.department_id] = (await db.execute(
+                    select(Department.name).where(
+                        Department.id == a.department_id))).scalar_one_or_none() or ""
+            due = (MeetingService.check_due(c, a.department_id)
+                   if check_row else a.effective_due_date)
             tasks.append({
-                **({"hint": f"Close your check items ({checks})"}
-                   if checks and a.rasic_letter not in BLOCKING_LETTERS else {}),
+                **({"hint": f"Close your check items ({checks})",
+                    "checks_open": checks,
+                    "department_name": check_dept_names[a.department_id]}
+                   if check_row else {}),
                 "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
                 "title": c.title,
                 "project_id": c.project_id, "project_number": c.project_number,
@@ -415,8 +428,9 @@ async def my_change_tasks(
                 "owner_id": a.effective_owner_id,
                 "owner_name": a.effective_owner_name,
                 "accepted_at": a.effective_accepted_at,
-                "due_date": a.effective_due_date,
-                "overdue": a.effective_overdue,
+                "due_date": due,
+                "overdue": (due is not None and due < datetime.utcnow()
+                            if check_row else a.effective_overdue),
                 "mine": a.effective_owner_id == current_user.id,
             })
 
@@ -3094,12 +3108,11 @@ async def list_concerns(
         concern_depts.update(dict((await db.execute(
             select(Department.id, Department.name).where(
                 Department.id.in_(owner_ids - set(concern_depts))))).all()))
-    due_by_dept: dict[int, datetime] = {}
-    for a in change.assessments:
-        due = a.effective_due_date
-        if due is not None and a.effective_status not in ("submitted", "waived"):
-            due_by_dept[a.department_id] = min(
-                due, due_by_dept.get(a.department_id, due))
+    # C8/R5: a check item is due with its department's assessment (a
+    # consulted department: the change's assessment due)
+    due_by_dept = {d: MeetingService.check_due(change, d)
+                   for d in {d for c in change.concerns if c.is_check
+                             for d in c.owner_department_ids}}
     part_ids = {c.part_id for c in change.concerns if c.part_id}
     part_numbers = dict((await db.execute(
         select(Part.id, Part.part_number).where(Part.id.in_(part_ids)))).all()) \
@@ -3140,7 +3153,7 @@ async def list_concerns(
                                           for d in c.owner_department_ids]
             if c.is_check:
                 dues = [due_by_dept[d] for d in c.owner_department_ids
-                        if d in due_by_dept]
+                        if due_by_dept.get(d) is not None]
                 row.owner_due = min(dues) if dues else None
             row.part_number = part_numbers.get(c.part_id)
             row.confirm_by_name = names.get(c.confirm_by_id)

@@ -341,6 +341,28 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(opened()).toBe('/changes/7')
   })
 
+  it('tells a consulted department its row is its check items, with owner and due (R5)', async () => {
+    await renderWith(changeTask({
+      kind: 'assessment', department_id: 2, assessment_id: 3, rasic_letters: ['C'],
+      owner_id: null, owner_name: null, mine: false, checks_open: 2,
+      department_name: 'Toolshop', hint: 'Close your check items (2)',
+      due_date: '2026-10-22T12:00:00',
+    }))
+    expect(screen.getByText(t('tasks.hint.checkItems').replace('{n}', '2')
+      .replace('{x}', 'Toolshop'))).toBeTruthy()
+    // it owes no submit: the button opens, it does not say Assess
+    expect(screen.queryByRole('button', { name: 'Assess' })).toBeNull()
+    expect(screen.getByRole('button', { name: t('tasks.open') })).toBeTruthy()
+  })
+
+  it('shows the backend brief on quote-vs-estimate rows (C25)', async () => {
+    await renderWith(changeTask({
+      kind: 'estimate_low', hint: 'Estimate low by 4200.00: send a supplement or absorb',
+      target_tab: 'offer',
+    }))
+    expect(screen.getByText('Estimate low by 4200.00: send a supplement or absorb')).toBeTruthy()
+  })
+
   it('names the owner on an assessment row: the first editor (L3)', async () => {
     await renderWith(changeTask({
       kind: 'assessment', department_id: 2, assessment_id: 3,

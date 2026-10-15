@@ -11,6 +11,7 @@ in the assessment, HARD #10 at the department's own submit.
   the asker hears the answer.
 """
 import json
+from datetime import datetime
 
 import pytest
 from sqlalchemy import select
@@ -290,6 +291,24 @@ async def test_a_consulted_department_owning_check_items_gets_the_task(
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=shop_auth)).json()
     row = next(t for t in tasks if t["kind"] == "assessment" and t["change_id"] == a["cid"])
     assert row["hint"] == "Close your check items (1)"
+    # R5: the count for the UI, the department as owner; no assessment due
+    # anywhere yet, so no date is invented
+    assert row["checks_open"] == 1 and row["department_name"] == "Toolshop"
+    assert row["due_date"] is None
+    # the change's assessment due (an R row's) is the C row's and the item's due
+    due = datetime(2026, 10, 22, 12, 0)
+    async with session_factory() as s:
+        for r in (await s.execute(select(ChangeAssessment).where(
+                ChangeAssessment.change_id == a["cid"],
+                ChangeAssessment.rasic_letter == "R"))).scalars():
+            r.due_date = due
+        await s.commit()
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=shop_auth)).json()
+    row = next(t for t in tasks if t["kind"] == "assessment" and t["change_id"] == a["cid"])
+    assert row["due_date"].startswith("2026-10-22")
+    rows = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=shop_auth)).json()}
+    assert rows[cid]["owner_due"].startswith("2026-10-22")
     acts = (await client.get(_url(a, "/my-actions"), headers=shop_auth)).json()
     assert any(x["kind"] == "assessment" and "check items" in x["label"]
                for x in acts["actions"])

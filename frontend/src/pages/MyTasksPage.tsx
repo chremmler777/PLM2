@@ -330,6 +330,16 @@ const kickoffHint = (missing?: string[]): string => {
 
 const taskHint = (task: ChangeTask): string | null => {
   switch (task.kind) {
+    case 'assessment':
+      // R5/R18: a consulted department owes no submit, only its check items
+      return (task.checks_open ?? 0) > 0
+        ? t('tasks.hint.checkItems').replace('{n}', String(task.checks_open))
+          .replace('{x}', task.department_name ?? '')
+        : null;
+    case 'estimate_check':
+    case 'estimate_low':
+      // the backend's brief names the positions and the amount
+      return task.hint ?? null;
     case 'kickoff':
       return kickoffHint(task.missing);
     case 'hold_resume':
@@ -659,7 +669,7 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
           onClick={() => navigate(taskLink(task))}
           className={btnSm.primary}
         >
-          {task.kind === 'assessment' ? 'Assess' : t('tasks.open')}
+          {task.kind === 'assessment' && !task.checks_open ? 'Assess' : t('tasks.open')}
         </button>
       </td>
     </tr>

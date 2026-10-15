@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AssessmentChecks from './AssessmentChecks'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
+import { formatDate } from '../../../lib/format'
 import type { ChangeConcern } from '../../../types/change'
 
 vi.mock('../scoping/AnswerForm', () => ({ default: () => <div data-testid="answer-form" /> }))
@@ -52,6 +53,12 @@ describe('AssessmentChecks (spec §4)', () => {
     fireEvent.click(save)
     await waitFor(() => expect(changesApi.closeCheck).toHaveBeenCalledWith(7, 11, {
       outcome: 'answered', value: '2.4', unit: 'mm' }))
+  })
+
+  it('names the due of an open check item (R5)', () => {
+    render(view([check({ owner_due: '2026-10-22T12:00:00' })]))
+    expect(screen.getByTestId('achk-item-11').textContent)
+      .toContain(t('flag.due').replace('{d}', formatDate('2026-10-22T12:00:00')))
   })
 
   it('a viewer who may not check sees the item without the form', () => {

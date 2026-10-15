@@ -599,6 +599,10 @@ export interface ChangeTask {
   hint?: string | null;
   /** not_feasible: the departments that answered 'not feasible'. */
   departments?: string[];
+  /** assessment row of a consulted department: its open check items and
+   *  the department that owns them (R5/R18). */
+  checks_open?: number;
+  department_name?: string | null;
 }
 
 /** The viewer's standing on a role's work for a project (spec §18). */

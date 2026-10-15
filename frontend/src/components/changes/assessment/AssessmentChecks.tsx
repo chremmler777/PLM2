@@ -19,6 +19,7 @@ import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
+import { formatDate } from '../../../lib/format'
 import CustomerCopy from '../scoping/CustomerCopy'
 import AnswerForm from '../scoping/AnswerForm'
 import {
@@ -104,6 +105,8 @@ function Head({ c }: { c: ChangeConcern }) {
         {' · '}{t(`flag.what.${c.check_what ?? 'other'}`)}
         {c.part_number ? ` · ${c.part_number}` : ''}
         {c.raised_by_name ? ` · ${t('flag.byRaiser').replace('{x}', c.raised_by_name)}` : ''}
+        {/* R5: an open check item names its due (the department's assessment due) */}
+        {c.is_open && c.owner_due ? ` · ${t('flag.due').replace('{d}', formatDate(c.owner_due))}` : ''}
       </span>
     </p>
   )

@@ -1343,6 +1343,23 @@ class MeetingService:
         return concern
 
     @staticmethod
+    def check_due(change: ChangeRequest, department_id: int):
+        """C8/R5: when a department's check items are due: its own open
+        assessment row's due date, else (a consulted row has none) the
+        change's assessment due, the earliest of the R/A rows. None when
+        no row carries one."""
+        own = [a.effective_due_date for a in change.assessments
+               if a.department_id == department_id
+               and a.effective_due_date is not None
+               and a.effective_status not in ("submitted", "waived")]
+        if own:
+            return min(own)
+        stage = [a.effective_due_date for a in change.assessments
+                 if a.rasic_letter in BLOCKING_LETTERS
+                 and a.effective_due_date is not None]
+        return min(stage) if stage else None
+
+    @staticmethod
     def reopen_check_refusal(change: ChangeRequest, concern: ChangeConcern,
                              user: User) -> Optional[tuple[bool, str]]:
         """Why the caller may not reopen this check item, as (forbidden,
