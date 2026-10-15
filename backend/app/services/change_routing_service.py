@@ -27,6 +27,20 @@ from app.services.notification_service import NotificationService
 from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS, WorkflowService
 
 
+DEFAULT_ASSESSMENT_TEMPLATE = "ECM Assessment"
+
+
+async def default_assessment_template_id(session: AsyncSession) -> Optional[int]:
+    """The seeded default assessment template, for changes whose routing
+    carries no template. Template names are not unique (the flow designer
+    can save a second one), so pick deterministically: active first, then
+    the lowest id. None when there is none."""
+    return (await session.execute(
+        select(WfTemplate.id).where(WfTemplate.name == DEFAULT_ASSESSMENT_TEMPLATE)
+        .order_by(WfTemplate.is_active.desc(), WfTemplate.id).limit(1)
+    )).scalars().first()
+
+
 async def _match_step_id(session: AsyncSession, template_id: Optional[int],
                          stage_order: int, department_id: int,
                          rasic_letter: str) -> Optional[int]:
@@ -402,9 +416,7 @@ class ChangeRoutingService:
         else:
             # Legacy TYPE_DISCIPLINES fallback carries no template — resolve the
             # seeded default by name.
-            tmpl_id = (await session.execute(
-                select(WfTemplate.id).where(WfTemplate.name == "ECM Assessment")
-            )).scalar_one_or_none()
+            tmpl_id = await default_assessment_template_id(session)
             if tmpl_id is not None:
                 await WorkflowService.start_change_workflow(
                     session, change.id, tmpl_id, user_id)

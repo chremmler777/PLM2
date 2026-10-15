@@ -16,8 +16,8 @@ from app.models.change import (
     ChangeRequest, ChangeAssessment, ChangeRouting, TERMINAL_STATUSES,
     BLOCKING_LETTERS,
 )
-from app.models.workflow import WfInstance, WfInstanceTask, WfTemplate
-from app.services.change_routing_service import _match_step_id
+from app.models.workflow import WfInstance, WfInstanceTask
+from app.services.change_routing_service import _match_step_id, default_assessment_template_id
 
 # Legacy assessment.status -> synthesized task.status for BLOCKING (R/A) rows.
 # pending->pending, active->active, submitted->approved, waived->waived. This is
@@ -45,9 +45,8 @@ async def repair_change_assessment_instances(session) -> int:
             ChangeAssessment.change_id == change.id))).scalars().all()
         if not rows:
             continue
-        template_id = routing.template_id or (await session.execute(
-            select(WfTemplate.id).where(WfTemplate.name == "ECM Assessment")
-        )).scalar_one_or_none()
+        template_id = (routing.template_id
+                       or await default_assessment_template_id(session))
         if template_id is None:
             continue  # cannot synthesize without any template; log and move on
 
