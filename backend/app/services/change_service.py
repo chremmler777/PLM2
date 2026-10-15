@@ -3461,8 +3461,8 @@ class ChangeService:
         scoping_entered: Optional[dict] = None
         # spec §4: open supplier waits pause a department's costing task
         # (one query for the list)
-        from app.services import supplier_wait_service as _sw
-        costing_waits = (await _sw.open_by_department(
+        from app.services import supplier_wait_service as _waits
+        costing_waits = (await _waits.open_by_department(
             db, [c.id for c in open_changes
                  if c.status in ("in_assessment", "costing")], "costing")
             if cm_switches.on("ASSESSMENT_V2") and dep_ids else {})
@@ -3548,8 +3548,7 @@ class ChangeService:
                 # R18 (SCOPING_V2): no impacted parts holds proceed (HARD #1)
                 # and Quality's PPAP 'yes' (it picks parts of the set): the
                 # lead, its owner, gets the row
-                from app.services import cm_switches as _sw
-                if (_sw.on("SCOPING_V2") and not c.impacted_items
+                if (cm_switches.on("SCOPING_V2") and not c.impacted_items
                         and c.impact_confirmed_at is None and holds_lead(c, user)):
                     tasks.append({**await _base(c), "kind": "pick_impacted",
                                   "target_tab": "impacted"})
@@ -3730,7 +3729,7 @@ class ChangeService:
                         **({"waiting_on": wait.vendor_name,
                             "waiting_until": datetime.combine(
                                 wait.expected_by, datetime.min.time()),
-                            "hint": _sw.line(wait)} if wait else {}),
+                            "hint": _waits.line(wait)} if wait else {}),
                     })
 
             # Stage 8 is a cadence, not a milestone: while the change is being
