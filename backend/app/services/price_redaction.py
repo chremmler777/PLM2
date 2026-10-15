@@ -203,7 +203,8 @@ class PriceViewer:
         return self._user_level
 
     async def may_read(self, change) -> bool:
-        if change is not None and change.lead_id == self.user.id:
+        from app.services.change_people import holds_lead
+        if change is not None and holds_lead(change, self.user):
             return True
         return await self._base()
 

@@ -689,6 +689,7 @@ class WorkflowService:
                           actor) -> WfInstanceTask:
         from app.models.entities import User
         from app.models.change import ChangeRequest
+        from app.services.change_people import holds_lead
         task = await WorkflowService._load_open_task(db, task_id)
         allowed = actor.effective_role == "admin" or await WorkflowService.actor_in_department(
                 db, actor, task.department_id)
@@ -696,12 +697,12 @@ class WorkflowService:
             if task.instance.change_id is not None:
                 # Change-scoped: authorize against the change lead directly.
                 change = await db.get(ChangeRequest, task.instance.change_id)
-                allowed = change is not None and change.lead_id == actor.id
+                allowed = change is not None and holds_lead(change, actor)
             elif task.instance.part_revision_id is not None:
                 rev = await db.get(PartRevision, task.instance.part_revision_id)
                 if rev is not None and rev.originating_change_id is not None:
                     change = await db.get(ChangeRequest, rev.originating_change_id)
-                    allowed = change is not None and change.lead_id == actor.id
+                    allowed = change is not None and holds_lead(change, actor)
         if not allowed:
             raise ValueError("Only members of the task's department (or an admin) may assign it")
         assignee = await db.get(User, assignee_id)
@@ -731,18 +732,19 @@ class WorkflowService:
     async def set_task_due_date(db: AsyncSession, task_id: int,
                                 due_date: datetime, actor) -> WfInstanceTask:
         from app.models.change import ChangeRequest
+        from app.services.change_people import holds_lead
         task = await WorkflowService._load_open_task(db, task_id)
         allowed = actor.effective_role == "admin" or task.instance.started_by == actor.id
         if not allowed:
             if task.instance.change_id is not None:
                 # Change-scoped: authorize against the change lead directly.
                 change = await db.get(ChangeRequest, task.instance.change_id)
-                allowed = change is not None and change.lead_id == actor.id
+                allowed = change is not None and holds_lead(change, actor)
             elif task.instance.part_revision_id is not None:
                 rev = await db.get(PartRevision, task.instance.part_revision_id)
                 if rev is not None and rev.originating_change_id is not None:
                     change = await db.get(ChangeRequest, rev.originating_change_id)
-                    allowed = change is not None and change.lead_id == actor.id
+                    allowed = change is not None and holds_lead(change, actor)
         if not allowed:
             raise ValueError(
                 "Only an admin, the workflow starter, or the change lead may set due dates")

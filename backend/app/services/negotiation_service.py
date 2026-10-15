@@ -44,7 +44,8 @@ class NegotiationService:
         Sales. Same set that reads the summation and the costing positions —
         a counter price is one of those numbers."""
         from app.services.meeting_service import MeetingService
-        if actor.effective_role == "admin" or change.lead_id == actor.id:
+        from app.services.change_people import holds_lead
+        if actor.effective_role == "admin" or holds_lead(change, actor):
             return True
         if await MeetingService.user_is_pm_member(session, actor):
             return True

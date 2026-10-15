@@ -85,7 +85,8 @@ class ImplementationService:
         from app.services.change_service import ChangeService
         from app.services.meeting_service import MeetingService
         from app.services.workflow_service import WorkflowService
-        if (actor.effective_role == "admin" or change.lead_id == actor.id
+        from app.services.change_people import holds_lead
+        if (actor.effective_role == "admin" or holds_lead(change, actor)
                 or await MeetingService.user_is_pm_member(session, actor)
                 or await ChangeService._user_in_department(
                     session, actor, "Sales")):

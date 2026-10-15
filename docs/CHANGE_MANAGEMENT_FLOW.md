@@ -988,6 +988,13 @@ not see the button (`EarlyStageService.transition_refusal`, reused by
 `transition_rights`). Hops the service makes itself (an accepted offer that
 approves) are not affected. Switch off: these hops are open again.
 
+**Acting-as and the lead (ECR-solid C32).** Every right the change lead
+holds goes through `change_people.holds_lead`: the release (`ReleaseService.
+is_pm_or_lead`), price view (`PriceViewer`), the all-department costing and
+implementation views, the counter price (`NegotiationService.may_read`) and
+assigning or dating a change's workflow task. An admin who leads a change and
+acts as a department is exactly that department there.
+
 **Switch groups (`app/services/cm_switches.py`, all default ON).**
 `SCOPING_V2`, `ASSESSMENT_V2`, `COMMERCIAL_V2`, `RELEASE_V2`, `START_AT_RISK`:
 every new HARD gate and notification of the ECR-solid branch reads its group
