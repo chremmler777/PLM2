@@ -1956,6 +1956,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Das Angebot ist raus und deckt den neuen Umfang nicht mehr ab. Es braucht eine neue Angebotsversion oder eine genehmigte Übersteuerung; die Kalkulation öffnet sich nur für betroffene Fachbereiche.',
     en: 'The offer has gone out and will no longer cover the new scope. It needs a new offer version or an approved override; costing reopens only for the affected departments.',
   },
+  'impact.afterLockTitle': { de: 'Umfang nach der Freigabe ändern', en: 'Change the impacted set after the lock' },
+  'impact.afterLockWarning': {
+    de: 'Die Fachbereiche haben diesen Umfang bewertet. Betroffene Fachbereiche werden informiert und ihre Kalkulation öffnet sich wieder (in der Angebotserstellung geht die Änderung zurück in die Kalkulation).',
+    en: 'The departments assessed this set. The affected departments are told and their costing reopens (while the offer is being built, the change goes back to costing).' },
   'impact.afterQuoteLabel': { de: 'Warum ändert sich der Umfang? (Pflicht, protokolliert)', en: 'Why does the scope change? (required, audited)' },
   'impact.scopeChangedAfterQuote': {
     de: 'Umfang nach dem Angebot geändert: Das Angebot deckt ihn nicht mehr ab. Neue Angebotsversion oder genehmigte Übersteuerung nötig.',

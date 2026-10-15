@@ -295,6 +295,7 @@ export const pmChapter: ContentChapter = {
           points: [
             ['Proceeding with nobody on R or A.', 'Refused: the dialog shows "No department is marked R or A: nobody assesses".'],
             ['Editing the impacted set after Development confirmed it.', 'The confirmation is cleared and the change waits for Development again.'],
+            ['Changing the impacted set in assessment, costing or quoting without saying why.', 'It is refused: give the reason. The affected departments are told and their costing reopens (in quoting the change goes back to costing).'],
             ['Validating the timing with a stale confirmation.', 'The button stays disabled. Ask the team to confirm the current plan.'],
             ['Leaving deviations open.', 'They do not stop the work, which is why they get forgotten, but the change cannot be released while one is open. Decide each group.'],
             ['Deciding the route of an issue you raised.', 'Refused. Ask the lead or another PM.'],

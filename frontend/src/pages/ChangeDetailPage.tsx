@@ -1211,6 +1211,7 @@ export default function ChangeDetailPage() {
             ?? (stage?.scope_change ? !stage.scope_change.covered : false)}
           quoted={stage?.impact_edit_needs_reason
             ?? ['quoted', 'approved', 'in_implementation', 'in_validation', 'released'].includes(change.status)}
+          reopens={!!stage?.impact_edit_reopens}
           onChanged={() => qc.invalidateQueries({ queryKey: ['change', changeId] })} />
       )}
 

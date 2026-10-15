@@ -131,15 +131,18 @@ async def test_lead_pinned_once_assessment_started(client, eng_auth, seed,
         c.status = "in_assessment"
         await s.commit()
 
-    # The lead may not be dropped...
+    # The lead may not be dropped... (ECR-solid C16: after the lock an edit
+    # says why; the lead rule still refuses it)
     res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
-                           json={"part_ids": [extra["part_id"]]}, headers=eng_auth)
+                           json={"part_ids": [extra["part_id"]],
+                                 "reason": "Customer dropped the lead"}, headers=eng_auth)
     assert res.status_code == 400
     assert "lead" in res.json()["detail"].lower()
 
     # ...but the rest of the set still moves.
     res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
-                           json={"part_ids": [lead["part_id"]]}, headers=eng_auth)
+                           json={"part_ids": [lead["part_id"]],
+                                 "reason": "Customer dropped Extra3"}, headers=eng_auth)
     assert res.status_code == 200, res.text
     assert res.json()["impacted_part_ids"] == [lead["part_id"]]
 

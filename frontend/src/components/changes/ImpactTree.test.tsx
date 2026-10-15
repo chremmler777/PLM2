@@ -377,6 +377,15 @@ describe('ImpactTree, spec §16', () => {
       .toHaveBeenCalledWith(7, [2, 3], 'Customer added the RH part'))
   })
 
+  it('C16: after the lock and before the offer, asks why and says costing reopens', async () => {
+    wrap(<ImpactTree changeId={7} status="in_assessment" quoted reopens />)
+    await screen.findByText('Child')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    fireEvent.click(screen.getByTestId('impact-apply-bar'))
+    expect(screen.getByText(t('impact.afterLockWarning'), { exact: false })).toBeTruthy()
+    expect(changesApi.applyImpactSelection).not.toHaveBeenCalled()
+  })
+
   it('states that the offer no longer covers the scope', async () => {
     wrap(<ImpactTree changeId={7} status="quoted" quoted scopeChangedAfterQuote />)
     expect((await screen.findByTestId('impact-scope-changed')).textContent)

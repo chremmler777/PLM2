@@ -46,6 +46,9 @@ interface Props {
   scopeChangedAfterQuote?: boolean
   /** The offer has gone out: a changed set needs a reason on the record. */
   quoted?: boolean
+  /** C16: locked before the offer (assessment, costing, quoting): the reason
+   *  is asked and the affected departments' costing reopens. */
+  reopens?: boolean
   /** Called after the set (or the lead) changed on the server. */
   onChanged?: () => void
   /** 'engineering_review': the lock opens the review, no assessment is routed. */
@@ -61,7 +64,7 @@ const sortedKey = (ids: Iterable<number>) => [...ids].sort((a, b) => a - b).join
 export default function ImpactTree({
   changeId, status, impactConfirmedByName, impactConfirmedAt, canConfirm = true,
   canEdit = true, titleAuto = false, scopeChangedAfterQuote = false, quoted = false, onChanged,
-  origin = null, confirmStep = true,
+  origin = null, confirmStep = true, reopens = false,
 }: Props) {
   const qc = useQueryClient()
   const phaseOpen = !LOCKED.includes(status)
@@ -461,8 +464,9 @@ export default function ImpactTree({
 
       <ReasonDialog
         open={asking === 'reason'}
-        title={t('impact.afterQuoteTitle')}
-        warning={[t('impact.afterQuoteWarning'), lockWarning].filter(Boolean).join(' ')}
+        title={t(reopens ? 'impact.afterLockTitle' : 'impact.afterQuoteTitle')}
+        warning={[t(reopens ? 'impact.afterLockWarning' : 'impact.afterQuoteWarning'),
+          lockWarning].filter(Boolean).join(' ')}
         label={t('impact.afterQuoteLabel')}
         submitLabel={t('impact.apply')}
         onSubmit={(reason) => { setAsking(null); applyWithToast(reason) }}

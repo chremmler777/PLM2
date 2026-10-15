@@ -762,6 +762,29 @@ Switch `ASSESSMENT_V2` (migration 128).
   part of the case in plain words; stored on the change and shown on the
   approved card. Switch off: release deadline only, as before.
 
+### Impact edits after the lock (ECR-solid C16, 2026-10-15)
+Switch `ASSESSMENT_V2`. Before C16 the run team changed the impacted set in
+assessment, costing and quoting silently. Now (`EarlyStageService.
+begin_impact_edit` / `_reopen_after_locked_edit`), in `in_assessment`,
+`costing` and `quoting`:
+- the edit needs a **reason** (5+ characters) like a post-quote edit; the
+  Impacted tab asks it (*"Change the impacted set after the lock"*), served
+  as `impact_edit_needs_reason` / `impact_edit_reopens`;
+- the departments whose assessed objects moved (every routed R/A one when
+  nothing is traceable) get their **finalized costing reopened**
+  (`costing_input_reopened`, their costing task returns); in `quoting` the
+  change first steps back to `costing` (no offer went out yet);
+- each is told once (`impact_edited`, the assessment owner, else the
+  department): *"Impacted items changed after your assessment: ART-B:
+  <reason>. Check your answer; your costing is open again."*; logged
+  `impact_edited_after_lock`.
+Who may edit is unchanged (lead, PM members, admin; P1-5). Intake attach and
+supersede (§1) pass their own reason. **Not built:** sending a submitted
+assessment back on its own (spec "technical impact yes reopens
+assessment"): the department checks its answer from the notice and its
+reopened costing; a recall stays the lead's (open question for Christoph).
+From `quoted` on: the scope change below, unchanged.
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside

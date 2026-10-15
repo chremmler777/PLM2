@@ -1570,6 +1570,8 @@ export interface StageStateResponse {
   }>;
   can_edit_impact: boolean;
   impact_edit_needs_reason: boolean;
+  /** C16: locked before the offer: the edit reopens the departments' costing. */
+  impact_edit_reopens?: boolean;
   /** May the viewer record the scoping meeting and its decision (lead, PM, admin). */
   can_record_meeting?: boolean;
   lead_assigned: boolean;

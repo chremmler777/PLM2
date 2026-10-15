@@ -39,6 +39,9 @@ from app.services.change_service import (
 
 # Impact edits from here on no longer match the offer (spec §16).
 POST_QUOTE_STATUSES = ("quoted", "approved")
+# C16 (spec §4, ASSESSMENT_V2): after the lock and before the offer, an
+# impact edit needs a reason too and reopens the affected departments.
+LOCKED_PRE_QUOTE = ("in_assessment", "costing", "quoting")
 # The hops whose rights §16 P1-4 sets.
 RUN_TEAM_TARGETS = ("rejected", "cancelled", "on_hold")
 # ECR-solid C1 (switch COMMERCIAL_V2): the mid-flow hops are the run team's
@@ -51,6 +54,11 @@ RUN_TEAM_MIDFLOW_HOPS = (
     ("rejected", "scoping"),
 )
 TITLE_MAX_LENGTH = 255
+
+
+def _v2() -> bool:
+    from app.services import cm_switches
+    return cm_switches.on("ASSESSMENT_V2")
 
 
 class EarlyStageService:
@@ -336,6 +344,14 @@ class EarlyStageService:
         (the offer no longer covers the scope); returns the department ->
         objects snapshot the post-quote bookkeeping diffs against, or None
         when the edit is an ordinary pre-quote one."""
+        from app.services import cm_switches
+        if (change.status in LOCKED_PRE_QUOTE and cm_switches.on("ASSESSMENT_V2")):
+            # C16: the departments assessed this set; a change of it says why
+            if len((reason or "").strip()) < 5:
+                raise ChangeError(
+                    "The impacted set is locked and the departments assessed "
+                    "it: say why it changes (reason required, 5+ characters)")
+            return await EarlyStageService._objects_by_department(session, change)
         if not EarlyStageService.post_quote(change):
             return None
         if not (reason or "").strip():
@@ -358,6 +374,10 @@ class EarlyStageService:
         after = await EarlyStageService._objects_by_department(session, change)
         affected = sorted(d for d in set(before) | set(after)
                           if before.get(d, set()) != after.get(d, set()))
+        if change.status in LOCKED_PRE_QUOTE:
+            await EarlyStageService._reopen_after_locked_edit(
+                session, change, user_id, reason.strip(), affected, part_ids)
+            return
         if not affected:
             affected = sorted({a.department_id for a in change.assessments
                                if a.rasic_letter in BLOCKING_LETTERS})
@@ -373,6 +393,61 @@ class EarlyStageService:
             new_value={"part_ids": sorted(part_ids),
                        "department_ids": affected},
             notes=reason.strip())
+
+    @staticmethod
+    async def _reopen_after_locked_edit(session: AsyncSession, change: ChangeRequest,
+                                        user_id: int, reason: str,
+                                        affected: list[int], part_ids: list[int]) -> None:
+        """C16 (spec §4 "Impact edits after the lock"): the departments whose
+        objects moved (every routed R/A one when nothing is traceable) get
+        their costing back: a finalized costing reopens (in quoting, the
+        change steps back to costing first: no offer went out yet), and each
+        is told once what changed. Logged with the reason."""
+        from app.services import early_costing
+        from app.services.notification_service import NotificationService
+        if not affected:
+            affected = sorted({a.department_id for a in change.assessments
+                               if a.rasic_letter in BLOCKING_LETTERS})
+        parts = dict((await session.execute(
+            select(Part.id, Part.part_number).where(Part.id.in_(part_ids))
+        )).all()) if part_ids else {}
+        what = ", ".join(parts.get(p, f"#{p}") for p in part_ids) or "the impacted set"
+        if change.status == "quoting" and affected:
+            await ChangeService.transition(
+                session, change, "costing", user_id,
+                reason=f"Impacted items changed ({what}): {reason}; costing "
+                       "reopens before the offer goes out")
+        reopened = []
+        for did in affected:
+            if await early_costing.clear_finalization(
+                    session, change, did, user_id,
+                    f"Impacted items changed ({what}): {reason}"):
+                reopened.append(did)
+        entry = await ChangeService.append_changelog(
+            session, change, "impact_edited_after_lock",
+            f"Impacted items changed after the lock ({what}): {reason}", user_id,
+            new_value={"part_ids": sorted(part_ids), "department_ids": affected,
+                       "costing_reopened": reopened}, notes=reason)
+        names = dict((await session.execute(
+            select(Department.id, Department.name).where(
+                Department.id.in_(affected)))).all()) if affected else {}
+        for did in affected:
+            owners = sorted({a.effective_owner_id or a.responsible_id
+                             for a in change.assessments
+                             if a.department_id == did
+                             and (a.effective_owner_id or a.responsible_id)} - {user_id})
+            title = f"Impacted items changed after your assessment: {change.change_number}"[:255]
+            body = (f"{what}: {reason}. Check your answer"
+                    + ("; your costing is open again" if did in reopened else "") + ".")
+            key = f"impact_edit:{getattr(entry, 'id', 0)}:{did}"
+            if owners:
+                await NotificationService.notify_once(
+                    session, owners, kind="impact_edited", subject_key=key,
+                    title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
+            else:
+                await NotificationService.notify_departments_once(
+                    session, [did], kind="impact_edited", subject_key=key,
+                    title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
 
     @staticmethod
     async def scope_change_state(session: AsyncSession,
@@ -938,7 +1013,10 @@ class EarlyStageService:
                 change.status not in IMPACT_LOCKED_STATUSES
                 and await EarlyStageService.impact_edit_refusal(
                     session, change, user) is None),
-            "impact_edit_needs_reason": EarlyStageService.post_quote(change),
+            "impact_edit_needs_reason": EarlyStageService.post_quote(change) or (
+                change.status in LOCKED_PRE_QUOTE and _v2()),
+            # C16: before the offer the reason reopens the departments' costing
+            "impact_edit_reopens": change.status in LOCKED_PRE_QUOTE and _v2(),
             "lead_assigned": change.lead_id is not None,
             # One price rule (PriceViewer) for the API and the cost cards.
             "can_see_prices": await PriceViewer(session, user).may_read(change),
