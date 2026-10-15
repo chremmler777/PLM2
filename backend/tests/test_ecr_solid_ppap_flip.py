@@ -266,13 +266,19 @@ async def test_proceed_names_every_hold_at_once(client, admin_auth, seed, sessio
         "lead_id": seed["admin_id"]}, headers=admin_auth)
     cid = res.json()["id"]
     await _to_status(session_factory, cid, "scoping")
-    _, qid, _q = await _user(client, session_factory, seed, "q7", "Quality")
+    _, qid, quality = await _user(client, session_factory, seed, "q7", "Quality")
     mid = await _meeting(client, admin_auth, cid, qid)
     res = await _proceed(client, admin_auth, cid, mid)
     assert res.status_code == 400
     detail = res.json()["detail"]
     assert "held by 2 things" in detail
     assert "PPAP decision" in detail and "No impacted parts picked" in detail
+    # R18: the lead owns the empty set: a row of its own; Quality's 'yes'
+    # says who adds the parts first
+    assert len(await _tasks(client, admin_auth, cid, "pick_impacted")) == 1
+    assert await _tasks(client, quality, cid, "pick_impacted") == []
+    res = await _ppap(client, quality, cid, answer="yes", part_ids=[1])
+    assert res.status_code == 400 and "No impacted parts yet" in res.json()["detail"]
 
 
 async def test_notification_only_goes_on_as_internal(
@@ -427,3 +433,23 @@ async def test_direct_hop_refused_without_ppap_decision(
                                 headers=admin_auth)
         assert res.status_code == 400, res.text
         assert "PPAP decision" in res.json()["detail"]
+
+
+async def test_flip_in_capture_keeps_the_lead_on_the_kickoff_row(
+        client, admin_auth, seed, session_factory):
+    """A change that flips while captured (a customer index) still owes its
+    capture: the lead keeps 'Hand over to scoping' as main owner; Sales sees
+    it with the lead named (R18)."""
+    dev_uid, _, dev = await _user(client, session_factory, seed, "d13", "Development")
+    _, _, sales = await _user(client, session_factory, seed, "s13", "Sales")
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "pp kick", "reason": "r",
+        "change_type": "physical_part", "customer_relevant": False,
+        "lead_id": dev_uid}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    cid = res.json()["id"]
+    await _flip_at(session_factory, cid, "captured")
+    rows = await _tasks(client, dev, cid, "kickoff")
+    assert len(rows) == 1 and rows[0]["role"] == "main"
+    rows = await _tasks(client, sales, cid, "kickoff")
+    assert len(rows) == 1 and rows[0]["main_name"] == "PP d13"

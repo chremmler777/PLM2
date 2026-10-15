@@ -84,13 +84,14 @@ describe('§2 capture on the change', () => {
   })
 
   it('start at risk switched off: no start-at-risk option, "No start before PO"', () => {
-    const c = change({ priority: 'critical', customer_relevant: true, start_at_risk_on: false,
-      release_due_date: '2099-01-02T12:00:00' })
+    const over = { priority: 'critical', customer_relevant: true, start_at_risk_on: false,
+      release_due_date: '2099-01-02T12:00:00' }
+    const c = change(over)
     wrap(<NeedByCheck change={c} value={{ check: '', proposed: '' }} onChange={() => {}} customer />)
     expect(screen.queryByTestId('need-by-at_risk')).toBeNull()
     expect(screen.getByTestId('need-by-no-start-check').textContent).toBe(t('urgent.noStartBeforePo'))
     cleanup()
-    wrap(<NeedByLine change={{ ...c, status: 'scoping' }} />)
+    wrap(<NeedByLine change={change({ ...over, status: 'scoping' })} />)
     expect(screen.getByTestId('need-by-no-start')).toBeTruthy()
   })
 

@@ -500,7 +500,9 @@ export type ChangeTaskKind =
   /** §1: an Assumed "not asked yet" deadline to confirm by its date. */
   | 'index_deadline_confirm'
   /** §3 urgent: need-by not realistic: Sales tells the customer. */
-  | 'need_by_tell';
+  | 'need_by_tell'
+  /** R18: the lead picks the impacted parts (proceed and PPAP 'yes' wait). */
+  | 'pick_impacted';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the

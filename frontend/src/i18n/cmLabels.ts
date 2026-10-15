@@ -2594,6 +2594,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'flip.answeredOffer': { de: 'Angebot nötig: Angebotstermin gesetzt', en: 'Offer needed: quote deadline set' },
   'tasks.kind.ppap_decision': { de: 'PPAP-Entscheidung beantworten', en: 'Answer the PPAP decision' },
   'tasks.kind.customer_flip': { de: 'Kundeninfo oder Angebot?', en: 'Customer notification or offer?' },
+  'ppap.noPartsYet': {
+    de: 'Noch keine betroffenen Teile: {l} legt sie zuerst an (Reiter Betroffen, Aufgabe in Meine Aufgaben)',
+    en: 'No impacted parts yet: {l} adds them first (Impacted tab, a task in My Tasks)',
+  },
+  'ppap.theLead': { de: 'die Leitung', en: 'the lead' },
   'next.item.ppap_decision': { de: 'PPAP-Entscheidung der Qualität', en: "Quality's PPAP decision" },
   // the PM's scoping row and the header: what holds proceed besides questions
   // a customer question's mail text (spec §0 [R4])
@@ -2668,6 +2673,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'attach.customerFile': { de: 'Kundendatei (Zeichnung, 3D, EC-Blatt)', en: 'Customer file (drawing, 3D, EC sheet)' },
   'start.createHandOver': { de: 'Anlegen und übergeben', en: 'Create and hand over' },
   'start.createDraft': { de: 'Als Entwurf anlegen', en: 'Create as draft' },
+  'tasks.kind.pick_impacted': { de: 'Betroffene Teile wählen', en: 'Pick the impacted parts' },
   'tasks.kind.set_quote_deadline': { de: 'Angebotstermin setzen', en: 'Set the quote deadline' },
   'tasks.kind.need_by_tell': { de: 'Kunde informieren: neuer Termin oder Start auf Risiko?', en: 'Tell customer: new date or start at risk?' },
   // §1 intake: live change, what changed, customer-driven

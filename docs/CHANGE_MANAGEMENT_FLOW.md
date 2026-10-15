@@ -277,7 +277,10 @@ Scoping decides only *which parts, who assesses, go/no-go*.
 - **Proceed holds** (`MeetingService.proceed_holds`, L4 review): open
   questions and cancel votes (HARD #2), the PPAP decision and the flip's Sales
   answer (HARD #7), check items with no routed owner, no impacted parts
-  (HARD #1), each with owner and due. The
+  (HARD #1), each with owner and due. The lead owns an empty impacted set:
+  a My Tasks row *Pick the impacted parts* (`pick_impacted`, Impacted tab;
+  Quality's PPAP *yes* waits on it and says so), and the cockpit counts every
+  one of these holds. The
   PM's row and the change checklist (`next_step`, `who` = "Quality, due Thu")
   read it, the cockpit lists HARD #7 under *Blocked by* (never "Nothing
   blocking") and gives Quality *Answer the PPAP decision* as the scoping
@@ -356,6 +359,9 @@ Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
   `customer_relevant=false` and a meeting's cost carrier *internal* are
   refused while a flip holds (`flip_holds`: flipped, not answered
   *notification only*; HARD #7, no override; the carrier editors say so).
+  A flip while captured leaves the capture with its lead: the lead keeps
+  *Hand over to scoping* as main owner (Sales and PM see it with the lead
+  named).
   A PATCH internal -> customer by Sales or PM during capture
   or scoping is a cost-carrier correction, not a flip: no lead move, no Sales
   question (the quote tells the customer).

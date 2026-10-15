@@ -175,11 +175,16 @@ class PpapDecisionService:
         else:
             impacted = {i.part_id for i in change.impacted_items}
             picked = list(dict.fromkeys(part_ids or []))
+            if not impacted:
+                who = change.lead_name or "The lead"
+                raise ChangeError(f"No impacted parts yet: {who} adds them first "
+                                  "(Impacted tab, a task in My Tasks); then pick the parts")
             if not picked:
                 raise ChangeError("Pick the parts whose parameters, tool, material "
                                   "or cycle time changed")
             if set(picked) - impacted:
-                raise ChangeError("Pick parts of this change's impacted set")
+                raise ChangeError("Pick parts of this change's impacted set (part_ids "
+                                  "are part ids, not impacted-item ids)")
             change.ppap_part_ids = picked
             change.ppap_basis = None
             change.ppap_ref = (ref or "").strip() or None

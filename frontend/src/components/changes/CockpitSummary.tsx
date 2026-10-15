@@ -394,8 +394,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   }
   // Quality's PPAP decision and the flip's Sales answer hold 'proceed' (HARD
   // #7): the meeting cannot decide past them.
+  // every hold of proceed the checklist names (backend proceed_holds), so the
+  // header count and the PM's row agree (R5)
+  const PROCEED_HOLD_KEYS = ['ppap_decision', 'customer_flip', 'impacted_items', 'unrouted_checks']
   const proceedHolds = change.status === 'scoping'
-    ? nextItems.filter((i) => i.kind === 'hard' && (i.key === 'ppap_decision' || i.key === 'customer_flip'))
+    ? nextItems.filter((i) => i.kind === 'hard' && PROCEED_HOLD_KEYS.includes(i.key))
     : []
   // Why blocked (spec §0): a soft rule offers one Override bound to it (or
   // says where its override stands); a hard rule says it has none and names

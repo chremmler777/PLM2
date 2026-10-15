@@ -3418,9 +3418,15 @@ class ChangeService:
             # handed over by its run team (lead, PM); Sales has no part in it.
             run_team_kickoff = (not c.customer_relevant and c.lead_id is not None
                                 and not mp.is_mother_plant(c))
+            # a change that flipped to customer while captured (a customer
+            # index, PPAP 'yes'): its lead still owes the capture (description,
+            # customer file) and keeps the row as main owner (R18)
+            flipped_kickoff = (c.customer_relevant and c.customer_flip_at is not None
+                               and c.lead_id is not None and not mp.is_mother_plant(c))
             if c.status == "captured" and (
                     (holds_lead(c, user) or is_pm) if run_team_kickoff else (
-                        can_capture or (is_pm and mp.is_mother_plant(c)))):
+                        can_capture or (is_pm and mp.is_mother_plant(c))
+                        or (flipped_kickoff and holds_lead(c, user)))):
                 # a mother-plant change is captured by Project Management;
                 # with no lead yet, Project Management's part is to pick one
                 pm_row = (mp.is_mother_plant(c) or run_team_kickoff
@@ -3432,7 +3438,8 @@ class ChangeService:
                               # the lead hands it over; Project Management
                               # backs the lead up (R5: one main per row)
                               **({"main_user": (c.lead_id, c.lead_name or "")}
-                                 if run_team_kickoff and not holds_lead(c, user)
+                                 if (run_team_kickoff or flipped_kickoff)
+                                 and not holds_lead(c, user)
                                  and c.id not in idle_lead else {}),
                               # project team: then it is PM's role, not Sales'
                               "role_department_id": (dept_by_name.get("Project Manager")
@@ -3474,6 +3481,14 @@ class ChangeService:
                 if (can_confirm and c.impact_confirmed_at is None
                         and c.impact_confirm_step):
                     tasks.append({**await _base(c), "kind": "impact_confirm"})
+                # R18 (SCOPING_V2): no impacted parts holds proceed (HARD #1)
+                # and Quality's PPAP 'yes' (it picks parts of the set): the
+                # lead, its owner, gets the row
+                from app.services import cm_switches as _sw
+                if (_sw.on("SCOPING_V2") and not c.impacted_items
+                        and c.impact_confirmed_at is None and holds_lead(c, user)):
+                    tasks.append({**await _base(c), "kind": "pick_impacted",
+                                  "target_tab": "impacted"})
                 # C9 (spec §1): a customer change handed over without its
                 # quote deadline (a full ECR from the intake): Sales sets it
                 # while the lead scopes; owed before assessment

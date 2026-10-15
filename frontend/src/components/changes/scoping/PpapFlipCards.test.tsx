@@ -28,6 +28,14 @@ const change = (over: Record<string, unknown> = {}) => ({
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('PpapDecisionCard', () => {
+  it('yes with no impacted parts yet names the lead who adds them first', () => {
+    render(wrap(<PpapDecisionCard change={change({ impacted_items: [], lead_name: 'Holmes' })}
+      isQuality editable onChanged={() => {}} />))
+    fireEvent.click(screen.getByTestId('ppap-yes'))
+    expect(screen.getByTestId('ppap-no-parts').textContent).toContain('Holmes adds them first')
+    expect((screen.getByTestId('ppap-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('Quality answers no with basis and reference; nothing preselected', async () => {
     render(wrap(<PpapDecisionCard change={change()} isQuality editable onChanged={() => {}} />))
     expect(screen.queryByTestId('ppap-save')).toBeNull()

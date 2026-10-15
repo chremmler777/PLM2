@@ -118,6 +118,8 @@ TASK_KIND = {
     "index_deadline": ("New index: deadline holds?", "Neuer Index: hält der Termin?"),
     "index_deadline_confirm": ("Confirm the deadline with the customer",
                                "Termin mit dem Kunden bestätigen"),
+    # R18: the lead picks the impacted parts (proceed, PPAP 'yes' wait)
+    "pick_impacted": ("Pick the impacted parts", "Betroffene Teile wählen"),
     # C9: a full ECR from the intake, handed over without its deadline
     "set_quote_deadline": ("Set the quote deadline", "Angebotstermin setzen"),
     # §3 urgent proceed

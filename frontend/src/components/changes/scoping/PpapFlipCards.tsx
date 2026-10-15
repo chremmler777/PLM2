@@ -45,7 +45,8 @@ export function PpapDecisionCard({ change, isQuality, editable, onChanged }: {
   const missing = answer === '' ? [t('ppap.pickAnswer')]
     : answer === 'no'
       ? [...(basis ? [] : [t('ppap.basis')]), ...(ref.trim().length >= 5 ? [] : [t('answer.ref')])]
-      : (parts.length ? [] : [t('ppap.parts')])
+      : items.length === 0 ? [t('ppap.noPartsYet').replace('{l}', change.lead_name ?? t('ppap.theLead'))]
+        : (parts.length ? [] : [t('ppap.parts')])
   return (
     <div data-testid="ppap-card"
       className={`rounded-lg border p-3 space-y-2 ${decided ? 'border-slate-700 bg-slate-800/40'
@@ -92,6 +93,11 @@ export function PpapDecisionCard({ change, isQuality, editable, onChanged }: {
           {answer === 'yes' && (
             <div className="space-y-1">
               <p className="text-[11px] text-amber-300/90">{t('ppap.yesMeans')}</p>
+              {items.length === 0 && (
+                <p className="text-[11px] text-amber-200" data-testid="ppap-no-parts">
+                  {t('ppap.noPartsYet').replace('{l}', change.lead_name ?? t('ppap.theLead'))}
+                </p>
+              )}
               {items.map((i) => (
                 <label key={i.part_id} className="flex items-center gap-2 text-xs cursor-pointer">
                   <input type="checkbox" checked={parts.includes(i.part_id)}
