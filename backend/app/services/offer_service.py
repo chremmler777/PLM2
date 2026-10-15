@@ -1126,6 +1126,8 @@ class OfferService:
                            "high_risks": len(listed["high_risks"])}
                           if listed is not None else {})},
         )
+        if listed is not None and offer.version >= 2:
+            await OfferService._withdraw_stale_signatures(session, change, offer, user.id)
         if listed is not None and listed.get("risk_reason"):
             await ChangeService.append_changelog(
                 session, change, "offer_sent_with_risk",
@@ -1135,6 +1137,37 @@ class OfferService:
                 new_value={"offer_id": offer.id,
                            "concern_ids": [r["concern_id"] for r in listed["high_risks"]]})
         return offer
+
+    @staticmethod
+    async def _withdraw_stale_signatures(session: AsyncSession, change: ChangeRequest,
+                                         offer: ChangeOffer, actor_id: int) -> None:
+        """C14 (spec §7): a new version sent withdraws the signatures given
+        on an older one: PM always, Quality only when what it signed
+        technically changed (snapshot_diff, a part index included). The
+        record keeps who signed what; the signer is told once to sign v N."""
+        sides, latest = await ChangeService.signoff_sides_missing(session, change)
+        stale = [(side, by) for side, by in (("pm", change.pm_signed_by),
+                                              ("quality", change.quality_signed_by))
+                 if side in sides and by is not None]
+        if not stale:
+            return
+        names = {"pm": "PM", "quality": "Quality"}
+        await ChangeService.append_changelog(
+            session, change, "signoff_withdrawn",
+            f"Offer v{offer.version} sent: "
+            + " and ".join(names[s] for s, _ in stale)
+            + f" sign-off withdrawn, sign again for v{offer.version}", actor_id,
+            new_value={"offer_id": offer.id, "sides": [s for s, _ in stale]})
+        from app.services.notification_service import NotificationService
+        for side, by in stale:
+            if by == actor_id:
+                continue
+            await NotificationService.notify_once(
+                session, [by], kind="task_new",
+                subject_key=f"resign:{offer.id}:{side}",
+                title=f"Sign again for offer v{offer.version}: {change.change_number}"[:255],
+                body=f"Your {names[side]} sign-off was on an earlier version.",
+                link=f"/changes/{change.id}?tab=overview")
 
     @staticmethod
     async def _check_quote_plan(session, change) -> None:

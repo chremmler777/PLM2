@@ -392,10 +392,20 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.update_quote');
     case 'deviation_decision':
       return task.reason?.trim() || t('tasks.hint.deviation_decision');
-    case 'sign_off':
-      return task.offer_version != null
+    case 'sign_off': {
+      const base = task.offer_version != null
         ? t('tasks.hint.sign_off_v').replace('{v}', String(task.offer_version))
         : t('tasks.hint.sign_off');
+      if (task.side !== 'pm' || task.offer_total == null) return base;
+      // §7 [R3]: the PM signs knowing the total, the margin move and the assumptions
+      const money = `${task.offer_total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${task.offer_currency ?? ''}`.trim();
+      const margin = task.margin_pct != null ? `, ${t('tasks.hint.margin').replace('{m}', task.margin_pct.toFixed(1))}` : '';
+      const delta = task.margin_delta_pts != null && task.prev_version != null
+        ? ` ${t('tasks.hint.marginDelta').replace('{d}', `${task.margin_delta_pts > 0 ? '+' : ''}${task.margin_delta_pts.toFixed(1)}`).replace('{v}', String(task.prev_version))}`
+        : '';
+      const assumed = task.assumed_open ? `; ${t('tasks.hint.assumedOpen').replace('{n}', String(task.assumed_open))}` : '';
+      return `${base}: ${money}${margin}${delta}${assumed}`;
+    }
     case 'internal_approval':
       return t('tasks.hint.internal_approval');
     case 'routing_deviation_decision':

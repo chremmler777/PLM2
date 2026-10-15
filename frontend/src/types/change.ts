@@ -601,6 +601,16 @@ export interface ChangeTask {
   deviation_id?: number;
   side?: 'pm' | 'quality';
   offer_version?: number | null;
+  /** §7 [R3] PM sign-off brief: total, margin (delta vs the version before),
+   *  unconfirmed Assumed answers. Never on Quality's row. */
+  offer_total?: number | null;
+  offer_currency?: string | null;
+  margin_pct?: number | null;
+  margin_delta_pts?: number | null;
+  prev_version?: number | null;
+  assumed_open?: number;
+  /** §7 still talking: the next contact date of a customer_response row. */
+  next_contact?: string | null;
   to_status?: ChangeStatus | null;
   open_count?: number;
   target_tab?: string | null;

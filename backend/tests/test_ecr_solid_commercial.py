@@ -377,3 +377,119 @@ async def test_a_higher_total_needs_no_reason(client, quoted):
     await _v2_with_discount(client, cid, sales, -5)   # a negative discount: +5 %
     res = await _answer(client, cid, sales, _YES)
     assert res.status_code == 200, res.text
+
+
+# ---------------------------------------------------------------------------
+# C14: signatures bound to the offer; a new version withdraws them (PM
+# always, Quality on a technical change, a part index included)
+# ---------------------------------------------------------------------------
+async def _part_on_change(session_factory, seed, cid, index="C"):
+    from app.models.part import Part, PartRevision
+    async with session_factory() as s:
+        part = Part(project_id=seed["project_id"], part_number="886.197", name="Bezel",
+                    part_type="internal_mfg", item_category="article",
+                    created_by=seed["admin_id"])
+        s.add(part)
+        await s.flush()
+        rev = PartRevision(part_id=part.id, revision_name="3", phase="official",
+                           customer_index=index, source="customer",
+                           created_by=seed["admin_id"])
+        s.add(rev)
+        await s.flush()
+        item = ChangeImpactedItem(change_id=cid, part_id=part.id, resulting_revision_id=rev.id,
+                                  created_by=seed["admin_id"])
+        s.add(item)
+        await s.commit()
+        return part.id, item.id
+
+
+async def _signed_v1(client, session_factory, seed, offer_world, with_part=False):
+    """quoted-like world built by hand: Quality member, optional part, v1
+    sent, both signed on v1 before the customer answers."""
+    from tests.conftest import login, ENGINEER_PASSWORD
+    cid = offer_world["change_id"]
+    part = await _part_on_change(session_factory, seed, cid) if with_part else None
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)).status_code == 200
+    q = await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+        assert r.status_code == 200, r.text
+    return cid, sales, pm, q, part
+
+
+@pytest.fixture
+async def quality_member(session_factory, offer_world):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    async with session_factory() as s:
+        q = Department(name="Quality", flow_type="action", is_active=True)
+        s.add(q)
+        await s.flush()
+        u = User(organization_id=(await s.get(User, offer_world["users"]["sales"])).organization_id,
+                 username="off-quality", email="off-quality@test.io", full_name="Offer quality",
+                 role="engineer", hashed_password=get_password_hash("role-secret-1"),
+                 is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=q.id))
+        await s.commit()
+        return u.id
+
+
+async def test_a_price_only_version_withdraws_the_pm_signature_only(
+        client, session_factory, seed, offer_world, quality_member):
+    from app.models.notification import Notification
+    cid, sales, pm, q, _ = await _signed_v1(client, session_factory, seed, offer_world)
+    await _v2_with_discount(client, cid, sales, -5)
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "signoff_withdrawn"))).scalars().all()
+        notes = (await s.execute(select(Notification).where(
+            Notification.user_id == offer_world["users"]["pm"]))).scalars().all()
+    assert len(rows) == 1 and "PM sign-off withdrawn" in rows[0].action_description
+    assert "Quality" not in rows[0].action_description
+    assert any("Sign again for offer v2" in n.title for n in notes)
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 200, res.text
+    # NEGATIVE: approval waits for the PM's new signature
+    assert res.json()["status"] == "quoted"
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
+    rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
+    row = next(t for t in rows if t["kind"] == "sign_off" and t["change_id"] == cid)
+    assert (row["side"], row["offer_version"], row["prev_version"]) == ("pm", 2, 1)
+    assert row["offer_total"] > 0 and row["margin_delta_pts"] is not None
+    assert row["assumed_open"] == 0
+    r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=pm)
+    assert r.json()["status"] == "approved"
+
+
+async def test_a_part_index_change_withdraws_quality_too(
+        client, session_factory, seed, offer_world, quality_member):
+    from app.models.part import PartRevision
+    cid, sales, pm, q, (part_id, item_id) = await _signed_v1(
+        client, session_factory, seed, offer_world, with_part=True)
+    async with session_factory() as s:
+        d = PartRevision(part_id=part_id, revision_name="4", phase="official",
+                         customer_index="D", source="customer", created_by=seed["admin_id"])
+        s.add(d)
+        await s.flush()
+        item = await s.get(ChangeImpactedItem, item_id)
+        item.resulting_revision_id = d.id
+        await s.commit()
+    await _v2_with_discount(client, cid, sales, -5)
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "signoff_withdrawn"))).scalar_one()
+    assert "PM and Quality sign-off withdrawn" in row.action_description
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    # Quality's row carries no prices (Quality signs without price)
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=q)).json()
+    rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
+    qrow = next(t for t in rows if t["kind"] == "sign_off" and t["change_id"] == cid)
+    assert qrow["side"] == "quality" and "offer_total" not in qrow

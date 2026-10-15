@@ -207,6 +207,7 @@ export const pmChapter: ContentChapter = {
         },
         {
           points: [
+            ['Your sign-off row', 'in My Tasks reads "Sign for offer v2: 4,200.00 EUR, margin 12.0 % (-3.1 pts vs v1); 2 unconfirmed assumptions". A new version sent after you signed takes your signature back: you are told to sign the new one.'],
             ['"Accepted total below the last offer"', 'Sales accepted a version cheaper than the one sent before it and said why. You (or Management) decide the override; never the person who asked. Your OK approves the change when the rest holds.'],
           ],
         },

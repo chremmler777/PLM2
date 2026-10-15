@@ -1094,6 +1094,18 @@ never the asker. Until it is approved the approval waits (Why blocked names
 it); its OK approves the change when the rest holds. A higher total asks
 nothing. Per-position diff: cut 2.
 
+**Sign-offs bound to the offer (C14).** A signature counts for the offer it
+was given on (`pm_signed_offer_id`, `quality_signed_offer_id`; L2). Sending a
+new version withdraws the ones given on an older version
+(`OfferService._withdraw_stale_signatures`, changelog `signoff_withdrawn`):
+PM always, Quality only when what it signed technically changed
+(`snapshot_diff`: quote plan or impacted parts, a part index included); each
+signer is told once ("Sign again for offer vN"). The PM's sign-off row in My
+Tasks starts with the offer total, its margin and the margin move against
+the version before (on today's internal cost), and the number of
+unconfirmed Assumed answers (`_pm_signoff_brief`); Quality's row carries no
+prices.
+
 **Approval follows on its own** (`ChangeService.try_auto_approve`): on the
 last of acceptance, PM sign-off and Quality sign-off, when HARD #4 holds and no
 soft rule holds `quoted -> approved` (an open scope change, a price drop

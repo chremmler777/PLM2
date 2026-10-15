@@ -524,6 +524,17 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
   })
   afterEach(cleanup)
 
+  it('the PM sign-off row starts with the total, the margin move and the assumptions (§7)', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'sign_off', side: 'pm', offer_version: 2, needs_you: true,
+        offer_total: 4200, offer_currency: 'EUR', margin_pct: 12, margin_delta_pts: -3.1, prev_version: 1,
+        assumed_open: 2 }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    const row = await screen.findByText(/Sign for offer v2: 4,200.00 EUR, margin 12.0 % \(-3.1 pts vs v1\); 2 unconfirmed assumptions/)
+    expect(row).toBeDefined()
+  })
+
   it('lists decisions under Needs you, on top and by due', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'kickoff', due_date: '2026-10-10T00:00:00' }),

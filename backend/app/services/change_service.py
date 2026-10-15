@@ -4260,12 +4260,17 @@ class ChangeService:
                 since = max((t for t in (c.customer_response_at,
                                          getattr(latest, "sent_at", None))
                              if t is not None), default=None)
-                out.append({
+                row = {
                     **await base(c), "kind": "sign_off", "side": side,
                     "offer_version": latest.version if latest is not None else None,
                     "target_tab": "overview", "needs_you": True,
                     "since": since,
-                })
+                }
+                if side == "pm" and bound:
+                    # spec §7 [R3]: the PM task starts with the total, the
+                    # margin delta and the unconfirmed Assumed answers
+                    row.update(await ChangeService._pm_signoff_brief(db, c, latest))
+                out.append(row)
 
         # HARD #8: the approver list is read once for the whole list
         internal = [c for c in open_changes
@@ -6398,6 +6403,44 @@ class ChangeService:
             subject_key=f"po_differs:{offer.id}",
             title=f"PO differs from offer v{offer.version}: {change.change_number}"[:255],
             body=evidence.get("differs"), link=f"/changes/{change.id}?tab=offer")
+
+    @staticmethod
+    async def _pm_signoff_brief(session: AsyncSession, change: ChangeRequest,
+                                latest) -> dict:
+        """What the PM signs (spec §7 [R3]): the offer total, its margin
+        and the margin delta against the version sent before it (both on
+        today's internal cost), and the unconfirmed Assumed answers. PM
+        reads prices; Quality's row never carries them."""
+        assumed = sum(1 for q in change.concerns
+                      if q.answer_kind == "assumed" and q.confirmed_at is None
+                      and q.withdrawn_at is None and q.retracted_at is None)
+        out: dict = {"assumed_open": assumed}
+        if latest is None or latest.total_one_time is None:
+            return out
+        from app.models.change_offer import ChangeOffer
+        from app.services.offer_service import OfferService
+        internal = await OfferService._internal_cost(session, change)
+
+        def margin(total):
+            total = float(total or 0)
+            return round((total - internal) / total * 100.0, 1) if total else None
+
+        prev = (await session.execute(
+            select(ChangeOffer).where(
+                ChangeOffer.change_id == change.id,
+                ChangeOffer.version < latest.version,
+                ChangeOffer.sent_at.isnot(None))
+            .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
+        out.update(offer_total=float(latest.total_one_time),
+                   offer_currency=latest.currency,
+                   margin_pct=margin(latest.total_one_time))
+        if prev is not None and prev.total_one_time is not None:
+            m_now, m_prev = out["margin_pct"], margin(prev.total_one_time)
+            out.update(prev_version=prev.version,
+                       margin_delta_pts=(round(m_now - m_prev, 1)
+                                         if m_now is not None and m_prev is not None
+                                         else None))
+        return out
 
     @staticmethod
     async def _ask_price_drop_ok(session: AsyncSession, change: ChangeRequest,

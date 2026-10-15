@@ -2452,6 +2452,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'The customer accepted: your sign-off is missing' },
   'tasks.hint.sign_off_v': {
     de: 'Für Angebot v{v} unterschreiben', en: 'Sign for offer v{v}' },
+  'tasks.hint.margin': { de: 'Marge {m} %', en: 'margin {m} %' },
+  'tasks.hint.marginDelta': { de: '({d} Pkt. ggü. v{v})', en: '({d} pts vs v{v})' },
+  'tasks.hint.assumedOpen': { de: '{n} unbestätigte Annahmen', en: '{n} unconfirmed assumptions' },
   'tasks.hint.internal_approval': {
     de: 'Kalkulation abgeschlossen: Kosten, Nutzen und Begründung prüfen und freigeben',
     en: 'Costing is final: check cost, saving and rationale, then approve' },
