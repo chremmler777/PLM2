@@ -205,6 +205,11 @@ export const pmChapter: ContentChapter = {
             'the three, unless an open scope change or a price drop still waits for its OK. Every ' +
             'viewer reads who signed, when, and on which version ("PM: Pat, 14 Oct 2026, v2").',
         },
+        {
+          points: [
+            ['"Accepted total below the last offer"', 'Sales accepted a version cheaper than the one sent before it and said why. You (or Management) decide the override; never the person who asked. Your OK approves the change when the rest holds.'],
+          ],
+        },
         { shot: 'pm-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and "Quality sign-off" still open.' },
       ],
     },

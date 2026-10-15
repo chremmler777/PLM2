@@ -311,3 +311,69 @@ async def test_switch_off_keeps_the_old_answer(client, quoted, monkeypatch):
     res = await _answer(client, cid, sales, {"response": "accepted", "release_due_date": _DUE})
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "quoted"
+
+
+# ---------------------------------------------------------------------------
+# §7 [R4] price diff: a lower accepted total needs a reason and an OK
+# ---------------------------------------------------------------------------
+async def _v2_with_discount(client, cid, sales, pct):
+    res = await client.post(_url(cid), headers=sales)
+    assert res.status_code == 201, res.text
+    v2 = res.json()
+    factors = v2["data"]["factors"]
+    for f in factors:
+        if f["key"] == "discount":
+            f.update(enabled=True, value=pct)
+    res = await client.patch(_url(cid, f"/{v2['id']}"), json={"data": {"factors": factors}},
+                             headers=sales)
+    assert res.status_code == 200, res.text
+    res = await client.post(_url(cid, f"/{v2['id']}/send"),
+                            json={"change_note": f"Discount {pct} %"}, headers=sales)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def test_a_lower_total_needs_a_reason_and_the_pm_ok(client, quoted, session_factory):
+    from app.models.change import ChangeTransitionDeviation
+    from tests.conftest import login, ENGINEER_PASSWORD
+    cid = quoted["change_id"]
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    q = await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+    await _v2_with_discount(client, cid, sales, 10)
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 400            # NEGATIVE: no reason for the drop
+    assert "below v1" in res.json()["detail"]
+    res = await _answer(client, cid, sales, {**_YES, "price_drop_code": "competitor",
+                                             "price_drop_note": "ok"})
+    assert res.status_code == 400            # NEGATIVE: a reason that says nothing
+    res = await _answer(client, cid, sales, {
+        **_YES, "price_drop_code": "competitor",
+        "price_drop_note": "Competitor offered 8 % less, mail of 13 Oct"})
+    assert res.status_code == 200, res.text
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+        assert r.status_code == 200, r.text
+    # NEGATIVE: accepted and signed, but the drop waits for its OK
+    assert r.json()["status"] == "quoted"
+    async with session_factory() as s:
+        dev = (await s.execute(select(ChangeTransitionDeviation).where(
+            ChangeTransitionDeviation.change_id == cid,
+            ChangeTransitionDeviation.guard_key == "price_drop"))).scalar_one()
+    assert (dev.status, dev.reason_code) == ("pending", "competitor")
+    # NEGATIVE: the asker never decides it
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
+                          json={"decision": "approved"}, headers=sales)
+    assert r.status_code == 400 and "4-eyes" in r.json()["detail"]
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
+                          json={"decision": "approved"}, headers=pm)
+    assert r.status_code == 200, r.text
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    assert ch["status"] == "approved"
+
+
+async def test_a_higher_total_needs_no_reason(client, quoted):
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    await _v2_with_discount(client, cid, sales, -5)   # a negative discount: +5 %
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 200, res.text

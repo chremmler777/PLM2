@@ -1084,6 +1084,16 @@ nothing preselected:
   ("Customer declined offer vN (ref)"), so `send_rejection` takes over (C4: no
   dead end).
 
+**Price diff [R4].** Accepting a revised version compares its total with
+the last version sent before it (`ChangeService.price_drop_state`). A lower
+total needs a reason pick (`volume`, `competitor`, `goodwill`, `error`) and a
+sentence in the same request; it files an override of the soft rule
+`price_drop` on `quoted -> approved` (`_ask_price_drop_ok`, changelog
+`price_drop_asked`), decided by a Project Management or Management member,
+never the asker. Until it is approved the approval waits (Why blocked names
+it); its OK approves the change when the rest holds. A higher total asks
+nothing. Per-position diff: cut 2.
+
 **Approval follows on its own** (`ChangeService.try_auto_approve`): on the
 last of acceptance, PM sign-off and Quality sign-off, when HARD #4 holds and no
 soft rule holds `quoted -> approved` (an open scope change, a price drop

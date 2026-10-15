@@ -37,6 +37,10 @@ class GuardReason(str):
 OVERRIDE_REASONS = ("customer_date", "in_parallel", "not_applicable", "other")
 # Absorb: why the money is not asked from the customer (spec §0 HARD #9).
 ABSORB_REASONS = ("goodwill", "small_amount", "our_error", "other")
+# §7 [R4] price diff: why the accepted total is below the last version sent.
+PRICE_DROP_REASONS = ("volume", "competitor", "goodwill", "error")
+#: The rule a lower accepted total is held by (SOFT, PM / Management OK).
+PRICE_DROP_RULE = "price_drop"
 
 # --- who gives the OK (never the proposer) ---------------------------------
 RUN = "run"            # the lead, a Project Management member or an admin

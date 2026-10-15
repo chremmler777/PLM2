@@ -170,6 +170,26 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
       attachment_id: 81, po_match: 'no', confirm_total: true, differs: '886.198 added on the PO' })))
   })
 
+  it('a lower total than the last version sent asks why (price diff)', async () => {
+    const v1 = sent({ id: 9, version: 1, status: 'superseded', sent_at: '2026-10-01T00:00:00',
+      totals: { base: 0, factors: [], risks_total: 0, scrap: 0, free: 0, total_one_time: 5000 } as OfferOut['totals'] })
+    const v2 = { ...valid(), id: 10, version: 2, sent_at: '2026-10-10T00:00:00', index_changes: [] }
+    wrap(<CustomerDecision change={change({ release_due_date: '2026-12-18T00:00:00' })} latestSent={v2} offers={[v2, v1]}
+      canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    expect(screen.getByTestId('accept-drop').textContent).toContain('is below v1')
+    fireEvent.change(screen.getByTestId('answer-ref'), { target: { value: 'PO 4500123456' } })
+    fireEvent.click(screen.getByTestId('po-match-yes'))
+    fireEvent.click(screen.getByTestId('accept-total'))
+    const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)      // NEGATIVE: no reason for the drop
+    fireEvent.change(screen.getByTestId('accept-drop-code'), { target: { value: 'competitor' } })
+    fireEvent.change(screen.getByTestId('accept-drop-note'), { target: { value: 'Competitor 8 % lower, mail 13 Oct' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'accepted', expect.objectContaining({
+      price_drop_code: 'competitor', price_drop_note: 'Competitor 8 % lower, mail 13 Oct' })))
+  })
+
   it('still talking records the next contact, +5 working days by default', async () => {
     wrap(<CustomerDecision change={change()} latestSent={valid()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByTestId('customer-talking'))

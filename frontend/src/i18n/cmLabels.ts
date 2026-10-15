@@ -2911,6 +2911,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'send.riskNote': { de: 'In einem Satz: warum es nicht im Angebot steht (mind. 15 Zeichen)', en: 'In a sentence: why it is not on the offer (15+ characters)' },
   'send.nobody': { de: 'niemand benannt', en: 'nobody named' },
   // --- L6 §7 the customer's answer (C4, C12) -------------------------------------
+  'cust.drop': { de: 'v{v} über {t} liegt unter v{p} über {pt}: Grund angeben; PM oder Geschäftsleitung gibt das OK, dann folgt die Freigabe.', en: 'v{v} at {t} is below v{p} at {pt}: say why; Project Management or Management gives the OK before approval.' },
+  'cust.dropReason': { de: 'Warum niedriger', en: 'Why lower' },
+  'cust.dropNote': { de: 'In einem Satz, mit Beleg (mind. 15 Zeichen)', en: 'In a sentence, with its evidence (15+ characters)' },
+  'override.reason.volume': { de: 'Höhere Stückzahl', en: 'Higher volume' },
+  'override.reason.competitor': { de: 'Wettbewerb', en: 'Competitor' },
+  'override.reason.goodwill': { de: 'Kulanz', en: 'Goodwill' },
+  'override.reason.error': { de: 'Fehler im Angebot', en: 'Error in the offer' },
   'cust.evidence': { de: 'Nachweis', en: 'Evidence' },
   'cust.pickMail': { de: 'Abgelegte Kunden-Mail oder Datei wählen…', en: 'Pick a filed customer mail or file…' },
   'cust.ref': { de: 'oder PO-Nummer / Referenz', en: 'or PO number / reference' },

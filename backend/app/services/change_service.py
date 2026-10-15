@@ -590,6 +590,9 @@ class ChangeService:
                 f"Open price absorbed (#{dev.id}): {dev.reason}", actor.id,
                 field_name="price_open", old_value=True, new_value=False,
                 notes=dev.reason)
+        if decision == "approved" and dev.to_status == "approved":
+            # §7: the OK of a price drop may be the last thing approval waited on
+            await ChangeService.try_auto_approve(session, change, actor.id)
         if (cm_switches.on("COMMERCIAL_V2") and dev.proposed_by != actor.id
                 and (decision == "rejected" or change.priority == "critical")):
             # The asker hears the answer once (spec §0 Notifications): at
@@ -1750,6 +1753,16 @@ class ChangeService:
             text = await ChangeService.costing_not_finalized_text(session, change)
             if text:
                 out.append(R("costing_not_finalized", text))
+        # §7 [R4] price diff (COMMERCIAL_V2): an accepted total below the
+        # last version sent before it waits for a PM / Management OK.
+        if (to_status == "approved" and change.status == "quoted"
+                and cm_switches.on("COMMERCIAL_V2")):
+            drop = await ChangeService.price_drop_state(session, change)
+            if drop is not None:
+                out.append(R("price_drop",
+                             f"Accepted v{drop['version']} at {drop['total']:.2f} is "
+                             f"below v{drop['prev_version']} at {drop['prev_total']:.2f}: "
+                             "a Project Management or Management member gives the OK"))
         # 'quoted' means the offer is out with the customer, so by then there
         # is a price. Writing it is the whole content of the 'quoting' stage.
         if to_status == "quoted":
@@ -6290,8 +6303,28 @@ class ChangeService:
                 for n in frozen if n in now_idx and now_idx[n] != frozen[n]]
         await OfferService.check_customer_response(
             session, change, "accepted", expired_override_reason)
+        # §7 [R4] price diff: a lower total than the last version sent needs
+        # a reason pick + sentence; the OK of PM / Management follows
+        drop = (await ChangeService.price_drop_state(session, change, offer)
+                if offer is not None else None)
+        if drop is not None:
+            from app.services.cm_rules import (
+                PRICE_DROP_REASONS, override_note_refusal)
+            why = override_note_refusal(
+                answer.get("price_drop_code"), answer.get("price_drop_note"),
+                codes=PRICE_DROP_REASONS)
+            if why:
+                raise ChangeError(
+                    f"v{drop['version']} at {drop['total']:.2f} is below "
+                    f"v{drop['prev_version']} at {drop['prev_total']:.2f}: say why "
+                    f"({why})")
+            evidence["price_drop"] = drop
         await OfferService.apply_customer_response(
             session, change, "accepted", user_id, expired_override_reason)
+        if drop is not None:
+            await ChangeService._ask_price_drop_ok(
+                session, change, drop, answer["price_drop_code"],
+                answer["price_drop_note"].strip(), user_id)
         if offer is not None:
             offer.accept_evidence = evidence
             offer.answered_at, offer.answered_by = now, user_id
@@ -6328,6 +6361,31 @@ class ChangeService:
         return change
 
     @staticmethod
+    async def price_drop_state(session: AsyncSession, change: ChangeRequest,
+                               offer=None) -> Optional[dict]:
+        """§7 [R4]: the accepted offer (or `offer`, about to be accepted)
+        against the last version sent before it. None when it is not lower
+        (or there is nothing to compare: v1, no offer)."""
+        from app.models.change_offer import ChangeOffer
+        if offer is None:
+            if change.accepted_offer_id is None:
+                return None
+            offer = await session.get(ChangeOffer, change.accepted_offer_id)
+        if offer is None or offer.total_one_time is None:
+            return None
+        prev = (await session.execute(
+            select(ChangeOffer).where(
+                ChangeOffer.change_id == change.id, ChangeOffer.id != offer.id,
+                ChangeOffer.version < offer.version,
+                ChangeOffer.sent_at.isnot(None))
+            .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
+        if (prev is None or prev.total_one_time is None
+                or float(offer.total_one_time) >= float(prev.total_one_time) - 0.005):
+            return None
+        return {"version": offer.version, "total": float(offer.total_one_time),
+                "prev_version": prev.version, "prev_total": float(prev.total_one_time)}
+
+    @staticmethod
     async def _on_po_differs(session: AsyncSession, change: ChangeRequest, offer,
                              evidence: dict, user_id: int) -> None:
         """The PO differs from the offer (spec §7): the lead and the Sales
@@ -6340,6 +6398,33 @@ class ChangeService:
             subject_key=f"po_differs:{offer.id}",
             title=f"PO differs from offer v{offer.version}: {change.change_number}"[:255],
             body=evidence.get("differs"), link=f"/changes/{change.id}?tab=offer")
+
+    @staticmethod
+    async def _ask_price_drop_ok(session: AsyncSession, change: ChangeRequest,
+                                 drop: dict, code: str, note: str,
+                                 user_id: int) -> None:
+        """The OK of the lower total is an override of `price_drop` on the
+        approval (decided by Project Management or Management, never the
+        asker); the deciders are told once."""
+        from app.services.cm_rules import PRICE_DROP_RULE, rule_label
+        await ChangeService._load_deviations(session, change)
+        if any(d.guard_key == PRICE_DROP_RULE and d.status == "pending"
+               for d in change.transition_deviations):
+            return
+        dev = ChangeTransitionDeviation(
+            change_id=change.id, to_status="approved", reason=note,
+            proposed_by=user_id, guard_key=PRICE_DROP_RULE,
+            guard_reason=rule_label(PRICE_DROP_RULE), reason_code=code)
+        session.add(dev)
+        await session.flush()
+        change.transition_deviations.append(dev)
+        await ChangeService.append_changelog(
+            session, change, "price_drop_asked",
+            f"Accepted v{drop['version']} below v{drop['prev_version']}: OK asked "
+            f"({code})", user_id, field_name="deviation",
+            new_value={"deviation_id": dev.id, "guard_key": PRICE_DROP_RULE,
+                       "reason_code": code}, notes=note)
+        await ChangeService._notify_override_deciders(session, change, dev, user_id)
 
     @staticmethod
     async def try_auto_approve(session: AsyncSession, change: ChangeRequest,
@@ -6358,7 +6443,9 @@ class ChangeService:
             return False
         if await ChangeService.solid_hard_refusal(session, change, "approved"):
             return False
-        if await ChangeService._guard_reasons(session, change, "approved"):
+        # a soft rule an approved override covers (a price drop OK'd) lets it go
+        _, uncovered = await ChangeService.override_cover(session, change, "approved")
+        if uncovered:
             return False
         await ChangeService.transition(
             session, change, "approved", user_id,

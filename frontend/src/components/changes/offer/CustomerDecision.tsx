@@ -98,6 +98,16 @@ export default function CustomerDecision({
   const evidenceOk = !!evidenceId || refOk
   const evidence = evidenceId ? { attachment_id: Number(evidenceId) } : { ref: ref.trim() }
   const total = latestSent ? fmtMoney(latestSent.totals.total_one_time, latestSent.currency) : ''
+  // §7 [R4] price diff: below the last version sent before it needs a
+  // reason and a PM / Management OK (the backend asks for it)
+  const prevSent = latestSent ? (offers ?? [])
+    .filter((o) => o.version < latestSent.version && !!o.sent_at)
+    .sort((a, b) => b.version - a.version)[0] : undefined
+  const drop = !!(v2 && latestSent && prevSent
+    && latestSent.totals.total_one_time < prevSent.totals.total_one_time - 0.005)
+  const [dropCode, setDropCode] = useState('')
+  const [dropNote, setDropNote] = useState('')
+  const dropOk = !drop || (!!dropCode && dropNote.trim().length >= 15)
   const left = latestSent ? offerDaysLeft(latestSent) : null
   const expired = !!latestSent && latestSent.status === 'sent' && (!!latestSent.expired || (left != null && left < 0))
 
@@ -134,7 +144,7 @@ export default function CustomerDecision({
     && !!change.pm_signed_by && userId != null && userId === change.pm_signed_by
   const decided = change.customer_response === 'accepted' || change.customer_response === 'declined'
   const acceptBlocked = !due || (expired && !override.trim()) || respond.isPending
-    || (v2 && (!evidenceOk || (!!latestSent && (!match || (match === 'no' && differs.trim().length < 5) || !confirmed))))
+    || (v2 && (!evidenceOk || !dropOk || (!!latestSent && (!match || (match === 'no' && differs.trim().length < 5) || !confirmed))))
   const pick = (which: 'accept' | 'talk' | 'decline') => {
     setAcceptOpen(which === 'accept' ? (o) => !o : false)
     setTalkOpen(which === 'talk' ? (o) => !o : false)
@@ -290,6 +300,23 @@ export default function CustomerDecision({
                 placeholder="e.g. customer confirmed the price in writing on 2 Oct" />
             </>
           )}
+          {drop && prevSent && latestSent && (
+            <div data-testid="accept-drop" className="space-y-1 rounded border border-amber-900/70 bg-amber-950/20 p-2 sm:col-span-2">
+              <p className="text-xs text-amber-200">{fill('cust.drop', {
+                v: latestSent.version, t: total, p: prevSent.version,
+                pt: fmtMoney(prevSent.totals.total_one_time, prevSent.currency) })}</p>
+              <select data-testid="accept-drop-code" value={dropCode} aria-label={t('cust.dropReason')}
+                onChange={(e) => setDropCode(e.target.value)} className={`${inputCls} w-full`}>
+                <option value="">{t('cust.dropReason')}…</option>
+                {(['volume', 'competitor', 'goodwill', 'error'] as const).map((c) => (
+                  <option key={c} value={c}>{t(`override.reason.${c}`)}</option>
+                ))}
+              </select>
+              <textarea rows={2} data-testid="accept-drop-note" value={dropNote} aria-label={t('cust.dropNote')}
+                onChange={(e) => setDropNote(e.target.value)} placeholder={t('cust.dropNote')}
+                className={`${inputCls} w-full`} />
+            </div>
+          )}
           {v2 && latestSent && (
             <label className="flex items-start gap-2 text-xs text-slate-200 sm:col-span-2">
               <input type="checkbox" data-testid="accept-total" checked={confirmed}
@@ -308,6 +335,7 @@ export default function CustomerDecision({
                   ...(expired ? { expired_override_reason: override.trim() } : {}),
                   ...(v2 ? { ...evidence, ...(latestSent ? {
                     po_match: match || undefined, confirm_total: confirmed,
+                    ...(drop ? { price_drop_code: dropCode, price_drop_note: dropNote.trim() } : {}),
                     ...(match === 'no' ? { differs: differs.trim() } : {}) } : {}) } : {}),
                 },
               })}

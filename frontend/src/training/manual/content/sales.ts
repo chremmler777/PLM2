@@ -184,6 +184,7 @@ export const salesChapter: ContentChapter = {
         {
           steps: [
             { title: '"Customer accepted"', body: 'Nothing is preselected. Pick the PO or the customer\'s mail filed on the change, or type the PO number. Answer "PO matches offer vN exactly?" (no: name the parts that differ and any other P/Ns), tick "This mail says yes to vN at <total>", check the "Release deadline" (prefilled from the need-by or the weeks from order) and "Confirm acceptance". A part index that moved since the offer is shown as a warning.' },
+            { title: 'A lower price than the last version', body: 'When the version the customer accepts is below the one you sent before it, pick why (higher volume, competitor, goodwill, error in the offer) and say it in a sentence. A Project Management or Management member gives the OK; the approval waits for it.' },
             { title: 'Or "Still talking"', body: 'Set the next contact date (5 working days by default). Your task stays, due on that date. A new price is a new version.' },
             { title: 'Or "Customer declined"', body: 'Name the customer\'s reference or pick the filed mail. This cannot be undone: the change is rejected and you get the task to send the rejection letter.' },
             { title: 'Sign-offs', body: 'PM and Quality then give their sign-offs. The change is approved on its own with the last of the three.' },
