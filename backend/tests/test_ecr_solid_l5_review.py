@@ -103,3 +103,57 @@ async def test_my_tasks_with_a_wait_after_a_scoping_change(
     assert row["waiting_on"] == "FZ" and "FZ" in row["hint"]
     res = await client.get("/api/v1/changes/my-tasks", headers=cc["dale"])
     assert res.status_code == 200, res.text
+
+
+# --- R23: money and position names on non-price readers ----------------------
+
+async def _position(session_factory, cid, dept, by, label="Insert re-cut", **kw):
+    from app.models.change_cost import CostingPosition
+    async with session_factory() as s:
+        p = CostingPosition(change_id=cid, department_id=dept, label=label,
+                            kind="external", pricing="estimate", est_cost=5000.0,
+                            basis="estimate", created_by=by, **kw)
+        s.add(p)
+        await s.commit()
+        return p.id
+
+
+async def test_quality_reads_no_saving_and_no_quote_vs_estimate_money(
+        client, cc, seed, session_factory):
+    _, _, quality = await _user(client, session_factory, seed, "q", "Quality")
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                          estimate_check="pending")
+    res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/estimate-check"),
+                            json={"verdict": "above", "over": 4200}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cc["cid"])
+        c.internal_saving = 12000.0
+        c.internal_saving_basis = "calculated"
+        await s.commit()
+    # the price viewer reads both
+    lead_view = (await client.get(_u(cc["cid"]), headers=cc["lead"])).json()
+    assert lead_view["internal_saving"] == 12000.0
+    log = (await client.get(_u(cc["cid"], "/changelog"), headers=cc["lead"])).json()
+    row = next(r for r in log if r["action"] == "estimate_checked")
+    assert "4200" in row["action_description"]
+    # negative: Quality reads neither the saving nor the amount nor the label
+    q_view = (await client.get(_u(cc["cid"]), headers=quality)).json()
+    assert q_view["internal_saving"] is None
+    log = (await client.get(_u(cc["cid"], "/changelog"), headers=quality)).json()
+    row = next(r for r in log if r["action"] == "estimate_checked")
+    assert "4200" not in json.dumps(row) and "Insert re-cut" not in json.dumps(row)
+    # the owning department still reads its own position's verdict
+    log = (await client.get(_u(cc["cid"], "/changelog"), headers=cc["dale"])).json()
+    row = next(r for r in log if r["action"] == "estimate_checked")
+    assert "Insert re-cut" in row["action_description"]
+    assert "4200" not in row["action_description"]
+
+
+async def test_estimate_checked_text_keeps_the_verdict():
+    from app.services.price_redaction import redact_changelog_text, redact_value
+    desc, _ = redact_changelog_text(
+        "estimate_checked", "Quote vs estimate on 'Insert': above by 4200.00", None)
+    assert desc == "Quote vs estimate on 'Insert': above"
+    assert redact_value({"position_id": 1, "verdict": "above", "over": 4200.0},
+                        "estimate_checked")["over"] is None

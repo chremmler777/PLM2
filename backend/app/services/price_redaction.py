@@ -29,6 +29,9 @@ PRICE_KEYS = frozenset((
     "external_cost", "hourly_rate", "rate_snapshot", "price", "total",
     # validation issues (spec §12): the fix's extra cost
     "extra_cost",
+    # spec §4/§5: quote vs estimate ("above by x"), the internal case's
+    # yearly saving
+    "over", "estimate_over", "saving", "internal_saving",
 ))
 
 # Actions whose logged value IS a price (a bare number, no key to go by).
@@ -39,7 +42,9 @@ SCALAR_PRICE_ACTIONS = frozenset((
 # The money fields of the change header (negotiated_final_price is the
 # detail response's read-through of the final negotiation round).
 CHANGE_PRICE_FIELDS = ("estimated_cost", "quoted_price", "scrap_quote_price",
-                       "internal_approved_amount", "negotiated_final_price")
+                       "internal_approved_amount", "negotiated_final_price",
+                       # §5 internal approval card: the saving per year
+                       "internal_saving")
 
 # ChangeChangelog.field_name values whose old_value/new_value hold a raw
 # money amount — blanked for a non-price viewer same as everything else.
@@ -129,6 +134,10 @@ def redact_changelog_text(action: str, description: str,
         notes = None
     elif action == "costing_offer_added":
         desc = re.sub(r":\s*-?[\d.,]+\s*$", "", desc)
+    elif action == "estimate_checked":
+        # "Quote vs estimate on '<label>': above by 4200.00": the verdict
+        # stays, the amount goes
+        desc = re.sub(r"above by\s*-?[\d.,]+\s*$", "above", desc)
     elif action == "negotiation_final":
         m = re.match(r"(Negotiation closed \([^)]*\))", desc)
         desc = m.group(1) if m else "Negotiation closed"
@@ -272,6 +281,8 @@ COSTING_NAME_ACTIONS = {
     "costing_position_added": "Costing position added",
     "costing_position_updated": "Costing position updated",
     "costing_position_deleted": "Costing position removed",
+    # spec §4: the quote-vs-estimate verdict names the position
+    "estimate_checked": "Quote compared with the estimate",
 }
 # Keys that name the supplier, the document or the position.
 NAME_KEYS = frozenset(("filename", "vendor_name", "recommended_vendor", "label"))
