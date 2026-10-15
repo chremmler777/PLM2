@@ -118,3 +118,25 @@ async def test_quality_lead_cannot_flip(client, seed, depts, session_factory, ad
                              json={"customer_relevant": True}, headers=q)
     assert res.status_code == 403
     assert "Sales, Project Management" in res.json()["detail"]
+
+
+# --- P4: one price rule, Management included --------------------------------
+
+@pytest.mark.parametrize("dept,all_rows", [("Management", True), ("Quality", False)])
+async def test_management_reads_every_position(client, seed, depts, session_factory,
+                                               admin, dept, all_rows):
+    from app.models.change import ChangeRequest
+    from app.services.costing_position_service import CostingPositionService
+    from app.services.implementation_service import ImplementationService
+    pm = {**admin, ACTS: str(depts["Project Manager"])}
+    c = (await client.post("/api/v1/changes", json=_body(seed, True), headers=pm)).json()
+    uid, _ = await _user(session_factory, seed, "Viewer", depts[dept])
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, c["id"])
+        user = await s.get(User, uid)
+        for svc in (CostingPositionService, ImplementationService):
+            got = await svc.readable_department_ids(s, change, user)
+            assert (got is None) is all_rows, (svc.__name__, got)
+    res = await client.get(f"/api/v1/changes/{c['id']}/costing/positions",
+                           headers=await login(client, "viewer@test.io", admin=False))
+    assert res.status_code == 200, res.text

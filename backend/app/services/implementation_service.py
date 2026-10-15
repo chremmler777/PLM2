@@ -78,18 +78,15 @@ class ImplementationService:
         session: AsyncSession, change: ChangeRequest, actor: User,
     ) -> set | None:
         """Which departments' implementation rows this caller may see. None
-        means all — PM, Sales, the change lead and admins run the change as a
+        means all — PM, Sales, Management, the change lead and admins run the change as a
         whole. Identical to the costing rule on purpose: a user who can see a
         department's costing and not its progress would be able to compare a
         budget against nothing."""
-        from app.services.change_service import ChangeService
-        from app.services.meeting_service import MeetingService
+        # P4: the one price rule (PriceViewer: admin, the lead, PM, Sales,
+        # Management) - whoever reads the summation reads every position.
+        from app.services.price_redaction import PriceViewer
         from app.services.workflow_service import WorkflowService
-        from app.services.change_people import holds_lead
-        if (actor.effective_role == "admin" or holds_lead(change, actor)
-                or await MeetingService.user_is_pm_member(session, actor)
-                or await ChangeService._user_in_department(
-                    session, actor, "Sales")):
+        if await PriceViewer(session, actor).may_read(change):
             return None
         return set(await WorkflowService.effective_department_ids(session, actor))
 
