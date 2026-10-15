@@ -2612,6 +2612,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'problem.hint': {
     de: 'Interne Änderung: was heute falsch ist, als Zahl mit Einheit, und das Ziel.',
     en: 'Internal change: what is wrong today as a number with its unit, and the target.' },
+  'attach.customerFile': { de: 'Kundendatei (Zeichnung, 3D, EC-Blatt)', en: 'Customer file (drawing, 3D, EC sheet)' },
   'start.createHandOver': { de: 'Anlegen und übergeben', en: 'Create and hand over' },
   'start.createDraft': { de: 'Als Entwurf anlegen', en: 'Create as draft' },
   'tasks.kind.need_by_tell': { de: 'Kunde informieren: neuer Termin oder Start auf Risiko?', en: 'Tell customer: new date or start at risk?' },

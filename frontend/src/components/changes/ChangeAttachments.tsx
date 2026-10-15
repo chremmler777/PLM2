@@ -56,6 +56,13 @@ export default function ChangeAttachments({ change, readOnly = false }: {
 
   return (
     <div className="pt-3 space-y-4">
+      {/* §2: a customer change is complete with the customer's own file */}
+      {!readOnly && change.customer_relevant && change.scoping_v2 && (
+        <div data-testid="customer-file-zone">
+          <p className="text-sm text-slate-400 mb-1">{t('attach.customerFile')}</p>
+          <AttachmentDropzone changeId={change.id} kind="customer_file" onUploaded={invalidate} />
+        </div>
+      )}
       {!readOnly && (
         <div>
           <p className="text-sm text-slate-400 mb-1">{t('attach.uploadLabel')}</p>

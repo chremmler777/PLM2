@@ -28,6 +28,16 @@ const wrap = (ui: React.ReactElement) =>
 describe('ChangeAttachments', () => {
   afterEach(cleanup)
 
+  it('§2: a customer change gets a customer-file zone; an internal one does not', () => {
+    wrap(<ChangeAttachments change={change({ customer_relevant: true, scoping_v2: true })} />)
+    expect(screen.getByTestId('customer-file-zone')).toBeTruthy()
+    expect(screen.getAllByTestId('dropzone').map((d) => d.getAttribute('data-kind')))
+      .toEqual(['customer_file', ''])
+    cleanup()
+    wrap(<ChangeAttachments change={change({ customer_relevant: false, scoping_v2: true })} />)
+    expect(screen.queryByTestId('customer-file-zone')).toBeNull()
+  })
+
   it('splits baseline and post-scoping documents into two lists', () => {
     wrap(<ChangeAttachments change={change({
       status: 'in_assessment',
