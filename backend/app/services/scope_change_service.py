@@ -130,6 +130,15 @@ class ScopeChangeService:
                     session, change, attachment_id, from_customer=from_customer,
                     actor_id=user.id,
                     what="Pick a customer mail or file filed on this change")
+                # spec §6 step 1: the customer's mail after the offer date
+                from app.services.offer_service import OfferService
+                sent = await OfferService.latest_sent(session, change)
+                if (sent is not None and sent.sent_at is not None
+                        and att.created_at is not None and att.created_at < sent.sent_at):
+                    raise ChangeError(
+                        f"'{att.filename}' was filed {att.created_at:%d %b %Y}, before "
+                        f"v{sent.version} went out ({sent.sent_at:%d %b %Y}): the "
+                        "customer's new wish is in a mail after the offer")
                 evidence = f"Mail: {att.filename}"[:255]
             else:
                 why = reference_refusal(ref, "The customer's mail or its reference",
@@ -249,6 +258,7 @@ class ScopeChangeService:
             new.related_change_id = change.id
             if change.related_change_id is None:
                 change.related_change_id = new.id
+            await ScopeChangeService._copy_card_file(session, card, new, user.id)
             card.status, card.decided_by, card.decided_at = "moved", user.id, now
             card.new_change_id, card.decision_note, card.closed_at = new.id, note, now
             await session.flush()
@@ -267,9 +277,89 @@ class ScopeChangeService:
         stray = [d for d in ids if d not in routed]
         if stray:
             raise ChangeError("Only departments routed on this change re-cost it")
+        await ScopeChangeService._take_part(session, change, card, user)
         card.decided_by, card.decided_at, card.decision_note = user.id, now, note
         await ScopeChangeService._start_recost(session, change, card, ids, user.id)
         return card
+
+    @staticmethod
+    async def _take_part(session: AsyncSession, change: ChangeRequest,
+                         card: ChangeScopeChange, user: User) -> None:
+        """Spec §6 step 2: an added part gets the intake live-change check
+        and joins the impacted set (a logged impact edit, the card is the
+        reason). After approval an added part is its own change (refused
+        here: 'new change'); a P/N not in PLM yet is said in the log."""
+        if not card.part_number:
+            return
+        from app.models.part import Part
+        from app.services.early_stage_service import EarlyStageService
+        from app.services.revision_intake_service import RevisionIntakeService
+        part = (await session.execute(
+            select(Part).where(Part.project_id == change.project_id,
+                               Part.part_number == card.part_number))).scalars().first()
+        await session.refresh(change, ["impacted_items"])
+        if part is not None and any(i.part_id == part.id for i in change.impacted_items):
+            return                        # a change to a part already on it
+        if change.status in POST_APPROVAL:
+            raise ChangeError(
+                f"{card.part_number} is not on this change: after approval an "
+                "added part is its own linked change (decide 'new change')")
+        if part is None:
+            await ChangeService.append_changelog(
+                session, change, "scope_change_part_unknown",
+                f"Scope change #{card.id}: {card.part_number} is not in PLM yet; "
+                "add it to the impacted items once it is created", user.id,
+                new_value={"scope_change_id": card.id})
+            return
+        lives = await RevisionIntakeService.live_changes_for_part(
+            session, part.id, change.project_id, exclude_id=change.id)
+        await ChangeService.add_impacted_item(
+            session, change, part.id, user.id,
+            impact_note=f"Scope change #{card.id}: {card.what}"[:500])
+        await EarlyStageService.recompose_title(session, change, user.id)
+        live = (f"; {', '.join(f'{c.change_number} ({c.status})' for c in lives)} "
+                "also carries it") if lives else ""
+        await ChangeService.append_changelog(
+            session, change, "impact_edited_by_scope_change",
+            f"{card.part_number} added to the impacted items by scope change "
+            f"#{card.id}{live}", user.id,
+            new_value={"scope_change_id": card.id, "part_ids": [part.id],
+                       "live_change_ids": [c.id for c in lives]},
+            notes=card.what)
+        if lives and change.related_change_id is None:
+            # spec §1: related both ways, as for a full ECR next to a live one
+            change.related_change_id = lives[0].id
+            if lives[0].related_change_id is None:
+                lives[0].related_change_id = change.id
+
+    @staticmethod
+    async def _copy_card_file(session: AsyncSession, card: ChangeScopeChange,
+                              new: ChangeRequest, actor_id: int) -> None:
+        """The new linked change gets the customer's mail the card was
+        opened on (its own copy of the file: deleting one never removes the
+        other)."""
+        if not card.attachment_id:
+            return
+        import os
+        import shutil
+        import uuid
+        from app.models.change import ChangeAttachment
+        att = await session.get(ChangeAttachment, card.attachment_id)
+        if att is None or not att.stored_path or not os.path.exists(att.stored_path):
+            return
+        base = os.path.dirname(os.path.dirname(att.stored_path))
+        folder = os.path.join(base, str(new.id))
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{uuid.uuid4().hex}_{att.filename}")
+        shutil.copyfile(att.stored_path, path)
+        session.add(ChangeAttachment(
+            change_id=new.id, filename=att.filename, stored_path=path,
+            content_type=att.content_type, size_bytes=att.size_bytes,
+            sha256=att.sha256, uploaded_by=actor_id, kind=att.kind))
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, new, "attachment_added",
+            f"Attached {att.filename} (from scope change #{card.id})", actor_id)
 
     @staticmethod
     async def _start_recost(session: AsyncSession, change: ChangeRequest,

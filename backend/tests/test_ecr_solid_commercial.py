@@ -1299,3 +1299,83 @@ async def test_the_urgent_refusal_names_who_marks_it_urgent(client, urgent, sess
     # NEGATIVE: 'urgent' is not a priority the flow knows ('critical' is)
     r = await client.patch(f"/api/v1/changes/{cid}", json={"priority": "urgent"}, headers=admin)
     assert r.status_code == 422, r.text
+
+
+async def _mail(session_factory, world, name, when, tmp_path=None):
+    from datetime import datetime as _dt
+    from app.models.change import ChangeAttachment
+    path = "x"
+    if tmp_path is not None:
+        folder = tmp_path / "changes" / str(world["change_id"])
+        folder.mkdir(parents=True, exist_ok=True)
+        f = folder / f"abc_{name}"
+        f.write_bytes(b"mail")
+        path = str(f)
+    async with session_factory() as s:
+        att = ChangeAttachment(change_id=world["change_id"], kind="customer_email", filename=name,
+                               stored_path=path, content_type="application/vnd.ms-outlook",
+                               size_bytes=4, sha256="3" * 64, uploaded_by=world["users"]["sales"],
+                               created_at=when or _dt.utcnow())
+        s.add(att)
+        await s.commit()
+        return att.id
+
+
+async def test_scope_card_takes_a_mail_from_after_the_offer(client, quoted, session_factory):
+    from datetime import datetime as _dt, timedelta as _td
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    old = await _mail(session_factory, quoted, "old.msg", _dt.utcnow() - _td(days=30))
+    new = await _mail(session_factory, quoted, "new.msg", None)
+    r = await client.post(_scope(cid), json={"what": "Second variant grained",
+                                             "attachment_id": old}, headers=sales)
+    assert r.status_code == 400 and "before v1 went out" in r.json()["detail"]   # NEGATIVE
+    r = await client.post(_scope(cid), json={"what": "Second variant grained",
+                                             "attachment_id": new}, headers=sales)
+    assert r.status_code == 200, r.text
+
+
+async def test_an_added_part_joins_the_impacted_set_before_approval(
+        client, quoted, session_factory, seed):
+    from app.models.part import Part
+    cid = quoted["change_id"]
+    await _route_tool(session_factory, quoted)
+    async with session_factory() as s:
+        part = Part(project_id=seed["project_id"], part_number="886.198", name="Bezel 2",
+                    part_type="internal_mfg", item_category="article", created_by=seed["admin_id"])
+        s.add(part)
+        await s.commit()
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    card = await _card(client, cid, sales)
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"), json={
+        "decision": "accept", "department_ids": [quoted["depts"]["Tool Engineer"]]}, headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        items = (await s.execute(select(ChangeImpactedItem).where(
+            ChangeImpactedItem.change_id == cid))).scalars().all()
+        assert part.id in {i.part_id for i in items}
+        log = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == cid))).scalars().all()
+    assert "impact_edited_by_scope_change" in log
+
+
+async def test_after_approval_a_new_part_is_its_own_change_with_the_mail(
+        client, approved, session_factory, tmp_path):
+    from app.models.change import ChangeAttachment
+    cid, sales, pm = approved["change_id"], approved["sales"], approved["pm"]
+    await _route_tool(session_factory, approved)
+    mail = await _mail(session_factory, approved, "wish.msg", None, tmp_path)
+    card = await _card(client, cid, sales, ref=None, attachment_id=mail)
+    # NEGATIVE: an added part does not join an approved change
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"), json={
+        "decision": "accept", "department_ids": [approved["depts"]["Tool Engineer"]]}, headers=pm)
+    assert r.status_code == 400 and "its own linked change" in r.json()["detail"]
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"),
+                          json={"decision": "new_change"}, headers=pm)
+    assert r.status_code == 200, r.text
+    new_id = r.json()[0]["new_change_id"]
+    async with session_factory() as s:
+        files = (await s.execute(select(ChangeAttachment).where(
+            ChangeAttachment.change_id == new_id))).scalars().all()
+    assert [f.filename for f in files] == ["wish.msg"]
+    assert files[0].stored_path != str(tmp_path / "changes" / str(cid) / "abc_wish.msg")
