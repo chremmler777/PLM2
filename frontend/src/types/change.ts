@@ -1121,6 +1121,8 @@ export interface TransitionDeviation {
   decided_by?: number | null;
   decided_at?: string | null;
   decision_note?: string | null;
+  /** The viewer may decide this pending deviation (backend: lead or admin, not the proposer). */
+  can_decide?: boolean;
 }
 
 // --- Stage 8: what actually happens while the change is being implemented ---

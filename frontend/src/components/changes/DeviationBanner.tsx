@@ -87,7 +87,8 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
             <li key={d.id} className="flex items-center gap-2">
               <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_STYLE[d.status]}`}>{d.status}</span>
               <span className="text-slate-400">{d.reason}</span>
-              {d.status === 'pending' && (
+              {/* lead or admin, never the proposer: the backend's verdict per row */}
+              {d.status === 'pending' && d.can_decide && (
                 <span className="ml-auto flex gap-1">
                   <button type="button" className={btnSm.secondary}
                           onClick={() => decide.mutate({ devId: d.id, decision: 'approved' })}>Approve</button>

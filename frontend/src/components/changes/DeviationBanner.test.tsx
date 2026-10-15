@@ -93,6 +93,23 @@ describe('DeviationBanner', () => {
       })
     );
   });
+
+  // Roles audit issue 5: transition deviations are decided by the lead or an
+  // admin (never the proposer). The backend says so per row (can_decide);
+  // the banner must not offer Approve / Reject to anyone else.
+  it('offers Approve / Reject only on a deviation the viewer may decide', async () => {
+    const dev = { id: 3, to_status: 'in_assessment', reason: 'urgent', status: 'pending',
+      proposed_by: 1, proposed_at: '2026-10-14T00:00:00' };
+    vi.mocked(changesApi.listDeviations).mockResolvedValueOnce([{ ...dev, can_decide: false }]);
+    renderBanner();
+    await screen.findByText('urgent');
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull();
+    cleanup();
+    vi.mocked(changesApi.listDeviations).mockResolvedValueOnce([{ ...dev, can_decide: true }]);
+    renderBanner();
+    expect(await screen.findByRole('button', { name: 'Approve' })).toBeDefined();
+  });
 });
 
 describe('ReasonDialog', () => {
