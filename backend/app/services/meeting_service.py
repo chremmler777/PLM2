@@ -669,8 +669,8 @@ class MeetingService:
             return ("A customer question is Confirmed only by the customer's "
                     "mail (filed on the change) or the customer's document "
                     "filed on it; without it, answer Assumed")
-        return reference_refusal(ref, "Confirmed needs evidence: a filed "
-                                      "document or a reference")
+        return reference_refusal(ref, "Confirmed needs evidence",
+                                 "a process sheet number, a drawing number or a mail")
 
     @staticmethod
     async def _apply_answer_form(

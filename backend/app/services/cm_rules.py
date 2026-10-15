@@ -169,14 +169,16 @@ def override_note_refusal(reason_code: Optional[str], note: Optional[str],
     return None
 
 
-def reference_refusal(text: Optional[str], what: str = "A reference") -> Optional[str]:
+def reference_refusal(text: Optional[str], what: str = "A reference",
+                      example: str = "a document number, a mail or a file name"
+                      ) -> Optional[str]:
     """None when `text` is a usable reference id (>= 5 characters and not an
-    empty word like 'ok' or 'tbd'), else why not."""
+    empty word like 'ok' or 'tbd'), else why not, in one plain sentence
+    with an example that fits the basis (`example`)."""
     value = (text or "").strip()
     if not value:
-        return f"{what} is required (document number, mail or file reference)"
+        return f"{what} is required, e.g. {example}"
     if value.lower() in EMPTY_EVIDENCE or len(value) < 5:
-        return (f"{what} must name the evidence (at least 5 characters, e.g. "
-                "the PSW or mail reference): '"
-                + value + "' says nothing")
+        return (f"{what}: '{value}' says nothing. Name the evidence (at least "
+                f"5 characters), e.g. {example}")
     return None

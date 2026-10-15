@@ -63,7 +63,8 @@ def urgent_refusal(change: ChangeRequest) -> Optional[str]:
         return ("Urgent: pick the reason (line stop, safety, quality escape, "
                 "launch date, customer demand, other)")
     from app.services.cm_rules import reference_refusal
-    return reference_refusal(change.urgent_evidence, "Urgent: the evidence")
+    return reference_refusal(change.urgent_evidence, "Urgent: the evidence",
+                             "the customer mail of 15 Oct or the 8D number")
 
 
 async def missing(session: AsyncSession, change: ChangeRequest) -> list[str]:
@@ -206,7 +207,8 @@ async def tell_customer(session: AsyncSession, change: ChangeRequest, user, *,
             raise ChangeError("Pick a customer mail filed on this change")
         evidence = f"Mail: {mail.filename}"
     else:
-        why = reference_refusal(ref, "The mail to the customer or its reference")
+        why = reference_refusal(ref, "The mail to the customer or its reference",
+                                "Mail to the buyer 15 Oct")
         if why:
             raise ChangeError(why)
         evidence = ref.strip()
