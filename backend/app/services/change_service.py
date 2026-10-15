@@ -695,7 +695,7 @@ class ChangeService:
     # ------------------------------------------------------------------
     @staticmethod
     async def solid_hard_refusal(session: AsyncSession, change: ChangeRequest,
-                                 to_status: str) -> Optional[str]:
+                                 to_status: str, *, at_risk: bool = False) -> Optional[str]:
         """The ECR-solid HARD rules no override lifts, in transition() and
         in EarlyStageService.hard_refusal (so no button is offered):
         #3 (RELEASE_V2) a failed check or an open validation issue at
@@ -712,7 +712,7 @@ class ChangeService:
                 return why
         if (to_status == "approved" and change.status == "quoted"
                 and change.customer_relevant and cm_switches.on("COMMERCIAL_V2")
-                and change.start_at_risk_approved_at is None):
+                and not at_risk):
             # HARD #4 with C14's binding: the same rule as at release, so an
             # approval never passes on signatures release will refuse (R37)
             signed = await ChangeService.signoff_offer_refusal(
@@ -2072,15 +2072,18 @@ class ChangeService:
         reopen_reason: Optional[str] = None,
         reason: Optional[str] = None,
         logged_rules: tuple = (),
+        at_risk: bool = False,
     ) -> ChangeRequest:
         """`logged_rules`: soft rules a system hand-over passes without an
         override, named in the changelog instead (C9: a full ECR from the
-        intake goes to scoping with what its capture still misses)."""
+        intake goes to scoping with what its capture still misses).
+        `at_risk`: only StartAtRiskService.approve's own hop (§7a); a later
+        quoted -> approved (after a hold) needs HARD #4 again."""
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
         # §7a: a start at risk approved by a PM member takes the change to
         # 'approved' from costing, quoting or quoted, without the customer's yes
-        at_risk = (to_status == "approved" and change.customer_relevant
+        at_risk = (at_risk and to_status == "approved" and change.customer_relevant
                    and change.start_at_risk_approved_at is not None
                    and change.status in ("costing", "quoting", "quoted")
                    and cm_switches.on("START_AT_RISK"))
@@ -2124,8 +2127,13 @@ class ChangeService:
             await ChangeService.auto_lock_impact(
                 session, change, user_id, "the move to approved")
 
+        # §7a: an at-risk change put on hold (after a decline) resumes to
+        # 'approved', where it was: it was approved at risk, not on HARD #4
+        resumed_at_risk = (change.status == "on_hold"
+                           and change.start_at_risk_approved_at is not None)
         # HARD gates: the approval decision cannot be forced.
-        if to_status == "approved" and not mother_plant and not at_risk:
+        if (to_status == "approved" and not mother_plant and not at_risk
+                and not resumed_at_risk):
             if change.customer_relevant:
                 if change.customer_response != "accepted":
                     raise ChangeError("Customer has not accepted the offer")
@@ -2228,7 +2236,8 @@ class ChangeService:
 
         # ECR-solid HARD rules (spec §0 #3, #9): no override lifts them, so
         # they are named before any soft rule a user might ask to override.
-        hard = await ChangeService.solid_hard_refusal(session, change, to_status)
+        hard = await ChangeService.solid_hard_refusal(session, change, to_status,
+                                                      at_risk=at_risk)
         if hard is not None:
             raise ChangeError(hard)
 
@@ -6331,22 +6340,49 @@ class ChangeService:
         )
         return change
 
+    #: A filed customer mail or document (spec §0 Evidence, R4).
+    CUSTOMER_FILE_KINDS = ("customer_email", "customer_file")
+
+    @staticmethod
+    async def customer_evidence_file(session: AsyncSession, change: ChangeRequest,
+                                     attachment_id: int, *, from_customer: bool,
+                                     actor_id: int, what: str):
+        """The customer's mail or document filed on this change, as evidence
+        of a customer act (spec §0, §2 R4). An internal upload ('general',
+        e.g. the baseline drawing) counts only when the picker says it came
+        from the customer: it is re-tagged 'customer_file', logged."""
+        from app.models.change import ChangeAttachment
+        att = await session.get(ChangeAttachment, int(attachment_id))
+        if att is None or att.change_id != change.id:
+            raise ChangeError(what)
+        if att.kind in ChangeService.CUSTOMER_FILE_KINDS:
+            return att
+        if att.kind == "general" and from_customer:
+            att.kind = "customer_file"
+            await ChangeService.append_changelog(
+                session, change, "attachment_retagged",
+                f"'{att.filename}' marked as from the customer", actor_id,
+                field_name="kind", old_value="general", new_value="customer_file")
+            return att
+        raise ChangeError(
+            f"'{att.filename}' is not filed as the customer's: pick a customer "
+            "mail or file, or confirm this file came from the customer")
+
     @staticmethod
     async def _answer_evidence(session: AsyncSession, change: ChangeRequest,
                                answer: dict, what: str,
-                               example: str = "PO 4500123456") -> dict:
+                               example: str = "PO 4500123456", *,
+                               user_id: Optional[int] = None) -> dict:
         """Evidence of a customer answer (spec §0 Evidence): a file or a
         customer mail filed on this change (attachment_id), or a reference
         (PO number, mail reference; >= 5 characters, no 'ok')."""
-        from app.models.change import ChangeAttachment
         from app.services.cm_rules import reference_refusal
         att_id = answer.get("attachment_id")
         if att_id:
-            att = await session.get(ChangeAttachment, int(att_id))
-            if (att is None or att.change_id != change.id or att.kind not in
-                    ("customer_email", "customer_file", "general")):
-                raise ChangeError(
-                    "Pick a customer mail or a file filed on this change")
+            att = await ChangeService.customer_evidence_file(
+                session, change, att_id, from_customer=bool(answer.get("from_customer")),
+                actor_id=user_id if user_id is not None else change.raised_by,
+                what="Pick a customer mail or a file filed on this change")
             return {"kind": "mail" if att.kind == "customer_email" else "file",
                     "attachment_id": att.id, "ref": att.filename}
         ref = (answer.get("ref") or "").strip()
@@ -6415,7 +6451,7 @@ class ChangeService:
             evidence = await ChangeService._answer_evidence(
                 session, change, {**answer, "ref_is_po": False},
                 "The customer's reference for the decline (a filed mail or its "
-                "reference)", "Mail 14 Oct from the buyer")
+                "reference)", "Mail 14 Oct from the buyer", user_id=user_id)
             version = f"offer v{offer.version}" if offer is not None else "the quote"
             await OfferService.apply_customer_response(
                 session, change, "declined", user_id, None)
@@ -6458,7 +6494,7 @@ class ChangeService:
         evidence = await ChangeService._answer_evidence(
             session, change, answer,
             "The evidence of the customer's yes (the PO or mail filed on the "
-            "change, or the PO number)")
+            "change, or the PO number)", user_id=user_id)
         if offer is not None:
             match = answer.get("po_match")
             if match not in ("yes", "no"):
@@ -6643,7 +6679,7 @@ class ChangeService:
             evidence = await ChangeService._answer_evidence(
                 session, change, {**answer, "ref_is_po": False},
                 "The customer's reference for the decline (a filed mail or its "
-                "reference)", "Mail 14 Oct from the buyer")
+                "reference)", "Mail 14 Oct from the buyer", user_id=user_id)
             offer.status = "declined"
             offer.accept_evidence = evidence
             offer.answered_at, offer.answered_by = now, user_id
@@ -6672,7 +6708,7 @@ class ChangeService:
         evidence = await ChangeService._answer_evidence(
             session, change, answer,
             "The evidence of the customer's yes (the PO or mail filed on the "
-            "change, or the PO number)")
+            "change, or the PO number)", user_id=user_id)
         match = answer.get("po_match")
         if match not in ("yes", "no"):
             raise ChangeError(
@@ -6747,6 +6783,7 @@ class ChangeService:
         card (type 'po_differs', the lead decides it); the lead and the Sales
         owner are told what differs."""
         from app.services import cm_switches
+        carded = False
         if cm_switches.on("COMMERCIAL_V2") and change.status in (
                 "quoted", "approved", "in_implementation", "in_validation"):
             from app.services.scope_change_service import ScopeChangeService
@@ -6755,9 +6792,12 @@ class ChangeService:
                 session, change, actor, kind="po_differs", system=True,
                 what=f"PO differs from v{offer.version}: {evidence.get('differs')}",
                 ref=evidence.get("ref"))
+            carded = True
         from app.services.notification_service import NotificationService
+        # R33 one notice per event: the card already told the lead
         people = [i for i in (change.lead_id, change.sales_owner_id)
-                  if i is not None and i != user_id]
+                  if i is not None and i != user_id
+                  and not (carded and i == change.lead_id)]
         await NotificationService.notify_once(
             session, people, kind="po_differs",
             subject_key=f"po_differs:{offer.id}",

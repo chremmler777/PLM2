@@ -213,6 +213,8 @@ export interface OfferSendList {
   assumed: OfferAssumed[]
   estimates: string[]
   high_risks: { concern_id: number; note: string }[]
+  /** R6: still hidden, the reason an earlier version went out with carries. */
+  carried_risks?: { concern_id: number; note: string; code?: string | null; reason?: string | null; version?: number }[]
   risk_reason_code?: string
   risk_reason?: string
 }

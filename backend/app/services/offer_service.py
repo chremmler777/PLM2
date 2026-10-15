@@ -1163,7 +1163,11 @@ class OfferService:
         listed = None
         if cm_switches.on("COMMERCIAL_V2"):
             await session.refresh(change, ["concerns"])
-            listed = OfferService.send_list(change, offer.data or {})
+            listed = OfferService.send_list(
+                change, offer.data or {},
+                prior=OfferService.risks_stated_before(
+                    await OfferService.list_offers(session, change), offer.version),
+                supplement=supplement)
             if listed["high_risks"]:
                 from app.services.cm_rules import override_note_refusal
                 why = override_note_refusal(risk_reason_code, risk_reason,
@@ -1526,7 +1530,10 @@ class OfferService:
             if o.status == "draft":
                 indexes = [{k: r[k] for k in ("number", "index", "newer")}
                            for r in live_indexes]
-                send_list = OfferService.send_list(change, data) if commercial else None
+                send_list = OfferService.send_list(
+                    change, data,
+                    prior=OfferService.risks_stated_before(all_offers, o.version),
+                    supplement=o.kind == "supplement") if commercial else None
                 if send_list and send_list["assumed"]:
                     who = await ChangePlanService._user_names(
                         session, [a["confirm_by_id"] for a in send_list["assumed"]])
@@ -1833,12 +1840,40 @@ class OfferService:
         return out
 
     @staticmethod
-    def send_list(change: ChangeRequest, data: dict) -> dict:
+    def risks_stated_before(offers: list, version: int) -> dict:
+        """R6: what the versions sent before `version` already said about
+        the high risks: the ones shown to the customer, and the ones that
+        went out hidden with a reason (concern id -> that reason)."""
+        shown: set = set()
+        reasoned: dict = {}
+        for o in sorted((o for o in offers if o.sent_at is not None
+                         and o.version < version), key=lambda o: o.version):
+            data = o.data or {}
+            shown |= {r.get("concern_id") for r in data.get("risks") or []
+                      if isinstance(r, dict) and r.get("show")}
+            sent = data.get(SEND_KEY) or {}
+            if sent.get("risk_reason"):
+                for r in (sent.get("high_risks") or []) + (sent.get("carried_risks") or []):
+                    reasoned[r.get("concern_id")] = {
+                        "code": sent.get("risk_reason_code"),
+                        "reason": sent.get("risk_reason"), "version": o.version}
+            for r in sent.get("carried_risks") or []:
+                if r.get("reason") and r.get("concern_id") not in reasoned:
+                    reasoned[r["concern_id"]] = {k: r.get(k) for k in
+                                                 ("code", "reason", "version")}
+        return {"shown": shown, "reasoned": reasoned}
+
+    @staticmethod
+    def send_list(change: ChangeRequest, data: dict, prior: Optional[dict] = None,
+                  supplement: bool = False) -> dict:
         """Spec §6 [R3]: what Send lists before an offer goes out: the
         unconfirmed Assumed answers (value, risk if wrong, who confirms by
         when), the positions priced on an estimate, and the open high risks
         (severity 3) the offer does not state (hidden): those go out only
-        with a reason (the override of Send)."""
+        with a reason (the override of Send). R6: a hidden risk an earlier
+        version already sent with a reason carries that reason (no second
+        sentence); a supplement adds to what was sent before, so a risk a
+        sent version showed counts as stated (`prior`, risks_stated_before)."""
         assumed = []
         for q in change.concerns:
             if (q.answer_kind == "assumed" and q.confirmed_at is None
@@ -1855,11 +1890,18 @@ class OfferService:
         # a hidden one is what the customer never reads
         shown = {r.get("concern_id") for r in data.get("risks") or []
                  if r.get("show")}
-        high = [{"concern_id": c.id, "note": c.note}
-                for c in change.concerns
-                if c.kind == "risk" and c.is_open and c.severity == 3
-                and c.id not in shown]
-        return {"assumed": assumed, "estimates": estimates, "high_risks": high}
+        prior = prior or {"shown": set(), "reasoned": {}}
+        if supplement:
+            shown |= prior["shown"]
+        hidden = [{"concern_id": c.id, "note": c.note}
+                  for c in change.concerns
+                  if c.kind == "risk" and c.is_open and c.severity == 3
+                  and c.id not in shown]
+        reasoned = prior["reasoned"]
+        return {"assumed": assumed, "estimates": estimates,
+                "high_risks": [h for h in hidden if h["concern_id"] not in reasoned],
+                "carried_risks": [{**h, **reasoned[h["concern_id"]]} for h in hidden
+                                  if h["concern_id"] in reasoned]}
 
     @staticmethod
     def _legacy_pdf_defaults(change: ChangeRequest, offer: ChangeOffer,

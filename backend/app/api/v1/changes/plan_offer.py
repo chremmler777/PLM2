@@ -897,6 +897,8 @@ class ScopeChangeIn(BaseModel):
     expects_by: Optional[date] = None
     attachment_id: Optional[int] = None
     ref: Optional[str] = Field(default=None, max_length=255)
+    # an internal upload picked as the customer's (re-tagged, logged)
+    from_customer: bool = False
 
 
 class ScopeDecideIn(BaseModel):
@@ -948,7 +950,8 @@ async def request_scope_change(
     try:
         await ScopeChangeService.request(
             db, change, current_user, what=body.what, part_number=body.part_number,
-            expects_by=body.expects_by, attachment_id=body.attachment_id, ref=body.ref)
+            expects_by=body.expects_by, attachment_id=body.attachment_id, ref=body.ref,
+            from_customer=body.from_customer)
     except ChangeError as e:
         raise _scope_http(e)
     await db.commit()
@@ -1013,6 +1016,7 @@ async def scope_change_told(
 class StartAtRiskIn(BaseModel):
     attachment_id: Optional[int] = None
     ref: Optional[str] = Field(default=None, max_length=255)
+    from_customer: bool = False
 
 
 class StartAtRiskQualityIn(BaseModel):
@@ -1046,7 +1050,8 @@ async def request_start_at_risk(
     change = await _change(db, change_id, current_user)
     try:
         await StartAtRiskService.request(db, change, current_user,
-                                         attachment_id=body.attachment_id, ref=body.ref)
+                                         attachment_id=body.attachment_id, ref=body.ref,
+                                         from_customer=body.from_customer)
     except ChangeError as e:
         raise _sar_http(e)
     await db.commit()

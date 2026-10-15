@@ -15,6 +15,7 @@ import { t } from '../../../i18n/cmLabels'
 import { buttonClass } from '../../common/buttonStyles'
 import type { Attachment } from '../../../types/change'
 import { inputCls, sectionLabel } from './offerFormat'
+import EvidencePick, { pickBody, pickNeedsTick } from './EvidencePick'
 
 export interface StartAtRiskState {
   available: boolean
@@ -32,7 +33,7 @@ export interface StartAtRiskState {
 
 export const sarApi = {
   get: (id: number) => client.get<StartAtRiskState>(`/v1/changes/${id}/start-at-risk`).then((r) => r.data),
-  request: (id: number, body: { attachment_id?: number; ref?: string }) =>
+  request: (id: number, body: { attachment_id?: number; from_customer?: boolean; ref?: string }) =>
     client.post<StartAtRiskState>(`/v1/changes/${id}/start-at-risk`, body).then((r) => r.data),
   quality: (id: number, note: string) =>
     client.post<StartAtRiskState>(`/v1/changes/${id}/start-at-risk/quality`, { note }).then((r) => r.data),
@@ -58,6 +59,7 @@ export default function StartAtRiskCard({ changeId, canAsk, isQuality, canApprov
   const key = ['change', changeId, 'start-at-risk']
   const { data: s } = useQuery({ queryKey: key, queryFn: () => sarApi.get(changeId) })
   const [mail, setMail] = useState('')
+  const [fromCustomer, setFromCustomer] = useState(false)
   const [ref, setRef] = useState('')
   const [note, setNote] = useState('')
   const done = (data: StartAtRiskState) => {
@@ -67,7 +69,7 @@ export default function StartAtRiskCard({ changeId, canAsk, isQuality, canApprov
   }
   const onError = (e: unknown) => toastError(e, t('sar.error'))
   const ask = useMutation({
-    mutationFn: () => sarApi.request(changeId, mail ? { attachment_id: Number(mail) } : { ref: ref.trim() }),
+    mutationFn: () => sarApi.request(changeId, mail ? pickBody(attachments, mail) : { ref: ref.trim() }),
     onSuccess: done, onError,
   })
   const quality = useMutation({ mutationFn: () => sarApi.quality(changeId, note.trim()), onSuccess: done, onError })
@@ -83,22 +85,18 @@ export default function StartAtRiskCard({ changeId, canAsk, isQuality, canApprov
     )
   }
   if (!s.available && !s.requested_at) return null
-  const mails = attachments.filter((a) => ['customer_email', 'customer_file', 'general'].includes(a.kind ?? 'general'))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const askOk = mail ? (!pickNeedsTick(attachments, mail) || fromCustomer) : ref.trim().length >= 5
   return (
     <section data-testid="sar-card" className="space-y-2 rounded-lg border border-amber-900/70 bg-amber-950/10 p-3 text-xs">
       <div className={sectionLabel}>{t('sar.title')}</div>
       <p className="text-slate-400">{t('sar.help')}</p>
       {!s.requested_at && canAsk && (
         <div className="flex flex-wrap gap-2">
-          <select data-testid="sar-mail" value={mail} onChange={(e) => setMail(e.target.value)}
-            aria-label={t('sar.goAhead')} className={`${inputCls} min-w-0 flex-1`}>
-            <option value="">{t('cust.pickMail')}</option>
-            {mails.map((m) => <option key={m.id} value={m.id}>{m.filename}</option>)}
-          </select>
+          <EvidencePick testId="sar-mail" label={t('sar.goAhead')} attachments={attachments}
+            value={mail} onChange={setMail} fromCustomer={fromCustomer} onFromCustomer={setFromCustomer} />
           <input data-testid="sar-ref" value={ref} disabled={!!mail} onChange={(e) => setRef(e.target.value)}
             aria-label={t('sar.goAhead')} placeholder={t('sar.goAhead')} className={`${inputCls} min-w-0 flex-1`} />
-          <button type="button" data-testid="sar-ask" disabled={ask.isPending || (!mail && ref.trim().length < 5)}
+          <button type="button" data-testid="sar-ask" disabled={ask.isPending || !askOk}
             onClick={() => ask.mutate()} className={buttonClass('primary', 'sm')}>{t('sar.ask')}</button>
         </div>
       )}

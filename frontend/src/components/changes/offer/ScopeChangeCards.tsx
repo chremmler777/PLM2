@@ -18,6 +18,7 @@ import DateInput from '../../gantt/DateInput'
 import { buttonClass } from '../../common/buttonStyles'
 import type { Attachment, ScopeChangeCard } from '../../../types/change'
 import { inputCls, sectionLabel } from './offerFormat'
+import EvidencePick, { pickBody, pickNeedsTick } from './EvidencePick'
 
 const fill = (k: string, v: Record<string, string | number>) =>
   Object.entries(v).reduce((acc, [kk, vv]) => acc.split(`{${kk}}`).join(String(vv)), t(k))
@@ -87,14 +88,14 @@ function RequestForm({ changeId, attachments, onDone }: ScopeChangeCardsProps & 
   const [by, setBy] = useState('')
   const [mail, setMail] = useState('')
   const [ref, setRef] = useState('')
-  const mails = attachments.filter((a) => ['customer_email', 'customer_file', 'general'].includes(a.kind ?? 'general'))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const [fromCustomer, setFromCustomer] = useState(false)
   const save = useCardMutation(changeId, () => changesApi.requestScopeChange(changeId, {
     what: what.trim(), ...(part.trim() ? { part_number: part.trim() } : {}),
     ...(by ? { expects_by: by } : {}),
-    ...(mail ? { attachment_id: Number(mail) } : { ref: ref.trim() }),
+    ...(mail ? pickBody(attachments, mail) : { ref: ref.trim() }),
   }), onDone)
-  const ok = what.trim().length >= 5 && (!!mail || ref.trim().length >= 5)
+  const ok = what.trim().length >= 5
+    && (mail ? (!pickNeedsTick(attachments, mail) || fromCustomer) : ref.trim().length >= 5)
   return (
     <div data-testid="scope-request-form" className="grid gap-2 rounded border border-slate-700 p-2 sm:grid-cols-[auto_minmax(0,1fr)]">
       <label className="self-center text-xs text-slate-400" htmlFor={`scope-part-${changeId}`}>{t('sc.part')}</label>
@@ -107,11 +108,9 @@ function RequestForm({ changeId, attachments, onDone }: ScopeChangeCardsProps & 
       <DateInput id={`scope-by-${changeId}`} value={by} commitOnChange onChange={setBy} className={`${inputCls} w-44`} />
       <label className="self-center text-xs text-slate-400" htmlFor={`scope-mail-${changeId}`}>{t('sc.mail')}</label>
       <div className="flex flex-wrap gap-2">
-        <select id={`scope-mail-${changeId}`} data-testid="scope-mail" value={mail}
-          onChange={(e) => setMail(e.target.value)} className={`${inputCls} min-w-0 flex-1`}>
-          <option value="">{t('cust.pickMail')}</option>
-          {mails.map((m) => <option key={m.id} value={m.id}>{m.filename}</option>)}
-        </select>
+        <EvidencePick id={`scope-mail-${changeId}`} testId="scope-mail" label={t('sc.mail')}
+          attachments={attachments} value={mail} onChange={setMail}
+          fromCustomer={fromCustomer} onFromCustomer={setFromCustomer} />
         <input data-testid="scope-ref" value={ref} disabled={!!mail} onChange={(e) => setRef(e.target.value)}
           aria-label={t('sc.ref')} placeholder={t('sc.ref')} className={`${inputCls} min-w-0 flex-1`} />
       </div>

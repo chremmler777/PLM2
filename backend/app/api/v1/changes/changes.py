@@ -2014,7 +2014,7 @@ async def customer_response(
             release_due_reason=body.release_due_reason,
             expired_override_reason=body.expired_override_reason,
             answer=body.model_dump(include={
-                "attachment_id", "ref", "po_match", "differs", "confirm_total",
+                "attachment_id", "from_customer", "ref", "po_match", "differs", "confirm_total",
                 "next_contact", "note", "price_drop_code", "price_drop_note"}),
             actor=current_user)
     except ChangeError as e:

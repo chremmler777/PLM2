@@ -25,6 +25,7 @@ import type { ChangeDetail } from '../../../types/change'
 import type { OfferOut } from '../../../types/changeOffer'
 import { fmtMoney, inputCls, offerDaysLeft, sectionLabel } from './offerFormat'
 import { offersKey } from './useOfferDraft'
+import EvidencePick, { pickBody, pickNeedsTick } from './EvidencePick'
 
 const RESPONSE_CHIP: Record<string, string> = {
   pending: 'bg-slate-800 text-slate-300 border-slate-600',
@@ -40,7 +41,6 @@ const RESPONSE_LABEL: Record<string, string> = {
   declined: 'Declined',
 }
 
-const EVIDENCE_KINDS = new Set(['customer_email', 'customer_file', 'general'])
 const fill = (k: string, v: Record<string, string | number>) =>
   Object.entries(v).reduce((acc, [kk, vv]) => acc.split(`{${kk}}`).join(String(vv)), t(k))
 /** Today plus n working days (Mon-Fri), as an ISO date. */
@@ -91,12 +91,11 @@ export default function CustomerDecision({
   const [confirmed, setConfirmed] = useState(false)
   const [nextContact, setNextContact] = useState(addWorkingDaysIso(todayIso(), 5))
   const [talkNote, setTalkNote] = useState('')
-  const mails = (change.attachments ?? [])
-    .filter((a) => EVIDENCE_KINDS.has(a.kind ?? 'general'))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const files = change.attachments ?? []
+  const [fromCustomer, setFromCustomer] = useState(false)
   const refOk = ref.trim().length >= 5
-  const evidenceOk = !!evidenceId || refOk
-  const evidence = evidenceId ? { attachment_id: Number(evidenceId) } : { ref: ref.trim() }
+  const evidenceOk = evidenceId ? (!pickNeedsTick(files, evidenceId) || fromCustomer) : refOk
+  const evidence = evidenceId ? pickBody(files, evidenceId) : { ref: ref.trim() }
   const total = latestSent ? fmtMoney(latestSent.totals.total_one_time, latestSent.currency) : ''
   // §7 [R4] price diff: below the last version sent before it needs a
   // reason and a PM / Management OK (the backend asks for it)
@@ -170,11 +169,9 @@ export default function CustomerDecision({
     <>
       <label className="text-xs text-slate-400 self-center" htmlFor={`answer-mail-${change.id}`}>{t('cust.evidence')}</label>
       <div className="flex flex-wrap gap-2">
-        <select id={`answer-mail-${change.id}`} data-testid="answer-mail" value={evidenceId}
-          onChange={(e) => setEvidenceId(e.target.value)} className={`${inputCls} min-w-0 flex-1`}>
-          <option value="">{t('cust.pickMail')}</option>
-          {mails.map((m) => <option key={m.id} value={m.id}>{m.filename}</option>)}
-        </select>
+        <EvidencePick id={`answer-mail-${change.id}`} testId="answer-mail" label={t('cust.evidence')}
+          attachments={files} value={evidenceId} onChange={setEvidenceId}
+          fromCustomer={fromCustomer} onFromCustomer={setFromCustomer} />
         <input type="text" data-testid="answer-ref" value={ref} disabled={!!evidenceId}
           onChange={(e) => setRef(e.target.value)} aria-label={t('cust.ref')}
           placeholder={t('cust.refPlaceholder')} className={`${inputCls} min-w-0 flex-1`} />

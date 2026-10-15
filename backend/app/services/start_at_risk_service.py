@@ -19,7 +19,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.change import ChangeAttachment, ChangeRequest
+from app.models.change import ChangeRequest
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services import cm_switches
@@ -66,7 +66,8 @@ class StartAtRiskService:
     @staticmethod
     async def request(session: AsyncSession, change: ChangeRequest, user: User, *,
                       attachment_id: Optional[int] = None,
-                      ref: Optional[str] = None) -> ChangeRequest:
+                      ref: Optional[str] = None,
+                      from_customer: bool = False) -> ChangeRequest:
         """Sales or the run team file the customer's go-ahead."""
         why = refusal(change)
         if why:
@@ -79,10 +80,10 @@ class StartAtRiskService:
             raise StartAtRiskForbidden(
                 "Sales or the run team ask to start at risk")
         if attachment_id:
-            att = await session.get(ChangeAttachment, int(attachment_id))
-            if (att is None or att.change_id != change.id
-                    or att.kind not in ("customer_email", "customer_file", "general")):
-                raise ChangeError("Pick the customer's mail or file filed on this change")
+            att = await ChangeService.customer_evidence_file(
+                session, change, attachment_id, from_customer=from_customer,
+                actor_id=user.id,
+                what="Pick the customer's mail or file filed on this change")
             evidence = f"Mail: {att.filename}"[:255]
         else:
             from app.services.cm_rules import reference_refusal
@@ -176,7 +177,7 @@ class StartAtRiskService:
         await ChangeService.transition(
             session, change, "approved", user.id,
             reason="Started at risk (§7a): the customer's go-ahead, no PO yet",
-            logged_rules=LOGGED_RULES)
+            logged_rules=LOGGED_RULES, at_risk=True)
         return change
 
     @staticmethod

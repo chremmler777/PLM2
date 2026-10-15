@@ -113,6 +113,8 @@ class CustomerResponseRequest(BaseModel):
     # exactly?" (+ what differs), the confirmed total; still talking: the
     # next contact date; declined: the customer's reference.
     attachment_id: Optional[int] = None
+    # an internal upload picked as the customer's (re-tagged, logged)
+    from_customer: bool = False
     ref: Optional[str] = Field(default=None, max_length=255)
     po_match: Optional[str] = None          # yes | no
     differs: Optional[str] = Field(default=None, max_length=2000)

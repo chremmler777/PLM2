@@ -136,7 +136,7 @@ export const changesApi = {
       /** Required by the server when the latest sent offer is past valid-until. */
       expired_override_reason?: string | null;
       /** ECR-solid §7 (C4/C12): evidence, PO match, confirmed total, next contact. */
-      attachment_id?: number; ref?: string; po_match?: 'yes' | 'no'; differs?: string
+      attachment_id?: number; from_customer?: boolean; ref?: string; po_match?: 'yes' | 'no'; differs?: string
       confirm_total?: boolean; next_contact?: string; note?: string
       price_drop_code?: string; price_drop_note?: string
     },
@@ -390,7 +390,8 @@ export const changesApi = {
   scopeChanges: (id: number) =>
     client.get<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes`).then((r) => r.data),
   requestScopeChange: (id: number, body: {
-    what: string; part_number?: string; expects_by?: string; attachment_id?: number; ref?: string
+    what: string; part_number?: string; expects_by?: string; attachment_id?: number; from_customer?: boolean
+    ref?: string
   }) => client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes`, body).then((r) => r.data),
   decideScopeChange: (id: number, cardId: number, body: {
     decision: 'accept' | 'refuse' | 'new_change'; department_ids?: number[]; note?: string

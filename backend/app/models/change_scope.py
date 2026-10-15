@@ -16,8 +16,8 @@ request, three steps with an owner each:
 
 kind: 'customer' (Sales' button), 'customer_index' (a recheck found an
 effect at quoted or later, §1), 'po_differs' (the PO differs from the
-offer at acceptance, §7). A card opened after the customer's yes
-(post_accept) opens the price (HARD #9) instead of holding the approval.
+offer at acceptance, §7). A card opened after approval (post_accept)
+opens the price (HARD #9) instead of holding the approval.
 """
 from datetime import date, datetime
 
@@ -47,7 +47,7 @@ class ChangeScopeChange(Base):
     expects_by: Mapped[date | None] = mapped_column(Date, nullable=True)
     evidence_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     attachment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # opened after the customer's yes: the price is open, approval not held
+    # opened after approval: the price is open, approval not held
     post_accept: Mapped[bool] = mapped_column(Boolean, default=False)
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

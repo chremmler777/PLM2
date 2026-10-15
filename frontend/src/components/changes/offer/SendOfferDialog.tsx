@@ -40,7 +40,8 @@ export function DiffList({ diff, testId, currency = 'EUR' }: { diff: OfferDiffRo
 export function SendList({ list }: { list: OfferSendList }) {
   const fill = (k: string, v: Record<string, string | number>) =>
     Object.entries(v).reduce((acc, [kk, vv]) => acc.split(`{${kk}}`).join(String(vv)), t(k))
-  if (!list.assumed.length && !list.estimates.length && !list.high_risks.length) return null
+  const carried = list.carried_risks ?? []
+  if (!list.assumed.length && !list.estimates.length && !list.high_risks.length && !carried.length) return null
   return (
     <div data-testid="send-list" className="mt-3 space-y-2 rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-2 text-xs">
       <p className="font-medium text-amber-200">{t('send.listTitle')}</p>
@@ -69,6 +70,16 @@ export function SendList({ list }: { list: OfferSendList }) {
           <p className="text-rose-300">{fill('send.highRisks', { n: list.high_risks.length })}</p>
           <ul className="ml-4 list-disc text-slate-300">
             {list.high_risks.map((r) => <li key={r.concern_id}>{r.note}</li>)}
+          </ul>
+        </div>
+      )}
+      {carried.length > 0 && (
+        <div data-testid="send-carried">
+          <p className="text-amber-200">{fill('send.carried', { n: carried.length })}</p>
+          <ul className="ml-4 list-disc text-slate-300">
+            {carried.map((r) => (
+              <li key={r.concern_id}>{fill('send.carriedRow', { q: r.note, v: r.version ?? '-', r: r.reason ?? '-' })}</li>
+            ))}
           </ul>
         </div>
       )}

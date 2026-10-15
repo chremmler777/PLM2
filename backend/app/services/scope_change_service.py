@@ -55,8 +55,8 @@ def label(card: ChangeScopeChange) -> str:
 async def guard_text(session: AsyncSession, change: ChangeRequest,
                      to_status: str) -> Optional[str]:
     """SOFT `scope_change_uncovered` (spec §6): an open card holds
-    quoted -> approved (a card opened after the customer's yes does not: it
-    opens the price instead), -> in_implementation and -> released.
+    quoted -> approved (a card opened after approval opens the price
+    instead), -> in_implementation and -> released.
     Override: a Project Management or Management member."""
     if not cm_switches.on("COMMERCIAL_V2"):
         return None
@@ -100,7 +100,8 @@ class ScopeChangeService:
                       attachment_id: Optional[int] = None, ref: Optional[str] = None,
                       kind: str = "customer", system: bool = False,
                       department_ids: Optional[list[int]] = None,
-                      recheck_id: Optional[int] = None) -> ChangeScopeChange:
+                      recheck_id: Optional[int] = None,
+                      from_customer: bool = False) -> ChangeScopeChange:
         """Sales: "Customer wants to add or change something" (from quoted
         on). The customer's mail (filed on the change) or its reference is
         the evidence; what the customer expects by when drives the dues.
@@ -123,13 +124,12 @@ class ScopeChangeService:
             raise ChangeError("Say what the customer wants, in a few words")
         evidence = None
         if not system:
-            from app.models.change import ChangeAttachment
             from app.services.cm_rules import reference_refusal
             if attachment_id:
-                att = await session.get(ChangeAttachment, int(attachment_id))
-                if (att is None or att.change_id != change.id
-                        or att.kind not in ("customer_email", "customer_file", "general")):
-                    raise ChangeError("Pick a customer mail or file filed on this change")
+                att = await ChangeService.customer_evidence_file(
+                    session, change, attachment_id, from_customer=from_customer,
+                    actor_id=user.id,
+                    what="Pick a customer mail or file filed on this change")
                 evidence = f"Mail: {att.filename}"[:255]
             else:
                 why = reference_refusal(ref, "The customer's mail or its reference",
@@ -140,7 +140,10 @@ class ScopeChangeService:
             from app.utils.clock import business_today
             if expects_by is not None and expects_by < business_today():
                 raise ChangeError("The date the customer expects it is in the past")
-        post_accept = change.customer_response == "accepted"
+        # spec §6 [R4]: a card opened after approval opens the price; before
+        # it (a PO that differs at the customer's yes included, §7) it holds
+        # the approval (SOFT scope_change_uncovered)
+        post_accept = change.status in POST_APPROVAL
         card = ChangeScopeChange(
             change_id=change.id, kind=kind, status="requested",
             part_number=(part_number or "").strip()[:100] or None, what=what,
@@ -227,6 +230,8 @@ class ScopeChangeService:
                 f"Scope change {label(card)} refused: {note}", user.id,
                 new_value={"scope_change_id": card.id}, notes=note)
             await ScopeChangeService._maybe_close_price(session, change, user.id)
+            # §7: the card may be the last thing the approval waited on
+            await ChangeService.try_auto_approve(session, change, user.id)
             return card
         if decision == "new_change":
             if change.status not in POST_APPROVAL:

@@ -182,6 +182,18 @@ describe('OfferTab', () => {
       risk_reason_code: 'customer_aware', risk_reason: 'Customer accepted it in the DFM' })))
   })
 
+  it('send dialog (R6): a risk sent before with a reason carries it, no new sentence asked', async () => {
+    const o = offer({ version: 2, change_note: 'Discount', send_list: { assumed: [], estimates: [], high_risks: [],
+      carried_risks: [{ concern_id: 31, note: 'weld line on A-side', code: 'customer_aware',
+        reason: 'Customer accepted it in the DFM', version: 1 }] } })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([o])
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('offer-send'))
+    expect((await screen.findByTestId('send-carried')).textContent)
+      .toContain('weld line on A-side (v1: Customer accepted it in the DFM)')
+    expect(screen.queryByTestId('send-risk-note')).toBeNull()
+  })
+
   it('past approval (§6): "Send supplement" starts a supplement; its draft sends as one', async () => {
     const v1 = offer({ id: 10, version: 1, status: 'accepted' })
     vi.mocked(changeOfferApi.list).mockResolvedValue([v1])

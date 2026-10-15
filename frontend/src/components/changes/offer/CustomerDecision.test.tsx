@@ -284,6 +284,23 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
     expect(screen.queryByTestId('accept-drop')).toBeNull()
   })
 
+  it('an internal file counts as the evidence only once ticked as from the customer (R4)', async () => {
+    const drawing = { ...mail, id: 82, filename: 'baseline.pdf', kind: 'general' as const }
+    wrap(<CustomerDecision change={change({ attachments: [drawing, mail], release_due_date: '2026-12-18T00:00:00' })}
+      latestSent={valid()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    fireEvent.change(screen.getByTestId('answer-mail'), { target: { value: '82' } })
+    fireEvent.click(screen.getByTestId('po-match-yes'))
+    fireEvent.click(screen.getByTestId('accept-total'))
+    const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)          // NEGATIVE: not said to be the customer's
+    fireEvent.click(screen.getByTestId('answer-mail-from-customer'))
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'accepted',
+      expect.objectContaining({ attachment_id: 82, from_customer: true })))
+  })
+
   it('every viewer reads who signed, when and on which version', () => {
     wrap(<CustomerDecision change={change({ pm_signed_by: 3, pm_signed_by_name: 'Pat PM', pm_signed_at: '2026-10-14T09:00:00',
       pm_signed_offer_id: 10 })} latestSent={valid()} canRespond={false} canSignPm={false} canSignQuality={false} userId={5} />)

@@ -773,15 +773,27 @@ async def test_after_approval_a_card_opens_the_price_and_an_added_part_is_its_ow
         assert old.price_open is False          # the card that opened it is moved
 
 
-async def test_po_differs_opens_a_card_that_holds_implementation(client, quoted):
+async def test_po_differs_opens_a_card_that_holds_the_approval(client, quoted):
+    """Spec §7: approval is automatic when HARD #4 holds and no scope change
+    is open; a PO that differs opens a card that holds it until decided."""
     cid = quoted["change_id"]
-    sales = await _auth(client, "sales")
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
     res = await _answer(client, cid, sales, {**_YES, "po_match": "no",
                                              "differs": "PO also lists 886.199"})
     assert res.status_code == 200, res.text
+    assert res.json()["price_open"] is False
     cards = (await client.get(_scope(cid), headers=sales)).json()
     assert (cards[0]["kind"], cards[0]["status"], cards[0]["post_accept"]) == (
-        "po_differs", "requested", True)
+        "po_differs", "requested", False)
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+    assert r.json()["status"] == "quoted"       # NEGATIVE: the open card holds it
+    r = await client.post(_scope(cid, f"/{cards[0]['id']}/decide"),
+                          json={"decision": "refuse", "note": "886.199 is a separate order"},
+                          headers=pm)
+    assert r.status_code == 200, r.text
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    assert ch["status"] == "approved"           # the last hold gone: approved
 
 
 async def test_scope_cards_switch_off(client, quoted, monkeypatch):
@@ -1058,3 +1070,134 @@ async def test_no_cost_impact_is_said_with_a_reason(client, quoted, session_fact
     row = next(e for e in log if e["action"] == "scope_change_recosted")
     assert "no cost impact" in row["action_description"]
     assert row["notes"] == "Same insert, only the engraving text changes"
+
+
+async def test_an_internal_file_is_customer_evidence_only_when_marked_so(
+        client, quoted, session_factory):
+    """R4 (spec §0, §2): a customer act is Confirmed by the customer's mail
+    or document; an internal upload ('general', the baseline drawing) counts
+    only when Sales says it came from the customer (re-tagged, logged)."""
+    from app.models.change import ChangeAttachment
+    cid = quoted["change_id"]
+    async with session_factory() as s:
+        drawing = ChangeAttachment(change_id=cid, kind="general", filename="baseline.pdf",
+                                   stored_path="z", content_type="application/pdf",
+                                   size_bytes=1, sha256="2" * 64,
+                                   uploaded_by=quoted["users"]["sales"])
+        s.add(drawing)
+        await s.commit()
+    sales = await _auth(client, "sales")
+    body = {**_YES, "ref": None, "attachment_id": drawing.id}
+    for url, extra in ((None, {}),
+                       (_scope(cid), {"what": "Second variant grained"})):
+        res = (await _answer(client, cid, sales, body) if url is None else
+               await client.post(url, json={"attachment_id": drawing.id, **extra}, headers=sales))
+        assert res.status_code == 400 and "not filed as the customer's" in res.json()["detail"]
+    res = await _answer(client, cid, sales, {**body, "from_customer": True})
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeAttachment, drawing.id)).kind == "customer_file"
+
+
+async def test_the_at_risk_exemption_is_the_approval_hop_only(client, urgent, session_factory):
+    """R25: the start at risk lifts HARD #4 for its own hop; a later
+    quoted -> approved needs the customer's yes and both signatures again.
+    An at-risk change held after a decline resumes where it was."""
+    from app.models.change import ChangeRequest
+    cid = urgent["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    await _started_at_risk(client, cid, sales, pm, q)
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
+                              headers=sales)).status_code == 200
+    assert (await _answer(client, cid, sales, {"response": "declined",
+                                               "ref": "Mail 20 Oct: too high"})).status_code == 200
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={
+        "to_status": "on_hold", "reason": "Customer declined, waiting for the buyer call"},
+                          headers=pm)
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={"to_status": "approved"},
+                          headers=pm)
+    assert r.status_code == 200 and r.json()["status"] == "approved", r.text
+    # NEGATIVE: back at quoted (a legacy hold without its stage), no free pass
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        ch.status = "quoted"
+        await s.commit()
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={"to_status": "approved"},
+                          headers=pm)
+    assert r.status_code == 400 and "accepted" in r.json()["detail"], r.text
+
+
+async def test_a_hidden_risk_reason_carries_to_the_next_version(client, risky, session_factory):
+    """R6: v1 went out without the high risk, with a reason; v2 with the
+    same risk set needs no second sentence: it carries v1's reason. A new
+    high risk since v1 is still asked for."""
+    cid = risky["change_id"]
+    sales = await _auth(client, "sales")
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    why = "Customer accepted the weld line in DFM 2026-10-02"
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={
+        "risk_reason_code": "customer_aware", "risk_reason": why}, headers=sales)
+    assert res.status_code == 200, res.text
+    v2 = await _v2_with_discount(client, cid, sales, 5)
+    assert v2["send_list"]["high_risks"] == []
+    assert [(r["concern_id"], r["reason"], r["version"]) for r in v2["send_list"]["carried_risks"]] == [
+        (risky["risk_id"], why, 1)]
+    # NEGATIVE: a new high risk since v1 is asked for
+    async with session_factory() as s:
+        s.add(ChangeConcern(change_id=cid, kind="risk", note="sink mark on rib",
+                            risk_type="fill_issue", severity=3,
+                            department_id=risky["depts"]["Tool Engineer"],
+                            raised_by=risky["users"]["tool"]))
+        await s.commit()
+    res = await client.post(_url(cid), headers=sales)
+    assert res.status_code == 201, res.text
+    v3 = res.json()
+    res = await client.post(_url(cid, f"/{v3['id']}/send"), json={"change_note": "Rib added"},
+                            headers=sales)
+    assert res.status_code == 400 and "1 high risk not on this offer" in res.json()["detail"]
+
+
+async def test_a_supplement_counts_a_risk_the_offer_showed(client, risky, session_factory):
+    """R6: a supplement adds to the offer the customer read: a high risk
+    shown on it is stated; the supplement asks no reason for it."""
+    from tests.conftest import login, ENGINEER_PASSWORD
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    cid = risky["change_id"]
+    async with session_factory() as s:
+        qd = Department(name="Quality", flow_type="action", is_active=True)
+        s.add(qd)
+        await s.flush()
+        u = User(organization_id=(await s.get(User, risky["users"]["sales"])).organization_id,
+                 username="off-quality", email="off-quality@test.io", full_name="Offer quality",
+                 role="engineer", hashed_password=get_password_hash("role-secret-1"),
+                 is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=qd.id))
+        await s.commit()
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    q = await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+    o = await _create(client, sales, cid)
+    risks = o["data"]["risks"]
+    for r in risks:
+        r.update(show=r["concern_id"] == risky["risk_id"])
+    assert (await client.patch(_url(cid, f"/{o['id']}"), json={
+        "data": {"risks": risks, "timing": {"include": False}}}, headers=sales)).status_code == 200
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
+                              headers=sales)).status_code == 200
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+    assert r.json()["status"] == "approved", r.text
+    await _raise_position(session_factory, risky, 1500)
+    s1 = await _supplement(client, cid, sales)
+    assert s1["send_list"]["high_risks"] == []
+    res = await client.post(_url(cid, f"/{s1['id']}/send"),
+                            json={"change_note": "Insert rework quoted higher"}, headers=sales)
+    assert res.status_code == 200, res.text
