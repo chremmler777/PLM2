@@ -270,8 +270,14 @@ async def test_an_edit_after_the_lock_keeps_the_set_locked(
     part = await client.post("/api/v1/parts", json={
         "project_id": seed["project_id"], "part_number": "ART-LT9b",
         "name": "Part", "part_type": "internal_mfg"}, headers=admin_auth)
+    # C16 (ASSESSMENT_V2): an edit after the lock says why
     r = await client.post(f"/api/v1/changes/{cid}/impacted-items",
                           json={"part_id": part.json()["id"]}, headers=admin_auth)
+    assert r.status_code == 400 and "say why it changes" in r.json()["detail"]
+    r = await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                          json={"part_id": part.json()["id"],
+                                "reason": "Customer added the mirror part"},
+                          headers=admin_auth)
     assert r.status_code == 200, r.text
     async with session_factory() as s:
         assert (await s.get(ChangeRequest, cid)).impact_confirmed_at is not None
