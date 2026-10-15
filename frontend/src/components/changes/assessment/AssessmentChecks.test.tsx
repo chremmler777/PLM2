@@ -6,6 +6,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import type { ChangeConcern } from '../../../types/change'
 
+vi.mock('../scoping/AnswerForm', () => ({ default: () => <div data-testid="answer-form" /> }))
 vi.mock('../../../api/changes', () => ({
   changesApi: {
     closeCheck: vi.fn().mockResolvedValue({}),
@@ -79,5 +80,24 @@ describe('AssessmentChecks (spec §4)', () => {
       resolution_note: '2.4 mm', can_reopen: false, can_check: false })], false))
     expect(screen.getByTestId('achk-closed-11')).toBeTruthy()
     expect(screen.queryByTestId('achk-reopen-11')).toBeNull()
+  })
+})
+
+describe('AssessmentChecks questions (C8)', () => {
+  const q = (over: Partial<ChangeConcern> = {}): ChangeConcern => ({
+    id: 21, change_id: 7, kind: 'needs_info', note: 'Volume 2027?', raised_by: 5,
+    raised_at: '2026-10-15T10:00:00Z', is_open: true, flag_type: 'question',
+    check_what: 'volume', answer_from: 'customer', department_id: 3, ...over,
+  })
+
+  it('who may answer gets the answer form in the bucket', () => {
+    render(view([q({ can_answer: true })], false))
+    expect(screen.getByTestId('achk-answer-21')).toBeTruthy()
+  })
+
+  it('who may not answer only reads it', () => {
+    render(view([q({ can_answer: false })], false))
+    expect(screen.getByTestId('achk-q-21')).toBeTruthy()
+    expect(screen.queryByTestId('achk-answer-21')).toBeNull()
   })
 })

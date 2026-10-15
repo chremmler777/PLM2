@@ -221,6 +221,8 @@ async def test_question_holds_only_own_submit_and_reaches_sales_owner(
     rows = [t for t in tasks if t.get("kind") == "obtain_info"
             and t["change_id"] == a["cid"]]
     assert rows and "Annual volume" in (rows[0].get("customer_copy") or "")
+    # answered in the asking department's bucket, not the read-only scoping tab
+    assert rows[0]["target_tab"] == "assessments"
     # Sales answers (Assumed); the asker is told; Tool Engineer closes it
     res = await client.post(_url(a, f"/concerns/{qid}/answer"), json={
         "answer_kind": "assumed", "assumed_value": "120000", "assumed_unit": "pcs/yr",

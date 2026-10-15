@@ -1000,6 +1000,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'summation.grams': { de: 'g', en: 'g' },
   'tasks.kind.costing_input': { de: 'Kosten erfassen', en: 'Enter costs' },
+  'tasks.kind.estimate_low': { de: 'Angebot über Schätzung: Nachtrag oder übernehmen', en: 'Quote above the estimate: supplement or absorb' },
   'tasks.kind.create_quote': { de: 'Angebot erstellen', en: 'Create quote' },
   'tasks.hint.create_quote': {
     de: 'Angebot aus der Kostenzusammenfassung erstellen',

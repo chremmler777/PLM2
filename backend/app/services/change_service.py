@@ -3839,6 +3839,8 @@ class ChangeService:
                     "concern_id": newest.id,
                     "department_id": newest.department_id,
                     "since": newest.raised_at, "customer_copy": None,
+                    # answered in the asking department's bucket
+                    "target_tab": "assessments",
                 })
             elif questions and c.status not in ("captured", "scoping"):
                 if in_sales:
@@ -3853,6 +3855,10 @@ class ChangeService:
                         "since": newest.raised_at,
                         # a customer question: the mail text to copy
                         "customer_copy": _MS.customer_copy(c, newest),
+                        # C8: a question from an assessment is answered in
+                        # the asking department's bucket
+                        **({"target_tab": "assessments"}
+                           if c.status == "in_assessment" else {}),
                     })
             elif questions:
                 am_author = getattr(user, "acts_as_department_id", None) is None

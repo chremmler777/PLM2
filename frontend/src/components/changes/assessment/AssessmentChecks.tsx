@@ -20,8 +20,9 @@ import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import CustomerCopy from '../scoping/CustomerCopy'
+import AnswerForm from '../scoping/AnswerForm'
 import {
-  CHECK_WHAT, type AnswerFrom, type ChangeConcern, type CheckWhat,
+  CHECK_WHAT, type AnswerFrom, type Attachment, type ChangeConcern, type CheckWhat,
 } from '../../../types/change'
 
 const input = 'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100'
@@ -37,7 +38,12 @@ export const asksFrom = (c: ChangeConcern, deptId: number) =>
 
 export default function AssessmentChecks({
   changeId, departmentId, departmentName, concerns, editable, onChanged,
+  attachments = [], confirmerName = null,
 }: {
+  /** The change's attachments: an answerer picks the filed customer mail. */
+  attachments?: Attachment[]
+  /** Who confirms an Assumed answer by default (Sales owner, else lead). */
+  confirmerName?: string | null
   changeId: number
   departmentId: number
   departmentName: string
@@ -79,7 +85,8 @@ export default function AssessmentChecks({
         </div>
       )}
       {questions.map((q) => (
-        <QuestionRow key={q.id} changeId={changeId} q={q} editable={editable} onDone={refresh} />
+        <QuestionRow key={q.id} changeId={changeId} q={q} editable={editable} onDone={refresh}
+          attachments={attachments} confirmerName={confirmerName} />
       ))}
       {editable && <AskQuestion changeId={changeId} departmentId={departmentId} onDone={refresh} />}
     </div>
@@ -257,8 +264,9 @@ function ClosedCheck({ changeId, c, onDone }: { changeId: number; c: ChangeConce
   )
 }
 
-function QuestionRow({ changeId, q, editable, onDone }: {
+function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName }: {
   changeId: number; q: ChangeConcern; editable: boolean; onDone: () => void
+  attachments: Attachment[]; confirmerName: string | null
 }) {
   const [note, setNote] = useState('')
   const close = useMutation({
@@ -283,6 +291,14 @@ function QuestionRow({ changeId, q, editable, onDone }: {
         <p className="text-xs text-slate-400">{t('achk.waiting')}</p>
       )}
       {q.customer_copy && <CustomerCopy text={q.customer_copy} testId={`achk-copy-${q.id}`} />}
+      {/* Sales, PM or the asking department answer here (C8): Confirmed or
+          Assumed, as for any question. */}
+      {q.can_answer && !q.answered_at && (
+        <div data-testid={`achk-answer-${q.id}`}>
+          <AnswerForm changeId={changeId} concern={q} attachments={attachments}
+            confirmerName={confirmerName} onDone={onDone} />
+        </div>
+      )}
       {editable && (
         <div className="flex gap-2 items-center">
           <input className={`${input} flex-1`} value={note} placeholder={t('achk.closeNote')}

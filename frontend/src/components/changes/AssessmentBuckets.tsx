@@ -449,6 +449,8 @@ export default function AssessmentBuckets({
                   <AssessmentChecks changeId={changeId} departmentId={row.id}
                     departmentName={deptName(row.id)}
                     concerns={concerns as ChangeConcern[]}
+                    attachments={change.attachments ?? []}
+                    confirmerName={change.sales_owner_name ?? change.lead_name ?? null}
                     editable={isMine && editable && !(a?.submitted_at)} />
                 )}
 

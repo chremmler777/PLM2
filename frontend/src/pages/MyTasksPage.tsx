@@ -255,6 +255,9 @@ function FormsSection() {
 }
 
 
+// Kinds whose row may name its own tab (it wins over TASK_TAB).
+const OWN_TAB_KINDS = new Set(['obtain_info'])
+
 // Where each kind of change task is actually done, and how it reads in a list.
 const TASK_TAB: Record<string, string> = {
   kickoff: '', hold_resume: '', scoping_wrapup: '?tab=scoping',
@@ -266,7 +269,7 @@ const TASK_TAB: Record<string, string> = {
   index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
   need_by_tell: '', set_quote_deadline: '', pick_impacted: '?tab=impacted',
   send_rejection: '?tab=scoping',
-  costing_input: '?tab=costing',
+  costing_input: '?tab=costing', estimate_low: '?tab=commercial',
   create_quote: '?tab=commercial',
   // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
   // publishes from the same card.
@@ -293,7 +296,11 @@ const TASK_TAB: Record<string, string> = {
 /** Where a task row leads: its tab, plus `task=<kind>` so the change opens
  *  with the task card ("Your part: ..., due ... Next: ..."). */
 function taskLink(task: Pick<ChangeTask, 'kind' | 'change_id' | 'department_id' | 'target_tab' | 'deviation_id' | 'side'>): string {
-  const tab = TASK_TAB[task.kind] ?? (task.target_tab ? `?tab=${task.target_tab}` : '');
+  // C8: a question asked from an assessment names its own tab (the asking
+  // department's bucket), the scoping tab only reads it there
+  const tab = (OWN_TAB_KINDS.has(task.kind) && task.target_tab)
+    ? `?tab=${task.target_tab}`
+    : TASK_TAB[task.kind] ?? (task.target_tab ? `?tab=${task.target_tab}` : '');
   const params = new URLSearchParams(tab.replace(/^\?/, ''));
   params.set('task', task.kind);
   if (task.department_id != null) params.set('dept', String(task.department_id));
