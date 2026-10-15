@@ -183,9 +183,10 @@ export const salesChapter: ContentChapter = {
       blocks: [
         {
           steps: [
-            { title: '"Customer accepted"', body: 'Enter the "Release deadline" the customer agreed and "Confirm acceptance". The release deadline starts here.' },
-            { title: 'Or "Customer declined"', body: 'This cannot be undone. The offer is closed and the change cannot be approved on it.' },
-            { title: 'Sign-offs', body: 'PM and Quality then give their sign-offs. Approval needs all three.' },
+            { title: '"Customer accepted"', body: 'Nothing is preselected. Pick the PO or the customer\'s mail filed on the change, or type the PO number. Answer "PO matches offer vN exactly?" (no: name the parts that differ and any other P/Ns), tick "This mail says yes to vN at <total>", check the "Release deadline" (prefilled from the need-by or the weeks from order) and "Confirm acceptance". A part index that moved since the offer is shown as a warning.' },
+            { title: 'Or "Still talking"', body: 'Set the next contact date (5 working days by default). Your task stays, due on that date. A new price is a new version.' },
+            { title: 'Or "Customer declined"', body: 'Name the customer\'s reference or pick the filed mail. This cannot be undone: the change is rejected and you get the task to send the rejection letter.' },
+            { title: 'Sign-offs', body: 'PM and Quality then give their sign-offs. The change is approved on its own with the last of the three.' },
           ],
         },
         { shot: 'sales-customer-response', alt: 'The "Customer response" block on v2 with "Customer accepted", "Customer declined" and the sign-off buttons below.' },

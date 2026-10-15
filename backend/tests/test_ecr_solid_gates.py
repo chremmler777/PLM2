@@ -27,7 +27,7 @@ from app.models.change import ChangeRequest, ChangeTransitionDeviation
 from app.models.entities import User
 from app.models.workflow import Department, UserDepartment
 from app.services import cm_switches
-from tests.conftest import login, lock_impact
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, login, lock_impact
 
 pytestmark = pytest.mark.asyncio
 ACTS = "X-Acts-As-Department"
@@ -577,7 +577,7 @@ async def test_customer_acceptance_closes_the_open_price(
         client, admin, seed, depts, people, session_factory):
     cid = await _change(client, admin, seed, session_factory, "quoted", price_open=True)
     r = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": _DUE}, headers=admin)
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _DUE}, headers=admin)
     assert r.status_code == 200, r.text
     async with session_factory() as s:
         assert (await s.get(ChangeRequest, cid)).price_open is False
@@ -738,11 +738,14 @@ async def test_approval_and_release_use_one_signoff_rule_and_resign_is_the_way_o
     at approval as at release; signing again for the latest offer is the
     way out, at quoted and later (no dead end, R18)."""
     cid = await _change(client, admin, seed, session_factory, "quoted",
-                        customer_response="accepted",
                         release_due_date=datetime.utcnow() + timedelta(days=60))
     await _offer(session_factory, cid, 1)
-    await _sign(client, people, cid)
+    await _sign(client, people, cid)      # signed on v1 before any answer
     await _offer(session_factory, cid, 2)  # v2 went out after the signatures
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid)
+                        .values(customer_response="accepted"))
+        await s.commit()
     pm = people["Project Manager"][1]
     r = await client.post(f"/api/v1/changes/{cid}/transition",
                           json={"to_status": "approved"}, headers=pm)
@@ -753,9 +756,8 @@ async def test_approval_and_release_use_one_signoff_rule_and_resign_is_the_way_o
     assert keys["pm_signoff"]["sides"] == ["pm"] and keys["pm_signoff"]["detail"] == "v2"
     assert keys["quality_signoff"]["exits"] == ["sign"]
     await _sign(client, people, cid)
-    r = await client.post(f"/api/v1/changes/{cid}/transition",
-                          json={"to_status": "approved"}, headers=pm)
-    assert r.status_code == 200, r.text
+    # §7: the re-sign on v2 was the last missing piece: approved on its own
+    assert (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()["status"] == "approved"
     # a supplement after approval: release names the sides, signing clears it
     await _offer(session_factory, cid, 3)
     async with session_factory() as s:
@@ -909,7 +911,7 @@ async def test_acceptance_withdraws_a_pending_absorb(
         "reason_code": "small_amount", "note": "EUR 300 over, not worth it"},
         headers=people["Sales"][1])).json()
     r = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": _DUE}, headers=admin)
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _DUE}, headers=admin)
     assert r.status_code == 200, r.text
     rows = (await client.get(f"/api/v1/changes/{cid}/deviations", headers=admin)).json()
     assert next(d for d in rows if d["id"] == dev["id"])["status"] == "withdrawn"

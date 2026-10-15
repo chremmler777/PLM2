@@ -16,7 +16,7 @@ from app.models.change import ChangeConcern, ChangeRequest
 from app.models.change_cost import CostingPosition
 from app.models.change_offer import ChangeOffer
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import login, ENGINEER_PASSWORD
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, login, ENGINEER_PASSWORD
 
 pytestmark = pytest.mark.asyncio
 
@@ -338,10 +338,10 @@ async def test_expired_offer_acceptance_needs_a_reason(client, offer_world,
 
     due = (datetime.utcnow() + timedelta(days=90)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due}, headers=sales)
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due}, headers=sales)
     assert res.status_code == 400 and "expired" in res.json()["detail"]
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due,
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due,
         "expired_override_reason": "customer confirmed by mail"}, headers=sales)
     assert res.status_code == 200, res.text
     assert res.json()["accepted_offer_id"] == o["id"]
@@ -360,7 +360,7 @@ async def test_declined_marks_the_offer(client, offer_world):
                        json={"data": {"timing": {"include": False}}}, headers=sales)
     await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                            json={"response": "declined"}, headers=sales)
+                            json={"response": "declined", **DECLINE_EVIDENCE}, headers=sales)
     assert res.status_code == 200, res.text
     assert (await client.get(_url(cid), headers=sales)).json()[0]["status"] == "declined"
 
@@ -417,12 +417,12 @@ async def test_customer_response_needs_sales_rights_and_quoted(client, offer_wor
                        await _auth(client, "tool"))
     # still quoting: nothing is out with the customer yet
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                            json={"response": "declined"}, headers=sales)
+                            json={"response": "declined", **DECLINE_EVIDENCE}, headers=sales)
     assert res.status_code == 400 and "quoted" in res.json()["detail"]
     await _sent_v1(client, sales, cid)
     for who in (pm, tool):
         res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                                json={"response": "declined"}, headers=who)
+                                json={"response": "declined", **DECLINE_EVIDENCE}, headers=who)
         assert res.status_code == 403
 
 
@@ -458,7 +458,7 @@ async def test_offer_is_closed_after_acceptance(client, offer_world):
     v1 = await _sent_v1(client, sales, cid)
     due = (datetime.utcnow() + timedelta(days=90)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due}, headers=sales)
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due}, headers=sales)
     assert res.status_code == 200, res.text
     res = await client.post(_url(cid), headers=sales)
     assert res.status_code == 400

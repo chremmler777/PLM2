@@ -1,4 +1,4 @@
-from tests.conftest import post_active
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, post_active
 # backend/tests/test_changes.py
 import pytest
 from datetime import datetime, timedelta
@@ -256,7 +256,7 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
 
     # record customer acceptance
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                            json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
+                            json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     assert res.status_code == 200, res.text
     # PM signs (engineer), Quality signs (admin) — must be different users
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",
@@ -269,9 +269,7 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",
                             json={"role": "quality"}, headers=admin_auth)
     assert res.status_code == 200, res.text
-    # now approve works
-    res = await _transition(client, eng_auth, cid, "approved")
-    assert res.status_code == 200, res.text
+    # ECR-solid §7: the last of the three approves on its own
     assert res.json()["status"] == "approved"
 
 
@@ -282,7 +280,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
+                      json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
@@ -304,7 +302,7 @@ async def test_release_activates_revisions_and_stamps_eng_level(
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
+                      json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
@@ -705,7 +703,7 @@ async def test_sign_off_department_gating(
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
+                      json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
 
     # eng is a Quality department member (departments fixture) -> quality sign-off OK
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",

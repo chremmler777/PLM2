@@ -158,3 +158,156 @@ async def test_offer_states_index_and_warns_on_an_older_one(
     res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
     assert res.status_code == 200, res.text
     assert {"number": "886.197", "index": "C", "newer": None} in res.json()["indexes"]
+
+
+# ---------------------------------------------------------------------------
+# §7 the customer's answer (C4, C12) and approval on the last of three
+# ---------------------------------------------------------------------------
+_DUE = "2026-12-18T00:00:00"
+_YES = {"response": "accepted", "release_due_date": _DUE, "ref": "PO 4500123456",
+        "po_match": "yes", "confirm_total": True}
+
+
+@pytest.fixture
+async def quoted(client, session_factory, offer_world):
+    """offer_world with v1 sent (quoted) and a Quality member."""
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    async with session_factory() as s:
+        q = Department(name="Quality", flow_type="action", is_active=True)
+        s.add(q)
+        await s.flush()
+        u = User(organization_id=(await s.get(User, offer_world["users"]["sales"])).organization_id,
+                 username="off-quality", email="off-quality@test.io",
+                 full_name="Offer quality", role="engineer",
+                 hashed_password=get_password_hash("role-secret-1"),
+                 is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=q.id))
+        await s.commit()
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 200, res.text
+    return {**offer_world, "offer_id": o["id"], "quality_id": u.id}
+
+
+async def _answer(client, cid, auth, body):
+    return await client.post(f"/api/v1/changes/{cid}/customer-response",
+                             json=body, headers=auth)
+
+
+async def test_accept_needs_evidence_match_and_the_total(client, quoted, session_factory):
+    from app.models.change_offer import ChangeOffer
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    # NEGATIVE: no evidence, empty evidence, no match answer, a "no" without
+    # what differs, the total not confirmed
+    for body, words in (
+            ({**_YES, "ref": None}, "evidence"),
+            ({**_YES, "ref": "ok"}, "says nothing"),
+            ({**_YES, "po_match": None}, "PO matches offer v1"),
+            ({**_YES, "po_match": "no"}, "name the parts"),
+            ({**_YES, "confirm_total": False}, "Confirm the customer says yes to v1")):
+        res = await _answer(client, cid, sales, body)
+        assert res.status_code == 400, body
+        assert words in res.json()["detail"], res.json()["detail"]
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_response"] == "accepted"
+    async with session_factory() as s:
+        o = await s.get(ChangeOffer, quoted["offer_id"])
+        assert o.status == "accepted"
+        assert o.accept_evidence["ref"] == "PO 4500123456"
+        assert (o.accept_evidence["po_match"], o.accept_evidence["version"]) == ("yes", 1)
+        assert o.answered_by == quoted["users"]["sales"]
+
+
+async def test_accept_with_a_filed_mail_never_another_changes(client, quoted, session_factory, seed):
+    from app.models.change import ChangeAttachment, ChangeRequest
+    cid = quoted["change_id"]
+    async with session_factory() as s:
+        other = ChangeRequest(change_number="C-O-2", title="other", reason="x",
+                              change_type="physical_part", project_id=seed["project_id"],
+                              raised_by=quoted["users"]["sales"], customer_relevant=True,
+                              status="quoted")
+        s.add(other)
+        await s.flush()
+        mine = ChangeAttachment(change_id=cid, kind="customer_email", filename="PO yes.msg",
+                                stored_path="x", content_type="application/vnd.ms-outlook",
+                                size_bytes=1, sha256="0" * 64,
+                                uploaded_by=quoted["users"]["sales"])
+        theirs = ChangeAttachment(change_id=other.id, kind="customer_email",
+                                  filename="other.msg", stored_path="y",
+                                  content_type="application/vnd.ms-outlook",
+                                  size_bytes=1, sha256="1" * 64,
+                                  uploaded_by=quoted["users"]["sales"])
+        s.add_all([mine, theirs])
+        await s.commit()
+    sales = await _auth(client, "sales")
+    res = await _answer(client, cid, sales, {**_YES, "ref": None, "attachment_id": theirs.id})
+    assert res.status_code == 400 and "filed on this change" in res.json()["detail"]
+    res = await _answer(client, cid, sales, {**_YES, "ref": None, "attachment_id": mine.id})
+    assert res.status_code == 200, res.text
+
+
+async def test_declined_rejects_with_the_customers_ref_and_letter_task(client, quoted):
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    res = await _answer(client, cid, sales, {"response": "declined"})
+    assert res.status_code == 400            # NEGATIVE: no reference
+    res = await _answer(client, cid, sales, {"response": "declined",
+                                             "ref": "Mail 2026-10-14 Mr Klein: too expensive"})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "rejected"
+    assert body["rejection_reason"].startswith("Customer declined offer v1")
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+    rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
+    assert any(t["kind"] == "send_rejection" and t["change_id"] == cid for t in rows)
+
+
+async def test_still_talking_keeps_the_task_due_on_the_next_contact(client, quoted):
+    from app.utils.clock import business_today
+    from datetime import timedelta
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    past = (business_today() - timedelta(days=2)).isoformat()
+    res = await _answer(client, cid, sales, {"response": "negotiating", "next_contact": past})
+    assert res.status_code == 400            # NEGATIVE: a contact in the past
+    nxt = (business_today() + timedelta(days=9)).isoformat()
+    res = await _answer(client, cid, sales, {"response": "negotiating", "next_contact": nxt})
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_next_contact"] == nxt
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+    rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
+    row = next(t for t in rows if t["kind"] == "customer_response" and t["change_id"] == cid)
+    assert str(row["due_date"]).startswith(nxt)
+
+
+async def test_approval_follows_the_last_of_acceptance_and_both_signatures(client, quoted):
+    cid = quoted["change_id"]
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    from tests.conftest import login, ENGINEER_PASSWORD
+    q = await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=pm)
+    assert res.status_code == 200, res.text
+    res = await _answer(client, cid, sales, _YES)
+    # NEGATIVE: Quality has not signed: no approval yet
+    assert res.json()["status"] == "quoted"
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=q)
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "approved"
+
+
+async def test_switch_off_keeps_the_old_answer(client, quoted, monkeypatch):
+    monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", False)
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    res = await _answer(client, cid, sales, {"response": "accepted", "release_due_date": _DUE})
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "quoted"

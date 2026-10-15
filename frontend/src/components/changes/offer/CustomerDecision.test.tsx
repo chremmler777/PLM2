@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { addDaysIso, todayIso } from '../../../lib/format'
-import CustomerDecision from './CustomerDecision'
+import CustomerDecision, { addWorkingDaysIso } from './CustomerDecision'
 import InternalApproval from './InternalApproval'
 import { changesApi } from '../../../api/changes'
 import type { ChangeDetail } from '../../../types/change'
@@ -53,8 +53,8 @@ describe('CustomerDecision', () => {
     await waitFor(() => expect(changesApi.signOff).toHaveBeenCalledWith(7, 'pm'))
   })
 
-  it('requires a release date before recording customer acceptance', async () => {
-    wrap(<CustomerDecision change={change()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+  it('requires a release date before recording customer acceptance (switch off)', async () => {
+    wrap(<CustomerDecision change={change({ commercial_v2: false })} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
     const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
@@ -64,8 +64,8 @@ describe('CustomerDecision', () => {
       { release_due_date: '2026-11-30T23:59:59Z', release_due_reason: null }))
   })
 
-  it('asks for an override reason when the latest sent offer has expired', async () => {
-    wrap(<CustomerDecision change={change()} latestSent={sent()} canRespond
+  it('asks for an override reason when the latest sent offer has expired (switch off)', async () => {
+    wrap(<CustomerDecision change={change({ commercial_v2: false })} latestSent={sent()} canRespond
       canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
     expect(screen.getByTestId('accept-expired').textContent).toContain('1 Sep 2026')
@@ -85,8 +85,8 @@ describe('CustomerDecision', () => {
     expect(screen.queryByTestId('accept-override')).toBeNull()
   })
 
-  it('asks for confirmation before recording a decline (irreversible)', async () => {
-    wrap(<CustomerDecision change={change()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+  it('asks for confirmation before recording a decline (irreversible, switch off)', async () => {
+    wrap(<CustomerDecision change={change({ commercial_v2: false })} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer declined'))
     expect(changesApi.customerResponse).not.toHaveBeenCalled()
     expect(screen.getByTestId('decline-confirm-box').textContent).toContain('cannot be undone')
@@ -132,6 +132,68 @@ describe('CustomerDecision', () => {
     expect(screen.getByRole('button', { name: /Quality sign-off/ })).toBeDefined()
     expect(screen.queryByRole('button', { name: /PM sign-off/ })).toBeNull()
     expect(screen.queryByText('Customer accepted')).toBeNull()
+  })
+})
+
+describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
+  afterEach(cleanup)
+  beforeEach(() => { vi.clearAllMocks() })
+  const mail = { id: 81, filename: 'PO 4500123456.msg', content_type: 'x', size_bytes: 1, phase: 'baseline',
+    kind: 'customer_email', created_at: '2026-10-14T10:00:00' } as const
+  const valid = () => sent({ expired: false, days_left: 12, valid_until: addDaysIso(todayIso(), 12),
+    totals: { base: 0, factors: [], risks_total: 0, scrap: 0, free: 0, total_one_time: 4200 } as OfferOut['totals'],
+    index_changes: [{ number: '886.197', offer: 'C', now: 'D' }] })
+
+  it('accept needs evidence, the PO match and the confirmed total; nothing preselected', async () => {
+    wrap(<CustomerDecision change={change({ release_due_date: '2026-12-18T00:00:00', attachments: [mail] })}
+      latestSent={valid()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
+    expect((screen.getByTestId('po-match-yes') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByTestId('po-match-no') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByTestId('accept-index-warning').textContent).toContain('886.197 C → D')
+    // NEGATIVE: no evidence yet
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('answer-ref'), { target: { value: 'ok' } })
+    fireEvent.click(screen.getByTestId('po-match-yes'))
+    fireEvent.click(screen.getByTestId('accept-total'))
+    expect(confirm.disabled).toBe(true)      // 'ok' is no evidence
+    fireEvent.change(screen.getByTestId('answer-mail'), { target: { value: '81' } })
+    // NEGATIVE: a "no" needs what differs
+    fireEvent.click(screen.getByTestId('po-match-no'))
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('answer-differs'), { target: { value: '886.198 added on the PO' } })
+    expect(confirm.disabled).toBe(false)
+    expect(screen.getByTestId('accept-box').textContent).toContain('This mail says yes to v1 at')
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'accepted', expect.objectContaining({
+      attachment_id: 81, po_match: 'no', confirm_total: true, differs: '886.198 added on the PO' })))
+  })
+
+  it('still talking records the next contact, +5 working days by default', async () => {
+    wrap(<CustomerDecision change={change()} latestSent={valid()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByTestId('customer-talking'))
+    fireEvent.click(screen.getByTestId('talk-confirm'))
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'negotiating',
+      { next_contact: addWorkingDaysIso(todayIso(), 5) }))
+  })
+
+  it('decline needs the customer reference and says the change is rejected', async () => {
+    wrap(<CustomerDecision change={change()} latestSent={valid()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer declined'))
+    expect(screen.getByTestId('decline-confirm-box').textContent).toContain('rejection letter')
+    const confirm = screen.getByTestId('decline-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)      // NEGATIVE: no reference
+    fireEvent.change(screen.getByTestId('answer-ref'), { target: { value: 'Mail 14 Oct, too expensive' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'declined',
+      { ref: 'Mail 14 Oct, too expensive' }))
+  })
+
+  it('every viewer reads who signed, when and on which version', () => {
+    wrap(<CustomerDecision change={change({ pm_signed_by: 3, pm_signed_by_name: 'Pat PM', pm_signed_at: '2026-10-14T09:00:00',
+      pm_signed_offer_id: 10 })} latestSent={valid()} canRespond={false} canSignPm={false} canSignQuality={false} userId={5} />)
+    expect(screen.getByTestId('signers').textContent).toBe('PM: Pat PM, 14 Oct 2026, v1 · Quality: pending')
   })
 })
 

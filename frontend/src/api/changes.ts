@@ -135,6 +135,10 @@ export const changesApi = {
       release_due_date?: string; release_due_reason?: string | null;
       /** Required by the server when the latest sent offer is past valid-until. */
       expired_override_reason?: string | null;
+      /** ECR-solid §7 (C4/C12): evidence, PO match, confirmed total, next contact. */
+      attachment_id?: number; ref?: string; po_match?: 'yes' | 'no'; differs?: string
+      confirm_total?: boolean; next_contact?: string; note?: string
+      price_drop_code?: string; price_drop_note?: string
     },
   ) =>
     client.post(`/v1/changes/${id}/customer-response`, { response, ...body }).then((r) => r.data),

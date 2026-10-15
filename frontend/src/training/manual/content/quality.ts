@@ -45,7 +45,7 @@ export const qualityChapter: ContentChapter = {
             'While the change is "Quoted", the "Offer" tab shows two buttons: "PM sign-off" and ' +
             '"Quality sign-off". Once Sales records "Customer accepted", the cockpit\'s "Next step" ' +
             'says "Sign off (PM and Quality)". Approval needs the customer\'s acceptance and both ' +
-            'sign-offs.',
+            'sign-offs, and follows on its own with the last of the three.',
         },
         {
           points: [

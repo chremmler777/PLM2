@@ -51,6 +51,14 @@ class ChangeOffer(Base):
     received_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_until: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    # ECR-solid §7 (migration 131): what the customer's yes rests on (C12):
+    # {kind: file|mail|po, ref, attachment_id, po_match: yes|no, differs,
+    # total, indexes}; and who recorded the answer on this version.
+    accept_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    answered_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

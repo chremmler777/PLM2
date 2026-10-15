@@ -9,7 +9,7 @@ from app.models.change import ChangeRequest, ChangeChangelog
 from app.models.entities import AuditLog
 from app.models.workflow import WfInstance, WfTemplate, WfStage
 from app.services.change_service import ChangeService
-from tests.conftest import satisfy_capture_gate
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, satisfy_capture_gate
 
 
 async def _mk_change(session, seed, **over):
@@ -449,7 +449,7 @@ async def test_acceptance_requires_release_deadline(client, eng_auth, seed, sess
 
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due,
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due,
         "release_due_reason": "customer PO timing",
     }, headers=eng_auth)
     assert res.status_code == 200, res.text
@@ -470,7 +470,7 @@ async def test_decline_does_not_require_release_deadline(client, eng_auth, seed,
     cid = res.json()["id"]
     await _quote_out(session_factory, cid)
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                            json={"response": "declined"}, headers=eng_auth)
+                            json={"response": "declined", **DECLINE_EVIDENCE}, headers=eng_auth)
     assert res.status_code == 200, res.text
 
 
@@ -485,7 +485,7 @@ async def test_acceptance_release_deadline_audited(client, eng_auth, seed, sessi
     await _quote_out(session_factory, cid)
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
     await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due,
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due,
     }, headers=eng_auth)
     async with session_factory() as session:
         rows = (await session.execute(
@@ -509,7 +509,7 @@ async def _accepted_change(client, eng_auth, seed, title, session_factory):
     await _quote_out(session_factory, cid)
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due,
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due,
     }, headers=eng_auth)
     assert res.status_code == 200, res.text
     return cid

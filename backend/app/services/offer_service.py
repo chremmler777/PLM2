@@ -1356,7 +1356,8 @@ class OfferService:
         from app.services import cm_switches
         commercial = cm_switches.on("COMMERCIAL_V2")
         live_indexes = (await OfferService.part_indexes(session, change)
-                        if any(o.status == "draft" for o in offers) else [])
+                        if any(o.status in ("draft", "sent") for o in offers) else [])
+        live_by = {r["number"]: r["index"] for r in live_indexes}
         out = []
         for o in offers:
             unreadable: list[str] = []
@@ -1378,6 +1379,13 @@ class OfferService:
                            for i in ((snap or {}).get("items") or [])
                            if isinstance(i, dict)]
                 send_list = sent_list if isinstance(sent_list, dict) else None
+            # §7: an offer out with the customer whose part index moved since
+            # (the accept dialog warns; never a refusal)
+            index_changes = ([{"number": i["number"], "offer": i["index"],
+                               "now": live_by[i["number"]]}
+                              for i in indexes if i["number"] in live_by
+                              and live_by[i["number"]] != i["index"]]
+                             if o.status == "sent" else [])
             totals = compute_totals(data, internal)
             diff = None
             if o.version >= 2:
@@ -1489,6 +1497,9 @@ class OfferService:
                 "updated_at": o.updated_at,
                 "diff": diff, "warnings": warnings,
                 "indexes": indexes, "send_list": send_list,
+                "index_changes": index_changes,
+                "accept_evidence": o.accept_evidence,
+                "answered_at": o.answered_at,
                 "issued_by": await OfferService._issued_by(session, change, o),
                 "costing_currency": cost_cur,
                 "costing_totals_by_currency": meta.get("totals_by_currency") or {},

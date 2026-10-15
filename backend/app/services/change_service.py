@@ -3619,8 +3619,11 @@ class ChangeService:
                     "hint": "Build and send the offer",
                 })
             elif (c.status == "quoted" and in_sales and c.customer_relevant
-                    and c.customer_response in (None, "pending")):
-                tasks.append({**await _base(c), "kind": "customer_response"})
+                    and c.customer_response in (None, "pending", "negotiating")):
+                # C4: still talking keeps the task, due on the next contact
+                tasks.append({**await _base(c), "kind": "customer_response",
+                              **({"next_contact": c.customer_next_contact}
+                                 if c.customer_response == "negotiating" else {})})
 
             # The scheduling block. Acceptance leaves two errands in sequence:
             # Scheduling decides how the change reaches the line, then Sales tells
@@ -6079,9 +6082,25 @@ class ChangeService:
         *, release_due_date: Optional[datetime] = None,
         release_due_reason: Optional[str] = None,
         expired_override_reason: Optional[str] = None,
+        answer: Optional[dict] = None, actor: Optional[User] = None,
     ) -> ChangeRequest:
+        """The customer's answer to the offer. With COMMERCIAL_V2 (spec §7,
+        C4, C12) `answer` carries the dialog: accepted needs evidence (a
+        filed file or mail, or a PO number / reference) and, when an offer
+        version went out, "PO matches vN exactly? yes / no (+ what differs)"
+        and the confirmation of the total; still talking ('negotiating')
+        names the next contact date (default +5 working days); declined
+        names the customer's reference and rejects the change (the rejection
+        letter takes over, C4)."""
         if response not in CUSTOMER_RESPONSES:
             raise ChangeError(f"Invalid customer response '{response}'")
+        from app.services import cm_switches
+        if cm_switches.on("COMMERCIAL_V2") and response != "pending":
+            return await ChangeService._record_customer_answer(
+                session, change, response, user_id, answer or {},
+                release_due_date=release_due_date,
+                release_due_reason=release_due_reason,
+                expired_override_reason=expired_override_reason, actor=actor)
         # An acceptance is final: the price and the release deadline were
         # committed on it. A change of mind is a new change, not an edit.
         if change.customer_response == "accepted":
@@ -6137,6 +6156,216 @@ class ChangeService:
         )
         return change
 
+    @staticmethod
+    async def _answer_evidence(session: AsyncSession, change: ChangeRequest,
+                               answer: dict, what: str,
+                               example: str = "PO 4500123456") -> dict:
+        """Evidence of a customer answer (spec §0 Evidence): a file or a
+        customer mail filed on this change (attachment_id), or a reference
+        (PO number, mail reference; >= 5 characters, no 'ok')."""
+        from app.models.change import ChangeAttachment
+        from app.services.cm_rules import reference_refusal
+        att_id = answer.get("attachment_id")
+        if att_id:
+            att = await session.get(ChangeAttachment, int(att_id))
+            if (att is None or att.change_id != change.id or att.kind not in
+                    ("customer_email", "customer_file", "general")):
+                raise ChangeError(
+                    "Pick a customer mail or a file filed on this change")
+            return {"kind": "mail" if att.kind == "customer_email" else "file",
+                    "attachment_id": att.id, "ref": att.filename}
+        ref = (answer.get("ref") or "").strip()
+        why = reference_refusal(ref, what, example)
+        if why:
+            raise ChangeError(why)
+        return {"kind": "po" if answer.get("ref_is_po", True) else "ref",
+                "ref": ref[:255]}
+
+    @staticmethod
+    async def _record_customer_answer(
+        session: AsyncSession, change: ChangeRequest, response: str,
+        user_id: int, answer: dict, *,
+        release_due_date: Optional[datetime], release_due_reason: Optional[str],
+        expired_override_reason: Optional[str], actor: Optional[User],
+    ) -> ChangeRequest:
+        """COMMERCIAL_V2 customer answer (spec §7): see record_customer_response."""
+        from app.models.change_offer import ChangeOffer
+        from app.services.offer_service import OfferService
+        if change.customer_response == "accepted":
+            accepted = (await session.get(ChangeOffer, change.accepted_offer_id)
+                        if change.accepted_offer_id else None)
+            what = f"v{accepted.version}" if accepted is not None else "the quote"
+            raise ChangeError(
+                f"The customer accepted {what}; the answer cannot be changed")
+        if change.status != "quoted":
+            raise ChangeError(
+                "The customer response is recorded while the quote is out "
+                "(status 'quoted')")
+        offer = await OfferService.latest_sent(session, change)
+        now = datetime.utcnow()
+        if response == "negotiating":
+            from datetime import date as _date
+            nxt = answer.get("next_contact")
+            if isinstance(nxt, str) and nxt:
+                nxt = _date.fromisoformat(nxt[:10])
+            if isinstance(nxt, datetime):
+                nxt = nxt.date()
+            if nxt is None:
+                from app.services.due_rules import CUSTOMER_CONTACT_WD, add_wd
+                nxt = add_wd(now, CUSTOMER_CONTACT_WD).date()
+            from app.utils.clock import business_today
+            if nxt < business_today():
+                raise ChangeError("The next contact date is in the past")
+            change.customer_response = "negotiating"
+            change.customer_response_at = now
+            change.customer_response_by = user_id
+            change.customer_next_contact = nxt
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "customer_response_recorded",
+                f"Customer response: still talking, next contact {nxt.isoformat()}",
+                user_id, field_name="customer_response", new_value="negotiating",
+                notes=(answer.get("note") or "").strip() or None)
+            return change
+        if response == "declined":
+            evidence = await ChangeService._answer_evidence(
+                session, change, {**answer, "ref_is_po": False},
+                "The customer's reference for the decline (a filed mail or its "
+                "reference)", "Mail 14 Oct from the buyer")
+            version = f"offer v{offer.version}" if offer is not None else "the quote"
+            await OfferService.apply_customer_response(
+                session, change, "declined", user_id, None)
+            if offer is not None:
+                offer.accept_evidence = evidence
+                offer.answered_at, offer.answered_by = now, user_id
+            change.customer_response = "declined"
+            change.customer_response_at = now
+            change.customer_response_by = user_id
+            change.customer_next_contact = None
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "customer_response_recorded",
+                f"Customer response: declined ({evidence['ref']})", user_id,
+                field_name="customer_response", new_value="declined",
+                notes=evidence["ref"])
+            # C4: no dead end: the change is rejected and the rejection
+            # letter (Sales' send_rejection task) takes over
+            await ChangeService.transition(
+                session, change, "rejected", user_id,
+                rejection_reason=f"Customer declined {version} ({evidence['ref']})")
+            return change
+        # accepted
+        if release_due_date is None and change.release_due_date is None:
+            raise ChangeError(
+                "Recording acceptance requires a release deadline (release_due_date)")
+        evidence = await ChangeService._answer_evidence(
+            session, change, answer,
+            "The evidence of the customer's yes (the PO or mail filed on the "
+            "change, or the PO number)")
+        if offer is not None:
+            match = answer.get("po_match")
+            if match not in ("yes", "no"):
+                raise ChangeError(
+                    f"Say whether the PO matches offer v{offer.version} exactly "
+                    "(yes / no)")
+            differs = (answer.get("differs") or "").strip()
+            if match == "no" and len(differs) < 5:
+                raise ChangeError(
+                    "The PO differs: name the parts that differ and any other "
+                    "P/Ns on it")
+            if not answer.get("confirm_total"):
+                raise ChangeError(
+                    f"Confirm the customer says yes to v{offer.version} at its "
+                    "total (confirm_total)")
+            evidence.update(po_match=match, differs=differs or None,
+                            total=offer.total_one_time, version=offer.version)
+            # spec §7: the index match is computed, a warning only
+            frozen = {i.get("number"): i.get("index") or "" for i in
+                      ((offer.data or {}).get("_snapshot") or {}).get("items") or []
+                      if isinstance(i, dict)}
+            now_idx = {r["number"]: r["index"] for r in
+                       await OfferService.part_indexes(session, change)}
+            evidence["index_changes"] = [
+                {"number": n, "offer": frozen[n], "now": now_idx[n]}
+                for n in frozen if n in now_idx and now_idx[n] != frozen[n]]
+        await OfferService.check_customer_response(
+            session, change, "accepted", expired_override_reason)
+        await OfferService.apply_customer_response(
+            session, change, "accepted", user_id, expired_override_reason)
+        if offer is not None:
+            offer.accept_evidence = evidence
+            offer.answered_at, offer.answered_by = now, user_id
+        change.customer_response = "accepted"
+        change.customer_response_at = now
+        change.customer_response_by = user_id
+        change.customer_next_contact = None
+        if change.price_open:
+            change.price_open = False
+            await ChangeService._settle_estimate_checks(session, change)
+            from app.services.cm_rules import ABSORB_RULE
+            await ChangeService._load_deviations(session, change)
+            for d in change.transition_deviations:
+                if d.guard_key == ABSORB_RULE and d.status == "pending":
+                    d.status = "withdrawn"
+            await ChangeService.append_changelog(
+                session, change, "price_closed",
+                "Open price closed: the customer accepted the offer", user_id,
+                field_name="price_open", old_value=True, new_value=False)
+        if release_due_date is not None:
+            await ChangeService._apply_release_deadline(
+                session, change, release_due_date, release_due_reason, user_id)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "customer_response_recorded",
+            "Customer response: accepted"
+            + (f" v{offer.version}" if offer is not None else "")
+            + f" ({evidence['ref']})", user_id,
+            field_name="customer_response", new_value="accepted",
+            notes=evidence.get("differs"))
+        if offer is not None and evidence.get("po_match") == "no":
+            await ChangeService._on_po_differs(session, change, offer, evidence, user_id)
+        await ChangeService.try_auto_approve(session, change, user_id)
+        return change
+
+    @staticmethod
+    async def _on_po_differs(session: AsyncSession, change: ChangeRequest, offer,
+                             evidence: dict, user_id: int) -> None:
+        """The PO differs from the offer (spec §7): the lead and the Sales
+        owner are told what differs; the §6 scope change card picks it up."""
+        from app.services.notification_service import NotificationService
+        people = [i for i in (change.lead_id, change.sales_owner_id)
+                  if i is not None and i != user_id]
+        await NotificationService.notify_once(
+            session, people, kind="po_differs",
+            subject_key=f"po_differs:{offer.id}",
+            title=f"PO differs from offer v{offer.version}: {change.change_number}"[:255],
+            body=evidence.get("differs"), link=f"/changes/{change.id}?tab=offer")
+
+    @staticmethod
+    async def try_auto_approve(session: AsyncSession, change: ChangeRequest,
+                               user_id: int) -> bool:
+        """Spec §7 (COMMERCIAL_V2): approval is automatic once HARD #4 holds
+        (the customer accepted the current offer, PM and Quality signed it)
+        and no soft rule holds the hop (an open scope change, a price drop
+        waiting for its OK). Logged as the system's step on the actor's
+        last act; False when anything still holds."""
+        from app.services import cm_switches
+        if (not cm_switches.on("COMMERCIAL_V2") or change.status != "quoted"
+                or not change.customer_relevant
+                or change.customer_response != "accepted"):
+            return False
+        if change.pm_signed_by is None or change.quality_signed_by is None:
+            return False
+        if await ChangeService.solid_hard_refusal(session, change, "approved"):
+            return False
+        if await ChangeService._guard_reasons(session, change, "approved"):
+            return False
+        await ChangeService.transition(
+            session, change, "approved", user_id,
+            reason="Approved automatically: the customer accepted the offer "
+                   "and PM and Quality signed it")
+        return True
+
     #: Where a PM / Quality signature may be given (COMMERCIAL_V2): the
     #: quote (HARD #4) through validation (HARD #9 at release).
     SIGNABLE_STATUSES = ("quoted", "approved", "in_implementation", "in_validation")
@@ -6171,9 +6400,11 @@ class ChangeService:
             change.quality_signed_offer_id = offer_id
         await session.flush()
         await ChangeService.append_changelog(
-            session, change, "signed_off", f"{role} sign-off", user_id,
+            session, change, "signed_off", f"{role} sign-off"
+            + (f" for v{latest.version}" if latest is not None else ""), user_id,
             field_name=f"{role}_signed_by", new_value=user_id,
         )
+        await ChangeService.try_auto_approve(session, change, user_id)
         return change
 
     @staticmethod

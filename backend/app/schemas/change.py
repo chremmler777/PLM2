@@ -108,6 +108,21 @@ class CustomerResponseRequest(BaseModel):
     release_due_reason: Optional[str] = None
     # Required to accept when the latest sent offer version has expired.
     expired_override_reason: Optional[str] = None
+    # ECR-solid §7 (COMMERCIAL_V2, C4/C12): the evidence (a customer mail or
+    # file filed on the change, or a PO number / reference), "PO matches vN
+    # exactly?" (+ what differs), the confirmed total; still talking: the
+    # next contact date; declined: the customer's reference.
+    attachment_id: Optional[int] = None
+    ref: Optional[str] = Field(default=None, max_length=255)
+    po_match: Optional[str] = None          # yes | no
+    differs: Optional[str] = Field(default=None, max_length=2000)
+    confirm_total: bool = False
+    next_contact: Optional[date] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+    # §7 [R4] price diff: a lower total than the last version sent needs a
+    # reason pick and a sentence (the PM / Management OK follows).
+    price_drop_code: Optional[str] = None
+    price_drop_note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class SignOffRequest(BaseModel):
@@ -316,6 +331,8 @@ class ChangeResponse(BaseModel):
     sales_owner_name: Optional[str] = None
     # HARD #9 (ECR-solid): a price still open after approval.
     price_open: bool = False
+    # §7 still talking: the next contact date (C4)
+    customer_next_contact: Optional[date] = None
     raised_by: int
     customer_response: str
     pm_signed_by: Optional[int] = None
@@ -323,6 +340,11 @@ class ChangeResponse(BaseModel):
     pm_signed_offer_id: Optional[int] = None
     quality_signed_offer_id: Optional[int] = None
     quality_signed_by: Optional[int] = None
+    # C14: every viewer reads who signed, when (and on which offer: the ids)
+    pm_signed_by_name: Optional[str] = None
+    pm_signed_at: Optional[NaiveUtcDatetime] = None
+    quality_signed_by_name: Optional[str] = None
+    quality_signed_at: Optional[NaiveUtcDatetime] = None
     estimated_cost: Optional[float] = None
     quoted_price: Optional[float] = None
     issuer: Optional[str] = None
@@ -403,6 +425,7 @@ class ChangeResponse(BaseModel):
     # Served switch ASSESSMENT_V2 (spec §4-§5).
     assessment_v2: bool = False
     # Served switch START_AT_RISK (§7a): off = "No start before PO".
+    commercial_v2: bool = True
     start_at_risk_on: bool = True
     # §1: a full ECR started beside a live change carrying the same part.
     related_change_id: Optional[int] = None
@@ -504,6 +527,9 @@ class ChangeResponse(BaseModel):
             row["scoping_v2"] = data.scoping_v2
             row["assessment_v2"] = data.assessment_v2
             row["start_at_risk_on"] = data.start_at_risk_on
+            row["commercial_v2"] = data.commercial_v2
+            row["pm_signed_by_name"] = data.pm_signed_by_name
+            row["quality_signed_by_name"] = data.quality_signed_by_name
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
             row["validated_weight_by_name"] = data.validated_weight_by_name
             row["bank_build_set_by_name"] = data.bank_build_set_by_name

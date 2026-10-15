@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime, timedelta
 
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import login, ENGINEER_PASSWORD, satisfy_capture_gate
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, login, ENGINEER_PASSWORD, satisfy_capture_gate
 
 pytestmark = pytest.mark.asyncio
 
@@ -138,7 +138,7 @@ async def test_sales_chases_the_customer_response_until_it_lands(
 
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due}, headers=sales)
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due}, headers=sales)
     assert res.status_code == 200, res.text
     assert not [t for t in await _tasks(client, sales)
                 if t["kind"] == "customer_response"]

@@ -277,6 +277,9 @@ class ChangeRequest(Base):
     # Sales tasks still show to all of Sales, with this name on them.
     sales_owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
+    # §7 (migration 131): "Still talking" with the customer: the next
+    # contact date (the Sales task is due then, C4).
+    customer_next_contact: Mapped[date | None] = mapped_column(Date, nullable=True)
     # ECR-solid §2 (migration 124): an urgent change (priority 'critical')
     # names its reason (URGENT_REASONS) and evidence; its need-by date is
     # release_due_date. An internal change says what is wrong today (a
@@ -382,6 +385,11 @@ class ChangeRequest(Base):
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
     sales_owner: Mapped["User | None"] = relationship(
         foreign_keys=[sales_owner_id], lazy="selectin")
+    # C14: who signed is shown to every viewer ("PM: name, date, vN")
+    pm_signer: Mapped["User | None"] = relationship(
+        foreign_keys=[pm_signed_by], lazy="selectin", viewonly=True)
+    quality_signer: Mapped["User | None"] = relationship(
+        foreign_keys=[quality_signed_by], lazy="selectin", viewonly=True)
     impact_confirmed_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[impact_confirmed_by], lazy="selectin")
     estimated_weight_by_user: Mapped["User | None"] = relationship(
@@ -411,6 +419,14 @@ class ChangeRequest(Base):
         return self.sales_owner.full_name if self.sales_owner is not None else None
 
     @property
+    def pm_signed_by_name(self) -> Optional[str]:
+        return self.pm_signer.full_name if self.pm_signer is not None else None
+
+    @property
+    def quality_signed_by_name(self) -> Optional[str]:
+        return self.quality_signer.full_name if self.quality_signer is not None else None
+
+    @property
     def impact_confirm_step(self) -> bool:
         """Served flag: does this change use Development's manual impact
         confirm (app/services/cm_switches.py)?"""
@@ -431,6 +447,14 @@ class ChangeRequest(Base):
         waits. The UI reads this one flag."""
         from app.services import cm_switches
         return cm_switches.on("ASSESSMENT_V2")
+
+    @property
+    def commercial_v2(self) -> bool:
+        """Served switch COMMERCIAL_V2 (cm_switches): spec §6-§7 the answer
+        dialog with evidence, the send list, supplements, the scope change
+        card. The UI reads this one flag."""
+        from app.services import cm_switches
+        return cm_switches.on("COMMERCIAL_V2")
 
     @property
     def start_at_risk_on(self) -> bool:

@@ -196,6 +196,15 @@ export interface ChangeRequest {
   /** HARD #9: the offer each signature was given on (C14). */
   pm_signed_offer_id?: number | null;
   quality_signed_offer_id?: number | null;
+  /** C14: who signed and when, shown to every viewer. */
+  pm_signed_by_name?: string | null;
+  pm_signed_at?: string | null;
+  quality_signed_by_name?: string | null;
+  quality_signed_at?: string | null;
+  /** §7 still talking: the next contact date (C4). */
+  customer_next_contact?: string | null;
+  /** Served switch COMMERCIAL_V2 (§6-§7). */
+  commercial_v2?: boolean;
   estimated_cost?: number | null;
   quoted_price?: number | null;
   created_at: string;

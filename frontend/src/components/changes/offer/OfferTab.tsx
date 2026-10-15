@@ -463,7 +463,7 @@ function OfferWorkspace({ props, offers, offer }: {
               hint="Every version sent and every round with the customer, in order. A new version needs a note on what changed.">
               <NegotiationCard changeId={change.id} status={change.status} canWrite={canWrite}
                 offerId={latestSent?.id ?? null} offers={offers} />
-              <CustomerDecision change={change} latestSent={latestSent}
+              <CustomerDecision change={change} latestSent={latestSent} offers={offers}
                 canRespond={canWrite} canSignPm={props.canSignPm}
                 canSignQuality={props.canSignQuality} userId={props.userId} />
             </StepSection>

@@ -20,6 +20,8 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE  # noqa: F401
+
 from app.models.change import ChangeRequest
 from app.models.change_offer import ChangeOffer
 from app.services.change_service import ChangeError, ChangeService
@@ -41,7 +43,7 @@ def _pdf_text(pdf: bytes) -> str:
 async def _accept(client, auth, cid, **extra):
     due = (datetime.utcnow() + timedelta(days=90)).isoformat()
     return await client.post(f"/api/v1/changes/{cid}/customer-response", json={
-        "response": "accepted", "release_due_date": due, **extra}, headers=auth)
+        "response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": due, **extra}, headers=auth)
 
 
 # --- B2 / review 6: receipt date --------------------------------------------
@@ -84,7 +86,7 @@ async def test_acceptance_stops_the_clock_decides_the_bank_build_and_is_final(
     assert "from the accepted offer v1" in bb["action_description"]
     # the answer is final
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                            json={"response": "declined"}, headers=sales)
+                            json={"response": "declined", **DECLINE_EVIDENCE}, headers=sales)
     assert res.status_code == 400
     assert res.json()["detail"].startswith("The customer accepted v1;")
 

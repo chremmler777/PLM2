@@ -1058,6 +1058,41 @@ characters); the version keeps the list and the reason (`data._send`), and
 the changelog reads `offer_sent_with_risk`. A risk shown on the offer
 (priced or only stated) needs no reason. Switch off: no list, no reason.
 
+### The customer's answer with its evidence (ECR-solid §7, C4, C12, 2026-10-15)
+
+With `COMMERCIAL_V2` the "Customer response" block is the Customer answer
+dialog (`ChangeService._record_customer_answer`, `CustomerDecision.tsx`),
+nothing preselected:
+
+- **Accepted** needs evidence: a customer mail or file filed on the change
+  (`attachment_id`, kinds `customer_email`, `customer_file`, `general`) or a
+  PO number / reference (`ref`, `cm_rules.reference_refusal`: 5+ characters,
+  no "ok"). When an offer version went out: "PO matches vN exactly?" (`yes` /
+  `no`, `no` names what differs and other P/Ns: the lead and the Sales owner
+  are told, `po_differs`) and the confirmed total (`confirm_total`, "This
+  mail says yes to vN at <total>"). The index match is computed
+  (`index_changes`: the parts whose index moved since the version was
+  frozen), a warning only. Stored on the offer (`change_offers.accept_evidence`,
+  `answered_at`/`answered_by`, migration 131). The release date is prefilled
+  from the need-by, else from the offer's weeks from order. An expired offer
+  still needs its override reason [KEEP].
+- **Still talking** (`negotiating`) names the next contact date (default +5
+  working days, never in the past; `change_requests.customer_next_contact`).
+  Sales' `customer_response` task stays (C4) and is due on that date.
+- **Declined** names the customer's reference (or the filed mail); the offer
+  is declined and the change goes `quoted -> rejected` in the same request
+  ("Customer declined offer vN (ref)"), so `send_rejection` takes over (C4: no
+  dead end).
+
+**Approval follows on its own** (`ChangeService.try_auto_approve`): on the
+last of acceptance, PM sign-off and Quality sign-off, when HARD #4 holds and no
+soft rule holds `quoted -> approved` (an open scope change, a price drop
+waiting for its OK). The changelog names it ("Approved automatically ...").
+Every viewer reads who signed, when and on which version (`pm_signed_by_name`,
+`pm_signed_at`, `pm_signed_offer_id`; the same for Quality). Switch off: the
+old answer (acceptance with a release date only, decline only marks the
+offer) and the approval by hand.
+
 ### Timing validation at `approved` (2026-09-25)
 
 `approved` opens the Timing tab (`TimingTab.tsx`). The detailed plan is

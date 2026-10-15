@@ -201,7 +201,9 @@ export const pmChapter: ContentChapter = {
             'While the change is "Quoted", the "Offer" tab shows "PM sign-off" and "Quality ' +
             'sign-off". The cockpit asks for them once Sales has recorded "Customer accepted". ' +
             'Approval needs the customer\'s acceptance and both sign-offs. The two sign-offs must ' +
-            'come from two different people.',
+            'come from two different people. The change is approved on its own with the last of ' +
+            'the three, unless an open scope change or a price drop still waits for its OK. Every ' +
+            'viewer reads who signed, when, and on which version ("PM: Pat, 14 Oct 2026, v2").',
         },
         { shot: 'pm-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and "Quality sign-off" still open.' },
       ],

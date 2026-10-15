@@ -24,6 +24,10 @@ logging.getLogger().setLevel(logging.WARNING)
 
 ADMIN_PASSWORD = "admin-secret-1"
 ENGINEER_PASSWORD = "eng-secret-12"
+# ECR-solid §7 (COMMERCIAL_V2): a customer answer carries its evidence; the
+# legacy tests answer with these (test_ecr_solid_commercial pins the rules).
+ACCEPT_EVIDENCE = {"ref": "PO 4500123456", "po_match": "yes", "confirm_total": True}
+DECLINE_EVIDENCE = {"ref": "Mail 2026-10-14 customer declined"}
 
 
 @pytest_asyncio.fixture

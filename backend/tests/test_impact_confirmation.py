@@ -1,4 +1,4 @@
-from tests.conftest import post_active
+from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, post_active
 # backend/tests/test_impact_confirmation.py
 """Task 18: Development owns the affected-items decision. The lead
 proposes impacted items (existing flow, unchanged); a Development department member
@@ -227,11 +227,12 @@ async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departmen
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
+                      json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
-    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
-    res = await _transition(client, eng_auth, cid, "approved")
-    assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"},
+                            headers=admin_auth)
+    # ECR-solid §7: the last of acceptance and both sign-offs approves
+    assert res.json()["status"] == "approved", res.text
     return cid
 
 

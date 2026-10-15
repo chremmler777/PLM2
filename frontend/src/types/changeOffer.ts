@@ -180,6 +180,15 @@ export interface OfferOut {
   /** Spec §6 [R3] (COMMERCIAL_V2): what Send lists; a sent version keeps
    *  what it listed and the high-risk reason. null with the switch off. */
   send_list?: OfferSendList | null
+  /** §7: an offer out with the customer whose part index moved since. */
+  index_changes?: { number: string; offer: string; now: string }[]
+  /** §7 (C12): what the customer's answer on this version rests on. */
+  accept_evidence?: {
+    kind: 'file' | 'mail' | 'po' | 'ref'; ref?: string; attachment_id?: number
+    po_match?: 'yes' | 'no'; differs?: string | null; total?: number; version?: number
+    index_changes?: { number: string; offer: string; now: string }[]
+  } | null
+  answered_at?: string | null
 }
 
 export interface OfferPartIndex {

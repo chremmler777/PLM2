@@ -2012,7 +2012,11 @@ async def customer_response(
             db, change, body.response, current_user.id,
             release_due_date=body.release_due_date,
             release_due_reason=body.release_due_reason,
-            expired_override_reason=body.expired_override_reason)
+            expired_override_reason=body.expired_override_reason,
+            answer=body.model_dump(include={
+                "attachment_id", "ref", "po_match", "differs", "confirm_total",
+                "next_contact", "note", "price_drop_code", "price_drop_note"}),
+            actor=current_user)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
