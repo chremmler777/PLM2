@@ -24,6 +24,9 @@ import { btnSm } from '../common/buttonStyles'
 import CostLineGrid from './CostLineGrid'
 import CostPositions from './CostPositions'
 import CostingSheetBar from './CostingSheetBar'
+import {
+  NoCostButton, SupplierWaitDecisions, SupplierWaitPanel, noCostWords,
+} from './costing/NoCostAndWaits'
 import PlantNotInUseNote from '../common/PlantNotInUseNote'
 import { t } from '../../i18n/cmLabels'
 import { formatDays, formatMoney, formatNumber } from '../../lib/format'
@@ -31,8 +34,14 @@ import type { ChangeDetail, DeptRollup, Summation } from '../../types/change'
 
 /** Finalize / reopen the department's own costing (the backend refuses a
  *  finalize with nothing entered: a zero line is an answer, nothing is not). */
-function FinalizeBar({ changeId, departmentId, finalized }: {
+function FinalizeBar({ changeId, departmentId, finalized, v2 = false, departmentName = '',
+  noCost }: {
   changeId: number; departmentId: number; finalized: boolean
+  /** ASSESSMENT_V2: "<Dept> has no cost" beside Finalize (C18). */
+  v2?: boolean
+  departmentName?: string
+  /** The department's "no cost" answer, when that is how it finalized. */
+  noCost?: string | null
 }) {
   const qc = useQueryClient()
   const refresh = () => {
@@ -53,7 +62,12 @@ function FinalizeBar({ changeId, departmentId, finalized }: {
   return (
     <div data-testid={`costing-finalize-bar-${departmentId}`}
       className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
-      <span>{finalized ? t('costing.finalizedBody') : t('costing.finalizeHint')}</span>
+      <span>{finalized
+        ? (noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalizedBody'))
+        : t('costing.finalizeHint')}</span>
+      {!finalized && v2 && (
+        <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
+      )}
       {finalized ? (
         <button type="button" data-testid={`costing-reopen-${departmentId}`}
           disabled={reopen.isPending} onClick={() => reopen.mutate()}
@@ -109,8 +123,10 @@ function LeadTimeField({ changeId, departmentId, initial }: {
 
 export default function CostingBuckets({
   change, departments, myDepartmentIds, plants, projectPlantId, canSeeAll, editable,
-  isPm = false,
+  isPm = false, canDecideWaits = false,
 }: {
+  /** The lead, PM or admin: §5 "Wait for <vendor>" / "Price on estimate". */
+  canDecideWaits?: boolean
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
   myDepartmentIds: number[]
@@ -222,6 +238,10 @@ export default function CostingBuckets({
       {sheetBar}
       {/* Mexico (Silao) among the change's plants: not in use yet, said once. */}
       <PlantNotInUseNote plants={plants} />
+      {live && change.assessment_v2 && (
+        <SupplierWaitDecisions changeId={changeId} waits={change.open_supplier_waits ?? []}
+          canDecide={canDecideWaits && editable} />
+      )}
       {live && canSeeAll && (nothingCosted || owing.length > 0) && (
         <div role="status" data-testid="costing-readiness"
           className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${nothingCosted
@@ -305,7 +325,13 @@ export default function CostingBuckets({
                         old grid — the grid keeps working, position by position
                         is how departments actually think about it. */}
                     {editable && owesInput(id) && (
-                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
+                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized}
+                        v2={!!change.assessment_v2} departmentName={deptName(id)}
+                        noCost={noCostWords(change.costing_no_cost?.[String(id)])} />
+                    )}
+                    {change.assessment_v2 && (
+                      <SupplierWaitPanel changeId={changeId} departmentId={id}
+                        waits={change.open_supplier_waits ?? []} editable={editable && !finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}
                       departmentName={deptName(id)}

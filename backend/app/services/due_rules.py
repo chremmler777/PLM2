@@ -245,6 +245,9 @@ async def annotate_tasks(session, tasks: list[dict], changes,
             start = start_of(t["kind"], start, since.get(c.id), c.created_at, now)
             due = (add_wd(start, CUSTOMER_CONTACT_WD) if t["kind"] == "customer_response"
                    else task_due(start, c, t["kind"]))
+            # spec §0: a supplier wait pauses the late clock: due at expected-by
+            if t.get("waiting_until") is not None:
+                due = max(due, t["waiting_until"])
             t["due_date"] = due
             t["overdue"] = due < now
         t["late"] = is_late(due, now) if isinstance(due, datetime) else False

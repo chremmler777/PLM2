@@ -1,6 +1,7 @@
 """Costing priced from the cost sheet (spec §15 phase 2): the context the
 costing table needs (plant, currency, cost sheet version, stale review,
 machine classes) and the change's machine class."""
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -146,3 +147,101 @@ async def reopen_department_costing(change_id: int, department_id: int,
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return await _costing_state(db, change_id, current_user)
+
+
+# --- spec §4: "<Dept> has no cost" (C18) and waiting on a supplier ----------
+
+class NoCostIn(BaseModel):
+    reason: str                       # no_work | absorbed | supplier
+    hours: Optional[float] = None     # absorbed: the hours absorbed (> 0)
+
+
+@router.post("/{change_id}/costing/departments/{department_id}/no-cost")
+async def department_no_cost(change_id: int, department_id: int, body: NoCostIn,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """C18: the department has no cost (no work / absorbed + hours / the
+    supplier does it); finalizes its costing. Its members, PM, admin."""
+    from app.services import early_costing
+    change = await _change(db, change_id, current_user)
+    try:
+        await early_costing.no_cost(db, change, department_id, current_user,
+                                    body.reason, body.hours)
+    except early_costing.EarlyCostingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except early_costing.EarlyCostingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _costing_state(db, change_id, current_user)
+
+
+class SupplierWaitIn(BaseModel):
+    department_id: int
+    vendor_name: str
+    asked_on: date
+    expected_by: date
+    position_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+class SupplierWaitCloseIn(BaseModel):
+    reason: str                       # received | price_on_estimate | not_needed
+    note: Optional[str] = None
+
+
+async def _waits(db, change) -> list[dict]:
+    from sqlalchemy import select
+    from app.models.change_cost import SupplierWait
+    from app.services import supplier_wait_service as waits
+    rows = list((await db.execute(
+        select(SupplierWait).where(SupplierWait.change_id == change.id)
+        .order_by(SupplierWait.closed_at.is_not(None), SupplierWait.asked_on,
+                  SupplierWait.id))).scalars().all())
+    return await waits.serialize(db, rows)
+
+
+@router.get("/{change_id}/supplier-waits")
+async def list_supplier_waits(change_id: int,
+                              current_user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    change = await _change(db, change_id, current_user)
+    return await _waits(db, change)
+
+
+@router.post("/{change_id}/supplier-waits")
+async def start_supplier_wait(change_id: int, body: SupplierWaitIn,
+                              current_user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    """Spec §4: the department waits on a supplier (vendor, asked on,
+    expected by). Its members, PM, admin; costing or implementation."""
+    from app.services import supplier_wait_service as waits
+    change = await _change(db, change_id, current_user)
+    try:
+        await waits.create(db, change, current_user, department_id=body.department_id,
+                           vendor_name=body.vendor_name, asked_on=body.asked_on,
+                           expected_by=body.expected_by, position_id=body.position_id,
+                           note=body.note)
+    except waits.SupplierWaitForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except waits.SupplierWaitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _waits(db, change)
+
+
+@router.post("/{change_id}/supplier-waits/{wait_id}/close")
+async def close_supplier_wait(change_id: int, wait_id: int, body: SupplierWaitCloseIn,
+                              current_user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    """Received / not needed (the department), or §5 "Price on estimate"
+    (the lead, PM, admin)."""
+    from app.services import supplier_wait_service as waits
+    change = await _change(db, change_id, current_user)
+    try:
+        await waits.close(db, change, wait_id, current_user, body.reason, body.note)
+    except waits.SupplierWaitForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except waits.SupplierWaitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _waits(db, change)

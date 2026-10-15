@@ -682,6 +682,36 @@ for the whole team." Decision: a pipeline per department.
   cockpit reads "Costing: 3/5 finalized, waiting on ..." (muted, as
   information, during assessment; a wait in costing).
 
+### "<Dept> has no cost" and waiting on a supplier (ECR-solid §4/§5, C18, 2026-10-15)
+Switch `ASSESSMENT_V2` (migration 126: `supplier_waits`).
+- **"<Dept> has no cost"** (C18, `POST /costing/departments/{d}/no-cost`,
+  members, PM, admin): one button beside Finalize instead of an invented
+  zero, nothing preselected: *no work* / *absorbed* (the hours absorbed, an
+  estimate; 0 refused) / *the supplier does it*. It finalizes the
+  department's costing (stored with the finalization on its assessment row,
+  `details.costing_no_cost`; served as `costing_no_cost`; logged
+  `costing_no_cost`); reopen drops it. Refused while the department has a
+  costing position, a cost line with hours or money, or an open supplier
+  wait, naming the colleague ("Dale has an open supplier quote (Waiting on
+  FZ until 3 Nov)"). Toolshop reads *"Will toolmakers spend time on this?"*.
+  The checklist's timing risk stays a costing row (spec rev 6 replaced the
+  audit's "exclude timing_risk" with this button).
+- **Waiting on a supplier** (one state everywhere, `supplier_wait_service`,
+  `GET/POST /supplier-waits`, `POST /supplier-waits/{id}/close`): vendor,
+  asked on (today or earlier), expected by (not in the past), optionally the
+  position it prices; phase *costing* (assessment, costing) or
+  *implementation* (approved, in implementation). Recorded by the
+  department, PM or admin; one open wait per department and vendor. While
+  open: the department's finalize and "no cost" are refused; its
+  `costing_input` row is due at expected-by (the late clock pauses, spec
+  §0, also in the sweep and the lead's Overdue group via `owed_items`); C5
+  lists it ("Waiting on FZ until 3 Nov (Toolshop)"); the header reads
+  *"Waiting on FZ since 7 Oct (Toolshop, day 9 of 27)"*; the daily digest
+  lists it as a wait. It ends *received* / *not needed* (the department) or
+  **Price on estimate** (§5, the lead, PM or admin at close costing; the
+  department is told, `task_new`, to finalize on its estimate); *Wait for
+  FZ (3 Nov)* changes nothing.
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside
@@ -1525,8 +1555,9 @@ internal change's `costing → approved`) waits for every department's
 finalized costing: SOFT rule `costing_not_finalized`, refusal "Costing not
 finalized: Process Engineer (Nathan, due Thu 22 Oct), Toolshop". The
 internal approval is refused on the same rule unless an override of it is
-approved (the hop then consumes it). Supplier waits ("Wait for FZ / Price on
-estimate") come with lane L5.
+approved (the hop then consumes it). Open supplier waits join the line, with
+the lead's pick "Wait for FZ / Price on estimate" (see "<Dept> has no cost
+and waiting on a supplier").
 
 **Absorb.** `POST /changes/{id}/absorb {reason_code: goodwill | small_amount |
 our_error | other, note}` by Sales (customer change), the lead, PM or an

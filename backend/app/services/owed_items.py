@@ -59,14 +59,21 @@ async def owed_items(session: AsyncSession, changes: list,
     out: list[dict] = []
 
     async def add(c, kind: str, key: str, label: str, owner: str, owners,
-                  own: Optional[datetime]) -> None:
+                  own: Optional[datetime], until: Optional[datetime] = None) -> None:
         """owners: a coroutine function for the owner ids, run only
-        with_owners."""
+        with_owners. until: a supplier wait's expected-by (spec §0: it
+        pauses the late clock, the item is due then at the earliest)."""
         start = due_rules.start_of(kind, own, entered.get(c.id), c.created_at, now)
+        due = due_rules.task_due(start, c, kind)
         out.append({"change": c, "kind": kind, "key": key, "label": label,
                     "owner": owner,
                     "owner_ids": sorted(set(await owners())) if with_owners else [],
-                    "due": due_rules.task_due(start, c, kind)})
+                    "due": max(due, until) if until is not None else due})
+
+    from app.services import supplier_wait_service as _sw
+    waits = await _sw.open_by_department(
+        session, [c.id for c in changes if c.status in ("in_assessment", "costing")],
+        "costing")
 
     release_rule = cm_switches.on("RELEASE_V2")
     bound = cm_switches.on("COMMERCIAL_V2")
@@ -76,11 +83,14 @@ async def owed_items(session: AsyncSession, changes: list,
             submitted = [a.submitted_at for a in c.assessments
                          if a.department_id == did and a.submitted_at]
             dept = names.get(did, "A department")
+            wait = waits.get((c.id, did))
             await add(c, "costing_input", f"chg:{c.id}:costing:{did}",
                       f"Costing input: {dept}", dept,
                       lambda c=c, did=did: department_members_of_change_org(
                           session, c, [did]),
-                      max(submitted, default=None))
+                      max(submitted, default=None),
+                      datetime.combine(wait.expected_by, datetime.min.time())
+                      if wait else None)
 
         # sign-offs where the gate is live (the sign_off rows' rule)
         signable = (c.customer_relevant and not mp.is_mother_plant(c)

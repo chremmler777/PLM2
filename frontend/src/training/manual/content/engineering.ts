@@ -186,6 +186,8 @@ export const engineeringChapter: ContentChapter = {
             ['The star is your recommendation.', 'One favorite per position. Sales decides and is accountable; a different choice is recorded with a reason.'],
             ['Full or partial quote.', 'Full quotes are alternatives; one is bought. A partial quote is part of the line and always counted.'],
             ['"No rate in the cost sheet"', 'on a line means it is not counted. Tell Sales; they add the rate.'],
+            ['"<Your department> has no cost"', 'instead of a zero line: "No work", "Absorbed" (with the hours you absorb) or "Supplier does it". It finalizes your costing. Toolshop reads it as "Will toolmakers spend time on this?". It is refused while your department has a position, priced lines or a supplier wait, and says whose.'],
+            ['"Waiting on a supplier"', 'when you asked a supplier for a quote: supplier, asked on, expected by. The bucket shows "day 9 of 21"; your costing task is due on the expected date, not before, and you cannot finalize until you press "Quote is in" (or "Not needed"). At close costing the lead may decide "Price on estimate": you are told and finalize on your estimate.'],
           ],
         },
         { shot: 'eng-cost-positions', alt: 'The "Cost positions" table with the standing rows and one "External · vendor quote" line with two offers, one starred.' },

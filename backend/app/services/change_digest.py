@@ -13,7 +13,7 @@ wait, nothing late) has no line; nobody with no line gets a digest.
 Read-only and inactive accounts get none (nothing they could act on).
 Late items are the overdue digest's own (overdue_digest.late_by_change),
 so the managers' digest, this one, the lead's "Overdue" group and the
-Late chips agree. Supplier waits join with the supplier wait (lane L5)."""
+Late chips agree. Open supplier waits are a wait like the customer's."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -40,6 +40,12 @@ async def change_lines(session: AsyncSession, changes: list,
     from app.services.overdue_digest import late_by_change
     late = await late_by_change(session, {c.id: c for c in changes}, now,
                                 deadlines=False)
+    # spec §0: supplier waits are a wait like the customer's
+    from app.services import supplier_wait_service as _sw
+    supplier = {}
+    if cm_switches.on("ASSESSMENT_V2"):
+        for w in await _sw.open_waits(session, [c.id for c in changes]):
+            supplier.setdefault(w.change_id, []).append(w)
     out: dict[int, str] = {}
     since = now - WINDOW
     for c in changes:
@@ -56,6 +62,9 @@ async def change_lines(session: AsyncSession, changes: list,
         open_q = ChangeService.unanswered_questions(c)
         if open_q:
             waits.append(f"waiting on {len(open_q)} answer{'s' if len(open_q) > 1 else ''}")
+        for w in supplier.get(c.id, []):
+            waits.append(f"waiting on {w.vendor_name} since {fmt_date(w.asked_on)}"
+                         f" (expected {fmt_date(w.expected_by)})")
         if c.status == "quoted" and c.customer_response in (None, "pending"):
             waits.append("waiting on the customer"
                          + (f" since {fmt_date(c.quoted_at)}" if c.quoted_at else ""))

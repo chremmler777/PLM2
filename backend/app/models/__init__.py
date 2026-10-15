@@ -23,7 +23,7 @@ from app.models.change import (
 )
 from app.models.change_cost import (
     DepartmentRate, AssessmentActivity, AssessmentCostLine, ChangeGate,
-    CostingPosition, CostingOffer,
+    CostingPosition, CostingOffer, SupplierWait,
 )
 from app.models.change_impl import (
     ImplementationBooking, ImplementationReport, ImplementationEscalation,
@@ -118,6 +118,7 @@ __all__ = [
     "ChangeGate",
     "CostingPosition",
     "CostingOffer",
+    "SupplierWait",
     "ImplementationBooking",
     "ImplementationReport",
     "ImplementationEscalation",

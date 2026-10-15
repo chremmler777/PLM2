@@ -4,7 +4,7 @@ import type {
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
-  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind, CheckCloseBody,
+  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind, CheckCloseBody, NoCostReason, SupplierWait,
   FlagType, CheckWhat, AnswerFrom, AnswerForm, IndexFollowup, RecheckAreaAnswer,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
@@ -233,6 +233,22 @@ export const changesApi = {
   reopenDepartmentCosting: (id: number, departmentId: number, reason?: string) =>
     client.post(`/v1/changes/${id}/costing/departments/${departmentId}/reopen`,
       reason ? { reason } : {}).then((r) => r.data as DepartmentCostingState),
+  /** C18: "<Dept> has no cost" (no work / absorbed + hours / supplier). */
+  departmentNoCost: (id: number, departmentId: number,
+    body: { reason: NoCostReason; hours?: number }) =>
+    client.post(`/v1/changes/${id}/costing/departments/${departmentId}/no-cost`, body)
+      .then((r) => r.data as DepartmentCostingState),
+  /** Spec §4: waiting on a supplier (vendor, asked on, expected by). */
+  listSupplierWaits: (id: number) =>
+    client.get<SupplierWait[]>(`/v1/changes/${id}/supplier-waits`).then((r) => r.data),
+  startSupplierWait: (id: number, body: {
+    department_id: number; vendor_name: string; asked_on: string; expected_by: string;
+    position_id?: number; note?: string }) =>
+    client.post<SupplierWait[]>(`/v1/changes/${id}/supplier-waits`, body).then((r) => r.data),
+  closeSupplierWait: (id: number, waitId: number,
+    body: { reason: 'received' | 'price_on_estimate' | 'not_needed'; note?: string }) =>
+    client.post<SupplierWait[]>(`/v1/changes/${id}/supplier-waits/${waitId}/close`, body)
+      .then((r) => r.data),
 
   // What the part will weigh, as the Tool Engineer quotes it during costing.
   // An estimate by contract: the validated figure is a separate field the

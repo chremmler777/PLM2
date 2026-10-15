@@ -227,6 +227,10 @@ export interface ChangeRequest {
   costing_owed_department_ids?: number[];
   /** Departments that have finalized their costing. */
   costing_finalized_department_ids?: number[];
+  /** C18: departments that said "no cost", with why. */
+  costing_no_cost?: Record<string, { reason: NoCostReason; hours?: number }>;
+  /** Spec §4: open supplier waits (header "Waiting on FZ since ..."). */
+  open_supplier_waits?: SupplierWait[];
   /** Departments with an open assessment concern — their submit is blocked. */
   blocked_department_ids?: number[];
   quoted_at: string | null;
@@ -1600,4 +1604,27 @@ export interface IndexFollowup {
   deadline_ref: string | null;
   deadline_confirm_by: string | null;
   deadline_by_name: string | null;
+}
+
+/** C18: why a department has no cost. */
+export type NoCostReason = 'no_work' | 'absorbed' | 'supplier'
+
+/** Spec §4: a department waits on a supplier. */
+export interface SupplierWait {
+  id: number
+  change_id: number
+  department_id: number
+  department_name?: string | null
+  phase: 'costing' | 'implementation'
+  vendor_name: string
+  asked_on: string
+  expected_by: string
+  position_id?: number | null
+  note?: string | null
+  is_open: boolean
+  overdue: boolean
+  /** "day 9 of 21" */
+  chip: string
+  closed_at?: string | null
+  close_reason?: 'received' | 'price_on_estimate' | 'not_needed' | null
 }

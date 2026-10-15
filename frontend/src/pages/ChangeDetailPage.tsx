@@ -54,6 +54,7 @@ import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import IndexFollowups from '../components/changes/IndexFollowups';
 import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/changes/CaptureV2';
+import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -979,6 +980,8 @@ export default function ChangeDetailPage() {
               )}
               {/* §2: an urgent change says its need-by and where it stands */}
               <NeedByLine change={change} />
+              {/* §4: a supplier wait, beside the need-by */}
+              <SupplierWaitLine change={change} />
             </span>
             {impl?.ready_to_go && (
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-100">
@@ -1000,6 +1003,7 @@ export default function ChangeDetailPage() {
           </h1>
           <CockpitSummary {...cockpitProps} variant="compact" onShowOverview={() => setTab('overview')} />
           <NeedByLine change={change} />
+          <SupplierWaitLine change={change} />
           {headerActions}
         </div>
       )}
@@ -1319,7 +1323,8 @@ export default function ChangeDetailPage() {
               projectPlantId={projectPlantId}
               canSeeAll={canSeeCosts}
               editable={canWrite && (change.status === 'costing' || change.status === 'in_assessment')}
-              isPm={isPmMember || isAdmin} />
+              isPm={isPmMember || isAdmin}
+              canDecideWaits={isAdmin || isChangeLead || isPmMember} />
           )}
           {/* The whole picture, for the people who answer for it; at quoting
               also where Sales makes the binding vendor decisions. */}

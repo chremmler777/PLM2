@@ -373,6 +373,10 @@ class ChangeResponse(BaseModel):
     # has finalized it: the "Costing: 3/5 finalized" line.
     costing_owed_department_ids: List[int] = []
     costing_finalized_department_ids: List[int] = []
+    # C18: {department id: {"reason": no_work | absorbed | supplier, "hours"}}
+    costing_no_cost: dict = {}
+    # spec §4: open supplier waits (vendor, asked on, expected by, chip)
+    open_supplier_waits: List[dict] = []
     # Departments with costing lines the cost sheet cannot price (no rate):
     # [{department_id, department_name, subject, count, message}], message =
     # "No cost sheet rate for <department>: 12 h unpriced", or for a machine

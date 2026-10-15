@@ -1834,6 +1834,18 @@ class ChangeService:
         # §1: open rechecks and the lead's new-index question hold it too
         from app.services.index_followup_service import IndexFollowupService
         index_lines = await IndexFollowupService.open_lines(session, change)
+        # spec §5: a supplier wait names itself; the lead picks "Wait for
+        # <vendor>" or "Price on estimate"
+        wait_lines = []
+        if cm_switches.on("ASSESSMENT_V2") and pending:
+            from app.services import supplier_wait_service as waits
+            wnames = dict((await session.execute(
+                select(Department.id, Department.name).where(
+                    Department.id.in_(pending)))).all())
+            wait_lines = [waits.line(w, wnames.get(w.department_id))
+                          for w in await waits.open_waits(session, [change.id], "costing")
+                          if w.department_id in pending]
+        index_lines = wait_lines + index_lines
         if not pending:
             return " · ".join(index_lines) if index_lines else None
         from app.services.change_plan_service import ChangePlanService
@@ -3415,6 +3427,13 @@ class ChangeService:
             db, [c for c in open_changes if c.status in ("captured", "on_hold")])
             if is_pm else set())
         scoping_entered: Optional[dict] = None
+        # spec §4: open supplier waits pause a department's costing task
+        # (one query for the list)
+        from app.services import supplier_wait_service as _sw
+        costing_waits = (await _sw.open_by_department(
+            db, [c.id for c in open_changes
+                 if c.status in ("in_assessment", "costing")], "costing")
+            if cm_switches.on("ASSESSMENT_V2") and dep_ids else {})
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -3670,10 +3689,16 @@ class ChangeService:
                     # the change entered its status (C20)
                     submitted = [a.submitted_at for a in c.assessments
                                  if a.department_id == dept_id and a.submitted_at]
+                    wait = costing_waits.get((c.id, dept_id))
                     tasks.append({
                         **await _base(c), "kind": "costing_input",
                         "department_id": dept_id,
                         "since": max(submitted, default=None),
+                        # a supplier wait pauses the late clock (spec §0)
+                        **({"waiting_on": wait.vendor_name,
+                            "waiting_until": datetime.combine(
+                                wait.expected_by, datetime.min.time()),
+                            "hint": _sw.line(wait)} if wait else {}),
                     })
 
             # Stage 8 is a cadence, not a milestone: while the change is being

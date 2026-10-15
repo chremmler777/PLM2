@@ -164,6 +164,13 @@ export const pmChapter: ContentChapter = {
         },
         {
           p:
+            'A department waiting on a supplier shows on top: "Toolshop waits on FZ until 3 Nov (day 9 ' +
+            'of 21)". Pick "Wait for FZ (3 Nov)" (nothing changes, the task is due then) or "Price on ' +
+            'estimate": the wait ends and the department is told to finalize on its estimate. The ' +
+            'change header shows the wait too ("Waiting on FZ since 7 Oct").',
+        },
+        {
+          p:
             'Closing costing freezes the numbers and hands the change to Sales. If a number has to ' +
             'change later, "Reopen costing" asks "Which numbers have to change? (required, audited)".',
         },

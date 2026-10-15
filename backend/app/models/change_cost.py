@@ -440,3 +440,49 @@ class ChangeGate(Base):
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="gates")
+
+
+# Spec §4 "Waiting on supplier" (one state everywhere): the phase a wait
+# belongs to. costing: a supplier quote the department waits for;
+# implementation: the supplier's delivery (a tool change, a part).
+SUPPLIER_WAIT_PHASES = ("costing", "implementation")
+# How a wait ended: the quote / delivery came in, the lead priced the
+# department on its estimate instead (§5), or it was not needed after all.
+SUPPLIER_WAIT_ENDS = ("received", "price_on_estimate", "not_needed")
+
+
+class SupplierWait(Base):
+    """A department waits on a supplier (spec §4, migration 126): vendor,
+    asked on, expected by. The one wait that pauses the late clock with the
+    customer's (spec §0): the department's task is due at expected-by; the
+    header says "Waiting on <vendor> since <date>"; close costing lists it
+    and the lead picks "Wait for <vendor>" or "Price on estimate"."""
+    __tablename__ = "supplier_waits"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
+    phase: Mapped[str] = mapped_column(String(20), default="costing")
+    vendor_name: Mapped[str] = mapped_column(String(120))
+    asked_on: Mapped[date] = mapped_column(Date)
+    expected_by: Mapped[date] = mapped_column(Date)
+    # what it is for: the costing position a quote prices (optional)
+    position_id: Mapped[int | None] = mapped_column(
+        ForeignKey("costing_positions.id"), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    close_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    @property
+    def is_open(self) -> bool:
+        return self.closed_at is None
+
+    def chip(self, today: date | None = None) -> str:
+        """'day 9 of 21': days since asked against the days it was given."""
+        today = today or business_today()
+        span = max((self.expected_by - self.asked_on).days, 1)
+        day = max((today - self.asked_on).days + 1, 1)
+        return f"day {day} of {span}"

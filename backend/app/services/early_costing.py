@@ -157,7 +157,8 @@ async def clear_finalization(session: AsyncSession, change: ChangeRequest,
         return False
     for a in _rows(change, department_id):
         if a.details_dict.get("costing_finalized_at"):
-            _set_details(a, costing_finalized_at=None, costing_finalized_by=None)
+            _set_details(a, costing_finalized_at=None, costing_finalized_by=None,
+                         costing_no_cost=None)
     await session.flush()
     await ChangeService.append_changelog(
         session, change, "costing_input_reopened",
@@ -235,6 +236,7 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
             "costing input")
     if is_finalized(change, department_id):
         raise EarlyCostingError("The department's costing is already finalized")
+    await _refuse_while_waiting(session, change, department_id)
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
             "Nothing to finalize yet: enter hours or an amount on at least one "
@@ -251,6 +253,110 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         + (" during assessment" if change.status == "in_assessment" else ""),
         actor.id, new_value={"department_id": department_id,
                              "status": change.status},
+        for_department_id=department_id)
+    return anchor
+
+
+async def _refuse_while_waiting(session: AsyncSession, change: ChangeRequest,
+                                department_id: int) -> None:
+    """Spec §4/§5 (ASSESSMENT_V2): an open supplier wait holds the
+    department's costing until the quote is in or the lead prices it on the
+    estimate."""
+    from app.services import cm_switches, supplier_wait_service as waits
+    if not cm_switches.on("ASSESSMENT_V2"):
+        return
+    w = (await waits.open_by_department(session, [change.id], "costing")).get(
+        (change.id, department_id))
+    if w is not None:
+        raise EarlyCostingError(
+            f"{waits.line(w)}: close the wait when the quote is in, or the lead "
+            "decides to price it on your estimate")
+
+
+#: Spec §4 "<Dept> has no cost" (C18): why a department that owes a costing
+#: input has none. absorbed carries the hours it absorbs (0 refused).
+NO_COST_REASONS = ("no_work", "absorbed", "supplier")
+
+
+def no_cost_of(change: ChangeRequest, department_id: int) -> Optional[dict]:
+    """The department's "no cost" answer while its finalization holds."""
+    row = finalized_row(change, department_id)
+    return row.details_dict.get("costing_no_cost") if row is not None else None
+
+
+async def no_cost(session: AsyncSession, change: ChangeRequest, department_id: int,
+                  actor: User, reason: str, hours: Optional[float] = None
+                  ) -> ChangeAssessment:
+    """C18 (ASSESSMENT_V2): one button instead of an invented zero. The
+    department says it has no cost: no work / absorbed (with the hours it
+    absorbs, 0 refused) / the supplier does it (and pays). Refused while the
+    department has a costing position, a non-zero cost line or an open
+    supplier wait, naming the colleague. Finalizes its costing."""
+    from app.models.change_cost import AssessmentCostLine, CostingPosition
+    from app.services import cm_switches, supplier_wait_service as waits
+    from app.services.change_service import ChangeService
+    if not cm_switches.on("ASSESSMENT_V2"):
+        raise EarlyCostingError("'No cost' is switched off (ASSESSMENT_V2)")
+    if not await _may_act(session, change, department_id, actor):
+        raise EarlyCostingForbidden(
+            "Only a member of that department, Project Management or an admin "
+            "may say the department has no cost")
+    if change.status not in OPEN_STATUSES:
+        raise EarlyCostingError("Costing is not open on this change")
+    if not owes(change, department_id):
+        raise EarlyCostingError(
+            "The department owes no costing input on this change")
+    if is_finalized(change, department_id):
+        raise EarlyCostingError("The department's costing is already finalized")
+    if reason not in NO_COST_REASONS:
+        raise EarlyCostingError("Say why: no_work, absorbed or supplier")
+    if reason == "absorbed" and not (hours and hours > 0):
+        raise EarlyCostingError(
+            "Absorbed: give the hours you absorb (an estimate; 0 is no work)")
+    w = (await waits.open_by_department(session, [change.id], "costing")).get(
+        (change.id, department_id))
+    if w is not None:
+        who = await session.get(User, w.created_by)
+        raise EarlyCostingError(
+            f"{who.full_name if who else 'A colleague'} has an open supplier "
+            f"quote ({waits.line(w)}): close it first")
+    pos = (await session.execute(
+        select(CostingPosition).where(
+            CostingPosition.change_id == change.id,
+            CostingPosition.department_id == department_id)
+        .order_by(CostingPosition.id).limit(1))).scalar_one_or_none()
+    if pos is not None:
+        who = await session.get(User, pos.created_by)
+        raise EarlyCostingError(
+            f"{who.full_name if who else 'A colleague'} has a cost position "
+            f"'{pos.label}' for the department: delete it first, or finalize "
+            "the costing with it")
+    L = AssessmentCostLine
+    priced = (await session.execute(
+        select(func.count(L.id))
+        .join(ChangeAssessment, ChangeAssessment.id == L.assessment_id)
+        .where(ChangeAssessment.change_id == change.id,
+               ChangeAssessment.department_id == department_id,
+               or_(func.coalesce(L.demand_hours, 0) != 0,
+                   func.coalesce(L.internal_cost, 0) != 0,
+                   func.coalesce(L.external_cost, 0) != 0,
+                   func.coalesce(L.minutes_per_part, 0) != 0)))).scalar() or 0
+    if priced:
+        raise EarlyCostingError(
+            "The department has cost lines with hours or money: clear them "
+            "first, or finalize the costing with them")
+    anchor = next((a for a in _rows(change, department_id)
+                   if a.verdict in COSTING_VERDICTS), None)
+    answer = {"reason": reason, **({"hours": float(hours)} if reason == "absorbed" else {})}
+    _set_details(anchor, costing_finalized_at=datetime.utcnow().isoformat(),
+                 costing_finalized_by=actor.id, costing_no_cost=answer)
+    await session.flush()
+    words = (f"absorbed ({float(hours):g} h)" if reason == "absorbed"
+             else {"no_work": "no work", "supplier": "the supplier does it"}[reason])
+    await ChangeService.append_changelog(
+        session, change, "costing_no_cost",
+        f"No cost for dept {department_id}: {words}", actor.id,
+        new_value={"department_id": department_id, **answer},
         for_department_id=department_id)
     return anchor
 
@@ -273,7 +379,8 @@ async def reopen(session: AsyncSession, change: ChangeRequest,
     if not rows or not is_finalized(change, department_id):
         raise EarlyCostingError("The department's costing is not finalized")
     for a in rows:
-        _set_details(a, costing_finalized_at=None, costing_finalized_by=None)
+        _set_details(a, costing_finalized_at=None, costing_finalized_by=None,
+                     costing_no_cost=None)
     await session.flush()
     note = (reason or "").strip() or None
     await ChangeService.append_changelog(
@@ -289,4 +396,7 @@ def state(change: ChangeRequest) -> dict:
     owed = owed_department_ids(change)
     done = set(finalized_department_ids(change))
     return {"owed": owed, "finalized": sorted(done & set(owed)),
-            "pending": [d for d in owed if d not in done]}
+            "pending": [d for d in owed if d not in done],
+            # C18: departments that said "no cost", with why
+            "no_cost": {d: nc for d in sorted(done & set(owed))
+                        if (nc := no_cost_of(change, d))}}
