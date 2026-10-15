@@ -1121,6 +1121,8 @@ class MeetingCreate(BaseModel):
     # The room re-confirms the cost carrier: customer | internal (§16).
     # Proceed is refused until it is set.
     cost_carrier: Optional[str] = None
+    # §3 internal: why the raiser's department does not assess (R), logged
+    raiser_waive_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class MeetingUpdate(BaseModel):
@@ -1130,6 +1132,7 @@ class MeetingUpdate(BaseModel):
     selected_department_ids: Optional[List[int]] = None
     department_rasic: Optional[Dict[int, str]] = None
     cost_carrier: Optional[str] = None
+    raiser_waive_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class NegotiationCreate(BaseModel):

@@ -160,6 +160,7 @@ class MeetingService:
         channel: str = "meeting",
         department_rasic: Optional[dict] = None,
         cost_carrier: Optional[str] = None,
+        raiser_waive_reason: Optional[str] = None,
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
         # Meetings belong to scoping: capture is Sales writing the request
@@ -186,6 +187,10 @@ class MeetingService:
             created_by=user.id)
         session.add(meeting)
         await session.flush()
+        if rasic is not None or dept_ids:
+            await MeetingService._check_raiser_letter(
+                session, change, user, rasic or {str(i): "R" for i in dept_ids},
+                None, raiser_waive_reason, meeting.id)
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_recorded",
             f"Scoping decision #{meeting.id} recorded ({channel})", user.id,
@@ -193,6 +198,64 @@ class MeetingService:
         from app.services.ppap_decision_service import PpapDecisionService
         await PpapDecisionService.notify_owed(session, change, user.id)
         return meeting
+
+    @staticmethod
+    async def raiser_department_id(session: AsyncSession,
+                                   change: ChangeRequest) -> Optional[int]:
+        """Spec §3 "Internal: raiser's department auto-R" (SCOPING_V2): the
+        active internal-starter department (P3: Development, Process, Tool
+        Engineer) of the person who raised an internal change, the first by
+        sort order; else None."""
+        if (not cm_switches.on("SCOPING_V2") or change.origin != "internal"
+                or change.raised_by is None):
+            return None
+        from app.models.workflow import UserDepartment
+        return (await session.execute(
+            select(Department.id)
+            .join(UserDepartment, UserDepartment.department_id == Department.id)
+            .where(UserDepartment.user_id == change.raised_by,
+                   Department.is_active.is_(True),
+                   Department.can_start_internal_change.is_(True))
+            .order_by(Department.sort_order, Department.id).limit(1))).scalar_one_or_none()
+
+    @staticmethod
+    async def _check_raiser_letter(
+        session: AsyncSession, change: ChangeRequest, user: User,
+        letters: dict, before: Optional[dict], reason: Optional[str],
+        meeting_id: Optional[int] = None,
+    ) -> None:
+        """The raiser's department assesses an internal change (R); leaving
+        it out, or below R/A, needs a reason, logged (spec §3). Checked when
+        the room's call moves it out: a new meeting (unless an earlier one
+        waived it already) or an edit that drops it."""
+        rd = await MeetingService.raiser_department_id(session, change)
+        if rd is None or letters.get(str(rd)) in BLOCKING_LETTERS:
+            return
+        if before is not None:
+            if before.get(str(rd)) not in BLOCKING_LETTERS:
+                return                      # already out: nothing moves
+        else:
+            from app.models.change import ChangeChangelog
+            waived = (await session.execute(select(ChangeChangelog.id).where(
+                ChangeChangelog.change_id == change.id,
+                ChangeChangelog.action == "raiser_department_waived").limit(1))
+            ).scalar_one_or_none()
+            if waived is not None:
+                return
+        dept = await session.get(Department, rd)
+        name = dept.name if dept else f"department {rd}"
+        from app.services.cm_rules import reference_refusal
+        why = reference_refusal(
+            reason, f"{name} raised this internal change and assesses it (R): "
+            "the reason to leave it out", "only the tool changes, no process step")
+        if why:
+            raise ChangeError(why)
+        await ChangeService.append_changelog(
+            session, change, "raiser_department_waived",
+            f"{name} (the raiser's department) does not assess: {reason.strip()}",
+            user.id, new_value={"department_id": rd, "meeting_id": meeting_id,
+                                "letter": letters.get(str(rd))},
+            notes=reason.strip())
 
     @staticmethod
     def _refuse_internal_after_flip(change: ChangeRequest,
@@ -271,6 +334,9 @@ class MeetingService:
         meeting = await MeetingService._get_meeting(session, change, meeting_id)
         if meeting.decision is not None:
             raise ChangeError("A decided meeting can no longer be edited")
+        waive = fields.pop("raiser_waive_reason", None)
+        before = (dict(meeting.department_rasic) if meeting.department_rasic
+                  else {str(i): "R" for i in meeting.selected_department_ids or []})
         if fields.get("department_rasic") is not None:
             rasic, ids = await MeetingService._validate_rasic(session, fields["department_rasic"])
             fields["department_rasic"] = rasic
@@ -290,6 +356,12 @@ class MeetingService:
             fields["cost_carrier"] = MeetingService._validate_cost_carrier(
                 fields["cost_carrier"])
             MeetingService._refuse_internal_after_flip(change, fields["cost_carrier"])
+        if (fields.get("department_rasic") is not None
+                or fields.get("selected_department_ids") is not None):
+            after = fields.get("department_rasic") or {
+                str(i): "R" for i in fields.get("selected_department_ids") or []}
+            await MeetingService._check_raiser_letter(
+                session, change, user, after, before, waive, meeting.id)
         for k in ("meeting_date", "participants", "notes", "selected_department_ids",
                   "department_rasic", "cost_carrier"):
             if k in fields and fields[k] is not None:

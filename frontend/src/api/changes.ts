@@ -199,7 +199,7 @@ export const changesApi = {
   // Stage-1 departments of the change type's standard routing, each with the
   // letter the standard gives it — the picker's starting point.
   recommendedDepartments: (id: number) =>
-    client.get<{ id: number; name: string; rasic_letter?: RasicLetter }[]>(
+    client.get<{ id: number; name: string; rasic_letter?: RasicLetter; raiser?: boolean }[]>(
       `/v1/changes/${id}/recommended-departments`).then((r) => r.data),
 
   getRouting: (id: number) =>
@@ -338,6 +338,8 @@ export const changesApi = {
     notes?: string; selected_department_ids: number[];
     department_rasic?: Record<number, RasicLetter>;
     cost_carrier?: CostCarrier;
+    /** §3 internal: why the raiser's department does not assess (R) */
+    raiser_waive_reason?: string;
   }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
   updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),

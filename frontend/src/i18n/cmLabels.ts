@@ -1967,6 +1967,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // --- Scoping / concerns polish (spec §16) ---
   'meeting.dateLabel': { de: 'Termindatum', en: 'Meeting date' },
   'meeting.costCarrier': { de: 'Kostenträger', en: 'Cost carrier' },
+  'meeting.raiserWaive': {
+    de: '{d} hat diese interne Änderung angestoßen und bewertet sie (R). Warum nicht?',
+    en: '{d} raised this internal change and assesses it (R). Why not?',
+  },
+  'meeting.raiserWaiveHint': {
+    de: 'z. B. nur der Werkzeugeinsatz ändert sich, kein Prozessschritt (wird protokolliert)',
+    en: 'e.g. only the tool insert changes, no process step (logged)',
+  },
   'meeting.costCarrierHint': {
     de: 'Wer trägt die Kosten? Pflicht, bevor die Bewertung startet.',
     en: 'Who pays? Required before the assessment can start.',

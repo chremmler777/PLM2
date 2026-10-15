@@ -1081,20 +1081,25 @@ async def recommended_departments(
     try:
         _, _, stages = await ChangeRoutingService.resolve_standard(db, change.change_type)
     except ChangeError:
-        return []
+        stages = []
     stage1 = next((s for s in stages if s["stage_order"] == 1), None)
-    if not stage1:
-        return []
     # Every stage-1 department with the letter the standard gives it: the
     # picker starts from the template's opinion, the room overrules it.
-    letters = {d["department_id"]: d["rasic_letter"] for d in stage1["departments"]}
+    letters = ({d["department_id"]: d["rasic_letter"] for d in stage1["departments"]}
+               if stage1 else {})
+    # §3 internal (SCOPING_V2): the raiser's department is auto-R; the room
+    # may leave it out only with a reason (MeetingService)
+    raiser = await MeetingService.raiser_department_id(db, change)
+    if raiser is not None and letters.get(raiser) not in BLOCKING_LETTERS:
+        letters[raiser] = "R"
     if not letters:
         return []
     rows = (await db.execute(
         select(Department.id, Department.name)
         .where(Department.id.in_(letters), Department.is_active.is_(True))
         .order_by(Department.sort_order, Department.name))).all()
-    return [{"id": i, "name": n, "rasic_letter": letters[i]} for i, n in rows]
+    return [{"id": i, "name": n, "rasic_letter": letters[i],
+             **({"raiser": True} if i == raiser else {})} for i, n in rows]
 
 
 @router.get("/{change_id}/assessment-objects")
@@ -2881,7 +2886,7 @@ async def create_meeting(
             participants=[p.model_dump() for p in body.participants],
             notes=body.notes, selected_department_ids=body.selected_department_ids,
             channel=body.channel, department_rasic=body.department_rasic,
-            cost_carrier=body.cost_carrier)
+            cost_carrier=body.cost_carrier, raiser_waive_reason=body.raiser_waive_reason)
     except MeetingForbidden as e:
         raise HTTPException(status_code=403, detail=str(e))
     except ChangeError as e:

@@ -692,6 +692,28 @@ describe('ScopingPanel meeting routing selection', () => {
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
     expect(body.selected_department_ids).toEqual([2, 3, 4, 5])
   })
+
+  it('internal: the raiser\'s department is R; leaving it out needs a reason (§3)', async () => {
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(
+      FIVE.map((d) => (d.id === 3 ? { ...d, rasic_letter: 'R', raiser: true } : d)) as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    const chip = await screen.findByRole('button', { name: new RegExp(`^${FIVE[1].name}$`) })
+    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.queryByTestId('meeting-raiser-waive')).toBeNull()
+    fireEvent.click(screen.getByTestId('rasic-3-C'))
+    expect(screen.getByTestId('meeting-raiser-waive')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('meeting-carrier-internal'))
+    const save = screen.getByRole('button', { name: t('meeting.save') }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('meeting-raiser-waive-reason'),
+      { target: { value: 'Only the tool insert changes' } })
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
+    expect(body.raiser_waive_reason).toBe('Only the tool insert changes')
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
+  })
 })
 
 describe('ScopingPanel §16 meeting record', () => {

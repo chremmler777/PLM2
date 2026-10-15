@@ -101,3 +101,70 @@ async def test_engineering_lead_gets_the_kickoff_task(client, seed, depts, sessi
     assert not any(t["kind"] == "kickoff" and t["change_id"] == cid for t in tasks)
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=other)).json()
     assert st["can_transition"]["scoping"] is False
+
+
+# --- L4 review 2: spec §3 "Internal: raiser's department auto-R" -------------
+
+async def _internal_in_scoping(client, seed, depts, session_factory):
+    from sqlalchemy import update
+    from app.models.change import ChangeRequest
+    await _join(session_factory, seed["engineer_id"], depts["Process Engineer"])
+    eng = await login(client, "eng@test.io", admin=False)
+    res = await client.post("/api/v1/changes", json=_body(seed, False),
+                            headers={**eng, KEEP_LEAD_RULE: "1"})
+    assert res.status_code in (200, 201), res.text
+    cid = res.json()["id"]
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid)
+                        .values(status="scoping"))
+        await s.commit()
+    return cid
+
+
+def _meeting_body(rasic, **extra):
+    return {"channel": "meeting", "participants": [{"name": "Eva"}],
+            "department_rasic": rasic, "cost_carrier": "internal", **extra}
+
+
+async def test_raiser_department_is_auto_r_and_waived_only_with_a_reason(
+        client, seed, depts, session_factory):
+    cid = await _internal_in_scoping(client, seed, depts, session_factory)
+    admin = await login(client, "admin@test.io")
+    proc, tool = str(depts["Process Engineer"]), str(depts["Tool Engineer"])
+    rec = (await client.get(f"/api/v1/changes/{cid}/recommended-departments",
+                            headers=admin)).json()
+    row = next(r for r in rec if r["id"] == depts["Process Engineer"])
+    assert row["rasic_letter"] == "R" and row["raiser"] is True
+    url = f"/api/v1/changes/{cid}/meetings"
+    # negative: left out (or only C) without a reason, or with an empty one
+    for body in (_meeting_body({tool: "R"}), _meeting_body({tool: "R", proc: "C"}),
+                 _meeting_body({tool: "R"}, raiser_waive_reason="ok")):
+        res = await client.post(url, json=body, headers=admin)
+        assert res.status_code == 400, body
+        assert "Process Engineer raised this internal change" in res.json()["detail"]
+    res = await client.post(url, json=_meeting_body({tool: "R", proc: "R"}), headers=admin)
+    assert res.status_code == 200, res.text
+    mid = res.json()["id"]
+    # an edit that drops it needs the reason too, and is logged
+    res = await client.patch(f"{url}/{mid}", json={"department_rasic": {tool: "R"}},
+                             headers=admin)
+    assert res.status_code == 400
+    res = await client.patch(f"{url}/{mid}", json={
+        "department_rasic": {tool: "R"},
+        "raiser_waive_reason": "Only the tool insert changes, no process step"},
+        headers=admin)
+    assert res.status_code == 200, res.text
+    log = await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin)
+    assert log.status_code == 200, log.text
+    assert any(e["action"] == "raiser_department_waived" for e in log.json())
+
+
+async def test_raiser_department_rule_off_with_the_switch(
+        client, seed, depts, session_factory, monkeypatch):
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
+    cid = await _internal_in_scoping(client, seed, depts, session_factory)
+    admin = await login(client, "admin@test.io")
+    res = await client.post(f"/api/v1/changes/{cid}/meetings", json=_meeting_body(
+        {str(depts["Tool Engineer"]): "R"}), headers=admin)
+    assert res.status_code == 200, res.text

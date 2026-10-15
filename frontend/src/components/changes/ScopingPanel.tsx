@@ -18,7 +18,7 @@ import TransitionConfirmDialog from './TransitionConfirmDialog'
 import ScopingFlags from './scoping/ScopingFlags'
 import ProceedFixList from './scoping/ProceedFixList'
 import { CustomerFlipCard, PpapDecisionCard } from './scoping/PpapFlipCards'
-import { NeedByCheck, isUrgentV2, needByHold, type NeedByAnswer } from './CaptureV2'
+import { NeedByCheck, isUrgentV2, needByHold, okRef, type NeedByAnswer } from './CaptureV2'
 import DateInput from '../gantt/DateInput'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
@@ -160,6 +160,11 @@ export default function ScopingPanel(
     Object.fromEntries(recommended.map((d) => [d.id, d.rasic_letter ?? 'R']))
   const recommendedLetter = (id: number): RasicLetter =>
     recommended.find((d) => d.id === id)?.rasic_letter ?? 'R'
+  // §3 internal: the raiser's department is auto-R (served by the backend);
+  // leaving it out, or below R/A, needs a reason, logged
+  const raiserDept = recommended.find((d) => d.raiser)
+  const raiserOut = !motherPlant && !!raiserDept && !['R', 'A'].includes(deptRasic[raiserDept.id] ?? '')
+  const [waiveReason, setWaiveReason] = useState('')
   useEffect(() => {
     // Seed the selection from the recommendation once, until the user edits it.
     if (!deptTouched && recommendedIds.length > 0 && deptIds.length === 0) {
@@ -236,11 +241,13 @@ export default function ScopingPanel(
       department_rasic: motherPlant
         ? Object.fromEntries(deptIds.map((id) => [id, 'I' as RasicLetter])) : deptRasic,
       ...(carrier && !motherPlant ? { cost_carrier: carrier } : {}),
+      ...(raiserOut && waiveReason.trim() ? { raiser_waive_reason: waiveReason.trim() } : {}),
     }),
     onSuccess: () => {
       // A fresh form for the next record, folded away; the letters of this
       // meeting are what the next one starts from (seeded on reopen).
       setParticipants([]); setAddName(''); setDate(''); setChannel('meeting'); setCarrier('')
+      setWaiveReason('')
       setDeptTouched(false); setCarried(false); setFormOpen(false)
       toast.success(t('meeting.saved'))
       invalidate()
@@ -385,6 +392,7 @@ export default function ScopingPanel(
   const formShown = formOpen ?? !(latestMeeting && !latestMeeting.decision)
   const saveMissing = [
     ...(carrier || motherPlant ? [] : [t('meeting.costCarrier')]),
+    ...(raiserOut && !okRef(waiveReason) ? [t('meeting.raiserWaive').replace('{d}', raiserDept?.name ?? '')] : []),
   ]
   // The backend refuses to start the assessment on an unlocked impacted
   // set: the step says so instead of answering 400. With Development's
@@ -1028,6 +1036,15 @@ export default function ScopingPanel(
               <p className="mt-1.5 text-[11px] text-slate-500">
                 <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
               </p>
+            )}
+            {!motherPlant && raiserOut && (
+              <label className="mt-2 block text-xs text-amber-200" data-testid="meeting-raiser-waive">
+                {t('meeting.raiserWaive').replace('{d}', raiserDept?.name ?? '')}{' '}
+                <span className="text-amber-300">(required)</span>
+                <input value={waiveReason} onChange={(e) => setWaiveReason(e.target.value)}
+                  data-testid="meeting-raiser-waive-reason" placeholder={t('meeting.raiserWaiveHint')}
+                  className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+              </label>
             )}
           </div>
           {/* Who pays, confirmed by the room next to who works. A change from

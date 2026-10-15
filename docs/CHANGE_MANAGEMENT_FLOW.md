@@ -279,6 +279,15 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   blocking") and gives Quality *Answer the PPAP decision* as the scoping
   header action; a refused `proceed` names every hold at once (with the
   dialog's own fields: departments, R/A, cost carrier, the urgent need-by).
+- **Internal: the raiser's department assesses** (spec §3, L4 review 2,
+  `SCOPING_V2`): on a change raised as internal, the raiser's internal-starter
+  department (Development / Process / Tool Engineer, first by sort order) is
+  preset R in the room's RASIC (`recommended-departments` serves it with
+  `raiser: true`). Leaving it out, or below R/A, needs a reason
+  (`raiser_waive_reason`, 5+ characters, "ok" refused), logged as
+  `raiser_department_waived`; checked when a meeting is recorded (unless an
+  earlier one waived it) or an edit drops it, so in-flight meetings are not
+  touched.
 - **Confirm item rights** (L4 review): the list serves `can_confirm` per
   question (the named confirmer, or who may answer it; any live status, the
   question open or closed), and the card shows the confirm form on it, so
