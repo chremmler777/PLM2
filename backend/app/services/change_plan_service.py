@@ -317,7 +317,8 @@ class ChangePlanService:
         """Admin, the change lead, Sales, Project Management, Scheduling:
         the people who own the promise to the customer and the shop plan.
         Acts-as aware through _user_in_department."""
-        if user.effective_role == "admin" or change.lead_id == user.id:
+        from app.services.change_people import holds_lead
+        if user.effective_role == "admin" or holds_lead(change, user):
             return True
         for name in EDITOR_DEPARTMENTS:
             if await ChangeService._user_in_department(session, user, name):
@@ -334,7 +335,8 @@ class ChangePlanService:
     async def may_decide_deviation(session, change, user) -> bool:
         """PM, Sales, the lead, admin: accepting a slip internally or taking
         it to the customer are the two commercial answers to it."""
-        if user.effective_role == "admin" or change.lead_id == user.id:
+        from app.services.change_people import holds_lead
+        if user.effective_role == "admin" or holds_lead(change, user):
             return True
         for name in DEVIATION_DEPARTMENTS:
             if await ChangeService._user_in_department(session, user, name):

@@ -29,7 +29,7 @@ from app.services.change_service import (
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingForbidden, MeetingService
 from app.services.validation_issue_service import IssueForbidden, IssueNotFound
-from app.services.change_people import is_acting
+from app.services.change_people import holds_lead, is_acting
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
@@ -2132,7 +2132,7 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
         return      # the position write rule, checked by the caller
     # Everything else, and evidence whose assessment is gone: the default.
     if (is_admin or att.uploaded_by == user.id
-            or (change.lead_id is not None and change.lead_id == user.id)
+            or holds_lead(change, user)
             or await MeetingService.user_is_pm_member(db, user)):
         return
     raise HTTPException(

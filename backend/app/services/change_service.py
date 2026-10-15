@@ -1948,7 +1948,8 @@ class ChangeService:
     ) -> bool:
         """Quoted price is Sales territory: admin, the change lead, or a
         'Sales' department member may set it."""
-        if user.id == change.lead_id:
+        from app.services.change_people import holds_lead
+        if holds_lead(change, user):
             return True
         return await ChangeService._user_in_department(session, user, "Sales")
 
@@ -2120,7 +2121,8 @@ class ChangeService:
         Project Management may make it too — a bank-build decision that only
         one department can enter is a decision that waits for that department's
         calendar. Admin through _user_in_department, acts-as aware."""
-        if user.id == change.lead_id:
+        from app.services.change_people import holds_lead
+        if holds_lead(change, user):
             return True
         if await ChangeService._user_in_department(
                 session, user, ChangeService.SCHEDULING_DEPARTMENT):
@@ -3276,7 +3278,8 @@ class ChangeService:
         supports are the same conversation."""
         from app.services.workflow_service import WorkflowService
         from app.services.meeting_service import MeetingService
-        if (actor.effective_role == "admin" or change.lead_id == actor.id
+        from app.services.change_people import holds_lead
+        if (actor.effective_role == "admin" or holds_lead(change, actor)
                 or await MeetingService.user_is_pm_member(session, actor)
                 or await ChangeService._user_in_department(session, actor, "Sales")):
             return True
@@ -3311,9 +3314,10 @@ class ChangeService:
                 f"Department {department_id} has no assessment on this change")
         from app.services.workflow_service import WorkflowService
         from app.services.meeting_service import MeetingService
+        from app.services.change_people import holds_lead
         privileged = (
             actor.effective_role == "admin"
-            or change.lead_id == actor.id
+            or holds_lead(change, actor)
             or await MeetingService.user_is_pm_member(session, actor)
             or await ChangeService._user_in_department(session, actor, "Sales"))
         if not privileged and not await WorkflowService.actor_in_department(
@@ -3934,7 +3938,8 @@ class ChangeService:
             except ValueError as e:
                 raise ChangeError(str(e))
         else:
-            allowed = (actor.effective_role == "admin" or change.lead_id == actor.id
+            from app.services.change_people import holds_lead
+            allowed = (actor.effective_role == "admin" or holds_lead(change, actor)
                        or await WorkflowService.actor_in_department(
                            session, actor, a.department_id))
             if not allowed:
@@ -3977,7 +3982,8 @@ class ChangeService:
             except ValueError as e:
                 raise ChangeError(str(e))
         else:
-            if actor.effective_role != "admin" and change.lead_id != actor.id:
+            from app.services.change_people import holds_lead
+            if actor.effective_role != "admin" and not holds_lead(change, actor):
                 raise ChangeError("Only the change lead or an admin may set due dates")
             a.due_date = due_date
         await session.flush()

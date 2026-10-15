@@ -48,7 +48,8 @@ class ReleaseService:
     @staticmethod
     async def is_pm_or_lead(session, change, user) -> bool:
         """PM, the change lead, admin: who runs the release."""
-        if user.effective_role == "admin" or change.lead_id == user.id:
+        from app.services.change_people import holds_lead
+        if user.effective_role == "admin" or holds_lead(change, user):
             return True
         return await ChangeService._user_in_department(session, user, "Project Manager")
 
