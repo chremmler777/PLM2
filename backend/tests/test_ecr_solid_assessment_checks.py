@@ -398,6 +398,10 @@ async def test_question_holds_only_own_submit_and_reaches_sales_owner(
         assert len(heard) == 1
     res = await _submit(client, a["te"], a, a["tool"])
     assert res.status_code == 400 and "answered, settle it" in res.json()["detail"]
+    # negative (R4): 'ok' does not settle it
+    res = await client.post(_url(a, f"/concerns/{qid}/withdraw"),
+                            json={"resolution_note": "ok"}, headers=a["te"])
+    assert res.status_code == 400 and "settles it" in res.json()["detail"]
     res = await client.post(_url(a, f"/concerns/{qid}/withdraw"),
                             json={"resolution_note": "120k pcs assumed, 2 cavities"},
                             headers=a["te"])

@@ -1156,6 +1156,17 @@ class MeetingService:
             raise ChangeError(
                 f"Closing a department's {what} needs a resolution note: "
                 "how was it addressed?")
+        if (concern.kind == "needs_info" and not concern.is_check
+                and concern.department_id is not None
+                and change.status == "in_assessment"
+                and cm_switches.on("ASSESSMENT_V2")):
+            # R4: an assessment question is settled with what settled it,
+            # not 'ok' (the answer itself is checked by answer_concern)
+            from app.services.cm_rules import says_what
+            if not says_what(note):
+                raise ChangeError(
+                    f"Say what settles it, e.g. 'answer confirms 2.4 mm wall': "
+                    f"'{note}' says too little")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
         concern.settled_as = settled_as
