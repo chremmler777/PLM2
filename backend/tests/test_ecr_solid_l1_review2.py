@@ -168,3 +168,33 @@ async def test_management_and_retired_departments_are_never_routed(
                             headers=admin)
     assert res.status_code == 400
     assert "retired" in res.json()["detail"]
+
+
+# --- P3 / C32: an acting admin is no raiser-lead -----------------------------
+
+async def test_acting_admin_raiser_is_not_the_lead(client, seed, depts, admin):
+    dev = {**admin, ACTS: str(depts["Development"]), KEEP_LEAD_RULE: "1"}
+    res = await client.post("/api/v1/changes", json=_body(seed, False), headers=dev)
+    assert res.status_code in (200, 201), res.text
+    # no project PM in the seed: nobody leads, Project Management picks one
+    assert res.json()["lead_id"] is None
+
+
+# --- R25: a retired department grants nothing --------------------------------
+
+async def test_retired_sales_owns_nothing(client, seed, depts, session_factory, admin):
+    from app.services.project_team_service import is_live_member
+    sally, _ = await _user(session_factory, seed, "Sally", depts["Sales"])
+    pm = {**admin, ACTS: str(depts["Project Manager"])}
+    c = (await client.post("/api/v1/changes", json=_body(seed, True), headers=pm)).json()
+    async with session_factory() as s:
+        await s.execute(update(Department).where(Department.id == depts["Sales"])
+                        .values(is_active=False))
+        await s.commit()
+        assert await is_live_member(s, sally, "Sales") is False
+    res = await client.patch(f"/api/v1/changes/{c['id']}",
+                             json={"sales_owner_id": sally}, headers=admin)
+    assert res.status_code == 400
+    res = await client.get(f"/api/v1/changes/{c['id']}/sales-owner-candidates",
+                           headers=admin)
+    assert res.status_code == 200 and res.json() == []

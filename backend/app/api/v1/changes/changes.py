@@ -141,8 +141,10 @@ async def create_change(
     if lead_id is not None and not await MeetingService.user_is_pm(db, current_user):
         lead_id = None
     # P3: an internal change raised by engineering is led by its raiser
-    # (spec §0), unless Project Management named a lead.
-    if lead_id is None and engineering_raiser:
+    # (spec §0), unless Project Management named a lead. An admin acting as
+    # an engineering department is not a raiser-lead (C32: acting drops the
+    # personal lead right): the project PM default applies, else PM picks.
+    if lead_id is None and engineering_raiser and not is_acting(current_user):
         lead_id = current_user.id
     if lead_id is not None:
         await _require_org_user(db, lead_id, project_org)

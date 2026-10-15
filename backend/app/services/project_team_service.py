@@ -36,8 +36,8 @@ async def is_live_member(session: AsyncSession, user_id: Optional[int],
                          department_name: str) -> bool:
     """An active user with a real (not acting-as) membership of the named
     department. The one test for a named owner (C10 Sales owner, a project
-    responsible): an inactive user or one who left the department owns
-    nothing, and the department's work falls back to all of its members."""
+    responsible): an inactive user, one who left the department, or a member
+    of a retired department owns nothing, and the department's work falls back to all of its members."""
     if user_id is None:
         return False
     return (await session.execute(
@@ -46,6 +46,8 @@ async def is_live_member(session: AsyncSession, user_id: Optional[int],
         .join(User, User.id == UserDepartment.user_id)
         .where(UserDepartment.user_id == user_id,
                Department.name == department_name,
+               # a retired department grants nothing (R25)
+               Department.is_active.is_(True),
                User.is_active.is_(True))
     )).first() is not None
 

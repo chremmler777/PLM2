@@ -1001,7 +1001,9 @@ a badge on the stage (`StageResponsibleBadge.tsx`).
 **Internal starters (ECR-solid P3, decided 2026-10-14).** Members of a
 `can_start_internal_change` department (Development, Process Engineer, Tool
 Engineer; migration 117) may start an INTERNAL change and lead it: the
-create endpoint sets the raiser as lead unless Project Management named one.
+create endpoint sets the raiser as lead unless Project Management named one
+(an admin acting as an engineering department is not made the lead: the
+project PM default applies, else PM picks one).
 A customer change from them is refused (403, "Your department starts
 internal changes only"); the start dialog preselects "Internal change" and
 greys the customer option. `GET /changes/permissions` answers
@@ -1035,7 +1037,9 @@ changelog `sales_owner_changed`; candidates: `GET
 Sales from creation: the owner sees them as "main", the rest of Sales as
 "backup" with the owner's name, and anyone in Sales may act. One test decides
 a valid owner everywhere (`project_team_service.is_live_member`: an active user
-with a real Sales membership): the raiser becomes owner only as a real Sales
+with a real membership of the department, which must itself be active; the
+same test guards every project responsible, so a retired Sales or Project
+Manager department owns nothing and grants no default lead): the raiser becomes owner only as a real Sales
 member (an admin acting as Sales does not), and a stale owner (inactive, or
 left Sales) owns nothing, so the Sales rows fall back to all of Sales as
 "main". The Status card

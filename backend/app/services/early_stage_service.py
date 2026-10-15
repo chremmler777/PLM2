@@ -971,7 +971,9 @@ class EarlyStageService:
         from app.services.change_people import change_org_id
         from app.services.project_team_service import ProjectTeamService
         sales_id = (await session.execute(
-            select(Department.id).where(Department.name == "Sales"))).scalar_one_or_none()
+            select(Department.id).where(Department.name == "Sales",
+                                        Department.is_active.is_(True)))
+        ).scalar_one_or_none()
         if sales_id is None:
             return []
         q = (select(User).join(UserDepartment, UserDepartment.user_id == User.id)
