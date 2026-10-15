@@ -178,7 +178,11 @@ async def delete_part(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a part."""
+    """Delete a part. Admin only: a hard delete takes the part's whole
+    history with it, which no department owns alone."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only an admin may delete a part")
     try:
         success = await PartService.delete_part(db, part_id)
         if not success:
@@ -779,7 +783,10 @@ async def delete_part_file(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a part file."""
+    """Delete a part file. Admin only, like deleting the part."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only an admin may delete a part file")
     try:
         # Get the file record
         result = await db.execute(
