@@ -25,6 +25,7 @@ from app.models.workflow import (
 )
 from app.services.notification_service import NotificationService
 from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS, WorkflowService
+from app.services import due_rules
 
 
 DEFAULT_ASSESSMENT_TEMPLATE = "ECM Assessment"
@@ -641,8 +642,7 @@ class ChangeRoutingService:
                     department_id=a.department_id, rasic_letter=a.rasic_letter,
                     status="active" if live else "noted",
                     is_actionable=is_blocking,
-                    due_date=(a.due_date or datetime.utcnow()
-                              + timedelta(days=DEFAULT_TASK_DUE_DAYS))
+                    due_date=(a.due_date or due_rules.assessment_due(change))
                     if live else None,
                 )
                 if is_blocking and answered:
@@ -954,7 +954,7 @@ class ChangeRoutingService:
                     change_id=change.id, department_id=department_id, verdict="pending",
                     stage_order=order, rasic_letter=rasic_letter,
                     status=new_status,
-                    due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
+                    due_date=(due_rules.assessment_due(change)
                               if new_status == "active" else None),
                 )
                 session.add(new_row)
@@ -986,7 +986,7 @@ class ChangeRoutingService:
                         department_id=department_id, rasic_letter=rasic_letter,
                         status="active" if is_blocking else "noted",
                         is_actionable=is_blocking,
-                        due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
+                        due_date=(due_rules.assessment_due(change)
                                   if is_blocking else None),
                         notes=(f"Added to stage {order} after it had passed: the "
                                "answer is still owed (flagged for the change lead)"

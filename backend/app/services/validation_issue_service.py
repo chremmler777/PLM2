@@ -2329,6 +2329,8 @@ class ValidationIssueService:
                 kind, label = svc.ACT_KINDS[key]
                 item = {"kind": kind, "label": label.format(ref=i.ref),
                         "target_tab": "release", "issue_id": i.id}
+                if key == "customer" and i.route == "customer_concession":
+                    item["concession"] = True   # a concession to decide (Needs you)
                 # Project team (spec §18): the department that owes the act,
                 # so the task lists can tell main from backup. Route, close,
                 # customer and quote follow their fixed role (KIND_DEPARTMENT).

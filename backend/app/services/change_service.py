@@ -119,6 +119,9 @@ STAGE_TASK_TAB = {
     "create_quote": "commercial", "bank_build": "implementation",
     "publish_plan": "implementation", "progress_report": "implementation",
     "escalate_risk": "implementation", "update_quote": "implementation",
+    "sign_off": "overview", "internal_approval": "commercial",
+    "validation_check": "release", "advance": "overview",
+    "deviation_decision": "overview",
 }
 
 # A finished change's D1 master data and gates are the record: closed,
@@ -1030,6 +1033,10 @@ class ChangeService:
                 ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()
         if not changes:
             return []
+        # One escalation rule (spec §0): an item reaches the lead's
+        # "Overdue" group at due + 1 working day (ASSESSMENT_V2).
+        from app.services.notification_sweep import _escalation_cutoff
+        cutoff = _escalation_cutoff(now)
         by_id = {c.id: c for c in changes}
         out: list[dict] = []
 
@@ -1040,7 +1047,7 @@ class ChangeService:
                    ChangeAssessment.status == "active",
                    ChangeAssessment.wf_instance_task_id.is_(None),
                    ChangeAssessment.due_date.is_not(None),
-                   ChangeAssessment.due_date < now))).all()
+                   ChangeAssessment.due_date < cutoff))).all()
         for a, dept_name in assessment_rows:
             c = by_id[a.change_id]
             out.append({
@@ -1062,7 +1069,7 @@ class ChangeService:
                    WfInstanceTask.status == "active",
                    WfInstanceTask.is_actionable == True,  # noqa: E712
                    WfInstanceTask.due_date.is_not(None),
-                   WfInstanceTask.due_date < now))).all()
+                   WfInstanceTask.due_date < cutoff))).all()
         seen_task_ids: set[int] = set()
         for t, step_name, change_id in task_rows:
             seen_task_ids.add(t.id)
@@ -1087,7 +1094,7 @@ class ChangeService:
                    WfInstanceTask.status == "active",
                    WfInstanceTask.is_actionable == True,  # noqa: E712
                    WfInstanceTask.due_date.is_not(None),
-                   WfInstanceTask.due_date < now))).all()
+                   WfInstanceTask.due_date < cutoff))).all()
         for t, dept_name, change_id in change_task_rows:
             if t.id in seen_task_ids:
                 continue
@@ -2139,6 +2146,9 @@ class ChangeService:
             await ChangeRoutingService.teardown_routing(session, change, user_id)
         if to_status == "in_assessment":
             await ChangeService.ensure_assessments(session, change, user_id)
+            # C20: due by the assessment rule (quote deadline / need-by)
+            from app.services.due_rules import apply_assessment_due
+            await apply_assessment_due(session, change)
         if to_status == "in_implementation":
             await ChangeService.spawn_ecn_revisions(session, change, user_id)
         if to_status == "released":
@@ -2163,6 +2173,8 @@ class ChangeService:
             # locked at the top of this transition).
             from app.services.early_stage_service import EarlyStageService
             await EarlyStageService.wake_later_stages(session, change)
+        if to_status in ("in_implementation", "in_validation"):
+            await ChangeService.notify_stage_entered(session, change, to_status)
         if mother_plant and old == "scoping" and to_status == "approved":
             # After the status flips: the detailed plan is only writable in
             # approved.
@@ -3135,9 +3147,11 @@ class ChangeService:
         kind = STAGE_TASK_EQUIV.get(a["kind"], a["kind"])
         return (kind, a.get("assessment_id"), a.get("issue_id"),
                 a.get("escalation_id"), a.get("action_id"), a.get("concern_id"),
+                a.get("deviation_id"), a.get("side"),
                 a.get("department_id") if kind in (
                     "costing_input", "costing_update", "plan_feedback",
-                    "info_ack", "release_check", "progress_report") else None)
+                    "info_ack", "release_check", "progress_report",
+                    "validation_check") else None)
 
     @staticmethod
     async def stage_tasks(db: AsyncSession, user: User, open_changes: list,
@@ -3549,6 +3563,7 @@ class ChangeService:
                         "question_count": len(questions),
                         "concern_id": newest.id,
                         "department_id": newest.department_id,
+                        "since": newest.raised_at,
                     })
             elif questions:
                 am_author = getattr(user, "acts_as_department_id", None) is None
@@ -3565,6 +3580,7 @@ class ChangeService:
                         "question_count": len(answerable),
                         "concern_id": newest.id,
                         "department_id": newest.department_id,
+                        "since": newest.raised_at,
                         # the owner on the row: the asking department
                         "role_department_id": newest.department_id,
                         "asker_name": newest.raised_by_name,
@@ -3608,6 +3624,7 @@ class ChangeService:
                         "concern_id": newest.id,
                         "department_id": newest.department_id,
                         "question_note": newest.note,
+                        "since": newest.answered_at,
                     })
 
         # Post-quote scope change (spec §16): costing reopens for the affected
@@ -3625,7 +3642,178 @@ class ChangeService:
                                       "department_id": d,
                                       "reason": c.scope_change_reason})
 
+        # C3: the move-forward steps nobody saw in the list before.
+        tasks += await ChangeService._move_forward_tasks(
+            db, user, open_changes, dep_ids, _base)
         return tasks
+
+    @staticmethod
+    async def notify_stage_entered(session: AsyncSession, change: ChangeRequest,
+                                   to_status: str) -> int:
+        """C3 (switch RELEASE_V2): entering implementation or validation
+        tells the departments doing the work (the ones that priced it), once
+        per change and stage. Involved people only, routed by the project
+        team like every department notice."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2"):
+            return 0
+        from app.services.implementation_service import ImplementationService
+        from app.services.notification_service import NotificationService
+        dept_ids = await ImplementationService.implementing_department_ids(session, change)
+        if not dept_ids:
+            return 0
+        if to_status == "in_implementation":
+            title = f"Implementation starts: {change.change_number}"
+            body = (f"'{change.title}' is approved and in implementation. Do your "
+                    "plan blocks and report progress twice a week.")
+        else:
+            title = f"Validation starts: {change.change_number}"
+            body = (f"'{change.title}' is in validation. Record your department's "
+                    "validation checks on the Release tab.")
+        return await NotificationService.notify_team(
+            session, change.project_id, dept_ids, title=title, body=body,
+            link=f"/changes/{change.id}?tab="
+                 + ("implementation" if to_status == "in_implementation" else "release"),
+            kind="stage_entered", subject_key=f"chg:{change.id}:{to_status}")
+
+    @staticmethod
+    def deviation_label(dev) -> str:
+        from app.services.cm_rules import ABSORB_RULE, rule_label
+        if dev.guard_key == ABSORB_RULE:
+            return f"Decide Absorb #{dev.id}"
+        if dev.guard_key:
+            return f"Decide override #{dev.id}: {rule_label(dev.guard_key)}"
+        return f"Decide override #{dev.id}"
+
+    #: Statuses whose onward hop is the run team's (C1) and has no stage row
+    #: of its own: the 'Ready: move on' task once nothing holds it.
+    ADVANCE_STATUSES = ("in_assessment", "costing", "quoted", "approved",
+                        "in_implementation", "in_validation", "released")
+
+    @staticmethod
+    async def _move_forward_tasks(db: AsyncSession, user: User, open_changes: list,
+                                  dep_ids: set, base) -> list[dict]:
+        """C3 (spec §0 My Tasks): every next step is somebody's task.
+        - deviation_decision: an override or Absorb this user may decide
+          (deviation_decide_refusal, the decide endpoint's own rule);
+        - sign_off: PM / Quality sign-off owed for the latest offer (from
+          acceptance on; HARD #4 / #9), never to the other side's signer;
+        - internal_approval: an internal change's costing is finalized and
+          waits on this approver (HARD #8, never the raiser);
+        - validation_check: this user's implementing department still has
+          open validation checks;
+        - advance: the run team's onward hop once nothing holds it (the
+          lead; Project Management when the change has no lead).
+        Rows the user decides carry needs_you (the "Needs you" group)."""
+        from app.services import mother_plants as mp
+        from app.services.change_people import holds_lead
+        out: list[dict] = []
+        if not open_changes:
+            return out
+        is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
+        is_quality = await ChangeService.member_of(db, user, "Quality")
+        from app.services.cm_rules import ABSORB_RULE
+        for c in open_changes:
+            for dev in c.transition_deviations:
+                if dev.status != "pending":
+                    continue
+                if await ChangeService.deviation_decide_refusal(db, c, dev, user):
+                    continue
+                out.append({
+                    **await base(c), "kind": "deviation_decision",
+                    "deviation_id": dev.id, "label": ChangeService.deviation_label(dev),
+                    "to_status": dev.to_status,
+                    # an Absorb's note is price talk: read it on the change
+                    **({} if dev.guard_key == ABSORB_RULE else {"reason": dev.reason}),
+                    "target_tab": "overview", "needs_you": True,
+                    "since": dev.proposed_at,
+                })
+
+        def _signable(c) -> bool:
+            if (not c.customer_relevant or mp.is_mother_plant(c)
+                    or getattr(c, "origin", None) == "engineering_review"):
+                return False
+            return ((c.status == "quoted" and c.customer_response == "accepted")
+                    or c.status in ("approved", "in_implementation", "in_validation"))
+        if is_pm_member or is_quality:
+            for c in open_changes:
+                if not _signable(c):
+                    continue
+                sides, latest = await ChangeService.signoff_sides_missing(db, c)
+                for side in sides:
+                    if not (is_pm_member if side == "pm" else is_quality):
+                        continue
+                    other = c.quality_signed_by if side == "pm" else c.pm_signed_by
+                    if other == user.id:
+                        continue      # 4-eyes: the other side's signer
+                    out.append({
+                        **await base(c), "kind": "sign_off", "side": side,
+                        "offer_version": latest.version if latest is not None else None,
+                        "target_tab": "overview", "needs_you": True,
+                        "since": c.customer_response_at,
+                    })
+
+        for c in open_changes:
+            if (c.customer_relevant or c.status not in ("costing", "quoted")
+                    or c.internal_approved_at is not None):
+                continue
+            if not await ChangeService.is_internal_approver(db, user, c):
+                continue
+            from app.services import cm_switches
+            if (c.status == "costing" and cm_switches.on("ASSESSMENT_V2")
+                    and await ChangeService.costing_not_finalized_text(db, c)):
+                continue      # C5: approval waits on the departments' costing
+            out.append({**await base(c), "kind": "internal_approval",
+                        "target_tab": "commercial", "needs_you": True})
+
+        validating = [c for c in open_changes if c.status == "in_validation"]
+        if dep_ids and validating:
+            from app.models.change_validation import ValidationCheck
+            from app.services import validation_checklist as catalog
+            from app.services.validation_service import ValidationService
+            answered: dict = {}
+            for cid, did, key in (await db.execute(
+                    select(ValidationCheck.change_id, ValidationCheck.department_id,
+                           ValidationCheck.check_key).where(
+                        ValidationCheck.change_id.in_([c.id for c in validating]),
+                        ValidationCheck.status.in_(("passed", "failed"))))).all():
+                answered.setdefault((cid, did), set()).add(key)
+            names = dict((await db.execute(select(Department.id, Department.name))).all())
+            for c in validating:
+                for did in sorted(set(await ValidationService.implementing_department_ids(
+                        db, c)) & dep_ids):
+                    open_keys = [k for k in catalog.keys_for(names.get(did))
+                                 if k not in answered.get((c.id, did), set())]
+                    if open_keys:
+                        out.append({**await base(c), "kind": "validation_check",
+                                    "department_id": did, "open_count": len(open_keys),
+                                    "target_tab": "release"})
+
+        out += await ChangeService.advance_tasks(db, user, open_changes, base,
+                                                 is_pm_member=is_pm_member)
+        return out
+
+    @staticmethod
+    async def advance_tasks(db: AsyncSession, user: User, changes: list, base,
+                            *, is_pm_member: Optional[bool] = None) -> list[dict]:
+        """C3: "Ready: move it on" for the run team (the lead; Project
+        Management when the change has no lead) once next_step_missing
+        lists nothing that holds the onward hop."""
+        from app.services.change_people import holds_lead
+        if is_pm_member is None:
+            is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
+        out = []
+        for c in changes:
+            if c.status not in ChangeService.ADVANCE_STATUSES:
+                continue
+            if not (holds_lead(c, user) or (c.lead_id is None and is_pm_member)):
+                continue
+            nxt = await ChangeService.next_step_missing(db, c)
+            if nxt is None or nxt["items"]:
+                continue
+            out.append({**await base(c), "kind": "advance", "to_status": nxt["to"],
+                        "target_tab": "overview"})
+        return out
 
     @staticmethod
     async def my_actions(
@@ -3769,12 +3957,9 @@ class ChangeService:
                 continue
             if await ChangeService.deviation_decide_refusal(session, change, dev, user):
                 continue
-            from app.services.cm_rules import ABSORB_RULE, rule_label
             actions.append({
                 "kind": "deviation_decision",
-                "label": (f"Decide Absorb #{dev.id}" if dev.guard_key == ABSORB_RULE
-                          else f"Decide override #{dev.id}: {rule_label(dev.guard_key)}"
-                          if dev.guard_key else f"Decide override #{dev.id}"),
+                "label": ChangeService.deviation_label(dev),
                 "target_tab": "overview",
                 "deviation_id": dev.id,
                 # what the decide panel shows without another request
@@ -3906,7 +4091,7 @@ class ChangeService:
                         if k not in ("change_id", "change_number", "title",
                                      "project_id", "project_number",
                                      "project_name", "mine", "hint", "overdue",
-                                     "due_date")}
+                                     "due_date", "since")}
                 item["label"] = (r.get("label")
                                  or (cm_labels.TASK_KIND[kind][0]
                                      if kind in cm_labels.TASK_KIND

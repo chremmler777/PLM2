@@ -100,6 +100,11 @@ TASK_KIND = {
     "info_send": ("Send the information", "Information senden"),
     "inform_mother_plant": ("Inform KTX Weissenburg / Solingen",
                             "KTX Weissenburg / Solingen informieren"),
+    # C3: the move-forward steps (deviation_decision rows carry their own label)
+    "sign_off": ("Sign off", "Freigabe unterschreiben"),
+    "internal_approval": ("Approve the internal costs", "Interne Kosten freigeben"),
+    "validation_check": ("Confirm validation", "Validierung bestätigen"),
+    "advance": ("Ready: move it on", "Bereit: weiterschalten"),
 }
 
 GROUPS = {

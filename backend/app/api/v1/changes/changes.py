@@ -405,6 +405,21 @@ async def my_change_tasks(
 
     tasks += await ChangeService.stage_tasks(db, current_user, open_changes, dep_ids)
 
+    # C3: a released change still owes its close (lead / PM): the one row
+    # a released change gives, with no other stage builder run on it.
+    released = (await db.execute(_org_scope(
+        select(ChangeRequest).where(ChangeRequest.status == "released"),
+        current_user))).scalars().all()
+    if released:
+        async def _ident(c):
+            return {"change_id": c.id, "change_number": c.change_number,
+                    "title": c.title, "project_id": c.project_id,
+                    "project_number": c.project_number,
+                    "project_name": c.project_name,
+                    "due_date": None, "overdue": False}
+        tasks += await ChangeService.advance_tasks(db, current_user, released, _ident)
+        open_changes = [*open_changes, *released]
+
     # One list (spec §16): no duplicate rows, a human kind label and the
     # stage each row belongs to.
     from app.services import cm_labels
@@ -430,9 +445,11 @@ async def my_change_tasks(
         key = (t["kind"], t["change_id"], t.get("assessment_id"),
                t.get("concern_id"), t.get("issue_id"), t.get("check_key"),
                t.get("escalation_id"), t.get("action_id"),
+               t.get("deviation_id"), t.get("side"),
                t.get("department_id") if t["kind"] in ("costing_input", "costing_update",
                                                         "plan_feedback", "info_ack",
-                                                        "release_check", "progress_report")
+                                                        "release_check", "progress_report",
+                                                        "validation_check")
                else None)
         if key in seen:
             continue
@@ -463,13 +480,13 @@ async def my_change_tasks(
         unique.append(t)
     tasks = unique
 
-    # One order across every kind: overdue first, then soonest due (undated
-    # last), then change number. Assessment rows keep "mine" as the top tie
-    # break — an answer you already accepted outranks one you have not.
-    tasks.sort(key=lambda d: (
-        d.get("role") == "backup",
-        not d.get("mine", False), not d["overdue"],
-        d["due_date"] is None, d["due_date"] or datetime.max, d["change_number"]))
+    # C20: each row's due by the two rules (task 2 wd / 1 wd, the
+    # assessment's own), its deadline, late (due + 1 wd) and "Needs you".
+    from app.services import due_rules
+    await due_rules.annotate_tasks(db, tasks, open_changes)
+    # One order across every kind: "Needs you" on top by due; then mine,
+    # overdue first, soonest due (undated last), change number.
+    tasks.sort(key=due_rules.task_order)
     return tasks
 
 

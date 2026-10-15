@@ -513,7 +513,30 @@ class EarlyStageService:
                             "saved_by": user.id}
         a.details = json.dumps(details)
         await session.flush()
+        await EarlyStageService.first_editor_owns(session, change, a, user)
         return EarlyStageService.draft_of(a)
+
+    @staticmethod
+    async def first_editor_owns(session: AsyncSession, change: ChangeRequest,
+                                a: ChangeAssessment, user: User) -> bool:
+        """Spec §0 ownership: the first person who works a department's
+        task owns it ("Holmes is working on this"); no claim button. Only a
+        real member of the department, not acting as one, and only while
+        nobody owns it (routing named someone, or a hand-over did). True
+        when this call made the user the owner."""
+        from app.services.change_people import is_acting
+        from app.services.workflow_service import WorkflowService
+        if a.effective_owner_id is not None or is_acting(user):
+            return False
+        if not await WorkflowService._is_department_member(
+                session, user.id, a.department_id):
+            return False
+        from app.services.change_service import ChangeService
+        try:
+            await ChangeService.accept_assessment(session, change, a.id, user)
+        except ChangeError:
+            return False
+        return True
 
     @staticmethod
     async def load_draft(session: AsyncSession, change: ChangeRequest,

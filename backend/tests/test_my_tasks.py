@@ -143,7 +143,12 @@ async def test_sales_chases_the_customer_response_until_it_lands(
                 if t["kind"] == "customer_response"]
 
 
-async def test_overdue_rows_sort_first(client, seed, roles, session_factory):
+async def test_overdue_rows_sort_first(client, seed, roles, session_factory,
+                                       monkeypatch):
+    """Switch ASSESSMENT_V2 off: a stage row is due by its change's deadline
+    (the C20 task rule is covered in test_ecr_solid_tasks.py)."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     sales = await _auth(client, "Sales")
     late = await _create(client, sales, seed, "late one", customer_relevant=True)
     soon = await _create(client, sales, seed, "soon one", customer_relevant=True)
