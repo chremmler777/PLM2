@@ -1028,7 +1028,7 @@ the lead's or an admin's. Moving the lead to the project PM on the flip
 comes with the customer flip of lane L4 (spec §0 [R4]). An internal change with a lead is its run
 team's to hand over: the kickoff task goes to the lead and Project Management
 only, and Sales has no capture hop (scoping, reject) on it; the stage badge
-at capture reads "Lead", not "Sales". A change with no lead shows "No lead
+at capture reads "Lead", not "Sales" ("PM" while nobody leads it). A change with no lead shows "No lead
 assigned: Project Management picks one", and Project Management's kickoff row
 is its own ("Assign a lead, then hand over to scoping").
 

@@ -673,7 +673,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('cockpit.where')}</h3>
         {statusPill()}
         {' '}
-        <StageResponsibleBadge status={change.status} origin={change.origin} />
+        <StageResponsibleBadge status={change.status} origin={change.origin} leadId={change.lead_id} />
         {' '}
         {/* Phase-aware: release deadline once active, otherwise the frozen
             quote verdict, otherwise the quote deadline for customer work. */}

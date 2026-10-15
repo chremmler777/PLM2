@@ -33,21 +33,23 @@ export default function SalesOwnerPicker({ change, canEdit }: {
     },
     onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not set the Sales owner')),
   })
-  const defaultId = candidates.find((c) => c.is_default)?.id
 
   return (
     <div data-testid="sales-owner-picker" className="mt-1 flex flex-wrap items-center gap-2">
       <span>{t('cockpit.salesOwner')}:</span>
       {editing ? (
-        <select key={defaultId ?? 'none'} aria-label={t('cockpit.salesOwnerPick')}
+        // Opens on the placeholder when nobody owns it, so picking the
+        // project's Sales contact (marked) is a real change that saves.
+        <select aria-label={t('cockpit.salesOwnerPick')}
           data-testid="sales-owner-select" autoFocus
-          defaultValue={change.sales_owner_id ?? defaultId ?? ''}
+          defaultValue={change.sales_owner_id ?? ''}
           disabled={set.isPending}
           onChange={(e) => { const v = Number(e.target.value); if (v) set.mutate(v) }}
           onBlur={() => { if (!set.isPending) setEditing(false) }}
           className="rounded border border-slate-600 bg-slate-900 px-2 py-0.5 text-sm text-slate-100">
           <option value="">{t('cockpit.salesOwnerPick')}</option>
-          {candidates.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          {candidates.map((o) => <option key={o.id} value={o.id}>
+            {o.is_default ? `${o.name} ${t('cockpit.salesOwnerDefault')}` : o.name}</option>)}
         </select>
       ) : (
         <span className="text-slate-100" data-testid="sales-owner-name">

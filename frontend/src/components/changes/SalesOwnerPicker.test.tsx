@@ -32,6 +32,20 @@ describe('SalesOwnerPicker (ECR-solid C10)', () => {
     await waitFor(() => expect(setSalesOwner).toHaveBeenCalledWith(7, 4))
   })
 
+  it('opens on the placeholder, so the marked project contact can be picked and saved', async () => {
+    salesOwnerCandidates.mockResolvedValue([
+      { id: 3, name: 'Cody Sales', is_default: true }, { id: 4, name: 'Jubei Sales' },
+    ])
+    render(wrap(<SalesOwnerPicker change={{ id: 7, sales_owner_id: null, sales_owner_name: null }} canEdit />))
+    fireEvent.click(screen.getByTestId('sales-owner-edit'))
+    const sel = () => screen.getByTestId('sales-owner-select') as HTMLSelectElement
+    await waitFor(() => expect(sel().options.length).toBe(3))
+    expect(sel().value).toBe('')
+    expect(sel().options[1].textContent).toBe('Cody Sales (project contact)')
+    fireEvent.change(sel(), { target: { value: '3' } })
+    await waitFor(() => expect(setSalesOwner).toHaveBeenCalledWith(7, 3))
+  })
+
   it('reads only, without a change button, for everyone else', () => {
     render(wrap(<SalesOwnerPicker change={{ id: 7, sales_owner_id: 3, sales_owner_name: 'Cody Sales' }}
       canEdit={false} />))

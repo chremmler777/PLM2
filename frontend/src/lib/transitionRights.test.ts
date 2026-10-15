@@ -42,6 +42,12 @@ describe('mayTransition (spec §16 P1 4)', () => {
       expect(mayTransition(c, to, { ...none, isAdmin: true })).toBe(true)
     }
   })
+  it('lets Sales send a change back from validation (only the start from approved is C1)', () => {
+    const c = { status: 'in_validation' as const }
+    expect(mayTransition(c, 'in_implementation', { ...none, isSales: true })).toBe(true)
+    expect(mayTransition(c, 'in_implementation', none)).toBe(false)
+    expect(mayTransition({ status: 'approved' }, 'in_implementation', { ...none, isSales: true })).toBe(false)
+  })
   it('gives Sales no capture hop on an internal change that has a lead', () => {
     const internal = { status: 'captured' as const, customer_relevant: false, lead_id: 7 }
     expect(mayTransition(internal, 'scoping', { ...none, isSales: true })).toBe(false)

@@ -37,8 +37,9 @@ export const salesChapter: ContentChapter = {
         },
         {
           p:
-            'Every customer change has a Sales owner, shown on the Status card and in the change ' +
-            'list: you when you started it, else the project\'s Sales contact. All of Sales still ' +
+            'A customer change has a Sales owner, shown on the Status card and in the change ' +
+            'list: you when you started it, else the project\'s Sales contact. With neither it reads ' +
+            '"No Sales owner: all of Sales", and anyone in Sales takes it with "Pick a Sales owner". All of Sales still ' +
             'sees the Sales tasks, with the owner\'s name on them, and anyone in Sales may act. ' +
             'Hand a change to a colleague with "change" beside "Sales owner".',
         },

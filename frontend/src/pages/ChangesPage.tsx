@@ -71,7 +71,7 @@ const salesOwnerNow = (c: ChangeRequest): string | null =>
 const ownerText = (c: ChangeRequest): string => {
   if (endStateOf(c)) return '';
   if (c.stage_owner) return c.stage_owner;
-  const key = stageResponsibleKey(c.status, c.origin);
+  const key = stageResponsibleKey(c.status, c.origin, c.lead_id);
   const who = salesOwnerNow(c);
   return key ? (who ? `${t(key)} ${who}` : t(key)) : '';
 };
@@ -320,7 +320,7 @@ export default function ChangesPage() {
                       : c.stage_owner ? <span className="text-slate-300">{c.stage_owner}</span>
                         : (
                           <>
-                            <StageResponsibleBadge status={c.status} origin={c.origin} />
+                            <StageResponsibleBadge status={c.status} origin={c.origin} leadId={c.lead_id} />
                             {salesOwnerNow(c) && (
                               <span className="ml-1.5 text-slate-300" data-testid={`change-sales-owner-${c.id}`}>
                                 {salesOwnerNow(c)}

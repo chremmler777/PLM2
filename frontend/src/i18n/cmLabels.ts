@@ -2186,6 +2186,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.salesOwner': { de: 'Vertriebsverantwortlicher', en: 'Sales owner' },
   'cockpit.noSalesOwner': { de: 'Kein Vertriebsverantwortlicher: alle im Vertrieb', en: 'No Sales owner: all of Sales' },
   'cockpit.salesOwnerPick': { de: 'Vertriebsverantwortlichen wählen', en: 'Pick a Sales owner' },
+  'cockpit.salesOwnerDefault': { de: '(Projektkontakt)', en: '(project contact)' },
   'cockpit.salesOwnerSaved': { de: 'Vertriebsverantwortlicher gesetzt', en: 'Sales owner set' },
   'cockpit.salesOwnerHint': { de: 'Vertrieb oder Projektmanagement setzen ihn; Vertriebsaufgaben sieht trotzdem der ganze Vertrieb', en: 'Sales or Project Management sets it; all of Sales still sees the Sales tasks' },
 

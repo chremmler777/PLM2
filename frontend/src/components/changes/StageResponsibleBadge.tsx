@@ -54,15 +54,22 @@ export const INTERNAL_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> =
   captured: 'role.lead',
 }
 
-export function stageResponsibleKey(status: ChangeStatus, origin?: string | null): string | undefined {
+export function stageResponsibleKey(
+  status: ChangeStatus, origin?: string | null, leadId?: number | null,
+): string | undefined {
+  // An internal change nobody leads yet: Project Management picks the lead
+  // (the backend's "No lead assigned" wait), so the badge names PM.
+  if (origin === 'internal' && status === 'captured' && leadId === null) return 'role.pmShort'
   const table = origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE
     : origin === 'mother_plant' ? MOTHER_PLANT_STAGE_RESPONSIBLE
       : origin === 'internal' ? INTERNAL_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE
   return table[status]
 }
 
-export function StageResponsibleBadge({ status, origin }: { status: ChangeStatus; origin?: string | null }) {
-  const key = stageResponsibleKey(status, origin)
+export function StageResponsibleBadge({ status, origin, leadId }: {
+  status: ChangeStatus; origin?: string | null; leadId?: number | null
+}) {
+  const key = stageResponsibleKey(status, origin, leadId)
   if (!key) return null
   return (
     <span data-testid="stage-responsible" title={`${t('responsible.label')}: ${t(key)}`}

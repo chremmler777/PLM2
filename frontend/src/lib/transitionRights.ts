@@ -53,6 +53,9 @@ export function mayTransition(
   // Costing back from quote creation is a reopen, gated elsewhere; from
   // assessment it closes the round: lead/PM/admin.
   if (to === 'costing' && from !== 'in_assessment') return true
+  // Sending a change back from validation stays Sales' too
+  // (ValidationService.may_escalate); C1 restricts the start from approved.
+  if (from === 'in_validation' && to === 'in_implementation') return leadPmAdmin || v.isSales
   if (LEAD_PM_ADMIN_TARGETS.has(to)) return leadPmAdmin
   return true
 }
