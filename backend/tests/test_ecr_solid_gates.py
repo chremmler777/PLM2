@@ -786,3 +786,31 @@ async def test_signoff_rules_switch_off(client, admin, seed, depts, people,
         assert await EarlyStageService.hard_refusal(s, c, "approved") is None
         c.status = "in_validation"
         assert await EarlyStageService.hard_refusal(s, c, "released") is None
+
+
+async def test_absorb_note_is_price_talk(client, admin, seed, depts, people,
+                                         session_factory):
+    """R23: an Absorb note names the money; a viewer outside the price rule
+    (here Development, as Toolshop or Quality) reads the rule and the people,
+    never the note, in the override list and the changelog."""
+    cid = await _change(client, admin, seed, session_factory, "released", price_open=True)
+    note = "EUR 300 over the offer, not worth a supplement"
+    dev = (await client.post(f"/api/v1/changes/{cid}/absorb", json={
+        "reason_code": "small_amount", "note": note}, headers=people["Sales"][1])).json()
+    dev_auth = people["Development"][1]
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations", headers=dev_auth)).json()
+    assert rows[0]["reason"] == "" and rows[0]["guard_key"] == "price_open"
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations",
+                             headers=people["Project Manager"][1])).json()
+    assert rows[0]["reason"] == note  # a price viewer reads it
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
+                          json={"decision": "approved", "note": "ok, EUR 300 is fine"},
+                          headers=people["Management"][1])
+    assert r.status_code == 200, r.text
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=dev_auth)).json()
+    text = " ".join(f"{e['action_description']} {e.get('notes') or ''}" for e in log)
+    assert "EUR" not in text  # NEGATIVE: no amount leaks
+    absorbed = next(e for e in log if e["action"] == "price_absorbed")
+    assert absorbed["action_description"] == f"Open price absorbed (#{dev['id']})"
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin)).json()
+    assert any(note in (e.get("notes") or "") for e in log)

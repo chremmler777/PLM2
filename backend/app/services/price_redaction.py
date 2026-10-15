@@ -57,6 +57,16 @@ OFFER_NOTE_KEYS = frozenset(("note", "expired_override_reason"))
 # The description of these carries no free text and is kept.
 NOTE_ONLY_ACTIONS = frozenset(("weight_delta_acknowledged",))
 
+# Overrides of these rules are money talk (spec §0 Prices, R23): an Absorb
+# note names the amount absorbed, a price-drop reason the discount.
+PRICE_RULES = ("price_open", "price_drop")
+
+
+def _price_rule_labels() -> tuple[str, ...]:
+    from app.services.cm_rules import rule_label
+    return tuple(rule_label(k) for k in PRICE_RULES)
+
+
 # Free-text fields of the change header that carry the same talk.
 CHANGE_NOTE_FIELDS = ("internal_approval_note", "weight_delta_ack_note")
 
@@ -143,7 +153,21 @@ def redact_changelog_text(action: str, description: str,
         # may name the numbers too.
         desc = desc.split(":", 1)[0]
         notes = None
-    elif action in NOTE_ONLY_ACTIONS:
+    elif action in NOTE_ONLY_ACTIONS or action == "absorb_proposed":
+        notes = None
+    elif action == "price_absorbed":
+        # "Open price absorbed (#n): <note>" - the note names the amount
+        desc = desc.split(":", 1)[0]
+        notes = None
+    elif action in ("deviation_proposed", "deviation_decided") and any(
+            f"'{label}'" in desc for label in _price_rule_labels()):
+        notes = None
+    elif action == "deviated_transition" and any(
+            f"'{label}'" in desc for label in _price_rule_labels()):
+        # "(deviation #n waives '<price rule>': <reason>)": keep the rule
+        for label in _price_rule_labels():
+            desc = re.sub(r"(waives '" + re.escape(label) + r"'): (?:[^()]|\([^()]*\))*\)",
+                          r"\1)", desc)
         notes = None
     return desc, notes
 

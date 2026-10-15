@@ -2708,13 +2708,21 @@ async def list_deviations(
 async def _deviation_rows(db, change, devs, user) -> list[dict]:
     from app.services.change_plan_service import ChangePlanService
     from app.services.cm_rules import rule_label
+    from app.services.price_redaction import PRICE_RULES, PriceViewer
     names = await ChangePlanService._user_names(
         db, [d.proposed_by for d in devs] + [d.decided_by for d in devs])
+    # An Absorb note or a price-drop reason is money talk (R23): blanked
+    # for a viewer outside the price rule, the rule and the people stay.
+    hide = (any(d.guard_key in PRICE_RULES for d in devs)
+            and not await PriceViewer(db, user).may_read(change))
     out = []
     for d in devs:
         pending = d.status == "pending"
+        row = TransitionDeviationResponse.model_validate(d).model_dump()
+        if hide and d.guard_key in PRICE_RULES:
+            row.update(reason="", decision_note=None)
         out.append({
-            **TransitionDeviationResponse.model_validate(d).model_dump(),
+            **row,
             "can_decide": (pending and await ChangeService.deviation_decide_refusal(
                 db, change, d, user) is None),
             "proposed_by_name": names.get(d.proposed_by),

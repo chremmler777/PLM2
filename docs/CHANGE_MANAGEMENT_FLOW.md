@@ -1162,7 +1162,12 @@ estimate") come with lane L5.
 **Absorb.** `POST /changes/{id}/absorb {reason_code: goodwill | small_amount |
 our_error | other, note}` by Sales (customer change), the lead, PM or an
 admin, while `price_open` is set. It files an override bound to `price_open`;
-its approval clears `price_open` at once (changelog `price_absorbed`).
+its approval clears `price_open` at once (changelog `price_absorbed`). The
+note names money, so it follows the price rule (R23): `GET /deviations`
+blanks the reason and decision note of a `price_open` / `price_drop`
+override for a viewer who may not read prices, and the changelog drops the
+notes of `absorb_proposed`, `price_absorbed` ("Open price absorbed (#n)")
+and of the decisions and hops that waive a price rule.
 
 **Why blocked.** `next_step.items` (cockpit "Missing before ...") carry the
 rule (`rule`), the owner and due in words (`who`), a hard rule's only exits
