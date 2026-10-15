@@ -89,6 +89,20 @@ describe('ScopingFlags quick add', () => {
     await waitFor(() => expect(changesApi.joinConcern).toHaveBeenCalledWith(7, 12, { department_id: 3 }))
   })
 
+  it('offers add to only where the backend allows it (can_add_to, R24)', async () => {
+    render(flags([
+      concern({ id: 12, department_id: 4, owner_department_names: ['Tool Engineer'], can_add_to: true }),
+      concern({ id: 14, department_id: 4, owner_department_names: ['Tool Engineer'], can_add_to: false }),
+    ]))
+    fireEvent.change(screen.getByTestId('quick-add-note'), { target: { value: 'Rib 2 too' } })
+    fireEvent.change(screen.getByTestId('quick-add-what'), { target: { value: 'drawing' } })
+    expect(screen.getByTestId('quick-add-addto-12')).toBeTruthy()
+    expect(screen.queryByTestId('quick-add-addto-14')).toBeNull()
+    // 'same as' on #14 sends no line the caller may not add
+    fireEvent.click(screen.getByTestId('quick-add-same-14'))
+    await waitFor(() => expect(changesApi.joinConcern).toHaveBeenCalledWith(7, 14, { department_id: 3 }))
+  })
+
   it('does not offer same as for a department that is not mine', () => {
     render(flags([concern({ id: 12, department_id: 4, owner_department_names: ['Tool Engineer'] })]))
     fireEvent.change(screen.getByTestId('quick-add-dept'), { target: { value: '6' } })

@@ -1227,6 +1227,8 @@ export interface ChangeConcern {
   confirmed_at?: string | null;
   /** May the viewer switch question / check item (asker or PM)? */
   can_switch?: boolean | null;
+  /** C33 'add to #n' (R24): same predicate as the backend's join with a note */
+  can_add_to?: boolean | null;
 }
 
 export type FlagType = 'question' | 'check';

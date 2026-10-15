@@ -10,7 +10,7 @@ department's submit until settled with a note.
 """
 import pytest
 
-from tests.conftest import insert_legacy_concern
+from tests.conftest import QUESTION, insert_legacy_concern
 
 pytestmark = pytest.mark.asyncio
 
@@ -71,8 +71,12 @@ async def _meeting(client, auth, cid, dept_ids):
     return res.json()["id"]
 
 
+
+
 async def _raise(client, auth, cid, note, kind="needs_info", **extra):
     body = {"kind": kind, "note": note}
+    if kind == "needs_info":
+        body.update(QUESTION)
     body.update(extra)
     return await client.post(f"/api/v1/changes/{cid}/concerns", json=body,
                              headers=auth)

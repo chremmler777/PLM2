@@ -227,9 +227,10 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   only) and **Add to #n** (the line is appended), `POST /concerns/{id}/join`.
   Check items have no limit. Cancel votes keep "one per person".
 - **Questions hold `proceed` (HARD #2); check items never do.** Legacy flags
-  (`flag_type` NULL, migration 121 backfills `question`) and a raise without
-  `flag_type` (old API shape) are questions, so in-flight changes behave as
-  before.
+  (`flag_type` NULL, migration 121 backfills `question`) are questions, so
+  in-flight changes behave as before. A new scoping raise names its type
+  (`flag_type`; refused without, L4 review 2: a question owes who answers
+  and what it changes, R2/R3).
 - **Answer form** (`POST /concerns/{id}/answer` with `answer_kind`), nothing
   preselected: **Confirmed** = evidence: a customer question only by a filed
   customer mail (picked, `mail_id`) or the customer's document uploaded into
@@ -238,7 +239,9 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   confirmed by the Sales owner (else the lead) within 5 working days. An
   Assumed answer leaves a **confirm task** (`confirm_assumption`, My Tasks, due
   at `confirm_due`) for that person in any live status until someone who may
-  answer it confirms it with evidence (`POST /concerns/{id}/confirm`).
+  answer it confirms it with evidence (`POST /concerns/{id}/confirm`). When
+  the person named is the Sales owner, the row shows to all of Sales with the
+  owner's name ([R3]); closed, cancelled or rejected changes take no confirm.
   Answering still does not close: the asker or PM closes [KEEP].
 - **Proceed dialog**: open questions as a fix list (*Answer now* with the
   answer form, *Make it a check item*), check items collapsed by owner with
@@ -274,13 +277,17 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   question (the named confirmer, or who may answer it; any live status, the
   question open or closed), and the card shows the confirm form on it, so
   the confirmer is never sent to a dead end. A named confirmer
-  (`confirm_by_id`) must be an active writer of the change's organization and
-  is told once (`confirm:<concern>`). A customer question is Confirmed only by
+  (`confirm_by_id`) must be an active writer of the change's organization
+  (admin, or a member of an active department; not the stored role, which
+  follows a new department only at the next login) and is told once
+  (`confirm:<concern>`). A customer question is Confirmed only by
   a filed customer mail or a `customer_file` filed on the question (an
   internal `info_response` is no customer answer).
 - **Same as / add to rights**: *same as* is a department act (members only;
   an admin acts as the department); *add to* is the asker's, the owning
   departments', Sales' or PM's and is refused once the question is answered.
+  The list serves `can_add_to` (the same check, `MeetingService.may_add_to`):
+  the quick add shows *Add to #n* only where it is true.
   *Make it a question* keeps the one-open-question-per-pick limit.
 - **Customer copy**: a customer question carries its mail text
   (`customer_copy`: subject, what is asked, the part, what the answer

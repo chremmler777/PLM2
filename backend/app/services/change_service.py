@@ -3797,14 +3797,25 @@ class ChangeService:
             # named to confirm it (default the Sales owner) by its due date,
             # in any live status: the assumption travels into the assessment
             # and the offer until it is confirmed.
+            # [R3] Sales tasks show to all of Sales with the owner's name:
+            # an item the Sales owner is named for shows to every Sales
+            # member (any of them may confirm it, can_confirm).
             if c.status not in TERMINAL_STATUSES:
+                acting = getattr(user, "acts_as_department_id", None) is not None
                 for q in c.concerns:
-                    if q.confirm_open and q.confirm_by_id == user.id:
+                    if not q.confirm_open:
+                        continue
+                    mine = q.confirm_by_id == user.id and not acting
+                    for_sales = (in_sales and q.confirm_by_id is not None
+                                 and q.confirm_by_id == c.sales_owner_id)
+                    if mine or for_sales:
                         due = (datetime.combine(q.confirm_due, datetime.min.time())
                                if q.confirm_due else None)
                         tasks.append({
                             **await _base(c), "kind": "confirm_assumption",
                             "concern_id": q.id,
+                            **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                               if not mine else {}),
                             "reason": (f"{q.assumed_value}"
                                        f"{' ' + q.assumed_unit if q.assumed_unit else ''}"
                                        f": {q.note}"),

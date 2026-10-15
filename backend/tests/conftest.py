@@ -589,3 +589,9 @@ async def impact_confirm_on(monkeypatch):
     tests that cover the parked step."""
     from app.services import cm_switches
     monkeypatch.setattr(cm_switches, "IMPACT_CONFIRM_STEP_ENABLED", True)
+
+
+# C33 (SCOPING_V2): a new scoping question names its type, who answers and
+# what the answer changes in the scope; tests that raise one spread this.
+QUESTION = {"flag_type": "question", "check_what": "other",
+            "answer_from": "our_team", "scope_effect": "Decides which parts are in scope"}

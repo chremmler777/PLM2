@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import select
 
 from tests.conftest import (
-    insert_legacy_concern, login, make_department_member, satisfy_capture_gate,
+    QUESTION, insert_legacy_concern, login, make_department_member, satisfy_capture_gate,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_department_question_is_the_asking_departments_task(
     _, _, pm = await _user(client, session_factory, seed, "pm", "Project Manager")
     _, _, tool = await _user(client, session_factory, seed, "tool", "Tool Engineer")
     res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=apqp, json={
-        "kind": "needs_info", "note": "Which tolerance class?", "department_id": apqp_id})
+        "kind": "needs_info", "note": "Which tolerance class?", "department_id": apqp_id, **QUESTION})
     assert res.status_code == 200, res.text
     qid = res.json()["id"]
 
@@ -202,7 +202,7 @@ async def test_proceed_refusal_lists_every_open_flag(
     depts = await _dept_ids(session_factory)
     _, apqp_id, apqp = await _user(client, session_factory, seed, "apqp5", "APQP")
     await client.post(f"/api/v1/changes/{cid}/concerns", headers=apqp, json={
-        "kind": "needs_info", "note": "Tolerance?", "department_id": apqp_id})
+        "kind": "needs_info", "note": "Tolerance?", "department_id": apqp_id, **QUESTION})
     await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth, json={
         "kind": "reject_proposal", "note": "Too costly"})
     mid = await _meeting(client, admin_auth, cid, depts)

@@ -18,6 +18,10 @@ from app.services.change_service import ChangeService, ChangeError
 from app.services.workflow_service import WorkflowService
 
 
+#: An ended change: its record stays as it is (no confirm, no add).
+ENDED = ("closed", "cancelled", "rejected")
+
+
 class MeetingForbidden(ChangeError):
     """A meeting act the caller has no right to: 403, not 400 (spec §16)."""
 
@@ -381,8 +385,8 @@ class MeetingService:
             raise ChangeError("A concern needs a note saying what the problem is")
         # C33 (spec §3, SCOPING_V2): a scoping flag is a QUESTION (blocks
         # 'proceed') or a CHECK item (the raised-for department checks it in
-        # its assessment). A raise without flag_type is the legacy shape and
-        # stays a question; the UI always says which.
+        # its assessment). A raise names its type; a legacy row without one
+        # stays a question.
         structured = (kind == "needs_info" and not in_assessment
                       and cm_switches.on("SCOPING_V2"))
         if structured:
@@ -472,10 +476,15 @@ class MeetingService:
     ) -> tuple:
         """C33: the structure of a scoping flag (spec §3 quick add / "Make it
         a question"). Returns (flag_type, check_what, part_id, answer_from,
-        scope_effect), normalised. A raise without flag_type is a legacy
-        question and keeps its old, free shape."""
+        scope_effect), normalised. A new raise names its type (R2/R3: a
+        question owes who answers and what it changes); flags from before
+        C33 (flag_type NULL) stay questions, but none is raised that way."""
         if flag_type is None:
-            return "question", None, None, None, None
+            raise ChangeError(
+                "Say what it is: a check item (flag_type check: the raised-for "
+                "department checks it in its assessment) or a question "
+                "(flag_type question: who can answer, what the answer changes "
+                "in the scope)")
         if flag_type not in FLAG_TYPES:
             raise ChangeError(
                 f"Invalid flag type '{flag_type}': question or check")
@@ -594,6 +603,24 @@ class MeetingService:
         return concern
 
     @staticmethod
+    async def may_add_to(session: AsyncSession, change: ChangeRequest,
+                         concern: ChangeConcern, user: User) -> bool:
+        """'Add to #n' (spec §3): an open, unanswered question or check item
+        in capture or scoping, by the asker, a department it is raised for,
+        or whoever may answer it. Served as can_add_to (R24)."""
+        if (not cm_switches.on("SCOPING_V2") or concern.kind != "needs_info"
+                or not concern.is_open or concern.answered_at is not None
+                or change.status not in SCOPING_STATUSES):
+            return False
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if concern.raised_by == user.id and not acting:
+            return True
+        mine = set(await WorkflowService.effective_department_ids(session, user))
+        if mine & set(concern.owner_department_ids):
+            return True
+        return await MeetingService.can_answer_question(session, change, concern, user)
+
+    @staticmethod
     async def join_flag(
         session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
         *, department_id: Optional[int] = None, note: Optional[str] = None,
@@ -627,12 +654,7 @@ class MeetingService:
                 raise ChangeError(
                     f"#{concern.id} is already answered: raise a new question "
                     "instead of adding to it")
-            acting = getattr(user, "acts_as_department_id", None) is not None
-            mine = set(await WorkflowService.effective_department_ids(session, user))
-            if not ((concern.raised_by == user.id and not acting)
-                    or mine & set(concern.owner_department_ids)
-                    or await MeetingService.can_answer_question(
-                        session, change, concern, user)):
+            if not await MeetingService.may_add_to(session, change, concern, user):
                 raise MeetingForbidden(
                     "Only the asker, the departments it is raised for, Sales or "
                     "Project Management may add to it")
@@ -775,10 +797,11 @@ class MeetingService:
     async def _may_confirm_for(session: AsyncSession, change: ChangeRequest,
                                user_id: int) -> bool:
         """The named confirmer can act: active, of the change's organization,
-        a writer (admin, or a member of an active department; a viewer or a
-        user without department reads only)."""
+        a writer (admin, or a member of an active department; a user without
+        department reads only). Not the stored role: under strategy B a hub
+        user's role follows a new department only at the next login."""
         u = await session.get(User, user_id)
-        if u is None or not u.is_active or u.role == "viewer":
+        if u is None or not u.is_active:
             return False
         if change.project_id is not None:
             from app.models.entities import Plant, Project
@@ -796,7 +819,7 @@ class MeetingService:
         """The confirm item of an Assumed answer is open and the caller may
         close it: the person named to confirm it, or anyone who may answer
         the question, in any live status, the question open or closed."""
-        if not concern.confirm_open:
+        if not concern.confirm_open or change.status in ENDED:
             return False
         acting = getattr(user, "acts_as_department_id", None) is not None
         if concern.confirm_by_id == user.id and not acting:
@@ -832,6 +855,8 @@ class MeetingService:
             raise ChangeError("Concern not found on this change")
         if not concern.confirm_open:
             raise ChangeError("Nothing to confirm: the answer is not an open assumption")
+        if change.status in ENDED:
+            raise ChangeError(f"The change is {change.status}: its record stays as it is")
         if not await MeetingService.can_confirm(session, change, concern, user):
             raise MeetingForbidden(
                 "Only the person named to confirm it, the asking department, "

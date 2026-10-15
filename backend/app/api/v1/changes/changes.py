@@ -3065,9 +3065,7 @@ async def list_concerns(
             # the confirm item of an Assumed answer: open in any live status,
             # the question open or closed (its named confirmer, or whoever
             # may answer it)
-            row.can_confirm = (change.status not in ("closed", "cancelled", "rejected")
-                               and await MeetingService.can_confirm(
-                                   db, change, c, current_user))
+            row.can_confirm = await MeetingService.can_confirm(db, change, c, current_user)
             row.customer_copy = MeetingService.customer_copy(
                 change, c, part_numbers.get(c.part_id))
             row.owner_department_names = [concern_depts.get(d, f"#{d}")
@@ -3080,6 +3078,7 @@ async def list_concerns(
             row.confirm_by_name = names.get(c.confirm_by_id)
             row.can_switch = c.is_open and (
                 (c.raised_by == current_user.id and not acting) or is_pm_member)
+            row.can_add_to = await MeetingService.may_add_to(db, change, c, current_user)
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
             row.answered_by_name = names.get(c.answered_by)

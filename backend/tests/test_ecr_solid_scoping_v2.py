@@ -537,3 +537,90 @@ async def test_customer_question_carries_the_mail_copy(
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
     row = next(t for t in tasks if t["kind"] == "obtain_info" and t["change_id"] == cid)
     assert row["customer_copy"] is None or "Hello" in row["customer_copy"]
+
+
+# --- L4 review 2: add-to rights served, untyped raise, confirm rules ---------
+
+async def test_can_add_to_matches_the_join_rights_and_untyped_raise_is_refused(
+        client, admin_auth, seed, session_factory):
+    cid, _ = await _scoping(client, admin_auth, seed, "18")
+    _, proc, pe = await _user(client, session_factory, seed, "pe18", "Process Engineer")
+    _, _, tool = await _user(client, session_factory, seed, "te18", "Tool Engineer")
+    _, _, sales = await _user(client, session_factory, seed, "sa18", "Sales")
+    chk = (await _raise(client, pe, cid, _check(proc))).json()
+    assert (await _concerns(client, pe, cid))[chk["id"]]["can_add_to"] is True
+    assert (await _concerns(client, tool, cid))[chk["id"]]["can_add_to"] is False
+    q = (await _raise(client, pe, cid, _question(proc, answer_from="our_team"))).json()
+    assert (await _concerns(client, sales, cid))[q["id"]]["can_add_to"] is True
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/answer",
+                            json={"answer_kind": "confirmed", "ref": "Process sheet PS-1 rev 2"},
+                            headers=pe)
+    assert res.status_code == 200, res.text
+    # answered: nobody adds to it any more
+    assert (await _concerns(client, sales, cid))[q["id"]]["can_add_to"] is False
+    # a new scoping raise names its type (R2/R3)
+    res = await _raise(client, pe, cid, {"kind": "needs_info", "note": "Gate position?",
+                                         "department_id": proc})
+    assert res.status_code == 400 and "check item" in res.json()["detail"]
+
+
+async def test_confirmer_by_department_not_stored_role_and_not_on_ended_change(
+        client, admin_auth, seed, session_factory):
+    """A colleague just given a department (stored role still 'viewer' until
+    the next login) may be named to confirm; an ended change's assumption
+    is not rewritten."""
+    from sqlalchemy import update
+    from app.models.change import ChangeRequest
+    from app.models.entities import User
+    cid, _ = await _scoping(client, admin_auth, seed, "19")
+    _, proc, pe = await _user(client, session_factory, seed, "pe19", "Process Engineer")
+    new_uid, _, _new = await _user(client, session_factory, seed, "dev19", "Development")
+    async with session_factory() as s:
+        await s.execute(update(User).where(User.id == new_uid).values(role="viewer"))
+        await s.commit()
+    q = (await _raise(client, pe, cid, _question(proc, answer_from="our_team",
+                                                 what="volume", note="Volume?"))).json()
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/answer", json={
+        "answer_kind": "assumed", "assumed_value": "90000", "assumed_unit": "pcs/yr",
+        "assumed_risk": "Second cavity needed above 150k", "confirm_by_id": new_uid},
+        headers=pe)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid)
+                        .values(status="cancelled"))
+        await s.commit()
+    assert (await _concerns(client, pe, cid))[q["id"]]["can_confirm"] is False
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/confirm",
+                            json={"ref": "Sales forecast FC-2026-10"}, headers=pe)
+    assert res.status_code == 400 and "cancelled" in res.json()["detail"]
+
+
+async def test_confirm_item_for_the_sales_owner_shows_to_all_of_sales(
+        client, admin_auth, seed, session_factory):
+    """[R3] Sales tasks show to all of Sales with the owner's name: another
+    Sales member sees the Sales owner's confirm item, and may confirm it."""
+    cid, _ = await _scoping(client, admin_auth, seed, "20")
+    _, proc, pe = await _user(client, session_factory, seed, "pe20", "Process Engineer")
+    owner_uid, _, _owner = await _user(client, session_factory, seed, "sa20", "Sales")
+    _, _, other = await _user(client, session_factory, seed, "sb20", "Sales")
+    _, _, tool = await _user(client, session_factory, seed, "te20", "Tool Engineer")
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "customer_relevant": True, "sales_owner_id": owner_uid}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    q = (await _raise(client, pe, cid, _question(proc, answer_from="our_team",
+                                                 what="volume", note="Volume?"))).json()
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/answer", json={
+        "answer_kind": "assumed", "assumed_value": "90000", "assumed_unit": "pcs/yr",
+        "assumed_risk": "Second cavity needed above 150k", "confirm_by_id": owner_uid},
+        headers=pe)
+    assert res.status_code == 200, res.text
+
+    async def rows(auth):
+        tasks = (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+        return [t for t in tasks if t["kind"] == "confirm_assumption" and t["change_id"] == cid]
+    got = await rows(other)
+    assert len(got) == 1 and got[0]["main_name"] == "SV sa20"
+    assert await rows(tool) == []
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/confirm",
+                            json={"ref": "Sales forecast FC-2026-10"}, headers=other)
+    assert res.status_code == 200, res.text

@@ -10,7 +10,7 @@ them. Those tests seed the row directly; see conftest.insert_legacy_concern.
 """
 import pytest
 
-from tests.conftest import insert_legacy_concern, login, satisfy_capture_gate
+from tests.conftest import QUESTION, insert_legacy_concern, login, satisfy_capture_gate
 
 pytestmark = pytest.mark.asyncio
 
@@ -295,7 +295,7 @@ async def test_attribution_to_sales_gives_sales_no_settle_right(
     concern_id = (await client.post(
         f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
         json={"kind": "needs_info", "note": "Ask the customer for rev D",
-              "department_id": sales_dept_id})).json()["id"]
+              "department_id": sales_dept_id, **QUESTION})).json()["id"]
 
     # Sales answers — that is their part, and it changes nothing about who
     # decides the answer was good enough.

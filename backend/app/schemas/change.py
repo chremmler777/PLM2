@@ -1397,6 +1397,8 @@ class ConcernResponse(BaseModel):
     confirmed_at: Optional[datetime] = None
     # May the caller switch its type (asker or Project Management)?
     can_switch: Optional[bool] = None
+    # C33 'add to #n' (R24): the same predicate as POST .../join with a note
+    can_add_to: Optional[bool] = None
 
     class Config:
         from_attributes = True

@@ -121,9 +121,10 @@ export default function ScopingFlags({
     onError: (e: unknown) => setFailure(toastError(e, 'Could not add it')),
   })
   const join = useMutation({
-    mutationFn: (vars: { id: number; sameAs: boolean }) => changesApi.joinConcern(changeId, vars.id, {
+    mutationFn: (vars: { id: number; sameAs: boolean; addTo: boolean }) => changesApi.joinConcern(changeId, vars.id, {
       ...(vars.sameAs && deptId != null ? { department_id: deptId } : {}),
-      ...(note.trim() ? { note: note.trim() } : {}),
+      // the line goes along only where the backend lets the caller add it
+      ...(note.trim() && vars.addTo ? { note: note.trim() } : {}),
     }),
     onSuccess: () => { reset(); onChanged() },
     onError: (e: unknown) => setFailure(toastError(e, 'Could not add it')),
@@ -221,14 +222,14 @@ export default function ScopingFlags({
                   {mayCoOwn && !(c.owner_department_names ?? []).includes(deptName(deptId)) && (
                     <button type="button" className="text-sky-300 hover:text-sky-200"
                       data-testid={`quick-add-same-${c.id}`} disabled={join.isPending}
-                      onClick={() => join.mutate({ id: c.id, sameAs: true })}>
+                      onClick={() => join.mutate({ id: c.id, sameAs: true, addTo: !!c.can_add_to })}>
                       {t('flag.sameAs').replace('{n}', String(c.id))}
                     </button>
                   )}
-                  {note.trim() && (
+                  {note.trim() && c.can_add_to && c.answered_at == null && (
                     <button type="button" className="text-sky-300 hover:text-sky-200"
                       data-testid={`quick-add-addto-${c.id}`} disabled={join.isPending}
-                      onClick={() => join.mutate({ id: c.id, sameAs: false })}>
+                      onClick={() => join.mutate({ id: c.id, sameAs: false, addTo: true })}>
                       {t('flag.addTo').replace('{n}', String(c.id))}
                     </button>
                   )}
