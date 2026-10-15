@@ -48,10 +48,13 @@ async def sales_world(session_factory, seed):
         # A change reaches costing with its blocking assessments in: the
         # costing-side guards read them on the way out again.
         from app.models.change import ChangeAssessment
+        # ... and its costing finalized (C5 guards closing costing too).
         s.add(ChangeAssessment(
             change_id=change.id, department_id=other.id, stage_order=1,
             rasic_letter="R", status="submitted", verdict="feasible",
-            submitted_at=datetime.utcnow()))
+            submitted_at=datetime.utcnow(),
+            details='{"costing_finalized_at": "%s"}' % (
+                datetime.utcnow() + timedelta(seconds=1)).isoformat()))
         await s.commit()
         return {"change_id": change.id, "sales_dept": sales.id,
                 "other_dept": other.id, "users": users}

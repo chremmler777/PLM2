@@ -201,13 +201,23 @@ class EarlyStageService:
                                   "target_tab": None, "deviation_possible": False,
                                   "pending_deviation_id": None}
                 continue
-            reason = await ChangeService._guard(session, change, to_status)
-            if reason is None:
-                continue
+            from app.services import cm_switches
             devs = [d for d in change.transition_deviations if d.to_status == to_status]
-            if any(d.status == "approved" for d in devs):
-                continue
-            pending = next((d for d in devs if d.status == "pending"), None)
+            if cm_switches.on("COMMERCIAL_V2"):
+                # C6: covered only when every holding rule has its override
+                _, uncovered = await ChangeService.override_cover(
+                    session, change, to_status)
+                if not uncovered:
+                    continue
+                reason = uncovered[0]
+                pending = ChangeService.pending_override(change, to_status, reason.key)
+            else:
+                reason = await ChangeService._guard(session, change, to_status)
+                if reason is None:
+                    continue
+                if any(d.status == "approved" for d in devs):
+                    continue
+                pending = next((d for d in devs if d.status == "pending"), None)
             gate = next((g for g in change.gates
                          if GATE_TARGET_STATUS.get(g.gate_key) == to_status
                          and g.decision != "yes"), None)
@@ -216,6 +226,7 @@ class EarlyStageService:
             out[to_status] = {
                 "kind": "gate" if is_gate else "guard",
                 "reason": reason,
+                "rule": getattr(reason, "key", None),
                 "gate_key": gate.gate_key if is_gate else None,
                 "target_tab": "d1" if is_gate else None,
                 "deviation_possible": True,
@@ -259,6 +270,10 @@ class EarlyStageService:
             return "Internal changes skip the quote"
         if to_status == "in_assessment" and change.impact_confirmed_at is None:
             return "Impacted set is not locked"
+        # ECR-solid HARD #3 and #9 (the same check transition() runs)
+        hard = await ChangeService.solid_hard_refusal(session, change, to_status)
+        if hard is not None:
+            return hard
         if change.status == "on_hold" and to_status != "cancelled":
             before = await ChangeService._status_before_hold(session, change)
             if before is not None and before != "on_hold" and to_status != before:
@@ -886,6 +901,12 @@ class EarlyStageService:
             "lead_assigned": change.lead_id is not None,
             # One price rule (PriceViewer) for the API and the cost cards.
             "can_see_prices": await PriceViewer(session, user).may_read(change),
+            # HARD #8 (P9): the internal approval's button follows the rule
+            "can_approve_internal": (
+                not change.customer_relevant and change.status in ("costing", "quoted")
+                and change.internal_approved_at is None
+                and await ChangeService.user_can_approve_internal_costs(
+                    session, user, change)),
             "can_record_meeting": (
                 change.status == "scoping"
                 and await EarlyStageService._may_record_meeting(session, change, user)),

@@ -48,11 +48,21 @@ async def test_assessment_blocked_until_impact_locked(
 async def test_deviation_cannot_bypass_lock_gate(
         client, admin_auth, eng_auth, seed, departments, session_factory, part):
     cid = await _scoping_ready(client, eng_auth, seed, session_factory, part)
-    dev = (await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": "in_assessment", "reason": "skip lock"}, headers=eng_auth)).json()
-    ok = await client.post(f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
-                           json={"decision": "approved"}, headers=admin_auth)
-    assert ok.status_code == 200, ok.text
+    # C6: the lock is no soft rule, so there is nothing to ask an override for
+    asked = await client.post(f"/api/v1/changes/{cid}/deviations", json={
+        "to_status": "in_assessment", "reason": "skip lock"}, headers=eng_auth)
+    assert asked.status_code == 400, asked.text
+    assert "Nothing to override" in asked.json()["detail"]
+    # and an override approved before the binding (it covered anything) still
+    # does not lift the lock
+    from datetime import datetime
+    from app.models.change import ChangeTransitionDeviation
+    async with session_factory() as s:
+        s.add(ChangeTransitionDeviation(
+            change_id=cid, to_status="in_assessment", reason="skip lock",
+            status="approved", proposed_by=seed["engineer_id"],
+            decided_by=seed["admin_id"], decided_at=datetime.utcnow()))
+        await s.commit()
 
     blocked = await client.post(f"/api/v1/changes/{cid}/transition",
                                 json={"to_status": "in_assessment"}, headers=eng_auth)

@@ -42,7 +42,7 @@ from app.schemas.change import (
     RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
-    DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
+    DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse, AbsorbIn,
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
@@ -1401,6 +1401,9 @@ async def transition_change(
         dev_reason = (body.deviation_reason or "").strip()
         if not dev_reason:
             headers = {"X-Deviation-Required": e.to_status}
+            if getattr(e.guard_reason, "key", None):
+                # C6: the rule an override would have to name
+                headers["X-Deviation-Rule"] = e.guard_reason.key
             if e.pending_deviation_id is not None:
                 headers["X-Deviation-Pending"] = str(e.pending_deviation_id)
             raise HTTPException(status_code=400, detail=str(e), headers=headers)
@@ -1411,7 +1414,8 @@ async def transition_change(
         if created:
             try:
                 dev = await ChangeService.propose_transition_deviation(
-                    db, change, e.to_status, dev_reason, current_user.id)
+                    db, change, e.to_status, dev_reason, current_user.id,
+                    guard_key=getattr(e.guard_reason, "key", None))
             except ChangeError as err:
                 raise HTTPException(status_code=400, detail=str(err))
             await db.commit()
@@ -1983,11 +1987,14 @@ async def approve_internal_costs(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if not await ChangeService.user_can_approve_internal_costs(db, current_user):
+    if not await ChangeService.user_can_approve_internal_costs(
+            db, current_user, change):
         raise HTTPException(
             status_code=403,
-            detail="Only a Project Manager department member or an admin "
-                   "may approve internal costs")
+            detail=("The raiser does not approve their own change's spend: "
+                    "an engineering approver does"
+                    if change.raised_by == current_user.id else
+                    "Only an engineering approver may approve internal costs"))
     try:
         await ChangeService.approve_internal_costs(
             db, change, current_user, note=body.note,
@@ -2700,16 +2707,23 @@ async def list_deviations(
 
 async def _deviation_rows(db, change, devs, user) -> list[dict]:
     from app.services.change_plan_service import ChangePlanService
+    from app.services.cm_rules import rule_label
     names = await ChangePlanService._user_names(
         db, [d.proposed_by for d in devs] + [d.decided_by for d in devs])
-    return [{
-        **TransitionDeviationResponse.model_validate(d).model_dump(),
-        "can_decide": (d.status == "pending"
-                       and ChangeService.transition_deviation_refusal(
-                           change, d, user) is None),
-        "proposed_by_name": names.get(d.proposed_by),
-        "decided_by_name": names.get(d.decided_by),
-    } for d in devs]
+    out = []
+    for d in devs:
+        pending = d.status == "pending"
+        out.append({
+            **TransitionDeviationResponse.model_validate(d).model_dump(),
+            "can_decide": (pending and await ChangeService.deviation_decide_refusal(
+                db, change, d, user) is None),
+            "proposed_by_name": names.get(d.proposed_by),
+            "decided_by_name": names.get(d.decided_by),
+            "rule_label": rule_label(d.guard_key) if d.guard_key else None,
+            "deciders": (await ChangeService.override_deciders(
+                db, change, d.guard_key, d.to_status) if pending else None),
+        })
+    return out
 
 
 @router.post("/{change_id}/deviations", response_model=TransitionDeviationResponse)
@@ -2722,11 +2736,38 @@ async def propose_deviation(
         raise HTTPException(status_code=404, detail="Change not found")
     try:
         dev = await ChangeService.propose_transition_deviation(
-            db, change, body.to_status, body.reason, current_user.id)
+            db, change, body.to_status, body.reason, current_user.id,
+            guard_key=body.guard_key, reason_code=body.reason_code)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
-    return dev
+    await db.refresh(dev)
+    return (await _deviation_rows(db, change, [dev], current_user))[0]
+
+
+@router.post("/{change_id}/absorb", response_model=TransitionDeviationResponse)
+async def propose_absorb(
+    change_id: int, body: AbsorbIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """HARD #9's exit (spec §0): absorb the open price. Asked by Sales or
+    the run team with a reason pick + note; a Project Management or
+    Management member gives the OK (internal: the approver) on the
+    deviation it files; the OK clears price_open."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    refusal = await ChangeService.absorb_refusal(db, change, current_user)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
+    try:
+        dev = await ChangeService.propose_absorb(
+            db, change, body.reason_code, body.note, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(dev)
+    return (await _deviation_rows(db, change, [dev], current_user))[0]
 
 
 @router.post("/{change_id}/deviations/{dev_id}/decide",
@@ -2744,7 +2785,7 @@ async def decide_deviation(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
-    return dev
+    return (await _deviation_rows(db, change, [dev], current_user))[0]
 
 
 @router.get("/{change_id}/meetings", response_model=List[MeetingResponse])

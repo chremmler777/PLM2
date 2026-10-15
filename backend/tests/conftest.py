@@ -288,6 +288,25 @@ async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
         await s.commit()
 
 
+async def finalize_costing(session_factory, change_id: int, actor_id: int = 1):
+    """Stamp every assessment's costing finalized directly (bypasses the
+    lines/positions finalize asks for) so state-machine tests can close
+    costing past the C5 guard (ECR-solid: every owing department finalized).
+    Same shortcut as lock_impact; the real flow is in test_early_costing.py."""
+    import json as _json
+    from datetime import datetime, timedelta
+    from sqlalchemy import select as _select
+    from app.models.change import ChangeAssessment
+    at = (datetime.utcnow() + timedelta(seconds=1)).isoformat()
+    async with session_factory() as s:
+        for a in (await s.execute(_select(ChangeAssessment).where(
+                ChangeAssessment.change_id == change_id))).scalars():
+            d = _json.loads(a.details) if a.details else {}
+            d.update(costing_finalized_at=at, costing_finalized_by=actor_id)
+            a.details = _json.dumps(d)
+        await s.commit()
+
+
 async def validate_timing(session_factory, change_id: int, actor_id: int = 1):
     """Stamp 'Timing validated' directly (bypasses the detailed plan and the
     teams' confirmations) so state-machine tests can cross the approved ->

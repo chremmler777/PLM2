@@ -11,11 +11,13 @@ from tests.test_change_scoping import create_change, add_item_and_lead
 _RELEASE_DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()
 
 
-async def to_costing(session_factory, change_id):
+async def to_costing(session_factory, change_id, raised_by=2):
+    """Into costing. HARD #8: the raiser never approves; these tests approve
+    as the admin or a PM member, so the seeded engineer (id 2) raised it."""
     from app.models.change import ChangeRequest
     async with session_factory() as s:
         await s.execute(update(ChangeRequest).where(
-            ChangeRequest.id == change_id).values(status="costing"))
+            ChangeRequest.id == change_id).values(status="costing", raised_by=raised_by))
         await s.commit()
 
 
@@ -43,6 +45,11 @@ async def test_internal_approval_guards(client, admin_auth, seed, part,
                                         session_factory):
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
+    async with session_factory() as s:  # HARD #8: the admin is not the raiser
+        from app.models.change import ChangeRequest
+        await s.execute(update(ChangeRequest).where(
+            ChangeRequest.id == change["id"]).values(raised_by=seed["engineer_id"]))
+        await s.commit()
     # wrong status
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
                             json={}, headers=admin_auth)
@@ -87,7 +94,7 @@ async def test_internal_approval_allows_pm_department_member(
         await s.commit()
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
-    await to_costing(session_factory, change["id"])
+    await to_costing(session_factory, change["id"], raised_by=seed["admin_id"])
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
                             json={"note": "pm approved", "release_due_date": _RELEASE_DUE}, headers=eng_auth)

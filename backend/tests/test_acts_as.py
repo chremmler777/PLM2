@@ -197,7 +197,7 @@ async def test_acting_admin_who_leads_cannot_decide_a_deviation(client, admin_au
                                json={"decision": "approved"},
                                headers=_acting(admin_auth, depts["sales"]))
     assert denied.status_code in (400, 403)
-    assert "lead or an admin" in denied.json()["detail"]
+    assert "change lead, a Project Management member or an admin" in denied.json()["detail"]
     ok = await client.post(f"/api/v1/changes/{cid}/deviations/{did}/decide",
                            json={"decision": "approved"}, headers=admin_auth)
     assert ok.status_code == 200, ok.text

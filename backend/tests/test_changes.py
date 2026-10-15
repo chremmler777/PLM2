@@ -231,6 +231,9 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth, sessio
                           json={"department_id": a["department_id"], "verdict": "feasible"},
                           headers=admin_auth)
     await _transition(client, auth, change["id"], "costing")
+    # C5: every owing department finalized its costing before the quote
+    from tests.conftest import finalize_costing
+    await finalize_costing(session_factory, change["id"])
     # Writing the offer is its own stage now: costing -> quoting -> quoted.
     await _transition(client, auth, change["id"], "quoting")
     await client.patch(f"/api/v1/changes/{change['id']}",

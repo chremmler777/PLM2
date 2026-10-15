@@ -1274,6 +1274,17 @@ class ImpactSelectionIn(BaseModel):
 class DeviationProposeIn(BaseModel):
     to_status: str
     reason: str
+    # C6: the soft rule this override waives (cm_rules keys, e.g.
+    # 'costing_not_finalized', 'gate:budget'); omitted = the first rule that
+    # holds the hop and has no override yet. reason_code: the reason pick.
+    guard_key: Optional[str] = None
+    reason_code: Optional[str] = None
+
+
+class AbsorbIn(BaseModel):
+    """HARD #9's exit: absorb the open price (reason pick + note)."""
+    reason_code: str
+    note: str
 
 
 class DeviationDecideIn(BaseModel):
@@ -1296,6 +1307,14 @@ class TransitionDeviationResponse(BaseModel):
     can_decide: bool = False
     proposed_by_name: Optional[str] = None
     decided_by_name: Optional[str] = None
+    # C6: the rule it waives (NULL: a request from before the binding), the
+    # rule's words when asked, the reason pick, and whose OK it needs
+    # (decider group run | pm_mgmt | quality | approver; the lead's name).
+    guard_key: Optional[str] = None
+    guard_reason: Optional[str] = None
+    reason_code: Optional[str] = None
+    rule_label: Optional[str] = None
+    deciders: Optional[dict] = None
 
     class Config:
         from_attributes = True

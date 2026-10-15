@@ -938,6 +938,8 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes/{change_id}/routing/deviation/approve"),
     ("POST", "/changes/{change_id}/deviations"),
     ("POST", "/changes/{change_id}/deviations/{dev_id}/decide"),
+    # HARD #9's exit: absorb an open price (ECR-solid L2)
+    ("POST", "/changes/{change_id}/absorb"),
     # impact
     ("POST", "/changes/{change_id}/impacted-items"),
     ("DELETE", "/changes/{change_id}/impacted-items/{item_id}"),

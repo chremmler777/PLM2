@@ -363,8 +363,10 @@ async def test_legacy_quoted_internal_change_approves_internally(
                                  lead_id=seed["admin_id"])
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
     async with session_factory() as s:
+        # HARD #8: the approver is never the raiser
         await s.execute(update(ChangeRequest).where(
-            ChangeRequest.id == change["id"]).values(status="quoted"))
+            ChangeRequest.id == change["id"]).values(
+                status="quoted", raised_by=seed["engineer_id"]))
         await s.commit()
     res = await client.post(
         f"/api/v1/changes/{change['id']}/internal-approval",

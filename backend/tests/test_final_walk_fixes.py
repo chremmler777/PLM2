@@ -273,6 +273,13 @@ async def test_deviation_list_says_who_may_decide(
                                         reason="late paperwork",
                                         proposed_by=seed["engineer_id"]))
         await s.commit()
+    # C6: an override into release is Quality's call, not a plain admin's
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations",
+                             headers=admin_auth)).json()
+    assert rows[0]["can_decide"] is False
+    assert rows[0]["deciders"]["group"] == "quality"
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["admin_id"], "Quality")
     rows = (await client.get(f"/api/v1/changes/{cid}/deviations",
                              headers=admin_auth)).json()
     assert rows[0]["can_decide"] is True

@@ -151,8 +151,13 @@ async def test_changes_pnl_rows(session_factory, seed, pnl_data):
         assert cust["realized"] is False  # 'quoted' is pre-realized
 
 
-async def test_internal_branch_uses_approved_amount(session_factory, seed, pnl_data):
+async def test_internal_branch_uses_approved_amount(session_factory, seed, pnl_data,
+                                                    monkeypatch):
     from app.services.pnl_service import PnlService
+    from app.services import cm_switches
+    # About the P&L snapshot, not C5: the fixture's department never
+    # finalized its costing (test_ecr_solid_gates covers that guard).
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     async with session_factory() as session:
         admin = await session.get(User, seed["admin_id"])
 
@@ -165,6 +170,7 @@ async def test_internal_branch_uses_approved_amount(session_factory, seed, pnl_d
         assert internal_row["total_cost"] == 3000.0
 
         change = await session.get(ChangeRequest, pnl_data["internal_id"])
+        change.raised_by = seed["engineer_id"]  # HARD #8: never the raiser
         await ChangeService.approve_internal_costs(
             session, change, admin,
             release_due_date=datetime.utcnow() + timedelta(days=120))

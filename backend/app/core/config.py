@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     lockout_duration_minutes: int = 30
 
     # Notification settings
+    # P9 / HARD #8 (ECR-solid): who approves an internal change's spend.
+    # Comma-separated usernames or e-mails (env INTERNAL_APPROVERS):
+    # Christoph + one deputy. Never the change's raiser. When none of them is
+    # an active user here, the earlier rule stands in (a Project Manager
+    # member or an admin), so no internal change stalls on the setting.
+    internal_approvers: str = "christoph.demmler"
+
     notification_task_assigned: bool = True
     notification_task_completed: bool = True
     notification_escalation: bool = True

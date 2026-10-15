@@ -876,6 +876,7 @@ async def test_internal_approval_freezes_the_plan(client, auth, seed, depts, ses
         ch = await s.get(ChangeRequest, c["id"])
         ch.customer_relevant = False
         ch.status = "costing"
+        ch.raised_by = seed["engineer_id"]  # HARD #8: never the raiser
         admin = await s.get(User, seed["admin_id"])
         await ChangeService.approve_internal_costs(
             s, ch, admin, release_due_date=datetime(2027, 1, 31))

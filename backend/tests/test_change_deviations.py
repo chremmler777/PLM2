@@ -65,9 +65,12 @@ async def test_reject_and_duplicate_pending_blocked(client, eng_auth, admin_auth
     c = await _change(client, eng_auth, seed)
     dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
         "to_status": "in_assessment", "reason": "r1"}, headers=eng_auth)).json()
+    # C6: an override is per rule; the same rule twice waits for the first
     dup = await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "r2"}, headers=eng_auth)
+        "to_status": "in_assessment", "reason": "r2", "guard_key": dev["guard_key"]},
+        headers=eng_auth)
     assert dup.status_code == 400
+    assert "already pending" in dup.json()["detail"]
     rej = await client.post(
         f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
         json={"decision": "rejected", "note": "not enough info"}, headers=admin_auth)

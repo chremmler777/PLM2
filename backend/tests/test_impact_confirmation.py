@@ -258,9 +258,15 @@ async def test_deviation_bypasses_impact_confirmation_guard(
     dev = (await client.post(f"/api/v1/changes/{cid}/deviations", json={
         "to_status": "in_implementation", "reason": "kickoff before Development signs off"},
         headers=eng_auth)).json()
-    ok = await client.post(
+    # C6: an override into implementation is Quality's call, not a plain admin's
+    no = await client.post(
         f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
         json={"decision": "approved"}, headers=admin_auth)
+    assert no.status_code == 400 and "Quality" in no.json()["detail"]
+    ok = await client.post(
+        f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
+        json={"decision": "approved"},
+        headers={**admin_auth, "X-Acts-As-Department": str(departments["Quality"])})
     assert ok.status_code == 200, ok.text
 
     res = await client.post(f"/api/v1/changes/{cid}/transition",

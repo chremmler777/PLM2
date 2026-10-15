@@ -340,10 +340,13 @@ async def test_transition_to_quoted_stamps_quoted_at(session_factory, seed):
         # Leaving costing now carries the costing-side guards, so the change
         # needs the submitted assessment a real one would have.
         from app.models.change import ChangeAssessment
+        # (C5: with its costing finalized, or closing costing is held)
         session.add(ChangeAssessment(
             change_id=chg.id, department_id=1, stage_order=1, rasic_letter="R",
             status="submitted", verdict="feasible",
-            submitted_at=datetime.utcnow()))
+            submitted_at=datetime.utcnow(),
+            details='{"costing_finalized_at": "%s"}' % (
+                datetime.utcnow() + timedelta(seconds=1)).isoformat()))
         await session.flush()
         # ...and the guard reads routing as well as the assessments (same
         # async lazy-load pitfall as gates above).

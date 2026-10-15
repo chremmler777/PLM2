@@ -518,6 +518,47 @@ class ValidationService:
     # The verdict
     # ------------------------------------------------------------------
     @staticmethod
+    async def release_parts(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> tuple[str | None, str | None]:
+        """(failed, outstanding) in the words of release_blocker, split for
+        C7: a FAILED check is HARD at release (only a concession lifts it),
+        a check not answered yet stays a soft rule.
+
+        A failed check is covered by a concession: a validation issue raised
+        on that check (check_id) and closed 'accepted' (the customer accepted
+        the deviation, route customer_concession). Vacuous with no rows."""
+        rows = await ValidationService.list_checks(session, change)
+        if not rows:
+            return None, None
+        names = await ValidationService._department_names(session)
+        rows = [r for r in rows if r.check_key in catalog.keys_for(
+            names.get(r.department_id))]
+
+        def _name(row) -> str:
+            dept = names.get(row.department_id) or f"dept {row.department_id}"
+            return f"{dept}: {catalog.label_for(row.check_key, names.get(row.department_id))}"
+
+        failed = [r for r in rows if r.status == "failed"]
+        if failed:
+            from app.models.change_validation_issue import ValidationIssue
+            conceded = set((await session.execute(
+                select(ValidationIssue.check_id).where(
+                    ValidationIssue.change_id == change.id,
+                    ValidationIssue.check_id.in_([r.id for r in failed]),
+                    ValidationIssue.status == "accepted",
+                    ValidationIssue.route == "customer_concession"))).scalars().all())
+            failed = [r for r in failed if r.id not in conceded]
+        outstanding = [r for r in rows if r.status not in ("passed", "failed")]
+        return (
+            ("Validation failed: " + ", ".join(sorted(map(_name, failed)))
+             + ". Fix it (back to implementation with a reason) and retest, or a "
+             "concession (Quality)") if failed else None,
+            ("Validation incomplete, still open: "
+             + ", ".join(sorted(map(_name, outstanding)))) if outstanding else None,
+        )
+
+    @staticmethod
     async def release_blocker(
         session: AsyncSession, change: ChangeRequest,
         *, rows: list[ValidationCheck] | None = None,
@@ -533,6 +574,12 @@ class ValidationService:
         Reads rows only; never seeds. A guard that created the very rows it
         then refuses on would fail a release nobody had been asked about.
         """
+        from app.services import cm_switches
+        if cm_switches.on("RELEASE_V2"):
+            # C7: one wording with the HARD refusal; a failed check covered by
+            # an accepted concession no longer holds.
+            failed, outstanding = await ValidationService.release_parts(session, change)
+            return failed or outstanding
         if rows is None:
             rows = await ValidationService.list_checks(session, change)
         if not rows:

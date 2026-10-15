@@ -404,9 +404,11 @@ async def test_release_refused_when_a_check_failed(client, admin_auth, val):
 
     state = await _state(client, admin_auth, val)
     assert state["failed_count"] == 1
-    # The guard refuses with exactly the blocker string, plus the standard
-    # deviation postscript every soft guard adds.
-    assert detail.startswith(state["release_blocker"])
+    # C7: the HARD refusal is exactly the blocker string, no override
+    # postscript (no override lifts it).
+    assert detail == state["release_blocker"]
+    assert "concession" in detail
+    assert "X-Deviation-Required" not in res.headers
 
 
 async def test_release_passes_the_validation_guard_once_everything_is_signed(

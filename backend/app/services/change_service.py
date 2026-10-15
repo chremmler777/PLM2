@@ -250,44 +250,121 @@ class ChangeService:
     @staticmethod
     async def propose_transition_deviation(
         session: AsyncSession, change: ChangeRequest, to_status: str,
-        reason: str, user_id: int,
+        reason: str, user_id: int, *, guard_key: Optional[str] = None,
+        reason_code: Optional[str] = None,
     ) -> ChangeTransitionDeviation:
+        """Ask for an override (a transition deviation). With COMMERCIAL_V2
+        (C6) it is bound to ONE soft rule that holds the hop now: the one
+        named (guard_key), else the first rule nobody asked to override yet.
+        Nothing to override is refused, so a request is never a blank cheque."""
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
         if not reason or not reason.strip():
             raise ChangeError("A reason is required to propose a deviation")
-        if any(d.to_status == to_status and d.status == "pending"
-               for d in change.transition_deviations):
+        from app.services import cm_switches
+        from app.services.cm_rules import OVERRIDE_REASONS, rule_label
+        bound = None
+        if cm_switches.on("COMMERCIAL_V2"):
+            if reason_code is not None and reason_code not in OVERRIDE_REASONS:
+                raise ChangeError(
+                    f"Unknown reason '{reason_code}': one of {', '.join(OVERRIDE_REASONS)}")
+            reasons = await ChangeService._guard_reasons(session, change, to_status)
+            if guard_key is not None:
+                bound = next((r for r in reasons if r.key == guard_key), None)
+                if bound is None:
+                    raise ChangeError(
+                        f"'{rule_label(guard_key)}' does not hold the move to "
+                        f"'{to_status}': nothing to override")
+            else:
+                asked = {d.guard_key for d in change.transition_deviations
+                         if d.to_status == to_status
+                         and d.status in ("pending", "approved")}
+                bound = next((r for r in reasons if r.key not in asked), None)
+                if bound is None:
+                    raise ChangeError(
+                        "Nothing to override: no soft rule holds the move to "
+                        f"'{to_status}'" if not reasons else
+                        "Every rule that holds this step already has an "
+                        "override asked or approved")
+            if any(d.to_status == to_status and d.status == "pending"
+                   and d.guard_key in (bound.key, None)
+                   for d in change.transition_deviations):
+                raise ChangeError(
+                    f"An override of '{rule_label(bound.key)}' is already pending")
+        elif any(d.to_status == to_status and d.status == "pending"
+                 for d in change.transition_deviations):
             raise ChangeError("A deviation for this transition is already pending")
         dev = ChangeTransitionDeviation(
             change_id=change.id, to_status=to_status, reason=reason.strip(),
             proposed_by=user_id,
+            guard_key=bound.key if bound is not None else None,
+            guard_reason=str(bound) if bound is not None else None,
+            reason_code=(reason_code or "other") if bound is not None else reason_code,
         )
         session.add(dev)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "deviation_proposed",
-            f"Transition deviation to '{to_status}' proposed", user_id,
-            field_name="deviation",
-            new_value={"deviation_id": dev.id, "to_status": to_status},
+            f"Transition deviation to '{to_status}' proposed"
+            + (f": waives '{rule_label(bound.key)}'" if bound is not None else ""),
+            user_id, field_name="deviation",
+            new_value={"deviation_id": dev.id, "to_status": to_status,
+                       "guard_key": dev.guard_key, "reason_code": dev.reason_code},
             notes=reason.strip(),
         )
-        if change.lead_id is not None and change.lead_id != user_id:
-            from app.services.notification_service import NotificationService
-            await NotificationService.notify_once(
-                session, [change.lead_id], kind="deviation_pending",
-                subject_key=f"dev:{dev.id}",
-                title=f"Deviation pending: {change.change_number}",
-                body=f"A transition deviation to '{to_status}' needs your review.",
-                link=f"/changes/{change.id}",
-            )
+        await ChangeService._notify_override_deciders(session, change, dev, user_id)
         return dev
 
     @staticmethod
+    async def _notify_override_deciders(session: AsyncSession, change: ChangeRequest,
+                                        dev, proposer_id: int) -> None:
+        """Decision needed (spec §0 Notifications: immediate, involved people
+        only, one per item): the lead as before; with COMMERCIAL_V2 the
+        rule's deciders, i.e. the PM department when there is no lead or the
+        lead asked (C6 fix 3), Quality for its rules, PM + Management for
+        the commercial ones, the internal approvers for an internal Absorb."""
+        from app.services.notification_service import NotificationService
+        from app.services import cm_switches
+        ids: set[int] = set()
+        if not cm_switches.on("COMMERCIAL_V2"):
+            if change.lead_id is not None and change.lead_id != proposer_id:
+                ids.add(change.lead_id)
+        else:
+            from app.services.cm_rules import (
+                decider_group, RUN, PM_MGMT, QUALITY, APPROVER, rule_label)
+            from app.services.change_people import department_members_of_change_org
+            group = decider_group(dev.guard_key, dev.to_status, change.customer_relevant)
+            names = {RUN: ("Project Manager",), PM_MGMT: ("Project Manager", "Management"),
+                     QUALITY: ("Quality",), APPROVER: ()}[group]
+            if group == RUN and change.lead_id is not None and change.lead_id != proposer_id:
+                ids.add(change.lead_id)
+            elif names:
+                dept_ids = [i for (i,) in (await session.execute(
+                    select(Department.id).where(Department.name.in_(names),
+                                                Department.is_active.is_(True)))).all()]
+                ids.update(await department_members_of_change_org(session, change, dept_ids))
+            if group == APPROVER:
+                ids.update(u.id for u in await ChangeService.internal_approver_users(session))
+            ids.discard(proposer_id)
+            if group == APPROVER:
+                ids.discard(change.raised_by)
+        if not ids:
+            return
+        from app.services.cm_rules import rule_label
+        what = (f"waives '{rule_label(dev.guard_key)}'" if dev.guard_key
+                else f"to '{dev.to_status}'")
+        await NotificationService.notify_once(
+            session, sorted(ids), kind="deviation_pending",
+            subject_key=f"dev:{dev.id}",
+            title=f"Decision needed: {change.change_number}",
+            body=f"An override ({what}) needs your OK.",
+            link=f"/changes/{change.id}",
+        )
+
+    @staticmethod
     def transition_deviation_refusal(change: ChangeRequest, dev, user) -> Optional[str]:
-        """None when `user` may decide the pending deviation `dev`, else why
-        not. One rule for the decide endpoint, the deviation list's
-        can_decide and the cockpit's 'Decide deviation #n' action."""
+        """The rule before C6 (switch COMMERCIAL_V2 off): None when `user`
+        may decide the pending deviation `dev`, else why not."""
         if dev.proposed_by == user.id:
             return "Cannot decide your own deviation (4-eyes rule)"
         if user.effective_role not in ("admin", "engineer"):
@@ -301,6 +378,109 @@ class ChangeService:
         return None
 
     @staticmethod
+    async def deviation_decide_refusal(session: AsyncSession, change: ChangeRequest,
+                                       dev, user) -> Optional[str]:
+        """None when `user` may decide the pending override `dev`, else why
+        not. One rule for the decide endpoint, the deviation list's
+        can_decide and the 'Decide deviation #n' action.
+
+        C6 (COMMERCIAL_V2): never the proposer; the OK belongs to the rule's
+        deciders (cm_rules.decider_group): the lead, a Project Management
+        member or an admin by default; a Quality member for implementation
+        start, release and validation rules; a Project Management or
+        Management member for price rules and Absorb; the internal approver
+        for an internal Absorb. Acting as a department drops the personal
+        lead and approver rights (C32)."""
+        from app.services import cm_switches
+        if not cm_switches.on("COMMERCIAL_V2"):
+            return ChangeService.transition_deviation_refusal(change, dev, user)
+        if dev.proposed_by == user.id:
+            return "Cannot decide your own deviation (4-eyes rule)"
+        if user.effective_role not in ("admin", "engineer"):
+            return "Deviation decisions require an engineer or admin role"
+        from app.services.cm_rules import decider_group, RUN, PM_MGMT, QUALITY
+        from app.services.change_people import holds_lead
+        group = decider_group(dev.guard_key, dev.to_status, change.customer_relevant)
+        if group == RUN:
+            if (user.effective_role == "admin" or holds_lead(change, user)
+                    or await ChangeService.member_of(session, user, "Project Manager")):
+                return None
+            return ("Only the change lead, a Project Management member or an "
+                    "admin may decide this override")
+        if group == PM_MGMT:
+            if await ChangeService.member_of(session, user, "Project Manager", "Management"):
+                return None
+            return ("Only a Project Management or Management member may decide "
+                    "this override")
+        if group == QUALITY:
+            if await ChangeService.member_of(session, user, "Quality"):
+                return None
+            return "Only a Quality member may decide this override"
+        if await ChangeService.is_internal_approver(session, user, change):
+            return None
+        return "Only the internal approver (never the raiser) may decide this"
+
+    @staticmethod
+    async def member_of(session: AsyncSession, user: User, *names: str) -> bool:
+        """Member of one of the named departments (acts-as aware, no admin
+        shortcut)."""
+        from app.services.workflow_service import WorkflowService
+        dept_ids = await WorkflowService.effective_department_ids(session, user)
+        if not dept_ids:
+            return False
+        return bool((await session.execute(
+            select(func.count()).select_from(Department).where(
+                Department.id.in_(dept_ids), Department.name.in_(names),
+                Department.is_active.is_(True)))).scalar())
+
+    @staticmethod
+    async def override_deciders(session: AsyncSession, change: ChangeRequest,
+                                guard_key: Optional[str], to_status: str) -> dict:
+        """Who gives the OK on an override of this rule, for the dialog's
+        "needs <name>'s OK": {group, lead_name}."""
+        from app.services.cm_rules import decider_group, RUN
+        group = decider_group(guard_key, to_status, change.customer_relevant)
+        lead_name = None
+        if group == RUN and change.lead_id is not None:
+            from app.services.change_plan_service import ChangePlanService
+            lead_name = (await ChangePlanService._user_names(
+                session, [change.lead_id])).get(change.lead_id)
+        return {"group": group, "lead_name": lead_name}
+
+    @staticmethod
+    async def override_cover(session: AsyncSession, change: ChangeRequest,
+                             to_status: str) -> tuple[list, list]:
+        """(approved overrides that cover the hop, soft rules still uncovered).
+        An override covers only its own rule; a row from before the binding
+        (guard_key NULL) covers what it always did: everything for its
+        target (legacy, in-flight changes)."""
+        reasons = await ChangeService._guard_reasons(session, change, to_status)
+        if not reasons:
+            return [], []
+        from sqlalchemy import inspect as _inspect
+        if "transition_deviations" in _inspect(change).unloaded:
+            await session.refresh(change, ["transition_deviations"])
+        approved = [d for d in change.transition_deviations
+                    if d.to_status == to_status and d.status == "approved"]
+        legacy = next((d for d in approved if d.guard_key is None), None)
+        covering: list = []
+        uncovered: list = []
+        for r in reasons:
+            d = next((d for d in approved if d.guard_key == r.key), None) or legacy
+            if d is None:
+                uncovered.append(r)
+            elif d not in covering:
+                covering.append(d)
+        return covering, uncovered
+
+    @staticmethod
+    def pending_override(change: ChangeRequest, to_status: str,
+                         guard_key: Optional[str]):
+        return next((d for d in change.transition_deviations
+                     if d.to_status == to_status and d.status == "pending"
+                     and d.guard_key in (guard_key, None)), None)
+
+    @staticmethod
     async def decide_transition_deviation(
         session: AsyncSession, change: ChangeRequest, deviation_id: int,
         decision: str, actor: User, *, note: Optional[str] = None,
@@ -312,22 +492,201 @@ class ChangeService:
             raise ChangeError("Deviation not found")
         if dev.status != "pending":
             raise ChangeError(f"Deviation is '{dev.status}', not pending")
-        refusal = ChangeService.transition_deviation_refusal(change, dev, actor)
+        refusal = await ChangeService.deviation_decide_refusal(session, change, dev, actor)
         if refusal:
             raise ChangeError(refusal)
+        from app.services import cm_switches
+        from app.services.cm_rules import ABSORB_RULE, rule_label
+        if (decision == "approved" and dev.guard_key is None
+                and cm_switches.on("COMMERCIAL_V2")):
+            # A request from before the binding is bound now, to the rule
+            # that holds the hop when it is approved.
+            first = await ChangeService._guard(session, change, dev.to_status)
+            if first is not None:
+                dev.guard_key, dev.guard_reason = first.key, str(first)
         dev.status = decision
         dev.decided_by = actor.id
         dev.decided_at = datetime.utcnow()
         dev.decision_note = note
+        absorbed = decision == "approved" and dev.guard_key == ABSORB_RULE
+        if absorbed:
+            # Absorb is not a hop: the approval itself clears the open price
+            # (HARD #9's exit), so the override is used up at once.
+            dev.status = "consumed"
+            change.price_open = False
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "deviation_decided",
-            f"Deviation #{dev.id} ({dev.to_status}): {decision}", actor.id,
+            f"Deviation #{dev.id} ({dev.to_status}"
+            + (f", waives '{rule_label(dev.guard_key)}'" if dev.guard_key else "")
+            + f"): {decision}", actor.id,
             field_name="deviation",
-            new_value={"deviation_id": dev.id, "decision": decision},
+            new_value={"deviation_id": dev.id, "decision": decision,
+                       "guard_key": dev.guard_key},
             notes=note,
         )
+        if absorbed:
+            await ChangeService.append_changelog(
+                session, change, "price_absorbed",
+                f"Open price absorbed (#{dev.id}): {dev.reason}", actor.id,
+                field_name="price_open", old_value=True, new_value=False,
+                notes=dev.reason)
         return dev
+
+    # ------------------------------------------------------------------
+    # HARD #9 exit: Absorb (spec §0, §4, §7)
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def absorb_refusal(session: AsyncSession, change: ChangeRequest,
+                             user: User) -> Optional[str]:
+        """Who may ask to absorb an open price: Sales (the Sales owner's
+        side) and the run team (lead, PM member, admin); for an internal
+        change the lead or the run team. None when allowed."""
+        from app.services.change_people import holds_lead
+        if user.effective_role == "admin" or holds_lead(change, user):
+            return None
+        if await ChangeService.member_of(session, user, "Project Manager"):
+            return None
+        if change.customer_relevant and await ChangeService.member_of(
+                session, user, "Sales"):
+            return None
+        return ("Only Sales, the change lead, Project Management or an admin "
+                "may ask to absorb an open price")
+
+    @staticmethod
+    async def propose_absorb(session: AsyncSession, change: ChangeRequest,
+                             reason_code: str, note: str,
+                             user: User) -> ChangeTransitionDeviation:
+        """Ask to absorb the open price (`price_open`): the money is not
+        asked from the customer (or, internal, not re-approved). Needs a
+        reason pick + note and the OK of a Project Management or Management
+        member (internal: the approver); approving it clears price_open."""
+        from app.services.cm_rules import ABSORB_REASONS, ABSORB_RULE
+        if not change.price_open:
+            raise ChangeError("No price is open on this change: nothing to absorb")
+        if change.status in ("cancelled", "rejected", "closed"):
+            raise ChangeError(f"The change is {change.status}")
+        if reason_code not in ABSORB_REASONS:
+            raise ChangeError(
+                f"Pick why it is absorbed: one of {', '.join(ABSORB_REASONS)}")
+        note = (note or "").strip()
+        if not note:
+            raise ChangeError("Say what is absorbed and why (recorded)")
+        if any(d.guard_key == ABSORB_RULE and d.status == "pending"
+               for d in change.transition_deviations):
+            raise ChangeError("An Absorb is already waiting for its OK")
+        dev = ChangeTransitionDeviation(
+            change_id=change.id, to_status="closed", reason=note,
+            proposed_by=user.id, guard_key=ABSORB_RULE,
+            guard_reason="Price open", reason_code=reason_code)
+        session.add(dev)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "absorb_proposed",
+            f"Absorb of the open price asked ({reason_code})", user.id,
+            field_name="deviation",
+            new_value={"deviation_id": dev.id, "guard_key": ABSORB_RULE,
+                       "reason_code": reason_code},
+            notes=note)
+        await ChangeService._notify_override_deciders(session, change, dev, user.id)
+        return dev
+
+    # ------------------------------------------------------------------
+    # HARD rules of the branch (spec §0 #3, #9)
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def solid_hard_refusal(session: AsyncSession, change: ChangeRequest,
+                                 to_status: str) -> Optional[str]:
+        """The ECR-solid HARD rules no override lifts, in transition() and
+        in EarlyStageService.hard_refusal (so no button is offered):
+        #3 (RELEASE_V2) a failed check or an open validation issue at
+        release, the only exit a concession; #9 (RELEASE_V2) at release the
+        PM and Quality sign-offs bound to the latest offer sent; #9
+        (COMMERCIAL_V2) no close while a price is open (exits: customer
+        acceptance or Absorb)."""
+        from app.services import cm_switches
+        if to_status == "released" and cm_switches.on("RELEASE_V2"):
+            from app.services.validation_service import ValidationService
+            from app.services.validation_issue_service import ValidationIssueService
+            failed, _ = await ValidationService.release_parts(session, change)
+            if failed:
+                return failed
+            issues = await ValidationIssueService.release_blocker(session, change)
+            if issues:
+                return (f"{issues}: fix and close them, or a concession "
+                        "(Quality); no override releases past them")
+            signed = await ChangeService.signoff_offer_refusal(session, change)
+            if signed:
+                return signed
+        if (to_status == "closed" and change.price_open
+                and cm_switches.on("COMMERCIAL_V2")):
+            return ("A price is still open: the customer accepts the offer or "
+                    "supplement, or the money is absorbed (Absorb, with the OK "
+                    "of Project Management or Management"
+                    + ("" if change.customer_relevant else "; internal: the approver")
+                    + ")")
+        return None
+
+    @staticmethod
+    async def latest_sent_offer(session: AsyncSession, change: ChangeRequest):
+        from app.models.change_offer import ChangeOffer
+        return (await session.execute(
+            select(ChangeOffer).where(ChangeOffer.change_id == change.id,
+                                      ChangeOffer.sent_at.isnot(None))
+            .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
+
+    @staticmethod
+    async def signoff_offer_refusal(session: AsyncSession,
+                                    change: ChangeRequest) -> Optional[str]:
+        """HARD #9 at release: the PM and Quality sign-offs are for the
+        latest offer sent. Only where an offer was sent (internal and
+        mother-plant changes have none)."""
+        if not change.customer_relevant:
+            return None
+        latest = await ChangeService.latest_sent_offer(session, change)
+        if latest is None:
+            return None
+        missing = [who for who, by, oid in (
+            ("PM", change.pm_signed_by, change.pm_signed_offer_id),
+            ("Quality", change.quality_signed_by, change.quality_signed_offer_id))
+            if by is None or oid != latest.id]
+        if not missing:
+            return None
+        return (f"{' and '.join(missing)} sign-off missing for offer "
+                f"v{latest.version}, the latest sent: sign it before release")
+
+    # ------------------------------------------------------------------
+    # HARD #8: internal approvers (P9)
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def internal_approver_users(session: AsyncSession) -> list[User]:
+        """The configured engineering approvers who are active users here
+        (settings.internal_approvers, usernames or e-mails)."""
+        from app.core.config import get_settings
+        wanted = {x.strip().lower() for x in (get_settings().internal_approvers or "").split(",")
+                  if x.strip()}
+        if not wanted:
+            return []
+        users = (await session.execute(
+            select(User).where(User.is_active.is_(True),
+                               (func.lower(User.username).in_(wanted))
+                               | (func.lower(User.email).in_(wanted))))).scalars().all()
+        return list(users)
+
+    @staticmethod
+    async def is_internal_approver(session: AsyncSession, user: User,
+                                   change: Optional[ChangeRequest] = None) -> bool:
+        """HARD #8 (P9): an engineering approver (settings.internal_approvers),
+        never the change's raiser, never while acting as a department. With
+        no configured approver active here, the earlier rule stands in: a
+        Project Manager member or an admin."""
+        from app.services.change_people import is_acting
+        if change is not None and change.raised_by == user.id:
+            return False
+        approvers = await ChangeService.internal_approver_users(session)
+        if approvers:
+            return not is_acting(user) and any(u.id == user.id for u in approvers)
+        return await ChangeService._user_in_department(session, user, "Project Manager")
 
     @staticmethod
     async def create_change(
@@ -793,30 +1152,49 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest,
     ) -> Optional[dict]:
         """What still stands between the change and its next stage, as the
-        cockpit's "missing before …" checklist.
+        cockpit's "why blocked" checklist (spec §0: rule, owner, due, allowed
+        exits; impossible buttons hidden).
 
-        Each item is {"key", "kind", "n"?, "detail"?}. `kind` says what the
-        item costs to skip: "hard" cannot be bypassed, "soft" is a _guard
-        refusal an approved deviation can override, "todo" is the stage's own
-        work that no guard enforces but somebody still owes. The keys are
-        stable codes — the UI owns the wording in both languages. Mirrors
-        _guard and the hard checks in transition(); when those change, this
-        has to follow, or the checklist lies about what blocks.
+        Each item is {"key", "kind", "n"?, "detail"?, "rule"?, "who"?,
+        "exits"?, "override"?}. `kind` says what the item costs to skip:
+        "hard" cannot be bypassed, "soft" is a _guard rule an approved
+        override bound to `rule` lifts, "todo" is the stage's own work that no
+        guard enforces but somebody still owes. `who` names the owner (and
+        due) in words; `exits` lists a hard rule's only ways out
+        (concession, absorb, customer_accepts, sign); `override` is the
+        rule's override when one is asked or approved ({id, status}). The
+        keys are stable codes — the UI owns the wording in both languages.
+        Mirrors _guard_reasons and the hard checks in transition(); when
+        those change, this has to follow, or the checklist lies about what
+        blocks.
         """
+        from app.services import cm_switches
         to = ChangeService.next_step_target(change)
         if to is None:
             return None
         items: list[dict] = []
+        overrides: dict = {}
 
         def add(key: str, kind: str, **extra) -> None:
-            items.append({"key": key, "kind": kind, **extra})
+            rule = extra.get("rule")
+            if rule is not None and kind == "soft":
+                if not overrides:  # read only when a soft rule is listed
+                    overrides.update({(d.to_status, d.guard_key): d
+                                      for d in change.transition_deviations
+                                      if d.status in ("pending", "approved")})
+                    overrides.setdefault(None, None)
+                d = overrides.get((to, rule))
+                if d is not None:
+                    extra["override"] = {"id": d.id, "status": d.status}
+            items.append({"key": key, "kind": kind,
+                          **{k: v for k, v in extra.items() if v is not None}})
 
         if to == "scoping":
             for m in await ChangeService.kickoff_missing(session, change):
                 add({"description": "description",
                      "at least one attachment": "attachment",
                      "quote deadline": "quote_deadline",
-                     "change lead": "lead"}[m], "soft")
+                     "change lead": "lead"}[m], "soft", rule="capture_incomplete")
         elif to == "approved" and change.status == "scoping":
             # Mother plant: MotherPlantService.approval_blocker, all hard.
             from app.services.mother_plant_service import MotherPlantService
@@ -842,9 +1220,9 @@ class ChangeService:
                 # Switch off: the set locks itself at the 'proceed' decision.
                 add("impact_confirmed", "hard")
             if change.lead_id is None:
-                add("lead", "soft")
+                add("lead", "soft", rule="no_lead")
             if change.customer_relevant and change.required_by_date is None:
-                add("quote_deadline", "soft")
+                add("quote_deadline", "soft", rule="no_quote_deadline")
             concerns = MeetingService.open_concerns(change)
             if concerns:
                 add("open_concerns", "hard", n=len(concerns))
@@ -855,79 +1233,140 @@ class ChangeService:
             open_rows = [a for a in blocking
                          if a.effective_status not in ("submitted", "waived")]
             if not blocking or open_rows:
-                add("assessments", "soft", n=len(open_rows))
+                names = await ChangeRoutingService._department_names(
+                    session, [a.department_id for a in open_rows])
+                add("assessments", "soft", n=len(open_rows), rule="assessments_open",
+                    who=", ".join(names) or None)
             if any(a.verdict == "not_feasible" for a in change.assessments):
-                add("not_feasible", "soft")
+                add("not_feasible", "soft", rule="not_feasible")
             if (change.routing is not None
                     and change.routing.deviation_status == "pending_approval"):
-                add("routing_deviation", "soft")
+                add("routing_deviation", "soft", rule="routing_deviation_pending")
         if change.status == "costing":
             pending = await ChangeService.costing_pending_department_ids(session, change)
             if pending:
-                add("costing_input", "todo", n=len(pending))
+                if cm_switches.on("ASSESSMENT_V2"):
+                    # C5: closing costing waits for every finalized costing
+                    text = await ChangeService.costing_not_finalized_text(session, change)
+                    add("costing_input", "soft", n=len(pending),
+                        rule="costing_not_finalized",
+                        who=(text or "").removeprefix("Costing not finalized: ") or None)
+                else:
+                    add("costing_input", "todo", n=len(pending))
             if to == "approved" and change.internal_approved_at is None:
-                add("internal_approval", "hard")
+                approvers = await ChangeService.internal_approver_users(session)
+                add("internal_approval", "hard",
+                    who=", ".join(u.full_name or u.username for u in approvers
+                                  if u.id != change.raised_by) or None)
         if to == "quoted" and change.quoted_price is None:
-            add("quoted_price", "soft")
+            add("quoted_price", "soft", rule="no_quoted_price")
         if to == "approved" and change.status == "quoted":
             if change.customer_response != "accepted":
-                add("customer_accepted", "hard")
+                owner = None
+                if change.sales_owner_id is not None:
+                    from app.services.change_plan_service import ChangePlanService
+                    owner = (await ChangePlanService._user_names(
+                        session, [change.sales_owner_id])).get(change.sales_owner_id)
+                add("customer_accepted", "hard", who=owner)
             if change.pm_signed_by is None:
-                add("pm_signoff", "hard")
+                add("pm_signoff", "hard", exits=["sign"])
             if change.quality_signed_by is None:
-                add("quality_signoff", "hard")
+                add("quality_signoff", "hard", exits=["sign"])
         if to == "in_implementation":
             if change.bank_build_mode is None:
                 add("bank_build", "todo")
             if change.impact_confirmed_at is None:
-                add("impact_confirmed", "soft")
+                add("impact_confirmed", "soft", rule="impact_not_confirmed")
             missing = await ChangeService.unmapped_check_categories(session, change)
             if missing:
-                add("check_mapping", "soft", detail=", ".join(missing))
+                add("check_mapping", "soft", detail=", ".join(missing),
+                    rule="check_mapping_missing")
             if change.timing_validated_at is None and change.status == "approved":
-                add("timing_validated", "soft")
+                add("timing_validated", "soft", rule="timing_not_validated")
         if to == "in_validation":
             n = sum(1 for i in change.impacted_items if i.resulting_revision_id is None)
             if n:
-                add("resulting_revisions", "soft", n=n)
+                add("resulting_revisions", "soft", n=n,
+                    rule="resulting_revisions_missing")
         if to == "released":
             from app.services.validation_service import ValidationService
             checks = await ValidationService.list_checks(session, change)
-            failed = sum(1 for r in checks if r.status == "failed")
-            if failed:
-                add("validation_failed", "soft", n=failed)
-            elif any(r.status != "passed" for r in checks):
-                add("validation_open", "soft",
-                    n=sum(1 for r in checks if r.status != "passed"))
+            if cm_switches.on("RELEASE_V2"):
+                # C7 / HARD #3: a failed check holds until a retest passes or
+                # a concession covers it; checks not answered yet stay soft.
+                failed, _ = await ValidationService.release_parts(session, change)
+                if failed:
+                    names = failed.removeprefix("Validation failed: ").split(". ")[0]
+                    add("validation_failed", "hard", exits=["concession"],
+                        who=names, n=len(names.split(", ")))
+                outstanding = sum(1 for r in checks if r.status not in ("passed", "failed"))
+                if outstanding:
+                    add("validation_open", "soft", n=outstanding, rule="validation_open")
+            else:
+                failed = sum(1 for r in checks if r.status == "failed")
+                if failed:
+                    add("validation_failed", "soft", n=failed, rule="validation_failed")
+                elif any(r.status != "passed" for r in checks):
+                    add("validation_open", "soft",
+                        n=sum(1 for r in checks if r.status != "passed"),
+                        rule="validation_open")
             progress = await ChangeService.implementation_progress(session, change)
             if not progress["ready_to_go"]:
                 add("check_workflows", "soft",
-                    n=sum(1 for e in progress["items"] if not e["ready"]))
+                    n=sum(1 for e in progress["items"] if not e["ready"]),
+                    rule="check_workflows_open")
             from app.services.validation_issue_service import ValidationIssueService
             from app.services.release_service import ReleaseService
             n = await ValidationIssueService.open_count(session, change)
             if n:
-                add("validation_issues", "soft", n=n)
+                if cm_switches.on("RELEASE_V2"):
+                    add("validation_issues", "hard", n=n, exits=["concession"])
+                else:
+                    add("validation_issues", "soft", n=n, rule="validation_issues_open")
             n = await ReleaseService.open_count(session, change)
             if n:
-                add("release_checklist", "soft", n=n)
+                add("release_checklist", "soft", n=n, rule="release_checklist_open")
             if change.lessons_done_at is None:
-                add("lessons", "soft")
+                add("lessons", "soft", rule="lessons_missing")
             n = await ReleaseService.open_deviation_count(session, change)
             if n:
-                add("plan_deviations", "soft", n=n)
+                add("plan_deviations", "soft", n=n, rule="plan_deviations_open")
+            if cm_switches.on("RELEASE_V2"):
+                signed = await ChangeService.signoff_offer_refusal(session, change)
+                if signed:
+                    add("release_signoffs", "hard", exits=["sign"], who=signed)
+        if to == "closed" and change.price_open and cm_switches.on("COMMERCIAL_V2"):
+            # HARD #9: exits are the customer's acceptance or an Absorb
+            add("price_open", "hard", exits=["customer_accepts", "absorb"],
+                override=next(({"id": d.id, "status": d.status}
+                               for d in change.transition_deviations
+                               if d.guard_key == "price_open" and d.status == "pending"),
+                              None))
         if change.status == "rejected":
             if not await ChangeService.has_rejection_letter(session, change):
                 add("rejection_letter", "hard")
             add("rejection_sent", "hard")
         for gate in change.gates:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to and gate.decision != "yes":
-                add("gate", "soft", detail=gate.gate_key)
+                add("gate", "soft", detail=gate.gate_key, rule=f"gate:{gate.gate_key}")
         return {"to": to, "items": items}
 
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
-        """Return None if soft-OK, else a human reason string (overridable)."""
+        """Return None if soft-OK, else the first soft refusal (a str that
+        carries its rule key as `.key`, cm_rules.GuardReason)."""
+        reasons = await ChangeService._guard_reasons(session, change, to_status)
+        return reasons[0] if reasons else None
+
+    @staticmethod
+    async def _guard_reasons(session: AsyncSession, change: ChangeRequest,
+                             to_status: str) -> list:
+        """Every soft rule that holds this hop, in the order the refusal names
+        them, each a cm_rules.GuardReason (text + rule key). An override is
+        bound to one rule (C6): a hop held by two rules needs two overrides."""
+        from app.services.cm_rules import GuardReason as R
+        from app.services import cm_switches
+        out: list = []
         # Capture is Sales' job, scoping is the project team's: kickoff means
         # handing over a request someone can actually work on. That needs the
         # what (description), the evidence (at least one attachment) and — for
@@ -938,18 +1377,19 @@ class ChangeService:
         if to_status == "scoping":
             missing = await ChangeService.kickoff_missing(session, change)
             if missing:
-                return ("Incomplete capture: missing " + ", ".join(missing)
-                        + " before scoping")
+                out.append(R("capture_incomplete",
+                             "Incomplete capture: missing " + ", ".join(missing)
+                             + " before scoping"))
         if to_status == "in_assessment":
-            count = len(change.impacted_items)
-            if count == 0:
-                return "No impacted items added yet"
+            if len(change.impacted_items) == 0:
+                out.append(R("no_impacted_items", "No impacted items added yet"))
             if change.lead_id is None:
-                return "No lead (project manager) assigned"
+                out.append(R("no_lead", "No lead (project manager) assigned"))
             # Internal changes have no quote deadline; only customer-relevant
             # changes must set the required-by date before assessment.
             if change.customer_relevant and change.required_by_date is None:
-                return "No quote deadline set: define it in scoping"
+                out.append(R("no_quote_deadline",
+                             "No quote deadline set: define it in scoping"))
             # A change that already has routing has fanned out once — the proceed
             # meeting was consumed then. Resuming from on_hold back into
             # in_assessment must not re-demand a fresh meeting (build_routing is
@@ -967,7 +1407,8 @@ class ChangeService:
                         ChangeMeeting.decision == "proceed").limit(1)
                 )).scalar_one_or_none()
                 if proceed is None:
-                    return "No scoping meeting with decision 'proceed' recorded"
+                    out.append(R("no_proceed_meeting",
+                                 "No scoping meeting with decision 'proceed' recorded"))
         # The costing-side guards hold for BOTH costing hops: entering costing,
         # and leaving it to write the offer. A quote built while an assessment
         # is still open or a routing deviation is unapproved is a quote for
@@ -976,33 +1417,47 @@ class ChangeService:
             from app.services.change_routing_service import ChangeRoutingService
             waiting = await ChangeRoutingService.blocking_waiting(session, change)
             if waiting is None:
-                return "Not all responsible/accountable assessments are submitted"
-            if waiting:
-                return ("Not all responsible/accountable assessments are "
-                        f"submitted: waiting on {', '.join(waiting)}")
+                out.append(R("assessments_open",
+                             "Not all responsible/accountable assessments are submitted"))
+            elif waiting:
+                out.append(R("assessments_open",
+                             "Not all responsible/accountable assessments are "
+                             f"submitted: waiting on {', '.join(waiting)}"))
             submitted = [a for a in change.assessments if a.verdict != "pending"]
             if any(a.verdict == "not_feasible" for a in submitted):
-                return ("An assessment is 'not feasible': reject, go back to "
-                        "scoping, or override with an approved deviation")
+                out.append(R("not_feasible",
+                             "An assessment is 'not feasible': reject, go back to "
+                             "scoping, or override with an approved deviation"))
             routing = change.routing
             if routing is not None and routing.deviation_status == "pending_approval":
-                return "Routing deviation is pending approval"
+                out.append(R("routing_deviation_pending",
+                             "Routing deviation is pending approval"))
+        # C5 (spec §5): closing costing - into the quote, or an internal
+        # change straight to approval - waits for every department's
+        # finalized costing. SOFT: the lead may override it (urgent quote).
+        if (change.status == "costing" and to_status in ("quoting", "approved")
+                and cm_switches.on("ASSESSMENT_V2")):
+            text = await ChangeService.costing_not_finalized_text(session, change)
+            if text:
+                out.append(R("costing_not_finalized", text))
         # 'quoted' means the offer is out with the customer, so by then there
         # is a price. Writing it is the whole content of the 'quoting' stage.
         if to_status == "quoted":
             if change.quoted_price is None:
-                return "No quoted price recorded"
+                out.append(R("no_quoted_price", "No quoted price recorded"))
         if to_status == "in_validation":
             missing = [i for i in change.impacted_items if i.resulting_revision_id is None]
             if missing:
-                return "Some impacted items have no resulting revision"
+                out.append(R("resulting_revisions_missing",
+                             "Some impacted items have no resulting revision"))
         if to_status == "in_implementation":
             if change.impact_confirmed_at is None:
-                return "impact_not_confirmed"
+                out.append(R("impact_not_confirmed", "impact_not_confirmed"))
             missing = await ChangeService.unmapped_check_categories(session, change)
             if missing:
-                return ("no check-workflow template mapped for item "
-                        f"category: {', '.join(missing)}")
+                out.append(R("check_mapping_missing",
+                             "no check-workflow template mapped for item "
+                             f"category: {', '.join(missing)}"))
             # The detailed plan is what the customer is told and what every
             # team works to. Implementation starting on a plan nobody
             # confirmed is how "we never agreed to that date" happens. Guarded
@@ -1017,42 +1472,83 @@ class ChangeService:
                     or (change.status == "on_hold"
                         and await ChangeService._approved_not_yet_implemented(
                             session, change))):
-                return ("Timing not validated - every responsible team must "
-                        "confirm the detailed plan")
+                out.append(R("timing_not_validated",
+                             "Timing not validated - every responsible team must "
+                             "confirm the detailed plan"))
         if to_status == "released":
             # Stage 9 first: "the Tool Engineer's weight check failed" is a
             # more useful refusal than "2 of 5 revisions have not completed
             # their check workflow", and it is the one somebody can act on
             # today. Silent for changes with no validation rows at all — see
-            # ValidationService.release_blocker.
+            # ValidationService.release_blocker. C7 (RELEASE_V2): a failed
+            # check and an open issue are HARD (transition), not here; the
+            # checks still open stay soft.
             from app.services.validation_service import ValidationService
-            blocker = await ValidationService.release_blocker(session, change)
-            if blocker is not None:
-                return blocker
-            # Validation issues (spec §12): open ones hold the release; a
-            # transferred issue does not (the follow-up change carries it).
             from app.services.validation_issue_service import ValidationIssueService
-            blocker = await ValidationIssueService.release_blocker(session, change)
-            if blocker is not None:
-                return blocker
+            if cm_switches.on("RELEASE_V2"):
+                failed, outstanding = await ValidationService.release_parts(
+                    session, change)
+                if outstanding:
+                    out.append(R("validation_open", outstanding))
+            else:
+                blocker = await ValidationService.release_blocker(session, change)
+                if blocker is not None:
+                    out.append(R("validation_failed" if blocker.startswith(
+                        "Validation failed") else "validation_open", blocker))
+                # Validation issues (spec §12): open ones hold the release; a
+                # transferred issue does not (the follow-up change carries it).
+                blocker = await ValidationIssueService.release_blocker(session, change)
+                if blocker is not None:
+                    out.append(R("validation_issues_open", blocker))
             from app.services.release_service import ReleaseService
             not_ready = ReleaseService.not_ready_message(
                 await ChangeService.implementation_progress(session, change))
             if not_ready:
-                return not_ready
+                out.append(R("check_workflows_open", not_ready))
             # Stage 10: the paperwork around the part (release checklist),
             # the lessons-learned step and the open plan deviations. After
             # the validation blocker, so the more concrete refusal wins while
             # validation is still open.
-            blocker = await ReleaseService.guard_reason(session, change)
-            if blocker is not None:
-                return blocker
+            out.extend(await ReleaseService.guard_reasons(session, change))
         # Gate wiring (additive): a gate constrains its target transition only when a
         # row exists. Changes with no gate rows behave exactly as before.
+        # Every rule is collected now (C6), so the gates are read on hops an
+        # earlier rule used to cut short: load them if a caller has not.
+        from sqlalchemy import inspect as _inspect
+        if "gates" in _inspect(change).unloaded:
+            await session.refresh(change, ["gates"])
         for gate in change.gates:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to_status and gate.decision != "yes":
-                return ChangeService.gate_message(gate.gate_key, gate.decision)
-        return None
+                out.append(R(f"gate:{gate.gate_key}",
+                             ChangeService.gate_message(gate.gate_key, gate.decision)))
+        return out
+
+    @staticmethod
+    async def costing_not_finalized_text(session: AsyncSession,
+                                         change: ChangeRequest) -> Optional[str]:
+        """C5: 'Not finalized: Process (Nathan, due Thu 22 Oct), Toolshop'.
+        One entry per department that owes its costing and has not
+        finalized it; the assessment's owner and due date when known."""
+        pending = await ChangeService.costing_pending_department_ids(session, change)
+        if not pending:
+            return None
+        from app.services.change_plan_service import ChangePlanService
+        by_dept = {a.department_id: a for a in change.assessments}
+        names = dict((await session.execute(
+            select(Department.id, Department.name).where(
+                Department.id.in_(pending)))).all())
+        owners = await ChangePlanService._user_names(
+            session, [getattr(by_dept.get(d), "owner_id", None)
+                      or getattr(by_dept.get(d), "responsible_id", None)
+                      for d in pending])
+        parts = []
+        for d in pending:
+            a = by_dept.get(d)
+            who = owners.get((a.owner_id or a.responsible_id) if a else None)
+            due = a.due_date.strftime("due %a %d %b") if a and a.due_date else None
+            extra = ", ".join(x for x in (who, due) if x)
+            parts.append(f"{names.get(d, f'dept {d}')}" + (f" ({extra})" if extra else ""))
+        return "Costing not finalized: " + ", ".join(parts)
 
     @staticmethod
     async def _status_before_hold(session: AsyncSession,
@@ -1320,22 +1816,47 @@ class ChangeService:
             if not reopen_reason:
                 raise ChangeError("reopen_reason is required to reopen a rejected change")
 
+        # ECR-solid HARD rules (spec §0 #3, #9): no override lifts them, so
+        # they are named before any soft rule a user might ask to override.
+        hard = await ChangeService.solid_hard_refusal(session, change, to_status)
+        if hard is not None:
+            raise ChangeError(hard)
+
         deviation = None
-        reason = await ChangeService._guard(session, change, to_status)
-        if reason is not None:
-            deviation = next(
-                (d for d in change.transition_deviations
-                 if d.to_status == to_status and d.status == "approved"), None)
-            if deviation is None:
-                pending = next(
-                    (d for d in change.transition_deviations
-                     if d.to_status == to_status and d.status == "pending"), None)
+        covering: list = []
+        from app.services import cm_switches
+        if cm_switches.on("COMMERCIAL_V2"):
+            # C6: every soft rule that holds the hop needs its own approved
+            # override; one bound to another rule lifts nothing here.
+            covering, uncovered = await ChangeService.override_cover(
+                session, change, to_status)
+            if uncovered:
+                reason = uncovered[0]
+                pending = ChangeService.pending_override(change, to_status, reason.key)
                 raise DeviationRequired(
                     f"{reason}. An approved deviation is required to proceed."
                     + (f" Deviation #{pending.id} is waiting for its decision."
                        if pending is not None else ""),
                     to_status=to_status, guard_reason=reason,
                     pending_deviation_id=pending.id if pending else None)
+            deviation = covering[0] if covering else None
+        else:
+            reason = await ChangeService._guard(session, change, to_status)
+            if reason is not None:
+                deviation = next(
+                    (d for d in change.transition_deviations
+                     if d.to_status == to_status and d.status == "approved"), None)
+                if deviation is None:
+                    pending = next(
+                        (d for d in change.transition_deviations
+                         if d.to_status == to_status and d.status == "pending"), None)
+                    raise DeviationRequired(
+                        f"{reason}. An approved deviation is required to proceed."
+                        + (f" Deviation #{pending.id} is waiting for its decision."
+                           if pending is not None else ""),
+                        to_status=to_status, guard_reason=reason,
+                        pending_deviation_id=pending.id if pending else None)
+                covering = [deviation]
 
         # HARD gate: assessment cannot start on an unlocked impacted set. Not in
         # _guard, so no approved transition deviation can bypass it — defining and
@@ -1369,8 +1890,8 @@ class ChangeService:
                 "Impacted set is not locked: it locks when the scoping "
                 "meeting decides 'proceed'")
 
-        if deviation is not None:
-            deviation.status = "consumed"
+        for d in covering:
+            d.status = "consumed"
 
         # Side effects on entry
         if to_status == "scoping" and change.status == "in_assessment":
@@ -1412,14 +1933,18 @@ class ChangeService:
             from app.services.mother_plant_service import MotherPlantService
             await MotherPlantService.on_approved(session, change, user_id)
         action = "deviated_transition" if deviation else "status_changed"
-        desc = f"{old} -> {to_status}" + (
-            f" (deviation #{deviation.id}: {deviation.reason})" if deviation else "")
+        from app.services.cm_rules import rule_label
+        # C6: the trail names the rule each override waived.
+        desc = f"{old} -> {to_status}" + "".join(
+            f" (deviation #{d.id}"
+            + (f" waives '{rule_label(d.guard_key)}'" if d.guard_key else "")
+            + f": {d.reason})" for d in covering)
         await ChangeService.append_changelog(
             session, change, action, desc, user_id,
             field_name="status", old_value=old, new_value=to_status,
             # C1: a hold's reason rides on its status row (the run team's
             # "Resume or cancel" task reads it back)
-            notes=(deviation.reason if deviation else
+            notes=("; ".join(d.reason for d in covering) if covering else
                    (escalation_note or None) if to_status == "on_hold" else None),
         )
 
@@ -2098,11 +2623,15 @@ class ChangeService:
             session, user, change, to_status="quoting")
 
     @staticmethod
-    async def user_can_approve_internal_costs(session: AsyncSession, user: User) -> bool:
-        """Internal cost approval is PM territory: admin or a 'Project
-        Manager' department member. No lead bypass — a lead who isn't a PM
-        member and isn't admin may not approve their own change's costs."""
-        return await ChangeService._user_in_department(session, user, "Project Manager")
+    async def user_can_approve_internal_costs(
+        session: AsyncSession, user: User,
+        change: Optional[ChangeRequest] = None,
+    ) -> bool:
+        """HARD #8 (P9): an engineering approver (settings.internal_approvers)
+        who is not the change's raiser. No lead bypass. Until an approver is
+        configured and active here: a Project Manager member or an admin
+        (still never the raiser)."""
+        return await ChangeService.is_internal_approver(session, user, change)
 
     # The department that owns tools (_DOMAIN_BY_DEPARTMENT's tool domain) and
     # therefore owns what the tool produces. Named once so the weight quote and
@@ -3002,11 +3531,14 @@ class ChangeService:
         for dev in change.transition_deviations:
             if dev.status != "pending":
                 continue
-            if ChangeService.transition_deviation_refusal(change, dev, user):
+            if await ChangeService.deviation_decide_refusal(session, change, dev, user):
                 continue
+            from app.services.cm_rules import ABSORB_RULE, rule_label
             actions.append({
                 "kind": "deviation_decision",
-                "label": f"Decide deviation #{dev.id}",
+                "label": (f"Decide Absorb #{dev.id}" if dev.guard_key == ABSORB_RULE
+                          else f"Decide override #{dev.id}: {rule_label(dev.guard_key)}"
+                          if dev.guard_key else f"Decide deviation #{dev.id}"),
                 "target_tab": "overview",
                 "deviation_id": dev.id,
                 # what the decide panel shows without another request
@@ -4376,6 +4908,13 @@ class ChangeService:
         change.customer_response = response
         change.customer_response_at = datetime.utcnow()
         change.customer_response_by = user_id
+        if response == "accepted" and change.price_open:
+            # HARD #9's exit: the customer accepted the offer that prices it.
+            change.price_open = False
+            await ChangeService.append_changelog(
+                session, change, "price_closed",
+                "Open price closed: the customer accepted the offer", user_id,
+                field_name="price_open", old_value=True, new_value=False)
         if release_due_date is not None:
             await ChangeService._apply_release_deadline(
                 session, change, release_due_date, release_due_reason, user_id)
@@ -4397,10 +4936,16 @@ class ChangeService:
         if other is not None and other == user_id:
             raise ChangeError("PM and Quality sign-off must be different users")
         now = datetime.utcnow()
+        # HARD #9: a signature is given on an offer (the latest one sent),
+        # and release checks it is still the latest (C14 binds it further).
+        latest = await ChangeService.latest_sent_offer(session, change)
+        offer_id = latest.id if latest is not None else None
         if role == "pm":
             change.pm_signed_by, change.pm_signed_at = user_id, now
+            change.pm_signed_offer_id = offer_id
         else:
             change.quality_signed_by, change.quality_signed_at = user_id, now
+            change.quality_signed_offer_id = offer_id
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "signed_off", f"{role} sign-off", user_id,
@@ -4430,6 +4975,23 @@ class ChangeService:
             raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
         if change.internal_approved_at is not None:
             raise ChangeError("Internal costs are already approved")
+        # HARD #8: never the raiser, whoever calls this.
+        if change.raised_by == actor.id:
+            raise ChangeError(
+                "The raiser does not approve their own change's spend: an "
+                "engineering approver does (4-eyes)")
+        # C5 (spec §5): approval waits for every department's finalized
+        # costing; an approved override of that rule lets it go ahead.
+        from app.services import cm_switches
+        if change.status == "costing" and cm_switches.on("ASSESSMENT_V2"):
+            text = await ChangeService.costing_not_finalized_text(session, change)
+            if text and not any(
+                    d.to_status == "approved" and d.status == "approved"
+                    and d.guard_key in ("costing_not_finalized", None)
+                    for d in change.transition_deviations):
+                raise ChangeError(
+                    f"{text}. Approve once they are finalized, or with an "
+                    "approved override of 'Costing not finalized'")
         # Internal path has no quote step, so approval is where deadline #2
         # is born — mirror of the acceptance rule for customer changes.
         if release_due_date is None and change.release_due_date is None:

@@ -297,16 +297,26 @@ class ReleaseService:
     async def guard_reason(session: AsyncSession,
                            change: ChangeRequest) -> Optional[str]:
         """The release checklist, lessons and plan deviation half of the
-        released guard."""
+        released guard (the first of guard_reasons)."""
+        reasons = await ReleaseService.guard_reasons(session, change)
+        return reasons[0] if reasons else None
+
+    @staticmethod
+    async def guard_reasons(session: AsyncSession, change: ChangeRequest) -> list:
+        """Each of the three as its own soft rule (C6: an override waives
+        one rule, not the whole paperwork half)."""
+        from app.services.cm_rules import GuardReason as R
+        out = []
         n = await ReleaseService.open_count(session, change)
         if n:
-            return f"Release checklist incomplete: {n} open"
+            out.append(R("release_checklist_open",
+                         f"Release checklist incomplete: {n} open"))
         if change.lessons_done_at is None:
-            return "Lessons learned step not done"
+            out.append(R("lessons_missing", "Lessons learned step not done"))
         n = await ReleaseService.open_deviation_count(session, change)
         if n:
-            return ReleaseService.deviations_message(n)
-        return None
+            out.append(R("plan_deviations_open", ReleaseService.deviations_message(n)))
+        return out
 
     @staticmethod
     async def blockers(session: AsyncSession, change: ChangeRequest) -> list[str]:
