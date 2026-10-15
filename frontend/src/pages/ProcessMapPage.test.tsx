@@ -70,7 +70,7 @@ describe('ProcessMapPage', () => {
       'soft: all R/A submitted, none not feasible, no routing change pending',
       'Close costing (PM, Sales, lead)',
       'offer v1 sent (auto)',
-      'accepted + PM and Quality sign-off (two people), Record approval (hard)',
+      'accepted with evidence + PM and Quality sign-off (two people), approved on its own (hard); or start at risk (urgent)',
       'Start implementation',
       'soft: every impacted item has its revision; open deviations do not hold this step',
       'all checks passed',
