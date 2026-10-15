@@ -205,6 +205,9 @@ export interface ChangeRequest {
   customer_next_contact?: string | null;
   /** Served switch COMMERCIAL_V2 (§6-§7). */
   commercial_v2?: boolean;
+  /** §7a start at risk: asked / approved. */
+  start_at_risk_requested_at?: string | null;
+  start_at_risk_approved_at?: string | null;
   estimated_cost?: number | null;
   quoted_price?: number | null;
   created_at: string;
@@ -515,6 +518,8 @@ export type ChangeTaskKind =
   | 'assessment_recheck'
   /** §6 [R3] scope change card: the lead decides, Sales revises or tells. */
   | 'scope_change_decide' | 'revise_offer' | 'scope_change_tell'
+  /** §7a start at risk: Quality's line, then the PM member's approval. */
+  | 'start_at_risk_quality' | 'start_at_risk_approve'
   /** §1: the lead: does the new index add parts or departments? */
   | 'index_decision'
   /** §1: Sales: the new index replaces the old one; deadline holds? */

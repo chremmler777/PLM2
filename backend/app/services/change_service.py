@@ -706,7 +706,8 @@ class ChangeService:
             if why:
                 return why
         if (to_status == "approved" and change.status == "quoted"
-                and change.customer_relevant and cm_switches.on("COMMERCIAL_V2")):
+                and change.customer_relevant and cm_switches.on("COMMERCIAL_V2")
+                and change.start_at_risk_approved_at is None):
             # HARD #4 with C14's binding: the same rule as at release, so an
             # approval never passes on signatures release will refuse (R37)
             signed = await ChangeService.signoff_offer_refusal(
@@ -2071,8 +2072,14 @@ class ChangeService:
         intake goes to scoping with what its capture still misses)."""
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
+        # §7a: a start at risk approved by a PM member takes the change to
+        # 'approved' from costing, quoting or quoted, without the customer's yes
+        at_risk = (to_status == "approved" and change.customer_relevant
+                   and change.start_at_risk_approved_at is not None
+                   and change.status in ("costing", "quoting", "quoted")
+                   and cm_switches.on("START_AT_RISK"))
         allowed = ALLOWED_TRANSITIONS.get(change.status, set())
-        if to_status not in allowed:
+        if to_status not in allowed and not at_risk:
             raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
         if to_status == "costing":
             # Entering costing wakes the later routing stages: the engine
@@ -2112,7 +2119,7 @@ class ChangeService:
                 session, change, user_id, "the move to approved")
 
         # HARD gates: the approval decision cannot be forced.
-        if to_status == "approved" and not mother_plant:
+        if to_status == "approved" and not mother_plant and not at_risk:
             if change.customer_relevant:
                 if change.customer_response != "accepted":
                     raise ChangeError("Customer has not accepted the offer")
@@ -2221,7 +2228,6 @@ class ChangeService:
 
         deviation = None
         covering: list = []
-        from app.services import cm_switches
         if cm_switches.on("COMMERCIAL_V2"):
             # C6: a HARD rule is named before any soft rule, so a refusal
             # never invites an override that cannot unblock the move.
@@ -3697,14 +3703,29 @@ class ChangeService:
                         "scrap_quote_price": c.scrap_quote_price,
                     })
 
+            sar_open = (c.start_at_risk_approved_at is not None
+                        and c.customer_response != "accepted")
             if (in_sales and c.customer_relevant and c.status != "quoted"
-                    and getattr(latest_sent.get(c.id), "kind", None) == "supplement"):
-                # §6 [R4]: the customer's answer to a supplement, any status
+                    and (getattr(latest_sent.get(c.id), "kind", None) == "supplement"
+                         or (sar_open and c.id in latest_sent))):
+                # §6 [R4]: the customer's answer to a supplement, any status;
+                # §7a: to the offer of a change started at risk
                 sup = latest_sent[c.id]
                 tasks.append({**await _base(c), "kind": "customer_response",
-                              "supplement_version": sup.version, "target_tab": "offer",
+                              **({"supplement_version": sup.version}
+                                 if sup.kind == "supplement" else {}),
+                              "target_tab": "offer",
                               **({"next_contact": c.customer_next_contact}
                                  if c.customer_next_contact else {})})
+            elif (in_sales and sar_open and c.status != "quoted"
+                    and c.status in ("approved", "in_implementation", "in_validation")):
+                # §7a: started at risk, no offer out: the price is open
+                draft = drafts.get(c.id)
+                tasks.append({**await _base(c), "kind": "create_quote",
+                              "has_offer_draft": draft is not None,
+                              "offer_id": draft.id if draft is not None else None,
+                              "target_tab": "offer",
+                              "hint": "Started at risk: send the offer (the price is open)"})
 
             # The offer is valid for 30 days from receipt: a week before it runs
             # out (or once it has) the customer has to be chased or a new
@@ -4319,8 +4340,10 @@ class ChangeService:
             if c.status == "quoted":
                 return c.customer_response == "accepted"
             if bound and release_rule and c.status in ("approved", "in_implementation"):
-                # §7: an accepted supplement asks the signers again at once
-                return c.pm_signed_by is not None or c.quality_signed_by is not None
+                # §7: an accepted supplement asks the signers again at once;
+                # §7a: a start at risk asks for both signatures at once
+                return (c.pm_signed_by is not None or c.quality_signed_by is not None
+                        or c.start_at_risk_approved_at is not None)
             return release_rule and c.status == "in_validation"
         signable = [c for c in open_changes if _signable(c)] \
             if (is_pm_member or is_quality) else []
@@ -4345,10 +4368,11 @@ class ChangeService:
             for side in sides:
                 if not (is_pm_member if side == "pm" else is_quality):
                     continue
-                if c.status in ("approved", "in_implementation") and (
+                sar = c.start_at_risk_approved_at is not None
+                if c.status in ("approved", "in_implementation") and not sar and (
                         c.pm_signed_by if side == "pm" else c.quality_signed_by) is None:
                     continue      # before validation only a re-sign is a row
-                if (c.status in ("approved", "in_implementation")
+                if (c.status in ("approved", "in_implementation") and not sar
                         and getattr(latest, "status", None) != "accepted"):
                     continue      # a supplement still out: signed once accepted
                 other = c.quality_signed_by if side == "pm" else c.pm_signed_by
@@ -4395,6 +4419,26 @@ class ChangeService:
                             "target_tab": "commercial", "needs_you": True,
                             # owed since the last department finalized
                             "since": ChangeService._last_costing_finalized(c)})
+
+        # §7a start at risk: Quality's line, then the PM member's approval
+        # (never the asker), both "Needs you"
+        if cm_switches.on("START_AT_RISK"):
+            for c in open_changes:
+                if (c.start_at_risk_requested_at is None
+                        or c.start_at_risk_approved_at is not None
+                        or c.status not in ("costing", "quoting", "quoted")):
+                    continue
+                if c.start_at_risk_quality_note is None:
+                    if is_quality:
+                        out.append({**await base(c), "kind": "start_at_risk_quality",
+                                    "target_tab": "offer", "needs_you": True,
+                                    "reason": c.start_at_risk_evidence,
+                                    "since": c.start_at_risk_requested_at})
+                elif is_pm_member and user.id != c.start_at_risk_requested_by:
+                    out.append({**await base(c), "kind": "start_at_risk_approve",
+                                "target_tab": "offer", "needs_you": True,
+                                "reason": c.start_at_risk_quality_note,
+                                "since": c.start_at_risk_quality_at})
 
         validating = [c for c in open_changes if c.status == "in_validation"]
         if dep_ids and validating:
@@ -6320,7 +6364,11 @@ class ChangeService:
             what = f"v{accepted.version}" if accepted is not None else "the quote"
             raise ChangeError(
                 f"The customer accepted {what}; the answer cannot be changed")
-        if change.status != "quoted":
+        # §7a: started at risk, the customer's answer comes after approval
+        at_risk = (change.start_at_risk_approved_at is not None
+                   and change.status in ("approved", "in_implementation",
+                                         "in_validation", "released"))
+        if change.status != "quoted" and not at_risk:
             raise ChangeError(
                 "The customer response is recorded while the quote is out "
                 "(status 'quoted')")
@@ -6371,6 +6419,19 @@ class ChangeService:
                 f"Customer response: declined ({evidence['ref']})", user_id,
                 field_name="customer_response", new_value="declined",
                 notes=evidence["ref"])
+            if at_risk:
+                # §7a [R4]: declined after a start at risk: the work runs, the
+                # price stays open: Absorb, or the run team puts it on hold
+                change.price_open = True
+                from app.services.notification_service import NotificationService
+                await NotificationService.notify_once(
+                    session, [i for i in (change.lead_id, change.sales_owner_id)
+                              if i is not None and i != user_id],
+                    kind="decision_needed", subject_key=f"declined_at_risk:{change.id}:{version}",
+                    title=f"Customer declined {version} after the start at risk: "
+                          f"absorb or hold: {change.change_number}"[:255],
+                    body=evidence["ref"], link=f"/changes/{change.id}?tab=offer")
+                return change
             # C4: no dead end: the change is rejected and the rejection
             # letter (Sales' send_rejection task) takes over
             await ChangeService.transition(

@@ -333,6 +333,9 @@ class ChangeResponse(BaseModel):
     price_open: bool = False
     # §7 still talking: the next contact date (C4)
     customer_next_contact: Optional[date] = None
+    # §7a start at risk: asked / approved (details: GET /start-at-risk)
+    start_at_risk_requested_at: Optional[NaiveUtcDatetime] = None
+    start_at_risk_approved_at: Optional[NaiveUtcDatetime] = None
     raised_by: int
     customer_response: str
     pm_signed_by: Optional[int] = None

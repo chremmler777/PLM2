@@ -280,6 +280,21 @@ class ChangeRequest(Base):
     # §7 (migration 131): "Still talking" with the customer: the next
     # contact date (the Sales task is due then, C4).
     customer_next_contact: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # §7a start at risk (migration 134, P8: urgent only): the customer's
+    # go-ahead, Quality's line of risks, the PM member's approval. Approved =
+    # the change went to 'approved' without the customer's acceptance; the
+    # price stays open until an offer is accepted or the money is absorbed.
+    start_at_risk_evidence: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    start_at_risk_requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    start_at_risk_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    start_at_risk_quality_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_at_risk_quality_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    start_at_risk_quality_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    start_at_risk_approved_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    start_at_risk_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # ECR-solid §2 (migration 124): an urgent change (priority 'critical')
     # names its reason (URGENT_REASONS) and evidence; its need-by date is
     # release_due_date. An internal change says what is wrong today (a

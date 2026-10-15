@@ -779,3 +779,123 @@ async def test_scope_cards_switch_off(client, quoted, monkeypatch):
     res = await client.post(_scope(cid), json={"what": "a variant", "ref": "Mail 15 Oct"},
                             headers=sales)
     assert res.status_code == 400 and "switched off" in res.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# §7a start at risk (P8: urgent only, PM member approves, Quality's line)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+async def urgent(session_factory, offer_world, quality_member):
+    from datetime import datetime as _dt, timedelta as _td
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, offer_world["change_id"])
+        ch.priority = "critical"
+        ch.release_due_date = _dt.utcnow() + _td(days=40)
+        await s.commit()
+    return offer_world
+
+
+def _sar(cid, tail=""):
+    return f"/api/v1/changes/{cid}/start-at-risk{tail}"
+
+
+async def _quality(client):
+    from tests.conftest import login, ENGINEER_PASSWORD
+    return await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+
+
+async def test_start_at_risk_asks_quality_then_a_pm_member(client, urgent, session_factory):
+    from app.models.change import ChangeRequest
+    cid = urgent["change_id"]
+    sales, pm, tool = (await _auth(client, "sales"), await _auth(client, "pm"),
+                       await _auth(client, "tool"))
+    q = await _quality(client)
+    # NEGATIVE: not Sales nor the run team; a go-ahead that says nothing
+    assert (await client.post(_sar(cid), json={"ref": "Mail 15 Oct go"}, headers=tool)).status_code == 403
+    assert (await client.post(_sar(cid), json={"ref": "ok"}, headers=sales)).status_code == 400
+    r = await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start tooling now, PO follows"},
+                          headers=sales)
+    assert r.status_code == 200, r.text
+    assert any(t["kind"] == "start_at_risk_quality" for t in await _tasks(client, q))
+    # NEGATIVE: no approval before Quality's line; Sales does not write it
+    r = await client.post(_sar(cid, "/approve"), headers=pm)
+    assert r.status_code == 400 and "Quality" in r.json()["detail"]
+    assert (await client.post(_sar(cid, "/quality"), json={"note": "first lot 100 % checked"},
+                              headers=sales)).status_code == 403
+    assert (await client.post(_sar(cid, "/quality"), json={"note": "ok"},
+                              headers=q)).status_code == 400
+    r = await client.post(_sar(cid, "/quality"),
+                          json={"note": "No PPAP before SOP; first lot 100 % checked"}, headers=q)
+    assert r.status_code == 200, r.text
+    assert any(t["kind"] == "start_at_risk_approve" for t in await _tasks(client, pm))
+    # NEGATIVE: Quality does not approve it
+    assert (await client.post(_sar(cid, "/approve"), headers=q)).status_code == 403
+    r = await client.post(_sar(cid, "/approve"), headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        assert (ch.status, ch.price_open, ch.customer_response) == ("approved", True, "pending")
+    # both sign-off rows come at once (HARD #9 holds them at release)
+    assert any(t["kind"] == "sign_off" and t["side"] == "pm" and t["change_id"] == cid
+               for t in await _tasks(client, pm))
+    assert any(t["kind"] == "sign_off" and t["side"] == "quality" and t["change_id"] == cid
+               for t in await _tasks(client, q))
+    # Sales sends the offer: still an offer, the change stays approved
+    assert any(t["kind"] == "create_quote" and t["change_id"] == cid
+               for t in await _tasks(client, sales))
+    o = await _create(client, sales, cid)
+    assert o["kind"] == "offer"
+    await _no_timing(client, sales, cid, o["id"])
+    r = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert r.status_code == 200, r.text
+    r = await _answer(client, cid, sales, _YES)
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["price_open"], r.json()["customer_response"]) == (
+        "approved", False, "accepted")
+
+
+async def test_start_at_risk_never_by_the_asker_and_urgent_only(client, urgent, session_factory):
+    from app.models.change import ChangeRequest
+    from tests.conftest import login
+    cid = urgent["change_id"]
+    pm, q = await _auth(client, "pm"), await _quality(client)
+    assert (await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"},
+                              headers=pm)).status_code == 200
+    await client.post(_sar(cid, "/quality"), json={"note": "No PPAP before SOP, lot checked"},
+                      headers=q)
+    r = await client.post(_sar(cid, "/approve"), headers=pm)
+    assert r.status_code == 403 and "4-eyes" in r.json()["detail"]
+    admin = await login(client, "admin@test.io")
+    r = await client.post(_sar(cid, "/approve"), headers=admin)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        ch.status, ch.priority, ch.start_at_risk_approved_at = "quoting", "medium", None
+        ch.start_at_risk_requested_at = None
+        await s.commit()
+    r = await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"}, headers=pm)
+    assert r.status_code == 400 and "urgent" in r.json()["detail"]
+
+
+async def test_declined_after_a_start_at_risk_keeps_the_price_open(client, urgent, session_factory):
+    from app.models.change import ChangeRequest
+    cid = urgent["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"}, headers=sales)
+    await client.post(_sar(cid, "/quality"), json={"note": "No PPAP before SOP, lot checked"}, headers=q)
+    assert (await client.post(_sar(cid, "/approve"), headers=pm)).status_code == 200
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)).status_code == 200
+    r = await _answer(client, cid, sales, {"response": "declined", "ref": "Mail 20 Oct: too high"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["price_open"]) == ("approved", True)
+
+
+async def test_start_at_risk_switch_off(client, urgent, monkeypatch):
+    monkeypatch.setattr(cm_switches, "START_AT_RISK", False)
+    cid = urgent["change_id"]
+    sales = await _auth(client, "sales")
+    r = await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"}, headers=sales)
+    assert r.status_code == 400 and "switched off" in r.json()["detail"]

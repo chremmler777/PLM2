@@ -1003,3 +1003,81 @@ async def scope_change_told(
         raise _scope_http(e)
     await db.commit()
     return await _scope_out(db, change)
+
+
+# ----------------------------------------------------------------------
+# §7a start at risk (START_AT_RISK)
+# ----------------------------------------------------------------------
+class StartAtRiskIn(BaseModel):
+    attachment_id: Optional[int] = None
+    ref: Optional[str] = Field(default=None, max_length=255)
+
+
+class StartAtRiskQualityIn(BaseModel):
+    note: str = Field(max_length=500)
+
+
+def _sar_http(e: Exception) -> HTTPException:
+    from app.services.start_at_risk_service import StartAtRiskForbidden
+    if isinstance(e, StartAtRiskForbidden):
+        return HTTPException(status_code=403, detail=str(e))
+    return HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{change_id}/start-at-risk")
+async def start_at_risk_state(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.start_at_risk_service import StartAtRiskService
+    change = await _change(db, change_id, current_user)
+    return await StartAtRiskService.state(db, change)
+
+
+@router.post("/{change_id}/start-at-risk")
+async def request_start_at_risk(
+    change_id: int, body: StartAtRiskIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales or the run team: the customer's go-ahead before the PO."""
+    from app.services.start_at_risk_service import StartAtRiskService
+    change = await _change(db, change_id, current_user)
+    try:
+        await StartAtRiskService.request(db, change, current_user,
+                                         attachment_id=body.attachment_id, ref=body.ref)
+    except ChangeError as e:
+        raise _sar_http(e)
+    await db.commit()
+    return await StartAtRiskService.state(db, change)
+
+
+@router.post("/{change_id}/start-at-risk/quality")
+async def start_at_risk_quality(
+    change_id: int, body: StartAtRiskQualityIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Quality: one line of quality risks."""
+    from app.services.start_at_risk_service import StartAtRiskService
+    change = await _change(db, change_id, current_user)
+    try:
+        await StartAtRiskService.quality_line(db, change, current_user, body.note)
+    except ChangeError as e:
+        raise _sar_http(e)
+    await db.commit()
+    return await StartAtRiskService.state(db, change)
+
+
+@router.post("/{change_id}/start-at-risk/approve")
+async def approve_start_at_risk(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A Project Management member (second: an admin), never the asker."""
+    from app.services.start_at_risk_service import StartAtRiskService
+    change = await _change(db, change_id, current_user)
+    try:
+        await StartAtRiskService.approve(db, change, current_user)
+    except ChangeError as e:
+        raise _sar_http(e)
+    await db.commit()
+    return await StartAtRiskService.state(db, change)

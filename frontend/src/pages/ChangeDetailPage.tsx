@@ -54,6 +54,7 @@ import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import IndexFollowups from '../components/changes/IndexFollowups';
 import ScopeChangeCards from '../components/changes/offer/ScopeChangeCards';
+import StartAtRiskCard from '../components/changes/offer/StartAtRiskCard';
 import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/changes/CaptureV2';
 import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
 import { useDepartments } from '../hooks/queries/useWorkflows';
@@ -1356,6 +1357,13 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
+      {effectiveTab === 'offer' && change.start_at_risk_on !== false && change.customer_relevant
+        && (change.priority === 'critical' || !!change.start_at_risk_approved_at) && (
+        <StartAtRiskCard changeId={changeId}
+          canAsk={isSalesMember || isAdmin || isChangeLead || isPmMember}
+          isQuality={isQualityMember || isAdmin} canApprove={isPmMember || isAdmin}
+          userId={actingAs ? null : (userId ?? null)} attachments={change.attachments ?? []} />
+      )}
       {effectiveTab === 'offer' && change.commercial_v2 !== false && change.customer_relevant && (
         <ScopeChangeCards changeId={changeId} status={change.status}
           canRequest={isSalesMember || isAdmin || isChangeLead || isPmMember}

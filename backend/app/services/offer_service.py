@@ -860,7 +860,12 @@ class OfferService:
         version = (max((o.version for o in offers), default=0)) + 1
         seed_currency = "EUR"
         kind = "offer"
-        if OfferService.supplement_window(change):
+        # §7a: started at risk with nothing accepted yet: the next version is
+        # still the offer (the customer accepts it later); a supplement adds
+        # to an accepted one
+        at_risk_offer = (change.start_at_risk_approved_at is not None
+                         and not any(o.status == "accepted" for o in offers))
+        if OfferService.supplement_window(change) and not at_risk_offer:
             if base is None:
                 raise ChangeError(
                     "No offer was sent on this change: a supplement adds to one")
@@ -1123,7 +1128,9 @@ class OfferService:
         totals = await OfferService._store_totals(session, change, offer)
         note = (change_note or offer.change_note or "").strip() or None
         supplement = offer.kind == "supplement"
-        if OfferService.supplement_window(change) and not supplement:
+        at_risk_offer = (change.start_at_risk_approved_at is not None
+                         and change.accepted_offer_id is None and not supplement)
+        if OfferService.supplement_window(change) and not supplement and not at_risk_offer:
             raise ChangeError(
                 f"The change is {change.status}: what changed goes to the "
                 "customer as a supplement (Send supplement), this draft is "

@@ -1186,6 +1186,36 @@ reads the cards; a change flagged before the cards keeps the old rule (a
 newer offer or an approved override covers it). Missing information on a
 card is a question (cut 2: bundled customer questions). Switch off: no cards.
 
+### Start at risk (ECR-solid §7a, P8, 2026-10-15)
+
+Switch `START_AT_RISK` (default ON; P8 decided: yes, urgent only). An urgent
+customer change (priority `critical`) in `costing`, `quoting` or `quoted`
+without the customer's yes may start before the PO
+(`start_at_risk_service.py`, columns `start_at_risk_*` on `change_requests`,
+migration 134; UI `StartAtRiskCard.tsx` on the Offer tab, no prices):
+
+1. Sales or the run team file the customer's go-ahead (a mail filed on the
+   change or its reference); Project Management and Quality are told.
+2. Quality adds one line of quality risks (My Tasks `start_at_risk_quality`,
+   Needs you).
+3. A Project Management member (who sees prices; second: an admin) approves
+   it, never the one who asked (`start_at_risk_approve`, Needs you). The
+   change goes to `approved` from costing, quoting or quoted
+   (`ChangeService.transition` lets this hop through without the customer's
+   acceptance; the soft rules `costing_not_finalized`,
+   `scope_change_uncovered` and `price_drop` are named in the changelog) and
+   `price_open` is set.
+
+After it: PM and Quality sign-off rows come at once, bound to the last offer
+sent (else the costing at approval); release checks them (HARD #9). Sales'
+row "Started at risk: send the offer" stays until an offer is out; with
+nothing accepted the next version is still an offer (not a supplement), sent
+without a status hop, and the Customer answer works in any later status:
+accepted clears `price_open`; declined leaves it open (no rejection: the
+work runs; the lead and the Sales owner are told: Absorb or hold). Close is
+HARD-blocked while the price is open (#9). Switch off: an urgent change reads
+"No start before PO" and nothing here is offered.
+
 ### Timing validation at `approved` (2026-09-25)
 
 `approved` opens the Timing tab (`TimingTab.tsx`). The detailed plan is

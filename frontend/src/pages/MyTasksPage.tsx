@@ -293,6 +293,7 @@ const TASK_TAB: Record<string, string> = {
   routing_deviation_decision: '?tab=assessments', not_feasible: '?tab=overview',
   // §6 [R3] scope change cards: the lead and Sales on the offer tab
   scope_change_decide: '?tab=offer', revise_offer: '?tab=offer', scope_change_tell: '?tab=offer',
+  start_at_risk_quality: '?tab=offer', start_at_risk_approve: '?tab=offer',
 };
 
 /** Where a task row leads: its tab, plus `task=<kind>` so the change opens
@@ -438,6 +439,9 @@ const taskHint = (task: ChangeTask): string | null => {
       return t(task.supplement ? 'tasks.hint.revise_supplement' : 'tasks.hint.revise_offer').replace('{x}', task.reason ?? '');
     case 'scope_change_tell':
       return t('tasks.hint.scope_change_tell').replace('{x}', task.reason ?? '');
+    case 'start_at_risk_quality':
+    case 'start_at_risk_approve':
+      return t(`tasks.hint.${task.kind}`).replace('{x}', task.reason ?? '');
     case 'costing_update':
       return task.scope_change_id != null
         ? t('tasks.hint.costing_update_scope').replace('{x}', task.reason ?? '')
