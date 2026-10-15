@@ -24,6 +24,9 @@ vi.mock('../components/ProjectSepSection', () => ({
 vi.mock('../components/ProjectChangesSection', () => stub('changes-section'))
 vi.mock('../components/parts/AssemblyTreeList', () => stub('assemblies'))
 vi.mock('../components/parts/UploadDialog', () => stub('upload-dialog'))
+vi.mock('../components/worksheet/WorksheetView', () => ({
+  default: ({ onClose }: { onClose(): void }) => <button data-testid="ws-close" onClick={onClose}>Back to list</button>,
+}))
 
 // Some tests replace these two; keep them at the jsdom defaults otherwise.
 const realOpen = window.open
@@ -520,5 +523,46 @@ describe('pop-out detail window from the project page', () => {
     fireEvent.click(await screen.findByTestId('item-row-5'))
     await screen.findByTestId('detail-header')
     expect(screen.queryByLabelText('Open detail in new window')).toBeNull()
+  })
+  describe('worksheet back navigation', () => {
+    function mountFromList() {
+      const nav: { go: NavigateFunction | null } = { go: null }
+      const Nav = () => { nav.go = useNavigate(); return null }
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={['/projects', '/projects/2']} initialIndex={1}>
+            <Nav />
+            <Routes>
+              <Route path="/projects" element={<div>project-selector</div>} />
+              <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>)
+      return nav
+    }
+
+    it('browser Back from the worksheet returns to the project, not the project list', async () => {
+      const nav = mountFromList()
+      fireEvent.click(await screen.findByTestId('show-worksheet'))
+      await screen.findByTestId('ws-close')
+      act(() => { nav.go!(-1) })
+      expect(await screen.findByTestId('items-pane')).toBeTruthy()
+      expect(screen.queryByText('project-selector')).toBeNull()
+    })
+
+    it('"Back to list" returns to the project and a second Back reaches the list', async () => {
+      const nav = mountFromList()
+      fireEvent.click(await screen.findByTestId('show-worksheet'))
+      fireEvent.click(await screen.findByTestId('ws-close'))
+      expect(await screen.findByTestId('items-pane')).toBeTruthy()
+      act(() => { nav.go!(-1) })
+      expect(await screen.findByText('project-selector')).toBeTruthy()
+    })
+
+    it('"Back to list" on a worksheet deep link stays in the project', async () => {
+      mount('/projects/2?view=worksheet')
+      fireEvent.click(await screen.findByTestId('ws-close'))
+      expect(await screen.findByTestId('items-pane')).toBeTruthy()
+    })
   })
 })

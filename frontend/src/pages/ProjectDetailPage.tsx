@@ -7,7 +7,7 @@
  * while the list here turns into a table.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useHref, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useHref, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import StartChangeModal from '../components/changes/StartChangeModal';
@@ -50,15 +50,25 @@ function ProjectDetailView() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const initialPartId = searchParams.get('part');
+  const location = useLocation();
   const showWorksheet = searchParams.get('view') === 'worksheet';
+  // Opening the worksheet is a history step, so the browser's Back returns to
+  // the project instead of leaving it for the project list. "Back to list"
+  // steps back when the worksheet was opened from here; on a deep link (no
+  // step to go back to) it drops ?view= in place.
+  const openedHere = (location.state as { worksheetFromProject?: boolean } | null)?.worksheetFromProject === true;
   const setWorksheet = useCallback((on: boolean) => {
+    if (!on && openedHere) {
+      navigate(-1);
+      return;
+    }
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (on) next.set('view', 'worksheet');
       else next.delete('view');
       return next;
-    }, { replace: true });
-  }, [setSearchParams]);
+    }, on ? { state: { worksheetFromProject: true } } : { replace: true });
+  }, [setSearchParams, navigate, openedHere]);
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
