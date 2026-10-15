@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.database import Base
 
 OFFER_STATUSES = ("draft", "sent", "superseded", "accepted", "declined")
+OFFER_KINDS = ("offer", "supplement")
 # How long an offer holds, counted from the day the customer received it.
 OFFER_VALIDITY_DAYS = 30
 
@@ -36,6 +37,10 @@ class ChangeOffer(Base):
     version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String(15), default="draft", server_default="draft")
+    # ECR-solid §6 (migration 132): 'offer' (the quote) or 'supplement'
+    # (after approval: the changed positions only; the status stays).
+    kind: Mapped[str] = mapped_column(
+        String(12), default="offer", server_default="offer")
     currency: Mapped[str] = mapped_column(
         String(3), default="EUR", server_default="EUR")
     data: Mapped[dict] = mapped_column(JSON, default=dict)

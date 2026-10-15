@@ -39,6 +39,9 @@ from app.services.change_plan_service import (
 from app.services.change_service import ChangeError, ChangeService
 
 OFFER_WINDOW = ("quoting", "quoted")
+# ECR-solid §6 [R3]: once approved, every offer is a supplement (the changed
+# positions only); the change keeps its status (COMMERCIAL_V2).
+SUPPLEMENT_STATUSES = ("approved", "in_implementation", "in_validation", "released")
 # The draft timing disclaimer: the quote plan is a rough plan, and the offer
 # says so in the same words every time.
 TIMING_DISCLAIMER = ("Draft timing. Final dates are confirmed after order "
@@ -590,10 +593,20 @@ class OfferService:
         return await ChangeService.user_can_set_quoted_price(session, user, change)
 
     @staticmethod
+    def supplement_window(change: ChangeRequest) -> bool:
+        """Spec §6 "After approval": a customer change past approval takes
+        supplements, in any later status up to release (COMMERCIAL_V2)."""
+        from app.services import cm_switches
+        return (cm_switches.on("COMMERCIAL_V2") and change.customer_relevant
+                and change.status in SUPPLEMENT_STATUSES)
+
+    @staticmethod
     async def _require_write(session, change, user) -> None:
         if not await OfferService.may_write(session, change, user):
             raise PlanForbidden(
                 "Only Sales, the change lead or an admin may write the offer")
+        if OfferService.supplement_window(change):
+            return
         await OfferService._require_open(session, change)
         if change.status not in OFFER_WINDOW:
             raise ChangeError(
@@ -846,7 +859,15 @@ class OfferService:
         base = next((o for o in offers if o.status != "draft"), None)
         version = (max((o.version for o in offers), default=0)) + 1
         seed_currency = "EUR"
-        if base is None:
+        kind = "offer"
+        if OfferService.supplement_window(change):
+            if base is None:
+                raise ChangeError(
+                    "No offer was sent on this change: a supplement adds to one")
+            kind = "supplement"
+            data = await OfferService._supplement_data(session, change, base, offers)
+            source = f"supplement to v{base.version}: the changed positions"
+        elif base is None:
             data = await OfferService.seed_data(session, change)
             source = "seeded from the costing"
             # A first offer starts in the costing's currency; Sales may
@@ -861,7 +882,7 @@ class OfferService:
             data["customer_note"] = ""
             source = f"cloned from v{base.version}"
         offer = ChangeOffer(
-            change_id=change.id, version=version, status="draft",
+            change_id=change.id, version=version, status="draft", kind=kind,
             currency=(base.currency if base else seed_currency), data=data,
             created_by=user.id)
         from sqlalchemy.exc import IntegrityError
@@ -887,6 +908,49 @@ class OfferService:
             f"Offer v{version} drafted ({source})", user.id,
             new_value={"offer_id": offer.id, "version": version})
         return offer
+
+    @staticmethod
+    async def _supplement_lines(session: AsyncSession, change: ChangeRequest,
+                                offers: list[ChangeOffer]) -> list[dict]:
+        """The changed positions only (spec §6): each costing line now,
+        less what the accepted offer and the accepted supplements already
+        priced for it (their source amounts); a line that did not move is
+        left out."""
+        fresh, _ = await OfferService._costing_basis(session, change)
+        covered: dict = {}
+        for o in offers:
+            if o.status != "accepted":
+                continue
+            for l in normalise(o.data).get("cost_lines") or []:
+                if l.get("include", True) and l.get("key"):
+                    covered[l["key"]] = covered.get(l["key"], 0.0) + _num(
+                        l.get("source_amount", l.get("amount")))
+        out = []
+        for n in fresh:
+            delta = round(_num(n.get("source_amount")) - covered.get(n["key"], 0.0), 2)
+            if abs(delta) > 0.005:
+                out.append({**n, "amount": delta, "source_amount": delta})
+        return out
+
+    @staticmethod
+    async def _supplement_data(session: AsyncSession, change: ChangeRequest,
+                               base: ChangeOffer, offers: list[ChangeOffer]) -> dict:
+        """A supplement keeps the recipient, terms and factors of the last
+        version sent and prices only the changed positions; no risks,
+        scrap, piece price or timing of its own."""
+        data = normalise(copy.deepcopy(base.data))
+        data.pop(SNAPSHOT_KEY, None)
+        data.pop(SEND_KEY, None)
+        data["cost_lines"] = await OfferService._supplement_lines(session, change, offers)
+        data["risks"] = []
+        data["free_fields"] = []
+        data["customer_note"] = ""
+        data["changeover"] = default_data()["changeover"]
+        data["piece_price"] = default_data()["piece_price"]
+        data["timing"] = {**default_data()["timing"], "include": False}
+        data["subject"] = (f"Supplement to the offer for engineering change "
+                           f"{change.change_number}: {change.title}")[:255]
+        return data
 
     @staticmethod
     def _require_draft(offer: ChangeOffer) -> None:
@@ -961,6 +1025,21 @@ class OfferService:
         are untouched."""
         await OfferService._require_write(session, change, user)
         OfferService._require_draft(offer)
+        if offer.kind == "supplement":
+            # the changed positions again, Sales' include flags kept
+            data = normalise(copy.deepcopy(offer.data or {}))
+            keep = {l.get("key"): l.get("include", True) for l in data["cost_lines"]}
+            lines = await OfferService._supplement_lines(
+                session, change, await OfferService.list_offers(session, change))
+            for l in lines:
+                l["include"] = bool(keep.get(l["key"], True))
+            data["cost_lines"] = lines + [
+                l for l in data["cost_lines"]
+                if not str(l.get("key") or "").startswith(SEEDED_LINE_PREFIXES)]
+            offer.data = data
+            await OfferService._store_totals(session, change, offer)
+            await session.flush()
+            return offer
         data = normalise(copy.deepcopy(offer.data or {}))
         fresh, _ = await OfferService._costing_basis(session, change)
         old = {l.get("key"): l for l in data["cost_lines"]}
@@ -1043,7 +1122,20 @@ class OfferService:
         OfferService._require_draft(offer)
         totals = await OfferService._store_totals(session, change, offer)
         note = (change_note or offer.change_note or "").strip() or None
-        if totals["total_one_time"] <= 0:
+        supplement = offer.kind == "supplement"
+        if OfferService.supplement_window(change) and not supplement:
+            raise ChangeError(
+                f"The change is {change.status}: what changed goes to the "
+                "customer as a supplement (Send supplement), this draft is "
+                "an offer: discard it")
+        if supplement and not OfferService.supplement_window(change):
+            raise ChangeError(
+                "A supplement is sent once the change is approved (up to release)")
+        if supplement:
+            if abs(totals["total_one_time"]) < 0.005:
+                raise ChangeError(
+                    "The supplement total is zero: no changed position is priced")
+        elif totals["total_one_time"] <= 0:
             raise ChangeError("The offer total must be greater than zero")
         if offer.version >= 2 and not note:
             raise ChangeError(
@@ -1075,7 +1167,7 @@ class OfferService:
         snapshot = await OfferService._snapshot(
             session, change,
             signer=await OfferService.send_signer(session, change, user))
-        if offer.version >= 2:
+        if offer.version >= 2 and not supplement:
             prev = await OfferService._previous_sent(session, change, offer)
             if prev is not None:
                 changed = [d for d in await OfferService._diff_against(
@@ -1105,7 +1197,18 @@ class OfferService:
         offer.sent_by = user.id
         offer.received_at = received
         offer.valid_until = received + timedelta(days=OFFER_VALIDITY_DAYS)
-        change.quoted_price = totals["total_one_time"]
+        if supplement:
+            # spec §6 [R4]: the money is open until the customer accepts the
+            # supplement or it is absorbed (HARD #9 at close)
+            if not change.price_open:
+                change.price_open = True
+                await ChangeService.append_changelog(
+                    session, change, "price_opened",
+                    f"Supplement v{offer.version} sent: the price is open until "
+                    "the customer accepts it or it is absorbed", user.id,
+                    field_name="price_open", old_value=False, new_value=True)
+        else:
+            change.quoted_price = totals["total_one_time"]
         await session.flush()
         if change.status == "quoting":
             await ChangeService.transition(session, change, "quoted", user.id)
@@ -1113,7 +1216,7 @@ class OfferService:
         # prices only by the cost roles (they read them on the offer itself).
         await ChangeService.append_changelog(
             session, change, "offer_sent",
-            f"Offer v{offer.version} sent, valid until "
+            f"{'Supplement' if supplement else 'Offer'} v{offer.version} sent, valid until "
             f"{offer.valid_until.isoformat()}"
             + (f" ({note})" if note else ""), user.id, notes=note,
             new_value={"offer_id": offer.id, "version": offer.version,
@@ -1518,7 +1621,8 @@ class OfferService:
                     "expired", f"Offer v{o.version} expired on {fmt_date(o.valid_until)}"))
             out.append({
                 "id": o.id, "change_id": o.change_id, "version": o.version,
-                "status": o.status, "currency": o.currency, "data": data,
+                "status": o.status, "kind": o.kind or "offer",
+                "currency": o.currency, "data": data,
                 "totals": totals, "change_note": o.change_note,
                 "sent_at": o.sent_at, "sent_by": o.sent_by,
                 "sent_by_name": users.get(o.sent_by),

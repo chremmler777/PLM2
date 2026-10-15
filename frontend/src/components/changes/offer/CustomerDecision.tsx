@@ -142,8 +142,10 @@ export default function CustomerDecision({
     && !!change.quality_signed_by && userId != null && userId === change.quality_signed_by
   const samePersonBlocksQuality = !change.quality_signed_by
     && !!change.pm_signed_by && userId != null && userId === change.pm_signed_by
-  const decided = change.customer_response === 'accepted' || change.customer_response === 'declined'
-  const acceptBlocked = !due || (expired && !override.trim()) || respond.isPending
+  // §6 [R4]: a supplement out with the customer is answered in any status
+  const supplementOut = v2 && latestSent?.kind === 'supplement' && latestSent.status === 'sent'
+  const decided = !supplementOut && (change.customer_response === 'accepted' || change.customer_response === 'declined')
+  const acceptBlocked = (!due && !supplementOut) || (expired && !override.trim()) || respond.isPending
     || (v2 && (!evidenceOk || !dropOk || (!!latestSent && (!match || (match === 'no' && differs.trim().length < 5) || !confirmed))))
   const pick = (which: 'accept' | 'talk' | 'decline') => {
     setAcceptOpen(which === 'accept' ? (o) => !o : false)
@@ -167,7 +169,7 @@ export default function CustomerDecision({
   )
   // The backend takes the customer's answer only at quoted, and once accepted
   // nothing about it changes any more.
-  const open = change.status === 'quoted'
+  const open = change.status === 'quoted' || supplementOut
 
   return (
     <div data-testid="customer-decision" className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 space-y-3">
@@ -234,7 +236,7 @@ export default function CustomerDecision({
         <div data-testid="decline-confirm-box" role="alertdialog" aria-label="Confirm customer declined"
           className="space-y-2 rounded-lg border border-rose-900/70 bg-rose-950/20 p-3">
           <p className="text-xs text-rose-200">
-            {v2 ? t('cust.declineText')
+            {supplementOut ? t('cust.declineSupplement') : v2 ? t('cust.declineText')
               : 'Recording that the customer declined cannot be undone. The offer is closed and the change cannot be approved on it any more.'}
           </p>
           {v2 && <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">{evidenceFields}</div>}
@@ -330,7 +332,7 @@ export default function CustomerDecision({
               onClick={() => respond.mutate({
                 response: 'accepted',
                 body: {
-                  release_due_date: `${due}T23:59:59Z`,
+                  ...(due ? { release_due_date: `${due}T23:59:59Z` } : {}),
                   release_due_reason: reason || null,
                   ...(expired ? { expired_override_reason: override.trim() } : {}),
                   ...(v2 ? { ...evidence, ...(latestSent ? {

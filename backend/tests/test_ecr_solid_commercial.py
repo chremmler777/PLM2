@@ -493,3 +493,133 @@ async def test_a_part_index_change_withdraws_quality_too(
     rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
     qrow = next(t for t in rows if t["kind"] == "sign_off" and t["change_id"] == cid)
     assert qrow["side"] == "quality" and "offer_total" not in qrow
+
+
+# ---------------------------------------------------------------------------
+# §6 supplements after approval
+# ---------------------------------------------------------------------------
+@pytest.fixture
+async def approved(client, quoted):
+    from tests.conftest import login, ENGINEER_PASSWORD
+    cid = quoted["change_id"]
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    q = await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+    assert r.json()["status"] == "approved", r.text
+    return {**quoted, "sales": sales, "pm": pm, "q": q}
+
+
+async def _raise_position(session_factory, world, to):
+    from app.models.change_cost import CostingPosition
+    async with session_factory() as s:
+        pos = await s.get(CostingPosition, world["position_id"])
+        pos.est_cost = to
+        await s.commit()
+
+
+async def _supplement(client, cid, sales):
+    res = await client.post(_url(cid), headers=sales)
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+async def test_supplement_prices_only_what_changed_and_keeps_the_status(
+        client, approved, session_factory):
+    from app.models.change import ChangeRequest
+    cid, sales = approved["change_id"], approved["sales"]
+    s1 = await _supplement(client, cid, sales)
+    assert s1["kind"] == "supplement" and s1["data"]["cost_lines"] == []
+    # NEGATIVE: nothing changed, nothing to send
+    res = await client.post(_url(cid, f"/{s1['id']}/send"),
+                            json={"change_note": "nothing"}, headers=sales)
+    assert res.status_code == 400 and "zero" in res.json()["detail"]
+    await _raise_position(session_factory, approved, 1500)
+    res = await client.post(_url(cid, f"/{s1['id']}/refresh"), headers=sales)
+    assert res.status_code == 200, res.text
+    lines = res.json()["data"]["cost_lines"]
+    assert [(l["key"], l["amount"]) for l in lines] == [
+        (f"pos:{approved['position_id']}", 500.0)]
+    res = await client.post(_url(cid, f"/{s1['id']}/send"),
+                            json={"change_note": "Insert rework quoted higher"}, headers=sales)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        assert (ch.status, ch.price_open, ch.customer_response) == ("approved", True, "accepted")
+        assert ch.quoted_price == 1000         # the quote stays what it was
+        rows = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == cid))).scalars().all()
+    assert "signoff_withdrawn" in rows        # PM signs the supplement again
+    # Sales chases the answer, in approved
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+    rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
+    assert any(t["kind"] == "customer_response" and t.get("supplement_version") == s1["version"]
+               for t in rows)
+    # NEGATIVE: the PM's re-sign waits until the customer accepts
+    pm_rows = (await client.get("/api/v1/changes/my-tasks", headers=approved["pm"])).json()
+    pm_rows = pm_rows if isinstance(pm_rows, list) else pm_rows.get("tasks", [])
+    assert not any(t["kind"] == "sign_off" and t["change_id"] == cid for t in pm_rows)
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert (body["status"], body["price_open"]) == ("approved", False)
+    pm_rows = (await client.get("/api/v1/changes/my-tasks", headers=approved["pm"])).json()
+    pm_rows = pm_rows if isinstance(pm_rows, list) else pm_rows.get("tasks", [])
+    assert any(t["kind"] == "sign_off" and t["change_id"] == cid and t["side"] == "pm"
+               for t in pm_rows)
+
+
+async def test_a_declined_supplement_leaves_the_price_open_for_absorb(
+        client, approved, session_factory):
+    cid, sales = approved["change_id"], approved["sales"]
+    await _raise_position(session_factory, approved, 1300)
+    s1 = await _supplement(client, cid, sales)
+    assert (await client.post(_url(cid, f"/{s1['id']}/send"),
+                              json={"change_note": "Rework higher"},
+                              headers=sales)).status_code == 200
+    res = await _answer(client, cid, sales, {"response": "declined",
+                                             "ref": "Mail 15 Oct, buyer refuses"})
+    assert res.status_code == 200, res.text
+    assert (res.json()["status"], res.json()["price_open"]) == ("approved", True)
+    res = await client.post(f"/api/v1/changes/{cid}/absorb", json={
+        "reason_code": "goodwill", "note": "Small amount, goodwill on the program"},
+        headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_a_negative_supplement_needs_a_reason_and_the_ok(client, approved, session_factory):
+    from app.models.change import ChangeRequest, ChangeTransitionDeviation
+    cid, sales, pm = approved["change_id"], approved["sales"], approved["pm"]
+    await _raise_position(session_factory, approved, 800)
+    s1 = await _supplement(client, cid, sales)
+    assert s1["data"]["cost_lines"][0]["amount"] == -200.0
+    assert (await client.post(_url(cid, f"/{s1['id']}/send"),
+                              json={"change_note": "Insert cheaper"},
+                              headers=sales)).status_code == 200
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 400 and "lowers the accepted total" in res.json()["detail"]
+    res = await _answer(client, cid, sales, {**_YES, "price_drop_code": "error",
+                                             "price_drop_note": "Rework was double counted in v1"})
+    assert res.status_code == 200, res.text
+    assert res.json()["price_open"] is True     # waits for the OK
+    async with session_factory() as s:
+        dev = (await s.execute(select(ChangeTransitionDeviation).where(
+            ChangeTransitionDeviation.change_id == cid,
+            ChangeTransitionDeviation.guard_key == "price_drop"))).scalar_one()
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
+                          json={"decision": "approved"}, headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).price_open is False
+
+
+async def test_only_offer_writers_start_a_supplement_and_switch_off_refuses(
+        client, approved, monkeypatch):
+    cid = approved["change_id"]
+    # NEGATIVE: Quality signs, it does not write offers
+    res = await client.post(_url(cid), headers=approved["q"])
+    assert res.status_code == 403
+    monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", False)
+    res = await client.post(_url(cid), headers=approved["sales"])
+    assert res.status_code == 400 and "accepted" in res.json()["detail"]

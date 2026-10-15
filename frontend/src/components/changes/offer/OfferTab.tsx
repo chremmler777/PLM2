@@ -16,6 +16,7 @@ import ConfirmDialog from '../../common/ConfirmDialog'
 import { buttonClass } from '../../common/buttonStyles'
 import type { ChangeDetail } from '../../../types/change'
 import type { OfferIssue, OfferOut } from '../../../types/changeOffer'
+import { t } from '../../../i18n/cmLabels'
 import NegotiationCard from '../NegotiationCard'
 import CustomerDecision from './CustomerDecision'
 import InternalApproval from './InternalApproval'
@@ -40,6 +41,12 @@ const planHasTasks = (p?: { tasks?: unknown[] }) => (p?.tasks?.length ?? 0) > 0
 /** Errors the quote plan's own check reports (the "1 error" chip in the planner). */
 const planErrorCount = (p?: { validation?: { errors?: unknown[] } }) => p?.validation?.errors?.length ?? 0
 const errorsText = (n: number) => `${n} error${n === 1 ? '' : 's'}`
+
+/** ECR-solid §6: past approval every offer is a supplement (backend
+ *  OfferService.supplement_window); the change keeps its status. */
+export const supplementWindow = (change: Pick<ChangeDetail, 'status' | 'commercial_v2' | 'customer_relevant'>): boolean =>
+  change.commercial_v2 !== false && !!change.customer_relevant
+  && ['approved', 'in_implementation', 'in_validation', 'released'].includes(change.status)
 
 /** Once the customer said yes the offer is history (backend _require_open). */
 export const offerClosed = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'>): boolean =>
@@ -124,8 +131,10 @@ function PdfButton({ changeId, offerId, testId = 'offer-preview-pdf' }: {
 
 function OfferHeader({
   change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings, stale, sendBlocked, sending,
-  onDiscard, discarding, sendReasons = [], sendWarnings = [],
+  onDiscard, discarding, sendReasons = [], sendWarnings = [], newVersionLabel = 'New version',
 }: {
+  /** "Send supplement" past approval (§6). */
+  newVersionLabel?: string
   change: ChangeDetail
   offer: OfferOut
   latestSent?: OfferOut
@@ -150,7 +159,8 @@ function OfferHeader({
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const tot = offer.totals
   const cur = offer.currency || 'EUR'
-  const statusLabel = offer.status === 'draft' ? 'Draft' : offer.status[0].toUpperCase() + offer.status.slice(1)
+  const statusLabel = (offer.status === 'draft' ? 'Draft' : offer.status[0].toUpperCase() + offer.status.slice(1))
+    + (offer.kind === 'supplement' ? ` ${t('supp.word')}` : '')
   const validRef = offer.status === 'draft' ? latestSent : offer
   return (
     <div data-testid="offer-header" className="rounded-xl border border-slate-700 bg-gradient-to-b from-slate-800 to-slate-800/60 p-4">
@@ -235,13 +245,13 @@ function OfferHeader({
               aria-describedby={sendReasons.length > 0 ? 'offer-send-reasons' : undefined}
               title={sendBlocked ? 'Saving your changes first' : undefined}
               className={buttonClass('primary')}>
-              {sending ? 'Saving' : 'Send offer'}
+              {sending ? 'Saving' : offer.kind === 'supplement' ? t('supp.send') : 'Send offer'}
             </button>
           )}
           {onNewVersion && (
             <button type="button" data-testid="offer-new-version" disabled={creating} onClick={onNewVersion}
               className={buttonClass('secondary')}>
-              New version
+              {newVersionLabel}
             </button>
           )}
         </div>
@@ -304,8 +314,11 @@ function OfferWorkspace({ props, offers, offer }: {
   const qc = useQueryClient()
   const [sendOpen, setSendOpen] = useState(false)
   const [preparingSend, setPreparingSend] = useState(false)
-  const closed = offerClosed(change)
-  const editable = canWrite && !closed && offer.status === 'draft' && ['quoting', 'quoted'].includes(change.status)
+  const supplements = supplementWindow(change)
+  const isSupplement = offer.kind === 'supplement'
+  const closed = offerClosed(change) && !isSupplement
+  const editable = canWrite && offer.status === 'draft'
+    && (isSupplement ? supplements : !closed && ['quoting', 'quoted'].includes(change.status))
   const { data, update, saveState, flush, dirty } = useOfferDraft(change.id, offer)
   // Send only what the server has: wait for the save, then open the dialog,
   // which reads the saved offer (fresh totals) from the cache.
@@ -374,7 +387,9 @@ function OfferWorkspace({ props, offers, offer }: {
     ...(closed ? [acceptedOffer
       ? `The customer accepted v${acceptedOffer.version}: the offer is closed`
       : 'The customer accepted the quote: the offer is closed'] : []),
-    ...((offer.totals.total_one_time ?? 0) <= 0 ? ['The offer total is zero (Price)'] : []),
+    ...(isSupplement
+      ? (Math.abs(offer.totals.total_one_time ?? 0) < 0.005 ? [t('supp.zero')] : [])
+      : (offer.totals.total_one_time ?? 0) <= 0 ? ['The offer total is zero (Price)'] : []),
     ...(timingIncluded && plan && !planHasTasks(plan)
       ? ['The quote plan is empty: plan it or leave the timing out (Timing)'] : []),
     ...(planErrors > 0 ? [`The quote plan has ${errorsText(planErrors)} (Timing)`] : []),
@@ -392,7 +407,9 @@ function OfferWorkspace({ props, offers, offer }: {
         onSend={() => { void openSend() }}
         sendReasons={sendReasons}
         sendWarnings={sendWarnings}
-        onNewVersion={canWrite && !hasDraft && !closed && change.status === 'quoted' ? () => newVersion.mutate() : undefined}
+        onNewVersion={canWrite && !hasDraft && (supplements || (!closed && change.status === 'quoted'))
+          ? () => newVersion.mutate() : undefined}
+        newVersionLabel={supplements ? t('supp.new') : 'New version'}
         creating={newVersion.isPending}
         onDiscard={canWrite && offer.status === 'draft' ? () => discard.mutateAsync() : undefined}
         discarding={discard.isPending} />
@@ -419,7 +436,7 @@ function OfferWorkspace({ props, offers, offer }: {
         })}
         {!editable && (
           <span data-testid="offer-read-only" className="ml-auto flex items-center gap-1 text-[11px] text-slate-400">
-            {closed ? (
+            {closed && supplements && canWrite ? t('supp.hint') : closed ? (
               <><Lock aria-hidden="true" size={11} />The customer accepted the offer: offer and quote timing are closed.</>
             ) : offer.status === 'draft' ? 'Read only: Sales, the change lead and admins edit the offer.' : `v${offer.version} is ${offer.status}, read only.`}
           </span>

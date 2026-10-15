@@ -139,10 +139,10 @@ export default function SendOfferDialog({
   return (
     <Dialog open onClose={onClose} busy={send.isPending} closeOnBackdrop={false} size="md"
       data-testid="send-offer-dialog"
-      title={`Send offer v${offer.version}`}
+      title={offer.kind === 'supplement' ? `${t('supp.send')} v${offer.version}` : `Send offer v${offer.version}`}
       description={<>
         Total <span className="tabular-nums text-slate-100">{fmtMoney(offer.totals.total_one_time, offer.currency)}</span>.
-        Sending sets the quoted price and moves the change to Quoted.
+        {' '}{offer.kind === 'supplement' ? t('supp.sendText') : 'Sending sets the quoted price and moves the change to Quoted.'}
       </>}
       footer={(
         <>

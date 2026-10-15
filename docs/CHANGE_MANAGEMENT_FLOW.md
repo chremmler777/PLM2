@@ -1115,6 +1115,32 @@ Every viewer reads who signed, when and on which version (`pm_signed_by_name`,
 old answer (acceptance with a release date only, decline only marks the
 offer) and the approval by hand.
 
+### Supplements after approval (ECR-solid §6, 2026-10-15)
+
+With `COMMERCIAL_V2`, once a customer change is approved (up to release)
+every offer is a **supplement** (`change_offers.kind = 'supplement'`,
+migration 132; `OfferService.supplement_window`). "Send supplement" drafts
+one from the last version sent: recipient, terms and factors kept, and only
+the changed positions priced (`_supplement_lines`: each costing line now
+less what the accepted offer and the accepted supplements already priced for
+it; a line that did not move is left out; no risks, scrap, piece price or
+timing of its own). "Refresh from costing" re-reads the changed positions.
+Sending it keeps the change's status and its quoted price, needs a note and a
+non-zero total (a negative one is allowed), and opens the price (`price_open`,
+changelog `price_opened`, HARD #9 at close); the signatures given on an older
+version are withdrawn as for any new version (PM; Quality on a technical
+change). The Customer answer panel works on a supplement in any status:
+accepted (evidence, PO match, confirmed total) closes the open price
+(`supplement_accepted`, `price_closed`) and the signers are asked to sign it
+(My Tasks rows in approved / in implementation are re-signs only, after the
+customer's yes); still talking sets the next contact; declined leaves the
+price open and tells the lead and the Sales owner: Absorb (HARD #9's exit) or
+the run team puts the change on hold. A negative supplement lowers the
+accepted total: it needs the price-drop reason, and the PM / Management OK of
+that override (`price_drop`, to `closed`) closes the open price. Sales'
+`customer_response` row names the supplement version. Switch off: no
+supplements (the offer is closed after acceptance).
+
 ### Timing validation at `approved` (2026-09-25)
 
 `approved` opens the Timing tab (`TimingTab.tsx`). The detailed plan is

@@ -210,6 +210,23 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
       { ref: 'Mail 14 Oct, too expensive' }))
   })
 
+  it('a supplement out is answered past approval, without a new release date', async () => {
+    const sup = { ...valid(), id: 12, version: 2, kind: 'supplement' as const, index_changes: [] }
+    wrap(<CustomerDecision change={change({ status: 'in_implementation', customer_response: 'accepted' })}
+      latestSent={sup} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer declined'))
+    expect(screen.getByTestId('decline-confirm-box').textContent).toContain('the price stays open')
+    fireEvent.click(screen.getByText('Customer accepted'))
+    fireEvent.change(screen.getByTestId('answer-ref'), { target: { value: 'PO 4500123999' } })
+    fireEvent.click(screen.getByTestId('po-match-yes'))
+    fireEvent.click(screen.getByTestId('accept-total'))
+    const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'accepted',
+      expect.not.objectContaining({ release_due_date: expect.anything() })))
+  })
+
   it('every viewer reads who signed, when and on which version', () => {
     wrap(<CustomerDecision change={change({ pm_signed_by: 3, pm_signed_by_name: 'Pat PM', pm_signed_at: '2026-10-14T09:00:00',
       pm_signed_offer_id: 10 })} latestSent={valid()} canRespond={false} canSignPm={false} canSignQuality={false} userId={5} />)

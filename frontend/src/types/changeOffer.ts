@@ -152,6 +152,8 @@ export interface OfferOut {
   id: number
   version: number
   status: OfferStatus
+  /** §6: 'supplement' past approval (the changed positions only). */
+  kind?: 'offer' | 'supplement'
   currency: string
   data: OfferData
   totals: OfferTotals

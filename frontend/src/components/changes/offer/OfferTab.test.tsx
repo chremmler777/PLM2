@@ -182,6 +182,24 @@ describe('OfferTab', () => {
       risk_reason_code: 'customer_aware', risk_reason: 'Customer accepted it in the DFM' })))
   })
 
+  it('past approval (§6): "Send supplement" starts a supplement; its draft sends as one', async () => {
+    const v1 = offer({ id: 10, version: 1, status: 'accepted' })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
+    vi.mocked(changeOfferApi.create).mockResolvedValue(offer({ id: 12, version: 2, kind: 'supplement' }))
+    renderTab(props({ change: change({ status: 'in_implementation', customer_response: 'accepted', accepted_offer_id: 10 }) }))
+    const start = await screen.findByTestId('offer-new-version')
+    expect(start.textContent).toBe('Send supplement')
+    fireEvent.click(start)
+    await waitFor(() => expect(changeOfferApi.create).toHaveBeenCalledWith(7))
+    cleanup()
+    const s2 = offer({ id: 12, version: 2, kind: 'supplement' })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([s2, v1])
+    renderTab(props({ change: change({ status: 'in_implementation', customer_response: 'accepted', accepted_offer_id: 10 }) }))
+    expect((await screen.findByTestId('offer-status')).textContent).toBe('Draft supplement v2')
+    expect((await screen.findByTestId('offer-send')).textContent).toBe('Send supplement')
+    expect(screen.queryByTestId('offer-read-only')).toBeNull()
+  })
+
   it('send dialog: no receipt date in the future or older than 60 days; the customer note is saved first', async () => {
     vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
     vi.mocked(changeOfferApi.patch).mockImplementation(async (_c, _o, body) => offer({ data: { ...offer().data, ...body.data } }))

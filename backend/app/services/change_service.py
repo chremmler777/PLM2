@@ -567,6 +567,15 @@ class ChangeService:
         dev.decided_at = datetime.utcnow()
         dev.decision_note = note
         absorbed = decision == "approved" and dev.guard_key == ABSORB_RULE
+        if (decision == "approved" and dev.guard_key == "price_drop"
+                and dev.to_status == "closed"):
+            # §7 [R4]: the OK of a lower supplement total closes its open price
+            dev.status = "consumed"
+            change.price_open = False
+            await ChangeService.append_changelog(
+                session, change, "price_closed",
+                f"Open price closed: the lower total was approved (#{dev.id})",
+                actor.id, field_name="price_open", old_value=True, new_value=False)
         if absorbed:
             # Absorb is not a hop: the approval itself clears the open price
             # (HARD #9's exit), so the override is used up at once.
@@ -3413,6 +3422,10 @@ class ChangeService:
         drafts: dict = {}
         latest_sent: dict = {}
         offer_ids = _ids("quoting", "quoted") if in_sales else []
+        # §6-§7: a supplement out with the customer is Sales' answer to chase
+        if in_sales and cm_switches.on("COMMERCIAL_V2"):
+            from app.services.offer_service import SUPPLEMENT_STATUSES
+            offer_ids = offer_ids + _ids(*SUPPLEMENT_STATUSES)
         if offer_ids:
             for o in (await db.execute(
                     select(ChangeOffer).where(
@@ -3657,6 +3670,15 @@ class ChangeService:
                         "mode": c.bank_build_mode,
                         "scrap_quote_price": c.scrap_quote_price,
                     })
+
+            if (in_sales and c.customer_relevant and c.status != "quoted"
+                    and getattr(latest_sent.get(c.id), "kind", None) == "supplement"):
+                # §6 [R4]: the customer's answer to a supplement, any status
+                sup = latest_sent[c.id]
+                tasks.append({**await _base(c), "kind": "customer_response",
+                              "supplement_version": sup.version, "target_tab": "offer",
+                              **({"next_contact": c.customer_next_contact}
+                                 if c.customer_next_contact else {})})
 
             # The offer is valid for 30 days from receipt: a week before it runs
             # out (or once it has) the customer has to be chased or a new
@@ -4227,6 +4249,9 @@ class ChangeService:
                 return False
             if c.status == "quoted":
                 return c.customer_response == "accepted"
+            if bound and release_rule and c.status in ("approved", "in_implementation"):
+                # §7: an accepted supplement asks the signers again at once
+                return c.pm_signed_by is not None or c.quality_signed_by is not None
             return release_rule and c.status == "in_validation"
         signable = [c for c in open_changes if _signable(c)] \
             if (is_pm_member or is_quality) else []
@@ -4251,6 +4276,12 @@ class ChangeService:
             for side in sides:
                 if not (is_pm_member if side == "pm" else is_quality):
                     continue
+                if c.status in ("approved", "in_implementation") and (
+                        c.pm_signed_by if side == "pm" else c.quality_signed_by) is None:
+                    continue      # before validation only a re-sign is a row
+                if (c.status in ("approved", "in_implementation")
+                        and getattr(latest, "status", None) != "accepted"):
+                    continue      # a supplement still out: signed once accepted
                 other = c.quality_signed_by if side == "pm" else c.pm_signed_by
                 if other == user.id:
                     continue      # 4-eyes: the other side's signer
@@ -6209,6 +6240,11 @@ class ChangeService:
         """COMMERCIAL_V2 customer answer (spec §7): see record_customer_response."""
         from app.models.change_offer import ChangeOffer
         from app.services.offer_service import OfferService
+        sent = await OfferService.latest_sent(session, change)
+        if sent is not None and sent.kind == "supplement":
+            # §6 [R4]: the Customer answer panel works on supplements in any status
+            return await ChangeService._record_supplement_answer(
+                session, change, sent, response, user_id, answer)
         if change.customer_response == "accepted":
             accepted = (await session.get(ChangeOffer, change.accepted_offer_id)
                         if change.accepted_offer_id else None)
@@ -6389,6 +6425,137 @@ class ChangeService:
             return None
         return {"version": offer.version, "total": float(offer.total_one_time),
                 "prev_version": prev.version, "prev_total": float(prev.total_one_time)}
+
+    @staticmethod
+    async def _record_supplement_answer(
+        session: AsyncSession, change: ChangeRequest, offer, response: str,
+        user_id: int, answer: dict,
+    ) -> ChangeRequest:
+        """The customer's answer to a supplement (spec §6-§7): accepted
+        closes the open price (unless a lower total waits for its OK);
+        still talking names the next contact; declined leaves the price
+        open: Absorb (HARD #9's exit) or the run team puts the change on
+        hold. The change keeps its status and its first acceptance."""
+        now = datetime.utcnow()
+        if response == "negotiating":
+            from datetime import date as _date
+            from app.utils.clock import business_today
+            nxt = answer.get("next_contact")
+            if isinstance(nxt, str) and nxt:
+                nxt = _date.fromisoformat(nxt[:10])
+            if isinstance(nxt, datetime):
+                nxt = nxt.date()
+            if nxt is None:
+                from app.services.due_rules import CUSTOMER_CONTACT_WD, add_wd
+                nxt = add_wd(now, CUSTOMER_CONTACT_WD).date()
+            if nxt < business_today():
+                raise ChangeError("The next contact date is in the past")
+            change.customer_next_contact = nxt
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "supplement_response_recorded",
+                f"Supplement v{offer.version}: still talking, next contact "
+                f"{nxt.isoformat()}", user_id,
+                notes=(answer.get("note") or "").strip() or None)
+            return change
+        if response == "declined":
+            evidence = await ChangeService._answer_evidence(
+                session, change, {**answer, "ref_is_po": False},
+                "The customer's reference for the decline (a filed mail or its "
+                "reference)", "Mail 14 Oct from the buyer")
+            offer.status = "declined"
+            offer.accept_evidence = evidence
+            offer.answered_at, offer.answered_by = now, user_id
+            change.customer_next_contact = None
+            change.price_open = True
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "supplement_declined",
+                f"Supplement v{offer.version} declined by the customer "
+                f"({evidence['ref']}): Absorb, or the run team puts the change "
+                "on hold", user_id, notes=evidence["ref"],
+                new_value={"offer_id": offer.id, "version": offer.version})
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [i for i in (change.lead_id, change.sales_owner_id)
+                          if i is not None and i != user_id],
+                kind="decision_needed", subject_key=f"supplement_declined:{offer.id}",
+                title=f"Supplement v{offer.version} declined: absorb or hold: "
+                      f"{change.change_number}"[:255],
+                body=evidence["ref"], link=f"/changes/{change.id}?tab=offer")
+            return change
+        if response != "accepted":
+            raise ChangeError(f"Invalid customer response '{response}'")
+        evidence = await ChangeService._answer_evidence(
+            session, change, answer,
+            "The evidence of the customer's yes (the PO or mail filed on the "
+            "change, or the PO number)")
+        match = answer.get("po_match")
+        if match not in ("yes", "no"):
+            raise ChangeError(
+                f"Say whether the PO matches supplement v{offer.version} exactly "
+                "(yes / no)")
+        differs = (answer.get("differs") or "").strip()
+        if match == "no" and len(differs) < 5:
+            raise ChangeError(
+                "The PO differs: name the parts that differ and any other P/Ns on it")
+        if not answer.get("confirm_total"):
+            raise ChangeError(
+                f"Confirm the customer says yes to v{offer.version} at its total "
+                "(confirm_total)")
+        evidence.update(po_match=match, differs=differs or None,
+                        total=offer.total_one_time, version=offer.version)
+        # §7 [R4] price diff: the accepted total (offer plus supplements)
+        # drops when the supplement itself is negative
+        drop = None
+        if float(offer.total_one_time or 0) < -0.005:
+            from app.services.cm_rules import PRICE_DROP_REASONS, override_note_refusal
+            why = override_note_refusal(
+                answer.get("price_drop_code"), answer.get("price_drop_note"),
+                codes=PRICE_DROP_REASONS)
+            if why:
+                raise ChangeError(
+                    f"Supplement v{offer.version} lowers the accepted total by "
+                    f"{-float(offer.total_one_time):.2f}: say why ({why})")
+            drop = {"version": offer.version, "total": float(offer.total_one_time)}
+            evidence["price_drop"] = drop
+        offer.status = "accepted"
+        offer.accept_evidence = evidence
+        offer.answered_at, offer.answered_by = now, user_id
+        change.customer_next_contact = None
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "supplement_accepted",
+            f"Supplement v{offer.version} accepted by the customer ({evidence['ref']})",
+            user_id, notes=differs or None,
+            new_value={"offer_id": offer.id, "version": offer.version})
+        if drop is not None:
+            # the open price stays until PM / Management OK the lower total
+            from app.services.cm_rules import PRICE_DROP_RULE, rule_label
+            dev = ChangeTransitionDeviation(
+                change_id=change.id, to_status="closed",
+                reason=answer["price_drop_note"].strip(), proposed_by=user_id,
+                guard_key=PRICE_DROP_RULE, guard_reason=rule_label(PRICE_DROP_RULE),
+                reason_code=answer["price_drop_code"])
+            session.add(dev)
+            await session.flush()
+            change.price_open = True
+            await ChangeService._notify_override_deciders(session, change, dev, user_id)
+        elif change.price_open:
+            change.price_open = False
+            await ChangeService._settle_estimate_checks(session, change)
+            from app.services.cm_rules import ABSORB_RULE
+            await ChangeService._load_deviations(session, change)
+            for d in change.transition_deviations:
+                if d.guard_key == ABSORB_RULE and d.status == "pending":
+                    d.status = "withdrawn"
+            await ChangeService.append_changelog(
+                session, change, "price_closed",
+                f"Open price closed: the customer accepted supplement v{offer.version}",
+                user_id, field_name="price_open", old_value=True, new_value=False)
+        if match == "no":
+            await ChangeService._on_po_differs(session, change, offer, evidence, user_id)
+        return change
 
     @staticmethod
     async def _on_po_differs(session: AsyncSession, change: ChangeRequest, offer,
