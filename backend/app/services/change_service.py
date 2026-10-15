@@ -5037,8 +5037,11 @@ class ChangeService:
     async def open_tool_changes(session: AsyncSession, change: ChangeRequest) -> list[str]:
         """C21 (spec §8-9 SOFT "tool change done per tool"): the part numbers
         whose check workflow still has its "Implement tool change" step
-        open (its R/A task not approved). One query."""
-        from app.models.workflow import WfInstance, WfInstanceTask, WfStep
+        open: its R/A task not approved, or not reached yet (tasks are
+        created stage by stage, so an active instance before the step's
+        stage has no task row). One query."""
+        from sqlalchemy import and_, or_
+        from app.models.workflow import WfInstance, WfInstanceTask, WfStage, WfStep
         from app.services.wf_seed_service import TOOL_CHANGE_STEP
         rev_ids = [i.resulting_revision_id for i in change.impacted_items
                    if i.resulting_revision_id is not None]
@@ -5047,16 +5050,23 @@ class ChangeService:
         from app.models.part import PartRevision
         rows = (await session.execute(
             select(Part.part_number)
-            .select_from(WfInstanceTask)
-            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
-            .join(WfStep, WfStep.id == WfInstanceTask.step_id)
+            .select_from(WfInstance)
+            .join(WfStage, WfStage.template_id == WfInstance.template_id)
+            .join(WfStep, WfStep.stage_id == WfStage.id)
             .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
             .join(Part, Part.id == PartRevision.part_id)
+            .outerjoin(WfInstanceTask, and_(
+                WfInstanceTask.instance_id == WfInstance.id,
+                WfInstanceTask.step_id == WfStep.id,
+                WfInstanceTask.is_actionable.is_(True),
+                WfInstanceTask.status.not_in(("approved", "noted"))))
             .where(WfInstance.part_revision_id.in_(rev_ids),
                    WfInstance.status.in_(("active", "completed")),
                    WfStep.step_name == TOOL_CHANGE_STEP,
-                   WfInstanceTask.is_actionable.is_(True),
-                   WfInstanceTask.status.not_in(("approved", "noted"))))).scalars().all()
+                   or_(WfInstanceTask.id.is_not(None),
+                       and_(WfInstance.status == "active",
+                            WfInstance.current_stage_order < WfStage.stage_order))))
+        ).scalars().all()
         return sorted(set(rows))
 
     @staticmethod

@@ -27,7 +27,7 @@ def test_toolshop_has_typical_positions():
     assert "toolmaker_hours" in keys
 
 
-async def _tool_change_world(session_factory, seed, *, done: bool):
+async def _tool_change_world(session_factory, seed, *, done: bool, stage: int = 3):
     """An in_implementation change whose tool revision has a check workflow
     with its 'Implement tool change' task open (or done)."""
     from app.models.change import ChangeImpactedItem, ChangeRequest
@@ -62,17 +62,18 @@ async def _tool_change_world(session_factory, seed, *, done: bool):
                 WfStage.template_id == tmpl.id,
                 WfStep.step_name == "Implement tool change"))).scalar_one()
         inst = WfInstance(template_id=tmpl.id, part_revision_id=rev.id, status="active",
-                          current_stage_order=3, started_by=seed["admin_id"])
+                          current_stage_order=stage, started_by=seed["admin_id"])
         s.add(inst)
         await s.flush()
         from app.models.workflow import Department
         te = (await s.execute(select(Department).where(
             Department.name == "Tool Engineer"))).scalar_one()
-        s.add(WfInstanceTask(instance_id=inst.id, stage_order=3, step_id=step.id,
-                             department_id=te.id, rasic_letter="R",
-                             status="approved" if done else "active",
-                             is_actionable=True,
-                             completed_at=datetime.utcnow() if done else None))
+        if stage >= 3:      # tasks are created stage by stage
+            s.add(WfInstanceTask(instance_id=inst.id, stage_order=3, step_id=step.id,
+                                 department_id=te.id, rasic_letter="R",
+                                 status="approved" if done else "active",
+                                 is_actionable=True,
+                                 completed_at=datetime.utcnow() if done else None))
         await s.commit()
         return change.id
 
@@ -96,3 +97,14 @@ async def test_done_tool_change_does_not_hold(session_factory, seed):
     async with session_factory() as s:
         change = await ChangeService.get_change(s, cid)
         assert await ChangeService.open_tool_changes(s, change) == []
+
+
+async def test_tool_change_not_reached_yet_holds_too(session_factory, seed):
+    """Review L5 loop 2: the check workflow is still in design (stage 1),
+    so the 'Implement tool change' task does not exist yet: the tool change
+    is plainly not done and the guard names the tool."""
+    from app.services.change_service import ChangeService
+    cid = await _tool_change_world(session_factory, seed, done=False, stage=1)
+    async with session_factory() as s:
+        change = await ChangeService.get_change(s, cid)
+        assert await ChangeService.open_tool_changes(s, change) == ["T-3454"]
