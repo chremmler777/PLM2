@@ -97,6 +97,12 @@ async def test_urgent_needs_need_by_reason_and_evidence(client, admin_auth, seed
     r = await _create(client, admin_auth, seed, "urgent weak", customer_relevant=True,
                       **{**URGENT, "urgent_evidence": "ok"})
     assert r.status_code == 400
+    # a need-by in the past, junk evidence: refused
+    for bad in ({"release_due_date": "2026-10-01T12:00:00"}, {"urgent_evidence": "asdfg"},
+                {"urgent_evidence": "n/a n/a"}):
+        r = await _create(client, admin_auth, seed, "urgent bad", customer_relevant=True,
+                          **{**URGENT, **bad})
+        assert r.status_code == 400, bad
     r = await _create(client, admin_auth, seed, "urgent ok", customer_relevant=True, **URGENT)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -203,6 +209,24 @@ async def test_realistic_need_by_gives_sales_nothing(client, admin_auth, seed, s
     assert rows == []
 
 
+async def test_start_at_risk_off_offers_no_start_before_po(
+        client, admin_auth, seed, session_factory, monkeypatch):
+    """§2/§3 with §7a switched off: an urgent customer change has no 'start
+    at risk' answer; the change serves the switch for "No start before PO"."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "START_AT_RISK", False)
+    cid, mid = await _urgent_in_scoping(client, admin_auth, seed, session_factory)
+    assert (await client.get(f"/api/v1/changes/{cid}",
+                             headers=admin_auth)).json()["start_at_risk_on"] is False
+    url = f"/api/v1/changes/{cid}/meetings/{mid}/decide"
+    r = await client.post(url, json={"decision": "proceed", "need_by_check": "at_risk"},
+                          headers=admin_auth)
+    assert r.status_code == 400 and "no start before PO" in r.json()["detail"]
+    r = await client.post(url, json={"decision": "proceed", "need_by_check": "yes"},
+                          headers=admin_auth)
+    assert r.status_code == 200, r.text
+
+
 async def test_switch_off_no_capture_rules(client, admin_auth, seed, session_factory, monkeypatch):
     from app.services import cm_switches
     monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
@@ -225,6 +249,11 @@ async def test_internal_urgent_not_realistic_tells_the_lead_not_sales(
     r = await client.post(url, json={"decision": "proceed", "need_by_check": "at_risk"},
                           headers=admin_auth)
     assert r.status_code == 400 and "start at risk" not in r.json()["detail"]
+    # the proposed date lies after today and after the need-by
+    for early in ("2026-10-01T12:00:00", "2026-10-30T12:00:00"):
+        r = await client.post(url, json={"decision": "proceed", "need_by_check": "no",
+                                         "need_by_proposed": early}, headers=admin_auth)
+        assert r.status_code == 400 and "propose a date after" in r.json()["detail"], early
     r = await client.post(url, json={"decision": "proceed", "need_by_check": "no",
                                      "need_by_proposed": "2026-11-20T12:00:00"},
                           headers=admin_auth)

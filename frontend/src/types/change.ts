@@ -242,6 +242,8 @@ export interface ChangeRequest {
   impact_confirm_step?: boolean;
   /** Served switch SCOPING_V2: C33 questions / check items, intake follow-ups. */
   scoping_v2?: boolean;
+  /** Served switch START_AT_RISK (§7a); off: "No start before PO" */
+  start_at_risk_on?: boolean;
   /** HARD #7: Quality's ppap_decision (internal changes) and the customer flip. */
   ppap_decision?: 'no' | 'yes' | null;
   ppap_basis?: string | null;

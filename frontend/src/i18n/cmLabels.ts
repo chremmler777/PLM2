@@ -2652,6 +2652,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Sales gets at once: "Tell customer: new date or start at risk?"' },
   'urgent.answerFirst': { de: 'Erst beantworten: Bedarfstermin realistisch?', en: 'Answer first: is the need-by realistic?' },
   'urgent.proposeFirst': { de: 'Termin vorschlagen', en: 'Propose a date' },
+  'urgent.proposeLater': { de: 'Einen Termin nach heute und nach dem Bedarfstermin vorschlagen', en: 'Propose a date after today and after the need-by' },
+  'urgent.noStartBeforePo': { de: 'Kein Start vor Bestellung', en: 'No start before PO' },
   'urgent.tellTitle': { de: 'Kunde informieren: neuer Termin oder Start auf Risiko?', en: 'Tell customer: new date or start at risk?' },
   'urgent.toldRef': { de: 'Kunde informiert: {r}', en: 'Customer told: {r}' },
   'urgent.toldSave': { de: 'Kunde informiert', en: 'Customer told' },

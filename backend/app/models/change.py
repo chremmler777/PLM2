@@ -418,6 +418,13 @@ class ChangeRequest(Base):
         return cm_switches.on("SCOPING_V2")
 
     @property
+    def start_at_risk_on(self) -> bool:
+        """Served switch START_AT_RISK (§7a): off, an urgent change reads "No
+        start before PO" and its need-by question offers no start at risk."""
+        from app.services import cm_switches
+        return cm_switches.on("START_AT_RISK")
+
+    @property
     def impact_confirmed_by_name(self) -> Optional[str]:
         return self.impact_confirmed_by_user.full_name if self.impact_confirmed_by_user is not None else None
 

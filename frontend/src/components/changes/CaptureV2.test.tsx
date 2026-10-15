@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { NeedByLine, NeedByTellCard, ProblemTargetEditor, needByHold, okRef, workingDaysLeft } from './CaptureV2'
+import { NeedByCheck, NeedByLine, NeedByTellCard, ProblemTargetEditor, needByHold, okRef, urgentMissing, workingDaysLeft } from './CaptureV2'
 import { PriorityEditor } from './PriorityEditor'
 import { changesApi } from '../../api/changes'
+import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({
   changesApi: { update: vi.fn().mockResolvedValue({}), needByTell: vi.fn().mockResolvedValue({}) },
@@ -71,6 +72,26 @@ describe('§2 capture on the change', () => {
     expect(needByHold(urgent, { check: 'no', proposed: '' })).toBeTruthy()
     expect(needByHold(urgent, { check: 'at_risk', proposed: '' })).toBeUndefined()
     expect(needByHold(change(), { check: '', proposed: '' })).toBeUndefined()
+  })
+
+  it('a need-by and a proposed date lie in the future (after the need-by)', () => {
+    expect(urgentMissing({ needBy: '2020-01-01', reason: 'line_stop', evidence: 'Mail 2026-10-15' }))
+      .toContain(t('next.item.need_by'))
+    expect(urgentMissing({ needBy: '2099-01-01', reason: 'line_stop', evidence: 'Mail 2026-10-15' })).toEqual([])
+    const urgent = change({ priority: 'critical', release_due_date: '2099-01-02T12:00:00' })
+    expect(needByHold(urgent, { check: 'no', proposed: '2099-01-02' })).toBe(t('urgent.proposeLater'))
+    expect(needByHold(urgent, { check: 'no', proposed: '2099-01-03' })).toBeUndefined()
+  })
+
+  it('start at risk switched off: no start-at-risk option, "No start before PO"', () => {
+    const c = change({ priority: 'critical', customer_relevant: true, start_at_risk_on: false,
+      release_due_date: '2099-01-02T12:00:00' })
+    wrap(<NeedByCheck change={c} value={{ check: '', proposed: '' }} onChange={() => {}} customer />)
+    expect(screen.queryByTestId('need-by-at_risk')).toBeNull()
+    expect(screen.getByTestId('need-by-no-start-check').textContent).toBe(t('urgent.noStartBeforePo'))
+    cleanup()
+    wrap(<NeedByLine change={{ ...c, status: 'scoping' }} />)
+    expect(screen.getByTestId('need-by-no-start')).toBeTruthy()
   })
 
   it('Sales tells the customer with evidence; others read who does', async () => {

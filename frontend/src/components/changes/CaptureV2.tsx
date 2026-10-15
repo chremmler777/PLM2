@@ -40,10 +40,20 @@ export const okRef = (v: string) => {
 export const plainChange = (c: Pick<ChangeRequest, 'origin'>) =>
   c.origin !== 'mother_plant' && c.origin !== 'engineering_review'
 
+/** Today as YYYY-MM-DD (local), the floor of every need-by date. */
+export const todayIso = (now = new Date()) =>
+  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+/** The day after `iso` (YYYY-MM-DD). */
+const dayAfter = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return todayIso(new Date(y, m - 1, d + 1))
+}
+
 export interface UrgentDraft { needBy: string; reason: string; evidence: string }
 export const emptyUrgent: UrgentDraft = { needBy: '', reason: '', evidence: '' }
 export const urgentMissing = (d: UrgentDraft): string[] => [
-  ...(d.needBy ? [] : [t('next.item.need_by')]),
+  ...(d.needBy && d.needBy.slice(0, 10) >= todayIso() ? [] : [t('next.item.need_by')]),
   ...(d.reason ? [] : [t('urgent.missingReason')]),
   ...(okRef(d.evidence) ? [] : [t('urgent.missingEvidence')]),
 ]
@@ -56,7 +66,7 @@ export function UrgentFields({ value, onChange, idPrefix = 'urgent' }: {
       <label className="text-xs text-slate-300">
         {t('next.item.need_by')}
         <DateInput id={`${idPrefix}-need-by`} aria-label={t('next.item.need_by')} value={value.needBy}
-          onChange={(v) => onChange({ ...value, needBy: v })} commitOnChange
+          onChange={(v) => onChange({ ...value, needBy: v })} commitOnChange min={todayIso()}
           className={`${input} mt-1 w-full`} />
       </label>
       <label className="text-xs text-slate-300">
@@ -103,6 +113,9 @@ export function NeedByLine({ change }: { change: ChangeRequest }) {
       {due ? ` · ${t('urgent.needBy').replace('{d}', formatDate(due))
         .replace('{n}', String(left))}` : ` · ${t('urgent.noNeedBy')}`}
       {` · ${t('urgent.now').replace('{s}', status)}`}
+      {change.start_at_risk_on === false && change.customer_relevant && (
+        <span data-testid="need-by-no-start">{' · '}{t('urgent.noStartBeforePo')}</span>
+      )}
       {change.need_by_check && change.need_by_check !== 'yes' && (
         <span className="text-amber-300">
           {' · '}{change.need_by_check === 'at_risk' ? t('urgent.checkAtRisk')
@@ -175,7 +188,10 @@ export function NeedByCheck({ change, value, onChange, customer = !!change.custo
    *  go-ahead, §7a) and Sales' "Tell customer" exist only then. */
   customer?: boolean
 }) {
-  const options = customer ? (['yes', 'at_risk', 'no'] as const) : (['yes', 'no'] as const)
+  // start at risk only for a customer change with §7a on; off: no start before PO
+  const atRisk = customer && change.start_at_risk_on !== false
+  const options = atRisk ? (['yes', 'at_risk', 'no'] as const) : (['yes', 'no'] as const)
+  const floor = proposeFloor(change)
   return (
     <fieldset data-testid="need-by-check" className="mt-3 space-y-1 text-xs">
       <legend className="text-sm text-slate-200">
@@ -192,7 +208,10 @@ export function NeedByCheck({ change, value, onChange, customer = !!change.custo
       </div>
       {value.check === 'no' && (
         <DateInput value={value.proposed} onChange={(v) => onChange({ ...value, proposed: v })}
-          aria-label={t('urgent.proposed')} className={`${input} w-36`} commitOnChange />
+          aria-label={t('urgent.proposed')} className={`${input} w-36`} commitOnChange min={floor} />
+      )}
+      {customer && !atRisk && (
+        <p className="text-[11px] text-slate-400" data-testid="need-by-no-start-check">{t('urgent.noStartBeforePo')}</p>
       )}
       {value.check !== '' && value.check !== 'yes' && (
         <p className="text-[11px] text-amber-300/90">
@@ -207,10 +226,18 @@ export function NeedByCheck({ change, value, onChange, customer = !!change.custo
 export const isUrgentV2 = (change: ChangeRequest) =>
   change.priority === 'critical' && !!change.scoping_v2 && plainChange(change)
 
+/** The first date a "no" may propose: after today and after the need-by. */
+export const proposeFloor = (change: Pick<ChangeRequest, 'release_due_date'>): string => {
+  const today = todayIso()
+  const due = change.release_due_date ? change.release_due_date.slice(0, 10) : ''
+  return dayAfter(due > today ? due : today)
+}
+
 export const needByHold = (change: ChangeRequest, v: NeedByAnswer): string | undefined => {
   if (!isUrgentV2(change)) return undefined
   if (v.check === '') return t('urgent.answerFirst')
   if (v.check === 'no' && !v.proposed) return t('urgent.proposeFirst')
+  if (v.check === 'no' && v.proposed.slice(0, 10) < proposeFloor(change)) return t('urgent.proposeLater')
   return undefined
 }
 

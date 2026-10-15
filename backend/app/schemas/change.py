@@ -390,6 +390,8 @@ class ChangeResponse(BaseModel):
     impact_confirm_step: bool = False
     # Served switch SCOPING_V2 (C33 questions / check items, intake follow-ups).
     scoping_v2: bool = False
+    # Served switch START_AT_RISK (§7a): off = "No start before PO".
+    start_at_risk_on: bool = True
     # §1: a full ECR started beside a live change carrying the same part.
     related_change_id: Optional[int] = None
     # §2 urgent (priority 'critical'; need-by = release_due_date) and the
@@ -484,6 +486,7 @@ class ChangeResponse(BaseModel):
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
             row["impact_confirm_step"] = data.impact_confirm_step
             row["scoping_v2"] = data.scoping_v2
+            row["start_at_risk_on"] = data.start_at_risk_on
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
             row["validated_weight_by_name"] = data.validated_weight_by_name
             row["bank_build_set_by_name"] = data.bank_build_set_by_name

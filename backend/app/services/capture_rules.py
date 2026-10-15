@@ -59,6 +59,9 @@ def urgent_refusal(change: ChangeRequest) -> Optional[str]:
         return None
     if change.release_due_date is None:
         return "Urgent: set the need-by date"
+    if change.release_due_date.date() < datetime.utcnow().date():
+        return (f"Urgent: the need-by date ({change.release_due_date:%d %b}) is in "
+                "the past: pick today or a later date")
     if change.urgent_reason not in URGENT_REASONS:
         return ("Urgent: pick the reason (line stop, safety, quality escape, "
                 "launch date, customer demand, other)")
@@ -118,14 +121,25 @@ def need_by_refusal(change: ChangeRequest, answer: Optional[str],
     if not cm_switches.on("SCOPING_V2") or not is_urgent(change) or not _plain(change):
         return None
     customer = _goes_on_as_customer(change)
-    allowed = NEED_BY_CHECKS if customer else ("yes", "no")
+    # start at risk exists only for a customer change with §7a switched on;
+    # off, nothing starts before the PO
+    at_risk = customer and cm_switches.on("START_AT_RISK")
+    allowed = NEED_BY_CHECKS if at_risk else ("yes", "no")
     if answer not in allowed:
         due = change.release_due_date.strftime("%d %b") if change.release_due_date else "-"
         return (f"Urgent: is the need-by date ({due}) realistic? Answer yes, "
-                + ("only with start at risk, " if customer else "")
-                + "or no with a proposed date")
+                + ("only with start at risk, " if at_risk else "")
+                + "or no with a proposed date"
+                + ("" if at_risk or not customer else " (no start before PO)"))
     if answer == "no" and proposed is None:
         return "Need-by not realistic: propose a date"
+    if answer == "no":
+        floor = datetime.utcnow().date()
+        if change.release_due_date is not None:
+            floor = max(floor, change.release_due_date.date())
+        if proposed.date() <= floor:
+            return (f"Need-by not realistic: propose a date after {floor:%d %b} "
+                    "(after today and after the need-by)")
     return None
 
 

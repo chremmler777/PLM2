@@ -128,14 +128,18 @@ soft kickoff guard above reads `kickoff_missing`, which adds:
 - **Urgent** (priority `critical`): the need-by date (`release_due_date`,
   settable at capture for an urgent change), a reason pick (`urgent_reason`:
   line_stop, safety, quality_escape, launch_date, customer_demand, other) and
-  evidence (`urgent_evidence`, a reference: "ok"/"tbd" refused). Create and
-  PATCH are refused without them (400); mother-plant changes keep their own
+  evidence (`urgent_evidence`, a reference: "ok", "tbd", "n/a n/a", a lone
+  word without a number refused). Create and PATCH are refused without them,
+  or with a need-by in the past (400); mother-plant changes keep their own
   SOP and are left out. The header reads "Urgent · Need-by 24 Oct, 8 wd
-  left, now: Scoping".
+  left, now: Scoping"; with `START_AT_RISK` off (served `start_at_risk_on`)
+  a customer change adds "No start before PO".
 - **Create and hand over**: a complete capture is created and moved to
   scoping in one click; "Create as draft" keeps it captured.
 - **Urgent proceed** (§3): `decide proceed` on an urgent change needs
-  `need_by_check` (yes / at_risk / no + `need_by_proposed`). On a customer
+  `need_by_check` (yes / at_risk / no + `need_by_proposed`, a date after
+  today and after the need-by; *at_risk* only with `START_AT_RISK` on, off
+  the dialog reads "No start before PO"). On a customer
   change (the cost carrier proceed goes on with) anything but yes notifies
   the Sales owner (else Sales) once and gives all of Sales the task
   `need_by_tell` ("Tell customer: new date or start at risk?", owner named),
