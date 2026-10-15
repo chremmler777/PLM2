@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Lock, MoreHorizontal } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { apiErrorMessage, toastError } from '../lib/apiError';
+import { apiErrorMessage } from '../lib/apiError';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { cockpitPart } from '../api/cockpitBundle';
@@ -24,6 +24,7 @@ import QuoteBasis from '../components/changes/QuoteBasis';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import TransitionDeviationsPanel from '../components/changes/TransitionDeviationsPanel';
 import ReasonDialog from '../components/changes/ReasonDialog';
+import OverrideDialog, { AbsorbDialog } from '../components/changes/OverrideDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import OfferTab from '../components/changes/offer/OfferTab';
 import ReleaseTab from '../components/changes/release/ReleaseTab';
@@ -117,7 +118,7 @@ export default function ChangeDetailPage() {
     issueId != null ? { tab: t, issue: String(issueId) } : { tab: t }, { replace: true });
   const issueParam = Number(searchParams.get('issue'));
   const focusIssueId = Number.isInteger(issueParam) && issueParam > 0 ? issueParam : null;
-  const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
+  const [blocked, setBlocked] = useState<{ to: string; reason: string; rule?: string | null } | null>(null);
   // Bumped on every reported block, even an identical one, so the banner's
   // scroll-into-view effect re-fires on a second, otherwise-unchanged block.
   const [blockedSeq, setBlockedSeq] = useState(0);
@@ -132,7 +133,9 @@ export default function ChangeDetailPage() {
   // F4: the last look before a step that cannot simply be undone.
   const [confirmTo, setConfirmTo] = useState<string | null>(null);
   // Not feasible, and still going on: a transition deviation with a reason.
-  const [overrideOpen, setOverrideOpen] = useState(false);
+  // C6: the override dialog, bound to one rule of one step (spec §0).
+  const [overrideFor, setOverrideFor] = useState<{ to: ChangeStatus; rule: string } | null>(null);
+  const [absorbOpen, setAbsorbOpen] = useState(false);
   // "Decide deviation #n": the Overview's decision panel scrolls to it once
   // (null: the panel itself; undefined: nothing to focus).
   const [focusDeviation, setFocusDeviation] = useState<number | null | undefined>(undefined);
@@ -342,7 +345,8 @@ export default function ChangeDetailPage() {
   // internal-cost approval keep the lead/PM exceptions the backend allows.
   const canSignPm = isAdmin || isPmMember;
   const canSignQuality = isAdmin || isQualityMember;
-  const canApproveInternalCosts = isAdmin || isPmMember;
+  // HARD #8: an engineering approver, never the raiser: the backend's verdict.
+  const canApproveInternalCosts = stage?.can_approve_internal ?? (isAdmin || isPmMember);
   const canEditQuotedPrice = isAdmin || isChangeLead || isSalesMember;
   // The whole cost picture is PM/Sales/Management/lead/admin business; a
   // department sees its own bucket and nobody else's figures. The backend's
@@ -391,14 +395,6 @@ export default function ChangeDetailPage() {
     return !!change && mayTransition(change, to,
       { isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember });
   };
-  const override = useMutation({
-    mutationFn: (reason: string) => changesApi.proposeDeviation(changeId, { to_status: 'costing', reason }),
-    onSuccess: () => {
-      toast.success(t('next.overrideSent'));
-      qc.invalidateQueries({ queryKey: ['change', changeId] });
-    },
-    onError: (e: unknown) => toastError(e, 'Could not propose the deviation'),
-  });
 
   // Close costing names the hours nobody can price (no cost sheet rate): the
   // summation lists them. Cost roles only, like every figure.
@@ -425,19 +421,6 @@ export default function ChangeDetailPage() {
     // list name them, from costing_pending_department_ids (F-01).
     return null;
   })();
-  // Releasing past open guards asks for a deviation with the reason, here and
-  // now, instead of a bare refusal and a second dialog.
-  const askDeviation = useMutation({
-    mutationFn: (v: { to: string; reason: string }) =>
-      changesApi.proposeDeviation(changeId, { to_status: v.to, reason: v.reason }),
-    onSuccess: (d) => {
-      toast.success(`Deviation #${d.id} asked. Someone other than you approves it; then the step can be taken.`);
-      qc.invalidateQueries({ queryKey: ['change', changeId] });
-      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] });
-    },
-    onError: (e: unknown) => toastError(e, 'Could not ask for the deviation'),
-  });
-
   const transition = useMutation({
     mutationFn: (vars: {
       to: string; cancellation_reason?: string;
@@ -453,7 +436,11 @@ export default function ChangeDetailPage() {
       // The memo-dialog transitions report inline; only the ordinary forward
       // moves offer the deviation banner.
       const viaDialog = vars.cancellation_reason || vars.rejection_reason || vars.reopen_reason || vars.reason;
-      if (!viaDialog) { setBlocked({ to: vars.to, reason: detail }); setBlockedSeq((n) => n + 1); }
+      // C6: the refusing rule rides on X-Deviation-Rule; the override asked
+      // from the banner is bound to it.
+      const rule = (e as { response?: { headers?: Record<string, string> } })
+        ?.response?.headers?.['x-deviation-rule'] ?? null;
+      if (!viaDialog) { setBlocked({ to: vars.to, reason: detail, rule }); setBlockedSeq((n) => n + 1); }
       else toast.error(detail);
     },
   });
@@ -703,12 +690,11 @@ export default function ChangeDetailPage() {
       }
       return {
         ...base,
-        title: 'Release with a deviation',
-        consequence: 'Releasing puts the change live although the points below are still open. That needs a deviation: '
-          + 'give the reason, someone other than you approves it, then the change can be released.',
+        title: 'Release with an override',
+        consequence: 'Releasing puts the change live although the points below are still open. Each open rule needs '
+          + 'its own override: pick why, say what covers it, someone other than you gives the OK, then release.',
         final: false,
-        confirmLabel: 'Ask for a deviation',
-        reason: { label: 'Why release anyway? (required, recorded)', placeholder: 'What covers the open points' },
+        confirmLabel: 'Override the first rule',
         asksDeviation: true,
       };
     }
@@ -827,9 +813,14 @@ export default function ChangeDetailPage() {
     may,
     review: review ?? null,
     onStepAction: (key: string) => {
-      if (key === 'override-costing') setOverrideOpen(true);
+      if (key === 'override-costing') setOverrideFor({ to: 'costing', rule: 'not_feasible' });
     },
     onDecideDeviation: (id?: number) => { setTab('overview'); setFocusDeviation(id ?? null); },
+    onOverride: (to: ChangeStatus, rule: string) => setOverrideFor({ to, rule }),
+    mayOverride: (to: string) => !readOnly && (may(to) || isAdmin || isChangeLead || isPmMember),
+    onAbsorb: () => setAbsorbOpen(true),
+    // Absorb is asked by Sales (customer change), the lead, PM or an admin.
+    canAbsorb: isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember),
     deviationTargets: {
       approved: deviations.filter((d) => d.status === 'approved').map((d) => d.to_status),
       pending: deviations.filter((d) => d.status === 'pending').map((d) => d.to_status),
@@ -838,7 +829,7 @@ export default function ChangeDetailPage() {
     // gate is a soft guard; an approved one lets the step through).
     onAskDeviation: (to: ChangeStatus, gateKey: GateKey) => {
       const g = gates.find((x) => x.gate_key === gateKey);
-      setBlocked({ to, reason: `${t('gate.' + gateKey)} ${t('cockpit.gateWord')} ${
+      setBlocked({ to, rule: `gate:${gateKey}`, reason: `${t('gate.' + gateKey)} ${t('cockpit.gateWord')} ${
         gateStateText(g?.decision)}. `
         + 'An approved deviation is required to proceed.' });
       setBlockedSeq((n) => n + 1);
@@ -999,6 +990,9 @@ export default function ChangeDetailPage() {
           blockedTo={blocked.to}
           from={change.status}
           blockedReason={blocked.reason}
+          rule={blocked.rule}
+          customerRelevant={!!change.customer_relevant}
+          leadName={change.lead_name}
           seq={blockedSeq}
           onRetry={() => transition.mutate({ to: blocked.to })}
           onClose={() => setBlocked(null)}
@@ -1035,11 +1029,15 @@ export default function ChangeDetailPage() {
         onSubmit={(reason) => { setReopenCostingOpen(false); transition.mutate({ to: 'costing', reason }); }}
         onClose={() => setReopenCostingOpen(false)}
       />
-      <TransitionConfirmDialog confirm={confirm} busy={transition.isPending || askDeviation.isPending}
+      <TransitionConfirmDialog confirm={confirm} busy={transition.isPending}
         onClose={() => setConfirmTo(null)}
         onConfirm={(reason) => {
           const to = confirmTo!; setConfirmTo(null);
-          if (confirm?.asksDeviation && reason) { askDeviation.mutate({ to, reason }); return; }
+          // C6: the override dialog, bound to the first rule that holds it
+          if (confirm?.asksDeviation) {
+            setOverrideFor({ to: to as ChangeStatus, rule: stage?.transition_blocks?.[to]?.rule ?? '' });
+            return;
+          }
           transition.mutate(reason ? { to, reason } : { to });
         }}>
         {motherPlant && change.status === 'captured' && confirmTo === 'scoping'
@@ -1049,15 +1047,15 @@ export default function ChangeDetailPage() {
           </div>
         )}
       </TransitionConfirmDialog>
-      <ReasonDialog
-        open={overrideOpen}
-        title={t('next.override')}
-        warning={t('confirm.overrideBody')}
-        label={t('confirm.overrideLabel')}
-        submitLabel={t('confirm.overrideGo')}
-        onSubmit={(reason) => { setOverrideOpen(false); override.mutate(reason); }}
-        onClose={() => setOverrideOpen(false)}
-      />
+      {overrideFor && (
+        <OverrideDialog changeId={changeId} to={overrideFor.to} rule={overrideFor.rule}
+          customerRelevant={!!change.customer_relevant} leadName={change.lead_name}
+          onClose={() => setOverrideFor(null)} />
+      )}
+      {absorbOpen && (
+        <AbsorbDialog changeId={changeId} customerRelevant={!!change.customer_relevant}
+          onClose={() => setAbsorbOpen(false)} />
+      )}
       <ReasonDialog
         open={cancelOpen}
         title="Cancel change"

@@ -7,6 +7,8 @@ import { apiErrorMessage } from '../../lib/apiError'
 import { formatDateTime } from '../../lib/format'
 import { STATUS_LABELS } from '../../lib/changeStatus'
 import type { ChangeStatus, TransitionDeviation } from '../../types/change'
+import { t } from '../../i18n/cmLabels'
+import { deciderText, ruleText } from '../../lib/overrideRules'
 
 /**
  * Pending transition deviations ("go on although a guard says no"), where the
@@ -61,11 +63,11 @@ export default function TransitionDeviationsPanel({
       aria-labelledby="transition-deviations-title"
       className="rounded-lg border border-amber-700/70 bg-amber-950/20 p-4 scroll-mt-4 focus:outline-none">
       <h3 id="transition-deviations-title" className="text-sm font-semibold text-amber-100">
-        Deviation requests waiting for a decision
+        Overrides waiting for a decision
       </h3>
       <p className="mt-0.5 text-xs text-slate-400">
-        A deviation lets the change take a step although a guard says it is not ready.
-        Someone other than the requester decides it (4-eyes).
+        An override lets the change take a step although one rule says it is not ready.
+        It lifts that rule only. Someone other than the requester decides it (4-eyes).
       </p>
       <ul className="mt-3 space-y-3">
         {pending.map((d) => {
@@ -80,6 +82,12 @@ export default function TransitionDeviationsPanel({
                 Go to <span className="font-medium">{STATUS_LABELS[d.to_status as ChangeStatus] ?? d.to_status}</span>
                 <span className="text-xs text-slate-500"> · asked {formatDateTime(d.proposed_at)}</span>
               </p>
+              {d.guard_key && (
+                <p data-testid={`deviation-rule-${d.id}`} className="mt-1 text-xs font-medium text-amber-200">
+                  {d.guard_key === 'price_open' ? t('absorb.title') : t('override.waives').replace('{rule}', ruleText(d.guard_key))}
+                  {d.reason_code ? ` · ${t((d.guard_key === 'price_open' ? 'absorb' : 'override') + '.reason.' + d.reason_code)}` : ''}
+                </p>
+              )}
               <p className="mt-1 whitespace-pre-wrap text-slate-300">{d.reason}</p>
               {mine ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -99,7 +107,9 @@ export default function TransitionDeviationsPanel({
                 </div>
               ) : (
                 <p data-testid={`deviation-waiting-${d.id}`} className="mt-1 text-xs text-slate-500">
-                  Waiting for the approver: the change lead or an admin; when the lead asked, any engineer or admin. Never the requester.
+                  {d.deciders
+                    ? `${t('override.waitingFor').replace('{who}', deciderText(d.deciders.group, d.deciders.lead_name))}. ${t('override.neverRequester')}`
+                    : 'Waiting for the approver. Never the requester.'}
                 </p>
               )}
             </li>

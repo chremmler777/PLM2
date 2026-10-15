@@ -72,10 +72,11 @@ describe('TransitionDeviationsPanel (P2-3)', () => {
   })
 
   it('tells anyone else whose decision it is, with no buttons', () => {
-    wrap(<TransitionDeviationsPanel changeId={21} deviations={[dev]} decidableIds={[]} />)
+    wrap(<TransitionDeviationsPanel changeId={21} deviations={[{ ...dev, deciders: { group: 'run' } }]} decidableIds={[]} />)
     expect(screen.getByTestId('deviation-waiting-5').textContent).toContain('Never the requester')
-    // transition_deviation_refusal: a deviation the lead asked for is any engineer's (or an admin's) to decide.
-    expect(screen.getByTestId('deviation-waiting-5').textContent).toContain('when the lead asked, any engineer or admin')
+    // C6 (deviation_decide_refusal): the rule's deciders, never a plain colleague of the lead.
+    expect(screen.getByTestId('deviation-waiting-5').textContent)
+      .toContain('Waiting for the OK of the lead, a Project Management member or an admin')
     expect(screen.queryByTestId('deviation-approve-5')).toBeNull()
   })
 

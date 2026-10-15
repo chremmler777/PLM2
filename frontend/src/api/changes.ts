@@ -91,8 +91,11 @@ export const changesApi = {
 
   listDeviations: (id: number) =>
     client.get<TransitionDeviation[]>(`/v1/changes/${id}/deviations`).then((r) => r.data),
-  proposeDeviation: (id: number, body: { to_status: string; reason: string }) =>
+  proposeDeviation: (id: number, body: { to_status: string; reason: string; guard_key?: string; reason_code?: string }) =>
     client.post<TransitionDeviation>(`/v1/changes/${id}/deviations`, body).then((r) => r.data),
+  /** HARD #9's exit: ask to absorb the open price (the OK clears it). */
+  absorb: (id: number, body: { reason_code: string; note: string }) =>
+    client.post<TransitionDeviation>(`/v1/changes/${id}/absorb`, body).then((r) => r.data),
   decideDeviation: (id: number, devId: number, body: { decision: 'approved' | 'rejected'; note?: string }) =>
     client.post<TransitionDeviation>(`/v1/changes/${id}/deviations/${devId}/decide`, body).then((r) => r.data),
 

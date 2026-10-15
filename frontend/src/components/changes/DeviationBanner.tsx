@@ -4,7 +4,10 @@ import { btnSm } from '../common/buttonStyles';
 import { transitionLabel } from '../../lib/changeStatus';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
-import ReasonDialog from './ReasonDialog';
+import OverrideDialog from './OverrideDialog';
+import { t } from '../../i18n/cmLabels';
+import { ruleText } from '../../lib/overrideRules';
+import type { ChangeStatus } from '../../types/change';
 
 interface Props {
   changeId: number;
@@ -13,6 +16,11 @@ interface Props {
    * by where the change comes from (transitionLabel). */
   from?: string | null;
   blockedReason: string;
+  /** C6: the soft rule that refused the move (X-Deviation-Rule); the
+   * override asked here is bound to it. */
+  rule?: string | null;
+  customerRelevant?: boolean;
+  leadName?: string | null;
   /** Bumped by the caller on every block report, even an identical one, so
    * the scroll-into-view effect below re-fires when the same transition is
    * blocked twice in a row. */
@@ -32,7 +40,7 @@ const STATUS_STYLE: Record<string, string> = {
   consumed: 'bg-slate-700 text-slate-400',
 };
 
-export default function DeviationBanner({ changeId, blockedTo, from, blockedReason, seq, onRetry, onClose }: Props) {
+export default function DeviationBanner({ changeId, blockedTo, from, blockedReason, rule, customerRelevant = true, leadName, seq, onRetry, onClose }: Props) {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -51,11 +59,6 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
     queryKey: ['change', changeId, 'deviations'],
     queryFn: () => changesApi.listDeviations(changeId),
   });
-  const propose = useMutation({
-    mutationFn: (reason: string) =>
-      changesApi.proposeDeviation(changeId, { to_status: blockedTo, reason }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] }),
-  });
   const decide = useMutation({
     mutationFn: (vars: { devId: number; decision: 'approved' | 'rejected' }) =>
       changesApi.decideDeviation(changeId, vars.devId, { decision: vars.decision }),
@@ -63,7 +66,10 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
     onError: (e: unknown) => toastError(e, 'Could not record the decision'),
   });
 
-  const relevant = deviations.filter((d) => d.to_status === blockedTo);
+  // C6: an override covers its own rule only; rows asked before the
+  // binding (no rule) still count for their target.
+  const relevant = deviations.filter((d) => d.to_status === blockedTo
+    && (!rule || !d.guard_key || d.guard_key === rule));
   const hasApproved = relevant.some((d) => d.status === 'approved');
   const hasPending = relevant.some((d) => d.status === 'pending');
   // Only a soft guard can be deviated from: a hard rule gets no request button.
@@ -75,7 +81,7 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
          data-testid="deviation-banner">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="font-medium text-amber-200">Transition blocked</p>
+          <p className="font-medium text-amber-200">Transition blocked: {transitionLabel(blockedTo, from)}</p>
           <p className="text-amber-200 mt-0.5">{blockedReason}</p>
         </div>
         <button type="button" className={btnSm.ghost} onClick={onClose}>Dismiss</button>
@@ -86,7 +92,9 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
           {relevant.map((d) => (
             <li key={d.id} className="flex items-center gap-2">
               <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_STYLE[d.status]}`}>{d.status}</span>
-              <span className="text-slate-400">{d.reason}</span>
+              <span className="text-slate-400">
+                {d.guard_key ? `${t('override.waives').replace('{rule}', ruleText(d.guard_key))}: ` : ''}{d.reason}
+              </span>
               {/* lead or admin, never the proposer: the backend's verdict per row */}
               {d.status === 'pending' && d.can_decide && (
                 <span className="ml-auto flex gap-1">
@@ -104,7 +112,8 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
       <div className="flex gap-2 mt-3">
         {deviable && !hasPending && !hasApproved && (
           <button type="button" className={btnSm.primary}
-                  onClick={() => setDialogOpen(true)}>Request deviation</button>
+                  data-testid="deviation-banner-override"
+                  onClick={() => setDialogOpen(true)}>{t('why.override')}</button>
         )}
         {deviable && hasApproved && (
           <button type="button" className={btnSm.primary}
@@ -112,14 +121,12 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
         )}
       </div>
 
-      <ReasonDialog
-        open={dialogOpen}
-        title={`Deviation: ${transitionLabel(blockedTo, from)}`}
-        label="Reason (recorded in the audit trail, requires 4-eyes approval)"
-        submitLabel="Submit"
-        onSubmit={(reason) => { propose.mutate(reason); setDialogOpen(false); }}
-        onClose={() => setDialogOpen(false)}
-      />
+      {dialogOpen && (
+        <OverrideDialog changeId={changeId} to={blockedTo as ChangeStatus} rule={rule}
+          customerRelevant={customerRelevant} leadName={leadName}
+          onDone={() => qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] })}
+          onClose={() => setDialogOpen(false)} />
+      )}
     </div>
   );
 }

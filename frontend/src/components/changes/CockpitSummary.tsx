@@ -93,6 +93,19 @@ interface Props {
   variant?: 'full' | 'compact'
   /** Compact bar: the blockers count and the actions count lead to Overview. */
   onShowOverview?: () => void
+  /** C6: "Override" on a soft rule of the why-blocked list: the page opens
+      the override dialog bound to that rule. Hidden while the viewer may not
+      take the step. */
+  onOverride?: (to: ChangeStatus, rule: string) => void
+  /** HARD #9's exit on an open price: the page opens the Absorb dialog. */
+  onAbsorb?: () => void
+  /** May the viewer ask to absorb (Sales, lead, PM, admin)? */
+  canAbsorb?: boolean
+  /** May the viewer ask for an override into this status? Default: who may
+      take the step (`may`). The page adds the run team, so an override is
+      reachable while a hard step of its own still waits on the rule (an
+      internal approval waiting for finalized costing). */
+  mayOverride?: (to: string) => boolean
 }
 
 /** What the cockpit needs of the engineering review state. */
@@ -305,7 +318,7 @@ const Where = ({ to }: { to: string }) => (
 /** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
 interface Blocker { key: string; text: string; go?: () => void }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   /** The late flag whose "Take off routing" dialog is open. */
   const [takeOff, setTakeOff] = useState<MyAction | null>(null)
@@ -361,6 +374,44 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     const key = i.key === 'assessments' && i.n ? 'assessments_n' : i.key
     const detail = i.key === 'gate' && i.detail ? t('gate.' + i.detail) : (i.detail ?? '')
     return t('next.item.' + key).replace('{n}', String(i.n ?? '')).replace('{detail}', detail)
+  }
+  // Why blocked (spec §0): a soft rule offers one Override bound to it (or
+  // says where its override stands); a hard rule says it has none and names
+  // its only ways out (Absorb as a button where it is the viewer's to ask).
+  // Several rows can share one rule (an incomplete capture): its override
+  // is offered once, on the last of them.
+  const lastOfRule = new Map(nextItems.map((i, idx) => [i.rule ?? `#${idx}`, idx] as const))
+  const whyExit = (i: NextStepItem, idx: number): ReactNode => {
+    if (i.kind === 'soft' && i.rule && nextStep) {
+      if (lastOfRule.get(i.rule) !== idx) return null
+      if (i.override) {
+        return (
+          <span data-testid={`why-override-state-${i.rule}`} className="block pl-4 text-slate-400">
+            {t(i.override.status === 'approved' ? 'why.overrideApproved' : 'why.overrideAsked')
+              .replace('{n}', String(i.override.id))}
+          </span>
+        )
+      }
+      return onOverride && (mayOverride ?? may)(nextStep.to) ? (
+        <button type="button" data-testid={`why-override-${i.rule}`}
+          className={`ml-1 text-amber-200 ${linkRow}`}
+          onClick={() => onOverride(nextStep.to, i.rule!)}>
+          {t('why.override')}
+        </button>
+      ) : null
+    }
+    if (i.kind !== 'hard' || !i.exits?.length) return null
+    return (
+      <span className="block pl-4 text-slate-400">
+        {t('why.noOverride')} {i.exits.map((e) => t('why.exit.' + e)).join(' ')}
+        {i.exits.includes('absorb') && (i.override
+          ? <span data-testid="why-absorb-asked"> {t('why.absorbAsked').replace('{n}', String(i.override.id))}</span>
+          : canAbsorb && onAbsorb ? (
+            <button type="button" data-testid="why-absorb" className={`ml-1 text-amber-200 ${linkRow}`}
+              onClick={onAbsorb}>{t('why.absorb')}</button>
+          ) : null)}
+      </span>
+    )
   }
   const nextTo = nextStep ? STATUS_LABELS[nextStep.to] : ''
   // The scoping meeting decides; a mother-plant change leaves scoping
@@ -785,10 +836,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               <AlertTriangle aria-hidden="true" size={12} />{nextTitle}
             </p>
             <ul className="mt-1 list-disc list-inside text-amber-100/80">
-              {nextItems.map((i) => (
-                <li key={i.key + (i.detail ?? '')} data-kind={i.kind}
+              {nextItems.map((i, idx) => (
+                <li key={i.key + (i.detail ?? '')} data-kind={i.kind} data-testid={`why-${i.key}`}
                   className={i.kind === 'hard' && !isScoping ? 'text-red-300' : undefined}>
                   {itemLabel(i)}
+                  {i.who && <span className="text-slate-400"> · {i.who}</span>}
+                  {whyExit(i, idx)}
                 </li>
               ))}
             </ul>

@@ -1,0 +1,38 @@
+import type { DeciderGroup } from '../types/change'
+import { t } from '../i18n/cmLabels'
+
+/**
+ * C6 (spec §0 "Override"): who gives the OK on an override, mirrored from
+ * backend cm_rules.decider_group so the dialog can say "needs <who>'s OK"
+ * before anything is asked. The backend stays the judge.
+ */
+const PM_MGMT_RULES = new Set(['scope_change_uncovered', 'price_drop', 'price_open'])
+const QUALITY_RULES = new Set(['validation_open', 'validation_failed', 'validation_issues_open'])
+const QUALITY_TARGETS = new Set(['in_implementation', 'released'])
+
+export function deciderGroup(rule: string | null | undefined, to: string, customerRelevant = true): DeciderGroup {
+  if (rule === 'price_open') return customerRelevant ? 'pm_mgmt' : 'approver'
+  if (rule && PM_MGMT_RULES.has(rule)) return 'pm_mgmt'
+  if ((rule && QUALITY_RULES.has(rule)) || QUALITY_TARGETS.has(to)) return 'quality'
+  return 'run'
+}
+
+/** "the lead (Anna Berg), a Project Management member or an admin". */
+export function deciderText(group: DeciderGroup, leadName?: string | null): string {
+  if (group === 'run') {
+    return leadName ? t('override.whoRunLead').replace('{lead}', leadName) : t('override.whoRun')
+  }
+  return t(`override.who.${group}`)
+}
+
+/** The reason pick of every override (backend cm_rules.OVERRIDE_REASONS). */
+export const OVERRIDE_REASONS = ['customer_date', 'in_parallel', 'not_applicable', 'other'] as const
+/** Why an open price is absorbed (backend cm_rules.ABSORB_REASONS). */
+export const ABSORB_REASONS = ['goodwill', 'small_amount', 'our_error', 'other'] as const
+
+/** A rule's name for people: `rule.<key>`, a gate by its D1 question. */
+export function ruleText(rule: string | null | undefined): string {
+  if (!rule) return t('override.anyRule')
+  if (rule.startsWith('gate:')) return `${t('gate.' + rule.slice(5))} ${t('cockpit.gateWord')}`
+  return t('rule.' + rule)
+}

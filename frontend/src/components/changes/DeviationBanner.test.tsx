@@ -82,14 +82,26 @@ describe('DeviationBanner', () => {
     }
   });
 
-  it('proposes a deviation with the entered reason', async () => {
-    renderBanner();
-    fireEvent.click(await screen.findByRole('button', { name: /request deviation/i }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'PPT only' } });
-    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+  it('asks for an override bound to the refusing rule, with a reason pick', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <DeviationBanner changeId={7} blockedTo="in_assessment" rule="no_impacted_items"
+          blockedReason="No impacted items added yet. An approved deviation is required to proceed."
+          seq={1} onRetry={() => {}} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Override' }));
+    expect(screen.getByTestId('override-dialog').textContent).toContain('Override: No impacted items');
+    fireEvent.change(screen.getByTestId('override-note'), { target: { value: 'PPT only' } });
+    // nothing preselected: the pick is required
+    expect((screen.getByTestId('override-submit') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('override-reason-customer_date'));
+    fireEvent.click(screen.getByTestId('override-submit'));
     await waitFor(() =>
       expect(changesApi.proposeDeviation).toHaveBeenCalledWith(7, {
-        to_status: 'in_assessment', reason: 'PPT only',
+        to_status: 'in_assessment', reason: 'PPT only', reason_code: 'customer_date',
+        guard_key: 'no_impacted_items',
       })
     );
   });
@@ -136,7 +148,7 @@ describe('ReasonDialog', () => {
     );
     await screen.findByText(/Cannot recall/);
     await waitFor(() => expect(changesApi.listDeviations).toHaveBeenCalled());
-    expect(screen.queryByText('Request deviation')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Override' })).toBeNull();
     rerender(
       <QueryClientProvider client={qc}>
         <DeviationBanner changeId={7} blockedTo="in_assessment"
@@ -144,6 +156,6 @@ describe('ReasonDialog', () => {
           seq={2} onRetry={() => {}} onClose={() => {}} />
       </QueryClientProvider>
     );
-    expect(await screen.findByText('Request deviation')).toBeDefined();
+    expect(await screen.findByRole('button', { name: 'Override' })).toBeDefined();
   });
 });

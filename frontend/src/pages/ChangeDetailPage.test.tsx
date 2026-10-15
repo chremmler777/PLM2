@@ -1315,15 +1315,17 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     wrap('/changes/1?tab=release')
     fireEvent.click(await screen.findByText('mock-release'))
     const dialog = await screen.findByTestId('confirm-released')
-    await waitFor(() => expect(dialog.textContent).toContain('Release with a deviation'))
+    await waitFor(() => expect(dialog.textContent).toContain('Release with an override'))
     expect(dialog.textContent).toContain('4 impacted revisions')
     const go = screen.getByTestId('confirm-go') as HTMLButtonElement
-    expect(go.textContent).toBe('Ask for a deviation')
-    expect(go.disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: 'ECN runs in the DMS track' } })
+    expect(go.textContent).toBe('Override the first rule')
     fireEvent.click(go)
+    // C6: the override dialog asks the reason pick and the note
+    fireEvent.click(await screen.findByTestId('override-reason-in_parallel'))
+    fireEvent.change(screen.getByTestId('override-note'), { target: { value: 'ECN runs in the DMS track' } })
+    fireEvent.click(screen.getByTestId('override-submit'))
     await waitFor(() => expect(changesApi.proposeDeviation).toHaveBeenCalledWith(
-      1, { to_status: 'released', reason: 'ECN runs in the DMS track' }))
+      1, { to_status: 'released', reason: 'ECN runs in the DMS track', reason_code: 'in_parallel' }))
     expect(changesApi.transition).not.toHaveBeenCalled()
   })
 

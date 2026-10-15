@@ -391,7 +391,18 @@ export interface NextStepItem {
   kind: 'hard' | 'soft' | 'todo';
   n?: number;
   detail?: string;
+  /** C6: the soft rule an Override is bound to (cm_rules key). */
+  rule?: string;
+  /** Who owns it (and by when), in words. */
+  who?: string;
+  /** A hard rule's only ways out: concession, absorb, customer_accepts, sign. */
+  exits?: ('concession' | 'absorb' | 'customer_accepts' | 'sign')[];
+  /** The rule's override, when one is asked or approved. */
+  override?: { id: number; status: 'pending' | 'approved' };
 }
+
+/** Who gives the OK on an override (backend cm_rules.decider_group). */
+export type DeciderGroup = 'run' | 'pm_mgmt' | 'quality' | 'approver';
 
 /** What still stands between the change and `to` (ChangeService.next_step_missing). */
 export interface NextStep {
@@ -1126,8 +1137,17 @@ export interface TransitionDeviation {
   decided_by?: number | null;
   decided_at?: string | null;
   decision_note?: string | null;
-  /** The viewer may decide this pending deviation (backend: lead or admin, not the proposer). */
+  /** The viewer may decide this pending deviation (backend: the rule's deciders, never the proposer). */
   can_decide?: boolean;
+  proposed_by_name?: string | null;
+  decided_by_name?: string | null;
+  /** C6: the soft rule it waives (null: asked before the binding). */
+  guard_key?: string | null;
+  guard_reason?: string | null;
+  reason_code?: string | null;
+  rule_label?: string | null;
+  /** Pending only: whose OK it needs. */
+  deciders?: { group: DeciderGroup; lead_name?: string | null } | null;
 }
 
 // --- Stage 8: what actually happens while the change is being implemented ---
@@ -1323,6 +1343,9 @@ export interface StageStateResponse {
   status_label?: string;
   /** {to_status: may the viewer} for every hop out of the current status. */
   can_transition: Record<string, boolean>;
+  /** Forward hops refused today: kind hard | gate | guard, the reason and,
+   * for a soft rule, its key (C6: what an override binds to). */
+  transition_blocks?: Record<string, { kind: string; reason: string; rule?: string | null }>;
   can_edit_impact: boolean;
   impact_edit_needs_reason: boolean;
   /** May the viewer record the scoping meeting and its decision (lead, PM, admin). */
@@ -1330,6 +1353,9 @@ export interface StageStateResponse {
   lead_assigned: boolean;
   /** The one price rule (backend PriceViewer): admin, lead, PM, Sales, Management. */
   can_see_prices?: boolean;
+  /** HARD #8: may the viewer give the internal approval (an engineering
+   * approver, never the raiser; only an internal change in costing). */
+  can_approve_internal?: boolean;
   title_auto: boolean;
   assessment: StageAssessment | null;
   routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;
