@@ -1213,6 +1213,34 @@ class MeetingService:
         return [c for c in flags if not c.is_check]
 
     @staticmethod
+    def unrouted_check_owners(change: ChangeRequest,
+                              meeting: Optional[ChangeMeeting] = None) -> dict[int, list[int]]:
+        """Spec §3 "Not routed": owner departments of open check items that
+        the meeting does not route with a task letter (R/A/S/C; I = told
+        only), each with its item ids. Such an item would leave proceed with
+        no owner, no due and no task (R18). `meeting`: else the latest
+        undecided one; no meeting yet: nothing (the dialog asks for
+        departments first)."""
+        checks = MeetingService.open_checks(change)
+        if not checks:
+            return {}
+        if meeting is None:
+            meeting = next((m for m in reversed(change.meetings or [])
+                            if m.decision is None), None)
+        if meeting is None:
+            return {}
+        if meeting.department_rasic:
+            routed = {int(k) for k, v in meeting.department_rasic.items() if v != "I"}
+        else:
+            routed = set(meeting.selected_department_ids or [])
+        out: dict[int, list[int]] = {}
+        for c in checks:
+            for d in c.owner_department_ids:
+                if d not in routed:
+                    out.setdefault(d, []).append(c.id)
+        return out
+
+    @staticmethod
     def open_checks(change: ChangeRequest) -> list[ChangeConcern]:
         """Open C33 check items (empty with SCOPING_V2 off)."""
         if not cm_switches.on("SCOPING_V2"):
@@ -1296,12 +1324,15 @@ class MeetingService:
     async def proceed_holds(session: AsyncSession, change: ChangeRequest, *,
                             names: Optional[dict] = None,
                             entered: Optional[datetime] = None,
-                            with_text: bool = True) -> list[dict]:
+                            with_text: bool = True,
+                            meeting: Optional[ChangeMeeting] = None) -> list[dict]:
         """What holds 'proceed' outside the meeting form (departments, R/A,
         cost carrier and the urgent need-by are answered in the proceed
         dialog): open questions and cancel votes (HARD #2), Quality's PPAP
-        decision and the flip's Sales answer (HARD #7), an empty impacted
-        set (HARD #1). Each {key, owner, text, n?, due?}, owner and due in
+        decision and the flip's Sales answer (HARD #7), check items whose
+        owner the meeting (`meeting`, else the latest undecided one) does not
+        route (spec §3 "Not routed", R18), an empty impacted set (HARD #1).
+        Each {key, owner, text, n?, due?}, owner and due in
         words, so the PM's scoping row, the change's checklist and the
         refusal name every hold at once, each with its owner. `names`:
         department id -> name (else read); `entered`: when the change
@@ -1340,6 +1371,21 @@ class MeetingService:
                         "text": f"The change became a customer change; proceed "
                                 f"waits for {who}: customer notification only, "
                                 "or offer needed?"})
+        unrouted = MeetingService.unrouted_check_owners(change, meeting)
+        if unrouted:
+            missing = set(unrouted) - set(names or {})
+            if missing:
+                names = {**(names or {}), **dict((await session.execute(
+                    select(Department.id, Department.name).where(
+                        Department.id.in_(missing)))).all())}
+            fixes = "; ".join(
+                f"Route {names.get(d, f'department {d}')}: C / R, or reassign "
+                + ", ".join(f"#{i}" for i in ids)
+                for d, ids in unrouted.items())
+            out.append({"key": "unrouted_checks", "n": len(unrouted),
+                        "owner": change.lead_name or "Project Management",
+                        "text": (f"Check items go to departments this meeting does "
+                                 f"not route, so nobody would own them: {fixes}")})
         if not change.impacted_items and change.impact_confirmed_at is None:
             out.append({"key": "impacted_items",
                         "owner": change.lead_name or "Project Management",
@@ -1382,7 +1428,7 @@ class MeetingService:
             # HARD #7 the PPAP decision and the flip's Sales answer; HARD #1
             # an empty impacted set locks nothing.
             problems += [h["text"] for h in await MeetingService.proceed_holds(
-                session, change)]
+                session, change, meeting=meeting)]
             # The room re-confirms the cost carrier (spec §16): it selects the
             # whole commercial branch, so nobody proceeds without saying it.
             if meeting.cost_carrier is None:

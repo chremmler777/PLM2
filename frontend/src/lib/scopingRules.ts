@@ -5,7 +5,7 @@
 import { t } from '../i18n/cmLabels'
 import { preferredDepartmentId } from './departments'
 import type { Contact } from '../api/contacts'
-import type { ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier } from '../types/change'
+import { isCheckItem, type ChangeConcern, type ChangeMeeting, type ChangeRequest, type CostCarrier } from '../types/change'
 
 /**
  * The attendee picker offers people only: the contact source also knows
@@ -154,4 +154,27 @@ export function openFlagLines(
       const who = `${c.raised_by_name ?? `#${c.raised_by}`}${dept ? ` (${dept})` : ''}`
       return `${kind} · ${who}: ${c.note}`
     })
+}
+
+/**
+ * Spec §3 "Not routed" (mirror of MeetingService.unrouted_check_owners):
+ * owner departments of open check items that the meeting does not route
+ * with a task letter (I = told only, owns nothing), with how many items
+ * each owns. Proceed waits until each is routed or its items reassigned.
+ */
+export function unroutedCheckOwners(
+  meeting: Pick<ChangeMeeting, 'department_rasic' | 'selected_department_ids'>,
+  concerns: ChangeConcern[],
+): Map<number, number> {
+  const routed = new Set(Object.entries(meeting.department_rasic ?? {})
+    .filter(([, l]) => l !== 'I').map(([k]) => Number(k)))
+  if (!meeting.department_rasic) (meeting.selected_department_ids ?? []).forEach((id) => routed.add(id))
+  const out = new Map<number, number>()
+  for (const c of concerns) {
+    if (!c.is_open || c.kind === 'risk' || !isCheckItem(c)) continue
+    for (const id of [c.department_id, ...(c.co_department_ids ?? [])]) {
+      if (id != null && !routed.has(id)) out.set(id, (out.get(id) ?? 0) + 1)
+    }
+  }
+  return out
 }

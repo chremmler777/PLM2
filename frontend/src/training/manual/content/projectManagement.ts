@@ -118,7 +118,9 @@ export const pmChapter: ContentChapter = {
             'Scoping is triage, not analysis. Open questions and cancel votes block "Proceed"; check ' +
             'items and risks do not. The proceed dialog lists the open questions: "Answer now", or ' +
             '"Make it a check item" if the scope can be decided without it. A department that owns ' +
-            'check items but has no letter shows "Route Quality: C" (or R). "Not yet" closes nobody\'s ' +
+            'check items but has no letter (or only I) shows "Route Quality: C" (or R); proceed waits ' +
+            'until it is routed or its items are reassigned, so no check item leaves without an owner. ' +
+            '"Not yet" closes nobody\'s ' +
             'question and, while questions are open, needs no reason. Your "Wrap up scoping" task ' +
             'says what it waits on and who owes it ("Not yet: waiting for 2 answers (Sales Thu, Process ' +
             'Fri)", "Proceed waits for: PPAP decision (Quality, due Thu)"), and reads "Ready: proceed" ' +

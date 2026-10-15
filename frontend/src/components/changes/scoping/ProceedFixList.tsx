@@ -20,6 +20,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import AnswerForm from './AnswerForm'
 import { CheckRow } from './ScopingFlags'
+import { unroutedCheckOwners } from '../../../lib/scopingRules'
 import {
   isCheckItem, type Attachment, type ChangeConcern, type ChangeMeeting, type RasicLetter,
 } from '../../../types/change'
@@ -42,15 +43,8 @@ export default function ProceedFixList({
   const open = concerns.filter((c) => c.is_open && c.kind !== 'risk')
   const questions = open.filter((c) => !isCheckItem(c)).sort((a, b) => a.id - b.id)
   const checks = open.filter(isCheckItem).sort((a, b) => a.id - b.id)
-  const routed = new Set(Object.keys(meeting.department_rasic ?? {}).map(Number))
-  if (!meeting.department_rasic) meeting.selected_department_ids.forEach((id) => routed.add(id))
-  // Owners of check items the meeting has not routed.
-  const unrouted = new Map<number, number>()
-  for (const c of checks) {
-    for (const id of [c.department_id, ...(c.co_department_ids ?? [])]) {
-      if (id != null && !routed.has(id)) unrouted.set(id, (unrouted.get(id) ?? 0) + 1)
-    }
-  }
+  // Owners of check items the meeting has not routed (proceed waits)
+  const unrouted = unroutedCheckOwners(meeting, concerns)
   const nameOf = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
 
   // Check items by owner (the raised-for department), largest group first

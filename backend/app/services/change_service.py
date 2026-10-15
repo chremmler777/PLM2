@@ -1468,6 +1468,10 @@ class ChangeService:
             for key in ("ppap_decision", "customer_flip"):
                 if key in holds:
                     add(key, "hard", who=holds[key]["owner"])
+            # §3 "Not routed": check items whose owner the meeting skips
+            if "unrouted_checks" in holds:
+                add("unrouted_checks", "hard", n=holds["unrouted_checks"]["n"],
+                    who=holds["unrouted_checks"]["owner"])
             # HARD #2: questions and cancel votes; C33 check items go along
             concerns = MeetingService.open_blocking(change)
             if concerns:

@@ -29,7 +29,7 @@ import {
   type ImpactedItem, type MeetingParticipant, type RasicLetter,
 } from '../../types/change'
 import {
-  askingSide, canAnswerQuestion, carrierOf, flipHolds, isPersonContact, openFlagLines, ppapApplies,
+  askingSide, canAnswerQuestion, carrierOf, flipHolds, unroutedCheckOwners, isPersonContact, openFlagLines, ppapApplies,
 } from '../../lib/scopingRules'
 import { departmentLabel, pickableDepartments } from '../../lib/departments'
 import { plantText } from '../../lib/plantName'
@@ -586,14 +586,21 @@ export default function ScopingPanel(
     const assessors = Object.values(rasic).filter((l) => l === 'R' || l === 'A').length
     const c = carrierOfMeeting(m)
     const flipped = c !== '' && carrierOf(change.customer_relevant) !== '' && c !== carrierOf(change.customer_relevant)
+    // §3 "Not routed": check items whose owner this meeting skips hold
+    // proceed until routed (the fix list's Route buttons) or reassigned
+    const live = meetings.find((x: ChangeMeeting) => x.id === m.id) ?? m
+    const unrouted = v2 ? [...unroutedCheckOwners(live, concerns).entries()].map(([id, n]) =>
+      t('proceed.notRouted').replace('{d}', departments.find((d) => d.id === id)?.name ?? `#${id}`)
+        .replace('{n}', String(n)).replace(/:$/, '')) : []
     // Open flags hold the step: the same dialog becomes the warning, listing
     // each flag and how it is cleared, and its confirm stays disabled.
-    if (openFlags.length > 0 || hard7.length > 0) {
+    if (openFlags.length > 0 || hard7.length > 0 || unrouted.length > 0) {
       return {
         to: 'in_assessment',
         title: t('meeting.proceedBlockedTitle'),
-        consequence: v2 ? t('proceed.questionsOpen') : t('meeting.proceedBlocked'),
-        open: [...openFlags, ...hard7],
+        consequence: !v2 ? t('meeting.proceedBlocked')
+          : openFlags.length > 0 ? t('proceed.questionsOpen') : t('proceed.heldBelow'),
+        open: [...openFlags, ...hard7, ...unrouted],
         holdWhileOpen: true,
         confirmLabel: v2 && openChecks.length > 0
           ? t('proceed.go').replace('{n}', String(openChecks.length))

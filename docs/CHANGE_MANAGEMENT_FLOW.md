@@ -247,7 +247,12 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   answer form, *Make it a check item*), check items collapsed by owner with
   *Promote to question*, and for a department that owns check items but is not
   routed *Route <dept>: C / R* (C first for Process and Quality; writes the
-  meeting's RASIC). The button reads *"Proceed: 12 check items go to
+  meeting's RASIC). **Not routed holds proceed** (L4 review 2, R18): an open
+  check item whose owner (or co-owner) the meeting does not route with a
+  task letter (R/A/S/C; *I* owns nothing) would leave with no owner, due or
+  task, so proceed waits until it is routed or the item reassigned
+  (`MeetingService.unrouted_check_owners`, hold `unrouted_checks`, owner the
+  lead; named in the refusal, the PM's row and the checklist). The button reads *"Proceed: 12 check items go to
   departments"*. **Go with conditions**: the meeting stores the open check
   items (`change_meetings.go_conditions`) and the changelog says how many.
 - **Check items in assessment**: each belongs to its department (and co-owners)
@@ -267,7 +272,8 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   *"Ready: proceed"* only when nothing holds proceed.
 - **Proceed holds** (`MeetingService.proceed_holds`, L4 review): open
   questions and cancel votes (HARD #2), the PPAP decision and the flip's Sales
-  answer (HARD #7), no impacted parts (HARD #1), each with owner and due. The
+  answer (HARD #7), check items with no routed owner, no impacted parts
+  (HARD #1), each with owner and due. The
   PM's row and the change checklist (`next_step`, `who` = "Quality, due Thu")
   read it, the cockpit lists HARD #7 under *Blocked by* (never "Nothing
   blocking") and gives Quality *Answer the PPAP decision* as the scoping

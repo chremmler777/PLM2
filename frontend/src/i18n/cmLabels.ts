@@ -2528,12 +2528,18 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'proceed.questionsOpen': {
     de: 'Offene Fragen halten die Freigabe. Beantworten und schließen, oder zum Prüfpunkt machen, wenn der Umfang ohne sie entschieden werden kann.',
     en: 'Open questions hold proceed. Answer and close them, or make one a check item if the scope can be decided without it.' },
+  'proceed.heldBelow': {
+    de: 'Die Freigabe wartet auf die Punkte unten, jeder mit seinem Verantwortlichen.',
+    en: 'Proceed waits for the points below, each with its owner.' },
   'proceed.answerNow': { de: 'Jetzt beantworten', en: 'Answer now' },
   'proceed.checksByOwner': { de: 'Prüfpunkte nach Fachbereich', en: 'Check items by owner' },
   'proceed.reassign': { de: 'Umhängen an …', en: 'Reassign to …' },
   'flag.noOwner': { de: 'ohne Fachbereich', en: 'no department' },
   'proceed.promote': { de: 'Zur Frage machen', en: 'Promote to question' },
-  'proceed.notRouted': { de: '{d} ist nicht geroutet, hat aber {n} Prüfpunkt(e):', en: '{d} is not routed but owns {n} check item(s):' },
+  'proceed.notRouted': {
+    de: '{d} ist nicht geroutet, hat aber {n} Prüfpunkt(e); Freigabe wartet, bis geroutet oder neu zugeordnet:',
+    en: '{d} is not routed but owns {n} check item(s); proceed waits until it is routed or they are reassigned:',
+  },
   'proceed.routeAs': { de: '{d} routen: {l}', en: 'Route {d}: {l}' },
   'proceed.conditionsInfo': {
     de: 'Go mit Bedingungen: jeder Prüfpunkt geht an seinen Fachbereich, fällig mit dessen Bewertung.',
@@ -2593,9 +2599,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'proceed.hold.ppap_decision': { de: 'PPAP-Entscheidung ({who})', en: 'PPAP decision ({who})' },
   'proceed.hold.customer_flip': { de: 'Kundeninfo oder Angebot? ({who})', en: 'notification or offer? ({who})' },
   'proceed.hold.impacted_items': { de: 'betroffene Teile ({who})', en: 'impacted parts ({who})' },
+  'proceed.hold.unrouted_checks': { de: 'Prüfpunkte ohne Routing ({who})', en: 'routing for check items ({who})' },
   'cockpit.proceedWaits': {
     de: 'Freigabe wartet auf: {x}. Scoping ansehen →',
     en: 'Proceed waits for: {x}. See Scoping →' },
+  'next.item.unrouted_checks': {
+    de: 'Prüfpunkte ohne geroutete Abteilung ({n}): Abteilung als C / R routen oder neu zuordnen',
+    en: 'Check items for {n} department(s) not routed: route them as C / R or reassign',
+  },
   'next.item.customer_flip': { de: 'Sales: Kundeninfo oder Angebot?', en: 'Sales: notification or offer?' },
   // §2 capture: urgent, internal problem and target; §3 urgent proceed
   'urgent.toggle': { de: 'Dringend', en: 'Urgent' },

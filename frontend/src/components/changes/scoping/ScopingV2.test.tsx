@@ -6,6 +6,7 @@ import AnswerForm from './AnswerForm'
 import ProceedFixList from './ProceedFixList'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
+import { unroutedCheckOwners } from '../../../lib/scopingRules'
 import type { ChangeConcern, ChangeMeeting } from '../../../types/change'
 
 vi.mock('../../../api/changes', () => ({
@@ -192,6 +193,13 @@ describe('ProceedFixList', () => {
     fireEvent.change(screen.getByTestId('proceed-reassign-20'), { target: { value: '6' } })
     await waitFor(() => expect(changesApi.setConcernType).toHaveBeenCalledWith(
       7, 20, { flag_type: 'question', department_id: 6 }))
+  })
+
+  it('an Informed department owns nothing: its check items count as not routed', () => {
+    const m = { ...meeting, selected_department_ids: [4, 3], department_rasic: { 4: 'R', 3: 'I' } } as unknown as ChangeMeeting
+    const got = unroutedCheckOwners(m, [concern({ id: 21, department_id: 3 }),
+      concern({ id: 23, department_id: 4 })])
+    expect([...got.entries()]).toEqual([[3, 1]])
   })
 
   it('a viewer who may neither answer nor switch gets no buttons', () => {
