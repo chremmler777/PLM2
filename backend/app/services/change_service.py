@@ -2288,6 +2288,27 @@ class ChangeService:
         old = change.status
         change.status = to_status
         await session.flush()
+        if (to_status == "quoting" and change.customer_relevant
+                and cm_switches.on("ASSESSMENT_V2")):
+            # spec §5 "Sales owner: ready to quote" (immediate, once)
+            from app.services.notification_service import NotificationService
+            title = f"Ready to quote: {change.change_number}"[:255]
+            body = "Costing is closed: build and send the offer."
+            link = f"/changes/{change.id}?tab=offer"
+            if change.sales_owner_id and change.sales_owner_id != user_id:
+                await NotificationService.notify_once(
+                    session, [change.sales_owner_id], kind="task_new",
+                    subject_key=f"ready_to_quote:{change.id}", title=title,
+                    body=body, link=link)
+            elif change.sales_owner_id is None:
+                sales = (await session.execute(
+                    select(Department.id).where(Department.name == "Sales"))
+                ).scalar_one_or_none()
+                if sales is not None:
+                    await NotificationService.notify_departments_once(
+                        session, [sales], kind="task_new",
+                        subject_key=f"ready_to_quote:{change.id}", title=title,
+                        body=body, link=link)
         if to_status == "costing":
             # Spec §16 P1-2: later routing stages wake only now (instance
             # locked at the top of this transition).
@@ -6009,6 +6030,8 @@ class ChangeService:
         *, note: Optional[str] = None,
         release_due_date: Optional[datetime] = None,
         release_due_reason: Optional[str] = None,
+        rationale: Optional[str] = None, volume: Optional[float] = None,
+        saving: Optional[float] = None, saving_basis: Optional[str] = None,
     ) -> ChangeRequest:
         """Internal costing branch: PM approves the summation total instead of
         a customer quote. Amount is snapshotted for the later P&L view.
@@ -6049,6 +6072,30 @@ class ChangeService:
                 "Internal approval requires a release deadline (release_due_date)")
         from app.services.cost_service import CostService
         summ = await CostService.summation(session, change)
+        if cm_switches.on("ASSESSMENT_V2"):
+            # Spec §5: the approval card. Always why (rationale pick); with
+            # money, the volume and the yearly saving it runs on, and whether
+            # that saving is calculated or estimated (payback is computed).
+            # All at no cost: one click + the rationale.
+            from app.models.change import INTERNAL_RATIONALES, SAVING_BASES
+            if rationale not in INTERNAL_RATIONALES:
+                raise ChangeError(
+                    "Say why we spend it: " + ", ".join(INTERNAL_RATIONALES))
+            if abs(float(summ["totals"]["grand_total"] or 0)) > 0.004:
+                if not (volume and volume > 0):
+                    raise ChangeError(
+                        "Give the annual volume the saving runs on (pieces per year)")
+                if saving is None or saving < 0:
+                    raise ChangeError(
+                        "Give the saving per year (0 when there is none, e.g. "
+                        "a quality change)")
+                if saving_basis not in SAVING_BASES:
+                    raise ChangeError(
+                        "Say whether the saving is calculated or an estimate")
+            change.internal_rationale = rationale
+            change.internal_volume = volume
+            change.internal_saving = saving
+            change.internal_saving_basis = saving_basis if saving is not None else None
         change.internal_approved_by = actor.id
         change.internal_approved_at = datetime.utcnow()
         change.internal_approved_amount = summ["totals"]["grand_total"]

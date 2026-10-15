@@ -744,6 +744,24 @@ Switch `ASSESSMENT_V2` (migration 127).
   customer's acceptance) clears `price_open` and the task. The automatic
   comparison is cut 2.
 
+### Close costing: ready to quote, the internal approval card (ECR-solid §5, 2026-10-15)
+Switch `ASSESSMENT_V2` (migration 128).
+- **Ready to quote**: closing costing (`costing -> quoting`) on a customer
+  change tells the Sales owner once (`task_new`, `ready_to_quote:<id>`;
+  without a Sales owner every Sales member), unless they closed it
+  themselves. The quote task is theirs from then on.
+- **Internal approval card** (HARD #8 kept: an engineering approver, never
+  the raiser): the cost (the summation) with a **"Tool cost ESTIMATE"**
+  banner while any external line is priced on an estimate, and the case,
+  nothing preselected: **why** (`internal_rationale`: saving / quality /
+  capacity / safety / maintenance / other) always; with money also the
+  **annual volume** (pcs/year), the **saving per year** (0 for a quality
+  change) and whether it is **calculated or estimated**; the **payback**
+  (months = cost / saving × 12) is computed in the card. All at no cost:
+  one click + the rationale. `POST /internal-approval` refuses a missing
+  part of the case in plain words; stored on the change and shown on the
+  approved card. Switch off: release deadline only, as before.
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside

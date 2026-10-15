@@ -284,6 +284,12 @@ class ChangelogResponse(BaseModel):
 
 class InternalApprovalIn(BaseModel):
     note: Optional[str] = None
+    # Spec §5 approval card: why (always), and with money the annual volume,
+    # the saving per year and whether it is calculated or estimated.
+    rationale: Optional[str] = None
+    volume: Optional[float] = None
+    saving: Optional[float] = None
+    saving_basis: Optional[str] = None
     # Mandatory — internal approval sets the release deadline (service enforces)
     release_due_date: Optional[NaiveUtcDatetime] = None
     release_due_reason: Optional[str] = None
@@ -462,6 +468,10 @@ class ChangeResponse(BaseModel):
     internal_approved_at: Optional[datetime] = None
     internal_approved_amount: Optional[float] = None
     internal_approval_note: Optional[str] = None
+    internal_rationale: Optional[str] = None
+    internal_volume: Optional[float] = None
+    internal_saving: Optional[float] = None
+    internal_saving_basis: Optional[str] = None
     rejected_at: Optional[datetime] = None
     rejection_sent_at: Optional[datetime] = None
     rejection_sent_by: Optional[int] = None

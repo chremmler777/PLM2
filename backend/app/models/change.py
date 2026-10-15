@@ -188,6 +188,13 @@ class ChangeRequest(Base):
     internal_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     internal_approved_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     internal_approval_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Spec §5 (migration 128): the internal approval's case. Why we spend it
+    # (INTERNAL_RATIONALES), the annual volume and saving it runs on, and
+    # whether the saving is calculated or estimated; payback is computed.
+    internal_rationale: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    internal_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    internal_saving: Mapped[float | None] = mapped_column(Float, nullable=True)
+    internal_saving_basis: Mapped[str | None] = mapped_column(String(12), nullable=True)
 
     # Task 18: Development owns the affected-items decision. Set together
     # by POST /impact/confirm; cleared together whenever the impacted-item set
@@ -895,6 +902,9 @@ CHECK_WHAT = ("drawing", "volume", "cycle_time", "weight", "tool", "material",
               "tolerance", "schedule", "other")
 # Who can answer a question (spec §3 "Make it a question").
 ANSWER_FROM = ("customer", "our_team", "supplier")
+# Why an internal change spends money (spec §5 internal approval).
+INTERNAL_RATIONALES = ("saving", "quality", "capacity", "safety", "maintenance", "other")
+SAVING_BASES = ("calculated", "estimate")
 # How a question was answered (spec §0 Answer form).
 ANSWER_KINDS = ("confirmed", "assumed")
 # How the owning department closes a check item in its assessment (spec §4).

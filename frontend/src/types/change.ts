@@ -279,6 +279,11 @@ export interface ChangeRequest {
   internal_approved_at?: string | null;
   internal_approved_amount?: number | null;
   internal_approval_note?: string | null;
+  /** Spec §5: the internal approval's case. */
+  internal_rationale?: string | null;
+  internal_volume?: number | null;
+  internal_saving?: number | null;
+  internal_saving_basis?: 'calculated' | 'estimate' | null;
   /**
    * What the Tool Engineer says the part will weigh, quoted during costing.
    * It is an estimate on purpose — the validated figure arrives later, and

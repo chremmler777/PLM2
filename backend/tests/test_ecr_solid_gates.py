@@ -345,7 +345,7 @@ async def test_internal_approval_waits_for_finalized_costing(
                         customer=False, raised_by=seed["engineer_id"])
     pm = people["Project Manager"][1]
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=pm)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=pm)
     assert r.status_code == 400  # NEGATIVE
     assert "Costing not finalized" in r.json()["detail"]
     lead = await login(client, "eng@test.io", admin=False)
@@ -353,7 +353,7 @@ async def test_internal_approval_waits_for_finalized_costing(
                           guard_key="costing_not_finalized")).json()
     assert (await _decide(client, pm, cid, dev["id"])).status_code == 200
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=pm)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=pm)
     assert r.status_code == 200, r.text
     r = await client.post(f"/api/v1/changes/{cid}/transition",
                           json={"to_status": "approved"}, headers=pm)
@@ -372,16 +372,16 @@ async def test_raiser_never_approves_own_internal_spend(
     cid = await _change(client, admin, seed, session_factory, "costing",
                         customer=False, raised_by=pm_id)
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=pm)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=pm)
     assert r.status_code == 403  # NEGATIVE: the raiser, although a PM member
     assert "raiser" in r.json()["detail"]
     cid2 = await _change(client, admin, seed, session_factory, "costing",
                          customer=False, raised_by=seed["admin_id"])
     r = await client.post(f"/api/v1/changes/{cid2}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=admin)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=admin)
     assert r.status_code == 403  # nor an admin who raised it
     r = await client.post(f"/api/v1/changes/{cid2}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=pm)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=pm)
     assert r.status_code == 200, r.text
 
 
@@ -392,14 +392,14 @@ async def test_configured_approver_replaces_the_pm_rule(
     cid = await _change(client, admin, seed, session_factory, "costing",
                         customer=False, raised_by=seed["engineer_id"])
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE},
+                          json={"release_due_date": _DUE, "rationale": "quality"},
                           headers=people["Project Manager"][1])
     assert r.status_code == 403  # NEGATIVE: PM is no approver once one is named
     ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
     item = next(i for i in ch["next_step"]["items"] if i["key"] == "internal_approval")
     assert item["kind"] == "hard" and item["who"] == "U Management"
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE},
+                          json={"release_due_date": _DUE, "rationale": "quality"},
                           headers=people["Management"][1])
     assert r.status_code == 200, r.text
 
@@ -621,10 +621,10 @@ async def test_approver_who_raised_the_change_falls_back_to_pm(
     assert st["can_approve_internal"] is True
     assert st["internal_approvers"] == "a Project Management member or an admin"
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=mgmt)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=mgmt)
     assert r.status_code == 403  # NEGATIVE: the raiser, although the approver
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE},
+                          json={"release_due_date": _DUE, "rationale": "quality"},
                           headers=people["Project Manager"][1])
     assert r.status_code == 200, r.text
 
@@ -936,7 +936,7 @@ async def test_internal_approval_switch_off_skips_the_costing_check(
     cid = await _change(client, admin, seed, session_factory, "costing",
                         customer=False, raised_by=seed["engineer_id"])
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE},
+                          json={"release_due_date": _DUE, "rationale": "quality"},
                           headers=people["Project Manager"][1])
     assert r.status_code == 200, r.text
 
@@ -1161,11 +1161,11 @@ async def test_internal_approver_acting_as_a_department_is_refused(
     cid = await _change(client, admin, seed, session_factory, "costing",
                         customer=False, raised_by=seed["engineer_id"])
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE},
+                          json={"release_due_date": _DUE, "rationale": "quality"},
                           headers={**admin, ACTS: str(depts["Project Manager"])})
     assert r.status_code == 403, r.text  # NEGATIVE
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                          json={"release_due_date": _DUE}, headers=admin)
+                          json={"release_due_date": _DUE, "rationale": "quality"}, headers=admin)
     assert r.status_code == 200, r.text
 
 

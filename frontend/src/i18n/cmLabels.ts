@@ -2856,6 +2856,23 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'basis.check.above': { de: 'darüber um', en: 'above by' },
   'basis.overBy': { de: 'Betrag', en: 'Amount' },
   'basis.above': { de: 'Angebot {x} über der Schätzung: Preis offen', en: 'Quote {x} above the estimate: price open' },
+  // --- spec §5 internal approval card -------------------------------------------
+  'internal.cost': { de: 'Kosten', en: 'Cost' },
+  'internal.estimateBanner': { de: 'Werkzeugkosten GESCHÄTZT: {x}', en: 'Tool cost ESTIMATE: {x}' },
+  'internal.why': { de: 'Warum geben wir das aus?', en: 'Why do we spend it?' },
+  'internal.pick': { de: 'Grund wählen …', en: 'Pick the reason…' },
+  'internal.rationale.saving': { de: 'Einsparung', en: 'Saving' },
+  'internal.rationale.quality': { de: 'Qualität', en: 'Quality' },
+  'internal.rationale.capacity': { de: 'Kapazität', en: 'Capacity' },
+  'internal.rationale.safety': { de: 'Sicherheit', en: 'Safety' },
+  'internal.rationale.maintenance': { de: 'Instandhaltung', en: 'Maintenance' },
+  'internal.rationale.other': { de: 'Sonstiges', en: 'Other' },
+  'internal.volume': { de: 'Stück pro Jahr', en: 'Volume (pcs/year)' },
+  'internal.saving': { de: 'Einsparung pro Jahr', en: 'Saving per year' },
+  'internal.basis.calculated': { de: 'berechnet', en: 'calculated' },
+  'internal.basis.estimate': { de: 'geschätzt', en: 'estimate' },
+  'internal.payback': { de: 'Amortisation', en: 'Payback' },
+  'internal.months': { de: '{n} Monate', en: '{n} months' },
   'verdict.noRefApply': { de: 'Für alle Nein ohne Referenz', en: 'Use for every No without one' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

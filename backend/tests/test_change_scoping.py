@@ -373,7 +373,8 @@ async def test_legacy_quoted_internal_change_approves_internally(
     res = await client.post(
         f"/api/v1/changes/{change['id']}/internal-approval",
         json={"release_due_date": (
-            datetime.utcnow() + timedelta(days=120)).isoformat()},
+            datetime.utcnow() + timedelta(days=120)).isoformat(),
+            "rationale": "quality"},
         headers=admin_auth)
     assert res.status_code == 200, res.text
     # F5: a second approval is refused.

@@ -879,7 +879,8 @@ async def test_internal_approval_freezes_the_plan(client, auth, seed, depts, ses
         ch.raised_by = seed["engineer_id"]  # HARD #8: never the raiser
         admin = await s.get(User, seed["admin_id"])
         await ChangeService.approve_internal_costs(
-            s, ch, admin, release_due_date=datetime(2027, 1, 31))
+            s, ch, admin, release_due_date=datetime(2027, 1, 31),
+            rationale="saving", volume=1000, saving=0, saving_basis="estimate")
         await s.commit()
         frozen = await PnlService.internal_frozen(s, [c["id"]])
         assert "revenue" in frozen[c["id"]] and "internal" in frozen[c["id"]]

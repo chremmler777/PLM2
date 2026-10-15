@@ -172,7 +172,8 @@ async def test_internal_branch_uses_approved_amount(session_factory, seed, pnl_d
         change = await session.get(ChangeRequest, pnl_data["internal_id"])
         change.raised_by = seed["engineer_id"]  # HARD #8: never the raiser
         await ChangeService.approve_internal_costs(
-            session, change, admin,
+            session, change, admin, rationale="saving", volume=1000, saving=0,
+            saving_basis="estimate",
             release_due_date=datetime.utcnow() + timedelta(days=120))
         await session.commit()
 

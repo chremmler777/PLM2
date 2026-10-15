@@ -473,12 +473,18 @@ export const changesApi = {
       .then((r) => r.data),
   approveInternalCosts: (
     id: number,
-    body: { note?: string | null; release_due_date?: string; release_due_reason?: string | null },
+    body: { note?: string | null; release_due_date?: string; release_due_reason?: string | null
+      /** Spec §5 approval card. */
+      rationale?: string; volume?: number; saving?: number; saving_basis?: 'calculated' | 'estimate' },
   ) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/internal-approval`, {
       note: body.note ?? null,
       release_due_date: body.release_due_date,
       release_due_reason: body.release_due_reason ?? null,
+      ...(body.rationale ? { rationale: body.rationale } : {}),
+      ...(body.volume != null ? { volume: body.volume } : {}),
+      ...(body.saving != null ? { saving: body.saving } : {}),
+      ...(body.saving_basis ? { saving_basis: body.saving_basis } : {}),
     }).then((r) => r.data),
 
   // The negotiation log at `quoted`: rounds in the order they happened, and the

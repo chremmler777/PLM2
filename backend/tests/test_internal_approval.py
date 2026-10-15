@@ -30,7 +30,7 @@ async def test_internal_approval_snapshots_amount_and_unblocks_approved(
     await advance_to_assessment(client, admin_auth, session_factory, change["id"])
     await to_costing(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={"note": "budget ok", "release_due_date": _RELEASE_DUE}, headers=admin_auth)
+                            json={"note": "budget ok", "release_due_date": _RELEASE_DUE, "rationale": "quality"}, headers=admin_auth)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["internal_approved_by"] == seed["admin_id"]
@@ -97,7 +97,7 @@ async def test_internal_approval_allows_pm_department_member(
     await to_costing(session_factory, change["id"], raised_by=seed["admin_id"])
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={"note": "pm approved", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
+                            json={"note": "pm approved", "release_due_date": _RELEASE_DUE, "rationale": "quality"}, headers=eng_auth)
     assert res.status_code == 200, res.text
     assert res.json()["internal_approved_by"] == seed["engineer_id"]
 
@@ -118,6 +118,7 @@ async def test_internal_approval_requires_release_deadline(
     due = (datetime.utcnow() + timedelta(days=30)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/internal-approval", json={
         "note": "ok", "release_due_date": due, "release_due_reason": "plant window",
+        "rationale": "quality",
     }, headers=admin_auth)
     assert res.status_code == 200, res.text
     body = res.json()

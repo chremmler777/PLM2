@@ -171,8 +171,17 @@ export const pmChapter: ContentChapter = {
         },
         {
           p:
-            'Closing costing freezes the numbers and hands the change to Sales. If a number has to ' +
+            'Closing costing freezes the numbers and hands the change to Sales: the Sales owner is ' +
+            'told "Ready to quote". If a number has to ' +
             'change later, "Reopen costing" asks "Which numbers have to change? (required, audited)".',
+        },
+        {
+          p:
+            'Internal change: the engineering approver (never the raiser) opens "Approve internal ' +
+            'costs". The card shows the cost and "Tool cost ESTIMATE" while a line is priced on an ' +
+            'estimate. Pick why we spend it; with money also the volume per year, the saving per year ' +
+            '(0 for a quality change) and whether it is calculated or an estimate. The payback in ' +
+            'months is computed. At no cost it is one click and the reason.',
         },
         { shot: 'pm-cost-summary', alt: 'The "Cost summary" card with "By department" totals and the "Timing" block showing "Longest lead time".' },
       ],
