@@ -441,7 +441,7 @@ async def quality_member(session_factory, offer_world):
 
 
 async def test_a_price_only_version_withdraws_the_pm_signature_only(
-        client, session_factory, seed, offer_world, quality_member):
+        client, session_factory, seed, offer_world, quality_member, monkeypatch):
     from app.models.notification import Notification
     cid, sales, pm, q, _ = await _signed_v1(client, session_factory, seed, offer_world)
     await _v2_with_discount(client, cid, sales, -5)
@@ -463,12 +463,19 @@ async def test_a_price_only_version_withdraws_the_pm_signature_only(
     assert any("Sign again for offer v2" in n.title for n in notes)
     # NEGATIVE: approval waits for the PM's new signature
     assert res.json()["status"] == "quoted"
+    # R34: the row reads the internal cost frozen at send, no costing summation
+    from app.services.offer_service import OfferService
+
+    async def _no_summation(*a, **k):
+        raise AssertionError("My Tasks ran a costing summation")
+    monkeypatch.setattr(OfferService, "_internal_cost", staticmethod(_no_summation))
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
     rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
     row = next(t for t in rows if t["kind"] == "sign_off" and t["change_id"] == cid)
     assert (row["side"], row["offer_version"], row["prev_version"]) == ("pm", 2, 1)
     assert row["offer_total"] > 0 and row["margin_delta_pts"] is not None
     assert row["assumed_open"] == 0
+    monkeypatch.undo()
     r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=pm)
     assert r.json()["status"] == "approved"
 

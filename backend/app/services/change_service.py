@@ -4398,6 +4398,7 @@ class ChangeService:
         signable = [c for c in open_changes if _signable(c)] \
             if (is_pm_member or is_quality) else []
         latest_by: dict = {}
+        prev_by: dict = {}
         if signable:
             from app.models.change_offer import ChangeOffer
             for o in (await db.execute(
@@ -4405,6 +4406,8 @@ class ChangeService:
                         ChangeOffer.change_id.in_([c.id for c in signable]),
                         ChangeOffer.sent_at.isnot(None))
                     .order_by(ChangeOffer.version))).scalars().all():
+                if o.change_id in latest_by:
+                    prev_by[o.change_id] = latest_by[o.change_id]
                 latest_by[o.change_id] = o      # by version: the last one wins
         for c in signable:
             latest = latest_by.get(c.id)
@@ -4438,7 +4441,8 @@ class ChangeService:
                 if side == "pm" and bound:
                     # spec §7 [R3]: the PM task starts with the total, the
                     # margin delta and the unconfirmed Assumed answers
-                    row.update(await ChangeService._pm_signoff_brief(db, c, latest))
+                    row.update(await ChangeService._pm_signoff_brief(
+                        db, c, latest, prev=prev_by.get(c.id), prev_known=True))
                 out.append(row)
 
         # HARD #8: the approver list is read once for the whole list
@@ -6855,11 +6859,13 @@ class ChangeService:
 
     @staticmethod
     async def _pm_signoff_brief(session: AsyncSession, change: ChangeRequest,
-                                latest) -> dict:
+                                latest, *, prev=None, prev_known: bool = False) -> dict:
         """What the PM signs (spec §7 [R3]): the offer total, its margin
         and the margin delta against the version sent before it (both on
-        today's internal cost), and the unconfirmed Assumed answers. PM
-        reads prices; Quality's row never carries them."""
+        the internal cost the latest version went out on; today's for a
+        version sent before that was frozen), and the unconfirmed Assumed
+        answers. PM reads prices; Quality's row never carries them. R34:
+        My Tasks passes the previous version it batched (prev_known)."""
         assumed = sum(1 for q in change.concerns
                       if q.answer_kind == "assumed" and q.confirmed_at is None
                       and q.withdrawn_at is None and q.retracted_at is None)
@@ -6867,19 +6873,22 @@ class ChangeService:
         if latest is None or latest.total_one_time is None:
             return out
         from app.models.change_offer import ChangeOffer
-        from app.services.offer_service import OfferService
-        internal = await OfferService._internal_cost(session, change)
+        from app.services.offer_service import SEND_KEY, OfferService
+        frozen = ((latest.data or {}).get(SEND_KEY) or {}).get("internal_cost")
+        internal = (float(frozen) if frozen is not None
+                    else await OfferService._internal_cost(session, change))
 
         def margin(total):
             total = float(total or 0)
             return round((total - internal) / total * 100.0, 1) if total else None
 
-        prev = (await session.execute(
-            select(ChangeOffer).where(
-                ChangeOffer.change_id == change.id,
-                ChangeOffer.version < latest.version,
-                ChangeOffer.sent_at.isnot(None))
-            .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
+        if not prev_known:
+            prev = (await session.execute(
+                select(ChangeOffer).where(
+                    ChangeOffer.change_id == change.id,
+                    ChangeOffer.version < latest.version,
+                    ChangeOffer.sent_at.isnot(None))
+                .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
         out.update(offer_total=float(latest.total_one_time),
                    offer_currency=latest.currency,
                    margin_pct=margin(latest.total_one_time))

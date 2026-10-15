@@ -839,9 +839,10 @@ class OfferService:
         return total
 
     @staticmethod
-    async def _store_totals(session, change, offer) -> dict:
-        totals = compute_totals(offer.data or {},
-                                await OfferService._internal_cost(session, change))
+    async def _store_totals(session, change, offer, internal: Optional[float] = None) -> dict:
+        if internal is None:
+            internal = await OfferService._internal_cost(session, change)
+        totals = compute_totals(offer.data or {}, internal)
         offer.total_one_time = totals["total_one_time"]
         offer.piece_price_delta = totals["piece_price_delta"]
         return totals
@@ -1125,7 +1126,8 @@ class OfferService:
                    risk_reason: Optional[str] = None) -> ChangeOffer:
         await OfferService._require_write(session, change, user)
         OfferService._require_draft(offer)
-        totals = await OfferService._store_totals(session, change, offer)
+        internal = await OfferService._internal_cost(session, change)
+        totals = await OfferService._store_totals(session, change, offer, internal)
         note = (change_note or offer.change_note or "").strip() or None
         supplement = offer.kind == "supplement"
         at_risk_offer = (change.start_at_risk_approved_at is not None
@@ -1213,6 +1215,9 @@ class OfferService:
                 data["free_fields"] = free + [{"label": line, "value": "", "amount": 0}]
         data[SNAPSHOT_KEY] = snapshot
         if listed is not None:
+            # R34: the internal cost the version went out on, so the PM's
+            # sign-off row reads its margin without a costing summation
+            listed["internal_cost"] = round(float(internal or 0.0), 2)
             data[SEND_KEY] = listed
         offer.data = data
         for prev in await OfferService.list_offers(session, change):
