@@ -82,6 +82,8 @@ TASK_KIND = {
                        "Betroffene Teile wählen und bestätigen"),
     "assessment": ("Assessment", "Bewertung"),
     "obtain_info": ("Answer the open question", "Offene Frage beantworten"),
+    "estimate_low": ("Quote above the estimate: supplement or absorb",
+                     "Angebot über Schätzung: Nachtrag oder übernehmen"),
     "close_question": ("Settle the answered question", "Beantwortete Frage abschließen"),
     "send_rejection": ("Send rejection letter", "Absage senden"),
     "costing_input": ("Costing input", "Kalkulationsbeitrag"),

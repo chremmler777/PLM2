@@ -4,6 +4,7 @@
  * factors sit on top, then the changeover, the piece-price effect and any free
  * items. The sum card on the right shows the server's arithmetic.
  */
+import { t } from '../../../i18n/cmLabels'
 import {
   factorShown,
   type OfferCostLine, type OfferData, type OfferFactor, type OfferFreeField, type OfferPiecePrice,
@@ -115,7 +116,12 @@ export default function OfferPriceSection({
                           onChange={(e) => setLine(i, { include: e.target.checked })}
                           className="accent-sky-500" />
                       </td>
-                      <td className="px-2 py-1.5 text-slate-100">{l.label}</td>
+                      <td className="px-2 py-1.5 text-slate-100">{l.label}
+                        {l.estimated && (
+                          <span data-testid={`offer-line-estimated-${l.key}`}
+                            className="ml-1.5 rounded bg-amber-900/60 px-1.5 text-[11px] text-amber-100">
+                            {t('basis.estimated')}</span>
+                        )}</td>
                       <td className="px-2 py-1.5 text-slate-400">{l.department ?? '-'}</td>
                       <td className="px-2 py-1.5">
                         <span className={`rounded border px-1.5 py-0 text-[11px] ${CATEGORY_CHIP[l.category] ?? CATEGORY_CHIP.other}`}>

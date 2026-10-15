@@ -39,6 +39,7 @@ import { toastError } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
+import { PositionBasis } from './costing/PositionBasis'
 import { machineClassOriginDetail, machineClassOriginText } from './machineClassOrigin'
 import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
 import { formatHours, formatMoney, formatNumber } from '../../lib/format'
@@ -621,9 +622,13 @@ function MachineSelect({ testId, value, classId, ctx, onChange }: {
 }
 
 /** A position row: reads as one line; edits in place; a quoted line opens its vendors. */
-function PositionRow({ changeId, position, editable, index, categories, onChanged, ctx }: {
+function PositionRow({ changeId, position, editable, index, categories, onChanged, ctx,
+  v2 = false, basisParts = [] }: {
   changeId: number; position: CostPosition; editable: boolean; index: number
   categories: CostCategory[]; onChanged: () => void; ctx?: CostingContext
+  /** ASSESSMENT_V2: the basis sub-row (spec §4, C25). */
+  v2?: boolean
+  basisParts?: { id: number; number: string }[]
 }) {
   const p = position
   const [editing, setEditing] = useState(false)
@@ -889,6 +894,15 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
               </ul>
             )}
             {editable && <NewOfferForm changeId={changeId} positionId={p.id} onAdded={onChanged} />}
+          </td>
+        </tr>
+      )}
+      {v2 && isExternal && (
+        <tr className="bg-slate-900/30">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
+            <PositionBasis changeId={changeId} position={p} editable={editable}
+              onChanged={onChanged} impactedParts={basisParts} />
           </td>
         </tr>
       )}
@@ -1370,8 +1384,12 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
 }
 
 export default function CostPositions({
-  changeId, departmentId, editable, departmentName, partWeightG,
+  changeId, departmentId, editable, departmentName, partWeightG, v2 = false, basisParts = [],
 }: {
+  /** ASSESSMENT_V2: every external line names its basis (spec §4, C25). */
+  v2?: boolean
+  /** Parts a "same as" basis may point at. */
+  basisParts?: { id: number; number: string }[]
   changeId: number
   departmentId: number
   /** The department's own members during costing (and PM). Everyone else reads. */
@@ -1481,6 +1499,7 @@ export default function CostPositions({
               </tr>
             ) : listed.map((p, i) => (
               <PositionRow key={p.id} changeId={changeId} position={p} categories={categories}
+                v2={v2} basisParts={basisParts}
                 editable={editable} index={standingCount + i + 1} onChanged={invalidate} ctx={ctx} />
             ))}
           </tbody>

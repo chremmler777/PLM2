@@ -712,6 +712,38 @@ Switch `ASSESSMENT_V2` (migration 126: `supplier_waits`).
   department is told, `task_new`, to finalize on its estimate); *Wait for
   FZ (3 Nov)* changes nothing.
 
+### Costing positions name their basis (ECR-solid §4, C25, 2026-10-15)
+Switch `ASSESSMENT_V2` (migration 127).
+- **Basis per line** (`costing_positions.basis`, served as the effective
+  basis): own time, machine time and sampling are *hours × the department
+  rate* (shown); an external line is a *vendor quote* or an *estimate* (+
+  its reference: an earlier tool, the supplier's figure and its date,
+  `basis_ref`) or *same as* a part (`basis_part_id`) + what differs (size,
+  cavities, material, slides; `basis_differs`). Positions of in-flight
+  changes keep `basis` NULL and read it from kind and pricing.
+- **Finalize** refuses (one sentence per kind, naming the lines): a quoted
+  line whose counted offer has no supplier quote number (`quote_ref`, 3+
+  characters) or no quote file (`vendor_quote` attachment on the offer), or
+  that has several full offers and no favourite; an estimate with money and
+  no basis that names something ("ok" refused); a pending quote-vs-estimate
+  check. Offers carry `quote_ref`, `quoted_on`, `valid_until` (not before
+  the quote date).
+- **"estimated"**: an external line priced on an estimate is marked on the
+  costing row and on the offer's cost basis lines (`estimated`), and the
+  internal approval says "Tool cost ESTIMATE" (§5).
+- **Quote vs your estimate** (spec [R4]): an offer with a quote number on a
+  position that had an estimate, after an offer went to the customer
+  (`quoted_at`) or the internal approval was given, marks the position
+  `estimate_check = pending`; the department answers, nothing preselected,
+  *within +5 %* or *above by x* (`POST /costing/positions/{id}/estimate-check`,
+  members, PM, admin). Above sets `price_open` (HARD #9 at close) and one
+  task: customer change, the Sales owner (Sales sees it) *"Estimate low by x:
+  send a supplement or absorb"*; internal, the approver and the lead *"Cost x
+  above the approved estimate: re-approve or absorb (reason)"* (task
+  `estimate_low`, told once `estimate_low:<position>`). Absorb (or the
+  customer's acceptance) clears `price_open` and the task. The automatic
+  comparison is cut 2.
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside

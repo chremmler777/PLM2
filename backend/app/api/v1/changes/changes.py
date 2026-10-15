@@ -49,7 +49,7 @@ from app.schemas.change import (
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
-    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, CheckCloseIn, CheckReopenIn, PpapDecisionIn, CustomerFlipAnswerIn,
+    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, CheckCloseIn, CheckReopenIn, EstimateCheckIn, PpapDecisionIn, CustomerFlipAnswerIn,
     RecheckAnswerIn, IndexScopeIn, IndexDeadlineIn, NeedByTellIn,
     ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
@@ -2566,6 +2566,34 @@ async def create_costing_offer(
     await db.refresh(position)
     return _offer_row(
         (await CostingPositionService.serialize(db, [position]))[0], offer.id)
+
+
+@router.post("/{change_id}/costing/positions/{pid}/estimate-check",
+             response_model=CostingPositionResponse)
+async def check_quote_against_estimate(
+    change_id: int, pid: int, body: EstimateCheckIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Spec §4 [R4]: the quote that came in after an offer or approval on
+    the estimate: within +5 % / above by x (the department, PM, admin)."""
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionForbidden, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        position = await CostingPositionService.get_position(db, change, pid)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        await CostingPositionService.estimate_check(
+            db, change, position, current_user, body.verdict, body.over)
+    except CostingPositionForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return (await CostingPositionService.serialize(db, [position]))[0]
 
 
 @router.put("/{change_id}/costing/offers/{oid}",

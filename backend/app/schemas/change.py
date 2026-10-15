@@ -899,6 +899,10 @@ class CostingOfferCreate(BaseModel):
     # Partial quote: part of the line, always counted. Default: a full quote,
     # one alternative among others.
     is_partial: bool = False
+    # C25: the supplier's quote number, its date and how long it holds.
+    quote_ref: Optional[str] = Field(default=None, max_length=120)
+    quoted_on: Optional[date] = None
+    valid_until: Optional[date] = None
 
 
 class CostingOfferUpdate(BaseModel):
@@ -912,6 +916,10 @@ class CostingOfferUpdate(BaseModel):
     lead_time_unit: Optional[str] = None
     favorite: Optional[bool] = None
     is_partial: Optional[bool] = None
+    # C25: the supplier's quote number, its date and how long it holds.
+    quote_ref: Optional[str] = Field(default=None, max_length=120)
+    quoted_on: Optional[date] = None
+    valid_until: Optional[date] = None
 
 
 class CostingOfferAttachment(BaseModel):
@@ -949,6 +957,9 @@ class CostingOfferResponse(BaseModel):
     chosen_by: Optional[int] = None
     chosen_by_name: Optional[str] = None
     chosen_at: Optional[datetime] = None
+    quote_ref: Optional[str] = None
+    quoted_on: Optional[date] = None
+    valid_until: Optional[date] = None
     created_by: int
     created_at: datetime
     attachments: List[CostingOfferAttachment] = []
@@ -985,6 +996,12 @@ class CostingPositionCreate(BaseModel):
     # A named MachineDB press (machine_time, sampling): its own cost sheet
     # rate beats the class rate.
     machine_id: Optional[int] = None
+    # Spec §4 (C25): what the number stands on. estimate: basis_ref (earlier
+    # tool, supplier figure + date); same_as: basis_part_id + basis_differs.
+    basis: Optional[str] = None
+    basis_ref: Optional[str] = Field(default=None, max_length=255)
+    basis_part_id: Optional[int] = None
+    basis_differs: Optional[str] = Field(default=None, max_length=2000)
 
 
 class CostingPositionUpdate(BaseModel):
@@ -1006,6 +1023,12 @@ class CostingPositionUpdate(BaseModel):
     # A named MachineDB press (machine_time, sampling): its own cost sheet
     # rate beats the class rate.
     machine_id: Optional[int] = None
+    # Spec §4 (C25): what the number stands on. estimate: basis_ref (earlier
+    # tool, supplier figure + date); same_as: basis_part_id + basis_differs.
+    basis: Optional[str] = None
+    basis_ref: Optional[str] = Field(default=None, max_length=255)
+    basis_part_id: Optional[int] = None
+    basis_differs: Optional[str] = Field(default=None, max_length=2000)
 
 
 class CostingPositionResponse(BaseModel):
@@ -1038,6 +1061,17 @@ class CostingPositionResponse(BaseModel):
     trials: Optional[int] = None
     machine_id: Optional[int] = None
     machine_name: Optional[str] = None
+    # Spec §4 (C25): the basis (rate | quote | same_as | estimate, read from
+    # kind and pricing when none was named), its reference, and the quote vs
+    # the estimate an offer or approval was given on.
+    basis: Optional[str] = None
+    basis_ref: Optional[str] = None
+    basis_part_id: Optional[int] = None
+    basis_part_number: Optional[str] = None
+    basis_differs: Optional[str] = None
+    estimated: bool = False
+    estimate_check: Optional[str] = None
+    estimate_over: Optional[float] = None
     machine_rate_own: bool = False
     # The rate the line is priced with (spec §15 phase 2): the snapshot taken
     # when it was costed. rate None + rate_missing = "No rate in the cost
@@ -1291,6 +1325,12 @@ class CheckCloseIn(BaseModel):
 
 class CheckReopenIn(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
+
+
+class EstimateCheckIn(BaseModel):
+    """Spec §4 [R4]: quote vs the estimate: within +5 % / above by x."""
+    verdict: str                      # within | above
+    over: Optional[float] = None      # above: by how much (money)
 
 
 class CostLeadTimeIn(BaseModel):

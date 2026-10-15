@@ -124,6 +124,7 @@ STAGE_TASK_TAB = {
     "publish_plan": "implementation", "progress_report": "implementation",
     "escalate_risk": "implementation", "update_quote": "implementation",
     "sign_off": "overview", "internal_approval": "commercial",
+    "estimate_low": "commercial",
     "validation_check": "release", "advance": "overview",
     "deviation_decision": "overview", "routing_deviation_decision": "assessments",
     "not_feasible": "overview",
@@ -3740,6 +3741,29 @@ class ChangeService:
                         **await _base(c), **item, "hint": item["label"],
                     })
 
+            # Spec §4 [R4]: a quote came in above the estimate an offer or
+            # the internal approval was given on: one task while the price is
+            # open (Sales: send a supplement or absorb; internal: the
+            # approver and the lead re-approve or absorb). Absorb clears it.
+            if c.price_open and cm_switches.on("ASSESSMENT_V2"):
+                over = [p for p in await ChangeService._positions_above(db, c)]
+                if over:
+                    mine = ((in_sales or c.sales_owner_id == user.id)
+                            if c.customer_relevant else
+                            (holds_lead(c, user) or user.id in set(
+                                await ChangeService.internal_approver_ids(db, c))))
+                    if mine:
+                        total = sum(p.estimate_over or 0 for p in over)
+                        tasks.append({
+                            **await _base(c), "kind": "estimate_low",
+                            "hint": (f"Estimate low by {total:.2f}: send a "
+                                     "supplement or absorb" if c.customer_relevant
+                                     else f"Cost {total:.2f} above the approved "
+                                     "estimate: re-approve or absorb (reason)"),
+                            "since": max((p.updated_at for p in over), default=None),
+                            "target_tab": "offer",
+                        })
+
             # Stage 9's one commercial errand: the sampled part came off the scale
             # at a different weight than the quote was built on. Not tied to a
             # status — the delta stays owed whether the change is still validating
@@ -4935,6 +4959,15 @@ class ChangeService:
         return a
 
     @staticmethod
+    async def _positions_above(session: AsyncSession, change: ChangeRequest) -> list:
+        """Positions whose quote came in above the estimate (spec §4 [R4])."""
+        from app.models.change_cost import CostingPosition
+        return list((await session.execute(
+            select(CostingPosition).where(
+                CostingPosition.change_id == change.id,
+                CostingPosition.estimate_check == "above"))).scalars().all())
+
+    @staticmethod
     def owes_costing_input(assessment: ChangeAssessment) -> bool:
         """Does this department still owe a number at costing?
 
@@ -5090,15 +5123,7 @@ class ChangeService:
         remark); impact no -> each No of the department's checklist carries
         its reference (checklist, drawing, report: `ref`). Junk ("ok",
         "checked") is refused like any evidence."""
-        from app.services.cm_rules import EMPTY_EVIDENCE, reference_refusal
-
-        def says_what(text: Optional[str]) -> bool:
-            """A reference, or a number with its unit ("+0.4 s")."""
-            v = (text or "").strip()
-            if not v or v.lower() in EMPTY_EVIDENCE:
-                return False
-            return reference_refusal(v) is None or (
-                any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
+        from app.services.cm_rules import says_what
 
         def name(e: dict) -> str:
             return (checklist.label_for(e["key"], dept_name) or e["key"]

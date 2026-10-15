@@ -334,6 +334,9 @@ export default function CostingBuckets({
                         waits={change.open_supplier_waits ?? []} editable={editable && !finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}
+                      v2={!!change.assessment_v2}
+                      basisParts={(change.impacted_items ?? []).map((i) => ({
+                        id: i.part_id, number: i.part_number ?? `#${i.part_id}` }))}
                       departmentName={deptName(id)}
                       partWeightG={change.estimated_part_weight_g}
                       editable={writable} />

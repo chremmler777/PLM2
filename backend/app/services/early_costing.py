@@ -237,6 +237,7 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
     if is_finalized(change, department_id):
         raise EarlyCostingError("The department's costing is already finalized")
     await _refuse_while_waiting(session, change, department_id)
+    await _refuse_thin_basis(session, change, department_id)
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
             "Nothing to finalize yet: enter hours or an amount on at least one "
@@ -271,6 +272,64 @@ async def _refuse_while_waiting(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError(
             f"{waits.line(w)}: close the wait when the quote is in, or the lead "
             "decides to price it on your estimate")
+
+
+async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
+                            department_id: int) -> None:
+    """Spec §4 costing positions (C25, ASSESSMENT_V2): every external number
+    stands on something. A quoted position finalizes only with its counted
+    offer(s) carrying the supplier's quote number and the quote file; an
+    estimated one names its reference (earlier tool, supplier figure +
+    date) or the part it is the same as and what differs; a quote that
+    arrived after an offer or approval on the estimate is compared with it
+    first."""
+    from app.models.change import ChangeAttachment
+    from app.models.change_cost import CostingPosition
+    from app.services import cm_switches
+    from app.services.cm_rules import says_what
+    if not cm_switches.on("ASSESSMENT_V2"):
+        return
+    positions = (await session.execute(
+        select(CostingPosition).where(
+            CostingPosition.change_id == change.id,
+            CostingPosition.department_id == department_id,
+            CostingPosition.kind == "external"))).scalars().all()
+    if not positions:
+        return
+    offer_ids = [o.id for p in positions for o in p.offers]
+    filed = set((await session.execute(
+        select(ChangeAttachment.costing_offer_id).where(
+            ChangeAttachment.costing_offer_id.in_(offer_ids)))).scalars().all()) \
+        if offer_ids else set()
+    quotes, estimates, checks = [], [], []
+    for p in positions:
+        if p.estimate_check == "pending":
+            checks.append(f"'{p.label}'")
+        if p.pricing == "quote":
+            counted = p.counted_offers(p.favorite_offer)
+            if not counted:
+                quotes.append(f"'{p.label}' (no offer, or no favourite among several)")
+            for o in counted:
+                if len((o.quote_ref or "").strip()) < 3 or o.id not in filed:
+                    quotes.append(f"'{p.label}' ({o.vendor_name}: quote number and file)")
+        elif p.est_cost:
+            ok = (p.basis_part_id is not None and len(p.basis_differs or "") >= 5
+                  if p.basis == "same_as" else says_what(p.basis_ref))
+            if not ok:
+                estimates.append(f"'{p.label}'")
+    why = []
+    if quotes:
+        why.append("Quoted positions need the supplier's quote number and the "
+                   "quote file on the offer: " + ", ".join(quotes))
+    if estimates:
+        why.append("Estimated positions need their basis: the reference (an "
+                   "earlier tool, the supplier's figure and its date) or 'same "
+                   "as' a part and what differs: " + ", ".join(estimates))
+    if checks:
+        why.append("Compare the quote with your estimate first (within +5 % or "
+                   "above by how much): " + ", ".join(checks))
+    if why:
+        raise EarlyCostingError(". ".join(why))
 
 
 #: Spec §4 "<Dept> has no cost" (C18): why a department that owes a costing

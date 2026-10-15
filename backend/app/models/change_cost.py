@@ -39,6 +39,10 @@ _STANDING_WHERE = text("kind IN ('internal_effort', 'support_effort')")
 # so the column never has to be read conditionally, but only external positions
 # are allowed to say "quote".
 COSTING_PRICINGS = ("estimate", "quote")
+# Spec §4: what a position's number stands on. rate: hours x the department
+# rate; quote: a supplier's quote (quote_ref + file); same_as: an earlier part
+# + what differs; estimate: a house number + its reference.
+COSTING_BASES = ("rate", "quote", "same_as", "estimate")
 # What "30 days" means. A tool shop quotes working days; a planning board
 # usually means the calendar. Rolling the two up together understates the
 # timeline, so the unit is recorded rather than assumed.
@@ -194,11 +198,42 @@ class CostingPosition(Base):
     rate_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     rate_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Spec §4 costing positions (C25, migration 127): the basis of the
+    # number (COSTING_BASES; NULL legacy = read from kind and pricing), its
+    # reference (estimate: earlier tool, supplier figure + date), the part it
+    # is the same as and what differs; and, once an offer was sent or the
+    # internal approval given on an estimate, how the quote compares
+    # (estimate_check pending | within | above, estimate_over = by how much).
+    basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    basis_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    basis_part_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parts.id"), nullable=True)
+    basis_differs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    estimate_check: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    estimate_over: Mapped[float | None] = mapped_column(
+        Numeric(14, 2, asdecimal=False), nullable=True)
+
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def effective_basis(self) -> str:
+        """The basis, read from kind and pricing where none was named."""
+        if self.kind != "external":
+            return "rate"
+        if self.pricing == "quote":
+            return "quote"
+        return self.basis if self.basis in ("same_as", "estimate") else "estimate"
+
+    @property
+    def estimated(self) -> bool:
+        """Shown as 'estimated' on the offer and the approval (spec §4): an
+        external line priced on an estimate with money on it."""
+        return (self.kind == "external" and self.pricing != "quote"
+                and bool(self.est_cost))
 
     offers: Mapped[list["CostingOffer"]] = relationship(
         back_populates="position", cascade="all, delete-orphan",
@@ -403,6 +438,11 @@ class CostingOffer(Base):
     chosen_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     chosen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # C25 (migration 127): the supplier's quote number, its date, how long it
+    # holds. A quoted position finalizes only with a quote_ref and a file.
+    quote_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    quoted_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valid_until: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(

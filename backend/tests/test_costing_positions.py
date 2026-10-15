@@ -597,7 +597,8 @@ async def test_the_costing_input_task_disappears_for_a_nothing_impacted_departme
 
 async def test_a_position_answers_the_costing_queue(
         client, admin_auth, costing):
-    await _add_position(client, admin_auth, costing, est_cost=42.0)
+    await _add_position(client, admin_auth, costing, est_cost=42.0,
+                        basis_ref="Hasco figure 12 Oct 2026")
     # A position is a finalizable answer like a line (per-department
     # pipeline: the queue clears on finalize, not on the first entry).
     res = await client.post(

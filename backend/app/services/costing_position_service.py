@@ -14,13 +14,15 @@ accountable for the change as a whole see every department's positions, a
 department sees its own.
 """
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeAssessment, ChangeAttachment, ChangeRequest
 from app.models.change_cost import (
-    COSTING_POSITION_KINDS, COSTING_PRICINGS, LEAD_TIME_UNITS, STANDING_KINDS,
+    COSTING_BASES, COSTING_POSITION_KINDS, COSTING_PRICINGS, LEAD_TIME_UNITS,
+    STANDING_KINDS,
     CostingOffer, CostingPosition,
 )
 from app.models.entities import User
@@ -35,9 +37,15 @@ class CostingPositionError(ValueError):
 # no record of it — delete and re-add instead.
 _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
                     "hours", "lead_time_days", "lead_time_unit", "notes",
-                    "labour_position", "machine_class_id", "trials", "machine_id")
+                    "labour_position", "machine_class_id", "trials", "machine_id",
+                    "basis", "basis_ref", "basis_part_id", "basis_differs")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
-                 "lead_time_days", "lead_time_unit", "favorite", "is_partial")
+                 "lead_time_days", "lead_time_unit", "favorite", "is_partial",
+                 "quote_ref", "quoted_on", "valid_until")
+
+
+class CostingPositionForbidden(CostingPositionError):
+    """A costing act the caller has no right to: 403."""
 
 
 class CostingPositionService:
@@ -221,6 +229,12 @@ class CostingPositionService:
             if change is not None:
                 pricing.update(await costing_rates.describe_positions(
                     session, change, rows))
+        basis_parts = {p.basis_part_id for p in positions if p.basis_part_id}
+        part_numbers: dict[int, str] = {}
+        if basis_parts:
+            from app.models.part import Part
+            part_numbers = dict((await session.execute(
+                select(Part.id, Part.part_number).where(Part.id.in_(basis_parts)))).all())
         out = []
         for p in positions:
             # Two different questions, two different properties:
@@ -240,6 +254,11 @@ class CostingPositionService:
                 "machine_class_id": p.machine_class_id, "trials": p.trials,
                 "machine_id": p.machine_id,
                 **pricing.get(p.id, {}),
+                "basis": p.effective_basis, "basis_ref": p.basis_ref,
+                "basis_part_id": p.basis_part_id,
+                "basis_part_number": part_numbers.get(p.basis_part_id),
+                "basis_differs": p.basis_differs, "estimated": p.estimated,
+                "estimate_check": p.estimate_check, "estimate_over": p.estimate_over,
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,
                 "created_by": p.created_by, "created_at": p.created_at,
@@ -286,6 +305,8 @@ class CostingPositionService:
                     "chosen_by_name": choosers.get(o.chosen_by),
                     "chosen_at": o.chosen_at,
                     "created_by": o.created_by, "created_at": o.created_at,
+                    "quote_ref": o.quote_ref, "quoted_on": o.quoted_on,
+                    "valid_until": o.valid_until,
                     "attachments": docs.get(o.id, []),
                 } for o in p.offers],
             })
@@ -356,6 +377,24 @@ class CostingPositionService:
             position.machine_id = None
         if position.kind != "sampling":
             position.trials = None
+        # Spec §4 basis: own time is hours x the rate, a quoted line stands on
+        # its quote; an estimated external line is an estimate (+ reference)
+        # or "same as" a part (+ what differs). Normalised, not refused.
+        if position.basis is not None and position.basis not in COSTING_BASES:
+            raise CostingPositionError(
+                f"Invalid basis '{position.basis}': rate, quote, same_as or estimate")
+        if position.kind != "external":
+            position.basis = "rate"
+        elif position.pricing == "quote":
+            position.basis = "quote"
+        elif position.basis in ("rate", "quote"):
+            position.basis = None
+        if position.basis != "same_as":
+            position.basis_part_id = None
+            position.basis_differs = None
+        for f in ("basis_ref", "basis_differs"):
+            v = getattr(position, f)
+            setattr(position, f, (v or "").strip() or None)
 
     @staticmethod
     async def _check_machine_class(session: AsyncSession, change: ChangeRequest,
@@ -399,6 +438,9 @@ class CostingPositionService:
         # offer to 'part' simply drops the star.
         if offer.is_partial:
             offer.favorite = False
+        if (offer.quoted_on is not None and offer.valid_until is not None
+                and offer.valid_until < offer.quoted_on):
+            raise CostingPositionError("Valid until: on or after the quote date")
 
     # ------------------------------------------------------------------
     # Writes
@@ -455,6 +497,9 @@ class CostingPositionService:
             machine_class_id=spec.get("machine_class_id"),
             machine_id=spec.get("machine_id"),
             trials=spec.get("trials"),
+            basis=spec.get("basis"), basis_ref=spec.get("basis_ref"),
+            basis_part_id=spec.get("basis_part_id"),
+            basis_differs=spec.get("basis_differs"),
         )
         CostingPositionService._validate(position)
         await CostingPositionService._check_machine_class(session, change, position)
@@ -568,11 +613,14 @@ class CostingPositionService:
             lead_time_unit=spec.get("lead_time_unit") or "calendar_days",
             favorite=bool(spec.get("favorite") or False),
             is_partial=bool(spec.get("is_partial") or False),
+            quote_ref=(spec.get("quote_ref") or "").strip() or None,
+            quoted_on=spec.get("quoted_on"), valid_until=spec.get("valid_until"),
             created_by=actor.id,
         )
         CostingPositionService._validate_offer(offer, position)
         session.add(offer)
         await session.flush()
+        CostingPositionService._quote_after_commit(change, position, offer)
         if offer.favorite:
             await CostingPositionService._clear_other_favorites(
                 session, position, offer)
@@ -601,6 +649,7 @@ class CostingPositionService:
             offer.vendor_name = offer.vendor_name.strip()
         CostingPositionService._validate_offer(offer, position)
         await session.flush()
+        CostingPositionService._quote_after_commit(change, position, offer)
         if offer.favorite:
             await CostingPositionService._clear_other_favorites(
                 session, position, offer)
@@ -718,6 +767,78 @@ class CostingPositionService:
         return offer
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _quote_after_commit(change: ChangeRequest, position: CostingPosition,
+                            offer: CostingOffer) -> None:
+        """Spec §4 [R4]: an estimated position gets its supplier quote (an
+        offer with a quote number) after an offer went to the customer or
+        the internal approval was given on the estimate: the department
+        compares it with its estimate before it finalizes (pending)."""
+        from app.services import cm_switches
+        if (cm_switches.on("ASSESSMENT_V2") and position.estimate_check is None
+                and position.est_cost and (offer.quote_ref or "").strip()
+                and (change.quoted_at is not None
+                     or change.internal_approved_at is not None)):
+            position.estimate_check = "pending"
+
+    @staticmethod
+    async def estimate_check(session: AsyncSession, change: ChangeRequest,
+                             position: CostingPosition, actor: User,
+                             verdict: str, over: Optional[float] = None
+                             ) -> CostingPosition:
+        """Spec §4 [R4] "Quote vs your estimate: within +5 % / above by x",
+        nothing preselected. Above: the price is open again (price_open,
+        HARD #9 at close) and one task goes out: a customer change to Sales
+        ("Estimate low by x: send supplement or absorb"), an internal one to
+        the approver and the lead ("re-approve or absorb"). The Absorb (or
+        the customer's acceptance of a supplement) clears it."""
+        from app.services import cm_switches
+        from app.services.change_service import ChangeService
+        from app.services.early_costing import _may_act
+        if not cm_switches.on("ASSESSMENT_V2"):
+            raise CostingPositionError("The estimate check is switched off (ASSESSMENT_V2)")
+        if not await _may_act(session, change, position.department_id, actor):
+            raise CostingPositionForbidden(
+                "Only a member of that department, Project Management or an "
+                "admin compares its quote with its estimate")
+        if position.estimate_check != "pending":
+            raise CostingPositionError(
+                "Nothing to compare: no quote came in on an estimate an offer "
+                "or approval was given on")
+        if verdict not in ("within", "above"):
+            raise CostingPositionError("Say how the quote compares: within or above")
+        if verdict == "above" and not (over and over > 0):
+            raise CostingPositionError("Above: by how much (the amount over the estimate)")
+        position.estimate_check = verdict
+        position.estimate_over = float(over) if verdict == "above" else None
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "estimate_checked",
+            f"Quote vs estimate on '{position.label}': "
+            + ("within +5 %" if verdict == "within" else f"above by {float(over):.2f}"),
+            actor.id, new_value={"position_id": position.id, "verdict": verdict,
+                                 "over": position.estimate_over},
+            for_department_id=position.department_id)
+        if verdict == "above":
+            change.price_open = True
+            await session.flush()
+            from app.services.notification_service import NotificationService
+            if change.customer_relevant:
+                ids = ([change.sales_owner_id] if change.sales_owner_id else [])
+                title = (f"Estimate low by {float(over):.2f}: send supplement or "
+                         f"absorb: {change.change_number}")
+            else:
+                ids = list(await ChangeService.internal_approver_ids(session, change))
+                ids += [change.lead_id] if change.lead_id else []
+                title = (f"Cost {float(over):.2f} above the approved estimate: "
+                         f"re-approve or absorb: {change.change_number}")
+            await NotificationService.notify_once(
+                session, [i for i in ids if i and i != actor.id], kind="task_new",
+                subject_key=f"estimate_low:{position.id}", title=title[:255],
+                body=f"'{position.label}' was estimated at {position.est_cost:.2f}.",
+                link=f"/changes/{change.id}?tab=offer")
+        return position
+
     @staticmethod
     async def _clear_other_favorites(
         session: AsyncSession, position: CostingPosition, keep: CostingOffer,

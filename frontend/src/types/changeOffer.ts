@@ -23,6 +23,8 @@ export interface OfferCostLine {
   category: CostLineCategory
   amount: number
   source_amount?: number | null
+  /** Spec §4 (C25): priced on an estimate, not a supplier's quote. */
+  estimated?: boolean
   include: boolean
   /** Where the customer reads this line in the CBD (Engineering, Tooling,
    *  Sampling and trials, Machine time, Supplier parts, Other), when the

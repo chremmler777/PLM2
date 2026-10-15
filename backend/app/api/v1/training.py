@@ -974,6 +974,8 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     # spec §4: "<Dept> has no cost" (C18), waiting on a supplier
     ("POST", "/changes/{change_id}/costing/departments/{department_id}/no-cost"),
     ("POST", "/changes/{change_id}/supplier-waits"),
+    # spec §4 [R4]: quote vs the estimate an offer / approval was given on
+    ("POST", "/changes/{change_id}/costing/positions/{pid}/estimate-check"),
     ("POST", "/changes/{change_id}/supplier-waits/{wait_id}/close"),
     ("PUT", "/changes/{change_id}/scope-definition"),
     ("POST", "/changes/{change_id}/actual-costs"),

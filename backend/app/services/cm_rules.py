@@ -189,3 +189,14 @@ def reference_refusal(text: Optional[str], what: str = "A reference",
         return (f"{what}: '{value}' says nothing. Name the evidence (at least "
                 f"5 characters: a number, a date or a few words), e.g. {example}")
     return None
+
+
+def says_what(text: Optional[str]) -> bool:
+    """Evidence in words (spec §0, §4): a reference that names something
+    (reference_refusal passes) or a number with its unit ("+0.4 s").
+    "ok", "checked" and the like say nothing."""
+    v = (text or "").strip()
+    if not v or v.lower() in EMPTY_EVIDENCE:
+        return False
+    return reference_refusal(v) is None or (
+        any(c.isdigit() for c in v) and any(c.isalpha() for c in v))

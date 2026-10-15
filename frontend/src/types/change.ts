@@ -982,12 +982,26 @@ export interface CostingOffer {
   chosen_by_name?: string | null;
   chosen_at?: string | null;
   attachments?: Attachment[];
+  /** C25: the supplier's quote number, its date, how long it holds. */
+  quote_ref?: string | null;
+  quoted_on?: string | null;
+  valid_until?: string | null;
 }
 
 export interface CostPosition {
   id: number;
   department_id: number;
   label: string;
+  /** Spec §4 (C25): what the number stands on, its reference, "estimated",
+   *  and the quote vs the estimate an offer / approval was given on. */
+  basis?: CostBasis | null;
+  basis_ref?: string | null;
+  basis_part_id?: number | null;
+  basis_part_number?: string | null;
+  basis_differs?: string | null;
+  estimated?: boolean;
+  estimate_check?: 'pending' | 'within' | 'above' | null;
+  estimate_over?: number | null;
   /** A key from the costing-tags reference, or a free-text word. */
   tag?: string | null;
   kind: CostPositionKind;
@@ -1126,11 +1140,22 @@ export interface CostPositionIn {
   machine_class_id?: number | null;
   machine_id?: number | null;
   trials?: number | null;
+  /** Spec §4 (C25): what the number stands on. */
+  basis?: CostBasis | null;
+  basis_ref?: string | null;
+  basis_part_id?: number | null;
+  basis_differs?: string | null;
 }
+
+export type CostBasis = 'rate' | 'quote' | 'same_as' | 'estimate'
 
 export interface CostingOfferIn {
   vendor_name: string;
   cost: number;
+  /** C25: the supplier's quote number, its date, how long it holds. */
+  quote_ref?: string | null;
+  quoted_on?: string | null;
+  valid_until?: string | null;
   is_partial?: boolean;
   shipping_cost?: number | null;
   shipping_included?: boolean;

@@ -737,6 +737,8 @@ class OfferService:
             line(f"pos:{p.id}", p.label + (f" ({vendor})" if vendor else ""),
                  dname, "external", p.quoted_cost,
                  customer_category_for_external(names.get(p.department_id)))
+            # spec §4 (C25): an estimate shows as "estimated" on the offer
+            lines[-1]["estimated"] = p.estimated
         return lines, float(summ["totals"]["grand_total"] or 0.0)
 
     @staticmethod
