@@ -56,6 +56,8 @@ export interface Intake {
   phase_route?: IntakeRoute | null;
   /** The newest live change whose impacted set holds the part. */
   live_change?: LiveChange | null;
+  /** Every other live change carrying the part (their leads are told). */
+  other_live_changes?: { id: number; change_number: string; status: string; lead_name?: string | null }[];
   what_changed?: string[];
   what_changed_ref?: string | null;
   no_change_reason?: string | null;

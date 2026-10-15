@@ -296,12 +296,12 @@ class RevisionIntakeService:
         return waiting
 
     @staticmethod
-    async def live_change_for_part(session: AsyncSession, part_id: int,
-                                   project_id: Optional[int] = None,
-                                   exclude_id: Optional[int] = None) -> Optional[ChangeRequest]:
-        """The newest live change (not released, closed, cancelled or
-        rejected) whose impacted set holds the part: triage suggests
-        attaching to it (spec §1)."""
+    async def live_changes_for_part(session: AsyncSession, part_id: int,
+                                    project_id: Optional[int] = None,
+                                    exclude_id: Optional[int] = None) -> list[ChangeRequest]:
+        """Every live change (not released, closed, cancelled or rejected)
+        whose impacted set holds the part, newest first: triage names them
+        all (spec §1), so none of them goes on with an old index unseen."""
         q = (select(ChangeRequest)
              .join(ChangeImpactedItem, ChangeImpactedItem.change_id == ChangeRequest.id)
              .where(ChangeImpactedItem.part_id == part_id,
@@ -311,23 +311,61 @@ class RevisionIntakeService:
             q = q.where(ChangeRequest.project_id == project_id)
         if exclude_id is not None:
             q = q.where(ChangeRequest.id != exclude_id)
-        return (await session.execute(
-            q.order_by(ChangeRequest.id.desc()).limit(1))).scalars().first()
+        return list(dict.fromkeys((await session.execute(
+            q.order_by(ChangeRequest.id.desc()))).scalars().all()))
 
     @staticmethod
-    async def suggestion(session: AsyncSession, intake: RevisionIntake
+    async def live_change_for_part(session: AsyncSession, part_id: int,
+                                   project_id: Optional[int] = None,
+                                   exclude_id: Optional[int] = None) -> Optional[ChangeRequest]:
+        """The newest live change whose impacted set holds the part."""
+        lives = await RevisionIntakeService.live_changes_for_part(
+            session, part_id, project_id, exclude_id)
+        return lives[0] if lives else None
+
+    @staticmethod
+    async def suggestion(session: AsyncSession, intake: RevisionIntake,
+                         lives: Optional[list[ChangeRequest]] = None,
                          ) -> tuple[Optional[str], Optional[ChangeRequest]]:
         """(suggested route, the live change carrying the part): with
-        SCOPING_V2 a live change that can still take the index makes
-        attach_ecr the suggestion; else the phase rule's route."""
+        SCOPING_V2 the newest live change that can still take the index
+        makes attach_ecr the suggestion; else the phase rule's route (and
+        the newest live change, named)."""
         if not _v2():
             return intake.suggested_route, None
-        live = await RevisionIntakeService.live_change_for_part(
-            session, intake.part_id, intake.project_id,
-            exclude_id=intake.change_id if intake.status == "decided" else None)
-        if live is not None and live.status not in ATTACH_REFUSED:
-            return "attach_ecr", live
-        return intake.suggested_route, live
+        if lives is None:
+            lives = await RevisionIntakeService.live_changes_for_part(
+                session, intake.part_id, intake.project_id,
+                exclude_id=intake.change_id if intake.status == "decided" else None)
+        attachable = next((c for c in lives if c.status not in ATTACH_REFUSED), None)
+        if attachable is not None:
+            return "attach_ecr", attachable
+        return intake.suggested_route, (lives[0] if lives else None)
+
+    @staticmethod
+    async def _tell_other_live_changes(session: AsyncSession, intake: RevisionIntake,
+                                       part: Part, rev: PartRevision,
+                                       target: Optional[ChangeRequest], user_id: int) -> None:
+        """The other live changes carrying the part (not the one the index
+        went to): their leads are told once, so a quote or costing built on
+        the old index is checked (spec §1, involved people only)."""
+        from app.services.notification_service import NotificationService
+        others = [c for c in await RevisionIntakeService.live_changes_for_part(
+            session, intake.part_id, intake.project_id)
+            if target is None or c.id != target.id]
+        for c in others:
+            if c.lead_id is None or c.lead_id == user_id:
+                continue
+            where = f" went to {target.change_number}" if target is not None else " was triaged"
+            await NotificationService.notify_once(
+                session, [c.lead_id], kind="index_other_change",
+                subject_key=f"index_other:{intake.id}:{c.id}",
+                title=(f"New index {rev.revision_name} of {part.part_number}: "
+                       f"check {c.change_number}")[:255],
+                body=(f"Index {rev.revision_name} of {part.part_number}{where}. "
+                      f"{c.change_number} ({c.status}) also carries the part: check "
+                      "whether its assessment, costing or offer still holds."),
+                link=f"/changes/{c.id}")
 
     @staticmethod
     async def create(session: AsyncSession, part: Part, revision: PartRevision,
@@ -600,6 +638,9 @@ class RevisionIntakeService:
         intake.decided_at = datetime.utcnow()
         intake.change_id = change.id if change is not None else None
         await session.flush()
+        if v2 and route != "administrative":
+            await RevisionIntakeService._tell_other_live_changes(
+                session, intake, part, rev, change, user.id)
         # Project team (spec §18): a Development backup triaging for the
         # project's Development responsible is recorded as "<backup> for <main>".
         from app.services.project_team_service import ProjectTeamService
@@ -826,6 +867,13 @@ class RevisionIntakeService:
         if _v2():
             await RevisionIntakeService._hand_over(session, change, intake, part, rev,
                                                    user, related)
+            # C9 (spec §1): handed over: the lead schedules scoping while
+            # Sales sets the quote deadline (an incomplete capture is logged,
+            # not overridden; the deadline is owed before assessment; no lead
+            # yet: Project Management's scoping row picks one)
+            await ChangeService.transition(
+                session, change, "scoping", user.id,
+                logged_rules=("capture_incomplete",))
         return change
 
     @staticmethod
@@ -983,10 +1031,17 @@ class RevisionIntakeService:
         retriage = (intake.status == "decided" and intake.activated_at is None
                     and intake.change_id is not None and _change_is_dead(change))
         needs_triage = intake.status == "pending" or retriage
-        suggested, live = intake.suggested_route, None
+        suggested, live, others = intake.suggested_route, None, []
         if needs_triage:
-            # spec §1: a live change carrying the part is the suggestion
-            suggested, live = await RevisionIntakeService.suggestion(session, intake)
+            # spec §1: a live change carrying the part is the suggestion; the
+            # others carrying it are named too
+            lives = (await RevisionIntakeService.live_changes_for_part(
+                session, intake.part_id, intake.project_id,
+                exclude_id=intake.change_id if intake.status == "decided" else None)
+                if _v2() else [])
+            suggested, live = await RevisionIntakeService.suggestion(
+                session, intake, lives)
+            others = [c for c in lives if live is None or c.id != live.id]
         return {
             "id": intake.id,
             "part_id": intake.part_id,
@@ -1019,6 +1074,12 @@ class RevisionIntakeService:
                 "customer_relevant": live.customer_relevant,
                 "attachable": live.status not in ATTACH_REFUSED,
             } if live is not None else None),
+            # every other live change carrying the part (their leads are told
+            # at triage)
+            "other_live_changes": [{
+                "id": c.id, "change_number": c.change_number, "status": c.status,
+                "lead_name": c.lead_name,
+            } for c in others],
             "what_changed": intake.what_changed or [],
             "what_changed_ref": intake.what_changed_ref,
             "no_change_reason": intake.no_change_reason,

@@ -403,3 +403,90 @@ async def test_attach_to_an_internal_change_asks_customer_driven(
         change = await s.get(ChangeRequest, cid)
         assert change.customer_relevant is True and change.customer_flip_at is not None
         assert change.sales_owner_id == world["users"]["sales"]
+
+
+# ----------------------------------------------------------------------
+# L4 review: handed over, effect in quoting, every live change, the lead's row
+# ----------------------------------------------------------------------
+async def test_full_ecr_is_handed_over_to_scoping_and_sales_sets_the_deadline(
+        client, session_factory, world):
+    """C9: the new change goes to scoping (the incomplete capture logged,
+    not overridden) so the lead scopes while Sales sets the quote deadline."""
+    await _team(session_factory, world)
+    await _receive(client, world["part_id"], statement="official")
+    i = await _intake(client, world["part_id"])
+    r = await _decide_v2(client, i["id"], "full_ecr")
+    assert r.status_code == 200, r.text
+    cid = r.json()["change_id"]
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        assert change.status == "scoping" and change.required_by_date is None
+        logged = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "handover_logged"))).scalars().all()
+        assert len(logged) == 1 and "quote deadline" in logged[0].action_description
+    rows = await _tasks(client, "sales", "set_quote_deadline", cid)
+    assert len(rows) == 1
+
+
+async def test_an_effect_while_quoting_reopens_costing(client, session_factory, world):
+    """Before the offer is sent (quoting) an effect reopens the department's
+    costing: the change steps back to costing, no scope change."""
+    cid = await _change_carrying(session_factory, world, "quoting",
+                                 routed=("Tool Engineer",), finalized=("Tool Engineer",))
+    await _attach_new_index(client, world, cid, what_changed=["tolerance"])
+    rid = (await _followups(client, cid))[0]["rechecks"][0]["id"]
+    r = await client.post(f"{API}/changes/{cid}/rechecks/{rid}/answer", json={
+        "answers": [{"area": "tolerance", "effect": True, "what": "Tighter flatness 0.2",
+                     "evidence": "Drawing D zone C4"}]}, headers=await _auth(client, "tool"))
+    assert r.status_code == 200, r.text
+    from app.services import early_costing
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await s.refresh(change, ["assessments"])
+        assert change.status == "costing"
+        assert not change.scope_changed_after_quote
+        assert not early_costing.is_finalized(change, world["depts"]["Tool Engineer"])
+
+
+async def test_every_live_change_on_the_part_is_named_and_its_lead_told(
+        client, session_factory, world):
+    older = await _change_carrying(session_factory, world, "quoted", routed=())
+    newer = await _change_carrying(session_factory, world, "costing", routed=())
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, older)).lead_id = world["users"]["pack"]
+        await s.commit()
+    await _receive(client, world["part_id"], statement="official")
+    i = await _intake(client, world["part_id"])
+    assert i["live_change"]["id"] == newer
+    assert [c["id"] for c in i["other_live_changes"]] == [older]
+    r = await _decide_v2(client, i["id"], "attach_ecr", change_id=newer)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        notes = (await s.execute(select(Notification).where(
+            Notification.user_id == world["users"]["pack"],
+            Notification.kind == "index_other_change"))).scalars().all()
+    assert len(notes) == 1 and "check" in notes[0].title
+
+
+async def test_lead_question_on_an_index_attached_in_scoping_starts_at_proceed(
+        client, session_factory, world):
+    """Attached during scoping, the lead's question is owed from the entry
+    into assessment: not overdue at birth, and it names the new index."""
+    from datetime import timedelta
+    cid = await _change_carrying(session_factory, world, "scoping", routed=())
+    i = await _attach_new_index(client, world, cid)
+    async with session_factory() as s:
+        intake = await s.get(RevisionIntake, i["id"])
+        intake.decided_at = datetime.utcnow() - timedelta(days=20)
+        change = await s.get(ChangeRequest, cid)
+        change.status = "in_assessment"
+        s.add(ChangeChangelog(change_id=cid, action="status_changed", field_name="status",
+                              old_value='"scoping"', new_value='"in_assessment"',
+                              action_description="scoping -> in_assessment",
+                              performed_by=world["seed"]["admin_id"],
+                              performed_at=datetime.utcnow()))
+        await s.commit()
+    rows = await _tasks(client, "admin", "index_decision", cid)
+    assert len(rows) == 1 and rows[0]["overdue"] is False
+    assert "->" in rows[0]["reason"] and "index" not in rows[0]["reason"].split("->")[1]

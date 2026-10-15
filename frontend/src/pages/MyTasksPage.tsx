@@ -264,7 +264,7 @@ const TASK_TAB: Record<string, string> = {
   customer_flip: '?tab=scoping',
   assessment_recheck: '?tab=assessments', index_decision: '?tab=assessments',
   index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
-  need_by_tell: '',
+  need_by_tell: '', set_quote_deadline: '',
   send_rejection: '?tab=scoping',
   costing_input: '?tab=costing',
   create_quote: '?tab=commercial',

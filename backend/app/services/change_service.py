@@ -1985,7 +1985,11 @@ class ChangeService:
         rejection_reason: Optional[str] = None,
         reopen_reason: Optional[str] = None,
         reason: Optional[str] = None,
+        logged_rules: tuple = (),
     ) -> ChangeRequest:
+        """`logged_rules`: soft rules a system hand-over passes without an
+        override, named in the changelog instead (C9: a full ECR from the
+        intake goes to scoping with what its capture still misses)."""
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
         allowed = ALLOWED_TRANSITIONS.get(change.status, set())
@@ -2143,6 +2147,8 @@ class ChangeService:
             # override; one bound to another rule lifts nothing here.
             covering, uncovered = await ChangeService.override_cover(
                 session, change, to_status)
+            logged = [r for r in uncovered if r.key in logged_rules]
+            uncovered = [r for r in uncovered if r.key not in logged_rules]
             from app.services.cm_rules import DECIDE_ONLY_RULES
             overridable = [r for r in uncovered if r.key not in DECIDE_ONLY_RULES]
             if uncovered and not overridable:
@@ -2163,7 +2169,9 @@ class ChangeService:
                     pending_deviation_id=pending.id if pending else None)
             deviation = covering[0] if covering else None
         else:
-            reason = await ChangeService._guard(session, change, to_status)
+            reasons = await ChangeService._guard_reasons(session, change, to_status)
+            logged = [r for r in reasons if r.key in logged_rules]
+            reason = next((r for r in reasons if r.key not in logged_rules), None)
             if reason is not None:
                 deviation = next(
                     (d for d in change.transition_deviations
@@ -2290,6 +2298,12 @@ class ChangeService:
                    (escalation_note or None) if to_status == "on_hold" else None),
         )
 
+        if logged:
+            # a system hand-over past soft rules: named, not overridden
+            await ChangeService.append_changelog(
+                session, change, "handover_logged",
+                "Handed over with: " + "; ".join(str(r) for r in logged), user_id,
+                new_value={"rules": [r.key for r in logged]})
         # Both memos get their own audit row, distinct from the status hop, so
         # the trail reads as "who rejected this and why" rather than as a bare
         # state change with a reason buried in a field.
@@ -2329,6 +2343,11 @@ class ChangeService:
             # HARD #7: Quality's PPAP decision is needed now (told once)
             from app.services.ppap_decision_service import PpapDecisionService
             await PpapDecisionService.notify_owed(session, change, user_id)
+        if to_status == "in_assessment" and old in ("captured", "scoping"):
+            # §1: a new index attached before proceed: the lead's question
+            # is owed from now
+            from app.services.index_followup_service import IndexFollowupService
+            await IndexFollowupService.notify_lead_on_assessment(session, change, user_id)
         return change
 
     @staticmethod
@@ -3451,6 +3470,17 @@ class ChangeService:
                 if (can_confirm and c.impact_confirmed_at is None
                         and c.impact_confirm_step):
                     tasks.append({**await _base(c), "kind": "impact_confirm"})
+                # C9 (spec §1): a customer change handed over without its
+                # quote deadline (a full ECR from the intake): Sales sets it
+                # while the lead scopes; owed before assessment
+                if (in_sales and c.customer_relevant and c.required_by_date is None
+                        and c.flip_answer != "notification"
+                        and not mp.is_mother_plant(c)):
+                    tasks.append({
+                        **await _base(c), "kind": "set_quote_deadline",
+                        "target_tab": "overview",
+                        **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                           if c.sales_owner_id not in (None, user.id) else {})})
 
             elif (c.status == "rejected" and in_sales and c.customer_relevant
                     and c.rejection_sent_at is None):

@@ -2634,11 +2634,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'attach.customerFile': { de: 'Kundendatei (Zeichnung, 3D, EC-Blatt)', en: 'Customer file (drawing, 3D, EC sheet)' },
   'start.createHandOver': { de: 'Anlegen und übergeben', en: 'Create and hand over' },
   'start.createDraft': { de: 'Als Entwurf anlegen', en: 'Create as draft' },
+  'tasks.kind.set_quote_deadline': { de: 'Angebotstermin setzen', en: 'Set the quote deadline' },
   'tasks.kind.need_by_tell': { de: 'Kunde informieren: neuer Termin oder Start auf Risiko?', en: 'Tell customer: new date or start at risk?' },
   // §1 intake: live change, what changed, customer-driven
   'intake.liveChange': {
     de: '{n} ({s}, Leitung {l}) enthält {p} bereits: an diese Änderung anhängen?',
     en: '{n} ({s}, lead {l}) already carries {p}: attach the index to it?' },
+  'intake.otherLive': {
+    de: 'Das Teil steckt auch in: {x}. Deren Leads werden informiert und prüfen Bewertung, Kalkulation und Angebot.',
+    en: 'Also carried by: {x}. Their leads are told and check their assessment, costing and offer.' },
   'intake.liveNotAttachable': {
     de: 'Sie ist zu weit für einen neuen Index: neue Änderung starten.',
     en: 'It is too far along to take a new index: start a full ECR.' },
@@ -2682,8 +2686,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'followup.answeredNoEffect': { de: 'keine Auswirkung', en: 'no effect' },
   'followup.answeredEffect': { de: 'Auswirkung', en: 'effect' },
   'followup.effectBeforeQuote': {
-    de: 'Auswirkung vor dem Angebot öffnet eure Kalkulation wieder; danach wird es eine Umfangsänderung.',
-    en: 'An effect before the quote reopens your costing; after it, it is a scope change.' },
+    de: 'Auswirkung, bevor das Angebot raus ist, öffnet eure Kalkulation wieder; danach wird es eine Umfangsänderung.',
+    en: 'An effect before the offer is sent reopens your costing; after it is sent, it is a scope change.' },
   'followup.lead': { de: 'Bringt {to} weitere Teile oder Abteilungen?', en: 'Index {to} adds parts or departments?' },
   'followup.leadOwes': { de: '{x} beantwortet das (morgen fällig).', en: '{x} answers this (due tomorrow).' },
   'followup.leadNo': { de: 'Nein', en: 'No' },

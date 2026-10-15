@@ -94,8 +94,12 @@ class PpapDecisionService:
         members of the change's organization, once per change, when the
         change is in scoping and owes the PPAP decision (entering scoping,
         or a meeting that sets the carrier to internal)."""
-        if (change.status != "scoping" or not applies(change)
-                or change.ppap_decision is not None):
+        if change.status != "scoping" or change.ppap_decision is not None:
+            return
+        from sqlalchemy import inspect as sa_inspect
+        if "meetings" in sa_inspect(change).unloaded:
+            await session.refresh(change, ["meetings"])     # a fresh change
+        if not applies(change):
             return
         from app.models.workflow import Department
         from app.services.change_people import department_members_of_change_org
@@ -139,7 +143,8 @@ class PpapDecisionService:
                 raise ChangeError("Say what 'no' is based on: the control plan, "
                                   "the process sheet or the customer spec")
             from app.services.cm_rules import reference_refusal
-            why = reference_refusal(ref, "The reference of that document")
+            why = reference_refusal(ref, "The reference of that document",
+                                    "CP-4711 rev 3")
             if why:
                 raise ChangeError(why)
             change.ppap_part_ids = None
@@ -289,7 +294,8 @@ class PpapDecisionService:
                 evidence = f"Mail: {mail.filename}"
             else:
                 from app.services.cm_rules import reference_refusal
-                why = reference_refusal(ref, "The notification's mail or reference")
+                why = reference_refusal(ref, "The notification's mail or reference",
+                                        "Mail to the buyer 15 Oct")
                 if why:
                     raise ChangeError(why)
                 evidence = ref.strip()

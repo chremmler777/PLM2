@@ -8,8 +8,9 @@ and "what changed" (the triager's areas) drives the follow-up:
 - Rechecks (ChangeRecheck): every routed department that had submitted its
   assessment answers per changed area "no effect" (drawing ref / checklist
   row) or "effect" (what + evidence), plus anything else that changed;
-  nothing is preselected. An effect before the quote reopens that
-  department's finalized costing; from quoting on it flags the scope change
+  nothing is preselected. An effect before the offer went out (quoted)
+  reopens that department's finalized costing (from quoting the change
+  steps back to costing first); from quoted on it flags the scope change
   (scope_changed_after_quote + costing_update for that department). A "no
   visible change" makes no rechecks. A department that had not submitted
   assesses on D (the banner on its assessment).
@@ -41,8 +42,10 @@ from app.services.change_service import ChangeError, ChangeService
 OPEN_QUOTE_STATUSES = ("captured", "scoping", "in_assessment", "costing",
                        "quoting", "quoted")
 #: A department's costing reopens in these (early_costing.OPEN_STATUSES);
-#: later an effect is a scope change (costing_update).
+#: from quoting (no offer sent yet) the change steps back to costing first;
+#: from quoted on an effect is a scope change (costing_update).
 COSTING_OPEN = ("in_assessment", "costing")
+BEFORE_QUOTED = (*COSTING_OPEN, "quoting")
 AREA_LABELS = {"geometry": "geometry", "tolerance": "tolerance",
                "material": "material", "colour_grain": "colour/grain",
                "other": "other / not sure"}
@@ -205,7 +208,8 @@ class IndexFollowupService:
                     raise ChangeError(f"{AREA_LABELS.get(area, area)}: say what the "
                                       "effect is (at least 5 characters)")
                 why = reference_refusal(a.get("evidence"),
-                                        f"{AREA_LABELS.get(area, area)}: the evidence")
+                                        f"{AREA_LABELS.get(area, area)}: the evidence",
+                                        "the drawing compare, a measurement or a mail")
                 if why:
                     raise ChangeError(why)
                 out.append({"area": area, "effect": True, "what": what,
@@ -213,8 +217,8 @@ class IndexFollowupService:
                 effect = True
             elif a.get("effect") is False:
                 why = reference_refusal(
-                    a.get("ref"), f"{AREA_LABELS.get(area, area)}: 'no effect' needs "
-                                  "the drawing reference or checklist row")
+                    a.get("ref"), f"{AREA_LABELS.get(area, area)}: the basis of 'no effect'",
+                    "the drawing number or your checklist row")
                 if why:
                     raise ChangeError(why)
                 out.append({"area": area, "effect": False, "ref": a["ref"].strip()})
@@ -226,7 +230,8 @@ class IndexFollowupService:
             if len(what) < 5:
                 raise ChangeError("Something else changed: say what (at least 5 characters)")
             why = reference_refusal(something_else.get("evidence"),
-                                    "Something else changed: the evidence")
+                                    "Something else changed: the evidence",
+                                    "the drawing compare, a measurement or a mail")
             if why:
                 raise ChangeError(why)
             else_text = f"{what} ({something_else['evidence'].strip()})"
@@ -254,11 +259,17 @@ class IndexFollowupService:
     @staticmethod
     async def _apply_effect(session: AsyncSession, change: ChangeRequest,
                             recheck: ChangeRecheck, dept: str, user: User) -> None:
-        """Before the quote: the department's finalized costing reopens. From
-        quoting on: the scope change with costing_update for the department
-        (the §6 scope change card reuses it)."""
+        """Before quoted (spec §1 [R4]): the department's finalized costing
+        reopens; in quoting (no offer sent) the change first steps back to
+        costing, the correction path. From quoted on: the scope change with
+        costing_update for the department (the §6 scope change card reuses
+        it)."""
         from app.services import early_costing
         why = f"Customer index {recheck.to_revision} (was {recheck.from_revision}): effect for {dept}"
+        if change.status == "quoting":
+            await ChangeService.transition(
+                session, change, "costing", user.id,
+                reason=f"{why}: its costing reopens before the offer goes out")
         if change.status in COSTING_OPEN:
             await session.refresh(change, ["assessments"])
             rows = [a for a in change.assessments
@@ -344,7 +355,8 @@ class IndexFollowupService:
                     raise ChangeError("Pick a customer mail filed on this change")
                 evidence = f"Mail: {mail.filename}"
             else:
-                why = reference_refusal(ref, "The customer's mail or reference")
+                why = reference_refusal(ref, "The customer's mail or reference",
+                                        "Mail from the buyer 15 Oct")
                 if why:
                     raise ChangeError(why)
                 evidence = ref.strip()
@@ -437,6 +449,32 @@ class IndexFollowupService:
         return out
 
     @staticmethod
+    async def notify_lead_on_assessment(session: AsyncSession, change: ChangeRequest,
+                                        actor_id: Optional[int]) -> None:
+        """An index attached during capture or scoping makes the lead's
+        "adds parts or departments?" owed once the change enters assessment:
+        task newly theirs, told once (the same key as at attach)."""
+        if not cm_switches.on("SCOPING_V2") or change.lead_id in (None, actor_id):
+            return
+        from app.models.part import PartRevision
+        from app.services.notification_service import NotificationService
+        intakes = (await session.execute(select(RevisionIntake).where(
+            RevisionIntake.change_id == change.id,
+            RevisionIntake.replaced_revision.isnot(None),
+            RevisionIntake.scope_answer.is_(None)))).scalars().all()
+        for i in intakes:
+            if not lead_open(i, change):
+                continue
+            rev = await session.get(PartRevision, i.revision_id)
+            to_name = rev.revision_name if rev else "new index"
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="index_decision",
+                subject_key=f"index_decision:{i.id}",
+                title=f"Index {to_name} adds parts or departments? {change.change_number}"[:255],
+                body=f"{i.replaced_revision} -> {to_name}: answer by tomorrow",
+                link=f"/changes/{change.id}?tab=assessments")
+
+    @staticmethod
     async def open_lines(session: AsyncSession, change: ChangeRequest) -> list[str]:
         """C5 lines: open rechecks and the lead's new-index question."""
         if not cm_switches.on("SCOPING_V2"):
@@ -495,12 +533,35 @@ class IndexFollowupService:
             return out
         is_pm = await ChangeService.member_of(db, user, "Project Manager")
         is_sales = await ChangeService.member_of(db, user, "Sales")
+        leads = [i for i in intakes if lead_open(i, by_id[i.change_id])
+                 and (holds_lead(by_id[i.change_id], user) or is_pm)]
+        rev_names: dict = {}
+        entered: dict = {}
+        if leads:
+            # the row names the new index, and starts when the question became
+            # owed: the attach, or the change's entry into assessment for an
+            # index attached during capture or scoping (never overdue at birth)
+            from sqlalchemy import func
+            from app.models.change import ChangeChangelog
+            from app.models.part import PartRevision
+            rev_names = dict((await db.execute(select(
+                PartRevision.id, PartRevision.revision_name).where(
+                PartRevision.id.in_({i.revision_id for i in leads})))).all())
+            entered = dict((await db.execute(select(
+                ChangeChangelog.change_id, func.min(ChangeChangelog.performed_at))
+                .where(ChangeChangelog.change_id.in_({i.change_id for i in leads}),
+                       ChangeChangelog.field_name == "status",
+                       ChangeChangelog.new_value == '"in_assessment"')
+                .group_by(ChangeChangelog.change_id))).all())
         for i in intakes:
             c = by_id[i.change_id]
-            if lead_open(i, c) and (holds_lead(c, user) or is_pm):
+            if i in leads:
+                start = max(i.decided_at or datetime.utcnow(),
+                            entered.get(c.id) or i.decided_at or datetime.utcnow())
                 out.append({**await base(c), "kind": "index_decision",
-                            "intake_id": i.id, "since": i.decided_at,
-                            "reason": f"{i.replaced_revision} -> index",
+                            "intake_id": i.id, "since": start,
+                            "reason": (f"{i.replaced_revision} -> "
+                                       f"{rev_names.get(i.revision_id) or 'new index'}"),
                             "target_tab": "assessments",
                             **({"main_user": (c.lead_id, c.lead_name or "")}
                                if c.lead_id is not None and not holds_lead(c, user) else {})})

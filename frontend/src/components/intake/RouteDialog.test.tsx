@@ -53,6 +53,15 @@ describe('RouteDialog (§1 intake)', () => {
       route: 'attach_ecr', change_id: 5, what_changed: ['geometry'], what_changed_ref: 'Compare CR-118' }))
   })
 
+  it('names every other live change carrying the part', () => {
+    show(intake({ other_live_changes: [
+      { id: 3, change_number: 'CR-3', status: 'quoted', lead_name: 'Payne' },
+      { id: 2, change_number: 'CR-2', status: 'costing', lead_name: null }] }))
+    const note = screen.getByTestId('other-live-changes').textContent ?? ''
+    expect(note).toContain('CR-3 (Quoted, Payne)')
+    expect(note).toContain('CR-2 (Costing)')
+  })
+
   it('full ECR beside a live change needs the reason pick', () => {
     changes.list.mockResolvedValue([])
     const onSubmit = show(intake())

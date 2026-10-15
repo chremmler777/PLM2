@@ -118,6 +118,8 @@ TASK_KIND = {
     "index_deadline": ("New index: deadline holds?", "Neuer Index: hält der Termin?"),
     "index_deadline_confirm": ("Confirm the deadline with the customer",
                                "Termin mit dem Kunden bestätigen"),
+    # C9: a full ECR from the intake, handed over without its deadline
+    "set_quote_deadline": ("Set the quote deadline", "Angebotstermin setzen"),
     # §3 urgent proceed
     "need_by_tell": ("Tell customer: new date or start at risk?",
                      "Kunde informieren: neuer Termin oder Start auf Risiko?"),

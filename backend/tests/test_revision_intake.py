@@ -235,7 +235,7 @@ async def test_full_ecr_links_pending_revision_and_release_activates(client, ses
     assert r.status_code == 200, r.text
     out = r.json()
     cid = out["change_id"]
-    assert out["change_number"] and out["change_status"] == "captured"
+    assert out["change_number"] and out["change_status"] == "scoping"  # C9: handed over
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         assert change.origin == "customer" and change.customer_relevant

@@ -125,6 +125,15 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
           {!live.attachable && ` ${t('intake.liveNotAttachable')}`}
         </p>
       )}
+      {/* Every other live change carrying the part: named, their leads told */}
+      {(intake.other_live_changes ?? []).length > 0 && (
+        <p data-testid="other-live-changes" role="note"
+          className="mb-3 rounded-lg border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+          {t('intake.otherLive').replace('{x}', (intake.other_live_changes ?? []).map((c) =>
+            `${c.change_number} (${STATUS_LABELS[c.status as ChangeStatus] ?? c.status}${
+              c.lead_name ? `, ${c.lead_name}` : ''})`).join(', '))}
+        </p>
+      )}
 
       <FieldGroup legend="Route" legendHidden>
         <div className="space-y-2">
