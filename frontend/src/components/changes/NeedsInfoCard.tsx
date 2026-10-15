@@ -22,6 +22,7 @@ import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
 import AnswerForm from './scoping/AnswerForm'
+import CustomerCopy from './scoping/CustomerCopy'
 import type { Attachment, ChangeConcern } from '../../types/change'
 
 export default function NeedsInfoCard({
@@ -55,7 +56,8 @@ export default function NeedsInfoCard({
   const [addingDoc, setAddingDoc] = useState(false)
   // One collapse behaviour everywhere: settled questions start as a line, live
   // ones start open — and either can be toggled to the other.
-  const [expanded, setExpanded] = useState(c.is_open)
+  // an open confirm item keeps the card open: the confirmer acts on it
+  const [expanded, setExpanded] = useState(c.is_open || !!c.can_confirm)
 
   const mine = attachments.filter((a) => a.concern_id === c.id)
   const answerDocs = mine.filter((a) => a.kind === 'info_response')
@@ -170,6 +172,9 @@ export default function NeedsInfoCard({
             ].filter(Boolean).join(' · ')}
           </p>
         )}
+        {structured && !solved && c.customer_copy && (canAnswer || c.can_answer) && (
+          <CustomerCopy text={c.customer_copy} testId={`needs-info-copy-${c.id}`} />
+        )}
         {structured && !solved && editable && c.can_switch && (
           <button type="button" data-testid={`needs-info-make-check-${c.id}`}
             className="text-xs text-sky-300 hover:text-sky-200" disabled={makeCheck.isPending}
@@ -226,8 +231,10 @@ export default function NeedsInfoCard({
             )}
           </p>
         )}
-        {structured && c.answer_kind === 'assumed' && !c.confirmed_at && editable
-          && (canAnswer || c.can_answer) && (
+        {/* The confirm item: its named confirmer, or who may answer, in any
+            live status (the backend's can_confirm), question open or closed. */}
+        {structured && c.answer_kind === 'assumed' && !c.confirmed_at
+          && (c.can_confirm ?? (editable && (canAnswer || c.can_answer))) && (
           <AnswerForm changeId={changeId} concern={c} attachments={attachments}
             confirming onDone={onChanged} />
         )}

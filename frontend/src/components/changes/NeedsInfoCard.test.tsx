@@ -244,3 +244,31 @@ describe('NeedsInfoCard collapsing', () => {
       .toContain('customer confirmed 12.50')
   })
 })
+
+describe('NeedsInfoCard confirm item (L4 review)', () => {
+  afterEach(cleanup)
+  const assumed = (over: Record<string, unknown> = {}) => concern({
+    flag_type: 'question', answer_from: 'our_team', answer_kind: 'assumed',
+    assumed_value: '90000', assumed_unit: 'pcs/yr', confirm_due: '2026-10-22',
+    answered_at: '2026-10-15T10:00:00', is_open: false,
+    withdrawn_at: '2026-10-15T11:00:00', ...over })
+
+  it('offers the confirm form to the named confirmer after the question closed and scoping ended', () => {
+    // not editable (past scoping), cannot answer, the question is closed
+    card({ structured: true, editable: false, concern: assumed({ can_confirm: true }) })
+    expect(screen.getByTestId('answer-form-1')).toBeDefined()
+  })
+
+  it('shows no confirm form to anybody else', () => {
+    card({ structured: true, editable: true, canAnswer: true,
+      concern: assumed({ can_confirm: false, is_open: true, withdrawn_at: null }) })
+    expect(screen.queryByTestId('answer-form-1')).toBeNull()
+  })
+
+  it('gives Sales the mail text of a customer question to copy', () => {
+    card({ structured: true, canAnswer: true, concern: concern({
+      flag_type: 'question', answer_from: 'customer',
+      customer_copy: 'Hello,\n\nWhich resin lot?' }) })
+    expect(screen.getByTestId('needs-info-copy-1-copy').textContent).toBe(t('copy.mailText'))
+  })
+})

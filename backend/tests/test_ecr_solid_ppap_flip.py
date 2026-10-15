@@ -92,7 +92,7 @@ async def test_internal_change_proceeds_only_after_quality_answers(
     _, _, tool = await _user(client, session_factory, seed, "t1", "Tool Engineer")
     mid = await _meeting(client, admin_auth, cid, qid)
     res = await _proceed(client, admin_auth, cid, mid)
-    assert res.status_code == 400 and "HARD #7" in res.json()["detail"]
+    assert res.status_code == 400 and "PPAP decision" in res.json()["detail"]
     # Quality sees it under Needs you; nobody else
     rows = await _tasks(client, quality, cid, "ppap_decision")
     assert len(rows) == 1 and rows[0]["needs_you"] is True
@@ -196,5 +196,153 @@ async def test_switch_off_no_gate(client, admin_auth, seed, session_factory, mon
     _, qid, quality = await _user(client, session_factory, seed, "q5", "Quality")
     mid = await _meeting(client, admin_auth, cid, qid)
     assert await _tasks(client, quality, cid, "ppap_decision") == []
+    res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 200, res.text
+
+
+# ---------------------------------------------------------------------------
+# L4 review: the room's cost carrier, notification only, flip past approval
+# ---------------------------------------------------------------------------
+
+async def _to_status(session_factory, cid, status, **values):
+    from sqlalchemy import update
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid)
+                        .values(status=status, **values))
+        await s.commit()
+
+
+async def test_customer_change_the_room_sets_internal_owes_ppap_and_proceeds(
+        client, admin_auth, seed, session_factory):
+    """The deadlock: a customer change whose scoping meeting says internal.
+    Quality may answer before proceed, proceed names it with its owner, and
+    after the answer proceed goes through and the change is internal."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "pp room", "reason": "r",
+        "change_type": "physical_part", "customer_relevant": True,
+        "lead_id": seed["admin_id"]}, headers=admin_auth)
+    cid = res.json()["id"]
+    part = await client.post("/api/v1/parts", json={
+        "project_id": seed["project_id"], "part_number": "ART-PPROOM",
+        "name": "Part", "part_type": "internal_mfg"}, headers=admin_auth)
+    assert (await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                              json={"part_id": part.json()["id"], "is_lead": True},
+                              headers=admin_auth)).status_code == 200
+    await _to_status(session_factory, cid, "scoping")
+    _, qid, quality = await _user(client, session_factory, seed, "q6", "Quality")
+    _, _, pm = await _user(client, session_factory, seed, "pm6", "Project Manager")
+    mid = await _meeting(client, admin_auth, cid, qid, carrier="internal")
+    # the PM's row is not "Ready": it names the PPAP decision and Quality
+    rows = await _tasks(client, pm, cid, "scoping_wrapup")
+    assert len(rows) == 1 and rows[0]["open_questions"] == 0
+    assert [h["key"] for h in rows[0]["holds"]] == ["ppap_decision"]
+    assert rows[0]["holds"][0]["owner"].startswith("Quality")
+    assert len(await _tasks(client, quality, cid, "ppap_decision")) == 1
+    res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 400 and "PPAP decision" in res.json()["detail"]
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    item = next(i for i in ch["next_step"]["items"] if i["key"] == "ppap_decision")
+    assert item["who"].startswith("Quality, due ")
+    res = await _ppap(client, quality, cid, answer="no", basis="process_sheet",
+                      ref="PS-2231 rev 4")
+    assert res.status_code == 200, res.text
+    assert (await _tasks(client, pm, cid, "scoping_wrapup"))[0]["holds"] == []
+    res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 200, res.text
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert ch["status"] == "in_assessment" and ch["customer_relevant"] is False
+
+
+async def test_proceed_names_every_hold_at_once(client, admin_auth, seed, session_factory):
+    """No parts and no PPAP decision: one refusal names both."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "pp holds", "reason": "r",
+        "change_type": "physical_part", "customer_relevant": False,
+        "lead_id": seed["admin_id"]}, headers=admin_auth)
+    cid = res.json()["id"]
+    await _to_status(session_factory, cid, "scoping")
+    _, qid, _q = await _user(client, session_factory, seed, "q7", "Quality")
+    mid = await _meeting(client, admin_auth, cid, qid)
+    res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert "held by 2 things" in detail
+    assert "PPAP decision" in detail and "No impacted parts picked" in detail
+
+
+async def test_notification_only_goes_on_as_internal(
+        client, admin_auth, seed, session_factory):
+    """'Notification only': the customer is told, the money stays ours: the
+    change goes on as internal (internal approval), no Sales owner, the
+    room's carrier follows, so proceed does not flip it back."""
+    cid, pid = await _internal_in_scoping(client, admin_auth, seed, "8")
+    _, qid, quality = await _user(client, session_factory, seed, "q8", "Quality")
+    sally, sales_id, sales = await _user(client, session_factory, seed, "s8", "Sales")
+    await _responsible(session_factory, seed, sales_id, sally)
+    mid = await _meeting(client, admin_auth, cid, qid, carrier="internal")
+    assert (await _ppap(client, quality, cid, answer="yes", part_ids=[pid])).status_code == 200
+    res = await client.post(f"/api/v1/changes/{cid}/customer-flip/answer",
+                            json={"answer": "notification",
+                                  "ref": "Mail to customer 2026-10-15"}, headers=sales)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["customer_relevant"] is False and body["origin"] == "internal"
+    assert body["sales_owner_id"] is None and body["flip_ref"] == "Mail to customer 2026-10-15"
+    meetings = (await client.get(f"/api/v1/changes/{cid}/meetings", headers=admin_auth)).json()
+    assert meetings[-1]["cost_carrier"] == "internal"
+    res = await _proceed(client, admin_auth, cid, mid)
+    assert res.status_code == 200, res.text
+    # the money path is the internal one: costing -> approved by internal approval
+    await _to_status(session_factory, cid, "costing")
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert ch["customer_relevant"] is False
+    assert ch["next_step"]["to"] == "approved"
+    assert any(i["key"] == "internal_approval" for i in ch["next_step"]["items"])
+
+
+async def _flip_at(session_factory, cid, status):
+    from app.models.change import ChangeRequest
+    from app.services.ppap_decision_service import PpapDecisionService
+    await _to_status(session_factory, cid, status)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await PpapDecisionService.flip(s, change, 1, "customer index C on part")
+        await s.commit()
+
+
+async def test_flip_past_approval_opens_the_price_only_with_offer_needed(
+        client, admin_auth, seed, session_factory):
+    _, _, sales = await _user(client, session_factory, seed, "s9", "Sales")
+    url = "/api/v1/changes/{}/customer-flip/answer"
+    # notification only: no price is open, the close is not held
+    cid, _ = await _internal_in_scoping(client, admin_auth, seed, "9a")
+    await _flip_at(session_factory, cid, "approved")
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert ch["customer_relevant"] is True and ch["price_open"] is False
+    res = await client.post(url.format(cid), json={
+        "answer": "notification", "ref": "Mail to customer 2026-10-15"}, headers=sales)
+    assert res.status_code == 200, res.text
+    assert res.json()["price_open"] is False
+    # offer needed: a supplement is owed, the price stays open (HARD #9)
+    cid2, _ = await _internal_in_scoping(client, admin_auth, seed, "9b")
+    await _flip_at(session_factory, cid2, "approved")
+    res = await client.post(url.format(cid2), json={
+        "answer": "offer", "quote_deadline": "2026-11-20T12:00:00"}, headers=sales)
+    assert res.status_code == 200, res.text
+    assert res.json()["price_open"] is True
+
+
+async def test_back_to_internal_drops_an_open_flip(
+        client, admin_auth, seed, session_factory):
+    cid, pid = await _internal_in_scoping(client, admin_auth, seed, "10")
+    _, qid, quality = await _user(client, session_factory, seed, "q10", "Quality")
+    mid = await _meeting(client, admin_auth, cid, qid, carrier="internal")
+    assert (await _ppap(client, quality, cid, answer="yes", part_ids=[pid])).status_code == 200
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"customer_relevant": False}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_flip_at"] is None
+    # nothing waits on Sales any more: proceed goes (the room says internal)
     res = await _proceed(client, admin_auth, cid, mid)
     assert res.status_code == 200, res.text

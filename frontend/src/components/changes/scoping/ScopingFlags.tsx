@@ -86,7 +86,6 @@ export default function ScopingFlags({
   editable: boolean
   onChanged: () => void
 }) {
-  const { isAdmin } = useAuth()
   const options = departments.filter((d) => d.is_active !== false)
   const [note, setNote] = useState('')
   const [deptPicked, setDeptPicked] = useState<number | undefined>(undefined)
@@ -134,7 +133,9 @@ export default function ScopingFlags({
   const open = concerns.filter((c) => c.is_open && c.kind === 'needs_info')
   const twins = what === '' ? [] : open.filter((c) => c.check_what === what
     && (c.part_id ?? '') === partId).slice(0, 3)
-  const mayCoOwn = deptId != null && (isAdmin || myDepartmentIds.includes(deptId))
+  // 'same as' is a department act: members only (an admin acts as the
+  // department), as the backend's join_flag
+  const mayCoOwn = deptId != null && myDepartmentIds.includes(deptId)
 
   const missing = [
     ...(note.trim() ? [] : [t('flag.missingNote')]),

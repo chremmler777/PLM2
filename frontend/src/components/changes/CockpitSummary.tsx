@@ -392,6 +392,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     const detail = i.key === 'gate' && i.detail ? t('gate.' + i.detail) : (i.detail ?? '')
     return t('next.item.' + key).replace('{n}', String(i.n ?? '')).replace('{detail}', detail)
   }
+  // Quality's PPAP decision and the flip's Sales answer hold 'proceed' (HARD
+  // #7): the meeting cannot decide past them.
+  const proceedHolds = change.status === 'scoping'
+    ? nextItems.filter((i) => i.kind === 'hard' && (i.key === 'ppap_decision' || i.key === 'customer_flip'))
+    : []
   // Why blocked (spec §0): a soft rule offers one Override bound to it (or
   // says where its override stands); a hard rule says it has none and names
   // its only ways out (Absorb as a button where it is the viewer's to ask).
@@ -480,6 +485,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       go: onGo ? () => onGo('assessments') : undefined,
     }] : []),
     ...(impactUnconfirmed ? [{ key: 'impact', text: t('impact.pending'), go: onShowImpact }] : []),
+    // HARD #7 holds proceed whatever the meeting says: named here with its
+    // owner and due, so scoping never reads "Nothing blocking" (R5)
+    ...proceedHolds.map((i) => ({
+      key: `hold-${i.key}`, text: `${itemLabel(i)}${i.who ? ` · ${i.who}` : ''}`,
+      go: onGo ? () => onGo('scoping') : undefined,
+    })),
   ]
   // Held departments, open assessments, customer questions, … arrive as waits;
   // the ones that hold nothing (info) are listed apart and never counted.
@@ -543,6 +554,16 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const sameJob = (a: MyAction) => stepKeys.some((k) => (SAME_JOB_AS_STEP[k] ?? []).includes(a.kind))
   const shownActions = actions.filter((a) => !sameJob(a))
   const mainActions = shownActions.filter((a) => a.role !== 'backup')
+  // The viewer's own HARD #7 answer is the scoping header's action ("Answer
+  // the PPAP decision"); the recorder reads what proceed waits for instead
+  // of an invitation to record a proceed the server refuses.
+  const ownHold = proceedHolds.length > 0
+    ? mainActions.find((a) => a.kind === 'ppap_decision' || a.kind === 'customer_flip')
+    : undefined
+  const meetingText = proceedHolds.length > 0
+    ? t('cockpit.proceedWaits').replace('{x}', proceedHolds
+      .map((i) => `${itemLabel(i)}${i.who ? ` (${i.who})` : ''}`).join(', '))
+    : canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')
   const backupActions = shownActions.filter((a) => a.role === 'backup')
   const actionKey = (a: MyAction, i: number) =>
     `${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? a.department_id ?? a.offer_id ?? i}`
@@ -651,9 +672,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           </button>
         )}
         <div className="ml-auto flex min-w-0 items-center gap-2">
-          {meetingDecides ? (
+          {meetingDecides && ownHold ? (
+            <button type="button" data-testid="compact-own-hold" className={btnSm.primary}
+              onClick={() => runAction(ownHold)}>
+              {pluralizeLabel(ownHold.label)}
+            </button>
+          ) : meetingDecides ? (
             <button type="button" className={btnSm.secondary} onClick={() => onAction?.('scoping')}>
-              {canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')}
+              {meetingText}
             </button>
           ) : demoted ? resolveButton('sm')
             : primaryStep ? (
@@ -892,12 +918,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <Check aria-hidden="true" size={12} />{nextReady}
           </p>
         )}
-        {meetingDecides ? (
+        {meetingDecides && ownHold ? (
+          <button type="button" data-testid="next-own-hold" className={btnSm.primary}
+            onClick={() => runAction(ownHold)}>
+            {pluralizeLabel(ownHold.label)}
+          </button>
+        ) : meetingDecides ? (
           // The decision lives in the meeting record, not on a button here.
-          <button type="button"
+          <button type="button" data-testid="meeting-decides"
             className="text-left text-sm text-slate-300 hover:text-slate-100 underline decoration-dotted underline-offset-2"
             onClick={() => onAction?.('scoping')}>
-            {canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')}
+            {meetingText}
           </button>
         ) : (offPath && steps.length === 0) || allSteps.length === 0 ? (
           <p className="text-sm text-slate-400">

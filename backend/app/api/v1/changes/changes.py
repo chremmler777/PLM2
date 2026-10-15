@@ -3062,6 +3062,14 @@ async def list_concerns(
             row.asking_department_name = concern_depts.get(c.department_id)
             row.can_answer = c.is_open and await MeetingService.can_answer_question(
                 db, change, c, current_user)
+            # the confirm item of an Assumed answer: open in any live status,
+            # the question open or closed (its named confirmer, or whoever
+            # may answer it)
+            row.can_confirm = (change.status not in ("closed", "cancelled", "rejected")
+                               and await MeetingService.can_confirm(
+                                   db, change, c, current_user))
+            row.customer_copy = MeetingService.customer_copy(
+                change, c, part_numbers.get(c.part_id))
             row.owner_department_names = [concern_depts.get(d, f"#{d}")
                                           for d in c.owner_department_ids]
             if c.is_check:

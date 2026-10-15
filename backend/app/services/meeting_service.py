@@ -185,6 +185,8 @@ class MeetingService:
             session, change, "scoping_meeting_recorded",
             f"Scoping decision #{meeting.id} recorded ({channel})", user.id,
             new_value={"meeting_id": meeting.id, "channel": channel})
+        from app.services.ppap_decision_service import PpapDecisionService
+        await PpapDecisionService.notify_owed(session, change, user.id)
         return meeting
 
     @staticmethod
@@ -275,6 +277,9 @@ class MeetingService:
             if k in fields and fields[k] is not None:
                 setattr(meeting, k, fields[k])
         await session.flush()
+        if fields.get("cost_carrier") == "internal":
+            from app.services.ppap_decision_service import PpapDecisionService
+            await PpapDecisionService.notify_owed(session, change, user.id)
         return meeting
 
     # ---- Concerns -----------------------------------------------------------
@@ -541,6 +546,18 @@ class MeetingService:
                 raise ChangeError(f"Unknown or inactive department {department_id}")
             concern.department_id = department_id
         before = "check" if concern.is_check else "question"
+        if flag_type == "question" and before != "question":
+            # the same limit as a raise: one open question per asker,
+            # raised-for department and check-what (spec §3 [R4])
+            twin = next((c for c in change.concerns
+                         if c.id != concern.id and c.is_open and c.is_question
+                         and c.raised_by == concern.raised_by
+                         and c.department_id == concern.department_id
+                         and c.check_what == (concern.check_what or "other")), None)
+            if twin is not None:
+                raise ChangeError(
+                    f"This is already asked (#{twin.id}: {twin.note}): add to "
+                    f"#{twin.id} or mark it 'same as #{twin.id}'")
         if flag_type == "question":
             concern.answer_from, concern.scope_effect = MeetingService._question_fields(
                 answer_from or concern.answer_from, scope_effect or concern.scope_effect)
@@ -575,10 +592,13 @@ class MeetingService:
         if department_id is None and not line:
             raise ChangeError("Say what to add, or which department it is the same for")
         if department_id is not None:
-            if user.effective_role != "admin" and not await \
-                    WorkflowService.actor_in_department(session, user, department_id):
+            # a department act: members only (admins act as the department),
+            # as every department act of the branch; co-ownership holds that
+            # department's own submit (HARD #10)
+            if not await WorkflowService.actor_in_department(session, user, department_id):
                 raise MeetingForbidden(
-                    "'Same as' adds your own department as co-owner")
+                    "'Same as' adds your own department as co-owner "
+                    "(admins: act as that department)")
             dept = await session.get(Department, department_id)
             if dept is None or not dept.is_active:
                 raise ChangeError(f"Unknown or inactive department {department_id}")
@@ -586,6 +606,22 @@ class MeetingService:
                 concern.co_department_ids = [
                     *(concern.co_department_ids or []), department_id]
         if line:
+            # 'add to' rewrites the question: not after it was answered (the
+            # answer would no longer match it), else only by who may raise
+            # it again or answer it
+            if concern.answered_at is not None:
+                raise ChangeError(
+                    f"#{concern.id} is already answered: raise a new question "
+                    "instead of adding to it")
+            acting = getattr(user, "acts_as_department_id", None) is not None
+            mine = set(await WorkflowService.effective_department_ids(session, user))
+            if not ((concern.raised_by == user.id and not acting)
+                    or mine & set(concern.owner_department_ids)
+                    or await MeetingService.can_answer_question(
+                        session, change, concern, user)):
+                raise MeetingForbidden(
+                    "Only the asker, the departments it is raised for, Sales or "
+                    "Project Management may add to it")
             who = user.full_name or user.username
             concern.note = f"{concern.note}\n+ {who}: {line}"
         await session.flush()
@@ -616,17 +652,23 @@ class MeetingService:
                     or mail.kind != "customer_email"):
                 return "Pick a customer mail filed on this change"
             return None
+        # a customer question: only the customer's own document (kind
+        # customer_file) filed on it; an internal note is no customer answer
+        customer = concern.answer_from == "customer"
+        kinds = (("customer_file",) if customer
+                 else ("info_response", "customer_file"))
         docs = (await session.execute(
             select(func.count()).select_from(ChangeAttachment).where(
                 ChangeAttachment.change_id == change.id,
                 ChangeAttachment.concern_id == concern.id,
-                ChangeAttachment.kind == "info_response")
+                ChangeAttachment.kind.in_(kinds))
         )).scalar() or 0
         if docs:
             return None
-        if concern.answer_from == "customer":
+        if customer:
             return ("A customer question is Confirmed only by the customer's "
-                    "mail or document filed on it; without it, answer Assumed")
+                    "mail (filed on the change) or the customer's document "
+                    "filed on it; without it, answer Assumed")
         return reference_refusal(ref, "Confirmed needs evidence: a filed "
                                       "document or a reference")
 
@@ -662,10 +704,14 @@ class MeetingService:
             raise ChangeError("Assumed: give the unit of the value")
         if len(risk) < 5:
             raise ChangeError("Assumed: say what happens if the assumption is wrong")
+        named = confirm_by_id is not None
         if confirm_by_id is None:
             confirm_by_id = change.sales_owner_id or change.lead_id
-        if confirm_by_id is not None and await session.get(User, confirm_by_id) is None:
-            raise ChangeError(f"User {confirm_by_id} not found")
+        if named and not await MeetingService._may_confirm_for(
+                session, change, confirm_by_id):
+            raise ChangeError(
+                "Who confirms must be an active colleague of this change's "
+                "organization who can work on it (not a viewer)")
         if confirm_due is None:
             from app.services.due_rules import add_wd
             confirm_due = add_wd(datetime.utcnow(), 5).date()
@@ -677,6 +723,71 @@ class MeetingService:
         concern.confirm_by_id = confirm_by_id
         concern.confirm_due = confirm_due
         concern.confirmed_at = concern.confirmed_by = None
+
+    #: Plain words of a check-what pick in a mail to the customer.
+    CHECK_WHAT_WORDS = {
+        "drawing": "drawing / 3D", "volume": "volume", "cycle_time": "cycle time",
+        "weight": "part weight", "tool": "tool / cavities", "material": "material",
+        "tolerance": "tolerance", "schedule": "schedule", "other": "other"}
+
+    @staticmethod
+    def customer_copy(change: ChangeRequest, concern: ChangeConcern,
+                      part_number: Optional[str] = None) -> Optional[str]:
+        """The mail text Sales copies for a customer question (spec §0 [R4],
+        §3 "text and customer copy built from the picks"): what is asked,
+        on which part, and what the answer decides. None for other
+        questions."""
+        if concern.kind != "needs_info" or concern.answer_from != "customer":
+            return None
+        topic = MeetingService.CHECK_WHAT_WORDS.get(concern.check_what or "", "")
+        where = f" for part {part_number}" if part_number else ""
+        lines = [
+            f"Subject: {change.change_number} {change.title}: question"
+            + (f" on {topic}" if topic and topic != "other" else ""),
+            "",
+            "Hello,",
+            "",
+            f"For your change request {change.change_number} ({change.title}){where} "
+            "we need your answer:",
+            "",
+            concern.note.strip(),
+        ]
+        if concern.scope_effect:
+            lines += ["", f"Your answer decides: {concern.scope_effect.strip()}"]
+        lines += ["", "Thank you, and best regards"]
+        return "\n".join(lines)
+
+    @staticmethod
+    async def _may_confirm_for(session: AsyncSession, change: ChangeRequest,
+                               user_id: int) -> bool:
+        """The named confirmer can act: active, of the change's organization,
+        a writer (admin, or a member of an active department; a viewer or a
+        user without department reads only)."""
+        u = await session.get(User, user_id)
+        if u is None or not u.is_active or u.role == "viewer":
+            return False
+        if change.project_id is not None:
+            from app.models.entities import Plant, Project
+            project = await session.get(Project, change.project_id)
+            plant = await session.get(Plant, project.plant_id) if project else None
+            if plant is not None and u.organization_id != plant.organization_id:
+                return False
+        if u.role == "admin":
+            return True
+        return bool(await WorkflowService.get_user_department_ids(session, u.id))
+
+    @staticmethod
+    async def can_confirm(session: AsyncSession, change: ChangeRequest,
+                          concern: ChangeConcern, user: User) -> bool:
+        """The confirm item of an Assumed answer is open and the caller may
+        close it: the person named to confirm it, or anyone who may answer
+        the question, in any live status, the question open or closed."""
+        if not concern.confirm_open:
+            return False
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if concern.confirm_by_id == user.id and not acting:
+            return True
+        return await MeetingService.can_answer_question(session, change, concern, user)
 
     @staticmethod
     async def _evidence_text(session: AsyncSession, ref: Optional[str],
@@ -707,9 +818,7 @@ class MeetingService:
             raise ChangeError("Concern not found on this change")
         if not concern.confirm_open:
             raise ChangeError("Nothing to confirm: the answer is not an open assumption")
-        if not (concern.confirm_by_id == user.id
-                or await MeetingService.can_answer_question(
-                    session, change, concern, user)):
+        if not await MeetingService.can_confirm(session, change, concern, user):
             raise MeetingForbidden(
                 "Only the person named to confirm it, the asking department, "
                 "Sales or Project Management may confirm this assumption")
@@ -814,17 +923,19 @@ class MeetingService:
         allowed = settled_as is not None
         if not allowed:
             raise ChangeError(
-                "Only a member of the department that raised this concern, "
-                "or Project Management, may settle it"
+                "Only a member of the department it was raised for, or "
+                "Project Management, may close it"
                 if department_owns_it else
-                "Only the person who raised this concern, or Project "
-                "Management, may settle it")
+                "Only the person who raised it, or Project Management, may "
+                "close it")
         if concern.department_id is not None and not note:
             # A department-attributed flag owes its resolution — how was the
             # point addressed, on the record.
+            what = ("check item" if concern.is_check else "question"
+                    if concern.kind == "needs_info" else "point")
             raise ChangeError(
-                "Withdrawing a department concern requires a resolution note "
-                "saying how it was addressed")
+                f"Closing a department's {what} needs a resolution note: "
+                "how was it addressed?")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
         concern.settled_as = settled_as
@@ -842,6 +953,19 @@ class MeetingService:
             old_value={"concern_id": concern.id},
             new_value={"settled_as": settled_as},
             notes=concern.resolution_note)
+        if settled_as == "pm" and concern.raised_by not in (None, user.id) \
+                and concern.kind == "needs_info":
+            # spec §3 scoping record: a question closed over the asker tells
+            # the asker (once per question)
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [concern.raised_by], kind="concern_settled",
+                subject_key=f"settled:{concern.id}",
+                title=f"Your {'check item' if concern.is_check else 'question'} "
+                      f"was closed: {change.change_number}"[:255],
+                body=(f"Project Management closed '{concern.note}'"
+                      + (f": {concern.resolution_note}" if concern.resolution_note else "")),
+                link=f"/changes/{change.id}?tab=scoping")
         return concern
 
     @staticmethod
@@ -1015,6 +1139,19 @@ class MeetingService:
             user.id,
             new_value={"concern_id": concern.id, "answer_kind": concern.answer_kind},
             notes=note or None)
+        if answer_kind == "assumed" and concern.confirm_by_id not in (None, user.id):
+            # task newly theirs (spec §0): the confirm item, once per question
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [concern.confirm_by_id], kind="confirm_assumption",
+                subject_key=f"confirm:{concern.id}",
+                title=f"Confirm an assumption: {change.change_number}"[:255],
+                body=(f"Assumed {concern.assumed_value}"
+                      f"{' ' + concern.assumed_unit if concern.assumed_unit else ''} "
+                      f"for '{concern.note}'"
+                      + (f"; confirm by {concern.confirm_due:%a %d %b}"
+                         if concern.confirm_due else "")),
+                link=f"/changes/{change.id}?tab=scoping")
         return concern
 
     @staticmethod
@@ -1096,14 +1233,79 @@ class MeetingService:
         return MeetingService.asking_sides(concerns, names)
 
     @staticmethod
-    def asking_sides(concerns: list[ChangeConcern], names: dict) -> list[str]:
-        """_asking_sides with the department names at hand (lists)."""
+    def asking_sides(concerns: list[ChangeConcern], names: dict,
+                     change: Optional[ChangeRequest] = None) -> list[str]:
+        """_asking_sides with the department names at hand (lists). With
+        the change, each side carries the due weekday of its earliest open
+        question (the task rule: 2 wd, 1 wd urgent): "Sales Thu"."""
+        from app.services import due_rules
         out: list[str] = []
+        due: dict[str, datetime] = {}
         for c in sorted(concerns, key=lambda c: c.id):
             side = (names.get(c.department_id) if c.department_id
                     else c.raised_by_name or f"user #{c.raised_by}")
-            if side and side not in out:
+            if not side:
+                continue
+            if side not in out:
                 out.append(side)
+            if change is not None and c.raised_at is not None:
+                d = due_rules.task_due(c.raised_at, change, "obtain_info")
+                due[side] = min(d, due.get(side, d))
+        return [f"{s} {due[s]:%a}" if s in due else s for s in out]
+
+    @staticmethod
+    async def proceed_holds(session: AsyncSession, change: ChangeRequest, *,
+                            names: Optional[dict] = None,
+                            entered: Optional[datetime] = None,
+                            with_text: bool = True) -> list[dict]:
+        """What holds 'proceed' outside the meeting form (departments, R/A,
+        cost carrier and the urgent need-by are answered in the proceed
+        dialog): open questions and cancel votes (HARD #2), Quality's PPAP
+        decision and the flip's Sales answer (HARD #7), an empty impacted
+        set (HARD #1). Each {key, owner, text, n?, due?}, owner and due in
+        words, so the PM's scoping row, the change's checklist and the
+        refusal name every hold at once, each with its owner. `names`:
+        department id -> name (else read); `entered`: when the change
+        entered scoping (the PPAP decision's start; else no due);
+        with_text=False skips the questions' refusal text (lists: no
+        query per change)."""
+        from app.services import due_rules
+        from app.services.ppap_decision_service import applies, flip_open
+        out: list[dict] = []
+        blocking = MeetingService.open_blocking(change)
+        if blocking:
+            if names is None:
+                ids = {c.department_id for c in blocking if c.department_id}
+                names = dict((await session.execute(
+                    select(Department.id, Department.name).where(
+                        Department.id.in_(ids)))).all()) if ids else {}
+            out.append({"key": "questions", "n": len(blocking),
+                        "owner": ", ".join(MeetingService.asking_sides(
+                            blocking, names, change)),
+                        "text": (await MeetingService.open_flags_refusal(
+                            session, blocking) if with_text else "")})
+        if applies(change) and change.ppap_decision is None:
+            due = (due_rules.task_due(entered, change, "ppap_decision")
+                   if entered is not None else None)
+            out.append({"key": "ppap_decision",
+                        "owner": "Quality" + (f", due {due:%a}" if due else ""),
+                        **({"due": due} if due else {}),
+                        "text": "Proceed waits for Quality's PPAP decision "
+                                "(parameters / tool / material / cycle time "
+                                "changed on any part?). No override lifts it"})
+        if flip_open(change):
+            who = change.sales_owner_name or "Sales"
+            due = due_rules.task_due(change.customer_flip_at, change, "customer_flip")
+            out.append({"key": "customer_flip",
+                        "owner": f"{who}, due {due:%a}", "due": due,
+                        "text": f"The change became a customer change; proceed "
+                                f"waits for {who}: customer notification only, "
+                                "or offer needed?"})
+        if not change.impacted_items and change.impact_confirmed_at is None:
+            out.append({"key": "impacted_items",
+                        "owner": change.lead_name or "Project Management",
+                        "text": "No impacted parts picked: pick the impacted "
+                                "parts on the Impacted tab before proceeding"})
         return out
 
     @staticmethod
@@ -1119,51 +1321,47 @@ class MeetingService:
         meeting = await MeetingService._get_meeting(session, change, meeting_id)
         if meeting.decision is not None:
             raise ChangeError(f"Meeting already decided ('{meeting.decision}')")
-        if decision == "proceed" and not meeting.selected_department_ids:
-            raise ChangeError(
-                "Select at least one impacted department before proceeding")
-        # With letters on the record, somebody has to own the assessment:
-        # a room of Supports and Consulteds leaves stage 1 with no gate.
-        if (decision == "proceed" and meeting.department_rasic
-                and not any(v in BLOCKING_LETTERS for v in meeting.department_rasic.values())):
-            raise ChangeError(
-                "At least one department must be Responsible or Accountable (R/A) "
-                "before proceeding")
-        # Proceeding over an unanswered objection is the failure this exists to
-        # stop. Either its author withdraws it, or the decision answers it.
-        # C33: only questions and cancel votes hold it (HARD #2); check items
-        # go with the change as conditions.
+        # Proceed names everything that holds it at once (owner each), not
+        # one refusal per press: the dialog's own fields (departments, R/A,
+        # cost carrier, the urgent need-by) and proceed_holds.
         open_concerns = MeetingService.open_concerns(change)
         blocking = MeetingService.open_blocking(change)
-        if decision == "proceed" and blocking:
-            raise ChangeError(
-                await MeetingService.open_flags_refusal(session, blocking))
-        # HARD #7 (SCOPING_V2): an internal change proceeds once Quality
-        # answered the ppap_decision; a flipped one once the Sales owner
-        # answered "notification only or offer needed?".
         if decision == "proceed":
-            from app.services.ppap_decision_service import PpapDecisionService
-            why = PpapDecisionService.proceed_refusal(change)
-            if why:
-                raise ChangeError(why)
-
-        # Picked parts are still required: proceeding locks the set they make
-        # up (switch off, cm_switches), and an empty set locks nothing.
-        if (decision == "proceed" and not change.impacted_items
-                and change.impact_confirmed_at is None):
-            raise ChangeError(
-                "No impacted parts picked: pick the impacted parts on the "
-                "Impacted tab before proceeding")
-        # The room re-confirms the cost carrier (spec §16): it selects the
-        # whole commercial branch, so nobody proceeds without saying it.
-        if decision == "proceed" and meeting.cost_carrier is None:
-            raise ChangeError(
-                "Confirm the cost carrier (customer or internal change) before "
-                "proceeding")
-        # §3 urgent (SCOPING_V2): "Need-by realistic?" at proceed; anything
-        # but yes gives Sales "Tell customer: new date or start at risk?"
-        if decision == "proceed":
+            problems: list[str] = []
+            if not meeting.selected_department_ids:
+                problems.append(
+                    "Select at least one impacted department before proceeding")
+            # With letters on the record, somebody has to own the assessment:
+            # a room of Supports and Consulteds leaves stage 1 with no gate.
+            elif (meeting.department_rasic and not any(
+                    v in BLOCKING_LETTERS for v in meeting.department_rasic.values())):
+                problems.append(
+                    "At least one department must be Responsible or Accountable "
+                    "(R/A) before proceeding")
+            # HARD #2: proceeding over an unanswered objection is the failure
+            # this exists to stop (C33: check items go along as conditions);
+            # HARD #7 the PPAP decision and the flip's Sales answer; HARD #1
+            # an empty impacted set locks nothing.
+            problems += [h["text"] for h in await MeetingService.proceed_holds(
+                session, change)]
+            # The room re-confirms the cost carrier (spec §16): it selects the
+            # whole commercial branch, so nobody proceeds without saying it.
+            if meeting.cost_carrier is None:
+                problems.append("Confirm the cost carrier (customer or internal "
+                                "change) before proceeding")
+            # §3 urgent (SCOPING_V2): "Need-by realistic?" at proceed
             from app.services import capture_rules
+            why = capture_rules.need_by_refusal(change, need_by_check, need_by_proposed)
+            if why:
+                problems.append(why)
+            if len(problems) == 1:
+                raise ChangeError(problems[0])
+            if problems:
+                raise ChangeError(
+                    f"Proceed is held by {len(problems)} things: "
+                    + " | ".join(f"({i}) {p}" for i, p in enumerate(problems, 1)))
+            # anything but yes gives Sales "Tell customer: new date or start
+            # at risk?" (customer changes; internal: the lead is told)
             await capture_rules.check_need_by(session, change, user.id,
                                               need_by_check, need_by_proposed)
         # Both of the negative outcomes owe the originator an answer: reject
@@ -1176,7 +1374,11 @@ class MeetingService:
         if decision == "needs_info" and not reason and v2 and waiting:
             # "Not yet: waiting for 3 answers (Sales, Process)": the open
             # questions are the reason; no new one is raised.
-            sides = await MeetingService._asking_sides(session, waiting)
+            dept_ids = {c.department_id for c in waiting if c.department_id}
+            names = dict((await session.execute(
+                select(Department.id, Department.name).where(
+                    Department.id.in_(dept_ids)))).all()) if dept_ids else {}
+            sides = MeetingService.asking_sides(waiting, names, change)
             reason = (f"Not yet: waiting for {len(waiting)} answer"
                       f"{'s' if len(waiting) != 1 else ''} ({', '.join(sides)})")
             raise_question = False

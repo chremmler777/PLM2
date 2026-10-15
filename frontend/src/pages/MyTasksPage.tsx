@@ -21,6 +21,7 @@ import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, mainFi
 import BackupChip from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
+import CustomerCopy from '../components/changes/scoping/CustomerCopy';
 import { t } from '../i18n/cmLabels';
 import type { ChangeTask } from '../types/change';
 import { projectLabel } from '../lib/project';
@@ -329,12 +330,19 @@ const taskHint = (task: ChangeTask): string | null => {
         ? t('tasks.hint.hold_resume').replace('{x}', task.reason.trim())
         : t('tasks.hint.hold_resumeNoReason');
     case 'scoping_wrapup': {
-      // C33: "Not yet: waiting for 2 answers (Sales, Process)" / "Ready: proceed"
+      // C33: "Not yet: waiting for 2 answers (Sales Thu, Process Fri)", then
+      // what else holds proceed with its owner; "Ready: proceed" only when
+      // nothing does (the backend's proceed_holds).
       if (task.open_questions != null && !task.has_decision) {
-        return task.open_questions > 0
-          ? t('tasks.hint.scopingWaiting').replace('{n}', String(task.open_questions))
-            .replace('{x}', (task.waiting_on ?? []).join(', '))
-          : t('tasks.hint.scopingReady')
+        const parts = [
+          ...(task.open_questions > 0
+            ? [t('tasks.hint.scopingWaiting').replace('{n}', String(task.open_questions))
+              .replace('{x}', (task.waiting_on ?? []).join(', '))] : []),
+          ...((task.holds ?? []).length > 0
+            ? [t('tasks.hint.scopingHeld').replace('{x}', (task.holds ?? [])
+              .map((h) => t(`proceed.hold.${h.key}`).replace('{who}', h.owner)).join(', '))] : []),
+        ]
+        return parts.length > 0 ? parts.join(' · ') : t('tasks.hint.scopingReady')
       }
       const open = [
         // null: no manual confirm (switch off), nothing to confirm.
@@ -624,6 +632,12 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
           {task.kind === 'obtain_info' && task.asking_side && (
             <span data-testid="task-asking-side" className="block text-xs text-slate-500">
               {t('tasks.hint.askedBy').replace('{x}', task.asking_side)}
+            </span>
+          )}
+          {/* a customer question: the mail text, ready to copy (spec §0 [R4]) */}
+          {task.kind === 'obtain_info' && task.customer_copy && (
+            <span className="mt-1 block">
+              <CustomerCopy text={task.customer_copy} testId={`task-copy-${task.change_id}`} />
             </span>
           )}
         </span>

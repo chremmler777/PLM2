@@ -294,8 +294,11 @@ async def test_not_yet_keeps_every_question_open(
     # with questions open, 'Not yet' needs no reason: they are the reason
     res = await _decide(client, pm, cid, mid, "needs_info")
     assert res.status_code == 200, res.text
-    assert res.json()["decision_reason"] == (
-        "Not yet: waiting for 2 answers (Process Engineer, Tool Engineer)")
+    # each side with the due weekday of its question (spec §3 "Sales Thu")
+    import re
+    assert re.fullmatch(
+        r"Not yet: waiting for 2 answers \(Process Engineer (Mon|Tue|Wed|Thu|Fri), "
+        r"Tool Engineer (Mon|Tue|Wed|Thu|Fri)\)", res.json()["decision_reason"])
     rows = await _concerns(client, pm, cid)
     assert rows[q1["id"]]["is_open"] and rows[q2["id"]]["is_open"]
     assert rows[q1["id"]]["resolved_by_meeting_id"] is None
@@ -305,7 +308,8 @@ async def test_not_yet_keeps_every_question_open(
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
     wrap = next(t for t in tasks if t["kind"] == "scoping_wrapup" and t["change_id"] == cid)
     assert wrap["open_questions"] == 2
-    assert wrap["waiting_on"] == ["Process Engineer", "Tool Engineer"]
+    assert [w.rsplit(" ", 1)[0] for w in wrap["waiting_on"]] == [
+        "Process Engineer", "Tool Engineer"]
 
 
 async def test_reject_still_closes_every_flag(
@@ -400,3 +404,136 @@ async def test_our_team_question_confirmed_by_reference(
                                        "ref": "Process sheet PS-3274 rev 4"}, headers=pe)
     assert res.status_code == 200, res.text
     assert res.json()["answer_ref"] == "Process sheet PS-3274 rev 4"
+
+
+# --- L4 review: the confirm item, evidence, join rights, twins, mail copy -----
+
+async def test_named_confirmer_confirms_after_the_question_closed_and_proceed(
+        client, admin_auth, seed, session_factory):
+    """The confirm item is no dead end: the named confirmer (a lead outside
+    the asking department, Sales and PM) sees can_confirm and confirms after
+    the question was closed and the change proceeded. A bad confirmer
+    (inactive, other org, viewer) is refused."""
+    from app.models.entities import User
+    cid, _ = await _scoping(client, admin_auth, seed, "13")
+    _, proc, pe = await _user(client, session_factory, seed, "pe13", "Process Engineer")
+    lead_uid, _, lead = await _user(client, session_factory, seed, "dev13", "Development")
+    _, _, pm = await _user(client, session_factory, seed, "pm13", "Project Manager")
+    _, _, tool = await _user(client, session_factory, seed, "te13", "Tool Engineer")
+    q = (await _raise(client, pe, cid, _question(proc, answer_from="our_team",
+                                                 what="volume", note="Volume?"))).json()
+    url = f"/api/v1/changes/{cid}/concerns/{q['id']}/answer"
+    body = {"answer_kind": "assumed", "assumed_value": "90000", "assumed_unit": "pcs/yr",
+            "assumed_risk": "Second cavity needed above 150k"}
+    # negatives: an inactive user, a user without department (reads only)
+    async with session_factory() as s:
+        idle = User(organization_id=seed["org_id"], username="sv-idle13",
+                    email="sv-idle13@test.io", full_name="Idle", hashed_password="x",
+                    role="engineer", is_active=True)
+        s.add(idle)
+        await s.commit()
+        idle_id = idle.id
+    for bad in (seed["inactive_id"], idle_id):
+        res = await client.post(url, json={**body, "confirm_by_id": bad}, headers=pe)
+        assert res.status_code == 400 and "Who confirms" in res.json()["detail"], bad
+    res = await client.post(url, json={**body, "confirm_by_id": lead_uid}, headers=pe)
+    assert res.status_code == 200, res.text
+    # the named confirmer is told once
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        notes = (await s.execute(select(Notification).where(
+            Notification.user_id == lead_uid,
+            Notification.kind == "confirm_assumption"))).scalars().all()
+    assert len(notes) == 1
+    # the asker closes the answered question; proceed
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/withdraw",
+                            json={"resolution_note": "Assumed 90k, confirm later"},
+                            headers=pe)
+    assert res.status_code == 200, res.text
+    mid = await _meeting(client, pm, cid, {str(proc): "R"})
+    assert (await _decide(client, pm, cid, mid, "proceed")).status_code == 200
+    rows = await _concerns(client, lead, cid)
+    assert rows[q["id"]]["is_open"] is False and rows[q["id"]]["can_confirm"] is True
+    assert (await _concerns(client, tool, cid))[q["id"]]["can_confirm"] is False
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/confirm",
+                            json={"ref": "Sales forecast FC-2026-10"}, headers=lead)
+    assert res.status_code == 200, res.text
+    assert (await _concerns(client, lead, cid))[q["id"]]["can_confirm"] is False
+
+
+async def test_customer_question_internal_note_is_not_confirmation(
+        client, admin_auth, seed, session_factory):
+    cid, _ = await _scoping(client, admin_auth, seed, "14")
+    _, proc, pe = await _user(client, session_factory, seed, "pe14", "Process Engineer")
+    _, _, sales = await _user(client, session_factory, seed, "sa14", "Sales")
+    q = (await _raise(client, pe, cid, _question(proc))).json()
+    up = await client.post(f"/api/v1/changes/{cid}/attachments",
+                           files={"file": ("note.txt", b"we think lot 7", "text/plain")},
+                           data={"kind": "info_response", "concern_id": str(q["id"])},
+                           headers=pe)
+    assert up.status_code in (200, 201), up.text
+    url = f"/api/v1/changes/{cid}/concerns/{q['id']}/answer"
+    res = await client.post(url, json={"answer_kind": "confirmed"}, headers=sales)
+    assert res.status_code == 400 and "Assumed" in res.json()["detail"]
+    up = await client.post(f"/api/v1/changes/{cid}/attachments",
+                           files={"file": ("spec.pdf", b"%PDF lot 7", "application/pdf")},
+                           data={"kind": "customer_file", "concern_id": str(q["id"])},
+                           headers=sales)
+    assert up.status_code in (200, 201), up.text
+    res = await client.post(url, json={"answer_kind": "confirmed"}, headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_same_as_has_no_admin_shortcut_and_add_to_has_rights(
+        client, admin_auth, seed, session_factory):
+    cid, _ = await _scoping(client, admin_auth, seed, "15")
+    _, proc, pe = await _user(client, session_factory, seed, "pe15", "Process Engineer")
+    _, tool_id, tool = await _user(client, session_factory, seed, "te15", "Tool Engineer")
+    _, _, sales = await _user(client, session_factory, seed, "sa15", "Sales")
+    chk = (await _raise(client, pe, cid, _check(proc))).json()
+    url = f"/api/v1/changes/{cid}/concerns/{chk['id']}/join"
+    # a plain admin binds no other department's submit
+    res = await client.post(url, json={"department_id": tool_id}, headers=admin_auth)
+    assert res.status_code == 403
+    # a bystander cannot rewrite someone else's item
+    res = await client.post(url, json={"note": "and the gate"}, headers=tool)
+    assert res.status_code == 403
+    q = (await _raise(client, pe, cid, _question(proc, answer_from="our_team"))).json()
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/answer",
+                            json={"answer_kind": "confirmed", "ref": "Process sheet PS-1 rev 2"},
+                            headers=pe)
+    assert res.status_code == 200, res.text
+    # an answered question is not rewritten
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/join",
+                            json={"note": "and also the colour"}, headers=sales)
+    assert res.status_code == 400 and "already answered" in res.json()["detail"]
+
+
+async def test_make_it_a_question_keeps_one_per_pick(
+        client, admin_auth, seed, session_factory):
+    cid, _ = await _scoping(client, admin_auth, seed, "16")
+    _, proc, pe = await _user(client, session_factory, seed, "pe16", "Process Engineer")
+    q = (await _raise(client, pe, cid, _question(proc))).json()
+    chk = (await _raise(client, pe, cid, _check(proc, what="material"))).json()
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{chk['id']}/type", json={
+        "flag_type": "question", "answer_from": "customer",
+        "scope_effect": "Decides whether Process assesses"}, headers=pe)
+    assert res.status_code == 400 and f"#{q['id']}" in res.json()["detail"]
+
+
+async def test_customer_question_carries_the_mail_copy(
+        client, admin_auth, seed, session_factory):
+    cid, pid = await _scoping(client, admin_auth, seed, "17")
+    _, proc, pe = await _user(client, session_factory, seed, "pe17", "Process Engineer")
+    _, _, sales = await _user(client, session_factory, seed, "sa17", "Sales")
+    q = (await _raise(client, pe, cid, _question(proc, part_id=pid))).json()
+    mine = (await _raise(client, pe, cid, _question(
+        proc, what="tool", answer_from="our_team", note="Slider?"))).json()
+    rows = await _concerns(client, sales, cid)
+    copy = rows[q["id"]]["customer_copy"]
+    assert "Which resin lot?" in copy and "ART-SV17" in copy
+    assert "Decides whether Process assesses" in copy
+    assert rows[mine["id"]]["customer_copy"] is None
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+    row = next(t for t in tasks if t["kind"] == "obtain_info" and t["change_id"] == cid)
+    assert row["customer_copy"] is None or "Hello" in row["customer_copy"]

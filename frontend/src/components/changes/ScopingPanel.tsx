@@ -29,7 +29,7 @@ import {
   type ImpactedItem, type MeetingParticipant, type RasicLetter,
 } from '../../types/change'
 import {
-  askingSide, canAnswerQuestion, carrierOf, isPersonContact, openFlagLines,
+  askingSide, canAnswerQuestion, carrierOf, isPersonContact, openFlagLines, ppapApplies,
 } from '../../lib/scopingRules'
 import { departmentLabel, pickableDepartments } from '../../lib/departments'
 import { plantText } from '../../lib/plantName'
@@ -397,13 +397,15 @@ export default function ScopingPanel(
   const openFlags = openFlagLines(concerns, (id) => departments.find((d) => d.id === id)?.name)
   // C33: check items never hold proceed; they go along as its conditions.
   const openChecks = concerns.filter((c) => c.is_open && isCheckItem(c))
-  // HARD #7: an internal change waits for Quality's ppap_decision; a flipped
-  // one for the Sales owner's "notification or offer" answer.
+  // HARD #7: a change that goes on as internal (internal now, or a customer
+  // change the open meeting set to internal) waits for Quality's PPAP
+  // decision; a flipped one for the Sales owner's "notification or offer"
+  // answer (mirrors ppap_decision_service.applies / flip_open).
+  const ppapOwed = v2 && ppapApplies(change, meetings)
   const hard7 = v2 ? [
-    ...(!change.customer_relevant && change.origin === 'internal' && change.ppap_decision == null
-      ? [`HARD #7 · ${t('next.item.ppap_decision')}`] : []),
+    ...(ppapOwed && change.ppap_decision == null ? [t('next.item.ppap_decision')] : []),
     ...(change.customer_flip_at && change.flip_answer == null
-      ? [`HARD #7 · ${t('next.item.customer_flip')}`] : []),
+      ? [t('next.item.customer_flip')] : []),
   ] : []
   const toggleDept = (id: number) => {
     setDeptTouched(true)
@@ -630,7 +632,8 @@ export default function ScopingPanel(
           setNeedBy({ check: '', proposed: '' })
         }}>
         {v2 && confirmProceed && isUrgentV2(change) && openFlags.length === 0 && hard7.length === 0 && (
-          <NeedByCheck change={change} value={needBy} onChange={setNeedBy} />
+          <NeedByCheck change={change} value={needBy} onChange={setNeedBy}
+            customer={!ppapApplies(change, meetings)} />
         )}
         {v2 && confirmProceed && (
           <ProceedFixList changeId={changeId}
@@ -748,7 +751,7 @@ export default function ScopingPanel(
 
         {/* HARD #7: Quality's ppap_decision on an internal change, and the
             Sales answer once it became a customer change. */}
-        {v2 && (change.origin === 'internal' || change.ppap_decision != null) && (
+        {v2 && (ppapOwed || change.ppap_decision != null) && (
           <PpapDecisionCard change={change} editable={open} onChanged={invalidate}
             isQuality={departments.some((d) => d.name === 'Quality' && myDepartmentIds.includes(d.id))} />
         )}

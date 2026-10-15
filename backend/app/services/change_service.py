@@ -1456,12 +1456,18 @@ class ChangeService:
             if (change.customer_relevant and change.required_by_date is None
                     and change.flip_answer != "notification"):
                 add("quote_deadline", "soft", rule="no_quote_deadline")
-            # HARD #7 (SCOPING_V2): ppap_decision; the flip's Sales answer
-            from app.services import ppap_decision_service as ppap
-            if ppap.applies(change) and change.ppap_decision is None:
-                add("ppap_decision", "hard")
-            if ppap.flip_open(change):
-                add("customer_flip", "hard")
+            # HARD #7 (SCOPING_V2): Quality's PPAP decision; the flip's Sales
+            # answer; each with its owner and due (proceed_holds)
+            from app.models.change import ChangeChangelog
+            entered = (await session.execute(
+                select(func.max(ChangeChangelog.performed_at)).where(
+                    ChangeChangelog.change_id == change.id,
+                    ChangeChangelog.field_name == "status"))).scalar()
+            holds = {h["key"]: h for h in await MeetingService.proceed_holds(
+                session, change, entered=entered or change.created_at)}
+            for key in ("ppap_decision", "customer_flip"):
+                if key in holds:
+                    add(key, "hard", who=holds[key]["owner"])
             # HARD #2: questions and cancel votes; C33 check items go along
             concerns = MeetingService.open_blocking(change)
             if concerns:
@@ -1616,6 +1622,7 @@ class ChangeService:
         "pm_signoff": "Project Management", "quality_signoff": "Quality",
         "validation_issues": "Quality", "validation_open": "Quality",
         "validation_failed": "Quality",
+        "ppap_decision": "Quality", "customer_flip": "sales",
     }
 
     @staticmethod
@@ -2318,6 +2325,10 @@ class ChangeService:
                 session, change, "reopened", f"Reopened: {reopen_reason}",
                 user_id, notes=reopen_reason,
                 old_value={"rejection_reason": prior}, new_value=None)
+        if to_status == "scoping":
+            # HARD #7: Quality's PPAP decision is needed now (told once)
+            from app.services.ppap_decision_service import PpapDecisionService
+            await PpapDecisionService.notify_owed(session, change, user_id)
         return change
 
     @staticmethod
@@ -3417,7 +3428,13 @@ class ChangeService:
                     # C33 "Not yet: waiting for 3 answers (Sales, Process)",
                     # flipping to "Ready: proceed" once nothing holds it.
                     from app.services.meeting_service import MeetingService
+                    names = {i: n for n, i in dept_by_name.items()}
                     holding = MeetingService.open_blocking(c)
+                    # every hold of 'proceed' with its owner (questions,
+                    # PPAP decision, the flip's Sales answer, no parts):
+                    # "Ready: proceed" only when none is left
+                    holds = await MeetingService.proceed_holds(db, c, names=names,
+                                                                with_text=False)
                     tasks.append({
                         **await _base(c), "kind": "scoping_wrapup",
                         # None: no manual confirm (switch off), nothing owed.
@@ -3426,8 +3443,9 @@ class ChangeService:
                         "has_decision": any(m.decision in ("proceed", "reject")
                                             for m in c.meetings),
                         "open_questions": len(holding),
-                        "waiting_on": MeetingService.asking_sides(
-                            holding, {i: n for n, i in dept_by_name.items()}),
+                        "waiting_on": MeetingService.asking_sides(holding, names, c),
+                        "holds": [{"key": h["key"], "owner": h["owner"]}
+                                  for h in holds if h["key"] != "questions"],
                         "open_checks": len(MeetingService.open_checks(c)),
                     })
                 if (can_confirm and c.impact_confirmed_at is None
@@ -3667,6 +3685,7 @@ class ChangeService:
             questions = ChangeService.unanswered_questions(c)
             if questions and c.status not in ("captured", "scoping"):
                 if in_sales:
+                    from app.services.meeting_service import MeetingService as _MS
                     newest = questions[-1]
                     tasks.append({
                         **await _base(c), "kind": "obtain_info",
@@ -3675,6 +3694,8 @@ class ChangeService:
                         "concern_id": newest.id,
                         "department_id": newest.department_id,
                         "since": newest.raised_at,
+                        # a customer question: the mail text to copy
+                        "customer_copy": _MS.customer_copy(c, newest),
                     })
             elif questions:
                 am_author = getattr(user, "acts_as_department_id", None) is None
@@ -3684,9 +3705,13 @@ class ChangeService:
                     or (q.department_id in dep_ids if q.department_id is not None
                         else am_author and q.raised_by == user.id)]
                 if answerable:
+                    from app.services.meeting_service import MeetingService as _MS
                     newest = answerable[-1]
                     tasks.append({
                         **await _base(c), "kind": "obtain_info",
+                        # a customer question: the mail text Sales copies
+                        "customer_copy": (_MS.customer_copy(c, newest)
+                                          if in_sales else None),
                         "reason": newest.note,
                         "question_count": len(answerable),
                         "concern_id": newest.id,
@@ -5466,9 +5491,16 @@ class ChangeService:
             "target_value",
         }
         from app.services import capture_rules
-        urgent_fields = {"priority", "urgent_reason", "urgent_evidence",
-                         "release_due_date"}
-        touches_urgent = any(k in fields for k in urgent_fields)
+        # §2: the urgent rule is checked when the urgency itself moves
+        # (priority, reason, evidence) or the need-by moves during capture
+        # or scoping; a later release-deadline move of a legacy critical
+        # change is a deadline edit, not an urgent capture.
+        def _moves(k: str) -> bool:
+            return k in fields and fields[k] != getattr(change, k, None)
+        touches_urgent = (
+            any(_moves(k) for k in ("priority", "urgent_reason", "urgent_evidence"))
+            or (_moves("release_due_date")
+                and change.status in ("captured", "scoping")))
 
         # Validate implementation_mode before applying any changes
         impl_mode = fields.get("implementation_mode")
@@ -5502,6 +5534,12 @@ class ChangeService:
             # customer change gets the project's Sales contact.
             if not cust_rel:
                 change.sales_owner_id = None
+                if change.customer_relevant and change.customer_flip_at is not None \
+                        and change.flip_answer is None:
+                    # back to internal before Sales answered the flip: no
+                    # customer to tell, nothing for proceed to wait on
+                    change.customer_flip_at = None
+                    change.customer_flip_reason = None
             elif change.sales_owner_id is None and "sales_owner_id" not in fields:
                 change.sales_owner_id = await ChangeService.default_sales_owner_id(
                     session, change.project_id, True, change.origin)

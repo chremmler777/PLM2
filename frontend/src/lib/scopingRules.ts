@@ -5,7 +5,7 @@
 import { t } from '../i18n/cmLabels'
 import { preferredDepartmentId } from './departments'
 import type { Contact } from '../api/contacts'
-import type { ChangeConcern, CostCarrier } from '../types/change'
+import type { ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier } from '../types/change'
 
 /**
  * The attendee picker offers people only: the contact source also knows
@@ -27,6 +27,25 @@ export function isPersonContact(c: Contact, departmentNames: string[] = []): boo
 /** The room's cost carrier as a form value, from the change's flag. */
 export const carrierOf = (customerRelevant?: boolean | null): CostCarrier | '' =>
   customerRelevant === true ? 'customer' : customerRelevant === false ? 'internal' : ''
+
+/**
+ * HARD #7 mirror of ppap_decision_service.applies: a change of ours
+ * (customer or internal origin) that goes on as internal owes Quality's
+ * PPAP decision. While captured or scoped an undecided meeting's cost
+ * carrier wins (proceed applies it), else the change's own.
+ */
+export function ppapApplies(
+  change: Pick<ChangeRequest, 'origin' | 'customer_relevant' | 'status'>,
+  meetings: Pick<ChangeMeeting, 'decision' | 'cost_carrier'>[],
+): boolean {
+  if (change.origin !== 'customer' && change.origin !== 'internal') return false
+  let carrier: string = change.customer_relevant ? 'customer' : 'internal'
+  if (change.status === 'captured' || change.status === 'scoping') {
+    const room = [...meetings].reverse().find((m) => m.decision == null && m.cost_carrier)
+    if (room?.cost_carrier) carrier = room.cost_carrier
+  }
+  return carrier === 'internal'
+}
 
 /**
  * Which department a new flag is filed under by default: the viewer's own.

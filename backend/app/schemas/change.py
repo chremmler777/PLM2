@@ -1352,6 +1352,11 @@ class ConcernResponse(BaseModel):
     # answer (asking department or author, Sales, Project Management).
     asking_department_name: Optional[str] = None
     can_answer: Optional[bool] = None
+    # C33: the caller may confirm this Assumed answer (named confirmer, or
+    # who may answer it), in any live status
+    can_confirm: Optional[bool] = None
+    # A customer question: the mail text Sales copies (spec §0 [R4])
+    customer_copy: Optional[str] = None
     answer_note: Optional[str] = None
     answered_at: Optional[datetime] = None
     answered_by: Optional[int] = None

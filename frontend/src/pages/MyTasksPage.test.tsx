@@ -135,6 +135,24 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(opened()).toBe('/changes/7?tab=scoping')
   })
 
+  it('reads Ready: proceed only when nothing holds proceed (HARD #7 names its owner)', async () => {
+    await renderWith(changeTask({
+      kind: 'scoping_wrapup', impact_confirmed: null, has_decision: false,
+      open_questions: 0, waiting_on: [], holds: [{ key: 'ppap_decision', owner: 'Quality, due Thu' }],
+    }))
+    const hint = screen.getByText(new RegExp(t('tasks.hint.scopingHeld').replace('{x}', '')))
+    expect(hint.textContent).toContain('PPAP decision (Quality, due Thu)')
+    expect(hint.textContent).not.toContain(t('tasks.hint.scopingReady'))
+  })
+
+  it('reads Ready: proceed once nothing holds it', async () => {
+    await renderWith(changeTask({
+      kind: 'scoping_wrapup', impact_confirmed: null, has_decision: false,
+      open_questions: 0, waiting_on: [], holds: [],
+    }))
+    expect(screen.getByText(t('tasks.hint.scopingReady'))).toBeDefined()
+  })
+
   it('drops the settled half of a scoping wrap-up hint', async () => {
     await renderWith(changeTask({
       kind: 'scoping_wrapup', impact_confirmed: true, has_decision: false,

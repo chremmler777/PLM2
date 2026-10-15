@@ -47,7 +47,10 @@ export default function AnswerForm({
   const customer = c.answer_from === 'customer'
   const mails = attachments.filter((a) => a.kind === 'customer_email')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-  const docs = attachments.filter((a) => a.concern_id === c.id && a.kind === 'info_response')
+  // a customer question: only the customer's own document filed on it
+  const docKind = customer ? 'customer_file' : 'info_response'
+  const docs = attachments.filter((a) => a.concern_id === c.id
+    && (a.kind === 'customer_file' || (!customer && a.kind === 'info_response')))
   const na = ['n/a', 'na'].includes(value.trim().toLowerCase())
 
   const save = useMutation({
@@ -125,8 +128,13 @@ export default function AnswerForm({
                 data-testid={`answer-ref-${c.id}`} className={`${input} flex-1 min-w-[12rem]`} />
             )}
           </div>
-          <AttachmentDropzone changeId={changeId} kind="info_response" concernId={c.id}
-            compact label={t('attach.responseSlot')} onUploaded={onDone} />
+          {/* a closed question takes no more documents: the filed mail or a
+              reference confirms it then */}
+          {c.is_open && (
+            <AttachmentDropzone changeId={changeId} kind={docKind} concernId={c.id}
+              compact label={t(customer ? 'answer.customerDocSlot' : 'attach.responseSlot')}
+              onUploaded={onDone} />
+          )}
         </div>
       )}
       {kind === 'assumed' && (

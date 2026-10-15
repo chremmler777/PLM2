@@ -532,10 +532,15 @@ export interface ChangeTask {
    *  and the check items that go along. */
   open_questions?: number;
   waiting_on?: string[];
+  /** What else holds proceed, each with its owner (and due) in words:
+   *  ppap_decision (Quality), customer_flip (Sales), impacted_items. */
+  holds?: { key: string; owner: string }[];
   open_checks?: number;
   // obtain_info rows: what the customer was asked for, and how much of it
   reason?: string | null;
   question_count?: number;
+  /** obtain_info on a customer question: the mail text Sales copies. */
+  customer_copy?: string | null;
   /** obtain_info: who owns the question, the asking department (else the
    *  person who asked). */
   asking_side?: string | null;
@@ -1172,6 +1177,11 @@ export interface ChangeConcern {
    *  endpoint. */
   asking_department_name?: string | null;
   can_answer?: boolean | null;
+  /** C33: the caller may confirm this Assumed answer (named confirmer, or
+   *  who may answer it), in any live status. */
+  can_confirm?: boolean | null;
+  /** A customer question: the mail text Sales copies. */
+  customer_copy?: string | null;
   answered_at?: string | null;
   answered_by?: number | null;
   answered_by_name?: string | null;

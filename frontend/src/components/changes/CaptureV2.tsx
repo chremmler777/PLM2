@@ -151,16 +151,20 @@ export function ProblemTargetEditor({ change, canEdit }: { change: ChangeRequest
 export interface NeedByAnswer { check: '' | 'yes' | 'at_risk' | 'no'; proposed: string }
 
 /** The proceed dialog's question for an urgent change; nothing preselected. */
-export function NeedByCheck({ change, value, onChange }: {
+export function NeedByCheck({ change, value, onChange, customer = !!change.customer_relevant }: {
   change: ChangeRequest; value: NeedByAnswer; onChange: (v: NeedByAnswer) => void
+  /** The change goes on as a customer change: start at risk (a customer
+   *  go-ahead, §7a) and Sales' "Tell customer" exist only then. */
+  customer?: boolean
 }) {
+  const options = customer ? (['yes', 'at_risk', 'no'] as const) : (['yes', 'no'] as const)
   return (
     <fieldset data-testid="need-by-check" className="mt-3 space-y-1 text-xs">
       <legend className="text-sm text-slate-200">
         {t('urgent.realistic').replace('{d}', formatDate(change.release_due_date))}
       </legend>
       <div className="flex flex-wrap gap-3">
-        {(['yes', 'at_risk', 'no'] as const).map((v) => (
+        {options.map((v) => (
           <label key={v} className="flex items-center gap-1.5 cursor-pointer text-slate-200">
             <input type="radio" name="need-by-check" checked={value.check === v}
               data-testid={`need-by-${v}`} onChange={() => onChange({ ...value, check: v })} />
@@ -173,7 +177,9 @@ export function NeedByCheck({ change, value, onChange }: {
           aria-label={t('urgent.proposed')} className={`${input} w-36`} commitOnChange />
       )}
       {value.check !== '' && value.check !== 'yes' && (
-        <p className="text-[11px] text-amber-300/90">{t('urgent.salesTells')}</p>
+        <p className="text-[11px] text-amber-300/90">
+          {t(customer ? 'urgent.salesTells' : 'urgent.leadTold')}
+        </p>
       )}
     </fieldset>
   )

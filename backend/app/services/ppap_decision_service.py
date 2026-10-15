@@ -11,8 +11,11 @@
   customer_relevant, the project's Sales contact as Sales owner, the project
   PM as lead; the Sales owner answers "notification only" (filed mail or a
   reference) or "offer needed" (the quote deadline). Proceed waits for that
-  answer. A flip at approved or later leaves the price open (HARD #9 at
-  close) until a supplement is accepted or the money is absorbed.
+  answer. "Notification only": the customer is told, the money stays ours,
+  so the change goes on as internal (internal_approval, HARD #8) with the
+  notification on the record. "Offer needed" at approved or later leaves the
+  price open (HARD #9 at close) until a supplement is accepted or the money
+  is absorbed.
 """
 from __future__ import annotations
 
@@ -38,12 +41,27 @@ class PpapForbidden(ChangeError):
     """The caller may not give this answer: 403."""
 
 
+def carrier(change: ChangeRequest) -> str:
+    """The cost carrier the change goes on with: while it is captured or
+    scoped, an undecided scoping meeting's pick (proceed applies it, see
+    MeetingService._apply_cost_carrier), else the change's own."""
+    if change.status in SCOPING_STATUSES:
+        room = next((m.cost_carrier for m in reversed(change.meetings or [])
+                     if m.decision is None and m.cost_carrier), None)
+        if room:
+            return room
+    return "customer" if change.customer_relevant else "internal"
+
+
 def applies(change: ChangeRequest) -> bool:
-    """Does this change owe Quality's ppap_decision? An internal change
-    (origin internal, not a mother-plant change or an engineering review)
-    with SCOPING_V2 on. A change that flipped keeps its recorded answer."""
-    return (cm_switches.on("SCOPING_V2") and not change.customer_relevant
-            and getattr(change, "origin", None) == "internal")
+    """Does this change owe Quality's ppap_decision? One of ours (not a
+    mother-plant change or an engineering review) that goes on as internal:
+    internal now, or a customer change the scoping meeting set to internal
+    (else proceed would turn it internal past the gate). SCOPING_V2 on. A
+    change that flipped keeps its recorded answer."""
+    return (cm_switches.on("SCOPING_V2")
+            and getattr(change, "origin", None) in ("customer", "internal")
+            and carrier(change) == "internal")
 
 
 def flip_open(change: ChangeRequest) -> bool:
@@ -60,15 +78,41 @@ class PpapDecisionService:
         if not cm_switches.on("SCOPING_V2"):
             return None
         if applies(change) and change.ppap_decision is None:
-            return ("HARD #7: Quality answers the ppap_decision first "
-                    "(parameters / tool / material / cycle time changed on any "
-                    "part?). No override lifts it")
+            return ("Proceed waits for Quality's PPAP decision (parameters / "
+                    "tool / material / cycle time changed on any part?). No "
+                    "override lifts it")
         if flip_open(change):
             who = change.sales_owner_name or "Sales"
-            return (f"HARD #7: the change became a customer change; proceed "
-                    f"waits for {who}: customer notification only, or offer "
-                    "needed?")
+            return (f"The change became a customer change; proceed waits for "
+                    f"{who}: customer notification only, or offer needed?")
         return None
+
+    @staticmethod
+    async def notify_owed(session: AsyncSession, change: ChangeRequest,
+                          actor_id: Optional[int] = None) -> None:
+        """Decision needed (spec §0 Notifications, immediate): Quality's
+        members of the change's organization, once per change, when the
+        change is in scoping and owes the PPAP decision (entering scoping,
+        or a meeting that sets the carrier to internal)."""
+        if (change.status != "scoping" or not applies(change)
+                or change.ppap_decision is not None):
+            return
+        from app.models.workflow import Department
+        from app.services.change_people import department_members_of_change_org
+        from app.services.notification_service import NotificationService
+        quality = (await session.execute(select(Department.id).where(
+            Department.name == "Quality", Department.is_active.is_(True)))
+        ).scalar_one_or_none()
+        if quality is None:
+            return
+        ids = [i for i in await department_members_of_change_org(session, change, [quality])
+               if i != actor_id]
+        await NotificationService.notify_once(
+            session, ids, kind="ppap_decision", subject_key=f"ppap_decision:{change.id}",
+            title=f"PPAP decision needed: {change.change_number}"[:255],
+            body=(f"'{change.title}': parameters / tool / material / cycle time "
+                  "changed on any part? Proceed waits for your answer."),
+            link=f"/changes/{change.id}?tab=scoping&task=ppap_decision")
 
     @staticmethod
     async def decide(
@@ -80,19 +124,20 @@ class PpapDecisionService:
         if not cm_switches.on("SCOPING_V2"):
             raise ChangeError("The ppap_decision is switched off (SCOPING_V2)")
         if not applies(change):
-            raise ChangeError("Only an internal change owes a ppap_decision")
+            raise ChangeError("Only a change that goes on as internal owes the "
+                              "PPAP decision")
         if change.status not in SCOPING_STATUSES:
-            raise ChangeError("The ppap_decision is answered during capture or scoping")
+            raise ChangeError("The PPAP decision is answered during capture or scoping")
         if not await ChangeService.member_of(session, user, "Quality"):
-            raise PpapForbidden("Only a Quality member answers the ppap_decision "
+            raise PpapForbidden("Only a Quality member answers the PPAP decision "
                                 "(admins: act as Quality)")
         if answer not in PPAP_ANSWERS:
             raise ChangeError("Answer no or yes: parameters / tool / material / "
                               "cycle time changed on any part?")
         if answer == "no":
             if basis not in PPAP_BASES:
-                raise ChangeError("Say what 'no' is based on: control_plan, "
-                                  "process_sheet or customer_spec")
+                raise ChangeError("Say what 'no' is based on: the control plan, "
+                                  "the process sheet or the customer spec")
             from app.services.cm_rules import reference_refusal
             why = reference_refusal(ref, "The reference of that document")
             if why:
@@ -133,8 +178,10 @@ class PpapDecisionService:
                    why: str) -> ChangeRequest:
         """The customer flip (spec §0): customer change, the project's Sales
         contact as Sales owner, the project PM as lead, and the Sales task
-        "Customer notification or offer needed?". Idempotent."""
-        if change.customer_relevant:
+        "Customer notification or offer needed?". Idempotent. A customer
+        change the scoping meeting set to internal flips too (the room's
+        carrier goes back to customer)."""
+        if carrier(change) == "customer":
             return change
         from app.services import mother_plants as mp
         if mp.is_mother_plant(change):
@@ -156,11 +203,9 @@ class PpapDecisionService:
         change.customer_flip_reason = why[:255]
         change.flip_answer = change.flip_ref = None
         change.flip_answered_by = change.flip_answered_at = None
+        # [R4] past approval the price opens only with Sales' "offer needed"
+        # (answer_flip), never on the flip itself
         after_approval = change.status in AFTER_APPROVAL
-        if after_approval:
-            # [R4] once approved every offer is a supplement: the money stays
-            # open until it is accepted or absorbed (HARD #9 at close)
-            change.price_open = True
         # the room's cost carrier follows: an undecided meeting that said
         # 'internal' would flip it back at proceed
         for m in change.meetings:
@@ -173,8 +218,7 @@ class PpapDecisionService:
             field_name="customer_relevant",
             old_value={"customer_relevant": False, "lead_id": old_lead},
             new_value={"customer_relevant": True, "lead_id": change.lead_id,
-                       "sales_owner_id": change.sales_owner_id,
-                       "price_open": change.price_open})
+                       "sales_owner_id": change.sales_owner_id})
         await PpapDecisionService._notify_flip(session, change, after_approval)
         return change
 
@@ -194,19 +238,31 @@ class PpapDecisionService:
                 Department.name == "Sales"))).scalar_one_or_none()
             if sales is not None:
                 ids += await department_members_of_change_org(session, change, [sales])
-        if change.lead_id is not None:
-            ids.append(change.lead_id)
         ids = list(dict.fromkeys(ids))
-        if not ids:
-            return
-        await NotificationService.notify_once(
-            session, ids, kind="customer_flip", subject_key=f"customer_flip:{change.id}",
-            title=f"Customer notification or offer needed? {change.change_number}"[:255],
-            body=(f"'{change.title}' became a customer change ({change.customer_flip_reason})."
-                  + (" It is past approval: an offer is a supplement; the price "
-                     "stays open until it is accepted or absorbed."
-                     if after_approval else "")),
-            link=f"/changes/{change.id}?tab=scoping&task=customer_flip")
+        past = (" It is past approval: an offer is a supplement; the price "
+                "stays open until it is accepted or absorbed."
+                if after_approval else "")
+        if ids:
+            await NotificationService.notify_once(
+                session, ids, kind="customer_flip",
+                subject_key=f"customer_flip:{change.id}",
+                title=f"Customer notification or offer needed? {change.change_number}"[:255],
+                body=(f"'{change.title}' became a customer change "
+                      f"({change.customer_flip_reason}). Answer: notification "
+                      "only (the mail or its reference) or offer needed (the "
+                      "quote deadline)." + past),
+                link=f"/changes/{change.id}?tab=scoping&task=customer_flip")
+        # the new lead: told, not asked (Sales answers)
+        if change.lead_id is not None and change.lead_id not in ids:
+            who = change.sales_owner_name or "Sales"
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="customer_flip",
+                subject_key=f"customer_flip_lead:{change.id}",
+                title=f"You lead {change.change_number}: it became a customer change"[:255],
+                body=(f"'{change.title}' ({change.customer_flip_reason}). {who} "
+                      "answers whether the customer needs only a notification "
+                      "or an offer; proceed waits for it." + past),
+                link=f"/changes/{change.id}?tab=scoping")
 
     @staticmethod
     async def answer_flip(
@@ -222,7 +278,7 @@ class PpapDecisionService:
         if not await ChangeService.member_of(session, user, "Sales"):
             raise PpapForbidden("Sales answers: notification only or offer needed")
         if answer not in FLIP_ANSWERS:
-            raise ChangeError("Answer notification or offer")
+            raise ChangeError("Answer 'notification only' or 'offer needed'")
         if answer == "notification":
             evidence = None
             if mail_id is not None:
@@ -238,6 +294,15 @@ class PpapDecisionService:
                     raise ChangeError(why)
                 evidence = ref.strip()
             change.flip_ref = evidence[:255]
+            # the customer is told; the money stays ours: the change goes on
+            # as internal (internal_approval, HARD #8), the room's carrier
+            # with it, and an internal change has no Sales owner (C10)
+            change.customer_relevant = False
+            change.origin = "internal"
+            change.sales_owner_id = None
+            for m in change.meetings:
+                if m.decision is None and m.cost_carrier == "customer":
+                    m.cost_carrier = "internal"
         else:
             if quote_deadline is None:
                 raise ChangeError("Offer needed: set the quote deadline")
@@ -252,6 +317,10 @@ class PpapDecisionService:
                     user.id, field_name="required_by_date",
                     old_value=str(old) if old else None, new_value=str(quote_deadline))
             change.flip_ref = None
+            if change.status in AFTER_APPROVAL:
+                # [R4] past approval every offer is a supplement: the money
+                # stays open until it is accepted or absorbed (HARD #9)
+                change.price_open = True
         change.flip_answer = answer
         change.flip_answered_by = user.id
         change.flip_answered_at = datetime.utcnow()
@@ -259,6 +328,11 @@ class PpapDecisionService:
         await ChangeService.append_changelog(
             session, change, "customer_flip_answered",
             f"Customer flip: {'notification only' if answer == 'notification' else 'offer needed'}"
-            + (f" ({change.flip_ref})" if change.flip_ref else ""), user.id,
-            new_value={"answer": answer, "ref": change.flip_ref})
+            + (f" ({change.flip_ref}); the money stays ours: goes on as internal"
+               if answer == "notification" else "")
+            + ("; price open until the supplement is accepted or absorbed"
+               if answer == "offer" and change.price_open else ""), user.id,
+            new_value={"answer": answer, "ref": change.flip_ref,
+                       "customer_relevant": change.customer_relevant,
+                       "price_open": change.price_open})
         return change

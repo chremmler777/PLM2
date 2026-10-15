@@ -109,7 +109,7 @@ TASK_KIND = {
                                    "Hinzugefügte Abteilung entscheiden"),
     "not_feasible": ("Not feasible: decide", "Nicht machbar: entscheiden"),
     # HARD #7 (§3) and the customer flip (§0)
-    "ppap_decision": ("ppap decision", "PPAP-Entscheidung"),
+    "ppap_decision": ("Answer the PPAP decision", "PPAP-Entscheidung beantworten"),
     "customer_flip": ("Customer notification or offer?", "Kundeninfo oder Angebot?"),
     # §1: a new customer index on a part the change carries
     "assessment_recheck": ("Recheck on the new index", "Auf neuen Index nachprüfen"),

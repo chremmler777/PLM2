@@ -406,6 +406,27 @@ describe('CockpitSummary scoping decisions belong to the meeting', () => {
     expect(onAction).toHaveBeenCalledWith('scoping')
   })
 
+  it('names the PPAP decision with its owner while it holds proceed (HARD #7), never "Nothing blocking"', () => {
+    const scoping = change({ status: 'scoping', assessments: [], next_step: { to: 'in_assessment', items: [
+      { key: 'ppap_decision', kind: 'hard', who: 'Quality, due Thu' },
+    ] } })
+    // the recorder: no invitation to record a proceed the server refuses
+    render(wrap(<CockpitSummary change={scoping} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onAction={() => {}} />))
+    expect(screen.queryByText(/Record the scoping meeting: proceed/)).toBeNull()
+    expect(screen.getByTestId('meeting-decides').textContent).toContain('Quality, due Thu')
+    expect(screen.queryByText(t('cockpit.nothingBlocking'))).toBeNull()
+    cleanup()
+    // Quality: the header action is its own answer
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={scoping} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onAction={onAction} canRecordMeeting={false}
+      actions={[{ kind: 'ppap_decision', label: 'Answer the PPAP decision', target_tab: 'scoping' }] as MyAction[]} />))
+    fireEvent.click(screen.getByTestId('next-own-hold'))
+    expect(onAction).toHaveBeenCalledWith('scoping')
+    expect(screen.queryByText(/The scoping meeting decides/)).toBeNull()
+  })
+
   it('points a viewer who cannot record the meeting at Scoping without telling them to record it', () => {
     render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}

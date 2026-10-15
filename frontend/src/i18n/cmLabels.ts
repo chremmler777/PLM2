@@ -2536,7 +2536,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.hint.confirm_assumption': { de: 'Annahme bestätigen: {x}', en: 'Confirm the assumption: {x}' },
   'tasks.hint.scopingReady': { de: 'Bereit: freigeben', en: 'Ready: proceed' },
   // HARD #7: ppap_decision and the customer flip
-  'ppap.title': { de: 'PPAP-Entscheidung (Qualität)', en: 'ppap decision (Quality)' },
+  'ppap.title': { de: 'PPAP-Entscheidung (Qualität)', en: 'PPAP decision (Quality)' },
   'ppap.question': {
     de: 'Parameter / Werkzeug / Material / Zykluszeit an einem Teil geändert?',
     en: 'Parameters / tool / material / cycle time changed on any part?' },
@@ -2554,8 +2554,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Yes = customer notification task for Sales: the change becomes a customer change.' },
   'ppap.save': { de: 'Entscheidung speichern', en: 'Save decision' },
   'ppap.qualityOwes': {
-    de: 'Qualität beantwortet das vor der Freigabe (HARD #7).',
-    en: 'Quality answers this before proceed (HARD #7).' },
+    de: 'Qualität beantwortet das vor der Freigabe; keine Übersteuerung hebt es auf.',
+    en: 'Quality answers this before proceed; no override lifts it.' },
+  'ppap.owner': { de: 'Qualität, fällig {d}', en: 'Quality, due {d}' },
   'ppap.decidedNo': { de: 'Nein, laut {b}: {r}', en: 'No, per {b}: {r}' },
   'ppap.decidedYes': { de: 'Ja, {n} Teil(e): Kundenänderung', en: 'Yes, {n} part(s): customer change' },
   'flip.title': { de: 'Kundeninfo oder Angebot nötig?', en: 'Customer notification or offer needed?' },
@@ -2566,9 +2567,24 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{x} answers this; proceed waits for it.' },
   'flip.answeredNotification': { de: 'Nur Kundeninfo: {r}', en: 'Notification only: {r}' },
   'flip.answeredOffer': { de: 'Angebot nötig: Angebotstermin gesetzt', en: 'Offer needed: quote deadline set' },
-  'tasks.kind.ppap_decision': { de: 'PPAP-Entscheidung', en: 'ppap decision' },
+  'tasks.kind.ppap_decision': { de: 'PPAP-Entscheidung beantworten', en: 'Answer the PPAP decision' },
   'tasks.kind.customer_flip': { de: 'Kundeninfo oder Angebot?', en: 'Customer notification or offer?' },
-  'next.item.ppap_decision': { de: 'PPAP-Entscheidung der Qualität', en: "Quality's ppap decision" },
+  'next.item.ppap_decision': { de: 'PPAP-Entscheidung der Qualität', en: "Quality's PPAP decision" },
+  // the PM's scoping row and the header: what holds proceed besides questions
+  // a customer question's mail text (spec §0 [R4])
+  'answer.customerDocSlot': { de: 'Dokument des Kunden hier ablegen', en: "Drop the customer's document here" },
+  'copy.mailText': { de: 'Mailtext kopieren', en: 'Copy mail text' },
+  'copy.show': { de: 'Text zeigen', en: 'Show text' },
+  'copy.hide': { de: 'Text ausblenden', en: 'Hide text' },
+  'copy.done': { de: 'Mailtext kopiert', en: 'Mail text copied' },
+  'copy.failed': { de: 'Kopieren nicht möglich: Text unten markieren', en: 'Could not copy: select the text below' },
+  'tasks.hint.scopingHeld': { de: 'Freigabe wartet auf: {x}', en: 'Proceed waits for: {x}' },
+  'proceed.hold.ppap_decision': { de: 'PPAP-Entscheidung ({who})', en: 'PPAP decision ({who})' },
+  'proceed.hold.customer_flip': { de: 'Kundeninfo oder Angebot? ({who})', en: 'notification or offer? ({who})' },
+  'proceed.hold.impacted_items': { de: 'betroffene Teile ({who})', en: 'impacted parts ({who})' },
+  'cockpit.proceedWaits': {
+    de: 'Freigabe wartet auf: {x}. Scoping ansehen →',
+    en: 'Proceed waits for: {x}. See Scoping →' },
   'next.item.customer_flip': { de: 'Sales: Kundeninfo oder Angebot?', en: 'Sales: notification or offer?' },
   // §2 capture: urgent, internal problem and target; §3 urgent proceed
   'urgent.toggle': { de: 'Dringend', en: 'Urgent' },
@@ -2596,6 +2612,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'urgent.realistic.at_risk': { de: 'Nur mit Start auf Risiko', en: 'Only with start at risk' },
   'urgent.realistic.no': { de: 'Nein: Termin vorschlagen', en: 'No: propose a date' },
   'urgent.proposed': { de: 'Vorgeschlagener Termin', en: 'Proposed date' },
+  'urgent.leadTold': {
+    de: 'Interne Änderung: festgehalten, der Lead wird informiert (kein Kunde, keine Sales-Aufgabe).',
+    en: 'Internal change: recorded and the lead is told (no customer, no Sales task).' },
   'urgent.salesTells': {
     de: 'Sales bekommt sofort: "Kunde informieren: neuer Termin oder Start auf Risiko?"',
     en: 'Sales gets at once: "Tell customer: new date or start at risk?"' },

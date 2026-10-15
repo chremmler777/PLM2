@@ -122,11 +122,13 @@ async def test_mother_plant_changes_keep_their_own_urgency(client, admin_auth, s
     assert r.status_code == 200, r.text
 
 
-async def _urgent_in_scoping(client, auth, seed, session_factory):
-    r = await _create(client, auth, seed, "urgent scoping", customer_relevant=True, **URGENT)
+async def _urgent_in_scoping(client, auth, seed, session_factory, *, customer=True,
+                             lead_id=None):
+    r = await _create(client, auth, seed, "urgent scoping", customer_relevant=customer,
+                      **({"lead_id": lead_id} if lead_id else {}), **URGENT)
     cid = r.json()["id"]
     part = await client.post("/api/v1/parts", json={
-        "project_id": seed["project_id"], "part_number": "ART-CPU1", "name": "Part",
+        "project_id": seed["project_id"], "part_number": f"ART-CPU{cid}", "name": "Part",
         "part_type": "internal_mfg"}, headers=auth)
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part.json()["id"], "is_lead": True}, headers=auth)
@@ -146,7 +148,8 @@ async def _urgent_in_scoping(client, auth, seed, session_factory):
             dept = d.id
     r = await client.post(f"/api/v1/changes/{cid}/meetings", json={
         "channel": "meeting", "participants": [{"name": "Eva"}],
-        "department_rasic": {str(dept): "R"}, "cost_carrier": "customer"}, headers=auth)
+        "department_rasic": {str(dept): "R"},
+        "cost_carrier": "customer" if customer else "internal"}, headers=auth)
     assert r.status_code == 200, r.text
     return cid, r.json()["id"]
 
@@ -207,3 +210,55 @@ async def test_switch_off_no_capture_rules(client, admin_auth, seed, session_fac
     assert r.status_code == 200, r.text
     cid = r.json()["id"]
     assert "customer file" not in await _missing(session_factory, cid)
+
+
+async def test_internal_urgent_not_realistic_tells_the_lead_not_sales(
+        client, admin_auth, seed, session_factory):
+    """An internal change has no customer and no Sales owner: 'start at
+    risk' is not offered, 'no' is recorded and the lead is told; Sales gets
+    no task and no notice (R33)."""
+    sally, sales = await _user(client, session_factory, seed, "s4", "Sales")
+    lead_id, _ = await _user(client, session_factory, seed, "l4", "Development")
+    cid, mid = await _urgent_in_scoping(client, admin_auth, seed, session_factory,
+                                        customer=False, lead_id=lead_id)
+    url = f"/api/v1/changes/{cid}/meetings/{mid}/decide"
+    r = await client.post(url, json={"decision": "proceed", "need_by_check": "at_risk"},
+                          headers=admin_auth)
+    assert r.status_code == 400 and "start at risk" not in r.json()["detail"]
+    r = await client.post(url, json={"decision": "proceed", "need_by_check": "no",
+                                     "need_by_proposed": "2026-11-20T12:00:00"},
+                          headers=admin_auth)
+    assert r.status_code == 200, r.text
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+            if t["kind"] == "need_by_tell"]
+    assert rows == []
+    async with session_factory() as s:
+        to_sales = (await s.execute(select(Notification).where(
+            Notification.user_id == sally, Notification.kind == "need_by_tell"))).scalars().all()
+        to_lead = (await s.execute(select(Notification).where(
+            Notification.user_id == lead_id,
+            Notification.title.like("Urgent need-by not realistic%")))).scalars().all()
+    assert to_sales == [] and len(to_lead) == 1
+
+
+async def test_release_date_moves_on_a_legacy_critical_change(
+        client, admin_auth, seed, session_factory):
+    """A critical change past capture without urgent reason and evidence (in
+    flight before §2) can still move its release deadline."""
+    from datetime import datetime
+    cid = (await _create(client, admin_auth, seed, "legacy", customer_relevant=True)).json()["id"]
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.priority = "critical"
+        c.status = "approved"
+        c.release_due_date = datetime(2026, 11, 1, 12)
+        await s.commit()
+    r = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": "2026-11-15T12:00:00",
+        "release_due_reason": "Tool trial moved, mail 2026-10-15"}, headers=admin_auth)
+    assert r.status_code == 200, r.text
+    assert r.json()["release_due_date"].startswith("2026-11-15")
+    # making the urgency itself move still asks for reason and evidence
+    r = await client.patch(f"/api/v1/changes/{cid}", json={"urgent_reason": "other"},
+                           headers=admin_auth)
+    assert r.status_code == 400
