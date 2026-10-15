@@ -79,7 +79,24 @@ describe('ScopeChangeCards (§6 [R3])', () => {
     expect((await screen.findByTestId('scope-waiting-3')).textContent).toContain('Waiting for: Tool Engineer, Process Engineer')
     expect(screen.queryByTestId('scope-recosted-3-22')).toBeNull()
     fireEvent.click(screen.getByTestId('scope-recosted-3-21'))
-    await waitFor(() => expect(changesApi.scopeRecosted).toHaveBeenCalledWith(7, 3, 21))
+    await waitFor(() => expect(changesApi.scopeRecosted).toHaveBeenCalledWith(7, 3, 21, undefined))
+  })
+
+  it('no cost impact needs a sentence saying why (R4)', async () => {
+    vi.mocked(changesApi.scopeChanges).mockResolvedValue([card({
+      status: 'recosting', waiting_for: ['Tool Engineer'],
+      departments: [{ id: 21, name: 'Tool Engineer', done: false }] })])
+    vi.mocked(changesApi.scopeRecosted).mockResolvedValue([card({ status: 'ready' })])
+    wrap(props({ myDepartmentIds: [21], canRequest: false }))
+    fireEvent.click(await screen.findByTestId('scope-nocost-open-3-21'))
+    const confirm = screen.getByTestId('scope-nocost-3-21') as HTMLButtonElement
+    fireEvent.change(screen.getByTestId('scope-nocost-note-3-21'), { target: { value: 'same insert' } })
+    expect(confirm.disabled).toBe(true)        // NEGATIVE: too short to say why
+    fireEvent.change(screen.getByTestId('scope-nocost-note-3-21'),
+      { target: { value: 'Same insert, only the engraving text changes' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changesApi.scopeRecosted).toHaveBeenCalledWith(
+      7, 3, 21, 'Same insert, only the engraving text changes'))
   })
 
   it('a refused card leaves Sales to tell the customer', async () => {

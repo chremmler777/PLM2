@@ -1140,8 +1140,17 @@ class OfferService:
                 "A supplement is sent once the change is approved (up to release)")
         if supplement:
             if abs(totals["total_one_time"]) < 0.005:
+                # R5: name who to ask (the departments of a re-costed card)
+                from app.services import scope_change_service as scs
+                ids = sorted({d for c in await scs.open_cards(session, change)
+                              if c.status == "ready" for d in (c.department_ids or [])})
+                names = [n for (n,) in (await session.execute(
+                    select(Department.name).where(Department.id.in_(ids))
+                    .order_by(Department.name))).all()] if ids else []
                 raise ChangeError(
-                    "The supplement total is zero: no changed position is priced")
+                    "The supplement total is zero: no changed position is priced. "
+                    f"Ask {', '.join(names) or 'the departments'} what changed in "
+                    "their costing (then refresh), or add a free line (Price)")
         elif totals["total_one_time"] <= 0:
             raise ChangeError("The offer total must be greater than zero")
         if offer.version >= 2 and not note:
@@ -1576,11 +1585,26 @@ class OfferService:
                     "below_internal_cost",
                     "The offer total is below the internal cost"))
             if o.status == "draft":
+                expected = sources_now
+                if o.kind == "supplement":
+                    # §6: a supplement holds what moved since the accepted
+                    # versions, not the whole costing (_supplement_lines)
+                    covered: dict = {}
+                    for a in all_offers:
+                        if a.status != "accepted":
+                            continue
+                        for l in normalise(a.data).get("cost_lines") or []:
+                            if l.get("include", True) and l.get("key"):
+                                covered[l["key"]] = covered.get(l["key"], 0.0) + _num(
+                                    l.get("source_amount", l.get("amount")))
+                    expected = {k: round(_num(v) - covered.get(k, 0.0), 2)
+                                for k, v in sources_now.items()}
+                    expected = {k: v for k, v in expected.items() if abs(v) > 0.005}
                 changed = [l for l in data["cost_lines"]
-                           if l.get("key") in sources_now
-                           and _num(l.get("source_amount")) != sources_now[l["key"]]]
+                           if l.get("key") in expected
+                           and abs(_num(l.get("source_amount")) - _num(expected[l["key"]])) > 0.005]
                 if changed or any(k not in {l.get("key") for l in data["cost_lines"]}
-                                  for k in sources_now):
+                                  for k in expected):
                     warnings.append(_issue(
                         "costing_changed",
                         "The costing changed since this offer was built - refresh it"))

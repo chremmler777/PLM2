@@ -535,12 +535,15 @@ async def test_supplement_prices_only_what_changed_and_keeps_the_status(
     res = await client.post(_url(cid, f"/{s1['id']}/send"),
                             json={"change_note": "nothing"}, headers=sales)
     assert res.status_code == 400 and "zero" in res.json()["detail"]
+    assert "add a free line" in res.json()["detail"]      # R5: what to do next
     await _raise_position(session_factory, approved, 1500)
     res = await client.post(_url(cid, f"/{s1['id']}/refresh"), headers=sales)
     assert res.status_code == 200, res.text
     lines = res.json()["data"]["cost_lines"]
     assert [(l["key"], l["amount"]) for l in lines] == [
         (f"pos:{approved['position_id']}", 500.0)]
+    # refreshed: no 'costing changed' warning for the positions left out
+    assert "costing_changed" not in {w["code"] for w in res.json().get("warnings") or []}
     res = await client.post(_url(cid, f"/{s1['id']}/send"),
                             json={"change_note": "Insert rework quoted higher"}, headers=sales)
     assert res.status_code == 200, res.text
@@ -709,10 +712,19 @@ async def test_scope_change_ready_goes_into_the_next_offer(client, quoted, sessi
     tid = quoted["depts"]["Tool Engineer"]
     await client.post(_scope(cid, f"/{card['id']}/decide"),
                       json={"decision": "accept", "department_ids": [tid]}, headers=pm)
-    # NEGATIVE: Sales does not mark Tool Engineer's re-costing done
+    # NEGATIVE: Sales, nor the run team, marks Tool Engineer's re-costing done
+    for who in (sales, pm):
+        r = await client.post(_scope(cid, f"/{card['id']}/recosted"),
+                              json={"department_id": tid}, headers=who)
+        assert r.status_code == 403, r.text
+    # NEGATIVE (R4): re-costed with nothing re-costed, or a no-cost word
     r = await client.post(_scope(cid, f"/{card['id']}/recosted"),
-                          json={"department_id": tid}, headers=sales)
-    assert r.status_code == 403
+                          json={"department_id": tid}, headers=tool)
+    assert r.status_code == 400 and "did not change" in r.json()["detail"]
+    r = await client.post(_scope(cid, f"/{card['id']}/recosted"),
+                          json={"department_id": tid, "no_cost_note": "none"}, headers=tool)
+    assert r.status_code == 400
+    await _raise_position(session_factory, quoted, 1200)
     r = await client.post(_scope(cid, f"/{card['id']}/recosted"),
                           json={"department_id": tid}, headers=tool)
     assert r.status_code == 200 and r.json()[0]["status"] == "ready"
@@ -1027,3 +1039,22 @@ async def test_a_price_drop_shows_no_money_outside_the_price_rule(
     # a price viewer reads it all
     log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=pm)).json()
     assert any(note == e.get("notes") for e in log)
+
+
+async def test_no_cost_impact_is_said_with_a_reason(client, quoted, session_factory):
+    cid = quoted["change_id"]
+    await _route_tool(session_factory, quoted)
+    sales, pm, tool = (await _auth(client, "sales"), await _auth(client, "pm"),
+                       await _auth(client, "tool"))
+    card = await _card(client, cid, sales)
+    tid = quoted["depts"]["Tool Engineer"]
+    await client.post(_scope(cid, f"/{card['id']}/decide"),
+                      json={"decision": "accept", "department_ids": [tid]}, headers=pm)
+    r = await client.post(_scope(cid, f"/{card['id']}/recosted"), json={
+        "department_id": tid, "no_cost_note": "Same insert, only the engraving text changes"},
+        headers=tool)
+    assert r.status_code == 200 and r.json()[0]["status"] == "ready", r.text
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=pm)).json()
+    row = next(e for e in log if e["action"] == "scope_change_recosted")
+    assert "no cost impact" in row["action_description"]
+    assert row["notes"] == "Same insert, only the engraving text changes"

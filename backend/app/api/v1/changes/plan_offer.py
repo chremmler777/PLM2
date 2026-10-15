@@ -907,6 +907,8 @@ class ScopeDecideIn(BaseModel):
 
 class ScopeRecostedIn(BaseModel):
     department_id: int
+    # R4: the costing moved, or "no cost impact" and why
+    no_cost_note: Optional[str] = Field(default=None, max_length=500)
 
 
 class ScopeToldIn(BaseModel):
@@ -982,7 +984,7 @@ async def scope_change_recosted(
     change = await _change(db, change_id, current_user)
     try:
         await ScopeChangeService.recosted(db, change, card_id, current_user,
-                                          body.department_id)
+                                          body.department_id, no_cost_note=body.no_cost_note)
     except ChangeError as e:
         raise _scope_http(e)
     await db.commit()

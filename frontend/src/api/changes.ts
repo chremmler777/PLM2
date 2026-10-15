@@ -395,9 +395,10 @@ export const changesApi = {
   decideScopeChange: (id: number, cardId: number, body: {
     decision: 'accept' | 'refuse' | 'new_change'; department_ids?: number[]; note?: string
   }) => client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/decide`, body).then((r) => r.data),
-  scopeRecosted: (id: number, cardId: number, departmentId: number) =>
+  /** R4: the costing moved, or noCostNote says why there is no cost impact. */
+  scopeRecosted: (id: number, cardId: number, departmentId: number, noCostNote?: string) =>
     client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/recosted`,
-      { department_id: departmentId }).then((r) => r.data),
+      { department_id: departmentId, ...(noCostNote ? { no_cost_note: noCostNote } : {}) }).then((r) => r.data),
   scopeTold: (id: number, cardId: number, ref: string) =>
     client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/told`, { ref }).then((r) => r.data),
   indexFollowups: (id: number) =>

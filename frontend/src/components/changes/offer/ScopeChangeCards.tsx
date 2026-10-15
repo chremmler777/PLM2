@@ -134,7 +134,11 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
       decision: v.decision, ...(v.decision === 'accept' ? { department_ids: picked } : {}),
       ...(note.trim() ? { note: note.trim() } : {}),
     }))
-  const recosted = useCardMutation(changeId, (d: number) => changesApi.scopeRecosted(changeId, card.id, d))
+  const recosted = useCardMutation(changeId, (v: { d: number; note?: string }) =>
+    changesApi.scopeRecosted(changeId, card.id, v.d, v.note), () => { setNoCostFor(null); setNoCost('') })
+  // R4: re-costed means the costing moved; else "no cost impact" and why
+  const [noCostFor, setNoCostFor] = useState<number | null>(null)
+  const [noCost, setNoCost] = useState('')
   const told = useCardMutation(changeId, () => changesApi.scopeTold(changeId, card.id, toldRef.trim()))
   const step = STEP[card.status]
   const postApproval = ['approved', 'in_implementation', 'in_validation'].includes(status)
@@ -213,10 +217,30 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
       )}
 
       {card.status === 'recosting' && card.departments.filter((d) => !d.done && myDepartmentIds.includes(d.id)).map((d) => (
-        <button key={d.id} type="button" data-testid={`scope-recosted-${card.id}-${d.id}`} disabled={recosted.isPending}
-          onClick={() => recosted.mutate(d.id)} className={buttonClass('primary', 'sm')}>
-          {fill('sc.recosted', { dept: d.name })}
-        </button>
+        <div key={d.id} className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" data-testid={`scope-recosted-${card.id}-${d.id}`} disabled={recosted.isPending}
+              onClick={() => recosted.mutate({ d: d.id })} className={buttonClass('primary', 'sm')}>
+              {fill('sc.recosted', { dept: d.name })}
+            </button>
+            <button type="button" data-testid={`scope-nocost-open-${card.id}-${d.id}`} aria-expanded={noCostFor === d.id}
+              onClick={() => setNoCostFor((x) => (x === d.id ? null : d.id))} className={buttonClass('secondary', 'sm')}>
+              {t('sc.noCost')}
+            </button>
+            <span className="text-[11px] text-slate-500">{t('sc.recostedHelp')}</span>
+          </div>
+          {noCostFor === d.id && (
+            <div className="flex flex-wrap gap-2">
+              <input value={noCost} onChange={(e) => setNoCost(e.target.value)} data-testid={`scope-nocost-note-${card.id}-${d.id}`}
+                aria-label={t('sc.noCostWhy')} placeholder={t('sc.noCostWhy')} className={`${inputCls} min-w-0 flex-1`} />
+              <button type="button" data-testid={`scope-nocost-${card.id}-${d.id}`}
+                disabled={recosted.isPending || noCost.trim().length < 15}
+                onClick={() => recosted.mutate({ d: d.id, note: noCost.trim() })} className={buttonClass('primary', 'sm')}>
+                {fill('sc.noCostConfirm', { dept: d.name })}
+              </button>
+            </div>
+          )}
+        </div>
       ))}
 
       {card.status === 'refused' && !card.told_at && isSales && (

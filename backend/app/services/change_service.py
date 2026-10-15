@@ -3731,6 +3731,7 @@ class ChangeService:
                               "has_offer_draft": draft is not None,
                               "offer_id": draft.id if draft is not None else None,
                               "target_tab": "offer",
+                              "needs_you": c.sales_owner_id in (None, user.id),
                               "hint": "Started at risk: send the offer (the price is open)"})
 
             # The offer is valid for 30 days from receipt: a week before it runs
@@ -4125,9 +4126,15 @@ class ChangeService:
                                       **({"due_date": datetime(due.year, due.month, due.day, 23, 59)}
                                          if due else {})})
             elif k.status == "ready" and in_sales:
+                post = c.status != "quoted"
                 tasks.append({**await _base(c), "kind": "revise_offer",
                               "scope_change_id": k.id, "reason": what,
-                              "supplement": c.status != "quoted", "target_tab": "offer",
+                              "supplement": post, "target_tab": "offer",
+                              # the label says what the notice said (R37)
+                              "kind_label": ("Scope change re-costed: send a supplement"
+                                             if post else
+                                             "Scope change re-costed: revise the offer"),
+                              "needs_you": c.sales_owner_id in (None, user.id),
                               **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
                                  if c.sales_owner_id not in (None, user.id) else {})})
             elif k.status == "refused" and k.told_at is None and in_sales:

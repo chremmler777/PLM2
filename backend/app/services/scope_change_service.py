@@ -303,40 +303,92 @@ class ScopeChangeService:
             body=label(card), link=f"/changes/{change.id}?tab=costing")
 
     @staticmethod
+    async def department_cost_moved(session: AsyncSession, change: ChangeRequest,
+                                    department_id: int) -> bool:
+        """Did the department's costing move against what the customer has
+        priced (the accepted offer and supplements, else the last version
+        sent)? Money only, compared per costing line (R4: evidence that the
+        re-costing happened)."""
+        from app.services.offer_service import OfferService, _num, normalise
+        dept = await session.get(Department, department_id)
+        name = dept.name if dept is not None else None
+        fresh, _ = await OfferService._costing_basis(session, change)
+        now: dict = {}
+        for l in fresh:
+            if l.get("department") == name:
+                now[l["key"]] = now.get(l["key"], 0.0) + _num(l.get("source_amount"))
+        offers = await OfferService.list_offers(session, change)
+        priced_by = [o for o in offers if o.status == "accepted"] or \
+            [o for o in offers if o.sent_at is not None][:1]
+        priced: dict = {}
+        for o in priced_by:
+            for l in normalise(o.data).get("cost_lines") or []:
+                if l.get("include", True) and l.get("key") and l.get("department") == name:
+                    priced[l["key"]] = priced.get(l["key"], 0.0) + _num(
+                        l.get("source_amount", l.get("amount")))
+        return any(abs(now.get(k, 0.0) - priced.get(k, 0.0)) > 0.005
+                   for k in set(now) | set(priced))
+
+    @staticmethod
     async def recosted(session: AsyncSession, change: ChangeRequest, card_id: int,
-                       user: User, department_id: int) -> ChangeScopeChange:
+                       user: User, department_id: int,
+                       no_cost_note: Optional[str] = None) -> ChangeScopeChange:
         """A department's re-costing is done; the last one hands Sales
-        "Revise offer" (or "Send supplement" after approval)."""
+        "Revise offer" (or "Send supplement" after approval). Only a member
+        of the department says so (acts-as honoured), and only with evidence
+        (R4): its costing moved against what the customer has priced, or a
+        "no cost impact" statement (why, 15+ characters) on the record."""
         card = await ScopeChangeService._card(session, change, card_id)
         if card.status != "recosting":
             raise ChangeError(f"Scope change #{card.id} is {card.status}, not re-costing")
         if department_id not in (card.department_ids or []):
             raise ChangeError("This department does not re-cost this scope change")
         from app.services.workflow_service import WorkflowService
-        roles = await ScopeChangeService._roles(session, change, user)
-        if not (roles["run_team"] or await WorkflowService.actor_in_department(
-                session, user, department_id)):
-            raise ScopeChangeForbidden("A member of the department marks its re-costing done")
+        dept = await session.get(Department, department_id)
+        dname = dept.name if dept is not None else f"dept {department_id}"
+        if not await WorkflowService.actor_in_department(session, user, department_id):
+            raise ScopeChangeForbidden(
+                f"A member of {dname} marks its re-costing done (the run team "
+                "may override 'scope change not covered' instead)")
+        note = " ".join((no_cost_note or "").split()) or None
+        if note is not None:
+            if len(note) < 15:
+                raise ChangeError(
+                    "No cost impact: say why in a sentence (15+ characters), e.g. "
+                    "'same insert, only the engraving text changes'")
+        elif not await ScopeChangeService.department_cost_moved(session, change, department_id):
+            raise ChangeError(
+                f"{dname}'s costing did not change against the offer: update the "
+                "costing positions first, or mark 'No cost impact' and say why")
         done = set(card.departments_done or []) | {department_id}
         card.departments_done = sorted(done)
-        name = await session.get(Department, department_id)
         await ChangeService.append_changelog(
             session, change, "scope_change_recosted",
-            f"Scope change #{card.id}: {name.name if name else department_id} re-costed",
-            user.id, new_value={"scope_change_id": card.id, "department_id": department_id},
-            for_department_id=department_id)
+            f"Scope change #{card.id}: {dname} "
+            + ("no cost impact" if note else "re-costed"),
+            user.id, new_value={"scope_change_id": card.id, "department_id": department_id,
+                                "no_cost": note is not None},
+            notes=note, for_department_id=department_id)
         if done >= set(card.department_ids or []):
             card.status = "ready"
             await session.flush()
             from app.services.notification_service import NotificationService
             post = change.status in POST_APPROVAL
             what = "Send supplement" if post else "Revise offer"
-            await NotificationService.notify_departments_once(
-                session, [d for d in [await ScopeChangeService._dept_id(session, "Sales")]
-                          if d is not None], change=change, kind="task_new",
-                subject_key=f"scope_change:{card.id}:ready",
-                title=f"{what}: scope change re-costed: {change.change_number}"[:255],
-                body=label(card), link=f"/changes/{change.id}?tab=offer")
+            title = f"{what}: scope change re-costed: {change.change_number}"[:255]
+            # spec §0: involved people only: the Sales owner (the row shows
+            # to all of Sales); no owner: Sales
+            if change.sales_owner_id is not None:
+                await NotificationService.notify_once(
+                    session, [change.sales_owner_id], kind="task_new",
+                    subject_key=f"scope_change:{card.id}:ready", title=title,
+                    body=label(card), link=f"/changes/{change.id}?tab=offer")
+            else:
+                await NotificationService.notify_departments_once(
+                    session, [d for d in [await ScopeChangeService._dept_id(session, "Sales")]
+                              if d is not None], change=change, kind="task_new",
+                    subject_key=f"scope_change:{card.id}:ready", title=title,
+                    body=label(card), link=f"/changes/{change.id}?tab=offer")
         await session.flush()
         return card
 
