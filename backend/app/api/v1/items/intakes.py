@@ -61,8 +61,11 @@ async def list_intakes(
     rows = await RevisionIntakeService.list(
         db, current_user, part_id=part_id, project_id=project_id, status=status,
         change_id=change_id, waiting=waiting)
+    # the live changes of every listed part in one query (R34)
+    lives = await RevisionIntakeService.live_change_rows(db, rows)
     return {"can_triage": can,
-            "intakes": [await RevisionIntakeService.out(db, i, can) for i in rows]}
+            "intakes": [await RevisionIntakeService.out(db, i, can, live_rows=lives)
+                        for i in rows]}
 
 
 @router.get("/my")

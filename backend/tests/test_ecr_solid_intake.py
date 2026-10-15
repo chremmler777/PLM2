@@ -505,6 +505,12 @@ async def test_every_live_change_on_the_part_is_named_and_its_lead_told(
     i = await _intake(client, world["part_id"])
     assert i["live_change"]["id"] == newer
     assert [c["id"] for c in i["other_live_changes"]] == [older]
+    # the list (one batched query for all parts, R34) shows what the single
+    # read shows
+    one = (await client.get(f"{API}/intakes/{i['id']}",
+                            headers=await _auth(client, "dev"))).json()
+    for key in ("live_change", "other_live_changes", "suggested_route"):
+        assert one[key] == i[key], key
     r = await _decide_v2(client, i["id"], "attach_ecr", change_id=newer)
     assert r.status_code == 200, r.text
     async with session_factory() as s:

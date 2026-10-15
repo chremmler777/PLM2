@@ -315,6 +315,37 @@ class RevisionIntakeService:
             q.order_by(ChangeRequest.id.desc()))).scalars().all()))
 
     @staticmethod
+    async def live_change_rows(session: AsyncSession, intakes: list[RevisionIntake],
+                               ) -> dict[tuple, list]:
+        """The live changes carrying each intake's part, for a whole list in
+        one query (R34): (part_id, project_id) -> rows newest first, each
+        with only what triage shows (id, number, title, status, lead name,
+        customer_relevant), never a full change with its relationships."""
+        from types import SimpleNamespace
+        keys = {(i.part_id, i.project_id) for i in intakes}
+        if not keys:
+            return {}
+        rows = (await session.execute(
+            select(ChangeImpactedItem.part_id, ChangeRequest.id,
+                   ChangeRequest.change_number, ChangeRequest.title,
+                   ChangeRequest.status, ChangeRequest.customer_relevant,
+                   ChangeRequest.project_id, User.full_name)
+            .join(ChangeRequest, ChangeImpactedItem.change_id == ChangeRequest.id)
+            .outerjoin(User, User.id == ChangeRequest.lead_id)
+            .where(ChangeImpactedItem.part_id.in_({p for p, _ in keys}),
+                   ChangeRequest.status.notin_(NOT_LIVE),
+                   ChangeRequest.origin != "engineering_review")
+            .order_by(ChangeRequest.id.desc()))).all()
+        out: dict[tuple, list] = {k: [] for k in keys}
+        for part_id, cid, number, title, status, cust, proj, lead in rows:
+            for key in ((part_id, proj), (part_id, None)):
+                if key in out and all(c.id != cid for c in out[key]):
+                    out[key].append(SimpleNamespace(
+                        id=cid, change_number=number, title=title, status=status,
+                        customer_relevant=cust, lead_name=lead))
+        return out
+
+    @staticmethod
     async def live_change_for_part(session: AsyncSession, part_id: int,
                                    project_id: Optional[int] = None,
                                    exclude_id: Optional[int] = None) -> Optional[ChangeRequest]:
@@ -1032,7 +1063,10 @@ class RevisionIntakeService:
 
     @staticmethod
     async def out(session: AsyncSession, intake: RevisionIntake,
-                  can_triage: bool = False) -> dict:
+                  can_triage: bool = False,
+                  live_rows: Optional[dict] = None) -> dict:
+        """One intake as the API shows it. `live_rows`: live_change_rows for
+        a whole list (one query), else read for this intake."""
         part = await session.get(Part, intake.part_id)
         rev = await session.get(PartRevision, intake.revision_id)
         change = (await session.get(ChangeRequest, intake.change_id)
@@ -1051,10 +1085,15 @@ class RevisionIntakeService:
         if needs_triage:
             # spec §1: a live change carrying the part is the suggestion; the
             # others carrying it are named too
-            lives = (await RevisionIntakeService.live_changes_for_part(
-                session, intake.part_id, intake.project_id,
-                exclude_id=intake.change_id if intake.status == "decided" else None)
-                if _v2() else [])
+            exclude = intake.change_id if intake.status == "decided" else None
+            if not _v2():
+                lives = []
+            elif live_rows is not None:
+                lives = [c for c in live_rows.get((intake.part_id, intake.project_id), [])
+                         if c.id != exclude]
+            else:
+                lives = await RevisionIntakeService.live_changes_for_part(
+                    session, intake.part_id, intake.project_id, exclude_id=exclude)
             suggested, live = await RevisionIntakeService.suggestion(
                 session, intake, lives)
             others = [c for c in lives if live is None or c.id != live.id]
