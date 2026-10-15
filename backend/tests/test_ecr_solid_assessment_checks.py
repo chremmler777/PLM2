@@ -192,6 +192,75 @@ async def test_raiser_or_lead_reopens_others_may_not(client, assess):
     assert rows[a["check"]]["can_check"] is False
 
 
+async def _own_check(session_factory, a, raiser_id):
+    """A check item a Process member raised for Process (the C33 pattern)."""
+    async with session_factory() as s:
+        c = ChangeConcern(change_id=a["cid"], kind="needs_info",
+                          note="Check our own cycle time", raised_by=raiser_id,
+                          department_id=a["proc"], flag_type="check",
+                          check_what="other")
+        s.add(c)
+        await s.commit()
+        return c.id
+
+
+async def test_no_free_note_close_for_the_author_in_the_department_or_pm(
+        client, assess, session_factory):
+    """R4: the structured close cannot be skipped by the raiser who sits in
+    the owning department, nor by Project Management."""
+    a = assess
+    own = await _own_check(session_factory, a, a["pe_id"])
+    url = _url(a, f"/concerns/{own}/withdraw")
+    for auth in (a["pe"], a["lead"]):
+        res = await client.post(url, json={"resolution_note": "ok"}, headers=auth)
+        assert res.status_code == 400 and "what you found" in res.json()["detail"], res.text
+    # PM closes it with evidence instead, and is served the form
+    rows = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=a["lead"])).json()}
+    assert rows[own]["can_check"] is True
+    res = await client.post(_url(a, f"/concerns/{own}/check"),
+                            json={"outcome": "answered", "value": "32", "unit": "s"},
+                            headers=a["lead"])
+    assert res.status_code == 200, res.text
+    assert res.json()["settled_as"] == "pm"
+    # the raiser reopens it
+    res = await client.post(_url(a, f"/concerns/{own}/reopen"),
+                            json={"reason": "cycle time was for the old tool"},
+                            headers=a["pe"])
+    assert res.status_code == 200, res.text
+
+
+async def test_raiser_outside_the_department_drops_and_reopens_own_item(client, assess):
+    a = assess
+    res = await client.post(_url(a, f"/concerns/{a['check']}/withdraw"),
+                            json={"resolution_note": "raised by mistake, was 4410"},
+                            headers=a["raiser"])
+    assert res.status_code == 200, res.text
+    rows = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=a["raiser"])).json()}
+    assert rows[a["check"]]["can_reopen"] is True
+    res = await client.post(_url(a, f"/concerns/{a['check']}/reopen"),
+                            json={"reason": "it was right after all"}, headers=a["raiser"])
+    assert res.status_code == 200, res.text
+
+
+async def test_served_flags_match_the_backend(client, assess):
+    """R24: no answer button on a check item, no reopen after the submit."""
+    a = assess
+    for auth in (a["sa"], a["lead"], a["pe"]):
+        rows = {c["id"]: c for c in (await client.get(
+            _url(a, "/concerns"), headers=auth)).json()}
+        assert rows[a["check"]]["can_answer"] is False
+    await _close(client, a["pe"], a, outcome="answered", ref="DRW-4471 rev C")
+    await _submit(client, a["pe"], a, a["proc"], ok=True)
+    rows = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=a["raiser"])).json()}
+    assert rows[a["check"]]["can_reopen"] is False
+    res = await client.post(_url(a, f"/concerns/{a['check']}/reopen"),
+                            json={"reason": "that is rev B, not C"}, headers=a["raiser"])
+    assert res.status_code == 400 and "already submitted" in res.json()["detail"]
+
+
 # --- C8: questions from the assessment ---------------------------------------
 
 def _q(dept, **extra):

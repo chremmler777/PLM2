@@ -3094,14 +3094,24 @@ async def list_concerns(
             names[uid] = full_name
     is_pm_member = await MeetingService.user_is_pm_member(db, current_user)
     acting = getattr(current_user, "acts_as_department_id", None) is not None
+    # spec §4 check items in the assessment: who closes them (an owning
+    # department's member, PM, admin), from one membership lookup (R34)
+    from app.services import cm_switches
+    checks_v2 = (change.status == "in_assessment"
+                 and cm_switches.on("ASSESSMENT_V2"))
+    my_dept_ids = (set(await WorkflowService.effective_department_ids(db, current_user))
+                   if checks_v2 else set())
     for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
         if c.kind == "needs_info":
             # The question is the asking side's (2026-10-14): who that is, and
             # whether the caller may answer it (same check as POST .../answer).
             row.asking_department_name = concern_depts.get(c.department_id)
-            row.can_answer = c.is_open and await MeetingService.can_answer_question(
-                db, change, c, current_user)
+            # a check item in the assessment is closed by its department,
+            # never answered (POST .../answer refuses it, R24)
+            row.can_answer = (c.is_open and not (checks_v2 and c.is_check)
+                              and await MeetingService.can_answer_question(
+                                  db, change, c, current_user))
             # the confirm item of an Assumed answer: open in any live status,
             # the question open or closed (its named confirmer, or whoever
             # may answer it)
@@ -3119,13 +3129,13 @@ async def list_concerns(
             row.can_switch = c.is_open and (
                 (c.raised_by == current_user.id and not acting) or is_pm_member)
             row.can_add_to = await MeetingService.may_add_to(db, change, c, current_user)
-            if c.is_check and change.status == "in_assessment":
-                row.can_check = c.is_open and (
-                    await MeetingService._owner_department_of(db, c, current_user)
-                    is not None)
-                row.can_reopen = (not c.is_open and c.check_outcome is not None
-                                  and ((c.raised_by == current_user.id and not acting)
-                                       or holds_lead(change, current_user)))
+            if c.is_check and checks_v2:
+                # same rules as POST .../check and .../reopen
+                row.can_check = c.is_open and bool(c.owner_department_ids) and (
+                    current_user.effective_role == "admin" or is_pm_member
+                    or bool(my_dept_ids & set(c.owner_department_ids)))
+                row.can_reopen = MeetingService.reopen_check_refusal(
+                    change, c, current_user) is None
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
             row.answered_by_name = names.get(c.answered_by)

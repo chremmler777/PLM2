@@ -462,11 +462,15 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   for a scoping answer). Stored as `check_outcome` and the resolution note;
   logged `concern_withdrawn`, so the raiser's and the lead's daily digest
   count it as closed. A free resolution note no longer closes a check item
-  in assessment (author and Project Management keep their withdraw), and
-  nobody else "answers" it. **Reopen** (`POST /concerns/{id}/reopen`, reason
-  5+ characters): the raiser or the lead, while an owning department still
-  has its assessment open (after the submit there is nothing left to hold:
-  ask a question or have the assessment sent back). The closer is told.
+  in assessment: not for a member of an owning department (a raiser in that
+  department included), not for Project Management or an admin. Project
+  Management closes it through the same form (`settled_as` pm). Only a
+  raiser outside the owning departments still drops their own item with a
+  note. Nobody else "answers" it (`can_answer` is false on it). **Reopen** (`POST /concerns/{id}/reopen`, reason
+  5+ characters): any closed check item, by the raiser or the lead, while an
+  owning department still has its assessment open (after the submit there
+  is nothing left to hold: ask a question or have the assessment sent back).
+  The served `can_reopen` uses the same rule. The closer is told.
 - **"Blocked? Ask a question" (C8).** A department raises `needs_info` with
   `flag_type` question from its own open assessment: one line, what it is
   about (check-what, part or whole change) and who can answer (customer /

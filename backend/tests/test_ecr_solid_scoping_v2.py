@@ -196,9 +196,16 @@ async def test_check_items_do_not_block_proceed_and_become_conditions(
                             json={"department_id": proc, "verdict": "feasible"},
                             headers=pe)
     assert res.status_code == 400 and "Check the rib thickness" in res.json()["detail"]
+    # the raiser sits in the owning department: it closes the item with
+    # what it found, like any colleague (R4: no free note in the assessment)
     res = await client.post(
         f"/api/v1/changes/{cid}/concerns/{chk['id']}/withdraw",
         json={"resolution_note": "Rib 2.4 mm per drawing 4711 rev C"}, headers=pe)
+    assert res.status_code == 400 and "what you found" in res.json()["detail"]
+    res = await client.post(
+        f"/api/v1/changes/{cid}/concerns/{chk['id']}/check",
+        json={"outcome": "answered", "value": "2.4", "unit": "mm",
+              "ref": "drawing 4711 rev C"}, headers=pe)
     assert res.status_code == 200, res.text
 
 

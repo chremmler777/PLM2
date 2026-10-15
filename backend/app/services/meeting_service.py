@@ -1122,11 +1122,16 @@ class MeetingService:
                  for d in concern.owner_department_ids]):
             settled_as = "department"
         allowed = settled_as is not None
-        if (settled_as == "department" and concern.is_check
-                and change.status == "in_assessment"
-                and cm_switches.on("ASSESSMENT_V2")):
-            # spec §4: the department closes its check item with what it
-            # found, not with a free note (POST .../check)
+        if (concern.is_check and change.status == "in_assessment"
+                and cm_switches.on("ASSESSMENT_V2")
+                and (settled_as in ("department", "pm")
+                     or user.effective_role == "admin"
+                     or await MeetingService._owner_department_of(
+                         session, concern, user) is not None)):
+            # spec §4 (R4): the department closes its check item with what it
+            # found, not with a free note (POST .../check); so does a member
+            # who raised it for their own department, and Project Management.
+            # Only a raiser outside the department drops their own item here.
             raise ChangeError(
                 "Close a check item with what you found: Answered (a number "
                 "with its unit, a reference or a file), Not relevant (checklist "
@@ -1224,9 +1229,16 @@ class MeetingService:
         if change.status != "in_assessment":
             raise ChangeError("Check items are closed in the assessment")
         dept_id = await MeetingService._owner_department_of(session, concern, user)
+        settled_as = "department"
+        if (dept_id is None and concern.owner_department_ids
+                and await MeetingService.user_is_pm_member(session, user)):
+            # Project Management closes it for the department, with the same
+            # evidence (R4: never a free note)
+            dept_id, settled_as = concern.owner_department_ids[0], "pm"
         if dept_id is None:
             raise MeetingForbidden(
-                "Only the department this check item was raised for closes it")
+                "Only the department this check item was raised for, or Project "
+                "Management, closes it")
         if outcome not in CHECK_OUTCOMES:
             raise ChangeError("Say what you found: answered, not_relevant or assumed")
         value = (value or "").strip()
@@ -1306,14 +1318,14 @@ class MeetingService:
         concern.check_outcome = outcome
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
-        concern.settled_as = "department"
+        concern.settled_as = settled_as
         concern.resolution_note = text
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_withdrawn",
             f"Check item #{concern.id} checked: {text}", user.id,
             old_value={"concern_id": concern.id},
-            new_value={"settled_as": "department", "check_outcome": outcome,
+            new_value={"settled_as": settled_as, "check_outcome": outcome,
                        "department_id": dept_id},
             notes=text)
         if outcome == "assumed" and concern.confirm_by_id not in (None, user.id):
@@ -1327,6 +1339,33 @@ class MeetingService:
         return concern
 
     @staticmethod
+    def reopen_check_refusal(change: ChangeRequest, concern: ChangeConcern,
+                             user: User) -> Optional[tuple[bool, str]]:
+        """Why the caller may not reopen this check item, as (forbidden,
+        text), or None. One rule for POST .../reopen and the served
+        can_reopen (R24): a closed check item (by its department, Project
+        Management, or its raiser before the evidence rule; not retracted),
+        the raiser or the lead, while an owning department's assessment is
+        still open."""
+        from app.services.change_people import holds_lead
+        if (not concern.is_check or concern.is_open
+                or concern.withdrawn_at is None or concern.retracted_at is not None):
+            return False, "Only a closed check item can be reopened"
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if not ((concern.raised_by == user.id and not acting)
+                or holds_lead(change, user)):
+            return True, ("Only the person who raised the check item or the "
+                          "change lead may reopen it")
+        if change.status != "in_assessment" or not any(
+                a.department_id in concern.owner_department_ids
+                and a.effective_status not in ("submitted", "waived")
+                for a in change.assessments):
+            return False, (
+                "The department already submitted its assessment: ask it a "
+                "question instead, or ask the lead to send its assessment back")
+        return None
+
+    @staticmethod
     async def reopen_check(
         session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
         reason: Optional[str],
@@ -1334,27 +1373,15 @@ class MeetingService:
         """Spec §4: the raiser or the lead reopens a check item its
         department closed, with a reason, while that department still has
         its assessment open (after the submit there is no hold left)."""
-        from app.services.change_people import holds_lead
         if not cm_switches.on("ASSESSMENT_V2"):
             raise ChangeError("Reopening check items is switched off (ASSESSMENT_V2)")
         concern = await session.get(ChangeConcern, concern_id)
         if concern is None or concern.change_id != change.id:
             raise ChangeError("Concern not found on this change")
-        if not concern.is_check or concern.is_open or concern.check_outcome is None:
-            raise ChangeError("Only a check item its department closed can be reopened")
-        acting = getattr(user, "acts_as_department_id", None) is not None
-        if not ((concern.raised_by == user.id and not acting)
-                or holds_lead(change, user)):
-            raise MeetingForbidden(
-                "Only the person who raised the check item or the change lead "
-                "may reopen it")
-        if change.status != "in_assessment" or not any(
-                a.department_id in concern.owner_department_ids
-                and a.effective_status not in ("submitted", "waived")
-                for a in change.assessments):
-            raise ChangeError(
-                "The department already submitted its assessment: ask it a "
-                "question instead, or ask the lead to send its assessment back")
+        refusal = MeetingService.reopen_check_refusal(change, concern, user)
+        if refusal is not None:
+            forbidden, text = refusal
+            raise (MeetingForbidden if forbidden else ChangeError)(text)
         why = (reason or "").strip()
         if len(why) < 5:
             raise ChangeError("Say why you reopen it (at least 5 characters)")
