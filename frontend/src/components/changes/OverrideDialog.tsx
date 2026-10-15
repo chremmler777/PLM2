@@ -118,13 +118,18 @@ export default function OverrideDialog({ changeId, customerRelevant, leadName, o
  * OK of a Project Management or Management member (internal: the approver)
  * clears it.
  */
-export function AbsorbDialog({ changeId, customerRelevant, onClose, onDone }: Common) {
+export function AbsorbDialog({ changeId, customerRelevant, approvers, onClose, onDone }: Common & {
+  /** HARD #8: the internal approvers in words (stage-state), named instead of "the internal approver". */
+  approvers?: string | null
+}) {
   const qc = useQueryClient()
   const [code, setCode] = useState('')
   const [note, setNote] = useState('')
   const noteId = useId()
   const noteRef = useRef<HTMLTextAreaElement>(null)
-  const who = deciderText(deciderGroup('price_open', 'closed', customerRelevant))
+  const who = !customerRelevant && approvers
+    ? approvers
+    : deciderText(deciderGroup('price_open', 'closed', customerRelevant))
   const problem = overrideNoteProblem(code, note)
   const ask = useMutation({
     mutationFn: () => changesApi.absorb(changeId, { reason_code: code, note: note.trim() }),

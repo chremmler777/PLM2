@@ -46,7 +46,7 @@ export function routeConsequences(route: IssueRoute, issue: IssueOut, changeStat
   if (route === 'design_change') lines.push('The customer is informed by default.')
   if (route === 'customer_concession') {
     lines.push('The customer must be informed: Sales gets the task.')
-    lines.push('The issue closes as accepted only when Sales records "accepts the deviation" with the customer mail filed into this issue.')
+    lines.push('Sales files the customer mail into this issue; a Quality member then accepts the concession and the issue closes as accepted. It is the only way to release with the failed check.')
     lines.push('The root cause may stay open while the customer accepts the part as it is.')
   }
   if (route === 'follow_up_change') {

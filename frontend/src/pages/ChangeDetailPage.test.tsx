@@ -1320,7 +1320,7 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     await waitFor(() => expect(dialog.textContent).toContain('Release with an override'))
     expect(dialog.textContent).toContain('4 impacted revisions')
     const go = screen.getByTestId('confirm-go') as HTMLButtonElement
-    expect(go.textContent).toBe('Override the first rule')
+    expect(go.textContent).toBe('Override this rule')
     fireEvent.click(go)
     // C6: the override dialog asks the reason pick and the note
     fireEvent.click(await screen.findByTestId('override-reason-in_parallel'))
@@ -1338,10 +1338,35 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
       { id: 7, to_status: 'released', reason: 'x', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
     ] as never)
+    // C6: the dialog follows stage-state: the rule's own pending override
+    vi.mocked(changesApi.stageState).mockResolvedValue({ can_transition: {}, transition_blocks: {
+      released: { kind: 'guard', reason: '6 moves with plan deviations still open',
+        rule: 'plan_deviations_open', pending_deviation_id: 7 } } } as never)
     wrap('/changes/1?tab=release')
     fireEvent.click(await screen.findByText('mock-release'))
-    expect((await screen.findByTestId('confirm-hold')).textContent).toContain('Deviation #7')
+    await waitFor(() => expect(screen.getByTestId('confirm-hold').textContent).toContain('Override #7'))
     expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+    vi.mocked(changesApi.stageState).mockRejectedValue(new Error('404'))
+  })
+
+  it('a hard rule at release holds the dialog with its reason (no override)', async () => {
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
+    change.status = 'in_validation' as ChangeDetail['status']
+    releaseMock.blockers = ['Validation failed: Tool Engineer: Part weight validated']
+    // an approved override of ANOTHER rule must not read as "releasing uses it"
+    vi.mocked(changesApi.listDeviations).mockResolvedValue([
+      { id: 7, to_status: 'released', reason: 'x', status: 'approved', guard_key: 'lessons_missing',
+        proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+    ] as never)
+    vi.mocked(changesApi.stageState).mockResolvedValue({ can_transition: {}, transition_blocks: {
+      released: { kind: 'hard', reason: 'Validation failed: Tool Engineer: Part weight validated. Fix it and retest, or a concession (Quality)',
+        rule: null, pending_deviation_id: null } } } as never)
+    wrap('/changes/1?tab=release')
+    fireEvent.click(await screen.findByText('mock-release'))
+    await waitFor(() => expect(screen.getByTestId('confirm-hold').textContent).toContain('concession (Quality)'))
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('confirm-info')).toBeNull()
+    vi.mocked(changesApi.stageState).mockRejectedValue(new Error('404'))
   })
 
   it('an approved release deviation lets the release go ahead as a transition', async () => {
@@ -1349,14 +1374,19 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     change.status = 'in_validation' as ChangeDetail['status']
     releaseMock.blockers = ['6 moves with plan deviations still open']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([
-      { id: 7, to_status: 'released', reason: 'x', status: 'approved', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+      { id: 7, to_status: 'released', reason: 'x', status: 'approved', guard_key: 'plan_deviations_open',
+        proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
     ] as never)
+    // every rule covered: stage-state lists no block for the release
+    vi.mocked(changesApi.stageState).mockResolvedValue({ can_transition: {}, transition_blocks: {} } as never)
     vi.mocked(changesApi.transition).mockClear()
     wrap('/changes/1?tab=release')
     fireEvent.click(await screen.findByText('mock-release'))
-    expect((await screen.findByTestId('confirm-info')).textContent).toContain('Deviation #7 is approved')
+    await waitFor(() => expect(screen.getByTestId('confirm-info').textContent).toContain('Override #7'))
+    expect(screen.getByTestId('confirm-info').textContent).toContain('is approved: releasing uses it')
     fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'released', { to: 'released' }))
+    vi.mocked(changesApi.stageState).mockRejectedValue(new Error('404'))
   })
 
   it('"Decide deviation #n" opens the decision panel on Overview, where the approver decides', async () => {

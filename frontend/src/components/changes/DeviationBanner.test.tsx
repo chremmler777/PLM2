@@ -164,4 +164,18 @@ describe('ReasonDialog', () => {
     );
     expect(await screen.findByRole('button', { name: 'Override' })).toBeDefined();
   });
+
+  it('never offers an override for a routing change: it is decided', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <DeviationBanner changeId={7} blockedTo="costing" rule="routing_deviation_pending"
+          blockedReason="Routing deviation is pending approval. An approved override of 'Routing change waits for its decision' is required to proceed."
+          seq={1} onRetry={() => {}} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    await screen.findByText(/Routing deviation is pending/);
+    await waitFor(() => expect(changesApi.listDeviations).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Override' })).toBeNull();
+  });
 });

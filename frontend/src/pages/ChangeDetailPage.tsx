@@ -55,6 +55,7 @@ import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
+import { ruleText } from '../lib/overrideRules';
 import {
   OFF_PATH_STATUSES, everydayTabsFor, transitionLabel, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, stoppedTabLocked, stoppedDefaultTab, type ChangeTab,
@@ -569,6 +570,9 @@ export default function ChangeDetailPage() {
     ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
     ...(change.lead_id == null ? [t('cockpit.noLead')] : []),
   ];
+  // The override dialog names the lead as a decider only when the lead is
+  // not the one asking (never your own OK; the backend asks PM then).
+  const overrideLeadName = change.lead_id !== userId ? change.lead_name : null;
   const confirm: TransitionConfirm | null = (() => {
     if (!confirmTo) return null;
     // Resuming from hold goes back to where the change stood: a plain resume,
@@ -676,8 +680,15 @@ export default function ChangeDetailPage() {
     }
     if (confirmTo === 'released') {
       const blockers = releaseState?.blockers ?? [];
-      const approved = deviations.find((d) => d.to_status === 'released' && d.status === 'approved');
-      const pending = deviations.find((d) => d.to_status === 'released' && d.status === 'pending');
+      // C6: drive the dialog from the backend's verdict on the hop (stage-state
+      // transition_blocks), not from "any approved override": an override
+      // covers only its own rule.
+      // Without stage-state (an older server) the open points ask for an
+      // override of the first rule, as before.
+      const block = stage ? stage.transition_blocks?.released
+        : blockers.length ? { kind: 'guard', reason: blockers[0], rule: null, pending_deviation_id: null }
+        : undefined;
+      const used = deviations.filter((d) => d.to_status === 'released' && d.status === 'approved');
       const base = {
         to: confirmTo, title: transitionLabel('released'),
         consequence: 'Releasing puts the change live. It cannot be moved back; after release it can only be closed.',
@@ -687,23 +698,25 @@ export default function ChangeDetailPage() {
         final: true,
         loading: !releaseState,
       };
-      if (blockers.length === 0 || approved) {
-        return approved && blockers.length > 0
-          ? { ...base, info: [`Deviation #${approved.id} is approved: releasing uses it.`] }
+      if (!block) {
+        return used.length > 0 && blockers.length > 0
+          ? { ...base, info: used.map((d) => t('override.releaseUses')
+            .replace('{n}', String(d.id)).replace('{rule}', ruleText(d.guard_key))) }
           : base;
       }
-      // Still open and no approved deviation: the dialog asks for one with the
-      // reason (4-eyes), or says whose decision it now waits on.
-      if (pending) {
-        return { ...base, holdNote: `Deviation #${pending.id} is asked and waits for its approver. Release once it is approved.` };
+      if (block.kind === 'hard' || block.kind === 'decide') {
+        return { ...base, holdNote: block.reason };
+      }
+      if (block.pending_deviation_id) {
+        return { ...base, holdNote: t('override.releaseWaits')
+          .replace('{n}', String(block.pending_deviation_id)).replace('{rule}', ruleText(block.rule)) };
       }
       return {
         ...base,
-        title: 'Release with an override',
-        consequence: 'Releasing puts the change live although the points below are still open. Each open rule needs '
-          + 'its own override: pick why, say what covers it, someone other than you gives the OK, then release.',
+        title: t('override.releaseTitle'),
+        consequence: t('override.releaseBody').replace('{rule}', ruleText(block.rule)),
         final: false,
-        confirmLabel: 'Override the first rule',
+        confirmLabel: t('override.releaseAsk'),
         asksDeviation: true,
       };
     }
@@ -1004,7 +1017,7 @@ export default function ChangeDetailPage() {
           blockedReason={blocked.reason}
           rule={blocked.rule}
           customerRelevant={!!change.customer_relevant}
-          leadName={change.lead_name}
+          leadName={overrideLeadName}
           seq={blockedSeq}
           onRetry={() => transition.mutate({ to: blocked.to })}
           onClose={() => setBlocked(null)}
@@ -1061,11 +1074,12 @@ export default function ChangeDetailPage() {
       </TransitionConfirmDialog>
       {overrideFor && (
         <OverrideDialog changeId={changeId} to={overrideFor.to} rule={overrideFor.rule}
-          customerRelevant={!!change.customer_relevant} leadName={change.lead_name}
+          customerRelevant={!!change.customer_relevant} leadName={overrideLeadName}
           onClose={() => setOverrideFor(null)} />
       )}
       {absorbOpen && (
         <AbsorbDialog changeId={changeId} customerRelevant={!!change.customer_relevant}
+          approvers={stage?.internal_approvers}
           onClose={() => setAbsorbOpen(false)} />
       )}
       <ReasonDialog

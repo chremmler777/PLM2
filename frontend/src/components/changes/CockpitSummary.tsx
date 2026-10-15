@@ -12,6 +12,7 @@ import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
 import { btnBase, btnSizes, btnSm, buttonClass, type ButtonSize } from '../common/buttonStyles'
 import { t } from '../../i18n/cmLabels'
+import { DECIDE_ONLY_RULES } from '../../lib/overrideRules'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
@@ -371,7 +372,10 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // only a later gate that was actually answered No is worth a line.
   const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key])
     && g.decision === 'no')
-  const overdue = change.assessments.filter((a) => a.overdue).length
+  // Overdue assessments hold the change only while it is assessed: once it
+  // moved on (costing, quoted ...) the flag is stale history, not a blocker.
+  const overdue = change.status === 'in_assessment'
+    ? change.assessments.filter((a) => a.overdue).length : 0
   // Blocks two transitions on the same signal: entering assessment (from scoping,
   // hard-gated) and kickoff (from approved, soft-guarded). Only meaningful once
   // there is an impacted set to lock.
@@ -384,7 +388,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const nextStep = change.next_step ?? null
   const nextItems = nextStep?.items ?? []
   const itemLabel = (i: NextStepItem) => {
-    const key = i.key === 'assessments' && i.n ? 'assessments_n' : i.key
+    const key = i.key === 'assessments' && i.n ? (i.n === 1 ? 'assessments_1' : 'assessments_n') : i.key
     const detail = i.key === 'gate' && i.detail ? t('gate.' + i.detail) : (i.detail ?? '')
     return t('next.item.' + key).replace('{n}', String(i.n ?? '')).replace('{detail}', detail)
   }
@@ -399,7 +403,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       if (lastOfRule.get(i.rule) !== idx) return null
       // A routing change waiting for its decision is decided, not skipped:
       // "Decide added department" in Your actions is the way (one road).
-      if (i.rule === 'routing_deviation_pending') return null
+      if (DECIDE_ONLY_RULES.has(i.rule)) return null
       if (i.override) {
         return (
           <span data-testid={`why-override-state-${i.rule}`} className="block pl-4 text-slate-400">
@@ -433,13 +437,15 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         {i.exits.includes('sign') && onSign && (i.sides ?? []).filter((s) => maySign?.(s)).map((s) => (
           <button key={s} type="button" data-testid={`why-sign-${s}`} className={`ml-1 text-amber-200 ${linkRow}`}
             onClick={() => onSign(s)}>
-            {t('why.sign.' + s).replace('{v}', i.detail ?? '')}
+            {i.detail ? t('why.sign.' + s).replace('{v}', i.detail) : t('why.signPlain.' + s)}
           </button>
         ))}
       </span>
     )
   }
   const nextTo = nextStep ? STATUS_LABELS[nextStep.to] : ''
+  const softDecideOnly = nextItems.some((i) => i.kind === 'soft' && DECIDE_ONLY_RULES.has(i.rule ?? ''))
+  const softOverridable = nextItems.some((i) => i.kind === 'soft' && !DECIDE_ONLY_RULES.has(i.rule ?? ''))
   // The scoping meeting decides; a mother-plant change leaves scoping
   // straight to approved and reads like any other stage.
   const isScoping = change.status === 'scoping' && nextStep?.to === 'in_assessment'
@@ -447,7 +453,10 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const nextReady = isScoping ? t('scopingSteps.ready') : t('next.ready').replace('{status}', nextTo)
   const nextNote = isScoping ? t('scopingSteps.note')
     : nextItems.some((i) => i.kind === 'hard') ? t('next.hardNote')
-    : nextItems.some((i) => i.kind === 'soft') ? t('kickoff.soft')
+    // the footer follows the row kinds: a routing change is decided, not
+    // overridden, so "each open rule needs an override" is not said of it
+    : softOverridable ? t('kickoff.soft') + (softDecideOnly ? ` ${t('next.decideNote')}` : '')
+    : softDecideOnly ? t('next.decideNote')
     : null
   const gateText = (g: Gate) => `${t('gate.' + g.gate_key)} ${t('cockpit.gateWord')}: ${gateRowText(g.decision)}`
   // One list of what holds the change up. The Blocked-by card, the count in

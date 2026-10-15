@@ -57,6 +57,9 @@ const fieldCls =
 const VALUE_CHECKS = new Set(['cycle_time', 'weight'])
 
 /** The backend's own label first (it owns the catalog), then ours, then the key. */
+/** Evidence words that say nothing (backend cm_rules.EMPTY_EVIDENCE). */
+const EMPTY_WORDS = new Set(['ok', 'okay', 'tbd', 'na', 'n/a', 'done', 'checked', 'yes', '-', '--'])
+
 const checkLabel = (key: string, given?: string | null): string => {
   if (given) return given
   const label = t(`validation.check.${key}`)
@@ -138,7 +141,11 @@ function CheckRow({
     : null
   // A measurement without the measurement is not a pass; a fail without a
   // reason is not a check; a typed number nobody can read is neither.
-  const mayPass = !needsValue || valueOk
+  // HARD #3: a failed check passes only by a retest that says what changed
+  // since (parameter, tool, material or method + reference, >= 5 characters)
+  const retest = check.status === 'failed'
+  const retestNoteOk = note.trim().length >= 5 && !EMPTY_WORDS.has(note.trim().toLowerCase())
+  const mayPass = (!needsValue || valueOk) && (!retest || retestNoteOk)
   const mayFail = !valueHint
   const mayWrite = editable && mine && !retired
 
@@ -278,6 +285,12 @@ function CheckRow({
           </div>
         </div>
       ) : (
+        <div className="space-y-1">
+        {retest && (
+          <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+            data-testid={`validation-retest-note-${id}`} aria-label={t('validation.retestNote')}
+            placeholder={t('validation.retestNote')} className={`w-full ${fieldCls}`} />
+        )}
         <div className="flex items-center gap-2">
           <button type="button" data-testid={`validation-pass-${id}`}
             disabled={!mayPass || post.isPending}
@@ -292,6 +305,7 @@ function CheckRow({
             <X aria-hidden="true" size={14} className="text-red-400" />
             {t('validation.fail')}
           </button>
+        </div>
         </div>
       ))}
     </li>

@@ -21,6 +21,28 @@ const wrap = (ui: React.ReactElement) => (
 describe('CockpitSummary', () => {
   afterEach(cleanup)
 
+  it('counts overdue assessments as a blocker only while the change is assessed', () => {
+    render(wrap(<CockpitSummary
+      change={change({ status: 'in_assessment', assessments: [
+        { id: 1, department_id: 2, verdict: 'pending', stage_order: 1,
+          rasic_letter: 'R', status: 'active', owner_id: null, owner_name: null,
+          accepted_at: null, due_date: '2026-06-01T00:00:00', overdue: true },
+      ] as ChangeDetail['assessments'] })}
+      gates={[]} pendingDeviations={0} onAdvance={vi.fn()} advancing={false} />))
+    expect(screen.getAllByText(/Overdue assessments/).length).toBeGreaterThan(0)
+  })
+
+  it('a routing change row says it is decided, not overridden', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'in_assessment', next_step: { to: 'costing', items: [
+      { key: 'assessments', kind: 'soft', n: 1, rule: 'assessments_open', who: 'Development' },
+      { key: 'routing_deviation', kind: 'soft', rule: 'routing_deviation_pending', who: 'Project Management' },
+    ] } })} gates={[]} pendingDeviations={0} onAdvance={vi.fn()} advancing={false} />))
+    const text = document.body.textContent ?? ''
+    expect(text).toContain('1 assessment still open')
+    expect(text).toContain('A routing change is decided (Assessments tab), not overridden.')
+    expect(screen.queryByTestId('why-override-routing_deviation_pending')).toBeNull()
+  })
+
   it('shows lead, blockers, and one primary next action', () => {
     const onAdvance = vi.fn()
     render(wrap(<CockpitSummary
@@ -47,16 +69,17 @@ describe('CockpitSummary', () => {
     expect(releaseRow?.textContent).not.toContain('⚠')
     expect(releaseRow?.className).toContain('text-slate-400')
     expect(screen.getByTestId('blocked-pending-deviations')).toBeDefined()
-    expect(screen.getByText(/Overdue assessments/)).toBeDefined()
+    // R5: an assessment overdue is stale once the change is quoted (no blocker)
+    expect(screen.queryByText(/Overdue assessments/)).toBeNull()
     expect(screen.getByTestId('next-resolve-first').textContent).toBe('First: Pending overrides: 1')
     // One truth: with blockers listed, the move is not the primary. The
     // primary says how many and leads to the first; the move stays secondary.
     const resolve = screen.getByTestId('next-resolve-blockers')
-    expect(resolve.textContent).toBe('Resolve 2 blockers first')
+    expect(resolve.textContent).toBe('Resolve 1 blocker first')
     expect(resolve.className).toContain('bg-sky-700')
     const move = screen.getByRole('button', { name: 'Record approval' })
     expect(move.className).not.toContain('bg-sky-700')
-    expect(move.title).toContain('2 blockers open')
+    expect(move.title).toContain('1 blocker open')
     fireEvent.click(move)
     expect(onAdvance).toHaveBeenCalledWith('approved')
   })

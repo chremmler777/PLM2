@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import OverrideDialog from './OverrideDialog';
 import { t } from '../../i18n/cmLabels';
-import { ruleText } from '../../lib/overrideRules';
+import { DECIDE_ONLY_RULES, ruleText } from '../../lib/overrideRules';
 import type { ChangeStatus } from '../../types/change';
 
 interface Props {
@@ -83,7 +83,8 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
   const hasApproved = relevant.some((d) => d.status === 'approved');
   const hasPending = relevant.some((d) => d.status === 'pending');
   // Only a soft guard can be deviated from: a hard rule gets no request button.
-  const deviable = isDeviable(blockedReason);
+  // a rule with its own decision (the routing change) is never overridden
+  const deviable = isDeviable(blockedReason) && !DECIDE_ONLY_RULES.has(rule ?? '');
 
   return (
     <div ref={rootRef} tabIndex={-1} role="alert" aria-label="Transition blocked"

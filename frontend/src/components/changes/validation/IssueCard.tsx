@@ -334,7 +334,9 @@ export default function IssueCard({
                     {by(issue.customer_decided_by_name, issue.customer_decided_at)}
                     {issue.concession_until && <div className="text-[11px] text-slate-400">Concession until {formatCalendarDate(issue.concession_until)}</div>}
                   </>
-                ) : <span className="text-slate-400">Sales records the customer's decision.</span>}
+                ) : <span className="text-slate-400">{issue.route === 'customer_concession'
+                  ? "Sales files the customer's mail; a Quality member accepts the concession."
+                  : "Sales records the customer's decision."}</span>}
               </Fact>
             )}
             <Fact label="Extra cost">

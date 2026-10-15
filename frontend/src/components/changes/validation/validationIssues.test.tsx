@@ -177,6 +177,13 @@ describe('route dialog', () => {
     expect(routeConsequences('design_change', ready, 'in_validation').loopBack).toMatch(/VI-2: Tool cannot run/)
   })
 
+  it('a concession names Quality as the decider and Sales as the mail filer (HARD #3)', () => {
+    const text = routeConsequences('customer_concession', ready, 'in_validation').lines.join(' ')
+    expect(text).toContain('Sales files the customer mail')
+    expect(text).toContain('a Quality member then accepts the concession')
+    expect(text).not.toContain('Sales records "accepts the deviation"')
+  })
+
   it('supplier rework needs the supplier', () => {
     open()
     fireEvent.click(screen.getByTestId('route-option-supplier_rework'))
@@ -195,7 +202,7 @@ describe('route dialog', () => {
     open(issue({ contained_at: 'x' }))
     expect((screen.getByTestId('route-option-internal_rework') as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(screen.getByTestId('route-option-customer_concession'))
-    expect(screen.getByTestId('route-consequences').textContent).toMatch(/customer mail filed into this issue/)
+    expect(screen.getByTestId('route-consequences').textContent).toMatch(/customer mail into this issue; a Quality member/)
     expect(screen.queryByTestId('route-loopback')).toBeNull()
     expect(screen.queryByTestId('route-actions')).toBeNull()
     fireEvent.change(screen.getByTestId('route-reason'), { target: { value: 'Cosmetic only' } })

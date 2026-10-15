@@ -9,6 +9,8 @@ import { t } from '../i18n/cmLabels'
 const PM_MGMT_RULES = new Set(['scope_change_uncovered', 'price_drop', 'price_open'])
 const QUALITY_RULES = new Set(['validation_open', 'validation_failed', 'validation_issues_open'])
 const QUALITY_TARGETS = new Set(['in_implementation', 'released'])
+/** Rules decided, never overridden (backend cm_rules.DECIDE_ONLY_RULES). */
+export const DECIDE_ONLY_RULES = new Set(['routing_deviation_pending'])
 
 export function deciderGroup(rule: string | null | undefined, to: string, customerRelevant = true): DeciderGroup {
   if (rule === 'price_open') return customerRelevant ? 'pm_mgmt' : 'approver'

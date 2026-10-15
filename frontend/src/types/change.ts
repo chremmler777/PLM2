@@ -399,7 +399,7 @@ export interface NextStepItem {
   /** Who owns it (and by when), in words. */
   who?: string;
   /** A hard rule's only ways out: concession, absorb, customer_accepts, sign. */
-  exits?: ('concession' | 'absorb' | 'absorb_internal' | 'customer_accepts' | 'sign')[];
+  exits?: ('concession' | 'absorb' | 'absorb_internal' | 'customer_accepts' | 'sign' | 'record_answer')[];
   /** The rule's override, when one is asked or approved. */
   override?: { id: number; status: 'pending' | 'approved' };
   /** Exit 'sign': the sign-offs still owed (missing, or given on an older
@@ -1351,9 +1351,13 @@ export interface StageStateResponse {
   status_label?: string;
   /** {to_status: may the viewer} for every hop out of the current status. */
   can_transition: Record<string, boolean>;
-  /** Forward hops refused today: kind hard | gate | guard, the reason and,
+  /** Forward hops refused today: kind hard | gate | guard | decide, the reason and,
    * for a soft rule, its key (C6: what an override binds to). */
-  transition_blocks?: Record<string, { kind: string; reason: string; rule?: string | null }>;
+  transition_blocks?: Record<string, {
+    /** hard | gate | guard | decide (a rule with its own decision, never overridden) */
+    kind: string; reason: string; rule?: string | null;
+    pending_deviation_id?: number | null;
+  }>;
   can_edit_impact: boolean;
   impact_edit_needs_reason: boolean;
   /** May the viewer record the scoping meeting and its decision (lead, PM, admin). */

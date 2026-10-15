@@ -63,6 +63,16 @@ describe('Why blocked (spec §0)', () => {
     expect(onSign).toHaveBeenCalledWith('quality')
   })
 
+  it('no offer sent: the sign button names no empty version', () => {
+    const rel = change({ status: 'in_validation', next_step: { to: 'released', items: [
+      { key: 'release_signoffs', kind: 'hard', exits: ['sign'], sides: ['pm'],
+        who: 'Project Management' },
+    ] } })
+    render(wrap(<CockpitSummary change={rel} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onSign={vi.fn()} maySign={() => true} />))
+    expect(screen.getByTestId('why-sign-pm').textContent).toBe('Sign as PM')
+  })
+
   it('a hard row says "No override" in words; a pending routing change is decided, not overridden', () => {
     const c = change({ status: 'in_assessment', next_step: { to: 'costing', items: [
       { key: 'routing_deviation', kind: 'soft', rule: 'routing_deviation_pending', who: 'Project Management' },
