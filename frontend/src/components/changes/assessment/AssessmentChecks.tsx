@@ -33,8 +33,11 @@ export const ownsCheck = (c: ChangeConcern, deptId: number) =>
   c.kind === 'needs_info' && c.flag_type === 'check'
   && (c.department_id === deptId || (c.co_department_ids ?? []).includes(deptId))
 
+/** A typed question this department asked (C8). A hold from before C8
+ *  (flag_type null) stays in the department's concern strip, answered by a
+ *  proposal with its document, as the backend still treats it. */
 export const asksFrom = (c: ChangeConcern, deptId: number) =>
-  c.kind === 'needs_info' && c.flag_type !== 'check' && c.department_id === deptId
+  c.kind === 'needs_info' && c.flag_type === 'question' && c.department_id === deptId
 
 export default function AssessmentChecks({
   changeId, departmentId, departmentName, concerns, editable, onChanged,

@@ -323,6 +323,69 @@ async def test_question_for_our_team_goes_to_the_lead(client, assess, session_fa
                for t in tasks)
 
 
+async def test_our_team_question_on_an_internal_change_is_the_leads_to_answer(
+        client, assess, session_factory):
+    """R5/R18: P3 makes the engineering raiser the lead of an internal
+    change; the question routed to that lead is one they can answer."""
+    a = assess
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, a["cid"])
+        c.customer_relevant = False
+        c.lead_id = a["raiser_id"]          # Development, not PM or Sales
+        c.sales_owner_id = None
+        await s.commit()
+    res = await client.post(_url(a, "/concerns"),
+                            json=_q(a["tool"], answer_from="our_team",
+                                    check_what="schedule"), headers=a["te"])
+    assert res.status_code == 200, res.text
+    qid = res.json()["id"]
+    async with session_factory() as s:
+        told = (await s.execute(select(Notification.user_id).where(
+            Notification.subject_key == f"ask:{qid}"))).scalars().all()
+        assert told == [a["raiser_id"]]
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=a["raiser"])).json()
+    assert any(t.get("kind") == "obtain_info" and t.get("concern_id") == qid
+               for t in tasks)
+    rows = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=a["raiser"])).json()}
+    assert rows[qid]["can_answer"] is True
+    res = await client.post(_url(a, f"/concerns/{qid}/answer"), json={
+        "answer_kind": "assumed", "assumed_value": "KW 44", "assumed_unit": "n/a",
+        "assumed_risk": "tool slot moves a week"}, headers=a["raiser"])
+    assert res.status_code == 200, res.text
+    # negative: Process (neither asker, lead, Sales nor PM) still may not
+    rows = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=a["pe"])).json()}
+    assert rows[qid]["can_answer"] is False
+
+
+async def test_sales_is_not_tasked_with_an_our_team_question(client, assess):
+    """R13: Sales' row counts customer and supplier questions only; a newer
+    our-team question neither adds to it nor hides the mail text."""
+    a = assess
+    res = await client.post(_url(a, "/concerns"),
+                            json=_q(a["tool"], answer_from="our_team",
+                                    check_what="schedule"), headers=a["te"])
+    assert res.status_code == 200, res.text
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=a["sa"])).json()
+    assert not [t for t in tasks if t.get("kind") == "obtain_info"
+                and t["change_id"] == a["cid"]]
+    cq = (await client.post(_url(a, "/concerns"), json=_q(a["tool"], answer_from="supplier",
+                                                          note="Hasco: insert lead time?"),
+                            headers=a["te"])).json()
+    await client.post(_url(a, "/concerns"),
+                      json=_q(a["tool"], answer_from="our_team", check_what="schedule",
+                              note="Free press slot in KW 45?"), headers=a["te"])
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=a["sa"])).json()
+    rows = [t for t in tasks if t.get("kind") == "obtain_info"
+            and t["change_id"] == a["cid"]]
+    assert len(rows) == 1 and rows[0]["concern_id"] == cq["id"]
+    assert rows[0]["question_count"] == 1
+    # the supplier question carries its mail text too
+    assert "Hasco: insert lead time?" in (rows[0].get("customer_copy") or "")
+    assert "our change" in rows[0]["customer_copy"]
+
+
 async def test_question_refusals(client, assess, monkeypatch):
     a = assess
     # negative: for another department, without who answers, as a check item

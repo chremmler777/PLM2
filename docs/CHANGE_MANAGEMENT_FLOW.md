@@ -477,11 +477,15 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   our team / supplier). Own department only, refused once it submitted, no
   check items here. It holds only that department's submit (HARD #10, the
   existing hold); scoping questions' rules for answering apply (asking
-  department, Sales, PM; answer form) and the department closes it. Told
+  department, Sales, PM; answer form), plus the lead for a question for our
+  team (routed to them: an internal change's engineering lead answers it),
+  and the department closes it. Told
   once (`task_new`, subject `ask:<id>`): customer or supplier → the Sales
   owner, else every Sales member; our team → the lead, else Project
-  Management; the obtain_info row follows the same split (Sales sees all,
-  with the mail text). The asker gets a badge when it is answered
+  Management; the obtain_info row follows the same split (Sales sees the
+  customer and supplier questions only, each with mail text to copy, worded
+  for the customer or the supplier). A department hold from before C8
+  (no flag type) stays a proposal with its document in flight. The asker gets a badge when it is answered
   (`question_answered`). Per spec §0 the late clock is not paused: a wait
   on Sales counts as late.
 - **Verdict evidence** (spec §4, `_validate_verdict_evidence`), nothing

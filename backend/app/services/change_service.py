@@ -3828,9 +3828,12 @@ class ChangeService:
             # a supplier) is the lead's errand, else Project Management's
             # (MeetingService._tell_question_asked told the same person).
             ours = [q for q in questions if q.answer_from == "our_team"]
-            if questions and c.status not in ("captured", "scoping") \
-                    and not in_sales and ours and (
-                        holds_lead(c, user) or (is_pm_member and c.lead_id is None)):
+            # Sales' errand: customer and supplier questions (and legacy ones
+            # without a pick), never one for our team (R13)
+            theirs = [q for q in questions if q.answer_from != "our_team"]
+            live = c.status not in ("captured", "scoping")
+            if live and ours and (
+                    holds_lead(c, user) or (is_pm_member and c.lead_id is None)):
                 newest = ours[-1]
                 tasks.append({
                     **await _base(c), "kind": "obtain_info",
@@ -3841,25 +3844,24 @@ class ChangeService:
                     # answered in the asking department's bucket
                     "target_tab": "assessments",
                 })
-            elif questions and c.status not in ("captured", "scoping"):
-                if in_sales:
-                    from app.services.meeting_service import MeetingService as _MS
-                    newest = questions[-1]
-                    tasks.append({
-                        **await _base(c), "kind": "obtain_info",
-                        "reason": newest.note,
-                        "question_count": len(questions),
-                        "concern_id": newest.id,
-                        "department_id": newest.department_id,
-                        "since": newest.raised_at,
-                        # a customer question: the mail text to copy
-                        "customer_copy": _MS.customer_copy(c, newest),
-                        # C8: a question from an assessment is answered in
-                        # the asking department's bucket
-                        **({"target_tab": "assessments"}
-                           if c.status == "in_assessment" else {}),
-                    })
-            elif questions:
+            if live and in_sales and theirs:
+                from app.services.meeting_service import MeetingService as _MS
+                newest = theirs[-1]
+                tasks.append({
+                    **await _base(c), "kind": "obtain_info",
+                    "reason": newest.note,
+                    "question_count": len(theirs),
+                    "concern_id": newest.id,
+                    "department_id": newest.department_id,
+                    "since": newest.raised_at,
+                    # a customer or supplier question: the mail text to copy
+                    "customer_copy": _MS.customer_copy(c, newest),
+                    # C8: a question from an assessment is answered in
+                    # the asking department's bucket
+                    **({"target_tab": "assessments"}
+                       if c.status == "in_assessment" else {}),
+                })
+            if not live and questions:
                 am_author = getattr(user, "acts_as_department_id", None) is None
                 answerable = [
                     q for q in questions

@@ -933,19 +933,23 @@ class MeetingService:
                       part_number: Optional[str] = None) -> Optional[str]:
         """The mail text Sales copies for a customer question (spec §0 [R4],
         §3 "text and customer copy built from the picks"): what is asked,
-        on which part, and what the answer decides. None for other
-        questions."""
-        if concern.kind != "needs_info" or concern.answer_from != "customer":
+        on which part, and what the answer decides. A supplier question
+        (C8: Sales asks the supplier too) gets the same text, worded for the
+        supplier. None for other questions."""
+        if (concern.kind != "needs_info"
+                or concern.answer_from not in ("customer", "supplier")):
             return None
         topic = MeetingService.CHECK_WHAT_WORDS.get(concern.check_what or "", "")
         where = f" for part {part_number}" if part_number else ""
+        whose = ("your change request" if concern.answer_from == "customer"
+                 else "our change")
         lines = [
             f"Subject: {change.change_number} {change.title}: question"
             + (f" on {topic}" if topic and topic != "other" else ""),
             "",
             "Hello,",
             "",
-            f"For your change request {change.change_number} ({change.title}){where} "
+            f"For {whose} {change.change_number} ({change.title}){where} "
             "we need your answer:",
             "",
             concern.note.strip(),
@@ -1430,13 +1434,22 @@ class MeetingService:
 
         The question stays the ASKING side's task: members of the department
         it was asked for (department_id) or, with none, its author. Sales
-        (the customer's contact) and Project Management may answer too.
+        (the customer's contact) and Project Management may answer too; from
+        the assessment on, the lead answers a question for our team.
         Acts-as is exactly that department: the acting admin's personal
         authorship and real memberships step aside, and so does the admin
         bypass (effective_role). Answering is not closing: see
         withdraw_concern."""
         if user.effective_role == "admin":
             return True
+        # C8: a question for our team from an assessment is routed to the
+        # lead (task and notice): the lead answers it, whatever their
+        # department (an internal change's engineering lead, P3), R5
+        if (concern.answer_from == "our_team"
+                and change.status not in ("captured", "scoping")):
+            from app.services.change_people import holds_lead
+            if holds_lead(change, user):
+                return True
         mine = set(await WorkflowService.effective_department_ids(session, user))
         acting = getattr(user, "acts_as_department_id", None) is not None
         if concern.department_id is not None:
@@ -1536,7 +1549,10 @@ class MeetingService:
                 "its assessment (Answered / Not relevant / Assumed)")
         departmental = (concern.department_id is not None
                         and change.status == "in_assessment"
-                        and not (v2 and concern.is_question))
+                        # a hold from before C8 (flag_type NULL) stays a
+                        # proposal in flight; only a typed question is
+                        # answered as a question
+                        and not (v2 and concern.flag_type == "question"))
         if departmental:
             if not await ChangeService.has_info_response(
                     session, change, concern_id=concern.id):
