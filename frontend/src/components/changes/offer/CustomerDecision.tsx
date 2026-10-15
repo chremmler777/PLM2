@@ -396,10 +396,12 @@ export default function CustomerDecision({
           ? `${change.quality_signed_by_name}${change.quality_signed_at ? `, ${formatCalendarDate(change.quality_signed_at)}` : ''}${signedVersion(change.quality_signed_offer_id)}`
           : t('cust.signPending')}
       </p>
-      <p className="text-[11px] text-slate-500">
-        {v2 ? t('cust.approvalAuto')
-          : "Approval needs the customer's acceptance and both sign-offs. The approve button is in the cockpit above."}
-      </p>
+      {change.status === 'quoted' && (
+        <p className="text-[11px] text-slate-500">
+          {v2 ? t('cust.approvalAuto')
+            : "Approval needs the customer's acceptance and both sign-offs. The approve button is in the cockpit above."}
+        </p>
+      )}
     </div>
   )
 }

@@ -53,6 +53,19 @@ describe('CustomerDecision', () => {
     await waitFor(() => expect(changesApi.signOff).toHaveBeenCalledWith(7, 'pm'))
   })
 
+  it('C14: a re-sign owed after approval is a button (accepted supplement)', async () => {
+    const owed = change({ status: 'approved', customer_response: 'accepted', pm_signed_by: 3, quality_signed_by: 4,
+      next_step: { to: 'in_implementation', items: [
+        { key: 'pm_signoff', kind: 'todo', exits: ['sign'], sides: ['pm'], detail: 'v2' },
+      ] } })
+    wrap(<CustomerDecision change={owed} canRespond={false} canSignPm canSignQuality={false} userId={5} />)
+    const pm = screen.getByTestId('signoff-pm') as HTMLButtonElement
+    expect(pm.disabled).toBe(false)
+    expect(pm.textContent).toBe('PM: Sign again for v2')
+    fireEvent.click(pm)
+    await waitFor(() => expect(changesApi.signOff).toHaveBeenCalledWith(7, 'pm'))
+  })
+
   it('requires a release date before recording customer acceptance (switch off)', async () => {
     wrap(<CustomerDecision change={change({ commercial_v2: false })} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))

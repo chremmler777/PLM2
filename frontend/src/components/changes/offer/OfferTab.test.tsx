@@ -107,6 +107,15 @@ describe('OfferTab', () => {
     expect(changeOfferApi.list).not.toHaveBeenCalled()
   })
 
+  it('Quality (no prices) gets the sign block in approved too (C14 re-sign)', async () => {
+    renderTab(props({ canSeePrices: false, canWrite: false, canSignQuality: true,
+      change: change({ status: 'approved', customer_response: 'accepted', quality_signed_by: 4,
+        next_step: { to: 'in_implementation', items: [
+          { key: 'quality_signoff', kind: 'todo', exits: ['sign'], sides: ['quality'], detail: 'v2' }] } }) }))
+    expect((await screen.findByTestId('signoff-quality')).textContent).toBe('Quality: Sign again for v2')
+    expect(screen.queryByTestId('offer-total')).toBeNull()
+  })
+
   it('renders the server totals, not a local sum', async () => {
     vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
     renderTab(props())

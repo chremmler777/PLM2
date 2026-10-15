@@ -209,7 +209,7 @@ export const pmChapter: ContentChapter = {
           points: [
             ['"Start at risk: approve or not"', 'an urgent change whose customer gave the go-ahead before the PO. Read the go-ahead and Quality\'s line of risks, then approve: the change is approved with the price open. You never approve your own ask; an admin is the second.'],
             ['"Scope change: accept or refuse"', 'Sales recorded what the customer wants to add or change. Accept it with the departments that re-cost it (the routed ones are preticked), or refuse it with a reason. After approval an added part can become its own linked change. While a scope change is open the approval, the start of implementation and the release wait (an override needs Project Management or Management).'],
-            ['Your sign-off row', 'in My Tasks reads "Sign for offer v2: 4,200.00 EUR, margin 12.0 % (-3.1 pts vs v1); 2 unconfirmed assumptions". A new version sent after you signed takes your signature back: you are told to sign the new one.'],
+            ['Your sign-off row', 'in My Tasks reads "Sign for offer v2: 4,200.00 EUR, margin 12.0 % (-3.1 pts vs v1); 2 unconfirmed assumptions". A new version sent after you signed takes your signature back; once the customer accepts it (offer or supplement) you are told to sign it, and the row and the sign button come back.'],
             ['"Accepted total below the last offer"', 'Sales accepted a version cheaper than the one sent before it and said why. You (or Management) decide the override; never the person who asked. Your OK approves the change when the rest holds.'],
           ],
         },

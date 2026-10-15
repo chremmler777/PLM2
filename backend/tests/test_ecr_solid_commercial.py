@@ -453,9 +453,14 @@ async def test_a_price_only_version_withdraws_the_pm_signature_only(
             Notification.user_id == offer_world["users"]["pm"]))).scalars().all()
     assert len(rows) == 1 and "PM sign-off withdrawn" in rows[0].action_description
     assert "Quality" not in rows[0].action_description
-    assert any("Sign again for offer v2" in n.title for n in notes)
+    # NEGATIVE: no notice before the customer accepts v2 (no task behind it)
+    assert not any("Sign again" in n.title for n in notes)
     res = await _answer(client, cid, sales, _YES)
     assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        notes = (await s.execute(select(Notification).where(
+            Notification.user_id == offer_world["users"]["pm"]))).scalars().all()
+    assert any("Sign again for offer v2" in n.title for n in notes)
     # NEGATIVE: approval waits for the PM's new signature
     assert res.json()["status"] == "quoted"
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
@@ -559,10 +564,16 @@ async def test_supplement_prices_only_what_changed_and_keeps_the_status(
     rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
     assert any(t["kind"] == "customer_response" and t.get("supplement_version") == s1["version"]
                for t in rows)
-    # NEGATIVE: the PM's re-sign waits until the customer accepts
+    # NEGATIVE: the PM's re-sign (row, button, notice) waits until the customer accepts
     pm_rows = (await client.get("/api/v1/changes/my-tasks", headers=approved["pm"])).json()
     pm_rows = pm_rows if isinstance(pm_rows, list) else pm_rows.get("tasks", [])
     assert not any(t["kind"] == "sign_off" and t["change_id"] == cid for t in pm_rows)
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        assert not (await s.execute(select(Notification).where(
+            Notification.subject_key.like("resign:%")))).scalars().all()
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=approved["pm"])).json()
+    assert "pm_signoff" not in {i["key"] for i in ch["next_step"]["items"]}
     res = await _answer(client, cid, sales, _YES)
     assert res.status_code == 200, res.text
     body = res.json()
@@ -571,6 +582,17 @@ async def test_supplement_prices_only_what_changed_and_keeps_the_status(
     pm_rows = pm_rows if isinstance(pm_rows, list) else pm_rows.get("tasks", [])
     assert any(t["kind"] == "sign_off" and t["change_id"] == cid and t["side"] == "pm"
                for t in pm_rows)
+    # the row has its button (cockpit / Offer tab) and the signer is told now
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=approved["pm"])).json()
+    item = next(i for i in ch["next_step"]["items"] if i["key"] == "pm_signoff")
+    assert (item["kind"], item["exits"], item["detail"]) == ("todo", ["sign"], f"v{s1['version']}")
+    async with session_factory() as s:
+        n = (await s.execute(select(Notification).where(
+            Notification.subject_key.like("resign:%")))).scalar_one()
+        assert n.title.startswith(f"Sign again for supplement v{s1['version']}")
+    r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"},
+                          headers=approved["pm"])
+    assert r.status_code == 200, r.text
 
 
 async def test_a_declined_supplement_leaves_the_price_open_for_absorb(
@@ -944,6 +966,11 @@ async def test_start_at_risk_from_quoted_then_the_customer_accepts_v1(
     assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
                               headers=sales)).status_code == 200
     await _started_at_risk(client, cid, sales, pm, q)
+    # both sign-offs are a button at once (C14 / §7a), not a block
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    signs = {i["key"]: i for i in ch["next_step"]["items"] if i["key"].endswith("_signoff")}
+    assert set(signs) == {"pm_signoff", "quality_signoff"}
+    assert all(i["kind"] == "todo" and i["exits"] == ["sign"] for i in signs.values())
     # Sales chases the answer to v1 in approved
     assert any(t["kind"] == "customer_response" and t["change_id"] == cid
                for t in await _tasks(client, sales))

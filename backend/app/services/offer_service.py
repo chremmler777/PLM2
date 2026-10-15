@@ -1274,7 +1274,8 @@ class OfferService:
         """C14 (spec §7): a new version sent withdraws the signatures given
         on an older one: PM always, Quality only when what it signed
         technically changed (snapshot_diff, a part index included). The
-        record keeps who signed what; the signer is told once to sign v N."""
+        record keeps who signed what; the signer is told once the customer
+        accepted it (ChangeService._ask_resign: the task exists from then)."""
         sides, latest = await ChangeService.signoff_sides_missing(session, change)
         stale = [(side, by) for side, by in (("pm", change.pm_signed_by),
                                               ("quality", change.quality_signed_by))
@@ -1288,16 +1289,6 @@ class OfferService:
             + " and ".join(names[s] for s, _ in stale)
             + f" sign-off withdrawn, sign again for v{offer.version}", actor_id,
             new_value={"offer_id": offer.id, "sides": [s for s, _ in stale]})
-        from app.services.notification_service import NotificationService
-        for side, by in stale:
-            if by == actor_id:
-                continue
-            await NotificationService.notify_once(
-                session, [by], kind="task_new",
-                subject_key=f"resign:{offer.id}:{side}",
-                title=f"Sign again for offer v{offer.version}: {change.change_number}"[:255],
-                body=f"Your {names[side]} sign-off was on an earlier version.",
-                link=f"/changes/{change.id}?tab=overview")
 
     @staticmethod
     async def _check_quote_plan(session, change) -> None:

@@ -428,6 +428,20 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         </button>
       ) : null
     }
+    // C14: a re-sign owed after approval is a button, not a block (HARD #9
+    // only at release)
+    if (i.kind === 'todo' && i.exits?.includes('sign') && onSign) {
+      return (
+        <span className="block pl-4 text-slate-400">
+          {(i.sides ?? []).filter((s) => maySign?.(s)).map((s) => (
+            <button key={s} type="button" data-testid={`why-sign-${s}`} className={`ml-1 text-amber-200 ${linkRow}`}
+              onClick={() => onSign(s)}>
+              {i.detail ? t('why.sign.' + s).replace('{v}', i.detail) : t('why.signPlain.' + s)}
+            </button>
+          ))}
+        </span>
+      )
+    }
     if (i.kind !== 'hard') return null
     // Said in words, not by colour alone (the scoping list is a to-do list)
     if (!i.exits?.length) {

@@ -776,6 +776,23 @@ class ChangeService:
         return sides, latest
 
     @staticmethod
+    def resign_sides(change: ChangeRequest, sides: list[str], latest) -> list[str]:
+        """C14 after approval (approved, in_implementation): which owed sides
+        are a sign-off to give now. A re-sign once the customer accepted the
+        newer offer or supplement; after a start at risk (§7a) both sides at
+        once. One rule for My Tasks and the cockpit's sign button (R5)."""
+        sar = change.start_at_risk_approved_at is not None
+        out = []
+        for side in sides:
+            signed = change.pm_signed_by if side == "pm" else change.quality_signed_by
+            if not sar and signed is None:
+                continue      # before validation only a re-sign is owed
+            if not sar and getattr(latest, "status", None) != "accepted":
+                continue      # a supplement still out: signed once accepted
+            out.append(side)
+        return out
+
+    @staticmethod
     async def _same_technical_offer(session: AsyncSession, signed_offer_id: int,
                                     latest) -> bool:
         """Do the offer Quality signed and the latest one show the same
@@ -1553,6 +1570,17 @@ class ChangeService:
                                  if by is None], None
             for side in sides:
                 add(f"{side}_signoff", "hard", exits=["sign"], sides=[side],
+                    detail=f"v{latest.version}" if latest is not None else None)
+        if (change.status in ("approved", "in_implementation") and change.customer_relevant
+                and cm_switches.on("COMMERCIAL_V2") and cm_switches.on("RELEASE_V2")
+                and getattr(change, "origin", None) not in ("mother_plant", "engineering_review")
+                and (change.pm_signed_by is not None or change.quality_signed_by is not None
+                     or change.start_at_risk_approved_at is not None)):
+            # C14: a re-sign owed after approval (an accepted supplement, a
+            # start at risk) is a sign button now; HARD only at release (#9)
+            sides, latest = await ChangeService.signoff_sides_missing(session, change)
+            for side in ChangeService.resign_sides(change, sides, latest):
+                add(f"{side}_signoff", "todo", exits=["sign"], sides=[side],
                     detail=f"v{latest.version}" if latest is not None else None)
         if to == "in_implementation":
             if change.bank_build_mode is None:
@@ -4387,16 +4415,11 @@ class ChangeService:
                 sides = [side for side, by in (("pm", c.pm_signed_by),
                                                ("quality", c.quality_signed_by))
                          if by is None]
+            if c.status in ("approved", "in_implementation"):
+                sides = ChangeService.resign_sides(c, sides, latest)
             for side in sides:
                 if not (is_pm_member if side == "pm" else is_quality):
                     continue
-                sar = c.start_at_risk_approved_at is not None
-                if c.status in ("approved", "in_implementation") and not sar and (
-                        c.pm_signed_by if side == "pm" else c.quality_signed_by) is None:
-                    continue      # before validation only a re-sign is a row
-                if (c.status in ("approved", "in_implementation") and not sar
-                        and getattr(latest, "status", None) != "accepted"):
-                    continue      # a supplement still out: signed once accepted
                 other = c.quality_signed_by if side == "pm" else c.pm_signed_by
                 if other == user.id:
                     continue      # 4-eyes: the other side's signer
@@ -6585,6 +6608,8 @@ class ChangeService:
         await ScopeChangeService.on_customer_answer(session, change, offer, True, user_id)
         if offer is not None and evidence.get("po_match") == "no":
             await ChangeService._on_po_differs(session, change, offer, evidence, user_id)
+        if offer is not None:
+            await ChangeService._ask_resign(session, change, offer, user_id)
         await ChangeService.try_auto_approve(session, change, user_id)
         return change
 
@@ -6612,6 +6637,28 @@ class ChangeService:
             return None
         return {"version": offer.version, "total": float(offer.total_one_time),
                 "prev_version": prev.version, "prev_total": float(prev.total_one_time)}
+
+    @staticmethod
+    async def _ask_resign(session: AsyncSession, change: ChangeRequest, offer,
+                          actor_id: int) -> None:
+        """C14 (spec §7 "Next accept: PM re-signs"): once the customer
+        accepted a newer offer or supplement, whoever signed an older one is
+        told once to sign this one (the task row appears now, too)."""
+        sides, latest = await ChangeService.signoff_sides_missing(session, change)
+        what = "supplement" if getattr(offer, "kind", None) == "supplement" else "offer"
+        names = {"pm": "PM", "quality": "Quality"}
+        from app.services.notification_service import NotificationService
+        for side in sides:
+            by = change.pm_signed_by if side == "pm" else change.quality_signed_by
+            if by is None or by == actor_id or latest is None:
+                continue
+            await NotificationService.notify_once(
+                session, [by], kind="task_new",
+                subject_key=f"resign:{latest.id}:{side}",
+                title=f"Sign again for {what} v{latest.version}: {change.change_number}"[:255],
+                body=f"The customer accepted {what} v{latest.version}; your "
+                     f"{names[side]} sign-off was on an earlier version.",
+                link=f"/changes/{change.id}?tab=overview")
 
     @staticmethod
     async def supplement_drop_state(session: AsyncSession, change: ChangeRequest,
@@ -6775,6 +6822,7 @@ class ChangeService:
                 user_id, field_name="price_open", old_value=True, new_value=False)
         if match == "no":
             await ChangeService._on_po_differs(session, change, offer, evidence, user_id)
+        await ChangeService._ask_resign(session, change, offer, user_id)
         return change
 
     @staticmethod

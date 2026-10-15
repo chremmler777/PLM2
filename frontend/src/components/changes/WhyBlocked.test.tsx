@@ -63,6 +63,17 @@ describe('Why blocked (spec §0)', () => {
     expect(onSign).toHaveBeenCalledWith('quality')
   })
 
+  it('C14: a re-sign owed in approved is a sign button, not a block', () => {
+    const onSign = vi.fn()
+    const app = change({ status: 'approved', next_step: { to: 'in_implementation', items: [
+      { key: 'pm_signoff', kind: 'todo', exits: ['sign'], sides: ['pm'], detail: 'v2', who: 'Project Management' },
+    ] } })
+    render(wrap(<CockpitSummary change={app} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onSign={onSign} maySign={() => true} />))
+    fireEvent.click(screen.getByTestId('why-sign-pm'))
+    expect(onSign).toHaveBeenCalledWith('pm')
+  })
+
   it('no offer sent: the sign button names no empty version', () => {
     const rel = change({ status: 'in_validation', next_step: { to: 'released', items: [
       { key: 'release_signoffs', kind: 'hard', exits: ['sign'], sides: ['pm'],

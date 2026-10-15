@@ -48,6 +48,9 @@ export const supplementWindow = (change: Pick<ChangeDetail, 'status' | 'commerci
   change.commercial_v2 !== false && !!change.customer_relevant
   && ['approved', 'in_implementation', 'in_validation', 'released'].includes(change.status)
 
+/** Where a PM / Quality signature is given (backend SIGNABLE_STATUSES). */
+const SIGNABLE = ['quoted', 'approved', 'in_implementation', 'in_validation']
+
 /** Once the customer said yes the offer is history (backend _require_open). */
 export const offerClosed = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'>): boolean =>
   !!change.accepted_offer_id || change.customer_response === 'accepted'
@@ -578,7 +581,9 @@ export default function OfferTab(props: OfferTabProps) {
           className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-400">
           Offer prices are visible to Sales, the Project Manager, the change lead and admins.
         </p>
-        {change.status === 'quoted' && (props.canSignQuality || props.canSignPm) && (
+        {/* Quality signs without the price (P4): the sign block in every
+            status a signature is given in (C14: a re-sign after approval) */}
+        {SIGNABLE.includes(change.status) && (props.canSignQuality || props.canSignPm) && (
           <CustomerDecision change={change} canRespond={false} canSignPm={props.canSignPm}
             canSignQuality={props.canSignQuality} userId={props.userId} />
         )}
