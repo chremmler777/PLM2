@@ -513,6 +513,11 @@ async def sign_off_gate(
     role = body.role.lower().strip()
     if role not in SIGN_OFF_ROLES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role must be 'pm' or 'quality'")
+    from app.services.change_service import ChangeService
+    if not await ChangeService.user_can_sign_off(db, current_user, role):
+        who = "Quality" if role == "quality" else "Project Manager"
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"Only {who} or an admin may sign as {role.upper()}")
     if gate.status == "closed":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Gate already closed")
     if gate.status == "pending":

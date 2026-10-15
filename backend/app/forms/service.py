@@ -186,6 +186,11 @@ async def sign_instance(db: AsyncSession, inst: FormInstance, role: str, user: U
         raise FormError(400, f"Role must be one of: {', '.join(roles) or 'none'}")
     if inst.status != "submitted":
         raise FormError(409, "Form must be submitted before signing")
+    if role in ("pm", "quality"):
+        from app.services.change_service import ChangeService
+        if not await ChangeService.user_can_sign_off(db, user, role):
+            who = "Quality" if role == "quality" else "Project Manager"
+            raise FormError(403, f"Only {who} or an admin may sign as {role.upper()}")
     state = signatures_state(inst)
     if state[role]:
         raise FormError(409, f"{role.upper()} has already signed")

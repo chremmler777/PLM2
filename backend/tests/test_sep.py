@@ -1,6 +1,15 @@
 """SEP Q-Gate module tests: activation, tri-state items with audit, strict
 gate sequencing, dual sign-off with yellow-gate risk gating, lessons hook."""
 import pytest
+import pytest_asyncio
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _engineer_is_project_manager(session_factory, seed):
+    """PM/Quality signatures are department-gated (user_can_sign_off): the
+    seeded engineer signs as PM, so make them a Project Manager member."""
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Project Manager")
 
 
 async def _add_form_risk(client, auth, project_id, gate_code, **row):
@@ -104,7 +113,7 @@ async def test_item_update_and_audit(client, eng_auth, seed):
     assert "remark" in fields and "responsible_id" in fields
 
 
-async def test_strict_gate_sequencing_and_dual_sign_off(client, eng_auth, admin_auth, seed):
+async def test_strict_gate_sequencing_and_dual_sign_off(client, eng_auth, admin_auth, seed, session_factory):
     await _activate(client, eng_auth, seed["project_id"])
     full = await _get_sep(client, eng_auth, seed["project_id"])
     gate1, gate2 = full["gates"][0], full["gates"][1]
@@ -115,7 +124,10 @@ async def test_strict_gate_sequencing_and_dual_sign_off(client, eng_auth, admin_
 
     await _clear_gate_items(client, eng_auth, gate1)
 
-    # PM signs; same user cannot also sign quality (4-eyes)
+    # PM signs; same user cannot also sign quality (4-eyes), even when they
+    # are in Quality too
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Quality")
     res = await client.post(f"/api/v1/sep/gates/{gate1['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
     assert res.status_code == 200
     assert res.json()["status"] == "in_progress"  # one signature is not enough

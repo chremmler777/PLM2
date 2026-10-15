@@ -1,7 +1,16 @@
 """SEP forms engine: definitions, instances, events, SEP item linking."""
+import pytest_asyncio
 from sqlalchemy import select
 
 from app.models.forms import FormDefinition, FormInstance, FormEvent
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _engineer_is_project_manager(session_factory, seed):
+    """PM/Quality signatures are department-gated (user_can_sign_off): the
+    seeded engineer signs as PM, so make them a Project Manager member."""
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Project Manager")
 
 
 async def test_models_roundtrip(session_factory, seed):
