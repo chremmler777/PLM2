@@ -100,11 +100,18 @@ export default function CustomerDecision({
   const total = latestSent ? fmtMoney(latestSent.totals.total_one_time, latestSent.currency) : ''
   // §7 [R4] price diff: below the last version sent before it needs a
   // reason and a PM / Management OK (the backend asks for it)
+  // A supplement compares with the supplement it revised (sent after the
+  // last accepted version), else with nothing: negative is a drop
+  // (backend supplement_drop_state).
+  const isSupp = latestSent?.kind === 'supplement'
+  const lastAccepted = Math.max(0, ...(offers ?? []).filter((o) => o.status === 'accepted').map((o) => o.version))
   const prevSent = latestSent ? (offers ?? [])
-    .filter((o) => o.version < latestSent.version && !!o.sent_at)
+    .filter((o) => o.version < latestSent.version && !!o.sent_at
+      && (!isSupp || (o.kind === 'supplement' && o.version > lastAccepted)))
     .sort((a, b) => b.version - a.version)[0] : undefined
-  const drop = !!(v2 && latestSent && prevSent
-    && latestSent.totals.total_one_time < prevSent.totals.total_one_time - 0.005)
+  const drop = !!(v2 && latestSent && (prevSent
+    ? latestSent.totals.total_one_time < prevSent.totals.total_one_time - 0.005
+    : isSupp && latestSent.totals.total_one_time < -0.005))
   const [dropCode, setDropCode] = useState('')
   const [dropNote, setDropNote] = useState('')
   const dropOk = !drop || (!!dropCode && dropNote.trim().length >= 15)
@@ -144,7 +151,14 @@ export default function CustomerDecision({
     && !!change.pm_signed_by && userId != null && userId === change.pm_signed_by
   // §6 [R4]: a supplement out with the customer is answered in any status
   const supplementOut = v2 && latestSent?.kind === 'supplement' && latestSent.status === 'sent'
-  const decided = !supplementOut && (change.customer_response === 'accepted' || change.customer_response === 'declined')
+  // §7a: started at risk, nothing accepted: the offer is answered after
+  // approval; a decline keeps the change approved with the price open, and
+  // a newer version sent after it is answered again
+  const atRisk = v2 && !!change.start_at_risk_approved_at
+    && change.customer_response !== 'accepted' && !change.accepted_offer_id
+  const atRiskOut = atRisk && latestSent?.kind !== 'supplement' && latestSent?.status === 'sent'
+  const decided = !supplementOut && !atRiskOut
+    && (change.customer_response === 'accepted' || change.customer_response === 'declined')
   const acceptBlocked = (!due && !supplementOut) || (expired && !override.trim()) || respond.isPending
     || (v2 && (!evidenceOk || !dropOk || (!!latestSent && (!match || (match === 'no' && differs.trim().length < 5) || !confirmed))))
   const pick = (which: 'accept' | 'talk' | 'decline') => {
@@ -167,9 +181,9 @@ export default function CustomerDecision({
       </div>
     </>
   )
-  // The backend takes the customer's answer only at quoted, and once accepted
-  // nothing about it changes any more.
-  const open = change.status === 'quoted' || supplementOut
+  // The backend takes the customer's answer at quoted, on a supplement out,
+  // and after a start at risk; once accepted nothing about it changes.
+  const open = change.status === 'quoted' || supplementOut || atRiskOut
 
   return (
     <div data-testid="customer-decision" className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 space-y-3">
@@ -236,7 +250,7 @@ export default function CustomerDecision({
         <div data-testid="decline-confirm-box" role="alertdialog" aria-label="Confirm customer declined"
           className="space-y-2 rounded-lg border border-rose-900/70 bg-rose-950/20 p-3">
           <p className="text-xs text-rose-200">
-            {supplementOut ? t('cust.declineSupplement') : v2 ? t('cust.declineText')
+            {supplementOut ? t('cust.declineSupplement') : atRisk ? t('cust.declineAtRisk') : v2 ? t('cust.declineText')
               : 'Recording that the customer declined cannot be undone. The offer is closed and the change cannot be approved on it any more.'}
           </p>
           {v2 && <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">{evidenceFields}</div>}
@@ -302,11 +316,12 @@ export default function CustomerDecision({
                 placeholder="e.g. customer confirmed the price in writing on 2 Oct" />
             </>
           )}
-          {drop && prevSent && latestSent && (
+          {drop && latestSent && (
             <div data-testid="accept-drop" className="space-y-1 rounded border border-amber-900/70 bg-amber-950/20 p-2 sm:col-span-2">
-              <p className="text-xs text-amber-200">{fill('cust.drop', {
+              <p className="text-xs text-amber-200">{prevSent ? fill('cust.drop', {
                 v: latestSent.version, t: total, p: prevSent.version,
-                pt: fmtMoney(prevSent.totals.total_one_time, prevSent.currency) })}</p>
+                pt: fmtMoney(prevSent.totals.total_one_time, prevSent.currency) })
+                : fill('cust.dropSupp', { v: latestSent.version, t: total })}</p>
               <select data-testid="accept-drop-code" value={dropCode} aria-label={t('cust.dropReason')}
                 onChange={(e) => setDropCode(e.target.value)} className={`${inputCls} w-full`}>
                 <option value="">{t('cust.dropReason')}…</option>

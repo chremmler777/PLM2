@@ -899,3 +899,96 @@ async def test_start_at_risk_switch_off(client, urgent, monkeypatch):
     sales = await _auth(client, "sales")
     r = await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"}, headers=sales)
     assert r.status_code == 400 and "switched off" in r.json()["detail"]
+
+
+async def _started_at_risk(client, cid, sales, pm, q):
+    r = await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"}, headers=sales)
+    assert r.status_code == 200, r.text
+    r = await client.post(_sar(cid, "/quality"), json={"note": "No PPAP before SOP, lot checked"},
+                          headers=q)
+    assert r.status_code == 200, r.text
+    r = await client.post(_sar(cid, "/approve"), headers=pm)
+    assert r.status_code == 200, r.text
+
+
+async def test_start_at_risk_from_quoted_then_the_customer_accepts_v1(
+        client, urgent, session_factory):
+    cid = urgent["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
+                              headers=sales)).status_code == 200
+    await _started_at_risk(client, cid, sales, pm, q)
+    # Sales chases the answer to v1 in approved
+    assert any(t["kind"] == "customer_response" and t["change_id"] == cid
+               for t in await _tasks(client, sales))
+    r = await _answer(client, cid, sales, _YES)
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["price_open"], r.json()["customer_response"]) == (
+        "approved", False, "accepted")
+
+
+async def test_an_at_risk_acceptance_of_a_lower_version_waits_for_the_ok(
+        client, urgent, session_factory):
+    from app.models.change import ChangeRequest, ChangeTransitionDeviation
+    cid = urgent["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
+                              headers=sales)).status_code == 200
+    await _started_at_risk(client, cid, sales, pm, q)
+    await _v2_with_discount(client, cid, sales, 10)
+    r = await _answer(client, cid, sales, _YES)
+    assert r.status_code == 400 and "below v1" in r.json()["detail"]
+    r = await _answer(client, cid, sales, {
+        **_YES, "price_drop_code": "competitor",
+        "price_drop_note": "Competitor offered 8 % less, mail of 13 Oct"})
+    assert r.status_code == 200, r.text
+    # NEGATIVE: the lower price is not settled before the PM's OK
+    assert (r.json()["status"], r.json()["price_open"]) == ("approved", True)
+    async with session_factory() as s:
+        dev = (await s.execute(select(ChangeTransitionDeviation).where(
+            ChangeTransitionDeviation.change_id == cid,
+            ChangeTransitionDeviation.guard_key == "price_drop"))).scalar_one()
+    assert (dev.status, dev.to_status) == ("pending", "closed")
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
+                          json={"decision": "approved"}, headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).price_open is False
+
+
+async def test_a_revised_supplement_below_the_one_it_revised_needs_the_ok(
+        client, approved, session_factory):
+    from app.models.change import ChangeRequest, ChangeTransitionDeviation
+    cid, sales, pm = approved["change_id"], approved["sales"], approved["pm"]
+    await _raise_position(session_factory, approved, 1500)
+    s1 = await _supplement(client, cid, sales)
+    assert (await client.post(_url(cid, f"/{s1['id']}/send"),
+                              json={"change_note": "Rework higher"},
+                              headers=sales)).status_code == 200
+    await _raise_position(session_factory, approved, 1200)
+    s2 = await _supplement(client, cid, sales)
+    assert s2["data"]["cost_lines"][0]["amount"] == 200.0
+    assert (await client.post(_url(cid, f"/{s2['id']}/send"),
+                              json={"change_note": "Rework cheaper after all"},
+                              headers=sales)).status_code == 200
+    # NEGATIVE: +200 after +500 is a discount, even though it is positive
+    r = await _answer(client, cid, sales, _YES)
+    assert r.status_code == 400 and f"below v{s1['version']}" in r.json()["detail"]
+    r = await _answer(client, cid, sales, {**_YES, "price_drop_code": "goodwill",
+                                           "price_drop_note": "Buyer asked, we meet halfway on rework"})
+    assert r.status_code == 200, r.text
+    assert r.json()["price_open"] is True
+    async with session_factory() as s:
+        dev = (await s.execute(select(ChangeTransitionDeviation).where(
+            ChangeTransitionDeviation.change_id == cid,
+            ChangeTransitionDeviation.guard_key == "price_drop"))).scalar_one()
+    assert dev.to_status == "closed"
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
+                          json={"decision": "approved"}, headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).price_open is False

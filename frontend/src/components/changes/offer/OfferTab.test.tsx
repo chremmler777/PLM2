@@ -200,6 +200,31 @@ describe('OfferTab', () => {
     expect(screen.queryByTestId('offer-read-only')).toBeNull()
   })
 
+  it('§7a: started at risk, Sales starts, edits and sends the offer in approved (not a supplement)', async () => {
+    const sar = change({ status: 'approved', start_at_risk_approved_at: '2026-10-15T10:00:00', price_open: true })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([])
+    vi.mocked(changeOfferApi.create).mockResolvedValue(offer())
+    renderTab(props({ change: sar }))
+    fireEvent.click(await screen.findByTestId('offer-start'))
+    await waitFor(() => expect(changeOfferApi.create).toHaveBeenCalledWith(7))
+    cleanup()
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    renderTab(props({ change: sar }))
+    expect((await screen.findByTestId('offer-send')).textContent).toBe('Send offer')
+    expect(screen.queryByTestId('offer-read-only')).toBeNull()
+    cleanup()
+    // v1 out: the next one is a "New version", never "Send supplement"
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer({ status: 'sent', sent_at: '2026-10-15T11:00:00' })])
+    renderTab(props({ change: sar }))
+    expect((await screen.findByTestId('offer-new-version')).textContent).toBe('New version')
+    expect(screen.getByTestId('customer-accepted')).toBeDefined()
+    cleanup()
+    // NEGATIVE: once the customer accepted, a later version is a supplement
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer({ status: 'accepted' })])
+    renderTab(props({ change: { ...sar, customer_response: 'accepted', accepted_offer_id: 11 } }))
+    expect((await screen.findByTestId('offer-new-version')).textContent).toBe('Send supplement')
+  })
+
   it('send dialog: no receipt date in the future or older than 60 days; the customer note is saved first', async () => {
     vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
     vi.mocked(changeOfferApi.patch).mockImplementation(async (_c, _o, body) => offer({ data: { ...offer().data, ...body.data } }))

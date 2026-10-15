@@ -52,6 +52,13 @@ export const supplementWindow = (change: Pick<ChangeDetail, 'status' | 'commerci
 export const offerClosed = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'>): boolean =>
   !!change.accepted_offer_id || change.customer_response === 'accepted'
 
+/** §7a: started at risk and nothing accepted yet: the next version is still
+ *  the offer (backend OfferService.create at_risk_offer), sent and answered
+ *  in approved or later. */
+export const atRiskOffer = (change: Pick<ChangeDetail, 'start_at_risk_approved_at' | 'accepted_offer_id'
+  | 'customer_response' | 'commercial_v2'>): boolean =>
+  change.commercial_v2 !== false && !!change.start_at_risk_approved_at && !offerClosed(change)
+
 export interface OfferTabProps {
   change: ChangeDetail
   /** Sales, the change lead, admin: build, edit and send. */
@@ -314,11 +321,14 @@ function OfferWorkspace({ props, offers, offer }: {
   const qc = useQueryClient()
   const [sendOpen, setSendOpen] = useState(false)
   const [preparingSend, setPreparingSend] = useState(false)
-  const supplements = supplementWindow(change)
+  const atRisk = atRiskOffer(change)
+  // §7a: started at risk with nothing accepted, the next version is an offer
+  const supplements = supplementWindow(change) && !atRisk
   const isSupplement = offer.kind === 'supplement'
   const closed = offerClosed(change) && !isSupplement
   const editable = canWrite && offer.status === 'draft'
-    && (isSupplement ? supplements : !closed && ['quoting', 'quoted'].includes(change.status))
+    && (isSupplement ? supplementWindow(change)
+      : !closed && (['quoting', 'quoted'].includes(change.status) || atRisk))
   const { data, update, saveState, flush, dirty } = useOfferDraft(change.id, offer)
   // Send only what the server has: wait for the save, then open the dialog,
   // which reads the saved offer (fresh totals) from the cache.
@@ -407,7 +417,7 @@ function OfferWorkspace({ props, offers, offer }: {
         onSend={() => { void openSend() }}
         sendReasons={sendReasons}
         sendWarnings={sendWarnings}
-        onNewVersion={canWrite && !hasDraft && (supplements || (!closed && change.status === 'quoted'))
+        onNewVersion={canWrite && !hasDraft && (supplements || (!closed && (change.status === 'quoted' || atRisk)))
           ? () => newVersion.mutate() : undefined}
         newVersionLabel={supplements ? t('supp.new') : 'New version'}
         creating={newVersion.isPending}
@@ -599,7 +609,8 @@ export default function OfferTab(props: OfferTabProps) {
   if (isLoading) return <p className="text-sm text-slate-500">Loading offer</p>
 
   if (!current) {
-    const canStart = canWrite && ['quoting', 'quoted'].includes(change.status)
+    // §7a: started at risk, Sales still sends the offer (the price is open)
+    const canStart = canWrite && (['quoting', 'quoted'].includes(change.status) || atRiskOffer(change))
     return (
       <div className="space-y-4">
         {header}
@@ -618,7 +629,7 @@ export default function OfferTab(props: OfferTabProps) {
             </button>
           ) : (
             <p className="mt-3 text-xs text-slate-500">
-              {canWrite ? 'Offers are created while the change is in quote creation or quoted.' : 'Sales starts the offer.'}
+              {canWrite ? 'Offers are created while the change is in quote creation or quoted, or after a start at risk.' : 'Sales starts the offer.'}
             </p>
           )}
         </div>

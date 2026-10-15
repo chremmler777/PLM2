@@ -2915,6 +2915,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'send.nobody': { de: 'niemand benannt', en: 'nobody named' },
   // --- L6 §7 the customer's answer (C4, C12) -------------------------------------
   'cust.drop': { de: 'v{v} über {t} liegt unter v{p} über {pt}: Grund angeben; PM oder Geschäftsleitung gibt das OK, dann folgt die Freigabe.', en: 'v{v} at {t} is below v{p} at {pt}: say why; Project Management or Management gives the OK before approval.' },
+  'cust.dropSupp': { de: 'Nachtrag v{v} über {t} senkt die angenommene Summe: Grund angeben; PM oder Geschäftsleitung gibt das OK, bis dahin bleibt der Preis offen.', en: 'Supplement v{v} at {t} lowers the accepted total: say why; Project Management or Management gives the OK, the price stays open until then.' },
   'cust.dropReason': { de: 'Warum niedriger', en: 'Why lower' },
   'cust.dropNote': { de: 'In einem Satz, mit Beleg (mind. 15 Zeichen)', en: 'In a sentence, with its evidence (15+ characters)' },
   'override.reason.volume': { de: 'Höhere Stückzahl', en: 'Higher volume' },
@@ -2987,6 +2988,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.hint.costing_update_scope': { de: 'Umfangsänderung neu kalkulieren, dann "neu kalkuliert": {x}', en: 'Re-cost the scope change, then "re-costed": {x}' },
   'tasks.hint.supplement_response': { de: 'Antwort des Kunden auf Nachtrag v{v} erfassen', en: "Record the customer's answer to supplement v{v}" },
   'cust.declineSupplement': { de: 'Der Kunde lehnt den Nachtrag ab: der Preis bleibt offen. Absorbieren (OK von PM oder Geschäftsleitung) oder das Run-Team stellt die Änderung zurück. Nennen Sie die Referenz des Kunden.', en: "The customer declines the supplement: the price stays open. Absorb it (OK of PM or Management), or the run team puts the change on hold. Name the customer's reference." },
+  'cust.declineAtRisk': { de: 'Der Kunde lehnt das Angebot nach dem Start auf Risiko ab: die Änderung bleibt freigegeben, der Preis bleibt offen. Absorbieren (OK von PM oder Geschäftsleitung) oder das Run-Team stellt die Änderung zurück. Nennen Sie die Referenz des Kunden.', en: "The customer declines the offer after the start at risk: the change stays approved and the price stays open. Absorb it (OK of PM or Management), or the run team puts the change on hold. Name the customer's reference." },
   'supp.word': { de: 'Nachtrag', en: 'supplement' },
   'supp.new': { de: 'Nachtrag senden', en: 'Send supplement' },
   'supp.send': { de: 'Nachtrag senden', en: 'Send supplement' },

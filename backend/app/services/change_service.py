@@ -572,9 +572,14 @@ class ChangeService:
         absorbed = decision == "approved" and dev.guard_key == ABSORB_RULE
         if (decision == "approved" and dev.guard_key == "price_drop"
                 and dev.to_status == "closed"):
-            # §7 [R4]: the OK of a lower supplement total closes its open price
+            # §7 [R4]: the OK of a lower total after approval (a supplement,
+            # a start at risk) closes its open price
             dev.status = "consumed"
             change.price_open = False
+            await ChangeService._settle_estimate_checks(session, change)
+            for d in change.transition_deviations:
+                if d.guard_key == ABSORB_RULE and d.status == "pending":
+                    d.status = "withdrawn"      # nothing left to absorb
             await ChangeService.append_changelog(
                 session, change, "price_closed",
                 f"Open price closed: the lower total was approved (#{dev.id})",
@@ -6493,9 +6498,12 @@ class ChangeService:
         await OfferService.apply_customer_response(
             session, change, "accepted", user_id, expired_override_reason)
         if drop is not None:
+            # §7a: started at risk the change is approved already: the OK
+            # holds the open price (close, HARD #9) as on a supplement
             await ChangeService._ask_price_drop_ok(
                 session, change, drop, answer["price_drop_code"],
-                answer["price_drop_note"].strip(), user_id)
+                answer["price_drop_note"].strip(), user_id,
+                to_status="closed" if at_risk else "approved")
         if offer is not None:
             offer.accept_evidence = evidence
             offer.answered_at, offer.answered_by = now, user_id
@@ -6503,7 +6511,9 @@ class ChangeService:
         change.customer_response_at = now
         change.customer_response_by = user_id
         change.customer_next_contact = None
-        if change.price_open:
+        if at_risk and drop is not None:
+            change.price_open = True          # until PM / Management OK the lower total
+        elif change.price_open:
             change.price_open = False
             await ChangeService._settle_estimate_checks(session, change)
             from app.services.cm_rules import ABSORB_RULE
@@ -6557,6 +6567,37 @@ class ChangeService:
             return None
         return {"version": offer.version, "total": float(offer.total_one_time),
                 "prev_version": prev.version, "prev_total": float(prev.total_one_time)}
+
+    @staticmethod
+    async def supplement_drop_state(session: AsyncSession, change: ChangeRequest,
+                                    offer) -> Optional[dict]:
+        """§7 [R4] on a supplement: lower than the last supplement sent
+        before it for the same open price (sent after the last accepted
+        version), or, with none, negative (below the accepted total)."""
+        from app.models.change_offer import ChangeOffer
+        total = float(offer.total_one_time or 0)
+        rows = (await session.execute(
+            select(ChangeOffer).where(
+                ChangeOffer.change_id == change.id, ChangeOffer.id != offer.id,
+                ChangeOffer.version < offer.version,
+                ChangeOffer.sent_at.isnot(None))
+            .order_by(ChangeOffer.version.desc()))).scalars().all()
+        prev = None
+        for o in rows:
+            if o.status == "accepted":
+                break                     # an earlier price is settled
+            if o.kind == "supplement":
+                prev = o
+                break
+        if prev is not None and prev.total_one_time is not None:
+            if total < float(prev.total_one_time) - 0.005:
+                return {"version": offer.version, "total": total,
+                        "prev_version": prev.version,
+                        "prev_total": float(prev.total_one_time)}
+            return None
+        if total < -0.005:
+            return {"version": offer.version, "total": total}
+        return None
 
     @staticmethod
     async def _record_supplement_answer(
@@ -6640,18 +6681,22 @@ class ChangeService:
         evidence.update(po_match=match, differs=differs or None,
                         total=offer.total_one_time, version=offer.version)
         # §7 [R4] price diff: the accepted total (offer plus supplements)
-        # drops when the supplement itself is negative
-        drop = None
-        if float(offer.total_one_time or 0) < -0.005:
+        # against the last version sent before it: a negative supplement, or
+        # one below the supplement it revised
+        drop = await ChangeService.supplement_drop_state(session, change, offer)
+        if drop is not None:
             from app.services.cm_rules import PRICE_DROP_REASONS, override_note_refusal
             why = override_note_refusal(
                 answer.get("price_drop_code"), answer.get("price_drop_note"),
                 codes=PRICE_DROP_REASONS)
             if why:
                 raise ChangeError(
-                    f"Supplement v{offer.version} lowers the accepted total by "
-                    f"{-float(offer.total_one_time):.2f}: say why ({why})")
-            drop = {"version": offer.version, "total": float(offer.total_one_time)}
+                    (f"Supplement v{offer.version} at {drop['total']:.2f} is below "
+                     f"v{drop['prev_version']} at {drop['prev_total']:.2f}"
+                     if drop.get("prev_version") else
+                     f"Supplement v{offer.version} lowers the accepted total by "
+                     f"{-drop['total']:.2f}")
+                    + f": say why ({why})")
             evidence["price_drop"] = drop
         offer.status = "accepted"
         offer.accept_evidence = evidence
@@ -6667,16 +6712,10 @@ class ChangeService:
             new_value={"offer_id": offer.id, "version": offer.version})
         if drop is not None:
             # the open price stays until PM / Management OK the lower total
-            from app.services.cm_rules import PRICE_DROP_RULE, rule_label
-            dev = ChangeTransitionDeviation(
-                change_id=change.id, to_status="closed",
-                reason=answer["price_drop_note"].strip(), proposed_by=user_id,
-                guard_key=PRICE_DROP_RULE, guard_reason=rule_label(PRICE_DROP_RULE),
-                reason_code=answer["price_drop_code"])
-            session.add(dev)
-            await session.flush()
             change.price_open = True
-            await ChangeService._notify_override_deciders(session, change, dev, user_id)
+            await ChangeService._ask_price_drop_ok(
+                session, change, drop, answer["price_drop_code"],
+                answer["price_drop_note"].strip(), user_id, to_status="closed")
         elif change.price_open:
             change.price_open = False
             await ChangeService._settle_estimate_checks(session, change)
@@ -6758,17 +6797,19 @@ class ChangeService:
     @staticmethod
     async def _ask_price_drop_ok(session: AsyncSession, change: ChangeRequest,
                                  drop: dict, code: str, note: str,
-                                 user_id: int) -> None:
+                                 user_id: int, *, to_status: str = "approved") -> None:
         """The OK of the lower total is an override of `price_drop` on the
         approval (decided by Project Management or Management, never the
-        asker); the deciders are told once."""
+        asker); the deciders are told once. `to_status` 'closed': the change
+        is approved already (a supplement, a start at risk): the OK closes
+        the open price instead (decide_transition_deviation)."""
         from app.services.cm_rules import PRICE_DROP_RULE, rule_label
         await ChangeService._load_deviations(session, change)
         if any(d.guard_key == PRICE_DROP_RULE and d.status == "pending"
                for d in change.transition_deviations):
             return
         dev = ChangeTransitionDeviation(
-            change_id=change.id, to_status="approved", reason=note,
+            change_id=change.id, to_status=to_status, reason=note,
             proposed_by=user_id, guard_key=PRICE_DROP_RULE,
             guard_reason=rule_label(PRICE_DROP_RULE), reason_code=code)
         session.add(dev)
@@ -6776,8 +6817,9 @@ class ChangeService:
         change.transition_deviations.append(dev)
         await ChangeService.append_changelog(
             session, change, "price_drop_asked",
-            f"Accepted v{drop['version']} below v{drop['prev_version']}: OK asked "
-            f"({code})", user_id, field_name="deviation",
+            f"Accepted v{drop['version']} below "
+            + (f"v{drop['prev_version']}" if drop.get("prev_version") else "the accepted total")
+            + f": OK asked ({code})", user_id, field_name="deviation",
             new_value={"deviation_id": dev.id, "guard_key": PRICE_DROP_RULE,
                        "reason_code": code}, notes=note)
         await ChangeService._notify_override_deciders(session, change, dev, user_id)

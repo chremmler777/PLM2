@@ -227,6 +227,63 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
       expect.not.objectContaining({ release_due_date: expect.anything() })))
   })
 
+  it('§7a: started at risk, the offer out is answered in approved; decline keeps the price open', async () => {
+    const sar = change({ status: 'approved', start_at_risk_approved_at: '2026-10-15T10:00:00', price_open: true,
+      release_due_date: '2026-12-18T00:00:00' })
+    wrap(<CustomerDecision change={sar} latestSent={{ ...valid(), kind: 'offer' as const }} canRespond
+      canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer declined'))
+    const box = screen.getByTestId('decline-confirm-box').textContent ?? ''
+    expect(box).toContain('stays approved')
+    expect(box).not.toContain('rejection letter')       // NEGATIVE: no reject after a start at risk
+    fireEvent.click(screen.getByText('Customer accepted'))
+    fireEvent.change(screen.getByTestId('answer-ref'), { target: { value: 'PO 4500123999' } })
+    fireEvent.click(screen.getByTestId('po-match-yes'))
+    fireEvent.click(screen.getByTestId('accept-total'))
+    fireEvent.click(screen.getByTestId('accept-confirm'))
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'accepted',
+      expect.objectContaining({ ref: 'PO 4500123999', po_match: 'yes', confirm_total: true })))
+  })
+
+  it('§7a: after an at-risk decline a newer version sent is answered again; nothing out, no buttons', () => {
+    const declined = change({ status: 'approved', start_at_risk_approved_at: '2026-10-15T10:00:00',
+      customer_response: 'declined' })
+    wrap(<CustomerDecision change={declined} latestSent={{ ...valid(), id: 12, version: 2, kind: 'offer' as const }}
+      canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    expect(screen.getByTestId('customer-accepted')).toBeDefined()
+    cleanup()
+    // NEGATIVE: the declined version itself is not answered again
+    wrap(<CustomerDecision change={declined} latestSent={{ ...valid(), status: 'declined', kind: 'offer' as const }}
+      canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    expect(screen.queryByTestId('customer-accepted')).toBeNull()
+    cleanup()
+    // NEGATIVE: approved without a start at risk: no answer outside a supplement
+    wrap(<CustomerDecision change={change({ status: 'approved', customer_response: 'accepted' })}
+      latestSent={{ ...valid(), status: 'accepted', kind: 'offer' as const }} canRespond canSignPm={false}
+      canSignQuality={false} userId={5} />)
+    expect(screen.queryByTestId('customer-accepted')).toBeNull()
+  })
+
+  it('a supplement compares with the supplement it revised, not the offer (price diff)', () => {
+    const v1 = { ...valid(), id: 10, version: 1, status: 'accepted' as const, kind: 'offer' as const, sent_at: '2026-10-01T00:00:00',
+      totals: { ...valid().totals, total_one_time: 100000 } }
+    const s2 = { ...valid(), id: 11, version: 2, status: 'superseded' as const, kind: 'supplement' as const,
+      sent_at: '2026-10-05T00:00:00', totals: { ...valid().totals, total_one_time: 5000 } }
+    const s3 = { ...valid(), id: 12, version: 3, kind: 'supplement' as const, sent_at: '2026-10-06T00:00:00',
+      totals: { ...valid().totals, total_one_time: 2000 } }
+    const ch = change({ status: 'approved', customer_response: 'accepted', accepted_offer_id: 10 })
+    wrap(<CustomerDecision change={ch} latestSent={s3} offers={[s3, s2, v1]} canRespond canSignPm={false}
+      canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    expect(screen.getByTestId('accept-drop').textContent).toContain('below v2')
+    cleanup()
+    // NEGATIVE: a first positive supplement is no drop, though below the offer
+    wrap(<CustomerDecision change={ch} latestSent={{ ...s2, status: 'sent' as const }} offers={[s2, v1]} canRespond
+      canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    expect(screen.queryByTestId('accept-drop')).toBeNull()
+  })
+
   it('every viewer reads who signed, when and on which version', () => {
     wrap(<CustomerDecision change={change({ pm_signed_by: 3, pm_signed_by_name: 'Pat PM', pm_signed_at: '2026-10-14T09:00:00',
       pm_signed_offer_id: 10 })} latestSent={valid()} canRespond={false} canSignPm={false} canSignQuality={false} userId={5} />)
