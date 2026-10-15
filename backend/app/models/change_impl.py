@@ -9,10 +9,10 @@ at the plant (DepartmentRate), read at the moment the actuals P&L is drawn —
 copying a euro amount onto the booking would let the actuals disagree with the
 costing they exist to be compared against.
 """
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Numeric, String, Text,
+    Boolean, Date, DateTime, ForeignKey, Numeric, String, Text,
 )
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column
@@ -59,6 +59,10 @@ class ImplementationBooking(Base):
     booked_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     booked_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow)
+    # ECR-solid C15 (migration 117): the day worked, and where the hours
+    # came from: 'estimate' (a confirmed department estimate) | 'typed'.
+    work_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class ImplementationReport(Base):

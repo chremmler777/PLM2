@@ -248,6 +248,19 @@ class ChangeRequest(Base):
     # The offer version the customer said yes to. No FK: change_offers points
     # back at this table, and a cycle of constraints buys nothing here.
     accepted_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ECR-solid (migration 117). The offer each signature was given on (C14,
+    # no FK for the same reason as accepted_offer_id); a price still open
+    # after approval: an estimate above the approved one, a supplement not
+    # yet accepted (HARD #9 blocks close while it is set).
+    pm_signed_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quality_signed_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_open: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false())
+    # The named Sales owner (C10): the raiser when in Sales, else the
+    # project's Sales responsible; NULL on internal and mother-plant changes.
+    # Sales tasks still show to all of Sales, with this name on them.
+    sales_owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
     # The lessons-learned step before release: done with at least one lesson,
     # or with a reason there is none. Guarded on in_validation -> released.
     lessons_done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -305,6 +318,8 @@ class ChangeRequest(Base):
     lead: Mapped["User | None"] = relationship(
         foreign_keys=[lead_id], lazy="selectin")
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
+    sales_owner: Mapped["User | None"] = relationship(
+        foreign_keys=[sales_owner_id], lazy="selectin")
     impact_confirmed_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[impact_confirmed_by], lazy="selectin")
     estimated_weight_by_user: Mapped["User | None"] = relationship(
@@ -328,6 +343,10 @@ class ChangeRequest(Base):
     @property
     def lead_name(self) -> Optional[str]:
         return self.lead.full_name if self.lead is not None else None
+
+    @property
+    def sales_owner_name(self) -> Optional[str]:
+        return self.sales_owner.full_name if self.sales_owner is not None else None
 
     @property
     def impact_confirm_step(self) -> bool:

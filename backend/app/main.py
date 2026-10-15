@@ -131,13 +131,19 @@ async def seed_test_data():
                 ("Scheduling", "info", 8, True),
                 ("Packaging Engineer", "action", 9, True),
                 ("Quality", "action", 10, True),
-                ("Logistics", "action", 11, False),
-                ("Production", "action", 12, False),
-                ("Purchasing", "action", 13, False),
-                ("Production control", "action", 14, False),
-                ("Operations Manager", "info", 15, False),
-                ("Developer", "action", 16, False),
+                # ECR-solid (migration 117): Toolshop is its own department
+                # (P7), Management gives the OK on price drops and Absorb (P4).
+                ("Toolshop", "action", 11, True),
+                ("Management", "action", 12, True),
+                ("Logistics", "action", 13, False),
+                ("Production", "action", 14, False),
+                ("Purchasing", "action", 15, False),
+                ("Production control", "action", 16, False),
+                ("Operations Manager", "info", 17, False),
+                ("Developer", "action", 18, False),
             ]
+            # P3: these start internal changes (and lead them).
+            internal_starters = {"Development", "Process Engineer", "Tool Engineer"}
             for dept_name, flow_type, sort_order, active in departments_data:
                 result = await session.execute(
                     select(Department).where(Department.name == dept_name)
@@ -149,6 +155,7 @@ async def seed_test_data():
                         flow_type=flow_type,
                         is_active=active,
                         sort_order=sort_order,
+                        can_start_internal_change=dept_name in internal_starters,
                     )
                     session.add(dept)
 

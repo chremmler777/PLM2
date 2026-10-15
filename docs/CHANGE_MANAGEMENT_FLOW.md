@@ -956,6 +956,17 @@ approval sign-off. All other departments are deactivated for ECR
 (migration 043; renames: R&D → Development, Tooling Engineer → Tool Engineer,
 Planner/Scheduler → Scheduling).
 
+**ECR-solid additions (migration 117, 2026-10-14).** **Toolshop** is its own
+department (P7), separate from Tool Engineer: the toolmakers' hours and work,
+no tool-data or price rights. **Management** gives the OK on price drops and
+Absorb (P4) and therefore reads prices (`PriceViewer`); until it has members,
+a Project Management member gives that OK. Quality still signs without price.
+Migration 117 also adds the columns later lanes fill: `sales_owner_id`,
+`price_open`, `pm_signed_offer_id` / `quality_signed_offer_id` (backfilled to
+the accepted offer, else the latest sent one), and on
+`implementation_bookings` `work_date` (backfilled from `booked_at`) and
+`source` (`estimate` | `typed`, old rows `typed`).
+
 Stage responsibilities so far: `captured` = Sales (`can_start_change`, Sales
 only), `scoping` = Project Manager, impact lock = **Development only — no
 admin shortcut**; an admin who needs to lock a set does it through acts-as

@@ -187,7 +187,7 @@ def redact_change_out(out: Any) -> Any:
 
 class PriceViewer:
     """Who may read prices, cached per request: the user-level half (admin,
-    PM member, Sales) is asked once; the change lead is per change."""
+    PM member, Sales, Management) is asked once; the change lead is per change."""
 
     def __init__(self, session, user):
         self.session, self.user = session, user
@@ -201,7 +201,11 @@ class PriceViewer:
             self._user_level = bool(
                 u.effective_role == "admin"
                 or await MeetingService.user_is_pm_member(self.session, u)
-                or await ChangeService._user_in_department(self.session, u, "Sales"))
+                or await ChangeService._user_in_department(self.session, u, "Sales")
+                # P4 (ECR-solid): Management gives the OK on price drops and
+                # Absorb, so it reads prices; Quality still signs without.
+                or await ChangeService._user_in_department(
+                    self.session, u, "Management"))
         return self._user_level
 
     async def may_read(self, change) -> bool:
