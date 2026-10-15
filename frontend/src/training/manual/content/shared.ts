@@ -110,6 +110,26 @@ export const basicsChapter: ContentChapter = {
             'top counts only the tasks you lead. Backup tasks follow underneath, muted.',
         },
         { shot: 'basics-my-tasks', alt: '"My Tasks" with "Open tasks (6)", the "+6 as backup" note and a muted backup row marked "Backup" with "Main:" and a name. Below the list, not in the picture, a "New indexes" section lists index triage for a Development member.' },
+        {
+          points: [
+            ['"Needs you"', 'Decisions only you can give sit on top: an override to approve or reject, your sign-off, the internal cost approval. The soonest due comes first.'],
+            ['Every step is a task', 'When nothing holds a change any more, the lead gets "Ready: move it on". Nobody has to notice it on their own.'],
+            ['Due dates', 'A task is due 2 working days after it reached you, 1 when the change is urgent. An assessment is due 7 days out, earlier when the quote deadline is close. The row says what it runs against, for example "(quote deadline 20 Oct)" or "(urgent)".'],
+            ['"Late"', 'One working day after the due date the row says "Late". Your department and the change lead see it then, and it goes into the daily overdue digest.'],
+            ['"is working on this"', 'There is no claim button. The first person in the department who edits the assessment owns it, and the row names them. Hand over with "Assign".'],
+          ],
+        },
+        {
+          p:
+            'Click a task and the change opens with a card on top: "Your part", the due date, and ' +
+            '"Next:" with the button that takes you to where you do it.',
+        },
+        {
+          callout:
+            'Mails, when they are switched on, are copies of these notices. Each one ends with ' +
+            '"Answer in PLM2:" and a link. Answer in PLM2, not by replying to the mail.',
+          tone: 'note',
+        },
         { h3: 'The change page' },
         {
           p:

@@ -1082,8 +1082,9 @@ not see the button (`EarlyStageService.transition_refusal`, reused by
 `transition_rights`; the client fallback `lib/transitionRights.ts` mirrors it
 while stage-state loads). No service step approves on its own yet: after
 "Customer accepted" and the sign-offs, the lead or PM records the approval by
-hand. A My Tasks row for these forward hops comes with C3 (lane L3). Switch
-off: these hops are open again.
+hand: once nothing holds the hop, the lead (no lead: Project Management) has
+the My Tasks row "Ready: move it on" (`advance`, C3). Switch off: these hops
+are open again.
 
 **Hold (C1, switch `COMMERCIAL_V2`).** Putting a change on hold needs a
 reason, what it waits for (`POST /transition {to_status: on_hold, reason}`,
@@ -1091,14 +1092,14 @@ reason, what it waits for (`POST /transition {to_status: on_hold, reason}`,
 held, the run team has a My Tasks row "On hold: resume or cancel"
 (`hold_resume`, overview tab) showing the reason: the lead as main, Project
 Management as backup with the lead's name (no lead: PM's own). Holds taken
-before this rule keep working and show "On hold (no reason on record)". A
-resume date and its due-date nudge come with the due rules (C20, lane L3).
-Switch off: the reason is optional again.
+before this rule keep working and show "On hold (no reason on record)". The
+row is due by the task rule (2 working days after the hold, C20). Switch off:
+the reason is optional again.
 
 **Kickoff row owner (R5).** On an internal change with a lead the lead's
 kickoff row is "main"; Project Management sees it as "backup" with the lead's
-name, so one person owns it. A due date for the kickoff comes with C20
-(lane L3).
+name, so one person owns it. The kickoff is due 2 working days after capture
+(C20; urgent 1).
 
 **Acting-as and the lead (ECR-solid C32).** Every right the change lead
 holds goes through `change_people.holds_lead`: the release (`ReleaseService.
@@ -1219,13 +1220,73 @@ and of the decisions and hops that waive a price rule.
 rule (`rule`), the owner and due in words (`who`; every row has one, R5:
 the rule's own owner, else its default, e.g. the Sales owner for the quote
 rows, Quality for the Quality sign-off, else the lead, else Project
-Management; dues follow with the due rules of lanes L3/L5), a hard rule's only exits
+Management; task dues follow the due rules above, lane L5 adds supplier waits), a hard rule's only exits
 (`exits`: concession, absorb, customer_accepts, sign, record_answer) and the
 rule's override state (`override`). The footer follows the row kinds (a
 routing change is "decided, not overridden"); overdue assessments count as a
 blocker only while the change is in assessment. The cockpit shows one "Override" link per soft rule (only
 to a viewer who may take the step), "No override" plus the exits for a hard
 one, and "Absorb" on an open price for who may ask it.
+
+**My Tasks: every next step, "Needs you", due dates (ECR-solid lane L3).**
+- **Every next step is a task (C3, no switch).** Besides the stage rows,
+  `ChangeService._move_forward_tasks` adds: `deviation_decision` (an
+  override or Absorb this person may decide: `deviation_decide_refusal`, the
+  decide endpoint's rule; never the proposer), `sign_off` (PM or Quality
+  member, per missing side for the latest offer, from "Customer accepted" on
+  and in approved / implementation / validation; never the other side's
+  signer), `internal_approval` (the internal approver once costing is final
+  under C5; never the raiser), `validation_check` (an implementing
+  department's open checks, Release tab) and `advance` ("Ready: move it on":
+  the lead, else Project Management, once `next_step_missing` lists nothing;
+  a released change's close too). The cockpit lists the same rows.
+- **"Needs you"** (`due_rules.NEEDS_YOU_KINDS`): overrides, sign-offs, the
+  internal approval, `ppap_decision` (when lane L4 adds it) and a concession
+  to decide (`validation_issue_customer` on a `customer_concession` route) sit
+  in their own group on top, by due. Backup rows never do.
+- **Two due rules (C20, `ASSESSMENT_V2`, `app/services/due_rules.py`).** A
+  task row is due 2 working days after it became owed (the question asked,
+  the override proposed, the customer's yes, else when the change entered its
+  status, else its capture); 1 working day when the change is urgent
+  (priority critical) or others wait on it (triage, new-index decision,
+  `ppap_decision`, customer flip). Waiting on the customer (`customer_response`)
+  is due at the next contact, +5 working days. An assessment is due
+  min(now + 7 d, deadline - 3 wd), deadline = the quote deadline (until the
+  offer went out) or the need-by date, whichever is earlier; floor 2 wd
+  (urgent 1). Set when the change enters assessment and when a department is
+  added. Rows carry `deadline_date`/`deadline_kind` ("due Thu (quote deadline
+  Mon)"), `urgent` and `late`. Switch off: rows keep the change's deadline as
+  their due date, the assessment a flat 7 days.
+- **One escalation rule.** The owner is reminded on the due date ("Task due
+  today"); at due + 1 working day (`late`) the owner hears it is late, the
+  item escalates to the change lead (notification and the "Overdue" group,
+  `lead_escalations`) and the department sees it marked "Late" (a late backup
+  row is no longer muted). Quote and release deadline alerts reach the Sales
+  owner too. Switch off: the earlier timing (due-soon 2 days ahead, escalation
+  at the due date). Supplier and customer waits pausing the clock come with
+  lanes L5/L6.
+- **Overdue digest (C27/P6 cut 1, `RELEASE_V2`, `overdue_digest.py`).** Once
+  a day to `settings.overdue_digest_recipients` (default `christoph.demmler`),
+  one line per change: late assessments and change tasks, Sales' late
+  hand-over, quote or customer answer, passed deadlines. Nothing late, no
+  digest; never twice a day, read or not. Cut 2: a manager per department.
+- **Stage entry notice (C3, `RELEASE_V2`).** Entering `in_implementation` or
+  `in_validation` tells the implementing departments (the ones that priced
+  the work) once per change and stage.
+- **Ownership.** No claim button: the first real member of the department
+  who edits its assessment (the draft autosave) owns it ("Holmes is working
+  on this"); a second editor does not take it over, an admin's edit owns
+  nothing; routing or "Assign" (hand over) still name someone first.
+- **Task card.** Every My Tasks link opens the change with `?task=<kind>`:
+  "Your part: <task>, due <date> (deadline). Next: <button>" to where the work
+  is done, with a first-use help line dismissed once per browser.
+- **Mail (`mail_outbox.py`, migration 120).** The notice channel stays the
+  in-app notification (one per item: `notify_once`, involved people only).
+  While `smtp_enabled` (default off) a one-minute loop mails each new one once,
+  plain text ending "Answer in PLM2: <link>" (`plm2_public_url`, else
+  `frontend_url` + `/plm2`). Read, older than 24 h or addressless ones are
+  skipped; existing notifications were stamped mailed by the migration.
+  Batching and reply-to answers: cut 2.
 
 **Acts-as (admin testing):** an admin can pick any role from a header dropdown
 and the *backend* treats them as an engineer in exactly that department —

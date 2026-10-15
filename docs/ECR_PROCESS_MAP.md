@@ -135,7 +135,7 @@ Import scripts bypass the intake. Status: BUILT.
 
 - **Scoped views everywhere**: a department sees its own input only, at
   assessment AND costing. PM and Sales see all blocks.
-- **Tasks are mandatory**: no accept/claim step; submitting names the owner.
+- **Tasks are mandatory**: no accept/claim step; the first person who edits a department task owns it. Due 2 working days (urgent 1); late at due + 1 working day (department, lead, daily digest).
 - **Sales owns the customer**: mails tracked on the change and filed into
   each validation issue (everyone uploads); escalations to the customer go
   through Sales.
