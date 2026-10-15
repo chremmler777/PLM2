@@ -2378,5 +2378,43 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'rule.scope_change_uncovered': { de: 'Umfangsänderung ohne Angebot', en: 'Scope change not covered by an offer' },
   'rule.price_drop': { de: 'Angenommene Summe unter letztem Angebot', en: 'Accepted total below the last offer' },
   'rule.price_open': { de: 'Preis offen', en: 'Price open' },
+  // L3 (C3, C20): Needs you, due rules, task card
+  'tasks.needsYou': { de: 'Braucht dich', en: 'Needs you' },
+  'tasks.late': { de: 'Verspätet', en: 'Late' },
+  'tasks.lateHint': {
+    de: 'Einen Arbeitstag über fällig: die Abteilung und der Lead sehen es jetzt',
+    en: 'One working day past due: the department and the lead see it now' },
+  'tasks.dueUrgent': { de: '(dringend)', en: '(urgent)' },
+  'tasks.dueQuoteDeadline': { de: '(Angebotstermin {d})', en: '(quote deadline {d})' },
+  'tasks.dueNeedBy': { de: '(benötigt bis {d})', en: '(need-by {d})' },
+  'tasks.workingOn': { de: '{x} arbeitet daran', en: '{x} is working on this' },
+  'tasks.kind.deviation_decision': { de: 'Override entscheiden', en: 'Decide the override' },
+  'tasks.kind.sign_off': { de: 'Freigabe unterschreiben', en: 'Sign off' },
+  'tasks.kind.internal_approval': { de: 'Interne Kosten freigeben', en: 'Approve the internal costs' },
+  'tasks.kind.advance': { de: 'Bereit: weiterschalten', en: 'Ready: move it on' },
+  'tasks.hint.deviation_decision': {
+    de: 'Jemand bittet um einen Override: genehmigen oder mit Begründung ablehnen',
+    en: 'Someone asks for an override: approve it, or reject it with a reason' },
+  'tasks.hint.sign_off': {
+    de: 'Der Kunde hat angenommen: deine Unterschrift fehlt',
+    en: 'The customer accepted: your sign-off is missing' },
+  'tasks.hint.sign_off_v': {
+    de: 'Für Angebot v{v} unterschreiben', en: 'Sign for offer v{v}' },
+  'tasks.hint.internal_approval': {
+    de: 'Kalkulation abgeschlossen: Kosten, Nutzen und Begründung prüfen und freigeben',
+    en: 'Costing is final: check cost, saving and rationale, then approve' },
+  'tasks.hint.advance': {
+    de: 'Nichts hält es auf: auf „{x}“ weiterschalten', en: "Nothing holds it: move it to '{x}'" },
+  'taskcard.yourPart': { de: 'Dein Teil: {x}', en: 'Your part: {x}' },
+  'taskcard.due': { de: 'fällig {d}', en: 'due {d}' },
+  'taskcard.next': { de: 'Weiter:', en: 'Next:' },
+  'taskcard.done': {
+    de: 'Diese Aufgabe ist erledigt oder liegt nicht mehr bei dir.',
+    en: 'This task is done or no longer yours.' },
+  'taskcard.close': { de: 'Schließen', en: 'Close' },
+  'taskcard.help': {
+    de: 'Diese Karte zeigt deinen Teil an dieser Änderung und bis wann. Der Knopf führt dorthin, wo du ihn erledigst. Fällig: 2 Arbeitstage (dringend 1); einen Arbeitstag danach sehen es deine Abteilung und der Lead.',
+    en: 'This card shows your part in this change and by when. The button takes you to where you do it. Due: 2 working days (urgent 1); one working day later your department and the lead see it.' },
+  'taskcard.gotIt': { de: 'Verstanden', en: 'Got it' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

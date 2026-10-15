@@ -7,6 +7,17 @@
  */
 import type { ChangeTask } from '../types/change'
 import type { MyTask } from '../types/workflow'
+import { t } from '../i18n/cmLabels'
+import { formatDayMonth } from './format'
+
+/** C20: what a row's due date runs against: "(quote deadline 20 Oct)",
+ *  "(need-by 3 Nov)" or "(urgent)"; null when nothing. */
+export function dueNote(task: Pick<ChangeTask, 'deadline_date' | 'deadline_kind' | 'urgent'>): string | null {
+  if (task.urgent) return t('tasks.dueUrgent')
+  if (!task.deadline_date || !task.deadline_kind) return null
+  return t(task.deadline_kind === 'quote' ? 'tasks.dueQuoteDeadline' : 'tasks.dueNeedBy')
+    .replace('{d}', formatDayMonth(task.deadline_date))
+}
 
 const earlier = (a: string | null | undefined, b: string | null | undefined) =>
   !a ? (b ?? null) : !b ? a : (a < b ? a : b)
@@ -31,7 +42,8 @@ export const changeTaskMine = (t: Pick<ChangeTask, 'is_mine' | 'mine'>): boolean
 export function foldChangeTasks(tasks: ChangeTask[] | null | undefined): ChangeTask[] {
   const out = new Map<string, ChangeTask>()
   for (const task of Array.isArray(tasks) ? tasks : []) {
-    const key = `${task.change_id}|${task.kind}|${task.department_id ?? ''}`
+    // two overrides (or both sign-off sides) on one change are two decisions
+    const key = `${task.change_id}|${task.kind}|${task.department_id ?? ''}|${task.deviation_id ?? ''}|${task.side ?? ''}`
     const seen = out.get(key)
     const letters = task.rasic_letters ?? []
     if (!seen) {

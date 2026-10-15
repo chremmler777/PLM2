@@ -443,7 +443,15 @@ export type ChangeTaskKind =
   /** An implementing department owes a validation check (stage 9). */
   | 'validation_check'
   /** A validated weight moved the part off its estimate — Sales re-quotes. */
-  | 'update_quote';
+  | 'update_quote'
+  /** C3 "Needs you": an override or Absorb this person decides. */
+  | 'deviation_decision'
+  /** C3 "Needs you": a PM or Quality sign-off for the latest offer. */
+  | 'sign_off'
+  /** C3 "Needs you": the internal approver's OK (HARD #8). */
+  | 'internal_approval'
+  /** C3: nothing holds the onward hop; the run team moves it on. */
+  | 'advance';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -494,6 +502,22 @@ export interface ChangeTask {
   role?: TeamRole;
   /** The responsible's name, on backup rows. */
   main_name?: string | null;
+  /** C3: a decision only this person gives; listed under "Needs you". */
+  needs_you?: boolean;
+  /** C20: past due + 1 working day: shown to the department and the lead. */
+  late?: boolean;
+  /** C20: the deadline the row runs against ("due Thu (quote deadline Mon)"). */
+  deadline_date?: string | null;
+  deadline_kind?: 'quote' | 'need_by' | null;
+  urgent?: boolean;
+  /** Per-kind extras of the C3 rows. */
+  label?: string | null;
+  deviation_id?: number;
+  side?: 'pm' | 'quality';
+  offer_version?: number | null;
+  to_status?: ChangeStatus | null;
+  open_count?: number;
+  target_tab?: string | null;
 }
 
 /** The viewer's standing on a role's work for a project (spec §18). */

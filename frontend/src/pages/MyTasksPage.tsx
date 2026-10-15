@@ -17,7 +17,7 @@ import { toastError } from '../lib/apiError';
 import { BookOpen, ClipboardList, FileText } from 'lucide-react';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
-import { foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
+import { dueNote, foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
 import BackupChip from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
@@ -272,9 +272,24 @@ const TASK_TAB: Record<string, string> = {
   escalate_risk: '?tab=implementation',
   // Stage 9 shares the tab: the department confirms its checks there, and the
   // weight delta that sends Sales back to the quote is stated on the same panel.
-  validation_check: '?tab=implementation',
+  // The checks live on the Release tab (C3 fix).
+  validation_check: '?tab=release',
   update_quote: '?tab=implementation',
+  // C3: decisions and the run team's onward hop, on the overview's
+  // why-blocked panel; the internal approval on the commercial tab.
+  deviation_decision: '?tab=overview', sign_off: '?tab=overview',
+  advance: '?tab=overview', internal_approval: '?tab=commercial',
 };
+
+/** Where a task row leads: its tab, plus `task=<kind>` so the change opens
+ *  with the task card ("Your part: ..., due ... Next: ..."). */
+function taskLink(task: Pick<ChangeTask, 'kind' | 'change_id' | 'department_id' | 'target_tab'>): string {
+  const tab = TASK_TAB[task.kind] ?? (task.target_tab ? `?tab=${task.target_tab}` : '');
+  const params = new URLSearchParams(tab.replace(/^\?/, ''));
+  params.set('task', task.kind);
+  if (task.department_id != null) params.set('dept', String(task.department_id));
+  return `/changes/${task.change_id}?${params.toString()}`;
+}
 
 const kickoffHint = (missing?: string[]): string => {
   const parts = (missing ?? []).map((m) =>
@@ -324,6 +339,17 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.validation_check');
     case 'update_quote':
       return t('tasks.hint.update_quote');
+    case 'deviation_decision':
+      return task.reason?.trim() || t('tasks.hint.deviation_decision');
+    case 'sign_off':
+      return task.offer_version != null
+        ? t('tasks.hint.sign_off_v').replace('{v}', String(task.offer_version))
+        : t('tasks.hint.sign_off');
+    case 'internal_approval':
+      return t('tasks.hint.internal_approval');
+    case 'advance':
+      return t('tasks.hint.advance').replace(
+        '{x}', task.to_status ? (STATUS_LABELS[task.to_status] ?? humanize(task.to_status)) : '-');
     case 'obtain_info':
     case 'close_question': {
       // The question (or the answer to it) is the brief; when several are open,
@@ -342,16 +368,32 @@ const taskHint = (task: ChangeTask): string | null => {
 
 /** The due cell: the same chip as the changes list ("in 5 d", "2 d overdue"),
  *  the date ("25 Sep 2026") under it; "-" when undated. The backend's overdue
- *  flag decides the color. */
-function DueCell({ due, overdue }: { due: string | null; overdue: boolean }) {
+ *  flag decides the color. C20: what the date runs against, "(quote deadline
+ *  20 Oct)" or "(urgent)", and "Late" once due + 1 working day passed (the
+ *  department and the lead see it then). */
+function DueCell({ due, overdue, task }: {
+  due: string | null; overdue: boolean;
+  task?: Pick<ChangeTask, 'deadline_date' | 'deadline_kind' | 'urgent' | 'late'>;
+}) {
   if (!due) return <span className="text-slate-500">-</span>;
+  const note = task ? dueNote(task) : null;
   return (
     <span data-testid="task-due" className="inline-flex flex-col items-start gap-0.5">
-      <DeadlineChip date={due} state={overdue ? 'overdue' : 'on_track'} />
+      <span className="inline-flex items-center gap-1">
+        <DeadlineChip date={due} state={overdue ? 'overdue' : 'on_track'} />
+        {task?.late && (
+          <span data-testid="task-late" title={t('tasks.lateHint')}
+            className="rounded bg-red-900/60 px-1.5 text-[11px] font-semibold text-red-200">
+            {t('tasks.late')}
+          </span>
+        )}
+      </span>
       <span className="text-[11px] tabular-nums text-slate-400">{formatCalendarDate(due)}</span>
+      {note && <span data-testid="task-due-note" className="text-[11px] text-slate-500">{note}</span>}
     </span>
   );
 }
+
 
 const LetterChips = ({ letters }: { letters: string[] }) => (
   <span className="inline-flex gap-1 align-middle">
@@ -390,7 +432,7 @@ function TaskList() {
   });
   const activeDepartments = departments.filter((d) => d.is_active);
 
-  const rows: Row[] = [
+  const allRows: Row[] = [
     ...foldChangeTasks(changeTasks).map((task): Row => ({
       source: 'change', key: `c-${task.kind}-${task.change_id}-${task.department_id ?? task.assessment_id ?? 0}`,
       task, overdue: task.overdue, due_date: task.due_date,
@@ -400,12 +442,44 @@ function TaskList() {
     })),
   ].sort((a, b) => mainFirst(
     { ...a, role: a.task.role }, { ...b, role: b.task.role }));
+  // C3 "Needs you": decisions only this person gives, on top, by due.
+  const needsYou = allRows.filter((r) => r.source === 'change' && r.task.needs_you && !isBackup(r.task))
+    .sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'));
+  const rows = allRows.filter((r) => !needsYou.includes(r));
   // Project team (spec §18): the header counts main rows, the same number as
   // the sidebar badge; backup rows are listed after them, muted.
   const backupCount = rows.filter((r) => isBackup(r.task)).length;
   const mainCount = rows.length - backupCount;
+  const head = (
+    <thead>
+      <tr className="border-b border-slate-700 bg-slate-900">
+        <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.what')}</th>
+        <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.task')}</th>
+        <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.stage')}</th>
+        <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
+        <th className="px-4 py-3" />
+      </tr>
+    </thead>
+  );
 
   return (
+    <div className="space-y-6">
+      {needsYou.length > 0 && (
+        <section data-testid="needs-you">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-amber-300">
+            {t('tasks.needsYou')} ({needsYou.length})
+          </h2>
+          <div className="bg-slate-800 border border-amber-700/50 rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              {head}
+              <tbody>
+                {needsYou.map((row) => row.source === 'change'
+                  && <ChangeTaskRow key={row.key} task={row.task} navigate={navigate} />)}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-2">
         <h2 data-testid="task-list-title"
@@ -438,23 +512,15 @@ function TaskList() {
         </label>
       </div>
 
-      {(loadingWf || loadingChange) && rows.length === 0 ? (
+      {(loadingWf || loadingChange) && allRows.length === 0 ? (
         <LoadingSkeleton count={4} />
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 ? (needsYou.length > 0 ? null :
         <EmptyState data-testid="task-list-empty"
-          title={selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')} />
-      ) : (
+          title={selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')} />)
+      : (
         <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 bg-slate-900">
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.what')}</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.task')}</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.stage')}</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
+            {head}
             <tbody>
               {rows.map((row) => (row.source === 'change'
                 ? <ChangeTaskRow key={row.key} task={row.task} navigate={navigate} />
@@ -464,13 +530,14 @@ function TaskList() {
         </div>
       )}
     </div>
+    </div>
   );
 }
 
 /** Mine rows carry a quiet tint; backup rows (spec §18) read muted. */
-const rowClass = (task: { mine?: boolean; role?: string }) =>
+const rowClass = (task: { mine?: boolean; role?: string; late?: boolean }) =>
   `border-b border-slate-700 last:border-0 hover:bg-slate-700/30${
-    task.mine ? ' bg-sky-950/30' : ''}${isBackup(task) ? ' opacity-60' : ''}`;
+    task.mine ? ' bg-sky-950/30' : ''}${isBackup(task) && !task.late ? ' opacity-60' : ''}`;
 
 /** The row's stage: the backend's label, else its stage key, else the change status. */
 function taskStageLabel(task: Pick<ChangeTask, 'stage' | 'stage_label' | 'status'>): string {
@@ -502,7 +569,9 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
           <span className="text-slate-200">{taskKindLabel(task.kind, task.kind_label)}</span>
           {letters.length > 0 && <span className="ml-2"><LetterChips letters={letters} /></span>}
           {task.kind === 'assessment' && task.owner_name && (
-            <span className="block text-xs text-slate-400">{task.owner_name}</span>
+            <span data-testid="task-owner" className="block text-xs text-slate-400">
+              {t('tasks.workingOn').replace('{x}', task.owner_name)}
+            </span>
           )}
           {isBackup(task) && <BackupChip mainName={task.main_name} className="ml-2" />}
           {hint && <span className="block text-xs text-slate-400">{hint}</span>}
@@ -516,11 +585,11 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
       <td data-testid="task-stage" className="px-4 py-3 align-top text-slate-300 whitespace-nowrap">
         {taskStageLabel(task)}
       </td>
-      <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} /></td>
+      <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} task={task} /></td>
       <td className="px-4 py-3 align-top text-right">
         <button
           type="button"
-          onClick={() => navigate(`/changes/${task.change_id}${TASK_TAB[task.kind] ?? ''}`)}
+          onClick={() => navigate(taskLink(task))}
           className={btnSm.primary}
         >
           {task.kind === 'assessment' ? 'Assess' : t('tasks.open')}

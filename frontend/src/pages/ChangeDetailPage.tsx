@@ -67,6 +67,7 @@ import { unpricedByDepartment } from '../lib/unpriced';
 import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/change';
 import { btnIcon, btnSm } from '../components/common/buttonStyles';
 import { formatDate, formatMoney } from '../lib/format';
+import TaskCard from '../components/changes/TaskCard';
 
 /** The change-detail queries refresh when the user comes back to the tab:
  *  other departments answer, approve and block while it sits in the
@@ -119,6 +120,9 @@ export default function ChangeDetailPage() {
   const setTab = (t: Tab, issueId?: number) => setSearchParams(
     issueId != null ? { tab: t, issue: String(issueId) } : { tab: t }, { replace: true });
   const issueParam = Number(searchParams.get('issue'));
+  // ?task=<kind>[&dept=<id>]: opened from My Tasks, the task card shows on top.
+  const taskParam = searchParams.get('task');
+  const taskDeptParam = Number(searchParams.get('dept'));
   const focusIssueId = Number.isInteger(issueParam) && issueParam > 0 ? issueParam : null;
   const [blocked, setBlocked] = useState<{ to: string; reason: string; rule?: string | null } | null>(null);
   // Bumped on every reported block, even an identical one, so the banner's
@@ -1092,6 +1096,14 @@ export default function ChangeDetailPage() {
         onSubmit={(reason) => { setCancelOpen(false); transition.mutate({ to: 'cancelled', cancellation_reason: reason }); }}
         onClose={() => setCancelOpen(false)}
       />
+
+      {taskParam && (
+        <TaskCard changeId={changeId} kind={taskParam}
+          departmentId={Number.isInteger(taskDeptParam) && taskDeptParam > 0 ? taskDeptParam : null}
+          actions={myActions?.actions ?? []}
+          onGo={(tab) => goTab(tab)}
+          onClose={() => setSearchParams({ tab: effectiveTab }, { replace: true })} />
+      )}
 
       {isOverview && <CockpitSummary {...cockpitProps} />}
 
