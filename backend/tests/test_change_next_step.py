@@ -132,10 +132,14 @@ async def test_approved_names_the_release_gate(client, admin_auth, seed, session
         await s.commit()
     step = await next_step(client, admin_auth, change["id"])
     assert step["to"] == "in_implementation"
+    # R5: every row names an owner; with no rule of its own, the lead
+    lead = step["items"][0]["who"]
+    assert lead
     assert {"key": "gate", "kind": "soft", "detail": "release",
-            "rule": "gate:release"} in step["items"]
+            "rule": "gate:release", "who": lead} in step["items"]
     assert {"key": "timing_validated", "kind": "soft",
-            "rule": "timing_not_validated"} in step["items"]
+            "rule": "timing_not_validated", "who": lead} in step["items"]
+    assert all(i.get("who") for i in step["items"])
 
 
 async def test_no_next_step_once_closed(client, admin_auth, seed, session_factory):

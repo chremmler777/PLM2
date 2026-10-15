@@ -1450,7 +1450,40 @@ class ChangeService:
         for gate in change.gates:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to and gate.decision != "yes":
                 add("gate", "soft", detail=gate.gate_key, rule=f"gate:{gate.gate_key}")
+        if any("who" not in i for i in items):
+            await ChangeService._default_owners(session, change, items)
         return {"to": to, "items": items}
+
+    #: Whose a why-blocked row is when the rule names nobody itself (R5): a
+    #: department in words, "sales" = the Sales owner, "capture" = the Sales
+    #: owner or the raiser; everything else falls to the lead.
+    _ROW_OWNER = {
+        "description": "capture", "attachment": "capture", "quote_deadline": "sales",
+        "quoted_price": "sales", "customer_accepted": "sales",
+        "lead": "Project Management", "routing_deviation": "Project Management",
+        "pm_signoff": "Project Management", "quality_signoff": "Quality",
+        "validation_issues": "Quality", "validation_open": "Quality",
+        "validation_failed": "Quality",
+    }
+
+    @staticmethod
+    async def _default_owners(session: AsyncSession, change: ChangeRequest,
+                              items: list[dict]) -> None:
+        """Fill `who` on every row that names no owner (R5: no row without
+        an owner): the row's default owner, else the lead, else Project
+        Management. Names only, no prices (R23)."""
+        from app.services.change_plan_service import ChangePlanService
+        names = await ChangePlanService._user_names(
+            session, [i for i in (change.lead_id, change.sales_owner_id,
+                                  change.raised_by) if i is not None])
+        lead = names.get(change.lead_id) or "Project Management"
+        sales = names.get(change.sales_owner_id) or "Sales"
+        capture = names.get(change.sales_owner_id) or names.get(change.raised_by) or lead
+        for i in items:
+            if "who" in i:
+                continue
+            owner = ChangeService._ROW_OWNER.get(i["key"])
+            i["who"] = {"sales": sales, "capture": capture, None: lead}.get(owner, owner)
 
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):

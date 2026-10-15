@@ -87,7 +87,7 @@ async def test_transition_blocked_without_impacted_items(client, eng_auth, seed)
     # Listed but not locked -> assessment still refuses.
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
-    assert "deviation" in res.json()["detail"].lower()
+    assert "approved override" in res.json()["detail"].lower()
 
 
 async def test_illegal_transition_rejected(client, eng_auth, seed):

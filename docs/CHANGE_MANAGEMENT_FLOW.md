@@ -1183,7 +1183,10 @@ notes of `absorb_proposed`, `price_absorbed` ("Open price absorbed (#n)")
 and of the decisions and hops that waive a price rule.
 
 **Why blocked.** `next_step.items` (cockpit "Missing before ...") carry the
-rule (`rule`), the owner and due in words (`who`), a hard rule's only exits
+rule (`rule`), the owner and due in words (`who`; every row has one, R5:
+the rule's own owner, else its default, e.g. the Sales owner for the quote
+rows, Quality for the Quality sign-off, else the lead, else Project
+Management; dues follow with the due rules of lanes L3/L5), a hard rule's only exits
 (`exits`: concession, absorb, customer_accepts, sign) and the rule's override
 state (`override`). The cockpit shows one "Override" link per soft rule (only
 to a viewer who may take the step), "No override" plus the exits for a hard
