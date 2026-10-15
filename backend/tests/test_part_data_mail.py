@@ -399,3 +399,16 @@ async def test_seed_script_is_idempotent_and_backfills(session_factory, world):
     rows = await _outbox(session_factory)
     assert len(rows) == 2 and {r.event for r in rows} == {"created"}
     assert rows[0].summary.startswith("E1.1 toolmaker data (FZ, per DFM) sent to Brose")
+
+
+async def test_stale_sending_rows_end_failed_not_resent(session_factory, world):
+    await _add_list(session_factory, world["project_id"])
+    old = datetime.utcnow() - timedelta(hours=1)
+    async with session_factory() as s:
+        s.add(MailOutbox(project_id=world["project_id"], part_id=world["a1"], event="created",
+                         summary="x", created_at=old, mail_status="sending"))
+        await s.commit()
+    await part_data_mail.run_digest(session_factory)
+    [row] = await _outbox(session_factory)
+    assert row.mail_status == "failed"
+    assert "delivery unknown" in row.error

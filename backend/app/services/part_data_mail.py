@@ -60,6 +60,8 @@ MAIL_EVENTS = frozenset({
 #: metadata_updated counts only on an iteration created this recently (the
 #: summary written right after creating it); later edits are noise.
 NEW_ITERATION_WINDOW = timedelta(hours=1)
+# A claimed row still "sending" this long after it was queued is a dead send.
+STALE_SENDING_MINUTES = 30
 
 #: Plain ASCII addresses only: anything Graph might refuse would fail the whole
 #: sendMail, and with it the mail for everyone else on the list (as TWOS).
@@ -411,6 +413,18 @@ async def run_digest(session_factory=None, now: Optional[datetime] = None) -> di
     now = now or datetime.utcnow()
     cutoff = now - timedelta(minutes=get_settings().notify_digest_minutes)
     async with session_factory() as s:
+        # A worker that died mid-send leaves rows in "sending". Whether that
+        # mail went out is unknown, so they end as failed (visible), never
+        # back to pending (a resend could double-mail the list).
+        stale = (await s.execute(select(MailOutbox).where(
+            MailOutbox.mail_status == "sending",
+            MailOutbox.created_at <= now - timedelta(minutes=STALE_SENDING_MINUTES)))).scalars().all()
+        for row in stale:
+            row.mail_status = "failed"
+            row.error = "interrupted while sending, delivery unknown"
+        if stale:
+            await s.commit()
+            log.warning("part data mail: %d stale sending rows marked failed", len(stale))
         due = list((await s.execute(
             select(MailOutbox.project_id)
             .where(MailOutbox.mail_status == "pending")
