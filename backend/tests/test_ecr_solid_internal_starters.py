@@ -83,3 +83,21 @@ async def test_sales_internal_change_is_led_by_the_project_pm(client, seed, dept
                             headers={**sales, KEEP_LEAD_RULE: "1"})
     assert res.status_code in (200, 201), res.text
     assert res.json()["lead_id"] is None
+
+
+async def test_engineering_lead_gets_the_kickoff_task(client, seed, depts, session_factory):
+    """No dead end: the raiser who leads its internal change sees "Hand over
+    to scoping" in My Tasks and may make the hop; a colleague may not."""
+    await _join(session_factory, seed["engineer_id"], depts["Process Engineer"])
+    eng = await login(client, "eng@test.io", admin=False)
+    res = await client.post("/api/v1/changes", json=_body(seed, False),
+                            headers={**eng, KEEP_LEAD_RULE: "1"})
+    cid = res.json()["id"]
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=eng)).json()
+    assert any(t["kind"] == "kickoff" and t["change_id"] == cid for t in tasks)
+    admin = await login(client, "admin@test.io")
+    other = {**admin, ACTS: str(depts["Development"])}
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=other)).json()
+    assert not any(t["kind"] == "kickoff" and t["change_id"] == cid for t in tasks)
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=other)).json()
+    assert st["can_transition"]["scoping"] is False

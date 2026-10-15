@@ -2301,6 +2301,7 @@ class ChangeService:
         is owed. Rows carry change identity + deadline context; the caller
         dedupes and labels. Batched lookups: a handful of queries for the
         whole list, not per change."""
+        from app.services.change_people import holds_lead
         from app.services.meeting_service import MeetingService
         tasks: list[dict] = []
         dep_ids = set(dep_ids or ())
@@ -2409,7 +2410,10 @@ class ChangeService:
 
         for c in open_changes:
             if c.status == "captured" and (
-                    can_capture or (is_pm and mp.is_mother_plant(c))):
+                    can_capture or (is_pm and mp.is_mother_plant(c))
+                    # P3: an engineering raiser leads its internal change and
+                    # hands it over to scoping itself
+                    or (not c.customer_relevant and holds_lead(c, user))):
                 # a mother-plant change is captured by Project Management
                 tasks.append({**await _base(c), "kind": "kickoff",
                               "missing": await ChangeService.kickoff_missing(db, c),
