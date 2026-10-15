@@ -448,6 +448,8 @@ async def upsert_routing_standard(body: RoutingStandardUpsert,
                                   db: AsyncSession = Depends(get_db),
                                   current_user: User = Depends(get_current_user)):
     from app.models.change import ChangeRoutingStandard
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin may set routing standards")
     row = (await db.execute(select(ChangeRoutingStandard).where(
         ChangeRoutingStandard.change_type == body.change_type))).scalar_one_or_none()
     if row is None:

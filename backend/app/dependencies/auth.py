@@ -18,7 +18,7 @@ from app.core.config import get_settings
 from app.auth.acts_as import HEADER as ACTS_AS_HEADER, set_acts_as
 from app.models import User, get_db
 from app.models.entities import Organization
-from app.models.workflow import Department
+from app.models.workflow import Department, UserDepartment
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _HUB_MANAGED = "!"  # sentinel hashed_password for auto-provisioned hub users
@@ -49,8 +49,22 @@ def plm2_roles(payload: dict) -> list[str]:
     ]
 
 
-def _local_role(hub_roles: list[str]) -> str:
-    return "admin" if "plm2_Admin" in hub_roles else "viewer"
+def _local_role(hub_roles: list[str], in_department: bool = False) -> str:
+    """plm2_Admin -> admin. Anyone else writes only as a member of an active
+    PLM department (assigned by an admin): engineer, gated by those
+    departments. No department -> read-only viewer. There is deliberately no
+    plm2_Engineer hub role: write access is granted in one place."""
+    if "plm2_Admin" in hub_roles:
+        return "admin"
+    return "engineer" if in_department else "viewer"
+
+
+async def _in_active_department(db: AsyncSession, user_id: int) -> bool:
+    return (await db.execute(
+        select(UserDepartment.user_id)
+        .join(Department, Department.id == UserDepartment.department_id)
+        .where(UserDepartment.user_id == user_id, Department.is_active.is_(True))
+        .limit(1))).first() is not None
 
 
 async def _default_org_id(db: AsyncSession) -> int:
@@ -87,10 +101,6 @@ async def get_current_user(
     hub_roles = plm2_roles(payload)
     if not hub_roles:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "No plm2 role in token")
-
-    # plm2_Viewer is read-only: block non-safe methods unless the caller is plm2_Admin.
-    if "plm2_Admin" not in hub_roles and not _is_read_only(request):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "plm2_Viewer is read-only")
 
     # NOTE: the AdminPanel hub token currently mints {sub, username, department,
     # roles, auth_time} with NO "email" claim, so this always falls through to
@@ -137,13 +147,20 @@ async def get_current_user(
                 if attempt >= 10:
                     raise
                 username = f"{base_username}-{attempt}"
-    elif user.hashed_password == _HUB_MANAGED and user.role != _local_role(hub_roles):
+    in_department = await _in_active_department(db, user.id)
+    hub_role = _local_role(hub_roles, in_department)
+    if user.hashed_password == _HUB_MANAGED and user.role != hub_role:
         # keep hub-provisioned users' local role in sync; never touch real local users
-        user.role = _local_role(hub_roles)
+        user.role = hub_role
         await db.commit()
 
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "User is inactive")
+
+    # Read-only unless plm2_Admin or a member of an active department. Decided
+    # from the hub roles + memberships, never from a local row's own role.
+    if hub_role == "viewer" and not _is_read_only(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "plm2_Viewer is read-only")
 
     request.state.hub_payload = payload
     await _apply_acts_as(request, db, user)

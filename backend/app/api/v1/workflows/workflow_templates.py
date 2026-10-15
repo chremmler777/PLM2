@@ -63,6 +63,8 @@ async def create_template(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new workflow template."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin may change workflow templates")
     try:
         # Create template
         template = WfTemplate(
@@ -266,6 +268,8 @@ async def update_template(
     db: AsyncSession = Depends(get_db)
 ):
     """Update workflow template (creates new version)."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin may change workflow templates")
     try:
         result = await db.execute(
             select(WfTemplate).where(WfTemplate.id == template_id)
@@ -387,6 +391,8 @@ async def deactivate_template(
     db: AsyncSession = Depends(get_db)
 ):
     """Deactivate a template (soft delete)."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin may change workflow templates")
     result = await db.execute(
         select(WfTemplate).where(WfTemplate.id == template_id)
     )

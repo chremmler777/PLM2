@@ -46,6 +46,8 @@ async def me(request: Request, user=Depends(get_current_user), db: AsyncSession 
         # switcher shows at all, without a second round-trip.
         "acting_as": ({"id": dept.id, "name": dept.name} if dept else None),
         "is_real_admin": user.is_real_admin,
+        # admin | engineer (member of an active department: may write) | viewer
+        "role": user.role,
         "effective_role": user.effective_role,
         # Tool data (tool fields, produces links, shrinkage, DFM): Tool Engineer or admin
         "can_edit_tools": await can_edit_tools(db, user),
