@@ -10,9 +10,10 @@ import hmac
 
 from fastapi import Depends, HTTPException, Request, status
 from jose import jwt, JWTError
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.config import get_settings
 from app.auth.acts_as import HEADER as ACTS_AS_HEADER, set_acts_as
@@ -57,6 +58,34 @@ def _local_role(hub_roles: list[str], in_department: bool = False) -> str:
     if "plm2_Admin" in hub_roles:
         return "admin"
     return "engineer" if in_department else "viewer"
+
+
+# Rank of the local roles. A stored role the hub cannot mint (anything but
+# these) counts as engineer-level, so a viewer token still drops it.
+_ROLE_RANK = {"viewer": 0, "engineer": 1, "admin": 2}
+
+
+def _cap_to_hub(user: User, hub_role: str) -> None:
+    """A local-password row never outranks its hub token: the effective role
+    is the LOWER of the stored role and the hub-derived one. Set as the
+    committed value (request-scoped, never flushed), so the stored row is
+    left alone and gets its own role back the moment the hub grants it.
+    The cap rides on the instance so a rollback/refresh that reloads the
+    row re-applies it instead of handing the stored role back."""
+    user.__dict__["_hub_role_cap"] = hub_role
+    _apply_cap(user)
+
+
+def _apply_cap(user: User) -> None:
+    cap = user.__dict__.get("_hub_role_cap")
+    if cap is not None and "role" in user.__dict__ \
+            and _ROLE_RANK.get(user.role, 1) > _ROLE_RANK[cap]:
+        set_committed_value(user, "role", cap)
+
+
+@event.listens_for(User, "refresh")
+def _recap_after_refresh(user, _context, _attrs):
+    _apply_cap(user)
 
 
 async def _in_active_department(db: AsyncSession, user_id: int) -> bool:
@@ -153,6 +182,8 @@ async def get_current_user(
         # keep hub-provisioned users' local role in sync; never touch real local users
         user.role = hub_role
         await db.commit()
+    elif user.hashed_password != _HUB_MANAGED:
+        _cap_to_hub(user, hub_role)
 
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "User is inactive")
