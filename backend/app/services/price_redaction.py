@@ -14,6 +14,8 @@ import json
 import re
 from typing import Any, Optional
 
+from sqlalchemy import false as sa_false
+
 # Keys whose value is money, wherever they sit in a logged value.
 PRICE_KEYS = frozenset((
     # the frozen planned P&L of an internal approval (spec §16), whole
@@ -219,6 +221,10 @@ async def price_scope(session, viewer, stmt):
     if await PriceViewer(session, viewer)._base():
         return stmt
     from app.models.change import ChangeRequest
+    from app.services.change_people import is_acting
+    if is_acting(viewer):
+        # acting as a department drops the personal lead right (C32)
+        return stmt.where(sa_false())
     return stmt.where(ChangeRequest.lead_id == viewer.id)
 
 

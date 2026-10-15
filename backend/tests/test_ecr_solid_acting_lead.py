@@ -57,3 +57,18 @@ async def test_lead_without_acting_keeps_the_rights(session_factory, seed):
             s, change, eng) is None
         assert await ImplementationService.readable_department_ids(
             s, change, eng) is None
+
+
+async def test_price_scope_drops_the_lead_while_acting(session_factory, seed):
+    from app.services.price_redaction import price_scope
+    dev_id, cid = await _setup(session_factory, seed)
+    async with session_factory() as s:
+        user = await s.get(User, seed["admin_id"])
+        user.acts_as_department_id = dev_id
+        rows = (await s.execute(await price_scope(
+            s, user, select(ChangeRequest.id)))).scalars().all()
+        assert rows == []
+        user.acts_as_department_id = None
+        rows = (await s.execute(await price_scope(
+            s, user, select(ChangeRequest.id)))).scalars().all()
+        assert rows == [cid]
