@@ -513,6 +513,8 @@ export type ChangeTaskKind =
   | 'customer_flip'
   /** §1: a new index on a part the change carried: the department rechecks. */
   | 'assessment_recheck'
+  /** §6 [R3] scope change card: the lead decides, Sales revises or tells. */
+  | 'scope_change_decide' | 'revise_offer' | 'scope_change_tell'
   /** §1: the lead: does the new index add parts or departments? */
   | 'index_decision'
   /** §1: Sales: the new index replaces the old one; deadline holds? */
@@ -611,6 +613,11 @@ export interface ChangeTask {
   assumed_open?: number;
   /** §7 still talking: the next contact date of a customer_response row. */
   next_contact?: string | null;
+  /** §6: the supplement a customer_response row is about. */
+  supplement_version?: number | null;
+  /** §6 [R3]: the scope change card a row belongs to; revise_offer past approval. */
+  scope_change_id?: number | null;
+  supplement?: boolean;
   to_status?: ChangeStatus | null;
   open_count?: number;
   target_tab?: string | null;
@@ -1694,4 +1701,27 @@ export interface SupplierWait {
   chip: string
   closed_at?: string | null
   close_reason?: 'received' | 'price_on_estimate' | 'not_needed' | null
+}
+
+/** ECR-solid §6 [R3]: a scope change card (no prices in it). */
+export interface ScopeChangeCard {
+  id: number
+  kind: 'customer' | 'customer_index' | 'po_differs'
+  status: 'requested' | 'recosting' | 'ready' | 'offered' | 'accepted' | 'refused' | 'dropped' | 'moved' | 'absorbed'
+  part_number?: string | null
+  what: string
+  expects_by?: string | null
+  evidence_ref?: string | null
+  post_accept: boolean
+  requested_by_name?: string | null
+  requested_at: string
+  decided_by_name?: string | null
+  decision_note?: string | null
+  departments: { id: number; name: string; done: boolean }[]
+  waiting_for: string[]
+  recost_due?: string | null
+  offer_id?: number | null
+  new_change_id?: number | null
+  told_at?: string | null
+  told_ref?: string | null
 }

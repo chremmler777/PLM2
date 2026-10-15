@@ -291,6 +291,8 @@ const TASK_TAB: Record<string, string> = {
   // the routing change is decided on the assessments tab; a 'not feasible'
   // answer on the overview's why-blocked panel (override, reroute, reject)
   routing_deviation_decision: '?tab=assessments', not_feasible: '?tab=overview',
+  // §6 [R3] scope change cards: the lead and Sales on the offer tab
+  scope_change_decide: '?tab=offer', revise_offer: '?tab=offer', scope_change_tell: '?tab=offer',
 };
 
 /** Where a task row leads: its tab, plus `task=<kind>` so the change opens
@@ -427,7 +429,19 @@ const taskHint = (task: ChangeTask): string | null => {
         : newest;
     }
     case 'customer_response':
-      return t('tasks.hint.customer_response');
+      return task.supplement_version != null
+        ? t('tasks.hint.supplement_response').replace('{v}', String(task.supplement_version))
+        : t('tasks.hint.customer_response');
+    case 'scope_change_decide':
+      return t('tasks.hint.scope_change_decide').replace('{x}', task.reason ?? '');
+    case 'revise_offer':
+      return t(task.supplement ? 'tasks.hint.revise_supplement' : 'tasks.hint.revise_offer').replace('{x}', task.reason ?? '');
+    case 'scope_change_tell':
+      return t('tasks.hint.scope_change_tell').replace('{x}', task.reason ?? '');
+    case 'costing_update':
+      return task.scope_change_id != null
+        ? t('tasks.hint.costing_update_scope').replace('{x}', task.reason ?? '')
+        : task.reason ?? null;
     case 'confirm_assumption':
       return t('tasks.hint.confirm_assumption').replace('{x}', task.reason ?? '');
     case 'ppap_decision':

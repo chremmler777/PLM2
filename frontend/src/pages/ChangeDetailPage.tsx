@@ -53,6 +53,7 @@ import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEd
 import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import IndexFollowups from '../components/changes/IndexFollowups';
+import ScopeChangeCards from '../components/changes/offer/ScopeChangeCards';
 import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/changes/CaptureV2';
 import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
 import { useDepartments } from '../hooks/queries/useWorkflows';
@@ -1286,6 +1287,13 @@ export default function ChangeDetailPage() {
           {change.status === 'costing' && (
             <p data-testid="costing-stage" className="text-xs text-slate-400">{t('costing.stageBody')}</p>
           )}
+          {/* §6 [R3]: a scope change the department re-costs (no prices on it) */}
+          {change.commercial_v2 !== false && change.customer_relevant
+            && ['quoted', 'approved', 'in_implementation', 'in_validation'].includes(change.status) && (
+            <ScopeChangeCards changeId={changeId} status={change.status} canRequest={false}
+              mayDecide={false} isSales={false} myDepartmentIds={myActions?.memberships ?? []}
+              routed={[]} attachments={[]} />
+          )}
           {/* Per-department pipeline: costing runs alongside the assessment. */}
           {change.status === 'in_assessment' && (
             <p data-testid="costing-early" className="text-xs text-slate-400">{t('costing.earlyBody')}</p>
@@ -1348,6 +1356,15 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
+      {effectiveTab === 'offer' && change.commercial_v2 !== false && change.customer_relevant && (
+        <ScopeChangeCards changeId={changeId} status={change.status}
+          canRequest={isSalesMember || isAdmin || isChangeLead || isPmMember}
+          mayDecide={isAdmin || isChangeLead || isPmMember}
+          isSales={isSalesMember} myDepartmentIds={myActions?.memberships ?? []}
+          routed={(change.assessments ?? []).map((a) => ({ id: a.department_id,
+            name: departments.find((d) => d.id === a.department_id)?.name ?? `#${a.department_id}` }))}
+          attachments={change.attachments ?? []} />
+      )}
       {effectiveTab === 'offer' && (
         <OfferTab change={change}
           canWrite={canEditQuotedPrice} canSeePrices={canSeeCosts}

@@ -1184,6 +1184,13 @@ class OfferService:
         received = received_at or business_today()
         OfferService._check_received(received)
         data = copy.deepcopy(offer.data or {})
+        # §6 [R3]: cards ready go into this version; one still being
+        # re-costed is named on it, "subject to final costing", and stays open
+        from app.services.scope_change_service import ScopeChangeService
+        for line in await ScopeChangeService.on_offer_sent(session, change, offer, user.id):
+            free = [f for f in data.get("free_fields") or [] if isinstance(f, dict)]
+            if not any(f.get("label") == line for f in free):
+                data["free_fields"] = free + [{"label": line, "value": "", "amount": 0}]
         data[SNAPSHOT_KEY] = snapshot
         if listed is not None:
             data[SEND_KEY] = listed

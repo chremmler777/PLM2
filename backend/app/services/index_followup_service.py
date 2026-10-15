@@ -320,6 +320,28 @@ class IndexFollowupService:
             return
         if change.status in ("captured", "scoping"):
             return
+        if cm_switches.on("COMMERCIAL_V2") and change.status in (
+                "quoted", "approved", "in_implementation", "in_validation"):
+            # §1 [R4]: the §6 scope change card, type "customer index" (P/N
+            # + new index prefilled), re-costed by the departments with effect
+            from app.models.part import Part
+            from app.services import scope_change_service as scs
+            part = await session.get(Part, recheck.part_id) if recheck.part_id else None
+            number = part.part_number if part else None
+            card = next((c for c in await scs.open_cards(session, change)
+                         if c.kind == "customer_index" and c.part_number == number
+                         and c.status == "recosting"), None)
+            if card is not None:
+                await scs.ScopeChangeService._start_recost(
+                    session, change, card, [recheck.department_id], user.id)
+            else:
+                await scs.ScopeChangeService.request(
+                    session, change, user, kind="customer_index", system=True,
+                    part_number=number,
+                    what=f"Customer index {recheck.to_revision} (was "
+                         f"{recheck.from_revision}): effect for {dept}",
+                    department_ids=[recheck.department_id], recheck_id=recheck.id)
+            return
         prior = set(change.scope_change_department_ids or [])
         change.scope_changed_after_quote = True
         change.scope_changed_at = datetime.utcnow()

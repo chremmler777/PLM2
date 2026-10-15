@@ -205,6 +205,7 @@ export const salesChapter: ContentChapter = {
             ['Validation issue, customer to be informed:', '"Record customer decision": "Accepts the deviation", "Requires a fix", "New timing" or "Pending". On a concession you file the customer\'s mail into the issue; a Quality member then decides it (you get no "Accepts the deviation" there).'],
             ['A fix the customer pays:', 'you get the task to quote it. "Quote the fix", then "Fix quoted to the customer".'],
             ['Release:', 'tick "Customer informed of the implementation date / first shipment".'],
+            ['"Customer wants to add or change something"', 'from "Quoted" on, on the Offer tab: the P/N (if a part), what, by when, and the customer\'s mail (or its reference). The lead accepts it (the departments re-cost it, the card says who it waits for) or refuses it (you tell the customer and record the mail). When the last department re-costed, you send a new version (after approval: a supplement). A version sent before that says "subject to final costing". Approval waits while a scope change is open.'],
             ['"Send supplement"', 'once the change is approved, what changes in price goes to the customer as a supplement: only the positions that changed since the accepted offer. The change keeps its status; the price is open until the customer accepts the supplement (record it under "Customer response" like any offer) or it is absorbed. Declined: absorb it, or the lead puts the change on hold.'],
           ],
         },

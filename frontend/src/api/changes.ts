@@ -1,5 +1,5 @@
 import client from './client';
-import type {
+import type { ScopeChangeCard,
   ChangeRequest, ChangeDetail, ChangeTask,
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
@@ -386,6 +386,20 @@ export const changesApi = {
   needByTell: (id: number, body: { ref?: string; mail_id?: number }) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/need-by/tell`, body).then((r) => r.data),
   /** §1: new customer indices on parts this change carried, and their follow-ups. */
+  // §6 [R3] scope change cards
+  scopeChanges: (id: number) =>
+    client.get<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes`).then((r) => r.data),
+  requestScopeChange: (id: number, body: {
+    what: string; part_number?: string; expects_by?: string; attachment_id?: number; ref?: string
+  }) => client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes`, body).then((r) => r.data),
+  decideScopeChange: (id: number, cardId: number, body: {
+    decision: 'accept' | 'refuse' | 'new_change'; department_ids?: number[]; note?: string
+  }) => client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/decide`, body).then((r) => r.data),
+  scopeRecosted: (id: number, cardId: number, departmentId: number) =>
+    client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/recosted`,
+      { department_id: departmentId }).then((r) => r.data),
+  scopeTold: (id: number, cardId: number, ref: string) =>
+    client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/told`, { ref }).then((r) => r.data),
   indexFollowups: (id: number) =>
     client.get<IndexFollowup[]>(`/v1/changes/${id}/index-followups`).then((r) => r.data),
   answerRecheck: (id: number, recheckId: number, body: {

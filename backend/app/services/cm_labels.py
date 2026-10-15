@@ -92,6 +92,13 @@ TASK_KIND = {
     "costing_update": ("Costing update after scope change", "Kalkulation nach Umfangsänderung"),
     "create_quote": ("Create the quote", "Angebot erstellen"),
     "customer_response": ("Record the customer response", "Kundenantwort erfassen"),
+    # §6 [R3] the scope change card
+    "scope_change_decide": ("Scope change: accept or refuse",
+                            "Umfangsänderung: annehmen oder ablehnen"),
+    "revise_offer": ("Scope change re-costed: revise the offer",
+                     "Umfangsänderung kalkuliert: Angebot überarbeiten"),
+    "scope_change_tell": ("Tell the customer: scope change refused",
+                          "Kunden informieren: Umfangsänderung abgelehnt"),
     "offer_expiring": ("Offer expiring", "Angebot läuft ab"),
     "update_quote": ("Update the quote", "Angebot aktualisieren"),
     "bank_build": ("Decide the bank build", "Bankbau entscheiden"),

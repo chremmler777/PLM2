@@ -128,6 +128,9 @@ STAGE_TASK_TAB = {
     "validation_check": "release", "advance": "overview",
     "deviation_decision": "overview", "routing_deviation_decision": "assessments",
     "not_feasible": "overview",
+    # §6 [R3] scope change cards
+    "scope_change_decide": "commercial", "revise_offer": "commercial",
+    "scope_change_tell": "commercial",
 }
 
 # A finished change's D1 master data and gates are the record: closed,
@@ -599,6 +602,8 @@ class ChangeService:
                 f"Open price absorbed (#{dev.id}): {dev.reason}", actor.id,
                 field_name="price_open", old_value=True, new_value=False,
                 notes=dev.reason)
+            from app.services.scope_change_service import ScopeChangeService
+            await ScopeChangeService.on_absorbed(session, change, actor.id)
         if decision == "approved" and dev.to_status == "approved":
             # §7: the OK of a price drop may be the last thing approval waited on
             await ChangeService.try_auto_approve(session, change, actor.id)
@@ -1627,6 +1632,20 @@ class ChangeService:
                                for d in change.transition_deviations
                                if d.guard_key == "price_open" and d.status == "pending"),
                               None))
+        if to in ("approved", "in_implementation", "released") and cm_switches.on("COMMERCIAL_V2"):
+            # §6 [R3]: an open scope change card (SOFT, PM / Management OK)
+            from app.services import scope_change_service as scs
+            text = await scs.guard_text(session, change, to)
+            if text:
+                add("scope_change", "soft", rule="scope_change_uncovered",
+                    detail=text.removeprefix("Scope change not covered by an offer: "))
+            if to == "approved" and change.status == "quoted":
+                # §7 [R4]: a lower accepted total waits for its OK
+                drop = await ChangeService.price_drop_state(session, change)
+                if drop is not None:
+                    add("price_drop", "soft", rule="price_drop",
+                        detail=f"v{drop['version']} below v{drop['prev_version']}",
+                        who="Project Management or Management")
         if change.status == "rejected":
             if not await ChangeService.has_rejection_letter(session, change):
                 add("rejection_letter", "hard")
@@ -1649,6 +1668,7 @@ class ChangeService:
         "validation_issues": "Quality", "validation_open": "Quality",
         "validation_failed": "Quality",
         "ppap_decision": "Quality", "customer_flip": "sales",
+        "scope_change": "Project Management",
     }
 
     @staticmethod
@@ -1772,6 +1792,12 @@ class ChangeService:
                              f"Accepted v{drop['version']} at {drop['total']:.2f} is "
                              f"below v{drop['prev_version']} at {drop['prev_total']:.2f}: "
                              "a Project Management or Management member gives the OK"))
+        # §6 [R3] SOFT scope_change_uncovered: an open scope change card
+        if to_status in ("approved", "in_implementation", "released"):
+            from app.services import scope_change_service
+            text = await scope_change_service.guard_text(session, change, to_status)
+            if text:
+                out.append(R("scope_change_uncovered", text))
         # 'quoted' means the offer is out with the customer, so by then there
         # is a price. Writing it is the whole content of the 'quoting' stage.
         if to_status == "quoted":
@@ -3342,7 +3368,7 @@ class ChangeService:
         kind = STAGE_TASK_EQUIV.get(a["kind"], a["kind"])
         return (kind, a.get("assessment_id"), a.get("issue_id"),
                 a.get("escalation_id"), a.get("action_id"), a.get("concern_id"),
-                a.get("deviation_id"), a.get("side"),
+                a.get("deviation_id"), a.get("side"), a.get("scope_change_id"),
                 a.get("department_id") if kind in (
                     "costing_input", "costing_update", "plan_feedback",
                     "info_ack", "release_check", "progress_report",
@@ -4043,11 +4069,54 @@ class ChangeService:
                             "target_tab": "scoping",
                         })
 
+        # §6 [R3] scope change cards: the lead decides, the departments
+        # re-cost, Sales revises the offer or tells the customer. One query.
+        from app.services import scope_change_service as _scs
+        card_rows = await _scs.cards(db, [c.id for c in open_changes
+                                          if c.status in _scs.CARD_STATUSES
+                                          or c.status == "released"])
+        carded = {k.change_id for k in card_rows}
+        by_change = {c.id: c for c in open_changes}
+        for k in card_rows:
+            c = by_change.get(k.change_id)
+            if c is None:
+                continue
+            what = _scs.label(k)
+            if k.status == "requested" and (
+                    holds_lead(c, user) or (c.lead_id is None and is_pm_member)):
+                tasks.append({**await _base(c), "kind": "scope_change_decide",
+                              "scope_change_id": k.id, "reason": what,
+                              "needs_you": True, "target_tab": "offer",
+                              "since": k.requested_at})
+            elif k.status == "recosting":
+                for d in sorted(set(k.department_ids or []) - set(k.departments_done or [])):
+                    if d in dep_ids:
+                        due = k.recost_due
+                        tasks.append({**await _base(c), "kind": "costing_update",
+                                      "department_id": d, "scope_change_id": k.id,
+                                      "reason": what, "since": k.decided_at or k.requested_at,
+                                      **({"due_date": datetime(due.year, due.month, due.day, 23, 59)}
+                                         if due else {})})
+            elif k.status == "ready" and in_sales:
+                tasks.append({**await _base(c), "kind": "revise_offer",
+                              "scope_change_id": k.id, "reason": what,
+                              "supplement": c.status != "quoted", "target_tab": "offer",
+                              **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                                 if c.sales_owner_id not in (None, user.id) else {})})
+            elif k.status == "refused" and k.told_at is None and in_sales:
+                tasks.append({**await _base(c), "kind": "scope_change_tell",
+                              "scope_change_id": k.id, "reason": what,
+                              "note": k.decision_note, "target_tab": "offer",
+                              **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                                 if c.sales_owner_id not in (None, user.id) else {})})
+
         # Post-quote scope change (spec §16): costing reopens for the affected
         # departments only, until a newer offer or an approved deviation covers it.
         if dep_ids:
             from app.services.early_stage_service import EarlyStageService as _ES
             for c in open_changes:
+                if c.id in carded:
+                    continue      # the cards carry the rows (above)
                 mine_depts = set(c.scope_change_department_ids or []) & dep_ids
                 if not (c.scope_changed_after_quote and mine_depts):
                     continue
@@ -6396,6 +6465,8 @@ class ChangeService:
             + f" ({evidence['ref']})", user_id,
             field_name="customer_response", new_value="accepted",
             notes=evidence.get("differs"))
+        from app.services.scope_change_service import ScopeChangeService
+        await ScopeChangeService.on_customer_answer(session, change, offer, True, user_id)
         if offer is not None and evidence.get("po_match") == "no":
             await ChangeService._on_po_differs(session, change, offer, evidence, user_id)
         await ChangeService.try_auto_approve(session, change, user_id)
@@ -6469,6 +6540,8 @@ class ChangeService:
             change.customer_next_contact = None
             change.price_open = True
             await session.flush()
+            from app.services.scope_change_service import ScopeChangeService
+            await ScopeChangeService.on_customer_answer(session, change, offer, False, user_id)
             await ChangeService.append_changelog(
                 session, change, "supplement_declined",
                 f"Supplement v{offer.version} declined by the customer "
@@ -6524,6 +6597,8 @@ class ChangeService:
         offer.answered_at, offer.answered_by = now, user_id
         change.customer_next_contact = None
         await session.flush()
+        from app.services.scope_change_service import ScopeChangeService
+        await ScopeChangeService.on_customer_answer(session, change, offer, True, user_id)
         await ChangeService.append_changelog(
             session, change, "supplement_accepted",
             f"Supplement v{offer.version} accepted by the customer ({evidence['ref']})",
@@ -6560,8 +6635,18 @@ class ChangeService:
     @staticmethod
     async def _on_po_differs(session: AsyncSession, change: ChangeRequest, offer,
                              evidence: dict, user_id: int) -> None:
-        """The PO differs from the offer (spec §7): the lead and the Sales
-        owner are told what differs; the §6 scope change card picks it up."""
+        """The PO differs from the offer (spec §7): it opens a scope change
+        card (type 'po_differs', the lead decides it); the lead and the Sales
+        owner are told what differs."""
+        from app.services import cm_switches
+        if cm_switches.on("COMMERCIAL_V2") and change.status in (
+                "quoted", "approved", "in_implementation", "in_validation"):
+            from app.services.scope_change_service import ScopeChangeService
+            actor = await session.get(User, user_id)
+            await ScopeChangeService.request(
+                session, change, actor, kind="po_differs", system=True,
+                what=f"PO differs from v{offer.version}: {evidence.get('differs')}",
+                ref=evidence.get("ref"))
         from app.services.notification_service import NotificationService
         people = [i for i in (change.lead_id, change.sales_owner_id)
                   if i is not None and i != user_id]

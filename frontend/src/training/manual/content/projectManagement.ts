@@ -207,6 +207,7 @@ export const pmChapter: ContentChapter = {
         },
         {
           points: [
+            ['"Scope change: accept or refuse"', 'Sales recorded what the customer wants to add or change. Accept it with the departments that re-cost it (the routed ones are preticked), or refuse it with a reason. After approval an added part can become its own linked change. While a scope change is open the approval, the start of implementation and the release wait (an override needs Project Management or Management).'],
             ['Your sign-off row', 'in My Tasks reads "Sign for offer v2: 4,200.00 EUR, margin 12.0 % (-3.1 pts vs v1); 2 unconfirmed assumptions". A new version sent after you signed takes your signature back: you are told to sign the new one.'],
             ['"Accepted total below the last offer"', 'Sales accepted a version cheaper than the one sent before it and said why. You (or Management) decide the override; never the person who asked. Your OK approves the change when the rest holds.'],
           ],

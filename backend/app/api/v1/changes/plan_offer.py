@@ -886,3 +886,120 @@ async def complete_change_lessons(
     out = await ReleaseService.state(db, change)
     await db.commit()
     return out
+
+
+# ----------------------------------------------------------------------
+# §6 [R3] scope change cards (COMMERCIAL_V2)
+# ----------------------------------------------------------------------
+class ScopeChangeIn(BaseModel):
+    what: str = Field(max_length=2000)
+    part_number: Optional[str] = Field(default=None, max_length=100)
+    expects_by: Optional[date] = None
+    attachment_id: Optional[int] = None
+    ref: Optional[str] = Field(default=None, max_length=255)
+
+
+class ScopeDecideIn(BaseModel):
+    decision: str                     # accept | refuse | new_change
+    department_ids: Optional[list[int]] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ScopeRecostedIn(BaseModel):
+    department_id: int
+
+
+class ScopeToldIn(BaseModel):
+    ref: str = Field(max_length=255)
+
+
+def _scope_http(e: Exception) -> HTTPException:
+    from app.services.scope_change_service import ScopeChangeForbidden
+    if isinstance(e, ScopeChangeForbidden):
+        return HTTPException(status_code=403, detail=str(e))
+    return HTTPException(status_code=400, detail=str(e))
+
+
+async def _scope_out(db, change):
+    from app.services.scope_change_service import ScopeChangeService
+    return await ScopeChangeService.serialize(db, change)
+
+
+@router.get("/{change_id}/scope-changes")
+async def list_scope_changes(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Every scope change card of the change (no prices in it)."""
+    change = await _change(db, change_id, current_user)
+    return await _scope_out(db, change)
+
+
+@router.post("/{change_id}/scope-changes")
+async def request_scope_change(
+    change_id: int, body: ScopeChangeIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales: "Customer wants to add or change something" (from quoted on)."""
+    from app.services.scope_change_service import ScopeChangeService
+    change = await _change(db, change_id, current_user)
+    try:
+        await ScopeChangeService.request(
+            db, change, current_user, what=body.what, part_number=body.part_number,
+            expects_by=body.expects_by, attachment_id=body.attachment_id, ref=body.ref)
+    except ChangeError as e:
+        raise _scope_http(e)
+    await db.commit()
+    return await _scope_out(db, change)
+
+
+@router.post("/{change_id}/scope-changes/{card_id}/decide")
+async def decide_scope_change(
+    change_id: int, card_id: int, body: ScopeDecideIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The lead: accept (departments re-cost), refuse, or (after approval,
+    an added part) its own linked change."""
+    from app.services.scope_change_service import ScopeChangeService
+    change = await _change(db, change_id, current_user)
+    try:
+        await ScopeChangeService.decide(
+            db, change, card_id, current_user, body.decision,
+            department_ids=body.department_ids, note=body.note)
+    except ChangeError as e:
+        raise _scope_http(e)
+    await db.commit()
+    return await _scope_out(db, change)
+
+
+@router.post("/{change_id}/scope-changes/{card_id}/recosted")
+async def scope_change_recosted(
+    change_id: int, card_id: int, body: ScopeRecostedIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A department's re-costing of the card is done."""
+    from app.services.scope_change_service import ScopeChangeService
+    change = await _change(db, change_id, current_user)
+    try:
+        await ScopeChangeService.recosted(db, change, card_id, current_user,
+                                          body.department_id)
+    except ChangeError as e:
+        raise _scope_http(e)
+    await db.commit()
+    return await _scope_out(db, change)
+
+
+@router.post("/{change_id}/scope-changes/{card_id}/told")
+async def scope_change_told(
+    change_id: int, card_id: int, body: ScopeToldIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales told the customer the scope change is refused."""
+    from app.services.scope_change_service import ScopeChangeService
+    change = await _change(db, change_id, current_user)
+    try:
+        await ScopeChangeService.told(db, change, card_id, current_user, body.ref)
+    except ChangeError as e:
+        raise _scope_http(e)
+    await db.commit()
+    return await _scope_out(db, change)

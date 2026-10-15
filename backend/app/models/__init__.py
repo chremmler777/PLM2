@@ -33,6 +33,7 @@ from app.models.change_plan import (
     ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation, ChangePlanLink,
 )
 from app.models.change_offer import ChangeOffer
+from app.models.change_scope import ChangeScopeChange
 from app.models.change_validation_issue import (
     ValidationIssue, ValidationIssueAction, ValidationIssueEscalation,
 )
@@ -128,6 +129,7 @@ __all__ = [
     "ChangePlanFeedback",
     "ChangePlanDeviation",
     "ChangeOffer",
+    "ChangeScopeChange",
     "ChangeActualCost",
     "ChangeInfoReceipt",
     "RevisionIntake", "ChangeReviewAnswer", "ChangeRecheck",

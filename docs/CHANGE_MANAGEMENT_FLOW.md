@@ -1141,6 +1141,51 @@ that override (`price_drop`, to `closed`) closes the open price. Sales'
 `customer_response` row names the supplement version. Switch off: no
 supplements (the offer is closed after acceptance).
 
+### The scope change card (ECR-solid §6 [R3], 2026-10-15)
+
+From `quoted` until validation the customer may add or change something
+(`change_scope_changes`, migration 133; `scope_change_service.py`; UI
+`ScopeChangeCards.tsx` on the Offer and Costing tabs, no prices on it). One
+card, three steps, an owner each:
+
+1. **Requested** (Sales, or the run team): "Customer wants to add or change
+   something": P/N (when a part), what, by when, and the customer's mail
+   filed on the change or its reference (5+ characters). The lead is told
+   (no lead: Project Management); My Tasks `scope_change_decide` (Needs you).
+2. **Re-costed**: the lead (run team) accepts with the departments that
+   re-cost it (preticked: the routed ones; only routed departments) or
+   refuses with a reason (Sales: `scope_change_tell`, then "Customer told"
+   with the mail reference). Accepting opens the departments' costing again
+   (the change's `scope_changed_after_quote` / `scope_change_department_ids`,
+   so `costing_position_service` lets them edit) with a `costing_update` row
+   per department, due in 2 working days (not after what the customer
+   expects); each marks "re-costed". The card reads "Waiting for: Toolshop
+   (by Thu)". The last one hands Sales `revise_offer` ("Send supplement"
+   after approval). After approval an added part may instead become its own
+   linked change (`new_change`: captured, `related_change_id` both ways, its
+   own quote and dates). An added part before approval joins the impacted set
+   through the impact editor (a logged edit after the quote).
+3. **Accepted**: the next offer or supplement sent while the card is ready
+   carries it (`offered`); the customer's answer to it settles the card
+   (`accepted`, or `dropped` on a decline). An offer sent while re-costing
+   runs prints "Scope change <P/N>: subject to final costing" (a free line
+   of 0) and covers nothing.
+
+Other sources: a recheck "effect" at quoted or later opens a card of type
+`customer_index` (P/N and the new index prefilled, the department with the
+effect re-costing at once; a second department joins the same card); a PO
+that differs from the offer at acceptance opens a `po_differs` card. A card
+opened after the customer's yes (`post_accept`) opens the price (HARD #9)
+instead of holding the approval; refusing it or moving it to its own change
+closes the price again when it was the card that opened it; an Absorb
+settles it (`absorbed`). **SOFT `scope_change_uncovered`** (override: a
+Project Management or Management member) holds `quoted -> approved` (cards
+opened before the yes, so automatic approval waits), `-> in_implementation`
+and `-> released` while a card is open. With cards, `scope_change_state`
+reads the cards; a change flagged before the cards keeps the old rule (a
+newer offer or an approved override covers it). Missing information on a
+card is a question (cut 2: bundled customer questions). Switch off: no cards.
+
 ### Timing validation at `approved` (2026-09-25)
 
 `approved` opens the Timing tab (`TimingTab.tsx`). The detailed plan is

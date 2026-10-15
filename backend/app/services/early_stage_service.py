@@ -474,6 +474,21 @@ class EarlyStageService:
         after it."""
         if not change.scope_changed_after_quote:
             return None
+        from app.services import scope_change_service as scs
+        cards = await scs.cards(session, [change.id])
+        if cards:
+            # §6 [R3]: with cards, the cards say it: covered once no card
+            # waits for re-costing or for the offer that carries it
+            from app.models.change_scope import SCOPE_UNCOSTED
+            uncovered = [c for c in cards if c.status in SCOPE_UNCOSTED]
+            return {
+                "changed_at": change.scope_changed_at,
+                "reason": change.scope_change_reason,
+                "department_ids": change.scope_change_department_ids or [],
+                "offer_version": None, "covered": not uncovered,
+                "covered_by_offer_version": None, "covered_by_deviation_id": None,
+                "cards": [c.id for c in uncovered],
+            }
         from app.models.change_offer import ChangeOffer
         offers = (await session.execute(
             select(ChangeOffer).where(ChangeOffer.change_id == change.id,

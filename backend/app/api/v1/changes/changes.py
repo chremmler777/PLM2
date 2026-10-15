@@ -500,7 +500,7 @@ async def my_change_tasks(
                t.get("concern_id"), t.get("issue_id"), t.get("check_key"),
                t.get("escalation_id"), t.get("action_id"),
                t.get("deviation_id"), t.get("side"),
-               t.get("recheck_id"), t.get("intake_id"),
+               t.get("recheck_id"), t.get("intake_id"), t.get("scope_change_id"),
                t.get("department_id") if t["kind"] in ("costing_input", "costing_update",
                                                         "plan_feedback", "info_ack",
                                                         "release_check", "progress_report",
