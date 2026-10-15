@@ -998,6 +998,22 @@ greys the customer option. `GET /changes/permissions` answers
 PM start any change; an internal one raised by Sales is led by the project's
 PM).
 
+**Sales owner (ECR-solid C10).** `change_requests.sales_owner_id` names who
+owns the customer side: the raiser when in Sales, else the project's Sales
+responsible (project team), else nobody; internal and mother-plant changes
+have none (an internal change made customer-relevant gets the project's Sales
+contact; the other way clears it). Sales and Project Management change it
+(`PATCH sales_owner_id`, an active Sales member of the organization only,
+changelog `sales_owner_changed`; candidates: `GET
+/changes/{id}/sales-owner-candidates`). Sales tasks still show to all of
+Sales from creation: the owner sees them as "main", the rest of Sales as
+"backup" with the owner's name, and anyone in Sales may act. The Status card
+shows the owner under the lead; the list shows it beside the Sales badge in
+the Sales stages. **"Mine"** on the list = lead, raiser, Sales owner, or one
+of my departments owes an open R/A assessment or an unfinalized cost input
+(`ChangeService.owing_change_ids`, from the loaded assessments, no query per
+change).
+
 **Run team (ECR-solid C1, 2026-10-14, switch `COMMERCIAL_V2`).** The run
 team is the change lead (`holds_lead`: an admin acting as a department is not
 the lead), Project Management members and admins. Besides reject, cancel,

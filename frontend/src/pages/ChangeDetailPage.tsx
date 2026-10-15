@@ -12,6 +12,7 @@ import { planApi } from '../api/changePlan';
 import AssessmentBuckets from '../components/changes/AssessmentBuckets';
 import { resolveWaitStates, earlyStageWaits, deriveAssessmentState, revisionsInCheckOf } from '../lib/waitStates';
 import LeadPicker from '../components/changes/LeadPicker';
+import SalesOwnerPicker from '../components/changes/SalesOwnerPicker';
 import { mayTransition, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
 import { plantText } from '../lib/plantName';
 import { assessmentVerdictLabel, changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
@@ -821,11 +822,21 @@ export default function ChangeDetailPage() {
         + 'An approved deviation is required to proceed.' });
       setBlockedSeq((n) => n + 1);
     },
-    leadSlot: <LeadPicker change={change}
-      canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
-        && (isAdmin || isChangeLead || isPmMember)}
-      viewer={!actingAs && userId != null ? { id: userId, name: t('cockpit.leadMe') } : null}
-      isAdmin={isAdmin} />,
+    leadSlot: (
+      <>
+        <LeadPicker change={change}
+          canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
+            && (isAdmin || isChangeLead || isPmMember)}
+          viewer={!actingAs && userId != null ? { id: userId, name: t('cockpit.leadMe') } : null}
+          isAdmin={isAdmin} />
+        {/* C10: only a customer change has a Sales owner. */}
+        {change.customer_relevant && change.origin !== 'mother_plant' && (
+          <SalesOwnerPicker change={change}
+            canEdit={!['closed', 'cancelled', 'released'].includes(change.status)
+              && (isAdmin || isSalesMember || isPmMember)} />
+        )}
+      </>
+    ),
   };
 
   // "More actions" menu keys: Escape closes it and gives focus back to its

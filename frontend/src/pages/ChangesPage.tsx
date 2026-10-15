@@ -63,12 +63,17 @@ const STATUS_ORDER = Object.keys(STATUS_LABELS);
 
 const statusText = (c: ChangeRequest): string => endLabel(c) ?? STATUS_LABELS[c.status] ?? c.status;
 
+/** C10: in a Sales stage the named Sales owner holds the change. */
+const salesOwnerNow = (c: ChangeRequest): string | null =>
+  stageResponsibleKey(c.status, c.origin) === 'role.sales' ? (c.sales_owner_name ?? null) : null;
+
 /** Who holds the change now: the server's word, else the stage's role. */
 const ownerText = (c: ChangeRequest): string => {
   if (endStateOf(c)) return '';
   if (c.stage_owner) return c.stage_owner;
   const key = stageResponsibleKey(c.status, c.origin);
-  return key ? t(key) : '';
+  const who = salesOwnerNow(c);
+  return key ? (who ? `${t(key)} ${who}` : t(key)) : '';
 };
 
 /** Excel-like sort and filter per column (spec: the change list). The keys
@@ -313,7 +318,16 @@ export default function ChangesPage() {
                   <td className="px-4 py-3 whitespace-nowrap" data-testid={`change-owner-${c.id}`}>
                     {ended ? <span className="text-slate-600">-</span>
                       : c.stage_owner ? <span className="text-slate-300">{c.stage_owner}</span>
-                        : <StageResponsibleBadge status={c.status} origin={c.origin} />}
+                        : (
+                          <>
+                            <StageResponsibleBadge status={c.status} origin={c.origin} />
+                            {salesOwnerNow(c) && (
+                              <span className="ml-1.5 text-slate-300" data-testid={`change-sales-owner-${c.id}`}>
+                                {salesOwnerNow(c)}
+                              </span>
+                            )}
+                          </>
+                        )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap" data-testid={`change-priority-${c.id}`}>
                     {c.priority !== 'medium' && (

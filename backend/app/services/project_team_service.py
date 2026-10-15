@@ -329,8 +329,20 @@ class TeamRoles:
         return "backup", resp[1]
 
     async def annotate(self, row: dict, project_id: Optional[int],
-                       owned: bool = False) -> dict:
-        role, main = await self.role(project_id, await self.row_department(row), owned)
+                       owned: bool = False,
+                       sales_owner: Optional[tuple[int, str]] = None) -> dict:
+        """sales_owner (C10): (id, name) of the change's Sales owner. On a
+        Sales row it takes the project responsible's place: the owner sees
+        it as main, the rest of Sales as backup with the owner's name."""
+        dept = await self.row_department(row)
+        if (sales_owner is not None and dept is not None
+                and dept == await self.department_id(SALES)):
+            if owned or sales_owner[0] == self.user_id:
+                role, main = "main", None
+            else:
+                role, main = "backup", sales_owner[1]
+        else:
+            role, main = await self.role(project_id, dept, owned)
         row["role"] = role
         row["main_name"] = main
         return row

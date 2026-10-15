@@ -146,6 +146,10 @@ async def create_change(
         lead_id = current_user.id
     if lead_id is not None:
         await _require_org_user(db, lead_id, project_org)
+    # C10: a customer change raised by Sales is owned by its raiser.
+    from app.services.early_stage_service import EarlyStageService as _ESS
+    raiser_owner = (current_user.id if not internal and not mother_plant
+                    and await _ESS._member_of(db, current_user, "Sales") else None)
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,
@@ -156,6 +160,7 @@ async def create_change(
             origin=body.origin, mother_plant_name=body.mother_plant_name,
             mother_plant_ref=body.mother_plant_ref,
             mother_plant_sop=body.mother_plant_sop,
+            sales_owner_id=raiser_owner,
         )
         # Spec §16: the impacted items travel with the capture, in the same
         # transaction, so a change never exists half-captured.
@@ -201,12 +206,16 @@ async def list_changes(
     from_intake = set((await db.execute(
         select(RevisionIntake.change_id).where(
             RevisionIntake.change_id.is_not(None)))).scalars().all())
+    owing = await ChangeService.owing_change_ids(db, current_user, changes)
     for change in changes:
         change.deadline_state = await ChangeService.deadline_state(db, change)
         row = ChangeResponse.model_validate(change)
         row.from_intake = change.id in from_intake
-        # "Mine" filter (spec §16): the caller leads or raised it.
-        row.is_mine = not acting and current_user.id in (change.lead_id, change.raised_by)
+        # "Mine" filter (spec §16, C10): the caller leads, raised or owns the
+        # customer side of it, or one of their departments owes work here.
+        row.is_mine = (not acting and current_user.id in (
+            change.lead_id, change.raised_by, change.sales_owner_id)) \
+            or change.id in owing
         if not await viewer.may_read(change):
             redact_change_out(row)
         out.append(row)
@@ -392,6 +401,8 @@ async def my_change_tasks(
     from app.services import cm_labels
     status_of = {c.id: c.status for c in open_changes}
     lead_of = {c.id: c.lead_id for c in open_changes}
+    sales_owner_of = {c.id: (c.sales_owner_id, c.sales_owner_name or "")
+                      for c in open_changes if c.sales_owner_id is not None}
     acting = getattr(current_user, "acts_as_department_id", None) is not None
     # The caller's departments' RASIC letters per change (spec §16 follow-up).
     letters: dict[int, set] = {}
@@ -426,12 +437,19 @@ async def my_change_tasks(
         t.setdefault("status", status_of.get(t["change_id"]))
         t["rasic_letters"] = sorted(letters.get(t["change_id"], set()),
                                     key="RASCI".index)
+        owner = sales_owner_of.get(t["change_id"])
         t["is_mine"] = bool(t.get("mine")) or (
             not acting and lead_of.get(t["change_id"]) == current_user.id)
         # Project team (spec §18): "main" rows count on the badge and the
         # list header; "backup" rows (another responsible leads this role
-        # on the project) stay listed, muted, with the main's name.
-        await team.annotate(t, t.get("project_id"), owned=t["is_mine"])
+        # on the project) stay listed, muted, with the main's name. A Sales
+        # row names the change's Sales owner instead (C10).
+        await team.annotate(t, t.get("project_id"), owned=t["is_mine"],
+                            sales_owner=owner)
+        if owner is not None and not acting and owner[0] == current_user.id \
+                and t["role"] == "main" and await team.row_department(t) \
+                == await team.department_id("Sales"):
+            t["is_mine"] = True
         t.pop("role_department_id", None)
         unique.append(t)
     tasks = unique
@@ -1657,6 +1675,8 @@ async def set_assessment_due_date(
 _PATCH_RIGHTS = {
     # the lead hands the change over; PM re-assigns it
     "lead_id": ("lead", "pm"),
+    # C10: Sales hands the customer side over; PM re-assigns it
+    "sales_owner_id": ("sales", "pm"),
     # money: the cost roles
     "estimated_cost": ("lead", "pm", "sales"),
     "pnl_note": ("lead", "pm", "sales"),
@@ -1749,6 +1769,32 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
                 detail=f"Only {who} or an admin may change {key}")
 
 
+async def _require_sales_owner(db: AsyncSession, change, user_id: int,
+                               actor: User) -> None:
+    """C10: the owner is an active Sales member of the change's organization,
+    on a customer change; the move is in the changelog."""
+    from app.services import mother_plants as mp
+    if not change.customer_relevant or mp.is_mother_plant(change):
+        raise HTTPException(status_code=400,
+                            detail="An internal change has no Sales owner")
+    owner = await _require_org_user(db, user_id,
+                                    await _project_org_id(db, change.project_id))
+    from app.models.workflow import Department, UserDepartment
+    in_sales = (await db.execute(
+        select(UserDepartment.user_id).join(
+            Department, Department.id == UserDepartment.department_id)
+        .where(UserDepartment.user_id == owner.id, Department.name == "Sales")
+    )).first() is not None
+    if not in_sales:
+        raise HTTPException(status_code=400,
+                            detail="The Sales owner must be a member of Sales")
+    await ChangeService.append_changelog(
+        db, change, "sales_owner_changed",
+        f"Sales owner {change.sales_owner_id} -> {owner.id}", actor.id,
+        field_name="sales_owner_id", old_value=change.sales_owner_id,
+        new_value=owner.id)
+
+
 @router.patch("/{change_id}", response_model=ChangeResponse)
 async def update_change(
     change_id: int, body: ChangeUpdate,
@@ -1782,6 +1828,10 @@ async def update_change(
             db, change, "lead_changed",
             f"Change lead {change.lead_id} -> {new_lead.id}", current_user.id,
             field_name="lead_id", old_value=change.lead_id, new_value=new_lead.id)
+    if "sales_owner_id" in fields and fields["sales_owner_id"] is not None \
+            and fields["sales_owner_id"] != change.sales_owner_id:
+        await _require_sales_owner(db, change, fields["sales_owner_id"],
+                                   current_user)
     # A hand-typed title stops following the lead item (spec §16).
     if fields.get("title") is not None and fields["title"] != change.title:
         change.title_auto = False

@@ -40,6 +40,8 @@ class ChangeCreate(BaseModel):
 
 class ChangeUpdate(BaseModel):
     title: Optional[str] = None
+    # C10: Sales and Project Management hand the customer side over.
+    sales_owner_id: Optional[int] = None
     reason: Optional[str] = Field(None, max_length=REASON_MAX_LENGTH)
     description: Optional[str] = None
     priority: Optional[str] = None
@@ -286,6 +288,11 @@ class ChangeResponse(BaseModel):
     status: str
     lead_id: Optional[int] = None
     lead_name: Optional[str] = None
+    # C10: the named Sales owner (NULL on internal changes).
+    sales_owner_id: Optional[int] = None
+    sales_owner_name: Optional[str] = None
+    # HARD #9 (ECR-solid): a price still open after approval.
+    price_open: bool = False
     raised_by: int
     customer_response: str
     pm_signed_by: Optional[int] = None
@@ -428,6 +435,7 @@ class ChangeResponse(BaseModel):
             row = {k: v for k, v in vars(data).items() if not k.startswith("_")}
             row["affected_plant_ids"] = plant_ids
             row["lead_name"] = data.lead_name
+            row["sales_owner_name"] = data.sales_owner_name
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
             row["impact_confirm_step"] = data.impact_confirm_step
             row["estimated_weight_by_name"] = data.estimated_weight_by_name

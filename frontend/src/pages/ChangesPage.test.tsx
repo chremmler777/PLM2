@@ -198,6 +198,18 @@ describe('ChangesPage list polish (spec §16)', () => {
     expect(within(screen.getByTestId('change-owner-1')).getByTestId('stage-responsible')).toBeDefined()
   })
 
+  it('C10: a Sales stage names the Sales owner beside the badge, other stages do not', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue([
+      row({ id: 1, status: 'quoting', sales_owner_id: 4, sales_owner_name: 'Sally Sales' }),
+      row({ id: 2, change_number: 'GB-CM-0002', status: 'in_assessment', sales_owner_id: 4,
+        sales_owner_name: 'Sally Sales' }),
+    ] as never)
+    wrap()
+    await screen.findByText('GB-CM-0002')
+    expect(screen.getByTestId('change-sales-owner-1').textContent).toBe('Sally Sales')
+    expect(screen.queryByTestId('change-sales-owner-2')).toBeNull()
+  })
+
   it('shows Rejected, Rejected closed and Canceled distinctly, without a deadline chip', async () => {
     vi.mocked(changesApi.list).mockResolvedValue([
       row({ id: 1, status: 'rejected', active_deadline: 'quote', required_by_date: '2020-01-01', deadline_state: 'overdue' }),

@@ -47,6 +47,12 @@ export const changesApi = {
   setLead: (id: number, leadId: number | null) =>
     client.patch<ChangeRequest>(`/v1/changes/${id}`, { lead_id: leadId }).then((r) => r.data),
 
+  /** C10: active Sales members, the current owner and the project's Sales contact first. */
+  salesOwnerCandidates: (id: number) =>
+    client.get<LeadCandidate[]>(`/v1/changes/${id}/sales-owner-candidates`).then((r) => r.data),
+  setSalesOwner: (id: number, userId: number) =>
+    client.patch<ChangeRequest>(`/v1/changes/${id}`, { sales_owner_id: userId }).then((r) => r.data),
+
   /** The department's unfinished checklist, kept server side (spec §16 P1 1). */
   saveAssessmentDraft: (id: number, assessmentId: number, draft: Record<string, unknown>) =>
     client.put(`/v1/changes/${id}/assessments/${assessmentId}/draft`, { draft })

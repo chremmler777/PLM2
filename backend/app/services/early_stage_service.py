@@ -954,6 +954,41 @@ class EarlyStageService:
         return sorted(out, key=lambda r: (
             not r["is_current"], not r["is_default"], r["name"].lower()))
 
+    @staticmethod
+    async def sales_owner_candidates(session: AsyncSession,
+                                     change: ChangeRequest) -> list[dict]:
+        """C10: [{id, name, is_default, is_current}] for the Sales owner
+        picker: active Sales members of the change's organization, the
+        current owner first, then the project's Sales responsible."""
+        from app.models.workflow import UserDepartment
+        from app.services.change_people import change_org_id
+        from app.services.project_team_service import ProjectTeamService
+        sales_id = (await session.execute(
+            select(Department.id).where(Department.name == "Sales"))).scalar_one_or_none()
+        if sales_id is None:
+            return []
+        q = (select(User).join(UserDepartment, UserDepartment.user_id == User.id)
+             .where(UserDepartment.department_id == sales_id, User.is_active.is_(True)))
+        org_id = await change_org_id(session, change)
+        if org_id is not None:
+            q = q.where(User.organization_id == org_id)
+        default_id = await ProjectTeamService.responsible_user_id(
+            session, change.project_id, "Sales")
+        users = (await session.execute(q)).scalars().all()
+        counts: dict[str, int] = {}
+        for u in users:
+            n = (u.full_name or u.username).lower()
+            counts[n] = counts.get(n, 0) + 1
+        out = []
+        for u in users:
+            name = u.full_name or u.username
+            if counts[name.lower()] > 1 and u.username and u.username != name:
+                name = f"{name} ({u.username})"
+            out.append({"id": u.id, "name": name, "is_default": u.id == default_id,
+                        "is_current": u.id == change.sales_owner_id})
+        return sorted(out, key=lambda r: (
+            not r["is_current"], not r["is_default"], r["name"].lower()))
+
     # ------------------------------------------------------------------
     # Served-by objects for parts, before routing exists
     # ------------------------------------------------------------------

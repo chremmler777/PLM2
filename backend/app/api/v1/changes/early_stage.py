@@ -127,6 +127,16 @@ async def lead_candidates(change_id: int,
     return await EarlyStageService.lead_candidates(db, change)
 
 
+@router.get("/{change_id}/sales-owner-candidates")
+async def sales_owner_candidates(change_id: int,
+                                 current_user: User = Depends(get_current_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """[{id, name, is_default, is_current}] for the Sales owner picker (C10):
+    active Sales members of the change's organization."""
+    change = await _change(db, change_id, current_user)
+    return await EarlyStageService.sales_owner_candidates(db, change)
+
+
 @router.get("/{change_id}/impact-objects")
 async def impact_objects(change_id: int, part_ids: str = "",
                          current_user: User = Depends(get_current_user),

@@ -339,6 +339,7 @@ class ChangeService:
         mother_plant_name: Optional[str] = None,
         mother_plant_ref: Optional[str] = None,
         mother_plant_sop=None,
+        sales_owner_id: Optional[int] = None,
     ) -> ChangeRequest:
         from app.services import mother_plants as mp
         if change_type not in CHANGE_TYPES:
@@ -380,6 +381,10 @@ class ChangeService:
         if customer_relevant is not None:
             change.customer_relevant = customer_relevant
         change.origin = origin
+        # C10: the named Sales owner of a customer change (the caller passes
+        # the raiser when in Sales), else the project's Sales responsible.
+        change.sales_owner_id = await ChangeService.default_sales_owner_id(
+            session, project_id, bool(customer_relevant), origin, sales_owner_id)
         if origin == mp.MOTHER_PLANT:
             change.mother_plant_name = mother_plant_name
             change.mother_plant_ref = mother_plant_ref
@@ -396,6 +401,47 @@ class ChangeService:
         )
         logger.info(f"Created change {number} in project {project_id}")
         return change
+
+    @staticmethod
+    async def owing_change_ids(session: AsyncSession, user: User,
+                               changes: list) -> set:
+        """C10 "Mine": the changes where one of the caller's (effective)
+        departments owes work: an open R/A assessment, or a cost input it
+        has not finalized. Uses the assessments loaded with the changes (no
+        query per change)."""
+        from app.services import early_costing
+        from app.services.workflow_service import WorkflowService
+        dept_ids = set(await WorkflowService.effective_department_ids(session, user))
+        if not dept_ids:
+            return set()
+        out = set()
+        for c in changes:
+            if c.status in ("released", "closed", "cancelled", "rejected"):
+                continue
+            if any(a.department_id in dept_ids and a.rasic_letter in BLOCKING_LETTERS
+                   and a.effective_status == "active" for a in c.assessments):
+                out.add(c.id)
+            elif (c.status in ("in_assessment", "costing")
+                  and dept_ids & set(early_costing.state(c)["pending"])):
+                out.add(c.id)
+        return out
+
+    @staticmethod
+    async def default_sales_owner_id(
+        session: AsyncSession, project_id: Optional[int], customer_relevant: bool,
+        origin: Optional[str], preferred: Optional[int] = None,
+    ) -> Optional[int]:
+        """C10: who owns the customer side. None on an internal or
+        mother-plant change; else `preferred` (the raiser in Sales), else the
+        project's Sales responsible (ProjectTeamService), else None (Sales
+        tasks then go to all of Sales without a name)."""
+        from app.services import mother_plants as mp
+        if not customer_relevant or origin == mp.MOTHER_PLANT:
+            return None
+        if preferred is not None:
+            return preferred
+        from app.services.project_team_service import ProjectTeamService
+        return await ProjectTeamService.responsible_user_id(session, project_id, "Sales")
 
     @staticmethod
     async def get_change(
@@ -3041,9 +3087,12 @@ class ChangeService:
         from app.services.change_people import holds_lead
         team = TeamRoles(session, user.id)
         lead = holds_lead(change, user)
+        owner = ((change.sales_owner_id, change.sales_owner_name or "")
+                 if change.sales_owner_id is not None else None)
         for a in actions:
             owned = bool(a.pop("_owned", False)) or lead
-            await team.annotate(a, change.project_id, owned=owned)
+            await team.annotate(a, change.project_id, owned=owned,
+                                sales_owner=owner)
             a.pop("role_department_id", None)
         return actions
 
@@ -4033,6 +4082,7 @@ class ChangeService:
             "estimated_cost", "quoted_price", "pnl_note", "timing_milestone_id",
             "issuer", "is_series", "cm_internal", "cm_external",
             "implementation_mode", "customer_relevant", "car_line",
+            "sales_owner_id",
         }
 
         # Validate implementation_mode before applying any changes
@@ -4063,6 +4113,13 @@ class ChangeService:
             )
         if cust_rel is not None and not mp.is_mother_plant(change):
             change.origin = "customer" if cust_rel else "internal"
+            # C10: an internal change has no Sales owner; one that becomes a
+            # customer change gets the project's Sales contact.
+            if not cust_rel:
+                change.sales_owner_id = None
+            elif change.sales_owner_id is None and "sales_owner_id" not in fields:
+                change.sales_owner_id = await ChangeService.default_sales_owner_id(
+                    session, change.project_id, True, change.origin)
 
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null

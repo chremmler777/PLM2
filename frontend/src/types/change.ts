@@ -182,6 +182,11 @@ export interface ChangeRequest {
   status: ChangeStatus;
   lead_id?: number | null;
   lead_name?: string | null;
+  /** C10: the named Sales owner; none on an internal change. */
+  sales_owner_id?: number | null;
+  sales_owner_name?: string | null;
+  /** HARD #9: a price still open after approval. */
+  price_open?: boolean;
   raised_by: number;
   customer_response: 'pending' | 'accepted' | 'declined' | 'negotiating';
   pm_signed_by?: number | null;

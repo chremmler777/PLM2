@@ -2179,6 +2179,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.brokenInChange': { de: "Kette in den Einträgen dieser Änderung beschädigt (ab #{n})", en: "Chain broken inside this change's entries (at #{n})" },
   'audit.brokenGlobally': { de: "Einträge dieser Änderung intakt; die globale Kette ist bei #{n} beschädigt (außerhalb dieser Änderung)", en: "This change's entries are intact; the global chain is broken at #{n}, outside this change" },
   'cockpit.leadChange': { de: "ändern", en: "change" },
+  'cockpit.salesOwner': { de: 'Vertrieb', en: 'Sales owner' },
+  'cockpit.noSalesOwner': { de: 'Kein Vertriebsverantwortlicher: alle im Vertrieb', en: 'No Sales owner: all of Sales' },
+  'cockpit.salesOwnerPick': { de: 'Vertriebsverantwortlichen wählen', en: 'Pick a Sales owner' },
+  'cockpit.salesOwnerSaved': { de: 'Vertriebsverantwortlicher gesetzt', en: 'Sales owner set' },
+  'cockpit.salesOwnerHint': { de: 'Vertrieb oder Projektleitung setzen ihn; Vertriebsaufgaben sieht trotzdem der ganze Vertrieb', en: 'Sales or Project Management sets it; all of Sales still sees the Sales tasks' },
 
   // Project team (spec 2026-09-25): one responsible per department per project.
   'team.title': { de: 'Projektteam', en: 'Project team' },
