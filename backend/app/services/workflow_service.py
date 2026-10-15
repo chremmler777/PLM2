@@ -644,11 +644,14 @@ class WorkflowService:
     @staticmethod
     async def _is_department_member(db: AsyncSession, user_id: int,
                                     department_id: int) -> bool:
-        from app.models.workflow import UserDepartment
+        from app.models.workflow import Department, UserDepartment
         row = (await db.execute(
-            select(UserDepartment).where(
+            select(UserDepartment)
+            .join(Department, Department.id == UserDepartment.department_id)
+            .where(
                 UserDepartment.user_id == user_id,
-                UserDepartment.department_id == department_id).limit(1)
+                UserDepartment.department_id == department_id,
+                Department.is_active.is_(True)).limit(1)
         )).scalar_one_or_none()
         return row is not None
 
@@ -772,11 +775,14 @@ class WorkflowService:
 
     @staticmethod
     async def get_user_department_ids(db: AsyncSession, user_id: int) -> list[int]:
-        """Department ids the user belongs to."""
-        from app.models.workflow import UserDepartment
+        """Active department ids the user belongs to. A deactivated
+        department grants nothing: every permission check reads this."""
+        from app.models.workflow import Department, UserDepartment
 
         result = await db.execute(
-            select(UserDepartment.department_id).where(UserDepartment.user_id == user_id)
+            select(UserDepartment.department_id)
+            .join(Department, Department.id == UserDepartment.department_id)
+            .where(UserDepartment.user_id == user_id, Department.is_active.is_(True))
         )
         return [d for (d,) in result.all()]
 
