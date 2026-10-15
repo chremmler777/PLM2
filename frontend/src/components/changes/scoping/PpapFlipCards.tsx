@@ -158,6 +158,9 @@ export function CustomerFlipCard({ change, isSales, editable, attachments, onCha
       ) : !isSales || !editable ? (
         <p className="text-[11px] text-slate-500" data-testid="flip-owner">
           {t('flip.salesOwes').replace('{x}', change.sales_owner_name ?? 'Sales')}
+          {change.sales_owner_id == null && (
+            <span className="block text-amber-300/90" data-testid="flip-no-owner">{t('flip.noSalesOwner')}</span>
+          )}
         </p>
       ) : (
         <div className="space-y-2">

@@ -142,7 +142,7 @@ describe('StartChangeModal', () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
     expect(screen.getByRole('button', { name: /Create change/ })).toHaveProperty('disabled', true)
     expect(screen.getByText(/affected item/)).toBeDefined()
-    expect(screen.getByText(/reason/)).toBeDefined()
+    expect(screen.getByText(/short description/)).toBeDefined()
     // The cost carrier is no longer a choice to make — it defaults to customer.
     expect(screen.queryByText(/cost carrier/)).toBeNull()
   })

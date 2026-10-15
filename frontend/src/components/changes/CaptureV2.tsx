@@ -35,8 +35,8 @@ export interface UrgentDraft { needBy: string; reason: string; evidence: string 
 export const emptyUrgent: UrgentDraft = { needBy: '', reason: '', evidence: '' }
 export const urgentMissing = (d: UrgentDraft): string[] => [
   ...(d.needBy ? [] : [t('next.item.need_by')]),
-  ...(d.reason ? [] : [t('urgent.reasonPick')]),
-  ...(okRef(d.evidence) ? [] : [t('urgent.evidence')]),
+  ...(d.reason ? [] : [t('urgent.missingReason')]),
+  ...(okRef(d.evidence) ? [] : [t('urgent.missingEvidence')]),
 ]
 
 export function UrgentFields({ value, onChange, idPrefix = 'urgent' }: {

@@ -4,7 +4,8 @@
  *
  * - Questions (they hold proceed, HARD #2) as a fix list: per row "Answer
  *   now" (the answer form) and, for the asker or Project Management, "Make it
- *   a check item" when the scope can be decided without it.
+ *   a check item" when the scope can be decided without it, or "Reassign" to
+ *   the department that can answer it.
  * - Check items collapsed by owner: they go along as the conditions of the
  *   go, each due with its department's assessment; "Promote to question".
  * - A department that owns check items but is not routed: "Route <dept>:
@@ -52,6 +53,19 @@ export default function ProceedFixList({
   }
   const nameOf = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
 
+  // Check items by owner (the raised-for department), largest group first
+  const byOwner = new Map<string, ChangeConcern[]>()
+  for (const c of checks) {
+    const owner = c.department_id != null ? nameOf(c.department_id) : t('flag.noOwner')
+    byOwner.set(owner, [...(byOwner.get(owner) ?? []), c])
+  }
+  const groups = [...byOwner.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+  const reassign = useMutation({
+    mutationFn: (vars: { id: number; department_id: number }) =>
+      changesApi.setConcernType(changeId, vars.id, { flag_type: 'question', department_id: vars.department_id }),
+    onSuccess: onChanged,
+    onError: (e: unknown) => { toastError(e, 'Could not reassign the question') },
+  })
   const makeCheck = useMutation({
     mutationFn: (id: number) => changesApi.setConcernType(changeId, id, { flag_type: 'check' }),
     onSuccess: onChanged,
@@ -94,6 +108,18 @@ export default function ProceedFixList({
                       {t('flag.makeCheck')}
                     </button>
                   )}
+                  {c.can_switch && (
+                    <select value="" aria-label={t('proceed.reassign')}
+                      data-testid={`proceed-reassign-${c.id}`} disabled={reassign.isPending}
+                      className="bg-slate-900 border border-slate-600 rounded px-1 py-0.5 text-xs text-slate-200"
+                      onChange={(e) => e.target.value && reassign.mutate(
+                        { id: c.id, department_id: Number(e.target.value) })}>
+                      <option value="">{t('proceed.reassign')}</option>
+                      {departments.filter((d) => d.id !== c.department_id).map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 {answering === c.id && (
                   <AnswerForm changeId={changeId} concern={c} attachments={attachments}
@@ -132,11 +158,16 @@ export default function ProceedFixList({
           <summary className="cursor-pointer px-2 py-1 text-xs text-slate-300">
             {t('proceed.checksByOwner')} ({checks.length})
           </summary>
-          <ul className="divide-y divide-slate-700/60">
-            {checks.map((c) => (
-              <CheckRow key={c.id} changeId={changeId} c={c} editable onChanged={onChanged} />
-            ))}
-          </ul>
+          {groups.map(([owner, rows]) => (
+            <div key={owner} data-testid={`proceed-checks-owner-${owner}`}>
+              <p className="px-2 pt-1.5 text-[11px] font-semibold text-slate-400">{owner} ({rows.length})</p>
+              <ul className="divide-y divide-slate-700/60">
+                {rows.map((c) => (
+                  <CheckRow key={c.id} changeId={changeId} c={c} editable onChanged={onChanged} />
+                ))}
+              </ul>
+            </div>
+          ))}
         </details>
       )}
       {checks.length > 0 && (

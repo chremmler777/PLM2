@@ -1906,6 +1906,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'When the customer expects the offer. Can be changed later on the Status card.',
   },
   'start.documents': { de: 'Kundendokumente', en: 'Customer documents' },
+  'start.documentsInternal': { de: 'Dateien (Beleg, Foto)', en: 'Files (evidence, photo)' },
+  'start.forHandOver': { de: '(für die Übergabe nötig)', en: '(needed to hand over)' },
   'start.dropFiles': {
     de: 'Dateien hier ablegen oder klicken (Zeichnung, Mail, Spezifikation)',
     en: 'Drop files here or click to browse (drawing, mail, specification)',
@@ -2524,6 +2526,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Open questions hold proceed. Answer and close them, or make one a check item if the scope can be decided without it.' },
   'proceed.answerNow': { de: 'Jetzt beantworten', en: 'Answer now' },
   'proceed.checksByOwner': { de: 'Prüfpunkte nach Fachbereich', en: 'Check items by owner' },
+  'proceed.reassign': { de: 'Umhängen an …', en: 'Reassign to …' },
+  'flag.noOwner': { de: 'ohne Fachbereich', en: 'no department' },
   'proceed.promote': { de: 'Zur Frage machen', en: 'Promote to question' },
   'proceed.notRouted': { de: '{d} ist nicht geroutet, hat aber {n} Prüfpunkt(e):', en: '{d} is not routed but owns {n} check item(s):' },
   'proceed.routeAs': { de: '{d} routen: {l}', en: 'Route {d}: {l}' },
@@ -2565,7 +2569,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'flip.salesOwes': {
     de: '{x} beantwortet das; die Freigabe wartet darauf.',
     en: '{x} answers this; proceed waits for it.' },
-  'flip.answeredNotification': { de: 'Nur Kundeninfo: {r}', en: 'Notification only: {r}' },
+  'flip.noSalesOwner': {
+    de: 'Das Projekt hat keinen Sales-Kontakt: im Projektteam einen benennen, dann gehört die Aufgabe ihm.',
+    en: 'The project has no Sales contact: name one in the project team, then the task is theirs.' },
+  'flip.answeredNotification': { de: 'Nur Kundeninfo: {r}. Die Kosten bleiben bei uns: läuft als interne Änderung weiter.', en: 'Notification only: {r}. The money stays ours: goes on as an internal change.' },
   'flip.answeredOffer': { de: 'Angebot nötig: Angebotstermin gesetzt', en: 'Offer needed: quote deadline set' },
   'tasks.kind.ppap_decision': { de: 'PPAP-Entscheidung beantworten', en: 'Answer the PPAP decision' },
   'tasks.kind.customer_flip': { de: 'Kundeninfo oder Angebot?', en: 'Customer notification or offer?' },
@@ -2599,6 +2606,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'urgent.reason.customer_demand': { de: 'Kundenforderung', en: 'Customer demand' },
   'urgent.reason.other': { de: 'Anderer', en: 'Other' },
   'urgent.evidence': { de: 'Beleg', en: 'Evidence' },
+  'urgent.missingReason': { de: 'Grund für dringend', en: 'urgent reason' },
+  'urgent.missingEvidence': { de: 'Beleg für dringend', en: 'urgent evidence' },
   'urgent.evidencePlaceholder': { de: 'Mail, 8D-Nr. oder Datei', en: 'Mail, 8D no. or file' },
   'urgent.line': { de: 'Dringend', en: 'Urgent' },
   'urgent.needBy': { de: 'Bedarf {d}, noch {n} AT', en: 'Need-by {d}, {n} wd left' },

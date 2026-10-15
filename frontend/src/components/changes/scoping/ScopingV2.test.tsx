@@ -171,6 +171,13 @@ describe('ProceedFixList', () => {
     await waitFor(() => expect(changesApi.updateMeeting).toHaveBeenCalledWith(7, 2, {
       department_rasic: { 4: 'R', 6: 'C' } }))
     expect(screen.getByTestId('proceed-checks').textContent).toContain('(2)')
+    // check items grouped by their owner, each with its count
+    expect(screen.getByTestId('proceed-checks-owner-Process Engineer').textContent).toContain('(1)')
+    expect(screen.getByTestId('proceed-checks-owner-Quality').textContent).toContain('(1)')
+    // a question is reassigned to the department that can answer it
+    fireEvent.change(screen.getByTestId('proceed-reassign-20'), { target: { value: '6' } })
+    await waitFor(() => expect(changesApi.setConcernType).toHaveBeenCalledWith(
+      7, 20, { flag_type: 'question', department_id: 6 }))
   })
 
   it('a viewer who may neither answer nor switch gets no buttons', () => {

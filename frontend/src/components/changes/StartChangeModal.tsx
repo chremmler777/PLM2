@@ -250,7 +250,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const missing: string[] = [];
   if (!projectId) missing.push('project');
   if (picked.length === 0) missing.push('affected item');
-  if (!reason.trim()) missing.push('reason');
+  if (!reason.trim()) missing.push(t('start.reason').toLowerCase());
   // A mother-plant change is handed over by the PM who starts it: the
   // kickoff needs its description, so the dialog asks for it up front.
   if (fromMotherPlant) missing.push(...(description.trim() ? [] : ['description']), ...motherPlantMissing(motherPlant));
@@ -719,7 +719,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           <div data-testid="kickoff-fields" className="mb-6 space-y-4">
             <div>
               <label htmlFor="sc-description" className="block text-sm text-slate-300 mb-1">
-                {t('start.description')} <span className="text-slate-500">{t('start.optional')}</span>
+                {t('start.description')} <span className="text-slate-500">{t('start.forHandOver')}</span>
               </label>
               <textarea id="sc-description" rows={3}
                 className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
@@ -729,7 +729,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             {customerRelevant === true && (
               <div>
                 <label htmlFor="sc-quote-deadline" className="block text-sm text-slate-300 mb-1">
-                  {t('deadline.quote')} <span className="text-slate-500">{t('start.optional')}</span>
+                  {t('deadline.quote')} <span className="text-slate-500">{t('start.forHandOver')}</span>
                 </label>
                 <DateInput id="sc-quote-deadline" aria-label={t('deadline.quote')}
                   value={quoteDeadline} onChange={setQuoteDeadline} commitOnChange
@@ -739,7 +739,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             )}
             <div>
               <p className="block text-sm text-slate-300 mb-1">
-                {t('start.documents')} <span className="text-slate-500">{t('start.optional')}</span>
+                {t(customerRelevant === false ? 'start.documentsInternal' : 'start.documents')}{' '}
+                <span className="text-slate-500">{t('start.forHandOver')}</span>
               </p>
               <div data-testid="start-dropzone" role="button" tabIndex={0}
                 onClick={() => fileInput.current?.click()}
