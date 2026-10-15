@@ -251,7 +251,8 @@ async def test_propose_deviation_notifies_lead(session_factory, seed):
 
         # C6: an override into assessment is the run team's (the lead here)
         dev = await ChangeService.propose_transition_deviation(
-            session, chg, "in_assessment", "urgent business need", seed["admin_id"])
+            session, chg, "in_assessment", "urgent business need", seed["admin_id"],
+            reason_code="in_parallel")
         await session.commit()
 
         rows = (await session.execute(select(Notification).where(

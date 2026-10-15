@@ -42,6 +42,14 @@ PM_MGMT = "pm_mgmt"    # a Project Management or Management member
 QUALITY = "quality"    # a Quality member
 APPROVER = "approver"  # the internal approver (engineering approvers, P9)
 
+#: Who gives the OK, in words (messages; the UI owns its own wording).
+DECIDER_WORDS = {
+    RUN: "the lead, a Project Management member or an admin",
+    PM_MGMT: "a Project Management or Management member",
+    QUALITY: "a Quality member",
+    APPROVER: "the internal approver (never the raiser)",
+}
+
 #: The rule Absorb is bound to: it clears `price_open` (HARD #9's exit).
 ABSORB_RULE = "price_open"
 
@@ -126,6 +134,30 @@ HARD_RULES = {
 #: Evidence words that say nothing (spec §0 Evidence).
 EMPTY_EVIDENCE = frozenset({"ok", "okay", "tbd", "na", "n/a", "done", "checked",
                             "yes", "-", "--"})
+
+
+#: An override or Absorb note says what covers the skipped rule (R4): a
+#: sentence, not a word. "Customer date" names the date or the mail.
+NOTE_MIN_CHARS = 15
+
+
+def override_note_refusal(reason_code: Optional[str], note: Optional[str],
+                          *, codes: tuple = OVERRIDE_REASONS) -> Optional[str]:
+    """None when the reason pick and note of an override (or an Absorb,
+    codes=ABSORB_REASONS) are usable, else why not (spec §0: always a
+    reason pick; evidence, not 'ok')."""
+    if not reason_code:
+        return f"Pick a reason: one of {', '.join(codes)}"
+    if reason_code not in codes:
+        return f"Unknown reason '{reason_code}': one of {', '.join(codes)}"
+    value = (note or "").strip()
+    if len(value) < NOTE_MIN_CHARS or value.lower() in EMPTY_EVIDENCE:
+        return (f"Say what covers it in a sentence (at least {NOTE_MIN_CHARS} "
+                f"characters): '{value}' says too little")
+    if reason_code == "customer_date" and not any(c.isdigit() for c in value):
+        return ("Customer date: name the date or the customer's mail reference "
+                "(e.g. 'SOP 24 Oct per mail 2026-10-12')")
+    return None
 
 
 def reference_refusal(text: Optional[str], what: str = "A reference") -> Optional[str]:

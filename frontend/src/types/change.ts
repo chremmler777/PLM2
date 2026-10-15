@@ -399,7 +399,7 @@ export interface NextStepItem {
   /** Who owns it (and by when), in words. */
   who?: string;
   /** A hard rule's only ways out: concession, absorb, customer_accepts, sign. */
-  exits?: ('concession' | 'absorb' | 'customer_accepts' | 'sign')[];
+  exits?: ('concession' | 'absorb' | 'absorb_internal' | 'customer_accepts' | 'sign')[];
   /** The rule's override, when one is asked or approved. */
   override?: { id: number; status: 'pending' | 'approved' };
   /** Exit 'sign': the sign-offs still owed (missing, or given on an older

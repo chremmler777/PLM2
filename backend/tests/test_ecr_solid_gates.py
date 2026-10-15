@@ -107,12 +107,15 @@ async def _scoping_two_rules(client, admin, seed, session_factory):
 
 async def _propose(client, auth, cid, to, **extra):
     return await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": to, "reason": "urgent customer date", **extra}, headers=auth)
+        "to_status": to, "reason": "customer SOP 24 Oct, mail 2026-10-12",
+        "reason_code": "in_parallel", **extra}, headers=auth)
 
 
 async def _decide(client, auth, cid, dev_id, decision="approved"):
     return await client.post(f"/api/v1/changes/{cid}/deviations/{dev_id}/decide",
-                             json={"decision": decision}, headers=auth)
+                             json={"decision": decision,
+                                   **({"note": "not covered: wait for the costs"}
+                                      if decision == "rejected" else {})}, headers=auth)
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +147,7 @@ async def test_override_is_bound_to_its_rule_and_lifts_nothing_else(
     r2 = await _propose(client, lead, cid, "in_assessment")
     assert r2.status_code == 200, r2.text
     assert r2.json()["guard_key"] == "no_proceed_meeting"
-    assert r2.json()["reason_code"] == "other"
+    assert r2.json()["reason_code"] == "in_parallel"
     assert (await _decide(client, pm, cid, r2.json()["id"])).status_code == 200
     r = await client.post(f"/api/v1/changes/{cid}/transition",
                           json={"to_status": "in_assessment"}, headers=lead)
@@ -814,3 +817,66 @@ async def test_absorb_note_is_price_talk(client, admin, seed, depts, people,
     assert absorbed["action_description"] == f"Open price absorbed (#{dev['id']})"
     log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin)).json()
     assert any(note in (e.get("notes") or "") for e in log)
+
+
+async def test_override_needs_a_reason_pick_and_a_real_note(
+        client, admin, seed, depts, people, session_factory):
+    """R4: no default pick, no one-word note, 'customer date' names the date
+    or the mail; the API refuses what the dialog refuses (scripts too)."""
+    cid = await _scoping_two_rules(client, admin, seed, session_factory)
+    lead = await login(client, "eng@test.io", admin=False)
+    base = {"to_status": "in_assessment", "guard_key": "no_quote_deadline"}
+    for body, words in (
+            ({"reason": "customer SOP 24 Oct per mail"}, "Pick a reason"),
+            ({"reason": "x", "reason_code": "other"}, "says too little"),
+            ({"reason": "urgent", "reason_code": "in_parallel"}, "says too little"),
+            ({"reason": "the customer is waiting for us", "reason_code": "customer_date"},
+             "name the date")):
+        r = await client.post(f"/api/v1/changes/{cid}/deviations",
+                              json={**base, **body}, headers=lead)
+        assert r.status_code == 400, body  # NEGATIVE
+        assert words in r.json()["detail"]
+    # the legacy transition path (202) asks for the pick as well
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={
+        "to_status": "in_assessment", "deviation_reason": "customer SOP 24 Oct"},
+        headers=lead)
+    assert r.status_code == 400 and "Pick a reason" in r.json()["detail"]
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={
+        "to_status": "in_assessment", "deviation_reason": "customer SOP 24 Oct",
+        "deviation_reason_code": "customer_date"}, headers=lead)
+    assert r.status_code == 202, r.text
+    assert "needs the OK of the lead, a Project Management member or an admin" \
+        in r.json()["detail"]
+    assert r.json()["deviation"]["reason_code"] == "customer_date"
+
+
+async def test_asker_hears_the_decision_and_a_reject_says_why(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _scoping_two_rules(client, admin, seed, session_factory)
+    lead = await login(client, "eng@test.io", admin=False)
+    pm = people["Project Manager"][1]
+    dev = (await _propose(client, lead, cid, "in_assessment",
+                          guard_key="no_quote_deadline")).json()
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
+                          json={"decision": "rejected"}, headers=pm)
+    assert r.status_code == 400  # NEGATIVE: a reject without a word
+    assert "Say why" in r.json()["detail"]
+    r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
+                          json={"decision": "rejected", "note": "set the deadline first"},
+                          headers=pm)
+    assert r.status_code == 200, r.text
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        rows = (await s.execute(select(Notification).where(
+            Notification.subject_key == f"dev:{dev['id']}:decided"))).scalars().all()
+    assert [n.user_id for n in rows] == [seed["engineer_id"]]
+    assert "rejected" in rows[0].title and rows[0].body == "set the deadline first"
+
+
+async def test_internal_open_price_names_its_own_exit(client, admin, seed, depts,
+                                                      session_factory):
+    cid = await _change(client, admin, seed, session_factory, "released",
+                        customer=False, price_open=True)
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
+    item = next(i for i in ch["next_step"]["items"] if i["key"] == "price_open")
+    assert item["exits"] == ["absorb_internal"]  # no customer to accept

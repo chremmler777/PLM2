@@ -164,7 +164,7 @@ def redact_changelog_text(action: str, description: str,
         notes = None
     elif action == "deviated_transition" and any(
             f"'{label}'" in desc for label in _price_rule_labels()):
-        # "(deviation #n waives '<price rule>': <reason>)": keep the rule
+        # "(override #n waives '<price rule>': <reason>)": keep the rule
         for label in _price_rule_labels():
             desc = re.sub(r"(waives '" + re.escape(label) + r"'): (?:[^()]|\([^()]*\))*\)",
                           r"\1)", desc)

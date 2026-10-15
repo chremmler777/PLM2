@@ -242,11 +242,12 @@ async def test_refused_transition_files_the_deviation_with_its_reason(
     plain = await client.post(f"/api/v1/changes/{cid}/transition", headers=admin_auth,
                               json={"to_status": "released"})
     assert plain.status_code == 400
-    assert "approved deviation" in plain.json()["detail"]
+    assert "approved override" in plain.json()["detail"]
     assert plain.headers["x-deviation-required"] == "released"
     res = await client.post(f"/api/v1/changes/{cid}/transition", headers=admin_auth,
                             json={"to_status": "released",
-                                  "deviation_reason": "Customer needs parts Monday"})
+                                  "deviation_reason": "Customer needs parts Monday",
+                                  "deviation_reason_code": "in_parallel"})
     assert res.status_code == 202, res.text
     body = res.json()
     assert body["deviation_requested"] and body["created"]

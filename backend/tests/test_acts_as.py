@@ -190,7 +190,7 @@ async def test_acting_admin_who_leads_cannot_decide_a_deviation(client, admin_au
     assert res.status_code in (200, 201), res.text
     cid = res.json()["id"]
     dev = await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": "scoping", "reason": "capture docs follow"}, headers=eng_auth)
+        "to_status": "scoping", "reason": "capture docs follow by Thu", "reason_code": "in_parallel"}, headers=eng_auth)
     assert dev.status_code == 200, dev.text
     did = dev.json()["id"]
     denied = await client.post(f"/api/v1/changes/{cid}/deviations/{did}/decide",

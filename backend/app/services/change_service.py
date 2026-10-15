@@ -260,14 +260,17 @@ class ChangeService:
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
         if not reason or not reason.strip():
-            raise ChangeError("A reason is required to propose a deviation")
+            raise ChangeError("A reason is required to ask for an override")
         from app.services import cm_switches
         from app.services.cm_rules import OVERRIDE_REASONS, rule_label
         bound = None
         if cm_switches.on("COMMERCIAL_V2"):
-            if reason_code is not None and reason_code not in OVERRIDE_REASONS:
-                raise ChangeError(
-                    f"Unknown reason '{reason_code}': one of {', '.join(OVERRIDE_REASONS)}")
+            # R4: always a reason pick and a note that says what covers it,
+            # for the dialog, the legacy transition path and scripts alike
+            from app.services.cm_rules import override_note_refusal
+            refusal = override_note_refusal(reason_code, reason, codes=OVERRIDE_REASONS)
+            if refusal:
+                raise ChangeError(refusal)
             reasons = await ChangeService._guard_reasons(session, change, to_status)
             if guard_key is not None:
                 bound = next((r for r in reasons if r.key == guard_key), None)
@@ -293,19 +296,19 @@ class ChangeService:
                     f"An override of '{rule_label(bound.key)}' is already pending")
         elif any(d.to_status == to_status and d.status == "pending"
                  for d in change.transition_deviations):
-            raise ChangeError("A deviation for this transition is already pending")
+            raise ChangeError("An override for this step is already pending")
         dev = ChangeTransitionDeviation(
             change_id=change.id, to_status=to_status, reason=reason.strip(),
             proposed_by=user_id,
             guard_key=bound.key if bound is not None else None,
             guard_reason=str(bound) if bound is not None else None,
-            reason_code=(reason_code or "other") if bound is not None else reason_code,
+            reason_code=reason_code,
         )
         session.add(dev)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "deviation_proposed",
-            f"Transition deviation to '{to_status}' proposed"
+            f"Override to '{to_status}' asked"
             + (f": waives '{rule_label(bound.key)}'" if bound is not None else ""),
             user_id, field_name="deviation",
             new_value={"deviation_id": dev.id, "to_status": to_status,
@@ -368,15 +371,15 @@ class ChangeService:
         """The rule before C6 (switch COMMERCIAL_V2 off): None when `user`
         may decide the pending deviation `dev`, else why not."""
         if dev.proposed_by == user.id:
-            return "Cannot decide your own deviation (4-eyes rule)"
+            return "Cannot decide your own override (4-eyes rule)"
         if user.effective_role not in ("admin", "engineer"):
-            return "Deviation decisions require an engineer or admin role"
+            return "Override decisions require an engineer or admin role"
         # Acting as a department drops the lead right like the admin bypass
         # (holds_lead), as for the D1 gates.
         from app.services.change_people import holds_lead
         if (user.effective_role != "admin" and not holds_lead(change, user)
                 and dev.proposed_by != change.lead_id):
-            return "Only the change lead or an admin may decide this deviation"
+            return "Only the change lead or an admin may decide this override"
         return None
 
     @staticmethod
@@ -384,7 +387,7 @@ class ChangeService:
                                        dev, user) -> Optional[str]:
         """None when `user` may decide the pending override `dev`, else why
         not. One rule for the decide endpoint, the deviation list's
-        can_decide and the 'Decide deviation #n' action.
+        can_decide and the 'Decide override #n' action.
 
         C6 (COMMERCIAL_V2): never the proposer; the OK belongs to the rule's
         deciders (cm_rules.decider_group): the lead, a Project Management
@@ -397,9 +400,9 @@ class ChangeService:
         if not cm_switches.on("COMMERCIAL_V2"):
             return ChangeService.transition_deviation_refusal(change, dev, user)
         if dev.proposed_by == user.id:
-            return "Cannot decide your own deviation (4-eyes rule)"
+            return "Cannot decide your own override (4-eyes rule)"
         if user.effective_role not in ("admin", "engineer"):
-            return "Deviation decisions require an engineer or admin role"
+            return "Override decisions require an engineer or admin role"
         from app.services.cm_rules import decider_group, RUN, PM_MGMT, QUALITY
         from app.services.change_people import holds_lead
         group = decider_group(dev.guard_key, dev.to_status, change.customer_relevant)
@@ -491,14 +494,19 @@ class ChangeService:
             raise ChangeError(f"Invalid deviation decision '{decision}'")
         dev = next((d for d in change.transition_deviations if d.id == deviation_id), None)
         if dev is None:
-            raise ChangeError("Deviation not found")
+            raise ChangeError("Override not found")
         if dev.status != "pending":
-            raise ChangeError(f"Deviation is '{dev.status}', not pending")
+            raise ChangeError(f"Override #{dev.id} is '{dev.status}', not pending")
         refusal = await ChangeService.deviation_decide_refusal(session, change, dev, actor)
         if refusal:
             raise ChangeError(refusal)
         from app.services import cm_switches
         from app.services.cm_rules import ABSORB_RULE, rule_label
+        note = (note or "").strip() or None
+        if (decision == "rejected" and note is None
+                and cm_switches.on("COMMERCIAL_V2")):
+            # R4: the asker reads why, without reopening the change
+            raise ChangeError("Say why the override is rejected (the asker is told)")
         if (decision == "approved" and dev.guard_key is None
                 and cm_switches.on("COMMERCIAL_V2")):
             # A request from before the binding is bound now, to the rule
@@ -519,7 +527,7 @@ class ChangeService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "deviation_decided",
-            f"Deviation #{dev.id} ({dev.to_status}"
+            f"Override #{dev.id} ({dev.to_status}"
             + (f", waives '{rule_label(dev.guard_key)}'" if dev.guard_key else "")
             + f"): {decision}", actor.id,
             field_name="deviation",
@@ -533,6 +541,19 @@ class ChangeService:
                 f"Open price absorbed (#{dev.id}): {dev.reason}", actor.id,
                 field_name="price_open", old_value=True, new_value=False,
                 notes=dev.reason)
+        if cm_switches.on("COMMERCIAL_V2") and dev.proposed_by != actor.id:
+            # The asker hears the answer once (spec §0 Notifications).
+            from app.services.notification_service import NotificationService
+            what = (f"Override of '{rule_label(dev.guard_key)}'" if dev.guard_key
+                    and dev.guard_key != ABSORB_RULE else
+                    "Absorb" if dev.guard_key == ABSORB_RULE else
+                    f"Override #{dev.id}")
+            await NotificationService.notify_once(
+                session, [dev.proposed_by], kind="deviation_decided",
+                subject_key=f"dev:{dev.id}:decided",
+                title=f"{what} {'approved' if decision == 'approved' else 'rejected'}: "
+                      f"{change.change_number}",
+                body=note, link=f"/changes/{change.id}")
         return dev
 
     # ------------------------------------------------------------------
@@ -563,7 +584,8 @@ class ChangeService:
         asked from the customer (or, internal, not re-approved). Needs a
         reason pick + note and the OK of a Project Management or Management
         member (internal: the approver); approving it clears price_open."""
-        from app.services.cm_rules import ABSORB_REASONS, ABSORB_RULE
+        from app.services.cm_rules import (
+            ABSORB_REASONS, ABSORB_RULE, override_note_refusal)
         if not change.price_open:
             raise ChangeError("No price is open on this change: nothing to absorb")
         if change.status in ("cancelled", "rejected", "closed"):
@@ -571,9 +593,10 @@ class ChangeService:
         if reason_code not in ABSORB_REASONS:
             raise ChangeError(
                 f"Pick why it is absorbed: one of {', '.join(ABSORB_REASONS)}")
-        note = (note or "").strip()
-        if not note:
-            raise ChangeError("Say what is absorbed and why (recorded)")
+        refusal = override_note_refusal(reason_code, note, codes=ABSORB_REASONS)
+        if refusal:
+            raise ChangeError(refusal.replace("covers it", "is absorbed and why"))
+        note = note.strip()
         if any(d.guard_key == ABSORB_RULE and d.status == "pending"
                for d in change.transition_deviations):
             raise ChangeError("An Absorb is already waiting for its OK")
@@ -1408,7 +1431,10 @@ class ChangeService:
                                           "quality": "Quality"}[s] for s in sides))
         if to == "closed" and change.price_open and cm_switches.on("COMMERCIAL_V2"):
             # HARD #9: exits are the customer's acceptance or an Absorb
-            add("price_open", "hard", exits=["customer_accepts", "absorb"],
+            # internal: no customer to accept, the approver's Absorb is the exit
+            add("price_open", "hard",
+                exits=(["customer_accepts", "absorb"] if change.customer_relevant
+                       else ["absorb_internal"]),
                 override=next(({"id": d.id, "status": d.status}
                                for d in change.transition_deviations
                                if d.guard_key == "price_open" and d.status == "pending"),
@@ -1498,7 +1524,7 @@ class ChangeService:
             if any(a.verdict == "not_feasible" for a in submitted):
                 out.append(R("not_feasible",
                              "An assessment is 'not feasible': reject, go back to "
-                             "scoping, or override with an approved deviation"))
+                             "scoping, or ask for an override"))
             routing = change.routing
             if routing is not None and routing.deviation_status == "pending_approval":
                 out.append(R("routing_deviation_pending",
@@ -1904,10 +1930,14 @@ class ChangeService:
             if uncovered:
                 reason = uncovered[0]
                 pending = ChangeService.pending_override(change, to_status, reason.key)
+                from app.services.cm_rules import DECIDER_WORDS, decider_group, rule_label
                 raise DeviationRequired(
-                    f"{reason}. An approved deviation is required to proceed."
-                    + (f" Deviation #{pending.id} is waiting for its decision."
-                       if pending is not None else ""),
+                    f"{reason}. An approved override of '{rule_label(reason.key)}' "
+                    "is required to proceed."
+                    + (f" Override #{pending.id} waits for the OK of "
+                       + DECIDER_WORDS[decider_group(pending.guard_key or reason.key,
+                                                     to_status, change.customer_relevant)]
+                       + "." if pending is not None else ""),
                     to_status=to_status, guard_reason=reason,
                     pending_deviation_id=pending.id if pending else None)
             deviation = covering[0] if covering else None
@@ -1922,8 +1952,8 @@ class ChangeService:
                         (d for d in change.transition_deviations
                          if d.to_status == to_status and d.status == "pending"), None)
                     raise DeviationRequired(
-                        f"{reason}. An approved deviation is required to proceed."
-                        + (f" Deviation #{pending.id} is waiting for its decision."
+                        f"{reason}. An approved override is required to proceed."
+                        + (f" Override #{pending.id} waits for its decision."
                            if pending is not None else ""),
                         to_status=to_status, guard_reason=reason,
                         pending_deviation_id=pending.id if pending else None)
@@ -1981,7 +2011,7 @@ class ChangeService:
             await ChangeService.close_engine_work(
                 session, change, user_id,
                 why=(f"Released by {change.change_number}"
-                     + (f" on deviation #{deviation.id}" if deviation else "")))
+                     + (f" on override #{deviation.id}" if deviation else "")))
         if to_status == "closed":
             change.closed_at = datetime.utcnow()
             await ChangeService.close_engine_work(
@@ -2007,7 +2037,7 @@ class ChangeService:
         from app.services.cm_rules import rule_label
         # C6: the trail names the rule each override waived.
         desc = f"{old} -> {to_status}" + "".join(
-            f" (deviation #{d.id}"
+            f" (override #{d.id}"
             + (f" waives '{rule_label(d.guard_key)}'" if d.guard_key else "")
             + f": {d.reason})" for d in covering)
         await ChangeService.append_changelog(
@@ -3609,7 +3639,7 @@ class ChangeService:
                 "kind": "deviation_decision",
                 "label": (f"Decide Absorb #{dev.id}" if dev.guard_key == ABSORB_RULE
                           else f"Decide override #{dev.id}: {rule_label(dev.guard_key)}"
-                          if dev.guard_key else f"Decide deviation #{dev.id}"),
+                          if dev.guard_key else f"Decide override #{dev.id}"),
                 "target_tab": "overview",
                 "deviation_id": dev.id,
                 # what the decide panel shows without another request

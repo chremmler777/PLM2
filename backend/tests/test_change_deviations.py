@@ -39,7 +39,7 @@ async def _change(client, auth, seed, **over):
 async def test_propose_and_admin_approves(client, eng_auth, admin_auth, seed):
     c = await _change(client, eng_auth, seed)
     res = await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "PPT only"}, headers=eng_auth)
+        "to_status": "in_assessment", "reason": "PPT only, drawing follows", "reason_code": "in_parallel"}, headers=eng_auth)
     assert res.status_code == 200, res.text
     dev = res.json()
     assert dev["status"] == "pending"
@@ -64,10 +64,10 @@ async def test_propose_and_admin_approves(client, eng_auth, admin_auth, seed):
 async def test_reject_and_duplicate_pending_blocked(client, eng_auth, admin_auth, seed):
     c = await _change(client, eng_auth, seed)
     dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "r1"}, headers=eng_auth)).json()
+        "to_status": "in_assessment", "reason": "first try: drawing follows", "reason_code": "in_parallel"}, headers=eng_auth)).json()
     # C6: an override is per rule; the same rule twice waits for the first
     dup = await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "r2", "guard_key": dev["guard_key"]},
+        "to_status": "in_assessment", "reason": "second try: drawing follows", "reason_code": "in_parallel", "guard_key": dev["guard_key"]},
         headers=eng_auth)
     assert dup.status_code == 400
     assert "already pending" in dup.json()["detail"]
@@ -77,7 +77,7 @@ async def test_reject_and_duplicate_pending_blocked(client, eng_auth, admin_auth
     assert rej.json()["status"] == "rejected"
     # after rejection a new proposal is allowed again
     again = await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "r3"}, headers=eng_auth)
+        "to_status": "in_assessment", "reason": "third try: drawing follows", "reason_code": "in_parallel"}, headers=eng_auth)
     assert again.status_code == 200
 
 
@@ -96,7 +96,7 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
 
     c = await _change(client, eng_auth, seed)  # lead is the engineer (proposer)
     dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "lead proposes"}, headers=eng_auth)).json()
+        "to_status": "in_assessment", "reason": "lead proposes it today", "reason_code": "in_parallel"}, headers=eng_auth)).json()
     denied = await client.post(
         f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
         json={"decision": "approved"}, headers=viewer_auth)
@@ -124,10 +124,10 @@ async def test_blocked_transition_requires_approved_deviation(
     blocked = await client.post(f"/api/v1/changes/{c['id']}/transition",
                                 json={"to_status": "in_assessment"}, headers=eng_auth)
     assert blocked.status_code == 400
-    assert "deviation" in blocked.json()["detail"].lower()
+    assert "approved override" in blocked.json()["detail"].lower()
 
     dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
-        "to_status": "in_assessment", "reason": "PPT only at capture"},
+        "to_status": "in_assessment", "reason": "PPT only at capture", "reason_code": "in_parallel"},
         headers=eng_auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
                       json={"decision": "approved"}, headers=admin_auth)

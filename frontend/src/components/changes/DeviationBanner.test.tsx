@@ -87,7 +87,7 @@ describe('DeviationBanner', () => {
     render(
       <QueryClientProvider client={qc}>
         <DeviationBanner changeId={7} blockedTo="in_assessment" rule="no_impacted_items"
-          blockedReason="No impacted items added yet. An approved deviation is required to proceed."
+          blockedReason="No impacted items added yet. An approved override of 'No impacted items' is required to proceed."
           seq={1} onRetry={() => {}} onClose={() => {}} />
       </QueryClientProvider>
     );
@@ -97,10 +97,16 @@ describe('DeviationBanner', () => {
     // nothing preselected: the pick is required
     expect((screen.getByTestId('override-submit') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('override-reason-customer_date'));
+    // R4: a word is not a reason; "customer date" names the date or the mail
+    expect((screen.getByTestId('override-submit') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('override-note-hint').textContent).toContain('at least 15 characters');
+    fireEvent.change(screen.getByTestId('override-note'), { target: { value: 'PPT only, the customer waits' } });
+    expect(screen.getByTestId('override-note-hint').textContent).toContain('name the date');
+    fireEvent.change(screen.getByTestId('override-note'), { target: { value: 'PPT only, SOP 24 Oct per mail' } });
     fireEvent.click(screen.getByTestId('override-submit'));
     await waitFor(() =>
       expect(changesApi.proposeDeviation).toHaveBeenCalledWith(7, {
-        to_status: 'in_assessment', reason: 'PPT only', reason_code: 'customer_date',
+        to_status: 'in_assessment', reason: 'PPT only, SOP 24 Oct per mail', reason_code: 'customer_date',
         guard_key: 'no_impacted_items',
       })
     );

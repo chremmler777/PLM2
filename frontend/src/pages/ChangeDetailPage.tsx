@@ -843,7 +843,7 @@ export default function ChangeDetailPage() {
       const g = gates.find((x) => x.gate_key === gateKey);
       setBlocked({ to, rule: `gate:${gateKey}`, reason: `${t('gate.' + gateKey)} ${t('cockpit.gateWord')} ${
         gateStateText(g?.decision)}. `
-        + 'An approved deviation is required to proceed.' });
+        + t('override.required') });
       setBlockedSeq((n) => n + 1);
     },
     leadSlot: (

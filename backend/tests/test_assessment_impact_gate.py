@@ -50,7 +50,7 @@ async def test_deviation_cannot_bypass_lock_gate(
     cid = await _scoping_ready(client, eng_auth, seed, session_factory, part)
     # C6: the lock is no soft rule, so there is nothing to ask an override for
     asked = await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": "in_assessment", "reason": "skip lock"}, headers=eng_auth)
+        "to_status": "in_assessment", "reason": "skip the lock for now", "reason_code": "in_parallel"}, headers=eng_auth)
     assert asked.status_code == 400, asked.text
     assert "Nothing to override" in asked.json()["detail"]
     # and an override approved before the binding (it covered anything) still

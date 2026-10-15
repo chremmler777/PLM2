@@ -82,6 +82,9 @@ class TransitionRequest(BaseModel):
     # this reason (or reuses the pending one) and answers 202 with it,
     # instead of a bare 400. Ignored when the hop goes through.
     deviation_reason: Optional[str] = None
+    # C6/R4: the override's reason pick (cm_rules.OVERRIDE_REASONS), required
+    # with deviation_reason while COMMERCIAL_V2 is on.
+    deviation_reason_code: Optional[str] = None
 
 
 class CustomerResponseRequest(BaseModel):

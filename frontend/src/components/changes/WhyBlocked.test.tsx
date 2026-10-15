@@ -152,9 +152,11 @@ describe('OverrideDialog', () => {
     expect(screen.getByTestId('absorb-needs').textContent).toContain('Project Management or Management')
     fireEvent.click(screen.getByTestId('absorb-reason-small_amount'))
     fireEvent.change(screen.getByTestId('absorb-note'), { target: { value: 'EUR 300 over' } })
+    expect((screen.getByTestId('absorb-submit') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('absorb-note'), { target: { value: 'EUR 300 over, no supplement' } })
     fireEvent.click(screen.getByTestId('absorb-submit'))
     await waitFor(() => expect(changesApi.absorb).toHaveBeenCalledWith(7, {
-      reason_code: 'small_amount', note: 'EUR 300 over' }))
+      reason_code: 'small_amount', note: 'EUR 300 over, no supplement' }))
     cleanup()
     render(wrap(<AbsorbDialog changeId={7} customerRelevant={false} onClose={() => {}} />))
     expect(screen.getByTestId('absorb-needs').textContent).toContain('internal approver')

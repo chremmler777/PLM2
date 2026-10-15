@@ -256,7 +256,7 @@ async def test_deviation_bypasses_impact_confirmation_guard(
     cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
                                          session_factory)
     dev = (await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": "in_implementation", "reason": "kickoff before Development signs off"},
+        "to_status": "in_implementation", "reason": "kickoff before Development signs off", "reason_code": "in_parallel"},
         headers=eng_auth)).json()
     # C6: an override into implementation is Quality's call, not a plain admin's
     no = await client.post(

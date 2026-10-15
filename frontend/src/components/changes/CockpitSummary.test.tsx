@@ -48,7 +48,7 @@ describe('CockpitSummary', () => {
     expect(releaseRow?.className).toContain('text-slate-400')
     expect(screen.getByTestId('blocked-pending-deviations')).toBeDefined()
     expect(screen.getByText(/Overdue assessments/)).toBeDefined()
-    expect(screen.getByTestId('next-resolve-first').textContent).toBe('First: Pending deviations: 1')
+    expect(screen.getByTestId('next-resolve-first').textContent).toBe('First: Pending overrides: 1')
     // One truth: with blockers listed, the move is not the primary. The
     // primary says how many and leads to the first; the move stays secondary.
     const resolve = screen.getByTestId('next-resolve-blockers')
@@ -866,7 +866,7 @@ describe('CockpitSummary gate held step and deviations (review M1)', () => {
     expect(step.disabled).toBe(false)
     fireEvent.click(step)
     expect(onAdvance).toHaveBeenCalledWith('in_implementation')
-    expect(screen.getByTestId('next-gate-release').textContent).toContain('approved deviation')
+    expect(screen.getByTestId('next-gate-release').textContent).toContain('approved override')
     expect(screen.queryByTestId('next-ask-deviation-in_implementation')).toBeNull()
   })
 

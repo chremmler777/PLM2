@@ -30,6 +30,21 @@ export const OVERRIDE_REASONS = ['customer_date', 'in_parallel', 'not_applicable
 /** Why an open price is absorbed (backend cm_rules.ABSORB_REASONS). */
 export const ABSORB_REASONS = ['goodwill', 'small_amount', 'our_error', 'other'] as const
 
+/** R4 (backend cm_rules.override_note_refusal): a note is a sentence, not
+ * a word; "customer date" names the date or the mail. */
+export const NOTE_MIN_CHARS = 15
+const EMPTY_WORDS = new Set(['ok', 'okay', 'tbd', 'na', 'n/a', 'done', 'checked', 'yes', '-', '--'])
+
+/** Why this note does not do yet (a sentence to show), or null. */
+export function overrideNoteProblem(code: string, note: string): string | null {
+  const v = note.trim()
+  if (v.length < NOTE_MIN_CHARS || EMPTY_WORDS.has(v.toLowerCase())) {
+    return t('override.noteTooShort').replace('{n}', String(NOTE_MIN_CHARS))
+  }
+  if (code === 'customer_date' && !/\d/.test(v)) return t('override.noteNeedsDate')
+  return null
+}
+
 /** A rule's name for people: `rule.<key>`, a gate by its D1 question. */
 export function ruleText(rule: string | null | undefined): string {
   if (!rule) return t('override.anyRule')

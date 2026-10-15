@@ -29,9 +29,10 @@ interface Props {
   onClose: () => void;
 }
 
-/** A soft guard's refusal ends in this sentence (ChangeService.transition);
- * a hard rule never does, and no deviation lifts it. */
-const isDeviable = (reason: string): boolean => /approved deviation is required/i.test(reason);
+/** A soft rule's refusal says an approved override would lift it
+ * (ChangeService.transition; older servers said "deviation"); a hard rule
+ * never does, and no override lifts it. */
+const isDeviable = (reason: string): boolean => /approved (override|deviation)\b[^.]*\bis required/i.test(reason);
 
 const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-amber-900 text-amber-200',
@@ -59,10 +60,17 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
     queryKey: ['change', changeId, 'deviations'],
     queryFn: () => changesApi.listDeviations(changeId),
   });
+  // R4: a reject says why (the asker is told)
+  const [rejecting, setRejecting] = useState<number | null>(null);
+  const [rejectNote, setRejectNote] = useState('');
   const decide = useMutation({
-    mutationFn: (vars: { devId: number; decision: 'approved' | 'rejected' }) =>
-      changesApi.decideDeviation(changeId, vars.devId, { decision: vars.decision }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] }),
+    mutationFn: (vars: { devId: number; decision: 'approved' | 'rejected'; note?: string }) =>
+      changesApi.decideDeviation(changeId, vars.devId, {
+        decision: vars.decision, ...(vars.note ? { note: vars.note } : {}) }),
+    onSuccess: () => {
+      setRejecting(null); setRejectNote('');
+      qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] });
+    },
     onError: (e: unknown) => toastError(e, 'Could not record the decision'),
   });
 
@@ -96,12 +104,23 @@ export default function DeviationBanner({ changeId, blockedTo, from, blockedReas
                 {d.guard_key ? `${t('override.waives').replace('{rule}', ruleText(d.guard_key))}: ` : ''}{d.reason}
               </span>
               {/* lead or admin, never the proposer: the backend's verdict per row */}
-              {d.status === 'pending' && d.can_decide && (
+              {d.status === 'pending' && d.can_decide && rejecting !== d.id && (
                 <span className="ml-auto flex gap-1">
                   <button type="button" className={btnSm.secondary}
-                          onClick={() => decide.mutate({ devId: d.id, decision: 'approved' })}>Approve</button>
-                  <button type="button" className={`${btnSm.secondary} text-red-200`}
-                          onClick={() => decide.mutate({ devId: d.id, decision: 'rejected' })}>Reject</button>
+                          onClick={() => decide.mutate({ devId: d.id, decision: 'approved' })}>{t('override.approve')}</button>
+                  <button type="button" className={`${btnSm.secondary} text-red-200`} data-testid={`banner-reject-${d.id}`}
+                          onClick={() => setRejecting(d.id)}>{t('override.reject')}</button>
+                </span>
+              )}
+              {d.status === 'pending' && d.can_decide && rejecting === d.id && (
+                <span className="ml-auto flex min-w-0 gap-1">
+                  <input aria-label={`Note on override #${d.id}`} placeholder={t('override.decideNote')}
+                    data-testid={`banner-reject-note-${d.id}`} value={rejectNote}
+                    onChange={(e) => setRejectNote(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100 placeholder-slate-500" />
+                  <button type="button" className={`${btnSm.secondary} text-red-200`} data-testid={`banner-reject-confirm-${d.id}`}
+                          disabled={!rejectNote.trim() || decide.isPending}
+                          onClick={() => decide.mutate({ devId: d.id, decision: 'rejected', note: rejectNote.trim() })}>{t('override.reject')}</button>
                 </span>
               )}
             </li>

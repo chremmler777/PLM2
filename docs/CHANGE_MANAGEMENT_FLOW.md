@@ -50,7 +50,7 @@ flowchart TD
     B -->|reject| X
     C -->|reject with reason| X
     C -.->|not feasible: back to scoping, reason| B
-    C -->|soft: all R/A submitted, none not feasible,<br/>no routing change pending, else override by deviation| D[costing]
+    C -->|soft: all R/A submitted, none not feasible,<br/>no routing change pending, else an override per rule| D[costing]
     D -->|customer change; soft C5: every department's<br/>costing finalized, else override| E[quoting: Offer]
     D -->|internal change: internal approval HARD #8<br/>engineering approver, never the raiser; soft C5| H
     E -->|offer v1 sent, auto| F[quoted: negotiation]
@@ -105,7 +105,7 @@ Run these when discussing any stage's implementation:
   attachment**, (customer-relevant changes only) the **required-by date**
   (quote deadline), and a **change lead**. Missing pieces are listed in the
   message: *"Incomplete capture: missing description, at least one attachment,
-  change lead before scoping"*. Overridable by approved deviation.
+  change lead before scoping"*. Overridable by an approved override.
   `change_service.py::kickoff_missing`, read by `_guard`.
   Rationale: Sales captures, the project team scopes — kickoff means handing
   over a request someone can actually work on. The impacted set is **no longer**
@@ -438,7 +438,7 @@ for the whole team." Decision: a pipeline per department.
 - **Hard, unbypassable:** impacted set must be locked. Since 2026-10-14 the
   meeting's `proceed` locks it on the decider's name (switch off, see "Inside
   `scoping`"); with the switch on, Development confirms it by hand. Not even
-  an approved deviation clears it.
+  an approved override clears it.
 - **Soft:** ≥1 impacted item (with the switch off, `proceed` refuses an empty
   set outright), lead assigned, deadline set, meeting with decision
   `proceed`.
@@ -1139,7 +1139,16 @@ that holds a hop, each with a key (`cm_rules.GuardReason`). An **Override**
 guard_key?, reason_code}`) is bound to ONE rule (`guard_key`, migration 118);
 a hop held by two rules needs two overrides, one bound to another rule lifts
 nothing (C6, `COMMERCIAL_V2`). The reason pick is customer date / done in
-parallel / does not apply / other, plus a note. The OK is never the
+parallel / does not apply / other, plus a note (R4, `cm_rules.override_note_refusal`,
+for the dialog, the 202 path of `POST /transition` with `deviation_reason` +
+`deviation_reason_code`, and scripts alike): no default pick, a sentence of at
+least 15 characters (not "ok" or "tbd"), and "customer date" names the date
+or the mail reference. The Absorb note follows the same length rule. A
+reject needs a note, and the asker is told the decision once
+(`deviation_decided`, subject `dev:<id>:decided`, with the note). Users read
+"override" everywhere (refusals "An approved override of '<rule>' is required
+to proceed. Override #n waits for the OK of <who>.", the 202 answer, the
+panel, the changelog); the model stays `ChangeTransitionDeviation`. The OK is never the
 proposer's: by default the lead, a Project Management member or an admin;
 overrides into `in_implementation` or `released` and validation rules: a
 Quality member; price rules (`scope_change_uncovered`, `price_drop`) and

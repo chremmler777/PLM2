@@ -63,12 +63,20 @@ describe('TransitionDeviationsPanel (P2-3)', () => {
   const dev = { id: 5, to_status: 'released', reason: 'Covered by the new timing', status: 'pending' as const,
     proposed_by: 16, proposed_at: '2026-09-25T10:00:00' }
 
-  it('lets the approver decide with a note', async () => {
+  it('lets the approver decide with a note; a reject needs one (the asker is told)', async () => {
     wrap(<TransitionDeviationsPanel changeId={21} deviations={[dev]} decidableIds={[5]} />)
-    fireEvent.change(screen.getByLabelText('Note on deviation #5'), { target: { value: 'ok by PM' } })
+    expect((screen.getByTestId('deviation-reject-5') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Note on override #5'), { target: { value: 'ok by PM' } })
     fireEvent.click(screen.getByTestId('deviation-reject-5'))
     await waitFor(() => expect(changesApi.decideDeviation)
       .toHaveBeenCalledWith(21, 5, { decision: 'rejected', note: 'ok by PM' }))
+  })
+
+  it('an Absorb row is no step: no "Go to Closed"; a redacted note shows nothing', () => {
+    wrap(<TransitionDeviationsPanel changeId={21} decidableIds={[]}
+      deviations={[{ ...dev, to_status: 'closed', guard_key: 'price_open', reason: '' }]} />)
+    expect(screen.getByTestId('deviation-5').textContent).not.toContain('Go to')
+    expect(screen.getByTestId('deviation-rule-5').textContent).toBe('Absorb the open price')
   })
 
   it('tells anyone else whose decision it is, with no buttons', () => {

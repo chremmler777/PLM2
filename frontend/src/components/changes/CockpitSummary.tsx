@@ -417,7 +417,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     return (
       <span className="block pl-4 text-slate-400">
         {t('why.noOverride')} {i.exits.map((e) => t('why.exit.' + e)).join(' ')}
-        {i.exits.includes('absorb') && (i.override
+        {(i.exits.includes('absorb') || i.exits.includes('absorb_internal')) && (i.override
           ? <span data-testid="why-absorb-asked"> {t('why.absorbAsked').replace('{n}', String(i.override.id))}</span>
           : canAbsorb && onAbsorb ? (
             <button type="button" data-testid="why-absorb" className={`ml-1 text-amber-200 ${linkRow}`}

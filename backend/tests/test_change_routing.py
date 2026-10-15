@@ -397,7 +397,7 @@ async def test_not_feasible_blocks_costing_until_justified(
     # overridable only via an approved transition deviation (4-eyes)
     admin_auth = await _login_admin(client)
     dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations",
-                             json={"to_status": "costing", "reason": "risk accepted"}, headers=auth)).json()
+                             json={"to_status": "costing", "reason": "risk accepted by the lead", "reason_code": "not_applicable"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
                       json={"decision": "approved"}, headers=admin_auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",

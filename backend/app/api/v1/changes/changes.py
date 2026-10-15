@@ -1415,22 +1415,26 @@ async def transition_change(
             try:
                 dev = await ChangeService.propose_transition_deviation(
                     db, change, e.to_status, dev_reason, current_user.id,
-                    guard_key=getattr(e.guard_reason, "key", None))
+                    guard_key=getattr(e.guard_reason, "key", None),
+                    reason_code=body.deviation_reason_code)
             except ChangeError as err:
                 raise HTTPException(status_code=400, detail=str(err))
             await db.commit()
             await db.refresh(dev)
         row = (await _deviation_rows(db, change, [dev], current_user))[0]
+        from app.services.cm_rules import DECIDER_WORDS, decider_group
+        who = DECIDER_WORDS[decider_group(dev.guard_key, dev.to_status,
+                                          change.customer_relevant)]
         return JSONResponse(status_code=202, content=jsonable_encoder({
             "deviation_requested": True,
             "created": created,
             "to_status": e.to_status,
             "blocked_by": e.guard_reason,
-            "detail": (f"{e.guard_reason}. Deviation #{dev.id} requested: the "
-                       "change lead or an admin decides it"
+            "detail": (f"{e.guard_reason}. Override #{dev.id} asked: it needs "
+                       f"the OK of {who}"
                        if created else
-                       f"{e.guard_reason}. Deviation #{dev.id} is already "
-                       "waiting for its decision"),
+                       f"{e.guard_reason}. Override #{dev.id} waits for the "
+                       f"OK of {who}"),
             "deviation": row,
         }))
     except ChangeError as e:

@@ -121,7 +121,7 @@ async def test_lead_with_pending_deviation_gets_deviation_decision(
     assert res.status_code in (200, 201), res.text
     cid = res.json()["id"]
     dev = await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": "in_assessment", "reason": "need it now"}, headers=admin_auth)
+        "to_status": "in_assessment", "reason": "need it now for the customer", "reason_code": "in_parallel"}, headers=admin_auth)
     assert dev.status_code == 200, dev.text
 
     out = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=eng_auth)

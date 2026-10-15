@@ -8,7 +8,7 @@ import { changesApi } from '../../api/changes'
 import { toastError } from '../../lib/apiError'
 import { t } from '../../i18n/cmLabels'
 import { STATUS_LABELS } from '../../lib/changeStatus'
-import { ABSORB_REASONS, OVERRIDE_REASONS, deciderGroup, deciderText, ruleText } from '../../lib/overrideRules'
+import { ABSORB_REASONS, OVERRIDE_REASONS, deciderGroup, deciderText, overrideNoteProblem, ruleText } from '../../lib/overrideRules'
 import type { ChangeStatus } from '../../types/change'
 
 const fieldCls =
@@ -63,6 +63,8 @@ export default function OverrideDialog({ changeId, customerRelevant, leadName, o
   const noteId = useId()
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const who = deciderText(deciderGroup(rule, to, customerRelevant), leadName)
+  // R4: the same rule as the backend; said once the user started typing
+  const problem = overrideNoteProblem(code, note)
   const ask = useMutation({
     mutationFn: () => changesApi.proposeDeviation(changeId, {
       to_status: to, reason: note.trim(), reason_code: code, ...(rule ? { guard_key: rule } : {}),
@@ -86,7 +88,7 @@ export default function OverrideDialog({ changeId, customerRelevant, leadName, o
         <>
           <Button onClick={onClose} disabled={ask.isPending}>{t('common.cancel')}</Button>
           <Button variant="primary" data-testid="override-submit"
-            disabled={!code || !note.trim()} loading={ask.isPending}
+            disabled={!code || !!problem} loading={ask.isPending}
             onClick={() => ask.mutate()}>{t('override.submit')}</Button>
         </>
       )}>
@@ -98,6 +100,9 @@ export default function OverrideDialog({ changeId, customerRelevant, leadName, o
           <textarea id={noteId} ref={noteRef} data-testid="override-note"
             className={`${fieldCls} min-h-[70px]`} placeholder={t('override.notePlaceholder')}
             value={note} onChange={(e) => setNote(e.target.value)} />
+          {note.trim() && problem && (
+            <p data-testid="override-note-hint" className="mt-1 text-xs text-amber-300">{problem}</p>
+          )}
         </div>
         <p data-testid="override-needs" className="flex items-start gap-2 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
           <TriangleAlert aria-hidden="true" size={14} className="mt-0.5 shrink-0 text-amber-300" />
@@ -120,6 +125,7 @@ export function AbsorbDialog({ changeId, customerRelevant, onClose, onDone }: Co
   const noteId = useId()
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const who = deciderText(deciderGroup('price_open', 'closed', customerRelevant))
+  const problem = overrideNoteProblem(code, note)
   const ask = useMutation({
     mutationFn: () => changesApi.absorb(changeId, { reason_code: code, note: note.trim() }),
     onSuccess: (d) => {
@@ -139,7 +145,7 @@ export function AbsorbDialog({ changeId, customerRelevant, onClose, onDone }: Co
         <>
           <Button onClick={onClose} disabled={ask.isPending}>{t('common.cancel')}</Button>
           <Button variant="primary" data-testid="absorb-submit"
-            disabled={!code || !note.trim()} loading={ask.isPending}
+            disabled={!code || !!problem} loading={ask.isPending}
             onClick={() => ask.mutate()}>{t('absorb.submit')}</Button>
         </>
       )}>
@@ -151,6 +157,9 @@ export function AbsorbDialog({ changeId, customerRelevant, onClose, onDone }: Co
           <textarea id={noteId} ref={noteRef} data-testid="absorb-note"
             className={`${fieldCls} min-h-[70px]`} placeholder={t('absorb.notePlaceholder')}
             value={note} onChange={(e) => setNote(e.target.value)} />
+          {note.trim() && problem && (
+            <p data-testid="absorb-note-hint" className="mt-1 text-xs text-amber-300">{problem}</p>
+          )}
         </div>
         <p data-testid="absorb-needs" className="text-xs text-amber-200">
           {t('override.needs').replace('{who}', who)}
