@@ -407,8 +407,12 @@ async def my_change_tasks(
 
     # C3: a released change still owes its close (lead / PM): the one row
     # a released change gives, with no other stage builder run on it.
+    # Only the caller's own (lead) or lead-less ones (Project Management):
+    # advance_tasks decides the rest, never over every released change (R34).
     released = (await db.execute(_org_scope(
-        select(ChangeRequest).where(ChangeRequest.status == "released"),
+        select(ChangeRequest).where(
+            ChangeRequest.status == "released",
+            (ChangeRequest.lead_id == current_user.id) | ChangeRequest.lead_id.is_(None)),
         current_user))).scalars().all()
     if released:
         async def _ident(c):

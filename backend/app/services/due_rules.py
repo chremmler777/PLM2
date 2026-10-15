@@ -6,8 +6,9 @@ Two due rules, one escalation rule, all in working days (Mon-Fri):
   (priority 'critical') or others wait on it (FAST_KINDS).
 - Assessment: min(now + 7 d, deadline - 3 wd), deadline = the quote deadline
   or the need-by date, whichever is earlier; floor 2 wd (urgent 1 wd).
-- Late at due + 1 wd: the item then shows to the owner's department, in the
-  lead's "Overdue" group and in the overdue digest.
+- Late at due + 1 wd: department assessments and engine tasks then show in
+  the lead's "Overdue" group and the overdue digest, Sales' stage rows in
+  the digest (escalation_of); other rows are flagged Late for their owner.
 
 With ASSESSMENT_V2 off the assessment due is the old flat 7 days and task
 rows keep the change's deadline as their due date (callers check on())."""
@@ -58,11 +59,15 @@ def is_urgent(change) -> bool:
 
 def deadline_of(change) -> tuple[Optional[datetime], Optional[str]]:
     """(date, 'quote' | 'need_by') the work runs against: the quote deadline
-    until the offer went out, the need-by (release) date; the earlier of the
-    two when both are set. (None, None) when neither is."""
+    (customer changes only, until the offer went out, as
+    ChangeRequest.active_deadline counts it), the need-by (release) date;
+    the EARLIER of the two when both are set, deliberately unlike
+    active_deadline (release first): a due date must meet both promises,
+    the header shows the phase's one. (None, None) when neither is."""
     out: list[tuple[datetime, str]] = []
     quote = getattr(change, "required_by_date", None)
-    if quote is not None and getattr(change, "quoted_at", None) is None:
+    if (quote is not None and getattr(change, "customer_relevant", False)
+            and getattr(change, "quoted_at", None) is None):
         out.append((quote, "quote"))
     need_by = getattr(change, "release_due_date", None)
     if need_by is not None:
@@ -139,6 +144,26 @@ CUSTOMER_CONTACT_WD = 5
 OWN_DUE_PREFIXES = ("assessment", "validation_issue_")
 
 
+#: Who sees a late row besides its owner (spec §0 one escalation rule):
+#: department assessments and engine tasks reach the lead's "Overdue" group
+#: and the digest (notification_sweep, ChangeService.lead_escalations); Sales'
+#: stage rows reach the digest (overdue_digest.SALES_ROWS). Every other row
+#: is flagged Late in the owner's list only (cut 1). The UI words the Late
+#: chip by this, so it never promises an escalation that does not happen.
+LEAD_ESCALATED_KINDS = frozenset({"assessment"})
+DIGEST_KINDS = frozenset({"kickoff", "create_quote", "customer_response"})
+
+
+def escalation_of(task: dict, change) -> Optional[str]:
+    """'lead' | 'digest' | None for a late My Tasks row."""
+    if task["kind"] in LEAD_ESCALATED_KINDS:
+        return "lead"
+    if (task["kind"] in DIGEST_KINDS and getattr(change, "customer_relevant", False)
+            and cm_switches.on("RELEASE_V2")):
+        return "digest"
+    return None
+
+
 def needs_you(task: dict) -> bool:
     return (bool(task.get("needs_you")) or task["kind"] in NEEDS_YOU_KINDS
             or (task["kind"] == "validation_issue_customer"
@@ -184,6 +209,7 @@ async def annotate_tasks(session, tasks: list[dict], changes,
             t["due_date"] = due
             t["overdue"] = due < now
         t["late"] = is_late(due, now) if isinstance(due, datetime) else False
+        t["escalation"] = escalation_of(t, c)
 
 
 def task_order(t: dict) -> tuple:

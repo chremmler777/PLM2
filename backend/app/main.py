@@ -468,9 +468,9 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"Lesson reminder run failed: {e}")
             try:
-                async with AsyncSessionLocal() as session:
-                    from app.services.notification_sweep import run_notification_sweep
-                    await run_notification_sweep(session)
+                # commits: the sweep's notices must outlive the session
+                from app.services.notification_sweep import sweep_once
+                await sweep_once()
             except Exception as e:
                 logger.warning(f"Notification sweep run failed: {e}")
             await asyncio.sleep(6 * 3600)

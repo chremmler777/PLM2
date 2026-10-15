@@ -9,6 +9,11 @@ from app.models.workflow import UserDepartment
 
 logger = logging.getLogger(__name__)
 
+#: How notify_team marks a backup's info copy (spec §18). The mail outbox
+#: reads it: an info copy stays a badge, never a mail.
+BACKUP_NOTE = "Info: you are backup here, main: {main}."
+BACKUP_NOTE_PREFIX = BACKUP_NOTE.split("{", 1)[0]
+
 
 class NotificationService:
 
@@ -57,6 +62,7 @@ class NotificationService:
         title: str,
         body: str | None = None,
         link: str | None = None,
+        include_read: bool = False,
     ) -> int:
         """Create a notification per user, deduped by (user, kind, subject_key).
 
@@ -64,18 +70,21 @@ class NotificationService:
         subject is skipped — re-emitting the same event (e.g. a periodic
         sweep) must not spam their inbox. A notification the user already
         read does NOT suppress a fresh one: if the event recurs after they
-        cleared the last one, it's news again.
+        cleared the last one, it's news again. include_read=True: one
+        notification per (user, kind, subject_key) ever, read or not — for a
+        state a periodic sweep re-detects every run (a late task, a deadline
+        at risk), which is no news the second time (spec §0: one per item).
         """
         if not user_ids:
             return 0
         unique_ids = set(user_ids)
-        existing = set((await db.execute(
-            select(Notification.user_id).where(
-                Notification.user_id.in_(list(unique_ids)),
-                Notification.kind == kind,
-                Notification.subject_key == subject_key,
-                Notification.is_read.is_(False),
-            ))).scalars().all())
+        q = select(Notification.user_id).where(
+            Notification.user_id.in_(list(unique_ids)),
+            Notification.kind == kind,
+            Notification.subject_key == subject_key)
+        if not include_read:
+            q = q.where(Notification.is_read.is_(False))
+        existing = set((await db.execute(q)).scalars().all())
         n = 0
         for uid in unique_ids - existing:
             db.add(Notification(user_id=uid, kind=kind, subject_key=subject_key,
@@ -157,6 +166,6 @@ class NotificationService:
         for uid, main in backups.items():
             by_main.setdefault(main, []).append(uid)
         for main, ids in by_main.items():
-            note = f"Info: you are backup here, main: {main}."
+            note = BACKUP_NOTE.format(main=main)
             n += await _send(ids, f"{body}\n{note}" if body else note)
         return n

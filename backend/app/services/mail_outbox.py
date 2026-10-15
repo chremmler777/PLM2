@@ -6,6 +6,13 @@ notification once as a plain-text mail ending "Answer in PLM2: <link>", so
 the answer is given in PLM2, never by reply (reply-to auto-answer and
 30-minute batching: cut 2).
 
+Only the immediate class is mailed (spec §0 Notifications): a task newly
+yours, a decision needed, an escalation to acknowledge, and the daily digest
+(MAIL_KINDS; kind-less notices are the older direct task and assignment
+notices). "Everything else is a badge": due reminders, late notices,
+deadline alerts, FYI and stage-entry notices, decisions told back, and a
+backup's info copy are stamped and never mailed.
+
 Off unless settings.smtp_enabled. A notification goes out at most once
 (notifications.mailed_at); one already read in PLM2, older than MAX_AGE (a
 backlog from before SMTP was switched on) or for a user without an active
@@ -29,6 +36,18 @@ from app.models.notification import Notification
 logger = logging.getLogger(__name__)
 
 MAX_AGE = timedelta(hours=24)
+#: The kinds that are mailed; None = a kind-less direct notice.
+MAIL_KINDS = frozenset({
+    None, "task_assigned", "deviation_pending", "routing_deviation_pending",
+    "revision_intake", "change_review", "change_info_sent",
+    "routing_late_assessment", "validation_issue_escalated", "overdue_digest",
+})
+
+
+def mailable(n: Notification) -> bool:
+    """Immediate class only; a backup's info copy is a badge."""
+    from app.services.notification_service import BACKUP_NOTE_PREFIX
+    return n.kind in MAIL_KINDS and BACKUP_NOTE_PREFIX not in (n.body or "")
 BATCH = 200
 FOOTER = "Answer in PLM2: {url}"
 
@@ -78,7 +97,7 @@ async def send_pending(session: AsyncSession, *,
         .order_by(Notification.id).limit(BATCH))).all()
     sent = 0
     for n, email, active in rows:
-        skip = (n.is_read or not active or not (email or "").strip()
+        skip = (n.is_read or not mailable(n) or not active or not (email or "").strip()
                 or (n.created_at is not None and n.created_at < now - MAX_AGE))
         if not skip:
             msg = compose(n, email.strip())

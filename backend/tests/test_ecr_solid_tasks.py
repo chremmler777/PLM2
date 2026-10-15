@@ -248,7 +248,7 @@ async def routed(client, seed, team, session_factory, part):
     admin = await login(client, "admin@test.io")
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "routed", "change_type": "tooling",
-        "lead_id": seed["admin_id"]}, headers=admin)
+        "lead_id": seed["admin_id"], "customer_relevant": True}, headers=admin)
     cid = res.json()["id"]
     res = await client.post(f"/api/v1/changes/{cid}/impacted-items",
                             json={"part_id": part["part_id"], "is_lead": True},

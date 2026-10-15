@@ -443,6 +443,9 @@ class ChangeRoutingService:
                 title=f"Change {change.change_number} entered assessment",
                 body=f"'{change.title}' has started cross-functional assessment.",
                 link=f"/changes/{change.id}",
+                # a stage notice: a badge, never a mail (spec §0); the
+                # department's own "Assessment task" notice is the push
+                kind="stage_entered", subject_key=f"chg:{change.id}:in_assessment",
             )
         # Belt and braces: any stage-1 row the engine did not give a task.
         await ChangeRoutingService.repair_stage_tasks(session, change, None)

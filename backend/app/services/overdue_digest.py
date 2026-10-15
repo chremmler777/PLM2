@@ -6,7 +6,13 @@ change with what is late: department assessments and change tasks past
 due + 1 working day, Sales' stage tasks (hand-over, quote, customer answer)
 by the task rule, and overdue change deadlines. Nothing
 late, no digest. Sent at most once per recipient and day, read or not.
-Cut 2 replaces the list with a manager per department."""
+Lateness is the sweep's own test (notification_sweep.escalated). Each
+recipient sees only the changes of their organization (change_service
+_org_scope; admins see all), so a non-admin deputy never reads other
+organizations' titles, leads or owners.
+Cut 2 replaces the list with a manager per department; the per-change digest
+for involved people (spec §0 "Digest: one line per change", §4 "lead's
+digest told") is cut 2 as well."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -44,12 +50,15 @@ async def digest_recipients(session: AsyncSession) -> list[User]:
     ))).scalars().all())
 
 
-async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None) -> list[str]:
-    """One line per change with everything late on it, oldest change first."""
+async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
+                        viewer: Optional[User] = None) -> list[str]:
+    """One line per change with everything late on it, oldest change first;
+    only the viewer's organization's changes when a viewer is given."""
+    from app.services.change_service import _org_scope
+    from app.services.notification_sweep import escalated
     now = now or datetime.utcnow()
-    cutoff = due_rules.sub_wd(now, due_rules.LATE_AFTER_WD)
-    changes = {c.id: c for c in (await session.execute(select(ChangeRequest).where(
-        ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()}
+    changes = {c.id: c for c in (await session.execute(_org_scope(select(ChangeRequest).where(
+        ChangeRequest.status.not_in(TERMINAL_STATUSES)), viewer))).scalars().all()}
     if not changes:
         return []
     items: dict[int, list[str]] = {}
@@ -63,7 +72,9 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None) -
             ChangeAssessment.status == "active",
             ChangeAssessment.wf_instance_task_id.is_(None),
             ChangeAssessment.due_date.is_not(None),
-            ChangeAssessment.due_date < cutoff))).scalars().all():
+            ChangeAssessment.due_date < now))).scalars().all():
+        if not escalated(a.due_date, now):
+            continue
         add(a.change_id, f"{names.get(a.department_id, 'a department')} assessment "
                          f"(due {fmt_date(a.due_date)})")
     for t, cid in (await session.execute(
@@ -73,7 +84,9 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None) -
                    WfInstanceTask.status == "active",
                    WfInstanceTask.is_actionable.is_(True),
                    WfInstanceTask.due_date.is_not(None),
-                   WfInstanceTask.due_date < cutoff))).all():
+                   WfInstanceTask.due_date < now))).all():
+        if not escalated(t.due_date, now):
+            continue
         who = f", {t.owner_name}" if t.owner_id is not None and t.owner_name else ""
         add(cid, f"{names.get(t.department_id, 'a department')}{who} "
                  f"(due {fmt_date(t.due_date)})")
@@ -131,11 +144,20 @@ async def send_overdue_digest(session: AsyncSession,
     todo = [u for u in users if u.id not in had]
     if not todo:
         return 0
-    lines = await overdue_lines(session, now)
-    if not lines:
-        return 0
     from app.services.notification_service import NotificationService
-    return await NotificationService.notify_once(
-        session, [u.id for u in todo], kind=DIGEST_KIND, subject_key=key,
-        title=f"Overdue today: {len(lines)} change(s)",
-        body="\n".join(lines), link="/changes")
+    sent = 0
+    unscoped: Optional[list[str]] = None
+    for u in todo:
+        if u.effective_role == "admin":
+            if unscoped is None:
+                unscoped = await overdue_lines(session, now)
+            lines = unscoped
+        else:
+            lines = await overdue_lines(session, now, viewer=u)
+        if not lines:
+            continue
+        sent += await NotificationService.notify_once(
+            session, [u.id], kind=DIGEST_KIND, subject_key=key, include_read=True,
+            title=f"Overdue today: {len(lines)} change(s)",
+            body="\n".join(lines), link="/changes")
+    return sent

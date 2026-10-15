@@ -29,6 +29,9 @@ from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
 
+#: "Not passed" marker for optional preloaded arguments (None is a value).
+_UNSET = object()
+
 
 def _org_scope(stmt, viewer: Optional[User]):
     """Restrict a ChangeRequest select to the viewer's organization.
@@ -706,15 +709,16 @@ class ChangeService:
 
     @staticmethod
     async def signoff_sides_missing(session: AsyncSession, change: ChangeRequest,
-                                    ) -> tuple[list[str], Optional[object]]:
+                                    latest=_UNSET) -> tuple[list[str], Optional[object]]:
         """(sides 'pm'/'quality' whose sign-off is missing or given on an
         older offer than the latest sent, that offer). One rule for approval
         (HARD #4) and release (HARD #9): a signature counts for the offer it
         was given on; Quality's also for a later version with the same
         technical content (spec §7). Without a sent offer (internal, mother
         plant, legacy) only a missing signature counts."""
-        latest = (await ChangeService.latest_sent_offer(session, change)
-                  if change.customer_relevant else None)
+        if latest is _UNSET:      # a list may pass the offer it batched
+            latest = (await ChangeService.latest_sent_offer(session, change)
+                      if change.customer_relevant else None)
         sides = [side for side, by, oid in (
             ("pm", change.pm_signed_by, change.pm_signed_offer_id),
             ("quality", change.quality_signed_by, change.quality_signed_offer_id))
@@ -794,10 +798,29 @@ class ChangeService:
         and not its raiser. Empty = the fallback rule decides (a Project
         Manager member or an admin), so a change raised by the only
         configured approver never stalls (R18)."""
-        approvers = await ChangeService.internal_approver_users(session)
+        approvers = await ChangeService._writers(
+            session, await ChangeService.internal_approver_users(session))
         if change is None:
             return approvers
         return [u for u in approvers if u.id != change.raised_by]
+
+    @staticmethod
+    async def _writers(session: AsyncSession, users: list[User]) -> list[User]:
+        """The users who can write here (R24): a read-only account (role
+        viewer, no active PLM department) is never a configured approver,
+        so the fallback rule decides instead of a task nobody may do. A
+        stored viewer who was given a department since writes from the next
+        login on (auth.py _local_role), so it counts."""
+        viewers = [u.id for u in users if u.role == "viewer"]
+        if not viewers:
+            return users
+        from app.models.workflow import UserDepartment
+        placed = set((await session.execute(
+            select(UserDepartment.user_id)
+            .join(Department, Department.id == UserDepartment.department_id)
+            .where(UserDepartment.user_id.in_(viewers),
+                   Department.is_active.is_(True)))).scalars().all())
+        return [u for u in users if u.role != "viewer" or u.id in placed]
 
     @staticmethod
     async def internal_approver_ids(session: AsyncSession,
@@ -837,6 +860,8 @@ class ChangeService:
         only one raised it), the earlier rule stands in: a Project Manager
         member or an admin, still never the raiser."""
         from app.services.change_people import is_acting
+        if user.effective_role == "viewer":
+            return False      # read-only: the POST would refuse it (R24)
         if change is not None and change.raised_by == user.id:
             return False
         approvers = await ChangeService.change_approvers(session, change)
@@ -1034,9 +1059,10 @@ class ChangeService:
         if not changes:
             return []
         # One escalation rule (spec §0): an item reaches the lead's
-        # "Overdue" group at due + 1 working day (ASSESSMENT_V2).
-        from app.services.notification_sweep import _escalation_cutoff
-        cutoff = _escalation_cutoff(now)
+        # "Overdue" group at due + 1 working day (ASSESSMENT_V2), by the
+        # sweep's own test (SQL keeps what is past due, `escalated` decides).
+        from app.services.notification_sweep import escalated
+        cutoff = now
         by_id = {c.id: c for c in changes}
         out: list[dict] = []
 
@@ -1049,6 +1075,8 @@ class ChangeService:
                    ChangeAssessment.due_date.is_not(None),
                    ChangeAssessment.due_date < cutoff))).all()
         for a, dept_name in assessment_rows:
+            if not escalated(a.due_date, now):
+                continue
             c = by_id[a.change_id]
             out.append({
                 "kind": "assessment", "change_id": c.id,
@@ -1072,6 +1100,8 @@ class ChangeService:
                    WfInstanceTask.due_date < cutoff))).all()
         seen_task_ids: set[int] = set()
         for t, step_name, change_id in task_rows:
+            if not escalated(t.due_date, now):
+                continue
             seen_task_ids.add(t.id)
             c = by_id[change_id]
             out.append({
@@ -1096,7 +1126,7 @@ class ChangeService:
                    WfInstanceTask.due_date.is_not(None),
                    WfInstanceTask.due_date < cutoff))).all()
         for t, dept_name, change_id in change_task_rows:
-            if t.id in seen_task_ids:
+            if t.id in seen_task_ids or not escalated(t.due_date, now):
                 continue
             seen_task_ids.add(t.id)
             c = by_id[change_id]
@@ -3451,6 +3481,9 @@ class ChangeService:
                         "department_id": did,
                         "stale": stale, "target_tab": "timing",
                         "hint": "Confirm the detailed plan or raise a concern",
+                        # owed since the plan last changed (a plan edit
+                        # bumps plan_revision on the change row)
+                        "since": c.updated_at,
                     })
 
             # Stage 10: open release-checklist items, per owner department.
@@ -3480,9 +3513,14 @@ class ChangeService:
             if c.status in ("in_assessment", "costing") and dep_ids:
                 pending = await ChangeService.costing_pending_department_ids(db, c)
                 for dept_id in sorted(set(pending) & dep_ids):
+                    # owed from the department's own submit, not from when
+                    # the change entered its status (C20)
+                    submitted = [a.submitted_at for a in c.assessments
+                                 if a.department_id == dept_id and a.submitted_at]
                     tasks.append({
                         **await _base(c), "kind": "costing_input",
                         "department_id": dept_id,
+                        "since": max(submitted, default=None),
                     })
 
             # Stage 8 is a cadence, not a milestone: while the change is being
@@ -3640,7 +3678,8 @@ class ChangeService:
                     for d in sorted(mine_depts):
                         tasks.append({**await _base(c), "kind": "costing_update",
                                       "department_id": d,
-                                      "reason": c.scope_change_reason})
+                                      "reason": c.scope_change_reason,
+                                      "since": c.scope_changed_at})
 
         # C3: the move-forward steps nobody saw in the list before.
         tasks += await ChangeService._move_forward_tasks(
@@ -3708,10 +3747,11 @@ class ChangeService:
         from app.services import mother_plants as mp
         from app.services.change_people import holds_lead
         out: list[dict] = []
-        if not open_changes:
-            return out
+        if not open_changes or user.effective_role == "viewer":
+            return out        # read-only: decides and moves nothing (R24)
         is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
         is_quality = await ChangeService.member_of(db, user, "Quality")
+        from app.services import cm_switches
         from app.services.cm_rules import ABSORB_RULE
         for c in open_changes:
             for dev in c.transition_deviations:
@@ -3729,42 +3769,81 @@ class ChangeService:
                     "since": dev.proposed_at,
                 })
 
+        # Sign-offs mirror the gates (R24/R30): bound to the latest offer
+        # with COMMERCIAL_V2 (HARD #4), a missing signature only without it;
+        # after approval only while RELEASE_V2 holds them at release (#9).
+        release_rule = cm_switches.on("RELEASE_V2")
+        bound = cm_switches.on("COMMERCIAL_V2")
+
         def _signable(c) -> bool:
             if (not c.customer_relevant or mp.is_mother_plant(c)
                     or getattr(c, "origin", None) == "engineering_review"):
                 return False
-            return ((c.status == "quoted" and c.customer_response == "accepted")
-                    or c.status in ("approved", "in_implementation", "in_validation"))
-        if is_pm_member or is_quality:
-            for c in open_changes:
-                if not _signable(c):
+            if c.status == "quoted":
+                return c.customer_response == "accepted"
+            return release_rule and c.status in (
+                "approved", "in_implementation", "in_validation")
+        signable = [c for c in open_changes if _signable(c)] \
+            if (is_pm_member or is_quality) else []
+        latest_by: dict = {}
+        if signable:
+            from app.models.change_offer import ChangeOffer
+            for o in (await db.execute(
+                    select(ChangeOffer).where(
+                        ChangeOffer.change_id.in_([c.id for c in signable]),
+                        ChangeOffer.sent_at.isnot(None))
+                    .order_by(ChangeOffer.version))).scalars().all():
+                latest_by[o.change_id] = o      # by version: the last one wins
+        for c in signable:
+            latest = latest_by.get(c.id)
+            if bound or c.status != "quoted":
+                sides, latest = await ChangeService.signoff_sides_missing(
+                    db, c, latest=latest)
+            else:
+                sides = [side for side, by in (("pm", c.pm_signed_by),
+                                               ("quality", c.quality_signed_by))
+                         if by is None]
+            for side in sides:
+                if not (is_pm_member if side == "pm" else is_quality):
                     continue
-                sides, latest = await ChangeService.signoff_sides_missing(db, c)
-                for side in sides:
-                    if not (is_pm_member if side == "pm" else is_quality):
-                        continue
-                    other = c.quality_signed_by if side == "pm" else c.pm_signed_by
-                    if other == user.id:
-                        continue      # 4-eyes: the other side's signer
-                    out.append({
-                        **await base(c), "kind": "sign_off", "side": side,
-                        "offer_version": latest.version if latest is not None else None,
-                        "target_tab": "overview", "needs_you": True,
-                        "since": c.customer_response_at,
-                    })
+                other = c.quality_signed_by if side == "pm" else c.pm_signed_by
+                if other == user.id:
+                    continue      # 4-eyes: the other side's signer
+                # owed since the customer's yes, or since the newer offer
+                # it must be signed for went out (a re-sign)
+                since = max((t for t in (c.customer_response_at,
+                                         getattr(latest, "sent_at", None))
+                             if t is not None), default=None)
+                out.append({
+                    **await base(c), "kind": "sign_off", "side": side,
+                    "offer_version": latest.version if latest is not None else None,
+                    "target_tab": "overview", "needs_you": True,
+                    "since": since,
+                })
 
-        for c in open_changes:
-            if (c.customer_relevant or c.status not in ("costing", "quoted")
-                    or c.internal_approved_at is not None):
-                continue
-            if not await ChangeService.is_internal_approver(db, user, c):
-                continue
-            from app.services import cm_switches
-            if (c.status == "costing" and cm_switches.on("ASSESSMENT_V2")
-                    and await ChangeService.costing_not_finalized_text(db, c)):
-                continue      # C5: approval waits on the departments' costing
-            out.append({**await base(c), "kind": "internal_approval",
-                        "target_tab": "commercial", "needs_you": True})
+        # HARD #8: the approver list is read once for the whole list
+        internal = [c for c in open_changes
+                    if not c.customer_relevant and c.status in ("costing", "quoted")
+                    and c.internal_approved_at is None]
+        if internal:
+            from app.services.change_people import is_acting
+            approvers = await ChangeService._writers(
+                db, await ChangeService.internal_approver_users(db))
+            for c in internal:
+                if c.raised_by == user.id:
+                    continue
+                mine = [u for u in approvers if u.id != c.raised_by]
+                # is_internal_approver's rule on the list read once
+                if not (any(u.id == user.id for u in mine) and not is_acting(user)
+                        if mine else (user.effective_role == "admin" or is_pm_member)):
+                    continue
+                if (c.status == "costing" and cm_switches.on("ASSESSMENT_V2")
+                        and await ChangeService.costing_pending_department_ids(db, c)):
+                    continue      # C5: approval waits on the departments' costing
+                out.append({**await base(c), "kind": "internal_approval",
+                            "target_tab": "commercial", "needs_you": True,
+                            # owed since the last department finalized
+                            "since": ChangeService._last_costing_finalized(c)})
 
         validating = [c for c in open_changes if c.status == "in_validation"]
         if dep_ids and validating:
@@ -3800,19 +3879,75 @@ class ChangeService:
         Management when the change has no lead) once next_step_missing
         lists nothing that holds the onward hop."""
         from app.services.change_people import holds_lead
+        if user.effective_role == "viewer":
+            return []         # a read-only lead: the hop would be refused (R24)
         if is_pm_member is None:
             is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
+        mine = [c for c in changes
+                if c.status in ChangeService.ADVANCE_STATUSES
+                and (holds_lead(c, user) or (c.lead_id is None and is_pm_member))
+                and not ChangeService._advance_held(c)]
+        if not mine:
+            return []
+        # owed since the change last moved (the last blocker cleared): its
+        # newest changelog entry, once for the list
+        from app.models.change import ChangeChangelog
+        last = dict((await db.execute(
+            select(ChangeChangelog.change_id, func.max(ChangeChangelog.performed_at))
+            .where(ChangeChangelog.change_id.in_([c.id for c in mine]))
+            .group_by(ChangeChangelog.change_id))).all())
         out = []
-        for c in changes:
-            if c.status not in ChangeService.ADVANCE_STATUSES:
-                continue
-            if not (holds_lead(c, user) or (c.lead_id is None and is_pm_member)):
-                continue
+        for c in mine:
             nxt = await ChangeService.next_step_missing(db, c)
             if nxt is None or nxt["items"]:
                 continue
             out.append({**await base(c), "kind": "advance", "to_status": nxt["to"],
-                        "target_tab": "overview"})
+                        "label": ChangeService.ADVANCE_VERBS.get(nxt["to"]),
+                        "target_tab": "overview", "since": last.get(c.id)})
+        return out
+
+    #: The verb of each onward hop, the same as the cockpit's Next step
+    #: button (frontend lib/changeStatus.ts TRANSITION_LABELS), so the task
+    #: card, "Your actions" and the Next step panel name one step one way.
+    ADVANCE_VERBS = {
+        "costing": "Close assessment", "quoting": "Close costing",
+        "quoted": "Mark offer as sent", "approved": "Record approval",
+        "in_implementation": "Start implementation",
+        "in_validation": "Finish implementation", "released": "Release change",
+        "closed": "Close change",
+    }
+
+    @staticmethod
+    def _advance_held(c) -> bool:
+        """What next_step_missing would list anyway, read from the loaded
+        change without a query: a department's costing still open, a 'not
+        feasible' answer, the internal approval missing. Saves its ~20
+        queries per change on the polled task list (R34)."""
+        from app.services import early_costing
+        to = ChangeService.next_step_target(c)
+        if (to in ("costing", "quoting") and c.status in ("in_assessment", "costing")
+                and any(a.verdict == "not_feasible" for a in c.assessments)):
+            return True
+        if c.status == "costing":
+            if early_costing.state(c)["pending"]:
+                return True
+            if to == "approved" and c.internal_approved_at is None:
+                return True
+        return False
+
+    @staticmethod
+    def _last_costing_finalized(c) -> Optional[datetime]:
+        """When the last department finalized its costing (C5), from the
+        assessment rows' details; None when none says."""
+        out = None
+        for a in c.assessments:
+            raw = a.details_dict.get("costing_finalized_at")
+            try:
+                t = datetime.fromisoformat(raw) if raw else None
+            except (TypeError, ValueError):
+                t = None
+            if t is not None and (out is None or t > out):
+                out = t
         return out
 
     @staticmethod
