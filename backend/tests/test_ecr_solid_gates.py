@@ -719,3 +719,70 @@ async def test_concession_recorded_without_quality_does_not_release(
         c = await s.get(ChangeRequest, cid)
         failed, _ = await ValidationService.release_parts(s, c)
     assert failed is None
+
+
+async def _sign(client, people, cid):
+    for role, who in (("pm", "Project Manager"), ("quality", "Quality")):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role},
+                              headers=people[who][1])
+        assert r.status_code == 200, r.text
+
+
+async def test_approval_and_release_use_one_signoff_rule_and_resign_is_the_way_out(
+        client, admin, seed, depts, people, session_factory):
+    """HARD #4/#9 (R37): a signature counts for the offer it was given on,
+    at approval as at release; signing again for the latest offer is the
+    way out, at quoted and later (no dead end, R18)."""
+    cid = await _change(client, admin, seed, session_factory, "quoted",
+                        customer_response="accepted",
+                        release_due_date=datetime.utcnow() + timedelta(days=60))
+    await _offer(session_factory, cid, 1)
+    await _sign(client, people, cid)
+    await _offer(session_factory, cid, 2)  # v2 went out after the signatures
+    pm = people["Project Manager"][1]
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "approved"}, headers=pm)
+    assert r.status_code == 400  # NEGATIVE: no approval on v1's signatures
+    assert "sign-off missing for offer v2" in r.json()["detail"]
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    keys = {i["key"]: i for i in ch["next_step"]["items"]}
+    assert keys["pm_signoff"]["sides"] == ["pm"] and keys["pm_signoff"]["detail"] == "v2"
+    assert keys["quality_signoff"]["exits"] == ["sign"]
+    await _sign(client, people, cid)
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "approved"}, headers=pm)
+    assert r.status_code == 200, r.text
+    # a supplement after approval: release names the sides, signing clears it
+    await _offer(session_factory, cid, 3)
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid)
+                        .values(status="in_validation"))
+        await s.commit()
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    row = next(i for i in ch["next_step"]["items"] if i["key"] == "release_signoffs")
+    assert row["sides"] == ["pm", "quality"] and row["detail"] == "v3"
+    assert row["who"] == "Project Management and Quality"
+    assert ch["pm_signed_offer_id"] is not None
+    await _sign(client, people, cid)
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    assert not any(i["key"] == "release_signoffs" for i in ch["next_step"]["items"])
+
+
+async def test_signoff_rules_switch_off(client, admin, seed, depts, people,
+                                        session_factory, monkeypatch):
+    """COMMERCIAL_V2 off: approval checks only that both signed; RELEASE_V2
+    off: release does not check the offer binding."""
+    monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", False)
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    cid = await _change(client, admin, seed, session_factory, "quoted",
+                        customer_response="accepted",
+                        release_due_date=datetime.utcnow() + timedelta(days=60))
+    await _offer(session_factory, cid, 1)
+    await _sign(client, people, cid)
+    await _offer(session_factory, cid, 2)
+    from app.services.early_stage_service import EarlyStageService
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        assert await EarlyStageService.hard_refusal(s, c, "approved") is None
+        c.status = "in_validation"
+        assert await EarlyStageService.hard_refusal(s, c, "released") is None

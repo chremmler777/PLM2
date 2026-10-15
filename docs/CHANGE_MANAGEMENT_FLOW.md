@@ -1111,7 +1111,9 @@ Quality member recorded: Sales files the customer's mail into the issue,
 Quality accepts it; Sales, PM and admins get no "accept" on a concession,
 and an accepted concession nobody in Quality decided does not count), not
 even an admin lifts it (C7, `RELEASE_V2`; off: Sales closes it as before); (4) acceptance of the current offer and
-both sign-offs for approval; (5) the rejection letter; (6) the run team's
+both sign-offs for approval, each given on the latest offer sent (the same
+binding as at release, `COMMERCIAL_V2`; a signature on an older version is
+owed again, the why-blocked row and the offer tab offer "Sign again for vN"); (5) the rejection letter; (6) the run team's
 mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (built with
 the card in lane L4); (8) internal: the internal approval before
 `costing → approved`, given by an engineering approver who is not the raiser
@@ -1123,7 +1125,9 @@ approval card and the "decision needed" notice name the same people; no
 switch); (9) at release the
 PM and Quality sign-offs bound to the latest offer sent
 (`pm_signed_offer_id`/`quality_signed_offer_id`, set by the sign-off,
-`RELEASE_V2`), at close no `price_open` (`COMMERCIAL_V2`), exits: the
+`RELEASE_V2`; the why-blocked row names the sides still owed and offers
+"Sign as PM / Quality for vN" to the viewer whose side it is, at any status),
+at close no `price_open` (`COMMERCIAL_V2`), exits: the
 customer accepts the offer (clears it) or **Absorb**; (10) own check items and
 questions at the department's submit (lanes L4/L5). The new ones are checked
 in `ChangeService.solid_hard_refusal`, called by `transition()` and by

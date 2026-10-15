@@ -32,6 +32,7 @@ import TimingTab from '../components/changes/timing/TimingTab';
 import { groupDeviations } from '../components/changes/timing/DeviationsPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary, { gateStateText } from '../components/changes/CockpitSummary';
+import { signoffOwed } from '../lib/signoff';
 import TransitionConfirmDialog, { type TransitionConfirm } from '../components/changes/TransitionConfirmDialog';
 import { changeReleaseApi } from '../api/changeRelease';
 import { validationIssuesApi, validationIssuesKey } from '../api/validationIssues';
@@ -421,6 +422,12 @@ export default function ChangeDetailPage() {
     // list name them, from costing_pending_department_ids (F-01).
     return null;
   })();
+  // HARD #4/#9: the cockpit's "sign it" exit signs for the latest offer
+  const signOff = useMutation({
+    mutationFn: (side: 'pm' | 'quality') => changesApi.signOff(changeId, side),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not record the sign-off')),
+  });
   const transition = useMutation({
     mutationFn: (vars: {
       to: string; cancellation_reason?: string;
@@ -516,7 +523,8 @@ export default function ChangeDetailPage() {
       case 'answer': return canEditQuotedPrice ? null : 'Needs Sales or the change lead';
       // Only the missing side gates the step: a viewer who can sign PM but
       // not Quality is still let through once PM is the only side left open.
-      case 'signoff': return ((!change.pm_signed_by && canSignPm) || (!change.quality_signed_by && canSignQuality))
+      case 'signoff': return (((!change.pm_signed_by || signoffOwed(change, 'pm')) && canSignPm)
+        || ((!change.quality_signed_by || signoffOwed(change, 'quality')) && canSignQuality))
         ? null : 'Needs the Project Manager and Quality';
       case 'internal-approval': return canApproveInternalCosts ? null
         : t('internal.approvedBy').replace('{who}', stage?.internal_approvers || t('internal.approverFallback'));
@@ -820,6 +828,8 @@ export default function ChangeDetailPage() {
     onOverride: (to: ChangeStatus, rule: string) => setOverrideFor({ to, rule }),
     mayOverride: (to: string) => !readOnly && (may(to) || isAdmin || isChangeLead || isPmMember),
     onAbsorb: () => setAbsorbOpen(true),
+    onSign: readOnly ? undefined : (side: 'pm' | 'quality') => signOff.mutate(side),
+    maySign: (side: 'pm' | 'quality') => (side === 'pm' ? canSignPm : canSignQuality),
     // Absorb is asked by Sales (customer change), the lead, PM or an admin.
     canAbsorb: isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember),
     deviationTargets: {

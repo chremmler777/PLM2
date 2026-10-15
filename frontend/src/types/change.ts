@@ -191,6 +191,9 @@ export interface ChangeRequest {
   customer_response: 'pending' | 'accepted' | 'declined' | 'negotiating';
   pm_signed_by?: number | null;
   quality_signed_by?: number | null;
+  /** HARD #9: the offer each signature was given on (C14). */
+  pm_signed_offer_id?: number | null;
+  quality_signed_offer_id?: number | null;
   estimated_cost?: number | null;
   quoted_price?: number | null;
   created_at: string;
@@ -399,6 +402,9 @@ export interface NextStepItem {
   exits?: ('concession' | 'absorb' | 'customer_accepts' | 'sign')[];
   /** The rule's override, when one is asked or approved. */
   override?: { id: number; status: 'pending' | 'approved' };
+  /** Exit 'sign': the sign-offs still owed (missing, or given on an older
+   * offer than `detail`, e.g. "v2"). */
+  sides?: ('pm' | 'quality')[];
 }
 
 /** Who gives the OK on an override (backend cm_rules.decider_group). */

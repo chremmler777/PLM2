@@ -70,6 +70,16 @@ export default function CustomerDecision({
     onError: (e: unknown) => toastError(e, 'Could not record the sign-off'),
   })
 
+  // HARD #4/#9: a signature counts for the offer it was given on; the
+  // backend lists a side as owed (next_step) when it is missing or older
+  // than the latest offer sent, and signing again is the way out.
+  const owed = (side: 'pm' | 'quality') => change.next_step?.items
+    .find((i) => i.key === `${side}_signoff` || (i.key === 'release_signoffs' && i.sides?.includes(side)))
+  const again = (side: 'pm' | 'quality') => {
+    const signed = side === 'pm' ? change.pm_signed_by : change.quality_signed_by
+    const row = owed(side)
+    return signed && row ? t('signoff.again').replace('{v}', row.detail ?? '') : null
+  }
   const samePersonBlocksPm = !change.pm_signed_by
     && !!change.quality_signed_by && userId != null && userId === change.quality_signed_by
   const samePersonBlocksQuality = !change.quality_signed_by
@@ -170,19 +180,23 @@ export default function CustomerDecision({
       {(canSignPm || canSignQuality) && (
         <div className="flex flex-wrap items-center gap-2">
           {canSignPm && (
-            <button type="button" disabled={!!change.pm_signed_by || samePersonBlocksPm || signOff.isPending}
+            <button type="button" data-testid="signoff-pm"
+              disabled={(!!change.pm_signed_by && !again('pm')) || samePersonBlocksPm || signOff.isPending}
               onClick={() => signOff.mutate('pm')}
-              className={`rounded-lg border px-3 py-1 text-xs disabled:cursor-not-allowed ${change.pm_signed_by
+              className={`rounded-lg border px-3 py-1 text-xs disabled:cursor-not-allowed ${change.pm_signed_by && !again('pm')
                 ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200' : 'border-slate-600 text-slate-200 hover:bg-slate-700 disabled:opacity-50'}`}>
-              PM sign-off{change.pm_signed_by && <Check aria-label="done" size={12} strokeWidth={3} className="ml-1 inline" />}
+              {again('pm') ? `PM: ${again('pm')}` : 'PM sign-off'}
+              {change.pm_signed_by && !again('pm') && <Check aria-label="done" size={12} strokeWidth={3} className="ml-1 inline" />}
             </button>
           )}
           {canSignQuality && (
-            <button type="button" disabled={!!change.quality_signed_by || samePersonBlocksQuality || signOff.isPending}
+            <button type="button" data-testid="signoff-quality"
+              disabled={(!!change.quality_signed_by && !again('quality')) || samePersonBlocksQuality || signOff.isPending}
               onClick={() => signOff.mutate('quality')}
-              className={`rounded-lg border px-3 py-1 text-xs disabled:cursor-not-allowed ${change.quality_signed_by
+              className={`rounded-lg border px-3 py-1 text-xs disabled:cursor-not-allowed ${change.quality_signed_by && !again('quality')
                 ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200' : 'border-slate-600 text-slate-200 hover:bg-slate-700 disabled:opacity-50'}`}>
-              Quality sign-off{change.quality_signed_by && <Check aria-label="done" size={12} strokeWidth={3} className="ml-1 inline" />}
+              {again('quality') ? `Quality: ${again('quality')}` : 'Quality sign-off'}
+              {change.quality_signed_by && !again('quality') && <Check aria-label="done" size={12} strokeWidth={3} className="ml-1 inline" />}
             </button>
           )}
         </div>

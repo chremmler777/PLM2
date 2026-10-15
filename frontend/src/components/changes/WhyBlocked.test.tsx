@@ -48,6 +48,21 @@ describe('Why blocked (spec §0)', () => {
     expect(onOverride).toHaveBeenCalledWith('quoting', 'costing_not_finalized')
   })
 
+  it('release sign-offs on an older offer: the row signs again, only the viewer\'s side', () => {
+    const onSign = vi.fn()
+    const rel = change({ status: 'in_validation', next_step: { to: 'released', items: [
+      { key: 'release_signoffs', kind: 'hard', exits: ['sign'], sides: ['pm', 'quality'],
+        detail: 'v3', who: 'Project Management and Quality' },
+    ] } })
+    render(wrap(<CockpitSummary change={rel} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onSign={onSign} maySign={(s) => s === 'quality'} />))
+    expect(screen.queryByTestId('why-sign-pm')).toBeNull()
+    const btn = screen.getByTestId('why-sign-quality')
+    expect(btn.textContent).toBe('Sign as Quality for v3')
+    fireEvent.click(btn)
+    expect(onSign).toHaveBeenCalledWith('quality')
+  })
+
   it('offers one Override per rule, not one per row', () => {
     const capture = change({ status: 'captured', next_step: { to: 'scoping', items: [
       { key: 'description', kind: 'soft', rule: 'capture_incomplete' },

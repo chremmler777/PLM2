@@ -7,6 +7,7 @@ import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 import { toastError } from '../../lib/apiError'
 import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, NextStepItem, StageAssessment } from '../../types/change'
+import { signoffOwed } from '../../lib/signoff'
 import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
 import { btnBase, btnSizes, btnSm, buttonClass, type ButtonSize } from '../common/buttonStyles'
@@ -101,6 +102,10 @@ interface Props {
   onAbsorb?: () => void
   /** May the viewer ask to absorb (Sales, lead, PM, admin)? */
   canAbsorb?: boolean
+  /** HARD #4/#9's exit 'sign': the viewer signs this side for the latest
+   * offer (`maySign` says whose side it is). */
+  onSign?: (side: 'pm' | 'quality') => void
+  maySign?: (side: 'pm' | 'quality') => boolean
   /** May the viewer ask for an override into this status? Default: who may
       take the step (`may`). The page adds the run team, so an override is
       reachable while a hard step of its own still waits on the rule (an
@@ -162,7 +167,7 @@ export type NextStep =
 export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_relevant' | 'customer_response'
   | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
   & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'
-    | 'costing_pending_department_ids' | 'impact_confirmed_at' | 'mother_plant_name'>>,
+    | 'costing_pending_department_ids' | 'impact_confirmed_at' | 'mother_plant_name' | 'next_step'>>,
   assessment?: StageAssessment | null, review?: ReviewProgress | null): NextStep[] {
   const s = change.status
   // The assessment round (spec §16 P1 6/8): no primary while departments are
@@ -276,7 +281,10 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
     if (change.customer_response !== 'accepted') {
       return [{ kind: 'go', key: 'answer', label: 'Record the customer answer', tab: 'offer' }]
     }
-    if (!change.pm_signed_by || !change.quality_signed_by) {
+    // HARD #4: a side is owed when unsigned or signed on an older offer
+    // (the backend lists it in next_step)
+    if (!change.pm_signed_by || !change.quality_signed_by || signoffOwed(change, 'pm')
+        || signoffOwed(change, 'quality')) {
       return [{ kind: 'go', key: 'signoff', label: 'Sign off (PM and Quality)', tab: 'offer' }]
     }
     return [{ kind: 'advance', to: 'approved' }]
@@ -318,7 +326,7 @@ const Where = ({ to }: { to: string }) => (
 /** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
 interface Blocker { key: string; text: string; go?: () => void }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   /** The late flag whose "Take off routing" dialog is open. */
   const [takeOff, setTakeOff] = useState<MyAction | null>(null)
@@ -410,6 +418,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <button type="button" data-testid="why-absorb" className={`ml-1 text-amber-200 ${linkRow}`}
               onClick={onAbsorb}>{t('why.absorb')}</button>
           ) : null)}
+        {i.exits.includes('sign') && onSign && (i.sides ?? []).filter((s) => maySign?.(s)).map((s) => (
+          <button key={s} type="button" data-testid={`why-sign-${s}`} className={`ml-1 text-amber-200 ${linkRow}`}
+            onClick={() => onSign(s)}>
+            {t('why.sign.' + s).replace('{v}', i.detail ?? '')}
+          </button>
+        ))}
       </span>
     )
   }

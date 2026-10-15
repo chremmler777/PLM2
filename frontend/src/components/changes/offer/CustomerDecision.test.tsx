@@ -39,6 +39,20 @@ describe('CustomerDecision', () => {
   afterEach(cleanup)
   beforeEach(() => { vi.clearAllMocks() })
 
+  it('HARD #4/#9: a signature on an older offer can be given again for the latest one', async () => {
+    const owed = change({ customer_response: 'accepted', pm_signed_by: 3, quality_signed_by: 4,
+      next_step: { to: 'approved', items: [
+        { key: 'pm_signoff', kind: 'hard', exits: ['sign'], sides: ['pm'], detail: 'v2' },
+      ] } })
+    wrap(<CustomerDecision change={owed} canRespond={false} canSignPm canSignQuality userId={5} />)
+    const pm = screen.getByTestId('signoff-pm') as HTMLButtonElement
+    expect(pm.disabled).toBe(false)
+    expect(pm.textContent).toBe('PM: Sign again for v2')
+    expect((screen.getByTestId('signoff-quality') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(pm)
+    await waitFor(() => expect(changesApi.signOff).toHaveBeenCalledWith(7, 'pm'))
+  })
+
   it('requires a release date before recording customer acceptance', async () => {
     wrap(<CustomerDecision change={change()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
@@ -138,7 +152,14 @@ describe('InternalApproval', () => {
 
   it('names who may approve instead of the button for anybody else', () => {
     wrap(<InternalApproval change={change({ status: 'costing', customer_relevant: false })} canApprove={false} />)
-    expect(screen.getByText(/Project Manager department member/)).toBeDefined()
+    expect(screen.getByTestId('internal-approvers').textContent)
+      .toBe('Internal costs are approved by a Project Management member or an admin (never the raiser)')
+    cleanup()
+    // HARD #8: the backend names the approvers (never the raiser)
+    wrap(<InternalApproval change={change({ status: 'costing', customer_relevant: false })} canApprove={false}
+      approvers="Christoph Demmler" />)
+    expect(screen.getByTestId('internal-approvers').textContent)
+      .toBe('Internal costs are approved by Christoph Demmler (never the raiser)')
     expect(screen.queryByText(t('internal.approve'))).toBeNull()
   })
 

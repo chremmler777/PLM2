@@ -607,6 +607,14 @@ class ChangeService:
         (COMMERCIAL_V2) no close while a price is open (exits: customer
         acceptance or Absorb)."""
         from app.services import cm_switches
+        if (to_status == "approved" and change.status == "quoted"
+                and change.customer_relevant and cm_switches.on("COMMERCIAL_V2")):
+            # HARD #4 with C14's binding: the same rule as at release, so an
+            # approval never passes on signatures release will refuse (R37)
+            signed = await ChangeService.signoff_offer_refusal(
+                session, change, before="approval")
+            if signed:
+                return signed
         if to_status == "released" and cm_switches.on("RELEASE_V2"):
             from app.services.validation_service import ValidationService
             from app.services.validation_issue_service import ValidationIssueService
@@ -638,24 +646,36 @@ class ChangeService:
             .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
 
     @staticmethod
-    async def signoff_offer_refusal(session: AsyncSession,
-                                    change: ChangeRequest) -> Optional[str]:
-        """HARD #9 at release: the PM and Quality sign-offs are for the
-        latest offer sent. Only where an offer was sent (internal and
-        mother-plant changes have none)."""
+    async def signoff_sides_missing(session: AsyncSession, change: ChangeRequest,
+                                    ) -> tuple[list[str], Optional[object]]:
+        """(sides 'pm'/'quality' whose sign-off is missing or given on an
+        older offer than the latest sent, that offer). One rule for approval
+        (HARD #4) and release (HARD #9): a signature counts for the offer it
+        was given on. Without a sent offer (internal, mother plant, legacy)
+        only a missing signature counts."""
+        latest = (await ChangeService.latest_sent_offer(session, change)
+                  if change.customer_relevant else None)
+        sides = [side for side, by, oid in (
+            ("pm", change.pm_signed_by, change.pm_signed_offer_id),
+            ("quality", change.quality_signed_by, change.quality_signed_offer_id))
+            if by is None or (latest is not None and oid != latest.id)]
+        return sides, latest
+
+    @staticmethod
+    async def signoff_offer_refusal(session: AsyncSession, change: ChangeRequest,
+                                    before: str = "release") -> Optional[str]:
+        """HARD #9 at release (and HARD #4 at approval): the PM and Quality
+        sign-offs are for the latest offer sent. Only where an offer was
+        sent (internal and mother-plant changes have none)."""
         if not change.customer_relevant:
             return None
-        latest = await ChangeService.latest_sent_offer(session, change)
-        if latest is None:
+        sides, latest = await ChangeService.signoff_sides_missing(session, change)
+        if latest is None or not sides:
             return None
-        missing = [who for who, by, oid in (
-            ("PM", change.pm_signed_by, change.pm_signed_offer_id),
-            ("Quality", change.quality_signed_by, change.quality_signed_offer_id))
-            if by is None or oid != latest.id]
-        if not missing:
-            return None
-        return (f"{' and '.join(missing)} sign-off missing for offer "
-                f"v{latest.version}, the latest sent: sign it before release")
+        names = {"pm": "PM", "quality": "Quality"}
+        return (f"{' and '.join(names[s] for s in sides)} sign-off missing for "
+                f"offer v{latest.version}, the latest sent: sign it for "
+                f"v{latest.version} before {before}")
 
     # ------------------------------------------------------------------
     # HARD #8: internal approvers (P9)
@@ -1310,10 +1330,15 @@ class ChangeService:
                     owner = (await ChangePlanService._user_names(
                         session, [change.sales_owner_id])).get(change.sales_owner_id)
                 add("customer_accepted", "hard", who=owner)
-            if change.pm_signed_by is None:
-                add("pm_signoff", "hard", exits=["sign"])
-            if change.quality_signed_by is None:
-                add("quality_signoff", "hard", exits=["sign"])
+            if cm_switches.on("COMMERCIAL_V2"):
+                sides, latest = await ChangeService.signoff_sides_missing(session, change)
+            else:
+                sides, latest = [s for s, by in (("pm", change.pm_signed_by),
+                                                 ("quality", change.quality_signed_by))
+                                 if by is None], None
+            for side in sides:
+                add(f"{side}_signoff", "hard", exits=["sign"], sides=[side],
+                    detail=f"v{latest.version}" if latest is not None else None)
         if to == "in_implementation":
             if change.bank_build_mode is None:
                 add("bank_build", "todo")
@@ -1373,10 +1398,14 @@ class ChangeService:
             n = await ReleaseService.open_deviation_count(session, change)
             if n:
                 add("plan_deviations", "soft", n=n, rule="plan_deviations_open")
-            if cm_switches.on("RELEASE_V2"):
-                signed = await ChangeService.signoff_offer_refusal(session, change)
-                if signed:
-                    add("release_signoffs", "hard", exits=["sign"], who=signed)
+            if cm_switches.on("RELEASE_V2") and change.customer_relevant:
+                sides, latest = await ChangeService.signoff_sides_missing(session, change)
+                if sides and latest is not None:
+                    # the way out is a button: sign again for the latest offer
+                    add("release_signoffs", "hard", exits=["sign"], sides=sides,
+                        detail=f"v{latest.version}",
+                        who=" and ".join({"pm": "Project Management",
+                                          "quality": "Quality"}[s] for s in sides))
         if to == "closed" and change.price_open and cm_switches.on("COMMERCIAL_V2"):
             # HARD #9: exits are the customer's acceptance or an Absorb
             add("price_open", "hard", exits=["customer_accepts", "absorb"],

@@ -296,6 +296,9 @@ class ChangeResponse(BaseModel):
     raised_by: int
     customer_response: str
     pm_signed_by: Optional[int] = None
+    # HARD #9: the offer each signature was given on (C14)
+    pm_signed_offer_id: Optional[int] = None
+    quality_signed_offer_id: Optional[int] = None
     quality_signed_by: Optional[int] = None
     estimated_cost: Optional[float] = None
     quoted_price: Optional[float] = None
