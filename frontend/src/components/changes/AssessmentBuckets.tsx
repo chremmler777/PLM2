@@ -19,6 +19,7 @@ import RoutingDeviationPanel from './RoutingDeviationPanel'
 import PendingRemovalChip from './PendingRemovalChip'
 import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
+import AssessmentChecks, { asksFrom, ownsCheck } from './assessment/AssessmentChecks'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import {
@@ -442,10 +443,23 @@ export default function AssessmentBuckets({
                   <ObjectList objects={objectsOf(row.id)} partName={partName} />
                 </div>
 
+                {/* Spec §4: check items first, then "Blocked? Ask a question"
+                    (ASSESSMENT_V2); both hold only this department's submit. */}
+                {change.assessment_v2 && (
+                  <AssessmentChecks changeId={changeId} departmentId={row.id}
+                    departmentName={deptName(row.id)}
+                    concerns={concerns as ChangeConcern[]}
+                    editable={isMine && editable && !(a?.submitted_at)} />
+                )}
+
                 {/* This department's own holds, in the room where the work happens. */}
                 <ConcernStrip changeId={changeId} editable={isMine && editable}
                   scoped departments={departments} myDepartmentIds={myDepartmentIds}
                   onlyDepartmentId={row.id} isPm={isPm}
+                  hideConcernIds={change.assessment_v2
+                    ? (concerns as ChangeConcern[]).filter((c) =>
+                      ownsCheck(c, row.id) || asksFrom(c, row.id)).map((c) => c.id)
+                    : []}
                   attachments={change.attachments ?? []} />
 
                 {a?.submitted_at || (a?.verdict && a.verdict !== 'pending') ? (

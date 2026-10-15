@@ -242,6 +242,8 @@ export interface ChangeRequest {
   impact_confirm_step?: boolean;
   /** Served switch SCOPING_V2: C33 questions / check items, intake follow-ups. */
   scoping_v2?: boolean;
+  /** Served switch ASSESSMENT_V2 (spec §4-§5). */
+  assessment_v2?: boolean;
   /** Served switch START_AT_RISK (§7a); off: "No start before PO" */
   start_at_risk_on?: boolean;
   /** HARD #7: Quality's ppap_decision (internal changes) and the customer flip. */
@@ -1233,6 +1235,24 @@ export interface ChangeConcern {
   can_switch?: boolean | null;
   /** C33 'add to #n' (R24): same predicate as the backend's join with a note */
   can_add_to?: boolean | null;
+  /** Spec §4: how the owning department closed a check item; may the viewer
+   *  close it inline (a member) or reopen it (raiser, lead)? */
+  check_outcome?: 'answered' | 'not_relevant' | 'assumed' | null;
+  can_check?: boolean | null;
+  can_reopen?: boolean | null;
+}
+
+/** Spec §4: POST .../concerns/{id}/check */
+export interface CheckCloseBody {
+  outcome: 'answered' | 'not_relevant' | 'assumed';
+  value?: string;
+  unit?: string;
+  ref?: string;
+  basis?: 'checklist_row' | 'drawing_ref' | 'outside_scope' | 'same_as';
+  checklist_key?: string;
+  who?: string;
+  same_as_id?: number;
+  assumed_risk?: string;
 }
 
 export type FlagType = 'question' | 'check';

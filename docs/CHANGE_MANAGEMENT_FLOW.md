@@ -263,7 +263,9 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   and is due with that department's assessment (`owner_due` on the concern
   list). The department cannot submit its assessment while one of its own
   check items is open (HARD #10, the existing department hold, now also for
-  co-owners); a member closes it with a resolution note.
+  co-owners). See "Check items first and questions in the assessment"
+  below for how it is closed (`ASSESSMENT_V2`; switch off: a member closes it
+  with a resolution note).
 - **C13, "Not yet"** (the meeting's `needs_info`, button *Not yet* in the UI):
   closes nobody's question. With questions open it needs no reason; it records
   *"Not yet: waiting for 2 answers (Process Engineer Thu, Tool Engineer Fri)"*
@@ -438,11 +440,48 @@ travels.
 - **"Reject" is not a raiseable option.** A department that cannot do it sets
   verdict `not_feasible` (which hard-requires the Change PPT, below).
 - **"Needs info" is not a department concern anymore** — by assessment time
-  it is too late, and everyone communicates with the customer directly. The
+  it is too late, and everyone communicates with the customer directly.
+  (Superseded 2026-10-15 by C8 with `ASSESSMENT_V2`: a department asks a
+  structured question that holds only its own submit, see below.) The
   mail lands in the change-level customer-mail log (below). The
   scoping-*meeting* decision `needs_info` (a meeting outcome) stays.
 - Legacy concerns (`reject_proposal` / `needs_info`) on old changes stay
   readable and closable with their old rules; only raising them is gone.
+
+### Check items first and questions in the assessment (ECR-solid §4, C8, 2026-10-15)
+Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
+- **Check items first.** The bucket opens with *"Checks for Process
+  Engineer: 3 open"*: each item with its raise text, what to check, the part
+  and the raiser. A member of an owning department closes it inline
+  (`POST /concerns/{id}/check`), nothing preselected:
+  **Answered** (a number with its unit, a reference of 5+ characters that
+  names something, or a file filed on the item), **Not relevant** (the
+  department's checklist row, a drawing reference, *outside our scope* + who
+  owns it, or *same as #n*) or **Assumed** (value + unit or n/a, the risk if
+  wrong; the confirm item goes to the Sales owner, else the lead, +5 wd, as
+  for a scoping answer). Stored as `check_outcome` and the resolution note;
+  logged `concern_withdrawn`, so the raiser's and the lead's daily digest
+  count it as closed. A free resolution note no longer closes a check item
+  in assessment (author and Project Management keep their withdraw), and
+  nobody else "answers" it. **Reopen** (`POST /concerns/{id}/reopen`, reason
+  5+ characters): the raiser or the lead, while an owning department still
+  has its assessment open (after the submit there is nothing left to hold:
+  ask a question or have the assessment sent back). The closer is told.
+- **"Blocked? Ask a question" (C8).** A department raises `needs_info` with
+  `flag_type` question from its own open assessment: one line, what it is
+  about (check-what, part or whole change) and who can answer (customer /
+  our team / supplier). Own department only, refused once it submitted, no
+  check items here. It holds only that department's submit (HARD #10, the
+  existing hold); scoping questions' rules for answering apply (asking
+  department, Sales, PM; answer form) and the department closes it. Told
+  once (`task_new`, subject `ask:<id>`): customer or supplier → the Sales
+  owner, else every Sales member; our team → the lead, else Project
+  Management; the obtain_info row follows the same split (Sales sees all,
+  with the mail text). The asker gets a badge when it is answered
+  (`question_answered`). Per spec §0 the late clock is not paused: a wait
+  on Sales counts as late.
+- Switch off: assessment takes risks only, a member closes a check item with
+  a resolution note.
 
 ### Assessment documents & customer communication (2026-08-11)
 

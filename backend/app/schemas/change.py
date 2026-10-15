@@ -390,6 +390,8 @@ class ChangeResponse(BaseModel):
     impact_confirm_step: bool = False
     # Served switch SCOPING_V2 (C33 questions / check items, intake follow-ups).
     scoping_v2: bool = False
+    # Served switch ASSESSMENT_V2 (spec §4-§5).
+    assessment_v2: bool = False
     # Served switch START_AT_RISK (§7a): off = "No start before PO".
     start_at_risk_on: bool = True
     # §1: a full ECR started beside a live change carrying the same part.
@@ -486,6 +488,7 @@ class ChangeResponse(BaseModel):
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
             row["impact_confirm_step"] = data.impact_confirm_step
             row["scoping_v2"] = data.scoping_v2
+            row["assessment_v2"] = data.assessment_v2
             row["start_at_risk_on"] = data.start_at_risk_on
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
             row["validated_weight_by_name"] = data.validated_weight_by_name
@@ -1263,6 +1266,29 @@ class ConcernConfirmIn(BaseModel):
     mail_id: Optional[int] = None
 
 
+class CheckCloseIn(BaseModel):
+    """Spec §4: the owning department closes a check item with what it
+    found. answered: value + unit, or ref, or a file filed on the item;
+    not_relevant: basis checklist_row (checklist_key) / drawing_ref (ref) /
+    outside_scope (who) / same_as (same_as_id); assumed: value + unit (or
+    n/a), assumed_risk, optional confirm_by_id / confirm_due."""
+    outcome: str
+    value: Optional[str] = Field(default=None, max_length=60)
+    unit: Optional[str] = Field(default=None, max_length=20)
+    ref: Optional[str] = Field(default=None, max_length=255)
+    basis: Optional[str] = None
+    checklist_key: Optional[str] = Field(default=None, max_length=120)
+    who: Optional[str] = Field(default=None, max_length=120)
+    same_as_id: Optional[int] = None
+    assumed_risk: Optional[str] = None
+    confirm_by_id: Optional[int] = None
+    confirm_due: Optional[date] = None
+
+
+class CheckReopenIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class CostLeadTimeIn(BaseModel):
     department_id: int
     lead_time_days: int = Field(ge=0)
@@ -1405,6 +1431,11 @@ class ConcernResponse(BaseModel):
     can_switch: Optional[bool] = None
     # C33 'add to #n' (R24): the same predicate as POST .../join with a note
     can_add_to: Optional[bool] = None
+    # Spec §4: how the owning department closed a check item, and whether
+    # the caller may close it inline (a member) or reopen it (raiser, lead)
+    check_outcome: Optional[str] = None
+    can_check: Optional[bool] = None
+    can_reopen: Optional[bool] = None
 
     class Config:
         from_attributes = True

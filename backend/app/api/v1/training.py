@@ -989,6 +989,9 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes/{change_id}/concerns/{concern_id}/type"),
     ("POST", "/changes/{change_id}/concerns/{concern_id}/join"),
     ("POST", "/changes/{change_id}/concerns/{concern_id}/confirm"),
+    # spec §4: the department closes its check item; raiser or lead reopen
+    ("POST", "/changes/{change_id}/concerns/{concern_id}/check"),
+    ("POST", "/changes/{change_id}/concerns/{concern_id}/reopen"),
     # HARD #7: Quality's ppap_decision; the Sales answer to a customer flip
     ("POST", "/changes/{change_id}/ppap-decision"),
     ("POST", "/changes/{change_id}/customer-flip/answer"),

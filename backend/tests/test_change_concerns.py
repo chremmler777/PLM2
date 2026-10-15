@@ -303,11 +303,19 @@ async def _join_department(session_factory, user_id, department_id):
 
 
 async def test_assessment_takes_only_risks_by_hand(
-        client, admin_auth, seed, session_factory):
+        client, admin_auth, seed, session_factory, monkeypatch):
     """The scoping vocabulary stops at the phase door: once the change is in
-    assessment, a hand raise is a register entry, not a question or a vote."""
+    assessment, a hand raise is a register entry, not a question or a vote.
+    ECR-solid C8 (ASSESSMENT_V2): a department may ask a question from its
+    own assessment (tests/test_ecr_solid_assessment_checks.py); a cancel
+    vote stays a scoping act, and with the switch off both are refused."""
+    from app.services import cm_switches
     cid, dept_ids = await _change_in_assessment(
         client, admin_auth, seed, session_factory, "A0")
+    res = await _raise(client, admin_auth, cid, "Too late for this",
+                       kind="reject_proposal", department_id=dept_ids[0])
+    assert res.status_code == 400 and "belong to scoping" in res.json()["detail"]
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     for kind in ("needs_info", "reject_proposal"):
         res = await _raise(client, admin_auth, cid, "Too late for this", kind=kind,
                            department_id=dept_ids[0])

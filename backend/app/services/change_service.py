@@ -3744,7 +3744,22 @@ class ChangeService:
             # assessment on a question is Sales' errand as it was before
             # (Sales owns the customer relationship), one task per change.
             questions = ChangeService.unanswered_questions(c)
-            if questions and c.status not in ("captured", "scoping"):
+            # C8: a department's question for our team (not the customer or
+            # a supplier) is the lead's errand, else Project Management's
+            # (MeetingService._tell_question_asked told the same person).
+            ours = [q for q in questions if q.answer_from == "our_team"]
+            if questions and c.status not in ("captured", "scoping") \
+                    and not in_sales and ours and (
+                        holds_lead(c, user) or (is_pm_member and c.lead_id is None)):
+                newest = ours[-1]
+                tasks.append({
+                    **await _base(c), "kind": "obtain_info",
+                    "reason": newest.note, "question_count": len(ours),
+                    "concern_id": newest.id,
+                    "department_id": newest.department_id,
+                    "since": newest.raised_at, "customer_copy": None,
+                })
+            elif questions and c.status not in ("captured", "scoping"):
                 if in_sales:
                     from app.services.meeting_service import MeetingService as _MS
                     newest = questions[-1]

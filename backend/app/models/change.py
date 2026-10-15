@@ -418,6 +418,14 @@ class ChangeRequest(Base):
         return cm_switches.on("SCOPING_V2")
 
     @property
+    def assessment_v2(self) -> bool:
+        """Served switch ASSESSMENT_V2 (cm_switches): spec §4-§5 check items
+        first, C8 questions, verdict refs, cost basis, no cost, supplier
+        waits. The UI reads this one flag."""
+        from app.services import cm_switches
+        return cm_switches.on("ASSESSMENT_V2")
+
+    @property
     def start_at_risk_on(self) -> bool:
         """Served switch START_AT_RISK (§7a): off, an urgent change reads "No
         start before PO" and its need-by question offers no start at risk."""
@@ -889,6 +897,11 @@ CHECK_WHAT = ("drawing", "volume", "cycle_time", "weight", "tool", "material",
 ANSWER_FROM = ("customer", "our_team", "supplier")
 # How a question was answered (spec §0 Answer form).
 ANSWER_KINDS = ("confirmed", "assumed")
+# How the owning department closes a check item in its assessment (spec §4).
+CHECK_OUTCOMES = ("answered", "not_relevant", "assumed")
+# Why a check item is not relevant (spec §4): a checklist row or a drawing
+# reference, outside our scope (+ who owns it), or the same as another item.
+NOT_RELEVANT_BASES = ("checklist_row", "drawing_ref", "outside_scope", "same_as")
 
 # What a "risk" concern is about. A fixed vocabulary rather than free text so
 # the register can be counted across changes — "how often does fill bite us"
@@ -1042,6 +1055,9 @@ class ChangeConcern(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     confirmed_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
+    # Spec §4 (migration 125): how the owning department closed a check item
+    # in its assessment (CHECK_OUTCOMES); NULL otherwise.
+    check_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(
         back_populates="concerns", foreign_keys=[change_id])

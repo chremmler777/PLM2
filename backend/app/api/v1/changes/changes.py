@@ -49,7 +49,7 @@ from app.schemas.change import (
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
-    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, PpapDecisionIn, CustomerFlipAnswerIn,
+    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, CheckCloseIn, CheckReopenIn, PpapDecisionIn, CustomerFlipAnswerIn,
     RecheckAnswerIn, IndexScopeIn, IndexDeadlineIn, NeedByTellIn,
     ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
@@ -3084,6 +3084,13 @@ async def list_concerns(
             row.can_switch = c.is_open and (
                 (c.raised_by == current_user.id and not acting) or is_pm_member)
             row.can_add_to = await MeetingService.may_add_to(db, change, c, current_user)
+            if c.is_check and change.status == "in_assessment":
+                row.can_check = c.is_open and (
+                    await MeetingService._owner_department_of(db, c, current_user)
+                    is not None)
+                row.can_reopen = (not c.is_open and c.check_outcome is not None
+                                  and ((c.raised_by == current_user.id and not acting)
+                                       or holds_lead(change, current_user)))
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
             row.answered_by_name = names.get(c.answered_by)
@@ -3334,6 +3341,33 @@ async def confirm_concern_assumption(
     return await _concern_act(change_id, current_user, db, lambda change: (
         MeetingService.confirm_assumption(db, change, concern_id, current_user,
                                           ref=body.ref, mail_id=body.mail_id)))
+
+
+@router.post("/{change_id}/concerns/{concern_id}/check", response_model=ConcernResponse)
+async def close_check_item(
+    change_id: int, concern_id: int, body: CheckCloseIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Spec §4: the owning department closes its check item in its
+    assessment: Answered / Not relevant / Assumed, each with its evidence."""
+    return await _concern_act(change_id, current_user, db, lambda change: (
+        MeetingService.close_check(
+            db, change, concern_id, current_user, outcome=body.outcome,
+            value=body.value, unit=body.unit, ref=body.ref, basis=body.basis,
+            checklist_key=body.checklist_key, who=body.who,
+            same_as_id=body.same_as_id, assumed_risk=body.assumed_risk,
+            confirm_by_id=body.confirm_by_id, confirm_due=body.confirm_due)))
+
+
+@router.post("/{change_id}/concerns/{concern_id}/reopen", response_model=ConcernResponse)
+async def reopen_check_item(
+    change_id: int, concern_id: int, body: CheckReopenIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Spec §4: the raiser or the lead reopens a closed check item (reason)."""
+    return await _concern_act(change_id, current_user, db, lambda change: (
+        MeetingService.reopen_check(db, change, concern_id, current_user,
+                                    body.reason)))
 
 
 async def _withdraw_concern(

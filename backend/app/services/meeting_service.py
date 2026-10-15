@@ -417,7 +417,13 @@ class MeetingService:
         # a decision. The risk register belongs to assessment — a risk holds
         # nothing and is worked with a mitigation proposal where the technical
         # work happens, not in the scoping room.
-        if in_assessment and kind != "risk":
+        # C8 (spec §4, ASSESSMENT_V2): "Blocked? Ask a question". A
+        # department asks Sales, the team or a supplier from its own
+        # assessment; the question holds only that department's submit
+        # (HARD #10). Check items are raised in scoping, never here.
+        assess_question = (in_assessment and kind == "needs_info"
+                           and cm_switches.on("ASSESSMENT_V2"))
+        if in_assessment and kind != "risk" and not assess_question:
             raise ChangeError(
                 f"'{kind}' concerns belong to scoping. During assessment "
                 "the register takes risks")
@@ -466,6 +472,12 @@ class MeetingService:
                 await MeetingService._validate_flag(
                     session, change, flag_type, check_what, part_id,
                     answer_from, scope_effect, department_id)
+        elif assess_question:
+            flag_type, check_what, part_id, answer_from = \
+                MeetingService._validate_assessment_question(
+                    change, flag_type, check_what, part_id, answer_from)
+            scope_effect = None
+            structured = True
         else:
             flag_type = check_what = part_id = answer_from = scope_effect = None
         if in_assessment:
@@ -482,6 +494,14 @@ class MeetingService:
                 if department_id not in mine:
                     raise ChangeError(
                         "You can only raise a concern for your own department")
+            if assess_question and not any(
+                    a.department_id == department_id
+                    and a.effective_status not in ("submitted", "waived")
+                    for a in change.assessments):
+                raise ChangeError(
+                    f"{dept.name} has no open assessment on this change: a "
+                    "question here holds your own submit, and there is none "
+                    "left to hold")
         elif department_id is not None:
             # Scoping: attribution only — any active department, no membership.
             dept = await session.get(Department, department_id)
@@ -537,7 +557,77 @@ class MeetingService:
                        **({"flag_type": flag_type, "check_what": check_what,
                            "part_id": part_id} if structured else {})},
             notes=concern.note)
+        if assess_question:
+            await MeetingService._tell_question_asked(session, change, concern, user)
         return concern
+
+    @staticmethod
+    def _validate_assessment_question(
+        change: ChangeRequest, flag_type: Optional[str], check_what: Optional[str],
+        part_id: Optional[int], answer_from: Optional[str],
+    ) -> tuple:
+        """C8 (spec §4): a question from a department's own assessment. It
+        names what it is about (check-what, part or whole change) and who can
+        answer it; what it blocks is the department's own submit, so it owes
+        no scope effect. A check item is a scoping act."""
+        if flag_type not in (None, "question"):
+            raise ChangeError(
+                "In assessment you ask a question; check items are raised in "
+                "scoping and checked here")
+        if check_what not in CHECK_WHAT:
+            raise ChangeError(
+                "Pick what the question is about: one of " + ", ".join(CHECK_WHAT))
+        if answer_from not in ANSWER_FROM:
+            raise ChangeError(
+                "Say who can answer the question: customer, our_team or supplier")
+        if part_id is not None and part_id not in {
+                i.part_id for i in change.impacted_items}:
+            raise ChangeError(
+                "Pick a part of this change's impacted set, or leave it for "
+                "the whole change")
+        return "question", check_what, part_id, answer_from
+
+    @staticmethod
+    async def _tell_question_asked(session: AsyncSession, change: ChangeRequest,
+                                   concern: ChangeConcern, user: User) -> None:
+        """C8: a question from an assessment is a task newly someone's (spec
+        §0, immediate, once per question): a customer or supplier question
+        goes to the Sales owner (else every Sales member, [R3]), a question
+        for our team to the lead (else Project Management)."""
+        from app.services.notification_service import NotificationService
+        dept = await session.get(Department, concern.department_id)
+        who = dept.name if dept is not None else "A department"
+        title = f"Question from {who}: {change.change_number}"[:255]
+        body = (f"'{concern.note}'. It holds {who}'s assessment until it is "
+                "answered.")
+        link = f"/changes/{change.id}?tab=assessments"
+        key = f"ask:{concern.id}"
+        if concern.answer_from in ("customer", "supplier"):
+            if change.sales_owner_id and change.sales_owner_id != user.id:
+                await NotificationService.notify_once(
+                    session, [change.sales_owner_id], kind="task_new",
+                    subject_key=key, title=title, body=body, link=link)
+                return
+            sales = (await session.execute(
+                select(Department.id).where(Department.name == "Sales"))
+            ).scalar_one_or_none()
+            if sales is not None:
+                await NotificationService.notify_departments_once(
+                    session, [sales], kind="task_new", subject_key=key,
+                    title=title, body=body, link=link)
+            return
+        if change.lead_id and change.lead_id != user.id:
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="task_new", subject_key=key,
+                title=title, body=body, link=link)
+            return
+        pm = (await session.execute(
+            select(Department.id).where(Department.name == "Project Manager"))
+        ).scalar_one_or_none()
+        if pm is not None:
+            await NotificationService.notify_departments_once(
+                session, [pm], kind="task_new", subject_key=key,
+                title=title, body=body, link=link)
 
     @staticmethod
     async def _validate_flag(
@@ -1032,6 +1122,16 @@ class MeetingService:
                  for d in concern.owner_department_ids]):
             settled_as = "department"
         allowed = settled_as is not None
+        if (settled_as == "department" and concern.is_check
+                and change.status == "in_assessment"
+                and cm_switches.on("ASSESSMENT_V2")):
+            # spec §4: the department closes its check item with what it
+            # found, not with a free note (POST .../check)
+            raise ChangeError(
+                "Close a check item with what you found: Answered (a number "
+                "with its unit, a reference or a file), Not relevant (checklist "
+                "row, drawing reference, outside our scope or same as another "
+                "item) or Assumed")
         if not allowed:
             raise ChangeError(
                 "Only a member of the department it was raised for, or "
@@ -1077,6 +1177,204 @@ class MeetingService:
                 body=(f"Project Management closed '{concern.note}'"
                       + (f": {concern.resolution_note}" if concern.resolution_note else "")),
                 link=f"/changes/{change.id}?tab=scoping")
+        return concern
+
+    # ---- spec §4: the department checks its check items -------------------
+
+    @staticmethod
+    async def _owner_department_of(session: AsyncSession, concern: ChangeConcern,
+                                   user: User) -> Optional[int]:
+        """The owning department the caller acts for (raised-for first, then
+        co-owners), or None. An admin acts as the raised-for department."""
+        for d in concern.owner_department_ids:
+            if await WorkflowService.actor_in_department(session, user, d):
+                return d
+        if user.effective_role == "admin" and concern.owner_department_ids:
+            return concern.owner_department_ids[0]
+        return None
+
+    @staticmethod
+    async def close_check(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        *, outcome: str, value: Optional[str] = None, unit: Optional[str] = None,
+        ref: Optional[str] = None, basis: Optional[str] = None,
+        checklist_key: Optional[str] = None, who: Optional[str] = None,
+        same_as_id: Optional[int] = None, assumed_risk: Optional[str] = None,
+        confirm_by_id: Optional[int] = None, confirm_due=None,
+    ) -> ChangeConcern:
+        """Spec §4 "Check items first": the owning department closes its
+        check item inline with what it found. Answered: a number with its
+        unit, a reference or a file filed on the item. Not relevant: a
+        checklist row or a drawing reference, outside our scope + who owns
+        it, or the same as another item. Assumed: value + unit (or n/a), the
+        risk if wrong, who confirms by when (the confirm item). Closing it
+        lifts the department's own hold (HARD #10); the raiser's and the
+        lead's digest count it, and either may reopen it."""
+        from app.models.change import (
+            CHECK_OUTCOMES, NOT_RELEVANT_BASES, ChangeAttachment)
+        from app.services import assessment_checklist as checklist
+        from app.services.cm_rules import reference_refusal
+        if not cm_switches.on("ASSESSMENT_V2"):
+            raise ChangeError("Closing check items inline is switched off (ASSESSMENT_V2)")
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if not concern.is_check or not concern.is_open:
+            raise ChangeError("Only an open check item is closed this way")
+        if change.status != "in_assessment":
+            raise ChangeError("Check items are closed in the assessment")
+        dept_id = await MeetingService._owner_department_of(session, concern, user)
+        if dept_id is None:
+            raise MeetingForbidden(
+                "Only the department this check item was raised for closes it")
+        if outcome not in CHECK_OUTCOMES:
+            raise ChangeError("Say what you found: answered, not_relevant or assumed")
+        value = (value or "").strip()
+        unit = (unit or "").strip()
+        ref = (ref or "").strip()
+        if outcome == "answered":
+            files = (await session.execute(
+                select(func.count()).select_from(ChangeAttachment).where(
+                    ChangeAttachment.change_id == change.id,
+                    ChangeAttachment.concern_id == concern.id))).scalar() or 0
+            if value:
+                if not any(ch.isdigit() for ch in value):
+                    raise ChangeError("Answered: the value is a number, e.g. 2.4")
+                if not unit:
+                    raise ChangeError("Answered: give the unit of the value, e.g. mm")
+                text = f"{value} {unit}" + (f" ({ref})" if ref else "")
+            elif ref:
+                why = reference_refusal(ref, "Answered needs evidence",
+                                        "a drawing number, a report or a mail")
+                if why:
+                    raise ChangeError(why)
+                text = ref
+            elif files:
+                text = "see the file filed on the item"
+            else:
+                raise ChangeError(
+                    "Answered needs evidence: a number with its unit, a "
+                    "reference (drawing, report, mail) or a file filed on the item")
+        elif outcome == "not_relevant":
+            if basis not in NOT_RELEVANT_BASES:
+                raise ChangeError(
+                    "Not relevant: say why (checklist row, drawing reference, "
+                    "outside our scope, or same as another item)")
+            if basis == "checklist_row":
+                dept = await session.get(Department, dept_id)
+                if checklist_key not in checklist.accepted_keys_for(
+                        dept.name if dept else None):
+                    raise ChangeError(
+                        "Not relevant: pick the checklist row of your department "
+                        "that answers it")
+                text = (f"not relevant: checklist row "
+                        f"'{checklist.label_for(checklist_key, dept.name if dept else None) or checklist_key}'")
+                ref = checklist_key
+            elif basis == "drawing_ref":
+                why = reference_refusal(ref, "Not relevant needs the drawing reference",
+                                        "DRW-4471 rev C")
+                if why:
+                    raise ChangeError(why)
+                text = f"not relevant: drawing {ref}"
+            elif basis == "outside_scope":
+                owner = (who or "").strip()
+                if len(owner) < 3:
+                    raise ChangeError(
+                        "Outside our scope: say who owns it (a department, the "
+                        "customer or a supplier)")
+                text = f"outside our scope, owned by {owner}"
+                ref = owner
+            else:
+                other = (await session.get(ChangeConcern, same_as_id)
+                         if same_as_id is not None else None)
+                if (other is None or other.change_id != change.id
+                        or other.id == concern.id or other.kind == "risk"):
+                    raise ChangeError(
+                        "Same as: pick another question or check item on this change")
+                text = f"same as #{other.id}"
+                ref = f"#{other.id}"
+        else:
+            await MeetingService._apply_answer_form(
+                session, change, concern, answer_kind="assumed", ref=ref or None,
+                assumed_value=value, assumed_unit=unit, assumed_risk=assumed_risk,
+                confirm_by_id=confirm_by_id, confirm_due=confirm_due)
+            text = (f"assumed {concern.assumed_value}"
+                    f"{' ' + concern.assumed_unit if concern.assumed_unit else ''}"
+                    f", risk if wrong: {concern.assumed_risk}")
+        if outcome != "assumed":
+            concern.answer_ref = (ref or None) and ref[:255]
+        concern.check_outcome = outcome
+        concern.withdrawn_at = datetime.utcnow()
+        concern.withdrawn_by = user.id
+        concern.settled_as = "department"
+        concern.resolution_note = text
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_withdrawn",
+            f"Check item #{concern.id} checked: {text}", user.id,
+            old_value={"concern_id": concern.id},
+            new_value={"settled_as": "department", "check_outcome": outcome,
+                       "department_id": dept_id},
+            notes=text)
+        if outcome == "assumed" and concern.confirm_by_id not in (None, user.id):
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [concern.confirm_by_id], kind="confirm_assumption",
+                subject_key=f"confirm:{concern.id}",
+                title=f"Confirm an assumption: {change.change_number}"[:255],
+                body=f"{text} for '{concern.note}'",
+                link=f"/changes/{change.id}?tab=assessments")
+        return concern
+
+    @staticmethod
+    async def reopen_check(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        reason: Optional[str],
+    ) -> ChangeConcern:
+        """Spec §4: the raiser or the lead reopens a check item its
+        department closed, with a reason, while that department still has
+        its assessment open (after the submit there is no hold left)."""
+        from app.services.change_people import holds_lead
+        if not cm_switches.on("ASSESSMENT_V2"):
+            raise ChangeError("Reopening check items is switched off (ASSESSMENT_V2)")
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if not concern.is_check or concern.is_open or concern.check_outcome is None:
+            raise ChangeError("Only a check item its department closed can be reopened")
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if not ((concern.raised_by == user.id and not acting)
+                or holds_lead(change, user)):
+            raise MeetingForbidden(
+                "Only the person who raised the check item or the change lead "
+                "may reopen it")
+        if change.status != "in_assessment" or not any(
+                a.department_id in concern.owner_department_ids
+                and a.effective_status not in ("submitted", "waived")
+                for a in change.assessments):
+            raise ChangeError(
+                "The department already submitted its assessment: ask it a "
+                "question instead, or ask the lead to send its assessment back")
+        why = (reason or "").strip()
+        if len(why) < 5:
+            raise ChangeError("Say why you reopen it (at least 5 characters)")
+        closer = concern.withdrawn_by
+        concern.withdrawn_at = concern.withdrawn_by = None
+        concern.settled_as = concern.check_outcome = None
+        concern.resolution_note = None
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_reopened",
+            f"Check item #{concern.id} reopened: {why}", user.id,
+            new_value={"concern_id": concern.id}, notes=why)
+        if closer not in (None, user.id):
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [closer], kind="check_reopened",
+                subject_key=f"reopen:{concern.id}",
+                title=f"Check item reopened: {change.change_number}"[:255],
+                body=f"'{concern.note}': {why}",
+                link=f"/changes/{change.id}?tab=assessments")
         return concern
 
     @staticmethod
@@ -1201,8 +1499,17 @@ class MeetingService:
         # Keyed on the change's CURRENT status rather than a stored phase: the
         # question is what this concern is doing now, and adding a column to
         # remember which room it was raised in would answer a different one.
+        # C8 (ASSESSMENT_V2): a question asked from an assessment is answered
+        # like any question (asking department, Sales, PM; answer form); a
+        # check item is not answered by others, its department closes it.
+        v2 = cm_switches.on("ASSESSMENT_V2") and change.status == "in_assessment"
+        if v2 and concern.is_check:
+            raise ChangeError(
+                "A check item is closed by the department it was raised for, in "
+                "its assessment (Answered / Not relevant / Assumed)")
         departmental = (concern.department_id is not None
-                        and change.status == "in_assessment")
+                        and change.status == "in_assessment"
+                        and not (v2 and concern.is_question))
         if departmental:
             if not await ChangeService.has_info_response(
                     session, change, concern_id=concern.id):
@@ -1250,6 +1557,15 @@ class MeetingService:
             user.id,
             new_value={"concern_id": concern.id, "answer_kind": concern.answer_kind},
             notes=note or None)
+        if v2 and concern.raised_by != user.id:
+            # C8: the asker hears the answer (a badge, once per question)
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [concern.raised_by], kind="question_answered",
+                subject_key=f"answered:{concern.id}",
+                title=f"Your question was answered: {change.change_number}"[:255],
+                body=f"'{concern.note}': {note or concern.answer_ref or concern.assumed_value or 'see the attached document'}"[:1000],
+                link=f"/changes/{change.id}?tab=assessments")
         if answer_kind == "assumed" and concern.confirm_by_id not in (None, user.id):
             # task newly theirs (spec §0): the confirm item, once per question
             from app.services.notification_service import NotificationService

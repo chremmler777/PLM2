@@ -4,7 +4,7 @@ import type {
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
-  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
+  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind, CheckCloseBody,
   FlagType, CheckWhat, AnswerFrom, AnswerForm, IndexFollowup, RecheckAreaAnswer,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
@@ -391,6 +391,14 @@ export const changesApi = {
   /** C33: confirm an Assumed answer with evidence (ref or a filed mail). */
   confirmConcern: (id: number, concernId: number, body: { ref?: string; mail_id?: number }) =>
     client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/confirm`, body)
+      .then((r) => r.data),
+  /** Spec §4: the owning department closes its check item in its assessment. */
+  closeCheck: (id: number, concernId: number, body: CheckCloseBody) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/check`, body)
+      .then((r) => r.data),
+  /** Spec §4: the raiser or the lead reopens a closed check item. */
+  reopenCheck: (id: number, concernId: number, reason: string) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/reopen`, { reason })
       .then((r) => r.data),
   /** C33 answer form: Confirmed (evidence) or Assumed (value, unit, risk). */
   answerConcernForm: (id: number, concernId: number, body: AnswerForm) =>
