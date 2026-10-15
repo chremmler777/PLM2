@@ -58,6 +58,7 @@ class PPAPSubmission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    submitted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

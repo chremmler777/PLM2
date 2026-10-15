@@ -44,7 +44,7 @@ async def test_ppap_submit_requires_complete_elements(client, eng_auth, part):
     assert res.json()["status"] == "submitted"
 
 
-async def test_ppap_approval_flow_and_changelog(client, eng_auth, part):
+async def test_ppap_approval_flow_and_changelog(client, eng_auth, admin_auth, part):
     pid, rid = part["part_id"], part["revision_id"]
     ppap = await _create_ppap(client, eng_auth, rid, level=1)
 
@@ -55,11 +55,12 @@ async def test_ppap_approval_flow_and_changelog(client, eng_auth, part):
             )
     await client.post(f"/api/v1/quality/ppap/{ppap['id']}/submit", headers=eng_auth)
 
-    # Approve only works on submitted; elements become read-only after decision
+    # Approve only works on submitted; elements become read-only after decision.
+    # Quality or an admin decides, never the submitter (four eyes).
     res = await client.post(
         f"/api/v1/quality/ppap/{ppap['id']}/approve",
         json={"notes": "released"},
-        headers=eng_auth,
+        headers=admin_auth,
     )
     assert res.status_code == 200
     assert res.json()["status"] == "approved"

@@ -249,12 +249,25 @@ async def _transition(
                 + (f" (+{len(incomplete) - 5} more)" if len(incomplete) > 5 else ""),
             )
         submission.submitted_at = datetime.utcnow()
+        submission.submitted_by = current_user.id
     else:  # approved / rejected
         if submission.status != "submitted":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Only submitted PPAPs can be approved or rejected",
             )
+        # Quality decides (admin through _user_in_department, acts-as
+        # aware), and never on a package they submitted themselves.
+        from app.services.change_service import ChangeService
+        if not await ChangeService._user_in_department(db, current_user, "Quality"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Quality or an admin may approve or reject a PPAP")
+        submitter = submission.submitted_by or submission.created_by
+        if submitter == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The submitter cannot approve or reject their own PPAP")
         submission.decided_at = datetime.utcnow()
         submission.decided_by = current_user.id
         submission.decision_notes = notes
