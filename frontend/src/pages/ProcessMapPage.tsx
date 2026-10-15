@@ -77,7 +77,7 @@ const STAGES: Stage[] = [
   {
     key: 'captured', name: 'Capture', badge: 'Sales', state: 'built',
     sub: 'Request, attachment, quote-by date, lead', task: 'task: kickoff',
-    responsible: 'Sales (can_start_change); PM may start. A change from KTX Weissenburg / Solingen is started by Project Management only',
+    responsible: 'Sales (can_start_change); PM may start. Development, Process Engineer and Tool Engineer start internal changes and lead them. A customer change has a named Sales owner (the Sales raiser, else the project Sales contact). A change from KTX Weissenburg / Solingen is started by Project Management only',
     artifacts: 'kickoff gate (soft, deviation-overridable): description, at least one attachment, quote deadline (customer changes), change lead; origin: customer change, internal change (the plant pays) or change from KTX Weissenburg / Solingen',
     what: 'The originator enters the request: project, affected items, description, documents, one-line reason, customer change, internal change (the plant pays, no quote, no quote deadline) or change from KTX Weissenburg / Solingen, quote deadline (customer changes). The scoping meeting confirms the cost carrier; it can still turn a change internal or customer there. No meetings here. Handing over to scoping needs a description, at least one attachment, the quote deadline (customer changes) and a change lead; the check is soft, so an urgent request can go on with an approved deviation. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is started by Project Management only, captured with its reference and SOP date, and runs in its own side track.',
   },
