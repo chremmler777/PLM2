@@ -135,10 +135,18 @@ soft kickoff guard above reads `kickoff_missing`, which adds:
 - **Create and hand over**: a complete capture is created and moved to
   scoping in one click; "Create as draft" keeps it captured.
 - **Urgent proceed** (§3): `decide proceed` on an urgent change needs
-  `need_by_check` (yes / at_risk / no + `need_by_proposed`); anything but yes
-  notifies the Sales owner (else Sales) once and gives all of Sales the task
+  `need_by_check` (yes / at_risk / no + `need_by_proposed`). On a customer
+  change (the cost carrier proceed goes on with) anything but yes notifies
+  the Sales owner (else Sales) once and gives all of Sales the task
   `need_by_tell` ("Tell customer: new date or start at risk?", owner named),
   answered with a filed mail or a reference (`POST /changes/{id}/need-by/tell`).
+  An internal change has no customer and no Sales owner: *start at risk* is
+  not offered (refused), *no* is recorded and the lead (else the raiser) is
+  told once; Sales gets nothing (L4 review).
+- **Urgent rule on edits**: create, and a PATCH that moves the urgency itself
+  (priority, reason, evidence) or the need-by during capture or scoping, run
+  the urgent check; a later release-deadline move of a critical change (a
+  legacy one without reason and evidence included) is a plain deadline edit.
 
 ### Inside `scoping`
 - **Scope (defined by PM)** (2026-10-14): the project manager writes down what
@@ -246,18 +254,50 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   co-owners); a member closes it with a resolution note.
 - **C13, "Not yet"** (the meeting's `needs_info`, button *Not yet* in the UI):
   closes nobody's question. With questions open it needs no reason; it records
-  *"Not yet: waiting for 2 answers (Process Engineer, Tool Engineer)"* and
-  raises nothing new. Without open questions it asks what is missing, which
+  *"Not yet: waiting for 2 answers (Process Engineer Thu, Tool Engineer Fri)"*
+  (each side with the due weekday of its earliest question, the task rule)
+  and raises nothing new. Without open questions it asks what is missing, which
   becomes the decider department's question as before. **Reject** still closes
   every flag [KEEP]. The PM's *Wrap up scoping* row reads *"Not yet: waiting
-  for n answer(s) (...)"* and flips to *"Ready: proceed"*.
+  for n answer(s) (...)"*, then *"Proceed waits for: PPAP decision (Quality,
+  due Thu), notification or offer? (Sales), impacted parts (lead)"*, and
+  *"Ready: proceed"* only when nothing holds proceed.
+- **Proceed holds** (`MeetingService.proceed_holds`, L4 review): open
+  questions and cancel votes (HARD #2), the PPAP decision and the flip's Sales
+  answer (HARD #7), no impacted parts (HARD #1), each with owner and due. The
+  PM's row and the change checklist (`next_step`, `who` = "Quality, due Thu")
+  read it, the cockpit lists HARD #7 under *Blocked by* (never "Nothing
+  blocking") and gives Quality *Answer the PPAP decision* as the scoping
+  header action; a refused `proceed` names every hold at once (with the
+  dialog's own fields: departments, R/A, cost carrier, the urgent need-by).
+- **Confirm item rights** (L4 review): the list serves `can_confirm` per
+  question (the named confirmer, or who may answer it; any live status, the
+  question open or closed), and the card shows the confirm form on it, so
+  the confirmer is never sent to a dead end. A named confirmer
+  (`confirm_by_id`) must be an active writer of the change's organization and
+  is told once (`confirm:<concern>`). A customer question is Confirmed only by
+  a filed customer mail or a `customer_file` filed on the question (an
+  internal `info_response` is no customer answer).
+- **Same as / add to rights**: *same as* is a department act (members only;
+  an admin acts as the department); *add to* is the asker's, the owning
+  departments', Sales' or PM's and is refused once the question is answered.
+  *Make it a question* keeps the one-open-question-per-pick limit.
+- **Customer copy**: a customer question carries its mail text
+  (`customer_copy`: subject, what is asked, the part, what the answer
+  decides); the question card and Sales' `obtain_info` row offer *Copy mail
+  text*. A question PM closes over the asker tells the asker once.
 - Switch OFF: every scoping flag is a question again and `needs_info` resolves
   the open flags (the 2026-10-14 behaviour).
 
 ### HARD #7: ppap_decision and the customer flip (2026-10-15)
 Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
-- **ppap_decision**: an internal change (origin `internal`) owes Quality's
-  answer before `proceed`: *"Parameters / tool / material / cycle time changed
+- **ppap_decision**: a change that goes on as internal owes Quality's
+  answer before `proceed` (`applies`: one of ours, origin customer or
+  internal, whose cost carrier is internal; while captured or scoped an
+  undecided meeting's carrier wins, so a customer change the room sets to
+  internal owes it before proceed instead of deadlocking at it). Quality is
+  told once when it is needed (`ppap_decision:<id>`: entering scoping, or a
+  meeting set to internal): *"Parameters / tool / material / cycle time changed
   on any part?"*, nothing preselected. **No** names its basis (control plan /
   process sheet / customer spec) and the document reference; **Yes** names the
   parts. One Quality member answers (an admin acts as Quality),
@@ -269,13 +309,22 @@ Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
   `customer_relevant` + origin `customer`, the project's Sales contact as Sales
   owner, the project PM as lead (when the project names one), an undecided
   meeting's cost carrier follows to *customer*. The Sales owner and the lead
-  are notified once (`customer_flip:<id>`); all of Sales see *"Customer
-  notification or offer needed?"* (`customer_flip`, 1 wd, owner named).
-  **Notification only** needs a filed customer mail or a reference (then no
-  quote deadline is owed: the `no_quote_deadline` rule skips it); **Offer
-  needed** sets the quote deadline (`POST /changes/{id}/customer-flip/answer`,
-  Sales members). `proceed` waits for this answer (part of HARD #7). A flip at
-  approved or later also sets `price_open` (HARD #9 at close).
+  are notified once (`customer_flip:<id>`; the lead's notice names Sales and
+  asks nothing); all of Sales see *"Customer notification or offer needed?"*
+  (`customer_flip`, 1 wd, owner named). **Notification only** needs a filed
+  customer mail or a reference: the customer is told, the money stays ours,
+  so the change goes on as **internal** again (`customer_relevant` false,
+  origin internal, no Sales owner, the open meeting's carrier internal; the
+  internal approval, HARD #8, before `costing -> approved`), the
+  notification on the record (`flip_ref`). **Offer needed** sets the quote
+  deadline (`POST /changes/{id}/customer-flip/answer`, Sales members) and the
+  change takes the customer path. `proceed` waits for this answer (part of
+  HARD #7). **At approved or later** only *offer needed* sets `price_open`
+  (HARD #9 at close: a supplement accepted, or Absorb); *notification only*
+  opens nothing. A lead's PATCH back to internal before Sales answered drops
+  the open flip. A PATCH internal -> customer by Sales or PM during capture
+  or scoping is a cost-carrier correction, not a flip: no lead move, no Sales
+  question (the quote tells the customer).
 
 ### The needs-info loop (2026-08-11)
 
@@ -1005,7 +1054,11 @@ Switch `SCOPING_V2` (`revision_intake_service.py`,
   (`attach_ecr`, preselected; the dialog names it with status and lead).
   `full_ecr` anyway needs a reason pick (separate topic / customer runs a
   separate EC / live change too far along / other + text) and links the two
-  changes both ways (`change_requests.related_change_id`).
+  changes both ways (`change_requests.related_change_id`). **Every other**
+  live change carrying the part is named too (`other_live_changes`, "Also
+  carried by: CR-3 (Quoted, lead), CR-5 (Costing)"), and at triage their
+  leads are told once (`index_other:<intake>:<change>`) to check whether
+  their assessment, costing or offer still holds (L4 review).
 - **A newer index is never refused** (minimal C11): it waits for its own
   triage (the customer package preview says where it will land). Attached
   to the change that carries the part, it supersedes there: a pending
@@ -1017,24 +1070,32 @@ Switch `SCOPING_V2` (`revision_intake_service.py`,
 - **full_ecr hands over (C9)**: the index's files are linked on the change
   as `customer_file` attachments (by reference: deleting one from the change
   never removes the revision's file), the Sales owner is the project's Sales
-  contact, the lead the project PM; both are told once
-  (`intake_handover:<id>`): Sales sets the quote deadline, the lead
-  schedules scoping (the kickoff row then lists only the deadline).
+  contact, the lead the project PM; the change is **handed over to
+  scoping** at once (the soft kickoff rule is logged, `handover_logged`, not
+  overridden), so the lead schedules scoping while Sales sets the quote
+  deadline (task `set_quote_deadline` in scoping, all of Sales, owner named;
+  owed before assessment, `no_quote_deadline`). Both are told once
+  (`intake_handover:<id>`).
 - **Follow-ups on an impacted item** (the part was on the change: the new
   index D replaces C there):
   - **Recheck** (`change_rechecks`, task `assessment_recheck`, 2 wd) for
     every routed department that had submitted; per picked area "no effect"
     (drawing ref or checklist row) or "effect" (what + evidence), plus
     "something else changed"; nothing preselected; only that department
-    answers (`POST /changes/{id}/rechecks/{rid}/answer`). An effect in
-    assessment/costing reopens the department's finalized costing; from
-    quoting on it is a scope change of type customer index
+    answers (`POST /changes/{id}/rechecks/{rid}/answer`). An effect before
+    the offer is sent reopens the department's finalized costing (in quoting
+    the change first steps back to costing, the correction path, logged);
+    from quoted on it is a scope change of type customer index
     (`scope_changed_after_quote` + `costing_update` for that department).
     No visible change: no rechecks. A department that had not submitted sees
     "Index changed to D: assess on D".
   - **Lead** (task `index_decision`, 1 wd, past scoping): "Index D adds
     parts or departments?" no / yes + which
-    (`POST /changes/{id}/index-followups/{intake}/scope`, run team).
+    (`POST /changes/{id}/index-followups/{intake}/scope`, run team; PM rows
+    name the lead as main). An index attached during capture or scoping
+    makes it owed from the entry into assessment: the row starts then (never
+    overdue at birth), names the new index ("C -> D") and the lead is told
+    once at proceed.
   - **Sales** (an open quote, task `index_deadline`): "D replaces C; deadline
     holds?" holds (filed mail or ref) / new date (date + mail or ref) / not
     asked yet (Assumed, confirm by +5 wd: `index_deadline_confirm` until
@@ -1296,8 +1357,8 @@ technical content changed: `offer_service.snapshot_diff` of the quote plan
 and impacted parts, a part index included, spec §7; a signature owed again
 shows "Sign again for vN" in the why-blocked row and the offer tab); (5)
 the rejection letter; (6) the run team's
-mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (built with
-the card in lane L4); (8) internal: the internal approval before
+mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (see
+"HARD #7" above); (8) internal: the internal approval before
 `costing → approved`, given by an engineering approver who is not the raiser
 (`settings.internal_approvers`, env `INTERNAL_APPROVERS`, default
 `christoph.demmler`; when no configured approver other than the raiser is an
@@ -1420,7 +1481,7 @@ one, and "Absorb" on an open price for who may ask it.
   them at release. `POST /sign-off` takes a signature from quoted until
   validation only (`COMMERCIAL_V2`), never on a change being scoped or done.
 - **"Needs you"** (`due_rules.NEEDS_YOU_KINDS`): overrides, routing changes,
-  sign-offs, the internal approval, `ppap_decision` (when lane L4 adds it)
+  sign-offs, the internal approval, `ppap_decision`
   and a concession
   to decide (`validation_issue_customer` on a `customer_concession` route) sit
   in their own group on top, by due. Backup rows never do.

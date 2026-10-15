@@ -120,10 +120,13 @@ export const pmChapter: ContentChapter = {
             '"Make it a check item" if the scope can be decided without it. A department that owns ' +
             'check items but has no letter shows "Route Quality: C" (or R). "Not yet" closes nobody\'s ' +
             'question and, while questions are open, needs no reason. Your "Wrap up scoping" task ' +
-            'says what it waits on, then "Ready: proceed". On an urgent change the proceed ' +
-            'dialog asks "Is the need-by date realistic?": Yes, Only with start at risk, or No with a ' +
-            'proposed date. Anything but Yes gives Sales "Tell customer: new date or start at risk?" ' +
-            'at once.',
+            'says what it waits on and who owes it ("Not yet: waiting for 2 answers (Sales Thu, Process ' +
+            'Fri)", "Proceed waits for: PPAP decision (Quality, due Thu)"), and reads "Ready: proceed" ' +
+            'only when nothing holds it; a refused proceed names every hold at once. On an urgent ' +
+            'change the proceed dialog asks "Is the need-by date realistic?": Yes, Only with start at ' +
+            'risk (customer changes), or No with a proposed date. On a customer change anything but ' +
+            'Yes gives Sales "Tell customer: new date or start at risk?" at once; on an internal one ' +
+            'it is recorded and the lead is told.',
           tone: 'warn',
         },
         { shot: 'pm-scoping-meeting', alt: 'The scoping meeting form with RASIC letters per department, the cost carrier and "Save meeting".' },

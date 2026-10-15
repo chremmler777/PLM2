@@ -23,7 +23,7 @@ export const qualityChapter: ContentChapter = {
           table: {
             head: ['Where', 'What you do'],
             rows: [
-              ['Scoping (internal changes)', 'Answer the "ppap decision (Quality)" card: "Parameters / tool / material / cycle time changed on any part?" "No" names the control plan, process sheet or customer spec and its reference. "Yes: pick the parts" makes it a customer change and gives Sales a task. The change cannot proceed before you answer.'],
+              ['Scoping (internal changes)', 'You are told when a change that goes on as internal reaches scoping (also a customer change the scoping meeting set to internal). Answer the "PPAP decision (Quality)" card, due the next working day: "Parameters / tool / material / cycle time changed on any part?" "No" names the control plan, process sheet or customer spec and its reference. "Yes: pick the parts" makes it a customer change and gives Sales a task. The change cannot proceed before you answer; the header says "Answer the PPAP decision".'],
               ['Quoted', 'Give the "Quality sign-off". The cockpit asks for it once the customer accepted.'],
               ['Any stage', 'Give the OK on overrides into implementation or release, and on validation rules. Never on your own request.'],
               ['Validation', 'Decide a customer concession once Sales filed the customer\'s mail. It is the only way past a failed check.'],

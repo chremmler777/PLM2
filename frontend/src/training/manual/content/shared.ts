@@ -217,11 +217,14 @@ export const flowChapter: ContentChapter = {
         },
         {
           p:
-            'Before PM can take over, the capture needs a description, at least one attachment, a ' +
-            'change lead and, for a customer change, the quote deadline. The form says what is ' +
-            'missing: "Not ready to hand over to scoping yet, missing:". The check is soft: an ' +
-            'urgent request can be handed over on an approved override of that rule, with the ' +
-            'reason on the record.',
+            'Before PM can take over, the capture needs a description and a change lead; a customer ' +
+            'change also the customer\'s own file (drawing, 3D, EC sheet or a filed customer mail) and ' +
+            'the quote deadline; an internal change one evidence file or photo, "what is wrong today" ' +
+            '(a number with its unit) and the target. The form says what is missing: "Not ready to ' +
+            'hand over to scoping yet, missing:"; "Create and hand over" does both in one click when ' +
+            'nothing is. The check is soft: an override bound to that rule lifts it, with the reason on ' +
+            'the record. Urgent is not an override: an urgent change needs its need-by date, a reason ' +
+            'pick and evidence, or it is not created.',
         },
       ],
     },
