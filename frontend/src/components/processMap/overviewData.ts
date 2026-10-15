@@ -64,11 +64,15 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
   },
   {
     key: 'costing', name: 'Costing', owner: 'Departments, PM runs', target: 'procmap-node-costing',
-    gates: [{ text: 'all R/A submitted, none not feasible, no routing change pending', soft: true }],
+    gates: [
+      { text: 'all R/A submitted, none not feasible', soft: true },
+      { text: 'routing change pending: decided by PM, never overridden' },
+      { text: 'close costing: every department costing finalized', soft: true },
+    ],
     evidence: ['costing lines with rate snapshot', 'vendor quotes + favorite', 'P&L planned'],
   },
   {
-    key: 'offer', name: 'Offer / Approval', owner: 'Sales or the lead; PM if internal', target: 'procmap-node-quoting',
+    key: 'offer', name: 'Offer / Approval', owner: 'Sales or the lead; internal: an engineering approver', target: 'procmap-node-quoting',
     gates: [
       { text: 'cost carrier (set at scoping) picks the offer or internal approval' },
       { text: 'customer: Close costing, same checks again', soft: true },
@@ -78,8 +82,8 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
   {
     key: 'timing', name: 'Timing', owner: 'PM, Scheduling, all teams', target: 'procmap-node-approved',
     gates: [
-      { text: 'customer: accepted offer, PM + Quality sign-off (two people)', hard: true },
-      { text: 'internal: PM approved costs + release deadline', hard: true },
+      { text: 'customer: accepted offer, PM + Quality sign-off on the latest offer sent (two people)', hard: true },
+      { text: 'internal: approved by an engineering approver, never the raiser, + release deadline', hard: true },
       { text: 'Weissenburg / Solingen: impact locked, team informed, SOP date', hard: true },
     ],
     evidence: ['detailed plan', 'baseline + team confirmations', 'bank build decision, published plan (not gates)'],
@@ -96,12 +100,19 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
   },
   {
     key: 'release', name: 'Release', owner: 'PM', target: 'procmap-node-released',
-    gates: [{ text: 'checks passed, revisions checked, checklist, lessons, no open validation issue or plan deviation', soft: true }],
+    gates: [
+      { text: 'no failed check, no open validation issue (only exit: a concession, Quality)', hard: true },
+      { text: 'PM + Quality sign-off on the latest offer or supplement sent', hard: true },
+      { text: 'checks answered, revisions checked, checklist, lessons, no open plan deviation', soft: true },
+    ],
     evidence: ['release checklist (16 items)', 'lessons learned', 'plan vs actual, P&L'],
   },
   {
     key: 'close', name: 'Close', owner: 'PM', target: 'procmap-node-closed',
-    gates: [{ text: 'released' }],
+    gates: [
+      { text: 'released' },
+      { text: 'no open price (customer accepts, or Absorb with the OK of PM or Management)', hard: true },
+    ],
     evidence: ['closure', 'linked index activated'],
   },
 ]
@@ -121,7 +132,7 @@ export const OVERVIEW_LANES: Lane[] = [
     key: 'issues', name: 'Validation issues', joins: 'from Validation', tone: 'amber',
     target: 'procmap-node-issue-raise',
     steps: ['raise VI-n (failed check or by hand)', 'containment', 'root cause', 'route (PM or lead, 4-eyes)'],
-    note: 'Routes: internal rework, supplier rework, design change (back to Implementation with a recovery group), customer concession, follow-up change. Escalation L1 department, L2 project, L3 management + customer (acknowledge task from L2). An open issue holds the release (soft).',
+    note: 'Routes: internal rework, supplier rework, design change (back to Implementation with a recovery group), customer concession, follow-up change. Escalation L1 department, L2 project, L3 management + customer (acknowledge task from L2). An open issue holds the release (hard: fix and re-validate, or a concession Quality accepts once Sales filed the customer mail; raised in error: Quality closes it with the evidence; a follow-up change takes it over).',
   },
   {
     key: 'mother-plant', name: 'Change from KTX Weissenburg / Solingen', joins: 'rejoins at Timing', tone: 'purple',

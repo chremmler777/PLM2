@@ -418,7 +418,7 @@ describe('earlyStageWaits (spec §16)', () => {
       'No lead assigned: Project Management picks one',
       '1 open cancel vote from Ann',
       'Tool Engineer: not feasible (no Change PPT)',
-      'Offer v2 no longer covers the scope: new offer version or approved deviation',
+      'Offer v2 no longer covers the scope: new offer version, or an override (OK of Project Management or Management)',
     ])
   })
 })

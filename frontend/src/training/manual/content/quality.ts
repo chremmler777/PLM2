@@ -52,7 +52,7 @@ export const qualityChapter: ContentChapter = {
             ['You do not see prices, on purpose.', 'Offer prices are shown to Sales, Project Management, the change lead and admins. The "Offer" tab shows you the sign-off without the figures, and money is blanked in the audit and its CSV. Your sign-off is on the process record, not the price.'],
             ['Four eyes:', '"PM and Quality sign-off must be different users". If you signed as PM, somebody else from Quality signs.'],
             ['Only Quality members', '(or an admin) see the Quality sign-off button.'],
-            ['A signature is for one offer version.', 'If Sales sends a newer version or a supplement after you signed, approval and release wait for you again. The button then reads "Sign again for v2"; the cockpit\'s "Missing before" list shows "Sign as Quality for v2" at any stage.'],
+            ['A signature is for one offer version.', 'If Sales sends a newer version or a supplement whose quote plan or parts changed (a new part index counts), approval and release wait for you again. A price-only version keeps your signature. The button then reads "Sign again for v2"; the cockpit\'s "Missing before" list shows "Sign as Quality for v2" at any stage.'],
           ],
         },
         { shot: 'qa-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and the "Quality sign-off" button.' },
@@ -136,7 +136,8 @@ export const qualityChapter: ContentChapter = {
         {
           points: [
             ['Watch the severity.', '"Blocks production" needs containment before anything else, and starts at level 2.'],
-            ['Decide the concessions.', 'A "Customer concession" is the only way past a failed check, and it is your decision: Sales files the customer\'s mail into the issue, then a Quality member records "Accepts the deviation". Sales, PM and admins cannot accept it.'],
+            ['Decide the concessions.', 'A "Customer concession" is the only way past a failed check besides a passed retest, and it is your decision: Sales files the customer\'s mail into the issue, then a Quality member records "Accepts the deviation". Sales, PM and admins cannot accept it. A concession Sales accepted before this rule waits for your confirmation on its card.'],
+            ['Retests and issues raised in error.', 'A failed check is answered again only by its own department, with what changed since (parameter, tool, material or method + reference); PM and admins cannot flip it. An issue raised in error is closed by you, with the evidence.'],
             ['Watch the cause.', 'A fix route is decided only after the root cause is recorded. A cause without evidence is a guess.'],
           ],
         },

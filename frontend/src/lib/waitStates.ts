@@ -567,7 +567,7 @@ export function earlyStageWaits(
   if (live && change.scope_changed_after_quote) {
     push({
       key: 'scope_not_covered',
-      text: `${change.scope_offer_version ? `Offer v${change.scope_offer_version}` : 'The offer'} no longer covers the scope: new offer version or approved deviation`,
+      text: `${change.scope_offer_version ? `Offer v${change.scope_offer_version}` : 'The offer'} no longer covers the scope: new offer version, or an override (OK of Project Management or Management)`,
       tab: 'offer',
     })
   }

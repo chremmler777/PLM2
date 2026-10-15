@@ -529,7 +529,7 @@ export default function OfferTab(props: OfferTabProps) {
     return (
       <div className="space-y-4">
         <StageHeader title="Internal approval"
-          body="Internal changes are not offered. PM approves the costs; the quote plan gives the change its timing before approval." />
+          body="Internal changes are not offered. An engineering approver (never the raiser) approves the costs; the quote plan gives the change its timing before approval." />
         {canSeePrices && props.costSummary}
         <StepSection id="offer-timing" n={1} title="Timing" done={timingDone} right={timingBadge}>
           <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />

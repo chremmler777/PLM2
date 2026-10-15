@@ -758,14 +758,25 @@ migration `090`), not just a bounce back. Shape, in order:
   raiser unless admin): 1 `internal_rework`, 2 `supplier_rework`, 3
   `design_change` loop the change back to `in_implementation` with fix
   actions and a recovery group in the plan; 4 `customer_concession` closes as
-  `accepted` only when Sales records `accept_deviation` **with a customer
-  mail filed** (hard rule), `require_fix` reopens the route; 5
+  `accepted` only when, **with the customer mail filed** by Sales (hard
+  rule), a Quality member records `accept_deviation` (with `RELEASE_V2`;
+  switch off: Sales records it), `require_fix` (Sales) reopens the route; 5
   `follow_up_change` spawns a new change at `captured` and marks the issue
-  `transferred`.
+  `transferred` (an allowed exit: the defect stays visible in the follow-up,
+  decided by PM or the lead with 4-eyes).
 - **Re-validation**: all fix actions done → `revalidation`; the linked check
-  answered `passed` closes the issue, a new `failed` reopens `fixing`.
-- **Guard**: `in_validation -> released` adds "n validation issues open"
-  (soft guard, after the checklist and lessons reasons).
+  answered `passed` closes the issue, a new `failed` reopens `fixing`. With
+  `RELEASE_V2` a FAILED check is answered again only by a retest in
+  validation, by its own department (acts-as aware; no PM or admin
+  shortcut), with "what changed since" (parameter, tool, material or method
+  + a reference, `cm_rules.reference_refusal`).
+- **Raised in error**: an issue still `open` or `contained` (no route) is
+  closed with a note; with `RELEASE_V2` only by a Quality member, the note
+  naming the evidence (a reference of at least 5 characters).
+- **Guard**: `in_validation -> released` is HARD with `RELEASE_V2` while any
+  issue is open (no override; exits: fix and re-validate, a concession,
+  raised in error by Quality, or a follow-up change); switch off: "n
+  validation issues open" is a soft rule as before.
 Code: `validation_issue_service.py`, `api/v1/changes/validation_issues.py`,
 `components/changes/validation/`. Changelog `validation_issue_*`.
 
@@ -1108,12 +1119,21 @@ proceed, never empty; (2) open questions at proceed; (3) a failed validation
 check or an open validation issue at release, the only exit a concession (an
 issue on the check closed `accepted` via `customer_concession`, whose yes a
 Quality member recorded: Sales files the customer's mail into the issue,
-Quality accepts it; Sales, PM and admins get no "accept" on a concession,
-and an accepted concession nobody in Quality decided does not count), not
-even an admin lifts it (C7, `RELEASE_V2`; off: Sales closes it as before); (4) acceptance of the current offer and
-both sign-offs for approval, each given on the latest offer sent (the same
-binding as at release, `COMMERCIAL_V2`; a signature on an older version is
-owed again, the why-blocked row and the offer tab offer "Sign again for vN"); (5) the rejection letter; (6) the run team's
+Quality accepts it; Sales, PM and admins get no "accept" on a concession;
+whether the yes was Quality's is stored with it,
+`customer_decided_as_quality`, migration 119, acts-as aware like a Quality
+override; an accepted concession nobody in Quality decided does not count
+until a Quality member confirms it on the issue card), not even an admin
+lifts it: a failed check is answered again only by its own department's
+retest with "what changed since", and an open issue closes as raised in
+error only by Quality (C7, `RELEASE_V2`; off: Sales closes it as before);
+(4) acceptance of the current offer and both sign-offs for approval, each
+given on the latest offer sent (the same binding as at release,
+`COMMERCIAL_V2`; PM signs every newer version, Quality only when its
+technical content changed: `offer_service.snapshot_diff` of the quote plan
+and impacted parts, a part index included, spec §7; a signature owed again
+shows "Sign again for vN" in the why-blocked row and the offer tab); (5)
+the rejection letter; (6) the run team's
 mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (built with
 the card in lane L4); (8) internal: the internal approval before
 `costing → approved`, given by an engineering approver who is not the raiser
@@ -1126,7 +1146,9 @@ switch); (9) at release the
 PM and Quality sign-offs bound to the latest offer sent
 (`pm_signed_offer_id`/`quality_signed_offer_id`, set by the sign-off,
 `RELEASE_V2`; the why-blocked row names the sides still owed and offers
-"Sign as PM / Quality for vN" to the viewer whose side it is, at any status),
+"Sign as PM / Quality for vN" to the viewer whose side it is, at any status;
+with no offer sent both signatures must still be there, except on
+mother-plant and engineering-review changes, which have none),
 at close no `price_open` (`COMMERCIAL_V2`), exits: the
 customer accepts the offer (clears it) or **Absorb**; (10) own check items and
 questions at the department's submit (lanes L4/L5). The new ones are checked
@@ -1138,14 +1160,22 @@ that holds a hop, each with a key (`cm_rules.GuardReason`). An **Override**
 (a transition deviation, `POST /changes/{id}/deviations {to_status, reason,
 guard_key?, reason_code}`) is bound to ONE rule (`guard_key`, migration 118);
 a hop held by two rules needs two overrides, one bound to another rule lifts
-nothing (C6, `COMMERCIAL_V2`). The reason pick is customer date / done in
+nothing (C6, `COMMERCIAL_V2`). A HARD rule holding the same move is named
+first and refuses the ask ("no override lifts this"), so no override is
+asked that could be approved and still lift nothing. The routing change
+(`routing_deviation_pending`) is decided, never overridden
+(`cm_rules.DECIDE_ONLY_RULES`): the ask is refused, the refusal carries no
+override headers, stage-state reports it as kind `decide` and the cockpit
+and banner point to "Decide added department". The reason pick is customer date / done in
 parallel / does not apply / other, plus a note (R4, `cm_rules.override_note_refusal`,
 for the dialog, the 202 path of `POST /transition` with `deviation_reason` +
 `deviation_reason_code`, and scripts alike): no default pick, a sentence of at
 least 15 characters (not "ok" or "tbd"), and "customer date" names the date
 or the mail reference. The Absorb note follows the same length rule. A
-reject needs a note, and the asker is told the decision once
-(`deviation_decided`, subject `dev:<id>:decided`, with the note). Users read
+reject needs a note, and the asker is told a rejection once
+(`deviation_decided`, subject `dev:<id>:decided`, with the note; an
+approval only on a `critical` change, otherwise it is a badge and a
+changelog line, spec §0 Notifications). Users read
 "override" everywhere (refusals "An approved override of '<rule>' is required
 to proceed. Override #n waits for the OK of <who>.", the 202 answer, the
 panel, the changelog); the model stays `ChangeTransitionDeviation`. The OK is never the
@@ -1155,13 +1185,16 @@ Quality member; price rules (`scope_change_uncovered`, `price_drop`) and
 Absorb: a Project Management or Management member (internal Absorb: the
 internal approver). The deciders get one notification per override
 (`deviation_pending`, deduped; the PM department when the lead asked or there
-is no lead). A deviation asked before the binding (no `guard_key`) still
+is no lead), naming the asker and the reason (an Absorb's note stays in
+PLM2). A deviation asked before the binding (no `guard_key`) still
 covers its target as before, so in-flight changes move; a pending one is
 bound to the rule holding the hop when it is approved. An approved override
 is an OK for the step out of the status it was given in: one not used when
 the change leaves that status turns `lapsed` (a later return of its rule
-needs a new decision), and a pending Absorb turns `withdrawn` when the
-customer's acceptance clears the open price. Switch off: the old
+needs a new decision), one still pending turns `withdrawn` (changelog
+`deviation_withdrawn`; no dead "Decide override" task is left), and a
+pending Absorb turns `withdrawn` when the customer's acceptance clears the
+open price. Switch off: the old
 rule (any approved deviation to the status, lead or admin decides).
 
 **C5 (spec §5, `ASSESSMENT_V2`).** Closing costing (`costing → quoting`, and an
@@ -1187,8 +1220,10 @@ rule (`rule`), the owner and due in words (`who`; every row has one, R5:
 the rule's own owner, else its default, e.g. the Sales owner for the quote
 rows, Quality for the Quality sign-off, else the lead, else Project
 Management; dues follow with the due rules of lanes L3/L5), a hard rule's only exits
-(`exits`: concession, absorb, customer_accepts, sign) and the rule's override
-state (`override`). The cockpit shows one "Override" link per soft rule (only
+(`exits`: concession, absorb, customer_accepts, sign, record_answer) and the
+rule's override state (`override`). The footer follows the row kinds (a
+routing change is "decided, not overridden"); overdue assessments count as a
+blocker only while the change is in assessment. The cockpit shows one "Override" link per soft rule (only
 to a viewer who may take the step), "No override" plus the exits for a hard
 one, and "Absorb" on an open price for who may ask it.
 

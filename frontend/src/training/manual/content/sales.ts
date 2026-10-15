@@ -59,7 +59,7 @@ export const salesChapter: ContentChapter = {
             { title: 'Project and affected items', body: 'Pick every part that changes with the same tool, for example the PEAK variant from the same mold. The first one is the lead item; "Make lead item" changes it.' },
             { title: 'Short description', body: 'One line: what is the problem. It is capped at 100 characters. The detail goes in the documents.' },
             { title: 'Who carries the cost', body: '"Customer change" when the customer pays. It goes through the quote workflow.' },
-            { title: 'Quote deadline', body: 'When the customer expects the offer. Optional on the form. The hand-over to scoping asks for it, and for a change lead; without them the hand-over needs an approved deviation.' },
+            { title: 'Quote deadline', body: 'When the customer expects the offer. Optional on the form. The hand-over to scoping asks for it, and for a change lead; without them the hand-over needs an approved override.' },
             { title: 'Customer documents', body: 'Drop the drawing, the mail, the specification. At least one is required before scoping.' },
             { title: 'Create change', body: 'The form tells you if it is "Ready to hand over to scoping" or what is missing.' },
           ],

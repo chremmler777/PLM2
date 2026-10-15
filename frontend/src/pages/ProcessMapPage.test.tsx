@@ -493,16 +493,25 @@ describe('ProcessMapPage', () => {
       expect(assessment).toContain('cost carrier set')
       // One gate per path into Timing: customer, internal, Weissenburg / Solingen.
       const timing = screen.getByTestId('procmap-ov-stage-timing').textContent ?? ''
-      expect(timing).toContain('PM + Quality sign-off (two people)')
-      expect(timing).toContain('internal: PM approved costs + release deadline')
+      expect(timing).toContain('PM + Quality sign-off on the latest offer sent (two people)')
+      expect(timing).toContain('internal: approved by an engineering approver, never the raiser')
+      expect(timing).not.toContain('PM approved costs')
       expect(timing).toContain('SOP date')
-      expect(screen.getByTestId('procmap-ov-stage-release').textContent).toContain('plan deviation')
+      const release = screen.getByTestId('procmap-ov-stage-release').textContent ?? ''
+      expect(release).toContain('plan deviation')
+      // HARD #3 / #9 (L2): the release gates no override lifts
+      expect(release).toContain('only exit: a concession, Quality')
+      expect(release).toContain('sign-off on the latest offer or supplement sent')
+      expect(screen.getByTestId('procmap-ov-stage-close').textContent).toContain('no open price')
+      expect(screen.getByTestId('procmap-ov-stage-costing').textContent).toContain('never overridden')
       expect(screen.getByTestId('procmap-overview').textContent).not.toContain('never gate')
       expect(screen.getByTestId('procmap-ov-stage-costing').textContent)
         .toContain('costing lines with rate snapshot')
       expect(screen.getByTestId('procmap-overview-audit').textContent).toContain('Audit trail on every stage')
       const lanes = screen.getByTestId('procmap-overview-lanes').textContent ?? ''
       expect(lanes).toContain('L1 department, L2 project, L3 management')
+      expect(lanes).not.toContain('holds the release (soft)')
+      expect(lanes).toContain('a concession Quality accepts')
       expect(lanes).toContain('Skips assessment, costing, offer')
       expect(lanes).toContain('Started by Project Management only')
       expect(lanes).toContain('PM captures: ref + SOP')

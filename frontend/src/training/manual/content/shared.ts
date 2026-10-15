@@ -374,7 +374,7 @@ export const flowChapter: ContentChapter = {
             ],
           },
         },
-        { callout: 'No change is released while a check failed or a validation issue is open. No override lifts this, not even an admin: fix and retest, or a concession the customer accepts and Quality decides.', tone: 'rule' },
+        { callout: 'No change is released while a check failed or a validation issue is open. No override lifts this, not even an admin: fix and retest (the department that measured it, saying what changed), or a concession the customer accepts and Quality decides.', tone: 'rule' },
         { shot: 'flow-issue-card', alt: 'A validation issue card VI-1 with its stepper, severity chip, "L2" badge and one primary button.' },
       ],
     },
