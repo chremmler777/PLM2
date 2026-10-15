@@ -1794,10 +1794,11 @@ class ChangeService:
                 and cm_switches.on("COMMERCIAL_V2")):
             drop = await ChangeService.price_drop_state(session, change)
             if drop is not None:
+                # no amounts (R23): every viewer reads why-blocked
                 out.append(R("price_drop",
-                             f"Accepted v{drop['version']} at {drop['total']:.2f} is "
-                             f"below v{drop['prev_version']} at {drop['prev_total']:.2f}: "
-                             "a Project Management or Management member gives the OK"))
+                             f"Accepted v{drop['version']} is below "
+                             f"v{drop['prev_version']}: a Project Management or "
+                             "Management member gives the OK"))
         # §6 [R3] SOFT scope_change_uncovered: an open scope change card
         if to_status in ("approved", "in_implementation", "released"):
             from app.services import scope_change_service

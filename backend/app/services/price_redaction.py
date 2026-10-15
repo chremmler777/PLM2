@@ -60,7 +60,9 @@ OFFER_NOTE_KEYS = frozenset(("note", "expired_override_reason"))
 # acknowledgement that updates the quote; internal_costs_approved is handled
 # above with its description).
 # The description of these carries no free text and is kept.
-NOTE_ONLY_ACTIONS = frozenset(("weight_delta_acknowledged",))
+NOTE_ONLY_ACTIONS = frozenset(("weight_delta_acknowledged",
+                               # §7: the reason a lower total was accepted
+                               "price_drop_asked"))
 
 # Overrides of these rules are money talk (spec §0 Prices, R23): an Absorb
 # note names the amount absorbed, a price-drop reason the discount.

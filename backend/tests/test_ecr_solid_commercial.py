@@ -992,3 +992,38 @@ async def test_a_revised_supplement_below_the_one_it_revised_needs_the_ok(
     assert r.status_code == 200, r.text
     async with session_factory() as s:
         assert (await s.get(ChangeRequest, cid)).price_open is False
+
+
+async def test_a_price_drop_shows_no_money_outside_the_price_rule(
+        client, quoted, session_factory):
+    """R23: why-blocked (stage-state, cockpit), the override list and the
+    changelog name the price-drop rule and the versions, never the totals
+    nor the reason, to a viewer without price rights (Quality)."""
+    from app.models.change import ChangeTransitionDeviation
+    cid = quoted["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    await _v2_with_discount(client, cid, sales, 10)
+    note = "Competitor offered 8 % less, EUR 900 off"
+    assert (await _answer(client, cid, sales, {**_YES, "price_drop_code": "competitor",
+                                               "price_drop_note": note})).status_code == 200
+    async with session_factory() as s:
+        dev = (await s.execute(select(ChangeTransitionDeviation).where(
+            ChangeTransitionDeviation.change_id == cid))).scalar_one()
+        dev.guard_reason = "Accepted v2 at 900.00 is below v1 at 1000.00"   # an older binding
+        await s.commit()
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+    assert r.json()["status"] == "quoted"      # the drop waits for its OK
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=q)).json()
+    blocks = str(st.get("transition_blocks"))
+    assert "1000.00" not in blocks and "900.00" not in blocks, blocks
+    assert "below v1" in blocks, blocks       # the rule is named, the money is not
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations", headers=q)).json()
+    assert rows[0]["reason"] == "" and ".00" not in (rows[0]["guard_reason"] or "")
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=q)).json()
+    asked = next(e for e in log if e["action"] == "price_drop_asked")
+    assert asked["notes"] is None
+    assert "EUR" not in " ".join(f"{e['action_description']} {e.get('notes') or ''}" for e in log)
+    # a price viewer reads it all
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=pm)).json()
+    assert any(note == e.get("notes") for e in log)

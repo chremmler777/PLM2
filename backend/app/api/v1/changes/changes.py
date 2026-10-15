@@ -2856,7 +2856,9 @@ async def _deviation_rows(db, change, devs, user) -> list[dict]:
         pending = d.status == "pending"
         row = TransitionDeviationResponse.model_validate(d).model_dump()
         if hide and d.guard_key in PRICE_RULES:
-            row.update(reason="", decision_note=None)
+            # guard_reason: an older binding kept the refusal text verbatim
+            row.update(reason="", decision_note=None,
+                       guard_reason=rule_label(d.guard_key))
         out.append({
             **row,
             "can_decide": (pending and await ChangeService.deviation_decide_refusal(
