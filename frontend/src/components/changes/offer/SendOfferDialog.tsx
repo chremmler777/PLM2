@@ -13,7 +13,9 @@ import { formatCalendarDate } from '../../../lib/format'
 import Dialog from '../../common/Dialog'
 import Button from '../../common/Button'
 import DateInput from '../../gantt/DateInput'
-import type { OfferDiffRow, OfferOut } from '../../../types/changeOffer'
+import { HIGH_RISK_SEND_REASONS } from '../../../types/changeOffer'
+import type { OfferDiffRow, OfferOut, OfferSendList } from '../../../types/changeOffer'
+import { t } from '../../../i18n/cmLabels'
 import { addDaysIso, diffLabel, diffValue, fmtMoney, inputCls, todayIso } from './offerFormat'
 import { offersKey } from './useOfferDraft'
 
@@ -30,6 +32,47 @@ export function DiffList({ diff, testId, currency = 'EUR' }: { diff: OfferDiffRo
         </li>
       ))}
     </ul>
+  )
+}
+
+/** Spec §6 [R3]: what goes out unconfirmed: the Assumed answers, the
+ *  estimated positions and the high risks the offer does not price. */
+export function SendList({ list }: { list: OfferSendList }) {
+  const fill = (k: string, v: Record<string, string | number>) =>
+    Object.entries(v).reduce((acc, [kk, vv]) => acc.split(`{${kk}}`).join(String(vv)), t(k))
+  if (!list.assumed.length && !list.estimates.length && !list.high_risks.length) return null
+  return (
+    <div data-testid="send-list" className="mt-3 space-y-2 rounded-lg border border-amber-900/70 bg-amber-950/20 px-3 py-2 text-xs">
+      <p className="font-medium text-amber-200">{t('send.listTitle')}</p>
+      {list.assumed.length > 0 && (
+        <div>
+          <p className="text-amber-200">{fill('send.assumed', { n: list.assumed.length })}</p>
+          <ul data-testid="send-assumed" className="ml-4 list-disc text-slate-300">
+            {list.assumed.map((a) => (
+              <li key={a.concern_id}>{fill('send.assumedRow', {
+                v: a.value || 'n/a', q: a.text, r: a.risk || '-',
+                w: a.confirm_by_name || t('send.nobody'),
+                d: a.confirm_due ? formatCalendarDate(a.confirm_due) : '-',
+              })}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {list.estimates.length > 0 && (
+        <p data-testid="send-estimates" className="text-slate-300">
+          <span className="text-amber-200">{fill('send.estimates', { n: list.estimates.length })}: </span>
+          {list.estimates.join(', ')}
+        </p>
+      )}
+      {list.high_risks.length > 0 && (
+        <div>
+          <p className="text-rose-300">{fill('send.highRisks', { n: list.high_risks.length })}</p>
+          <ul className="ml-4 list-disc text-slate-300">
+            {list.high_risks.map((r) => <li key={r.concern_id}>{r.note}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -58,6 +101,10 @@ export default function SendOfferDialog({
   const [note, setNote] = useState('')
   // Printed on the offer; lives in the draft, so it is saved before sending.
   const [customerNote, setCustomerNote] = useState(offer?.data?.customer_note ?? '')
+  const [riskCode, setRiskCode] = useState('')
+  const [riskNote, setRiskNote] = useState('')
+  const highRisks = offer?.send_list?.high_risks.length ?? 0
+  const riskOk = highRisks === 0 || (!!riskCode && riskNote.trim().length >= 15)
   const today = todayIso()
   const earliest = addDaysIso(today, -60)
   const receivedOk = !!received && received <= today && received >= earliest
@@ -73,6 +120,7 @@ export default function SendOfferDialog({
       return changeOfferApi.send(changeId, offerId, {
         received_at: received,
         ...(note.trim() ? { change_note: note.trim() } : {}),
+        ...(highRisks ? { risk_reason_code: riskCode, risk_reason: riskNote.trim() } : {}),
       })
     },
     onSuccess: () => {
@@ -85,7 +133,7 @@ export default function SendOfferDialog({
     onError: (e: unknown) => toastError(e, 'Could not send the offer'),
   })
 
-  const blocked = !offer || !receivedOk || (needsNote && !note.trim()) || send.isPending
+  const blocked = !offer || !receivedOk || (needsNote && !note.trim()) || !riskOk || send.isPending
   if (!offer) return null
 
   return (
@@ -119,6 +167,33 @@ export default function SendOfferDialog({
       <p data-testid="send-valid-until" className="mt-2 rounded-lg border border-sky-900 bg-sky-950/40 px-3 py-2 text-xs text-sky-200">
         The offer is valid 30 days from receipt, until {formatCalendarDate(validUntil)}.
       </p>
+
+      {(offer.indexes ?? []).length > 0 && (
+        <p data-testid="send-indexes" className="mt-3 text-xs text-slate-400">
+          {t('send.goesOutOn')}:{' '}
+          {(offer.indexes ?? []).map((i, n) => (
+            <span key={`${i.number}-${n}`} className="mr-2 text-slate-200">
+              {i.number} <span className="font-medium">{i.index || '-'}</span>
+              {i.newer && <span className="text-amber-300"> ({t('send.newer').replace('{i}', i.newer.index)})</span>}
+            </span>
+          ))}
+        </p>
+      )}
+
+      {offer.send_list && <SendList list={offer.send_list} />}
+      {highRisks > 0 && (
+        <div className="mt-2 space-y-1">
+          <p className="text-xs text-slate-400">{t('send.highRiskHelp')}</p>
+          <select data-testid="send-risk-code" aria-label={t('send.riskReason')} value={riskCode}
+            onChange={(e) => setRiskCode(e.target.value)} className={`${inputCls} w-full`}>
+            <option value="">{t('send.riskReason')}…</option>
+            {HIGH_RISK_SEND_REASONS.map((c) => <option key={c} value={c}>{t(`send.riskReason.${c}`)}</option>)}
+          </select>
+          <textarea rows={2} data-testid="send-risk-note" value={riskNote} aria-label={t('send.riskNote')}
+            onChange={(e) => setRiskNote(e.target.value)} placeholder={t('send.riskNote')}
+            className={`${inputCls} w-full`} />
+        </div>
+      )}
 
       {(offer.warnings ?? []).length > 0 && (
         <ul data-testid="send-warnings" className="mt-3 space-y-1">

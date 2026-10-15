@@ -1038,6 +1038,26 @@ offer) so a round is tied to the version it was about
 (`change_negotiations.offer_id`). Legacy changes with no offers at all keep
 working exactly as before (acceptance with no sent offer is unchanged).
 
+### Send: index letters and the send list (ECR-solid §6, 2026-10-15)
+
+Every offer names the index each part goes out on
+(`OfferService.part_indexes`): the customer index of the revision the change
+carries for the part (`resulting_revision`), else its engineering level. A
+sent version freezes it in its snapshot (`_snapshot.items[].index`), so a
+part index change shows in `snapshot_diff` and Quality signs again (§7). A
+draft warns `index_older` when the customer already sent a newer index the
+change does not carry yet ("886.197 C, the customer sent D on 12 Oct:
+triage the new index onto the change, or send knowing it"); a warning,
+never a refusal. With `COMMERCIAL_V2` the Send dialog lists what goes out
+unconfirmed (`OfferService.send_list`): the unconfirmed Assumed answers
+(value, risk if wrong, who confirms by when), the positions priced on an
+estimate, and the open severity-3 risks the offer does not show. A hidden
+high risk goes out only with a reason pick (`covered_in_price`,
+`customer_aware`, `low_likelihood`, `other`) and a sentence (15+
+characters); the version keeps the list and the reason (`data._send`), and
+the changelog reads `offer_sent_with_risk`. A risk shown on the offer
+(priced or only stated) needs no reason. Switch off: no list, no reason.
+
 ### Timing validation at `approved` (2026-09-25)
 
 `approved` opens the Timing tab (`TimingTab.tsx`). The detailed plan is

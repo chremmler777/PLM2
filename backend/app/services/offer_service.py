@@ -89,6 +89,12 @@ HIDDEN_FACTOR_KEYS = ("overhead", "margin")
 SNAPSHOT_KEY = "_snapshot"
 # A sent receipt date may be recorded after the fact, but not absurdly so.
 RECEIVED_MAX_PAST_DAYS = 60
+# Spec §6 [R3] (COMMERCIAL_V2): what Send lists and why an open high risk
+# (severity 3) the offer does not show may still go out: a reason pick and a
+# sentence, frozen with the version under SEND_KEY.
+SEND_KEY = "_send"
+HIGH_RISK_SEND_REASONS = ("covered_in_price", "customer_aware", "low_likelihood",
+                          "other")
 
 
 def _bool(v, default: bool = False) -> bool:
@@ -850,6 +856,7 @@ class OfferService:
         else:
             data = normalise(copy.deepcopy(base.data))
             data.pop(SNAPSHOT_KEY, None)
+            data.pop(SEND_KEY, None)
             # the note to the customer is about one version, not the next
             data["customer_note"] = ""
             source = f"cloned from v{base.version}"
@@ -1029,7 +1036,9 @@ class OfferService:
     async def send(session: AsyncSession, change: ChangeRequest,
                    offer: ChangeOffer, user: User, *,
                    received_at: Optional[date] = None,
-                   change_note: Optional[str] = None) -> ChangeOffer:
+                   change_note: Optional[str] = None,
+                   risk_reason_code: Optional[str] = None,
+                   risk_reason: Optional[str] = None) -> ChangeOffer:
         await OfferService._require_write(session, change, user)
         OfferService._require_draft(offer)
         totals = await OfferService._store_totals(session, change, offer)
@@ -1039,6 +1048,26 @@ class OfferService:
         if offer.version >= 2 and not note:
             raise ChangeError(
                 "A new offer version needs a note saying what changed")
+        # Spec §6 [R3] (COMMERCIAL_V2): Send lists the unconfirmed Assumed
+        # answers and the estimates; an open high risk the offer does not
+        # price goes out only with a reason (pick + sentence), on the record.
+        from app.services import cm_switches
+        listed = None
+        if cm_switches.on("COMMERCIAL_V2"):
+            await session.refresh(change, ["concerns"])
+            listed = OfferService.send_list(change, offer.data or {})
+            if listed["high_risks"]:
+                from app.services.cm_rules import override_note_refusal
+                why = override_note_refusal(risk_reason_code, risk_reason,
+                                            codes=HIGH_RISK_SEND_REASONS)
+                if why:
+                    n = len(listed["high_risks"])
+                    raise ChangeError(
+                        f"{n} high risk{'' if n == 1 else 's'} not on this offer: "
+                        "show it (with a surcharge if it costs), or say why it "
+                        f"goes out without it ({why})")
+                listed["risk_reason_code"] = risk_reason_code
+                listed["risk_reason"] = risk_reason.strip()
         if (offer.data or {}).get("timing", {}).get("include"):
             await OfferService._check_quote_plan(session, change)
         # Sales signs: the sender when in Sales, else the project's Sales
@@ -1064,6 +1093,8 @@ class OfferService:
         OfferService._check_received(received)
         data = copy.deepcopy(offer.data or {})
         data[SNAPSHOT_KEY] = snapshot
+        if listed is not None:
+            data[SEND_KEY] = listed
         offer.data = data
         for prev in await OfferService.list_offers(session, change):
             if prev.id != offer.id and prev.status == "sent":
@@ -1089,7 +1120,20 @@ class OfferService:
                        "status": offer.status,
                        "received_at": received.isoformat(),
                        "valid_until": offer.valid_until.isoformat(),
-                       "note": note})
+                       "note": note,
+                       **({"assumed": len(listed["assumed"]),
+                           "estimates": len(listed["estimates"]),
+                           "high_risks": len(listed["high_risks"])}
+                          if listed is not None else {})},
+        )
+        if listed is not None and listed.get("risk_reason"):
+            await ChangeService.append_changelog(
+                session, change, "offer_sent_with_risk",
+                f"Offer v{offer.version} sent without {len(listed['high_risks'])} "
+                f"high risk(s) on it ({listed['risk_reason_code']})", user.id,
+                notes=listed["risk_reason"],
+                new_value={"offer_id": offer.id,
+                           "concern_ids": [r["concern_id"] for r in listed["high_risks"]]})
         return offer
 
     @staticmethod
@@ -1307,11 +1351,33 @@ class OfferService:
         users = await ChangePlanService._user_names(
             session, [o.created_by for o in offers] + [o.sent_by for o in offers])
         all_offers = await OfferService.list_offers(session, change)
+        # §6: the index letters a draft would go out on (live), and the
+        # send list (COMMERCIAL_V2); a sent version shows what it froze
+        from app.services import cm_switches
+        commercial = cm_switches.on("COMMERCIAL_V2")
+        live_indexes = (await OfferService.part_indexes(session, change)
+                        if any(o.status == "draft" for o in offers) else [])
         out = []
         for o in offers:
             unreadable: list[str] = []
             data = normalise(o.data, issues=unreadable)
-            data.pop(SNAPSHOT_KEY, None)
+            snap = data.pop(SNAPSHOT_KEY, None)
+            sent_list = data.pop(SEND_KEY, None)
+            if o.status == "draft":
+                indexes = [{k: r[k] for k in ("number", "index", "newer")}
+                           for r in live_indexes]
+                send_list = OfferService.send_list(change, data) if commercial else None
+                if send_list and send_list["assumed"]:
+                    who = await ChangePlanService._user_names(
+                        session, [a["confirm_by_id"] for a in send_list["assumed"]])
+                    for a in send_list["assumed"]:
+                        a["confirm_by_name"] = who.get(a["confirm_by_id"])
+            else:
+                indexes = [{"number": i.get("number"), "index": i.get("index") or "",
+                            "newer": None}
+                           for i in ((snap or {}).get("items") or [])
+                           if isinstance(i, dict)]
+                send_list = sent_list if isinstance(sent_list, dict) else None
             totals = compute_totals(data, internal)
             diff = None
             if o.version >= 2:
@@ -1394,6 +1460,17 @@ class OfferService:
                                 + f" until {fmt_date(q.valid_until)}" for q in short)
                     + f" (offer valid until {fmt_date(offer_until)}): ask the "
                     "supplier to extend it, or keep the price risk in mind"))
+            older = [i for i in indexes if i.get("newer")]
+            if commercial and o.status == "draft" and older:
+                warnings.append(_issue(
+                    "index_older",
+                    "Goes out on an older index: " + "; ".join(
+                        f"{i['number']} {i['index'] or '(no index)'}, the customer "
+                        f"sent {i['newer']['index']}"
+                        + (f" on {fmt_date(date.fromisoformat(i['newer']['received']))}"
+                           if i["newer"].get("received") else "")
+                        for i in older)
+                    + ": triage the new index onto the change, or send knowing it"))
             expired = OfferService.is_expired(o)
             if expired:
                 warnings.append(_issue(
@@ -1411,6 +1488,7 @@ class OfferService:
                 "created_by_name": users.get(o.created_by),
                 "updated_at": o.updated_at,
                 "diff": diff, "warnings": warnings,
+                "indexes": indexes, "send_list": send_list,
                 "issued_by": await OfferService._issued_by(session, change, o),
                 "costing_currency": cost_cur,
                 "costing_totals_by_currency": meta.get("totals_by_currency") or {},
@@ -1488,25 +1566,14 @@ class OfferService:
         signs. Frozen into a sent version so its PDF never changes
         afterwards."""
         from app.models.entities import Organization, Plant, Project
-        from app.models.part import Part
         from app.services.company_profile import company_profile
         project = await session.get(Project, change.project_id)
         plant = await session.get(Plant, project.plant_id) if project else None
         org = (await session.get(Organization, plant.organization_id)
                if plant else None)
-        # one query for every impacted part (never a get per item)
-        part_ids = {it.part_id for it in change.impacted_items}
-        parts = ({p.id: p for p in (await session.execute(
-            select(Part).where(Part.id.in_(part_ids)))).scalars().all()}
-            if part_ids else {})
-        items = []
-        for it in change.impacted_items:
-            part = parts.get(it.part_id)
-            items.append({
-                "number": part.part_number if part else str(it.part_id),
-                "name": part.name if part else "",
-                "index": it.eng_level_after or it.eng_level_before or "",
-            })
+        # §6: each part with the index the offer goes out on
+        items = [{"number": r["number"], "name": r["name"], "index": r["index"]}
+                 for r in await OfferService.part_indexes(session, change)]
         # idea blocks are kept, marked: the PDF draws them hatched, outside
         # the committed finish
         tasks = await ChangePlanService.tasks(session, change, "quote")
@@ -1528,6 +1595,85 @@ class OfferService:
                        **({"idea": True} if t.is_idea else {})} for t in tasks],
             **({"signer": signer} if signer is not None else {}),
         }
+
+    @staticmethod
+    async def part_indexes(session: AsyncSession,
+                           change: ChangeRequest) -> list[dict]:
+        """Spec §6: the index letter each impacted part goes out on (the
+        customer index of the revision the change carries, else its
+        engineering level), and `newer`: a later customer index of the part
+        the change does not carry yet ({index, received}), so Send warns
+        before an offer goes out on an older one. Two queries for the set."""
+        from app.models.part import Part, PartRevision
+        items = list(change.impacted_items)
+        part_ids = {it.part_id for it in items}
+        if not part_ids:
+            return []
+        parts = {p.id: p for p in (await session.execute(
+            select(Part).where(Part.id.in_(part_ids)))).scalars().all()}
+        revs = {r.id: r for r in (await session.execute(
+            select(PartRevision).where(
+                PartRevision.part_id.in_(part_ids),
+                PartRevision.status.notin_(("rejected", "archived", "cancelled")))
+        )).scalars().all()}
+        newest: dict = {}
+        for r in revs.values():
+            if r.source == "customer" and (r.part_id not in newest
+                                           or r.id > newest[r.part_id].id):
+                newest[r.part_id] = r
+
+        def name(r) -> str:
+            return (r.customer_index or r.revision_name or "") if r else ""
+
+        out = []
+        for it in items:
+            part = parts.get(it.part_id)
+            carried = revs.get(it.resulting_revision_id) if it.resulting_revision_id else None
+            index = (name(carried) if carried is not None
+                     else it.eng_level_after or it.eng_level_before or "")
+            base_id = (it.resulting_revision_id
+                       or (part.active_revision_id if part else None))
+            top = newest.get(it.part_id)
+            newer = None
+            if (top is not None and name(top) and name(top) != index
+                    and (base_id is None or top.id > base_id)):
+                newer = {"index": name(top),
+                         "received": (top.customer_received_at.isoformat()
+                                      if top.customer_received_at else None)}
+            out.append({"part_id": it.part_id,
+                        "number": part.part_number if part else str(it.part_id),
+                        "name": part.name if part else "", "index": index,
+                        "newer": newer})
+        return out
+
+    @staticmethod
+    def send_list(change: ChangeRequest, data: dict) -> dict:
+        """Spec §6 [R3]: what Send lists before an offer goes out: the
+        unconfirmed Assumed answers (value, risk if wrong, who confirms by
+        when), the positions priced on an estimate, and the open high risks
+        (severity 3) the offer does not state (hidden): those go out only
+        with a reason (the override of Send)."""
+        assumed = []
+        for q in change.concerns:
+            if (q.answer_kind == "assumed" and q.confirmed_at is None
+                    and q.withdrawn_at is None and q.retracted_at is None):
+                value = (q.assumed_value or "") + (
+                    f" {q.assumed_unit}" if q.assumed_unit else "")
+                assumed.append({
+                    "concern_id": q.id, "text": q.note, "value": value.strip(),
+                    "risk": q.assumed_risk, "confirm_by_id": q.confirm_by_id,
+                    "confirm_due": q.confirm_due.isoformat() if q.confirm_due else None})
+        estimates = [l.get("label") for l in data.get("cost_lines") or []
+                     if l.get("include", True) and l.get("estimated")]
+        # stated on the offer (shown, priced or not) is handled knowingly;
+        # a hidden one is what the customer never reads
+        shown = {r.get("concern_id") for r in data.get("risks") or []
+                 if r.get("show")}
+        high = [{"concern_id": c.id, "note": c.note}
+                for c in change.concerns
+                if c.kind == "risk" and c.is_open and c.severity == 3
+                and c.id not in shown]
+        return {"assumed": assumed, "estimates": estimates, "high_risks": high}
 
     @staticmethod
     def _legacy_pdf_defaults(change: ChangeRequest, offer: ChangeOffer,

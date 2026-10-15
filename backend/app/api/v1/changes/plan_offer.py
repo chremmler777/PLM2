@@ -196,6 +196,10 @@ class OfferPatchIn(BaseModel):
 class OfferSendIn(BaseModel):
     received_at: Optional[date] = None
     change_note: Optional[str] = None
+    # Spec §6 [R3]: an open high risk the offer does not price goes out only
+    # with a reason pick (offer_service.HIGH_RISK_SEND_REASONS) + a sentence.
+    risk_reason_code: Optional[str] = None
+    risk_reason: Optional[str] = None
 
 
 class OfferReceivedIn(BaseModel):
@@ -766,7 +770,9 @@ async def send_offer(
         offer = await OfferService.get_offer(db, change, offer_id)
         await OfferService.send(db, change, offer, current_user,
                                 received_at=body.received_at,
-                                change_note=body.change_note)
+                                change_note=body.change_note,
+                                risk_reason_code=body.risk_reason_code,
+                                risk_reason=body.risk_reason)
     except _ERRORS as e:
         raise _http(e)
     out = await _offer_out(db, change, offer)

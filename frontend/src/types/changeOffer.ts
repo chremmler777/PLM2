@@ -174,4 +174,36 @@ export interface OfferOut {
   costing_totals_by_currency?: Record<string, { grand_total: number }>
   cost_sheet_versions_used?: number[]
   cost_sheet_current_version?: number | null
+  /** Spec §6: the index letter each part goes out on (a draft: live, with
+   *  a newer customer index the change does not carry yet; sent: frozen). */
+  indexes?: OfferPartIndex[]
+  /** Spec §6 [R3] (COMMERCIAL_V2): what Send lists; a sent version keeps
+   *  what it listed and the high-risk reason. null with the switch off. */
+  send_list?: OfferSendList | null
 }
+
+export interface OfferPartIndex {
+  number: string
+  index: string
+  newer?: { index: string; received?: string | null } | null
+}
+
+export interface OfferAssumed {
+  concern_id: number
+  text: string
+  value: string
+  risk?: string | null
+  confirm_by_id?: number | null
+  confirm_by_name?: string | null
+  confirm_due?: string | null
+}
+
+export interface OfferSendList {
+  assumed: OfferAssumed[]
+  estimates: string[]
+  high_risks: { concern_id: number; note: string }[]
+  risk_reason_code?: string
+  risk_reason?: string
+}
+
+export const HIGH_RISK_SEND_REASONS = ['covered_in_price', 'customer_aware', 'low_likelihood', 'other'] as const

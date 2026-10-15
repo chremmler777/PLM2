@@ -152,6 +152,36 @@ describe('OfferTab', () => {
     expect(changeOfferApi.patch).not.toHaveBeenCalled()
   })
 
+  it('send dialog (§6): index letters, the send list, and an unpriced high risk needs a reason', async () => {
+    const o = offer({
+      indexes: [{ number: '886.197', index: 'C', newer: { index: 'D', received: '2026-10-12' } }],
+      send_list: {
+        assumed: [{ concern_id: 5, text: 'Annual volume?', value: '40000 pcs/yr', risk: 'tool too small',
+          confirm_by_name: 'Jubei', confirm_due: '2026-11-02' }],
+        estimates: ['Insert rework (Hasco)'],
+        high_risks: [{ concern_id: 31, note: 'weld line on A-side' }],
+      },
+    })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([o])
+    vi.mocked(changeOfferApi.send).mockResolvedValue(offer({ status: 'sent' }))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('offer-send'))
+    expect((await screen.findByTestId('send-indexes')).textContent).toContain('886.197 C (customer sent D)')
+    expect(screen.getByTestId('send-assumed').textContent).toContain('40000 pcs/yr: Annual volume?. If wrong: tool too small. Jubei confirms by')
+    expect(screen.getByTestId('send-estimates').textContent).toContain('Insert rework (Hasco)')
+    const confirm = screen.getByTestId('send-confirm') as HTMLButtonElement
+    // NEGATIVE: no reason, then a reason too short, keep Send disabled
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('send-risk-code'), { target: { value: 'customer_aware' } })
+    fireEvent.change(screen.getByTestId('send-risk-note'), { target: { value: 'ok' } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('send-risk-note'), { target: { value: 'Customer accepted it in the DFM' } })
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changeOfferApi.send).toHaveBeenCalledWith(7, 11, expect.objectContaining({
+      risk_reason_code: 'customer_aware', risk_reason: 'Customer accepted it in the DFM' })))
+  })
+
   it('send dialog: no receipt date in the future or older than 60 days; the customer note is saved first', async () => {
     vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
     vi.mocked(changeOfferApi.patch).mockImplementation(async (_c, _o, body) => offer({ data: { ...offer().data, ...body.data } }))

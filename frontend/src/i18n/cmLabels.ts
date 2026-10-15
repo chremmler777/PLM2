@@ -2894,5 +2894,21 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl2.waitingChip': { de: 'Warten auf {v} bis {d}', en: 'Waiting on {v} until {d}' },
   'impl2.partDoneToggle': { de: 'Unser Teil ist erledigt (keine Berichte mehr fällig)', en: 'Our part is done (no more reports due)' },
   'verdict.noRefApply': { de: 'Für alle Nein ohne Referenz', en: 'Use for every No without one' },
+  // --- L6 §6 send: index letters, send list, high risk reason ------------------
+  'send.goesOutOn': { de: 'Geht raus auf Index', en: 'Goes out on index' },
+  'send.newer': { de: 'Kunde hat {i} geschickt', en: 'customer sent {i}' },
+  'send.listTitle': { de: 'Vor dem Senden prüfen', en: 'Check before it goes out' },
+  'send.assumed': { de: 'Unbestätigte Annahmen ({n})', en: 'Unconfirmed assumptions ({n})' },
+  'send.assumedRow': { de: '{v}: {q}. Falls falsch: {r}. Bestätigt {w} bis {d}', en: '{v}: {q}. If wrong: {r}. {w} confirms by {d}' },
+  'send.estimates': { de: 'Auf Schätzung kalkuliert ({n})', en: 'Priced on an estimate ({n})' },
+  'send.highRisks': { de: 'Hohe Risiken nicht im Angebot ({n})', en: 'High risks not on the offer ({n})' },
+  'send.highRiskHelp': { de: 'Im Angebot zeigen (mit Aufschlag, wenn es kostet), oder sagen warum es ohne rausgeht (wird protokolliert).', en: 'Show it on the offer (with a surcharge if it costs), or say why it goes out without it (logged).' },
+  'send.riskReason': { de: 'Grund', en: 'Reason' },
+  'send.riskReason.covered_in_price': { de: 'Im Preis enthalten', en: 'Covered in the price' },
+  'send.riskReason.customer_aware': { de: 'Kunde kennt das Risiko', en: 'Customer knows the risk' },
+  'send.riskReason.low_likelihood': { de: 'Geringe Wahrscheinlichkeit', en: 'Low likelihood' },
+  'send.riskReason.other': { de: 'Sonstiges', en: 'Other' },
+  'send.riskNote': { de: 'In einem Satz: warum es nicht im Angebot steht (mind. 15 Zeichen)', en: 'In a sentence: why it is not on the offer (15+ characters)' },
+  'send.nobody': { de: 'niemand benannt', en: 'nobody named' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

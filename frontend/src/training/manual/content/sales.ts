@@ -153,6 +153,13 @@ export const salesChapter: ContentChapter = {
             'offer is valid 30 days from that date. Sending v1 sets the quoted price and moves the ' +
             'change to "Quoted".',
         },
+        {
+          points: [
+            ['"Goes out on index"', 'names the index of every part. When the customer already sent a newer one ("customer sent D"), the change is still on the old one: get the new index triaged onto the change first, or send knowing it.'],
+            ['"Check before it goes out"', 'lists the unconfirmed assumptions (value, what happens if it is wrong, who confirms by when) and the positions priced on an estimate. The customer pays on them: confirm what you can first.'],
+            ['"High risks not on the offer"', 'a severity-3 risk you keep hidden needs a reason and a sentence to go out (it is logged). Show it, with a surcharge if it costs, and no reason is asked.'],
+          ],
+        },
       ],
     },
     {

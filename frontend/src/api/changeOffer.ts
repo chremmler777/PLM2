@@ -22,7 +22,9 @@ export const changeOfferApi = {
   refresh: (changeId: number, offerId: number) =>
     client.post<OfferOut>(`/v1/changes/${changeId}/offers/${offerId}/refresh`).then((r) => r.data),
 
-  send: (changeId: number, offerId: number, body: { received_at?: string; change_note?: string }) =>
+  send: (changeId: number, offerId: number, body: {
+    received_at?: string; change_note?: string; risk_reason_code?: string; risk_reason?: string
+  }) =>
     client.post<OfferOut>(`/v1/changes/${changeId}/offers/${offerId}/send`, body).then((r) => r.data),
 
   received: (changeId: number, offerId: number, receivedAt: string) =>

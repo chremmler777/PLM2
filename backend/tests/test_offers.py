@@ -58,7 +58,9 @@ async def offer_world(session_factory, seed):
             created_by=users["tool"])
         s.add(pos)
         s.add(ChangeConcern(change_id=change.id, kind="risk", note="fill at rib end",
-                            risk_type="fill_issue", severity=3,
+                            # severity 2: an unpriced severity-3 risk needs a
+                            # send reason (spec §6, test_ecr_solid_commercial)
+                            risk_type="fill_issue", severity=2,
                             department_id=depts["Tool Engineer"],
                             raised_by=users["tool"]))
         await s.commit()
@@ -109,7 +111,7 @@ async def test_v1_is_seeded_from_costing_and_register(client, offer_world):
     assert next(f for f in d["factors"] if f["key"] == "discount")["sign"] == -1
     risk = d["risks"][0]
     assert (risk["label"], risk["severity"], risk["show"], risk["value"]) == \
-        ("Fill issue", 3, False, 0)  # Sales opts in (final walk P2-7)
+        ("Fill issue", 2, False, 0)  # Sales opts in (final walk P2-7)
     assert d["changeover"]["mode"] == "running_change"
     assert d["timing"]["include"] is True
     assert d["timing"]["weeks_from_order"] >= 1
