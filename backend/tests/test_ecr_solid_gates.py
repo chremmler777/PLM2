@@ -443,12 +443,14 @@ async def test_failed_check_is_hard_at_release(
     lead = await login(client, "eng@test.io", admin=False)
     r = await _propose(client, lead, cid, "released", guard_key="validation_failed")
     assert r.status_code == 400
-    # a concession accepted by the customer covers the failed check
+    # a concession Quality accepted covers the failed check
     from app.models.change_validation_issue import ValidationIssue
     async with session_factory() as s:
         s.add(ValidationIssue(change_id=cid, number=1, title="weight high", created_by=1,
                               description="12.4 g vs 12.2", check_id=check_id,
-                              route="customer_concession", status="accepted"))
+                              route="customer_concession", status="accepted",
+                              customer_decision="accept_deviation",
+                              customer_decided_by=people["Quality"][0]))
         await s.commit()
     r = await client.post(f"/api/v1/changes/{cid}/transition",
                           json={"to_status": "released"}, headers=admin)
@@ -640,3 +642,80 @@ async def test_internal_absorb_tells_the_fallback_deciders(
     assert people["Project Manager"][0] in told
     assert seed["engineer_id"] not in told
     assert people["Sales"][0] not in told
+
+
+async def _concession(session_factory, cid, check_id, uploader, *, mail=True, **values):
+    from app.models.change import ChangeAttachment
+    from app.models.change_validation_issue import ValidationIssue
+    async with session_factory() as s:
+        i = ValidationIssue(change_id=cid, number=1, title="weight high", created_by=1,
+                            description="12.4 g vs 12.2", check_id=check_id,
+                            route="customer_concession", status="route_decided",
+                            customer_inform=True, **values)
+        s.add(i); await s.flush()
+        if mail:
+            s.add(ChangeAttachment(change_id=cid, filename="yes.msg", stored_path="x",
+                                   content_type="application/vnd.ms-outlook",
+                                   size_bytes=1, sha256="0" * 64, kind="customer_email",
+                                   validation_issue_id=i.id, uploaded_by=uploader))
+        await s.commit()
+        return i.id
+
+
+async def test_concession_is_qualitys_decision(
+        client, admin, seed, depts, people, session_factory):
+    """HARD #3: the only exit from a failed check is a concession Quality
+    decides once the customer's mail is filed. Sales, PM and an admin
+    cannot produce it alone (no admin shortcut, R1/R25)."""
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    iid = await _concession(session_factory, cid, check_id, people["Sales"][0])
+    url = f"/api/v1/changes/{cid}/validation/issues/{iid}/customer"
+    yes = {"decision": "accept_deviation", "note": "customer mail 14 Oct: ship as is"}
+    for auth in (people["Sales"][1], admin, people["Project Manager"][1]):
+        r = await client.post(url, json=yes, headers=auth)
+        assert r.status_code == 403, r.text  # NEGATIVE
+        assert "Quality decides the concession" in r.json()["detail"]
+    issues = (await client.get(f"/api/v1/changes/{cid}/validation/issues",
+                               headers=people["Sales"][1])).json()
+    row = issues[0] if isinstance(issues, list) else issues["issues"][0]
+    assert "accept_deviation" not in row["customer_options"]
+    issues = (await client.get(f"/api/v1/changes/{cid}/validation/issues",
+                               headers=people["Quality"][1])).json()
+    row = issues[0] if isinstance(issues, list) else issues["issues"][0]
+    assert "accept_deviation" in row["customer_options"]
+    assert "customer" in row["next_acts"]
+    r = await client.post(url, json=yes, headers=people["Quality"][1])
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert "Validation failed" not in r.json().get("detail", "")
+
+
+async def test_concession_recorded_without_quality_does_not_release(
+        client, admin, seed, depts, people, session_factory, monkeypatch):
+    """An accepted concession whose yes nobody in Quality gave (recorded
+    before the rule, or by Sales) does not lift HARD #3; with RELEASE_V2 off
+    it does, as before."""
+    from app.models.change_validation_issue import ValidationIssue
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    async with session_factory() as s:
+        s.add(ValidationIssue(change_id=cid, number=1, title="weight high", created_by=1,
+                              description="12.4 g vs 12.2", check_id=check_id,
+                              route="customer_concession", status="accepted",
+                              customer_decision="accept_deviation",
+                              customer_decided_by=people["Sales"][0]))
+        await s.commit()
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert r.status_code == 400
+    assert "Validation failed" in r.json()["detail"]
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    from app.services.validation_service import ValidationService
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        failed, _ = await ValidationService.release_parts(s, c)
+    assert failed is None

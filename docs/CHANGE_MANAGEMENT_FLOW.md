@@ -1106,8 +1106,11 @@ touching the code behind it. `IMPACT_CONFIRM_STEP_ENABLED` stays False.
 Exactly these are HARD (no override lifts them; spec §0): (1) impact lock at
 proceed, never empty; (2) open questions at proceed; (3) a failed validation
 check or an open validation issue at release, the only exit a concession (an
-issue on the check closed `accepted` via `customer_concession`), not even an
-admin lifts it (C7, `RELEASE_V2`); (4) acceptance of the current offer and
+issue on the check closed `accepted` via `customer_concession`, whose yes a
+Quality member recorded: Sales files the customer's mail into the issue,
+Quality accepts it; Sales, PM and admins get no "accept" on a concession,
+and an accepted concession nobody in Quality decided does not count), not
+even an admin lifts it (C7, `RELEASE_V2`; off: Sales closes it as before); (4) acceptance of the current offer and
 both sign-offs for approval; (5) the rejection letter; (6) the run team's
 mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (built with
 the card in lane L4); (8) internal: the internal approval before

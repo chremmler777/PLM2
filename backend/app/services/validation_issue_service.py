@@ -68,6 +68,7 @@ CHECK_CATEGORY = {
 PM_DEPARTMENT = "Project Manager"
 SALES_DEPARTMENT = "Sales"
 MANAGEMENT_DEPARTMENT = "Management"
+QUALITY_DEPARTMENT = "Quality"
 
 DEFAULT_FIX_WORKDAYS = 5
 REVALIDATION_DAYS = 3
@@ -147,6 +148,8 @@ class Viewer:
         self.pm = PM_DEPARTMENT in mine
         self.sales = SALES_DEPARTMENT in mine
         self.management = MANAGEMENT_DEPARTMENT in mine
+        # HARD #3 (C7): a concession is Quality's decision (no admin shortcut)
+        self.quality = QUALITY_DEPARTMENT in mine
 
     @property
     def pm_or_lead(self) -> bool:
@@ -170,6 +173,29 @@ class ValidationIssueService:
     async def _dept_names(session: AsyncSession) -> dict[int, str]:
         return dict((await session.execute(
             select(Department.id, Department.name))).all())
+
+    @staticmethod
+    def quality_decides_concessions() -> bool:
+        """HARD #3 (C7, RELEASE_V2): the customer's yes to a concession is
+        filed by Sales (the mail), the decision is a Quality member's."""
+        from app.services import cm_switches
+        return cm_switches.on("RELEASE_V2")
+
+    @staticmethod
+    async def quality_decided(session: AsyncSession,
+                              issue: ValidationIssue) -> bool:
+        """Was the concession's yes recorded by a Quality member? Off the
+        switch, any recorded yes counts (the rule before C7)."""
+        if not ValidationIssueService.quality_decides_concessions():
+            return True
+        if issue.customer_decided_by is None:
+            return False
+        return bool((await session.execute(
+            select(func.count()).select_from(UserDepartment)
+            .join(Department, Department.id == UserDepartment.department_id)
+            .where(UserDepartment.user_id == issue.customer_decided_by,
+                   Department.name == QUALITY_DEPARTMENT,
+                   Department.is_active.is_(True)))).scalar())
 
     @staticmethod
     async def check_retired(session: AsyncSession,
@@ -1169,7 +1195,8 @@ class ValidationIssueService:
         elif route == "customer_concession":
             issue.status = "route_decided"
             if issue.customer_decision == "accept_deviation" and \
-                    await svc.has_customer_mail(session, issue):
+                    await svc.has_customer_mail(session, issue) and \
+                    await svc.quality_decided(session, issue):
                 # Sales recorded the customer's yes (with the mail) before
                 # the route: the concession is settled the moment it is
                 # decided. Without the mail Sales still owes it and records
@@ -1415,15 +1442,38 @@ class ValidationIssueService:
         return issue
 
     @staticmethod
+    def customer_options(v: Viewer, issue: ValidationIssue) -> list[str]:
+        """The customer decisions this viewer may record on the issue (the
+        rule of customer_decision): Sales or an admin; on a concession with
+        RELEASE_V2 the yes is Quality's alone (HARD #3)."""
+        svc = ValidationIssueService
+        if issue.route == "customer_concession" and svc.quality_decides_concessions():
+            if v.quality:
+                return list(CUSTOMER_DECISIONS)
+            return ([d for d in CUSTOMER_DECISIONS if d != "accept_deviation"]
+                    if v.admin or v.sales else [])
+        return list(CUSTOMER_DECISIONS) if v.admin or v.sales else []
+
+    @staticmethod
     async def customer_decision(session: AsyncSession, change: ChangeRequest,
                                 iid: int, spec: dict, user: User) -> ValidationIssue:
         svc = ValidationIssueService
         v = await svc.viewer(session, change, user)
-        svc._require(v.admin or v.sales,
-                     "Only Sales records the customer's decision")
         issue = await svc.get_issue(session, change, iid)
-        svc._require_open(issue)
         decision = spec.get("decision")
+        concession = (issue.route == "customer_concession"
+                      and svc.quality_decides_concessions())
+        if concession and decision == "accept_deviation":
+            # HARD #3 (C7): the one exit from a failed check is Quality's
+            # decision once the customer's mail is filed; no admin shortcut.
+            svc._require(v.quality,
+                         "Quality decides the concession: Sales files the "
+                         "customer's mail into the issue, a Quality member "
+                         "accepts it")
+        else:
+            svc._require(v.admin or v.sales or (concession and v.quality),
+                         "Only Sales records the customer's decision")
+        svc._require_open(issue)
         if decision not in CUSTOMER_DECISIONS:
             raise ChangeError(
                 f"Unknown decision '{decision}': one of {', '.join(CUSTOMER_DECISIONS)}")
@@ -1897,11 +1947,14 @@ class ValidationIssueService:
         if not decided and can_route and change.status in WORK_STATUSES and not (
                 issue.severity == 3 and not issue.containment):
             acts.append("route")
-        if (v.admin or v.sales) and issue.customer_inform and (
+        quality_concession = (v.quality and issue.route == "customer_concession"
+                              and svc.quality_decides_concessions())
+        if ((v.admin or v.sales) and issue.customer_inform and (
                 issue.customer_decision in (None, "pending")
-                or issue.route == "customer_concession"):
+                or issue.route == "customer_concession")) or quality_concession:
             # an open concession always waits on the customer (a yes recorded
-            # before the route without the mail is recorded again with it)
+            # before the route without the mail is recorded again with it);
+            # with RELEASE_V2 Quality gives the yes once the mail is filed
             acts.append("customer")
         if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
             acts.append("action_done")
@@ -2109,6 +2162,7 @@ class ValidationIssueService:
                 "recovery": svc.recovery_info(change, i, ctx),
                 "next_acts": next_acts, "primary_act": primary,
                 "extra_acts": extra_acts,
+                "customer_options": svc.customer_options(v, i),
             })
         return out
 

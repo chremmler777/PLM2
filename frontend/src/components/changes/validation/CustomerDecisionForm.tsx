@@ -1,7 +1,8 @@
 /**
  * Sales records what the customer said (spec §12 Customer, §12a new timing).
  * A concession is accepted only with the customer's mail filed into the
- * issue; a new timing carries the new release date.
+ * issue, and (HARD #3) by a Quality member: the options are the backend's
+ * customer_options; a new timing carries the new release date.
  */
 import { useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
@@ -12,6 +13,7 @@ import { inputCls } from '../offer/offerFormat'
 import { DECISION_LABEL } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
 import { btnSm } from '../../common/buttonStyles'
+import { t } from '../../../i18n/cmLabels'
 
 const OPTIONS: CustomerDecision[] = ['accept_deviation', 'require_fix', 'new_timing', 'pending']
 
@@ -47,13 +49,16 @@ export default function CustomerDecisionForm({ changeId, issue, releaseDueDate, 
     ...(decision === 'new_timing' ? { new_release_due_date: newDate } : {}),
   }), { error: 'Could not record the customer decision', onDone })
 
+  const options = OPTIONS.filter((d) => !issue.customer_options || issue.customer_options.includes(d))
+  // HARD #3: Sales files the mail, Quality gives the concession's yes
+  const qualityDecides = issue.route === 'customer_concession' && !options.includes('accept_deviation')
   const blocked = customerDecisionBlocked(issue, decision, note, newDate)
   const deadline = releaseDueDate ?? issue.recovery?.release_due_date ?? null
 
   return (
     <div data-testid={`issue-customer-form-${issue.id}`} className="space-y-2 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
       <div role="radiogroup" aria-label="Customer decision" className="flex flex-wrap gap-1.5">
-        {OPTIONS.map((d) => (
+        {options.map((d) => (
           <button key={d} type="button" role="radio" aria-checked={decision === d}
             data-testid={`customer-decision-${d}`} onClick={() => setDecision(d)}
             className={`rounded-md border px-2.5 py-1 text-xs ${decision === d
@@ -62,6 +67,11 @@ export default function CustomerDecisionForm({ changeId, issue, releaseDueDate, 
           </button>
         ))}
       </div>
+      {qualityDecides && (
+        <p data-testid="customer-quality-decides" className="text-[11px] text-slate-400">
+          {t(hasCustomerMail(issue) ? 'concession.qualityDecides' : 'concession.fileMail')}
+        </p>
+      )}
       {decision === 'require_fix' && issue.route === 'customer_concession' && (
         <p className="text-[11px] text-amber-300">
           The concession is off: the route is decided again and the issue goes to level 3.

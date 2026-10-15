@@ -170,6 +170,9 @@ export interface IssueOut {
    */
   primary_act?: IssueAct | null
   extra_acts?: IssueExtraAct[]
+  /** The customer decisions this viewer may record (backend rule; HARD #3:
+   * on a concession the yes is a Quality member's). Absent: all. */
+  customer_options?: CustomerDecision[]
   /** raised, contained, root_cause, route, fixing, revalidation, closed. */
   step?: string | null
   escalation?: { level?: EscalationLevel | null; unacknowledged?: boolean } | null

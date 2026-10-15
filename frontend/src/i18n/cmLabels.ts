@@ -1500,6 +1500,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'internal.approved': { de: 'Interne Kosten freigegeben', en: 'Internal costs approved' },
   'internal.note': { de: 'Anmerkung', en: 'Note' },
   'internal.amount': { de: 'Freigegebener Betrag', en: 'Approved amount' },
+  'concession.qualityDecides': { de: 'Die Kundenmail ist abgelegt: ein Qualitäts-Mitglied entscheidet die Sonderfreigabe.', en: "The customer's mail is filed: a Quality member decides the concession." },
+  'concession.fileMail': { de: 'Lege die Kundenmail in diesem Thema ab; danach entscheidet ein Qualitäts-Mitglied die Sonderfreigabe.', en: "File the customer's mail into this issue; then a Quality member decides the concession." },
   'internal.approvedBy': { de: 'Interne Kosten gibt frei: {who} (nie der Ersteller)', en: 'Internal costs are approved by {who} (never the raiser)' },
   'internal.approverFallback': { de: 'ein PM-Mitglied oder ein Admin', en: 'a Project Management member or an admin' },
   // The ECR process flow page (docs/ECR_PROCESS_MAP.md). The page itself is

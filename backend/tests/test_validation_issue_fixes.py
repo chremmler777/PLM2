@@ -178,7 +178,12 @@ async def _pre_accept(client, vi, *, mail: bool):
     return iid, sales
 
 
-async def test_concession_after_accept_with_mail_closes(client, vi):
+async def test_concession_after_accept_with_mail_closes(client, vi, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): Sales closes the concession
+    # on the customer's mail; with the switch on Quality decides it
+    # (test_ecr_solid_gates.test_concession_is_qualitys_decision)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     iid, sales = await _pre_accept(client, vi, mail=True)
     r = await _route(client, vi, iid, route="customer_concession", actions=[])
     assert r.status_code == 200, r.text
@@ -186,7 +191,12 @@ async def test_concession_after_accept_with_mail_closes(client, vi):
     assert r.json()["closure_note"] == "ok as is"
 
 
-async def test_concession_after_accept_without_mail_gives_sales_the_act(client, vi):
+async def test_concession_after_accept_without_mail_gives_sales_the_act(client, vi, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): Sales closes the concession
+    # on the customer's mail; with the switch on Quality decides it
+    # (test_ecr_solid_gates.test_concession_is_qualitys_decision)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     iid, sales = await _pre_accept(client, vi, mail=False)
     r = await _route(client, vi, iid, route="customer_concession", actions=[])
     assert r.status_code == 200 and r.json()["status"] == "route_decided"
@@ -204,7 +214,12 @@ async def test_concession_after_accept_without_mail_gives_sales_the_act(client, 
 
 # --- B6 the customer mail of an accepted concession ---------------------------------
 
-async def test_mail_of_accepted_concession_is_frozen(client, vi):
+async def test_mail_of_accepted_concession_is_frozen(client, vi, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): Sales closes the concession
+    # on the customer's mail; with the switch on Quality decides it
+    # (test_ecr_solid_gates.test_concession_is_qualitys_decision)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     iid, sales = await _pre_accept(client, vi, mail=True)
     r = await _route(client, vi, iid, route="customer_concession", actions=[])
     assert r.json()["status"] == "accepted"

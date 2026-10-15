@@ -266,6 +266,14 @@ describe('customer decision', () => {
     }))
   })
 
+  it('HARD #3: Sales gets no concession yes; the form says Quality decides', () => {
+    wrap(<CustomerDecisionForm changeId={7}
+      issue={{ ...concession, customer_options: ['require_fix', 'new_timing', 'pending'] }} />)
+    expect(screen.queryByTestId('customer-decision-accept_deviation')).toBeNull()
+    expect(screen.getByTestId('customer-quality-decides').textContent)
+      .toBe("File the customer's mail into this issue; then a Quality member decides the concession.")
+  })
+
   it('new timing needs the new release date and sends it', async () => {
     wrap(<CustomerDecisionForm changeId={7} issue={issue({ customer_inform: true })} releaseDueDate="2026-11-03" />)
     fireEvent.click(screen.getByTestId('customer-decision-new_timing'))

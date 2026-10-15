@@ -527,7 +527,8 @@ class ValidationService:
 
         A failed check is covered by a concession: a validation issue raised
         on that check (check_id) and closed 'accepted' (the customer accepted
-        the deviation, route customer_concession). Vacuous with no rows."""
+        the deviation, route customer_concession) on a Quality member's
+        decision. Vacuous with no rows."""
         rows = await ValidationService.list_checks(session, change)
         if not rows:
             return None, None
@@ -542,12 +543,16 @@ class ValidationService:
         failed = [r for r in rows if r.status == "failed"]
         if failed:
             from app.models.change_validation_issue import ValidationIssue
-            conceded = set((await session.execute(
-                select(ValidationIssue.check_id).where(
+            from app.services.validation_issue_service import ValidationIssueService
+            # HARD #3: only a concession a Quality member decided counts (an
+            # admin, PM or Sales alone cannot produce the exit)
+            conceded = {i.check_id for i in (await session.execute(
+                select(ValidationIssue).where(
                     ValidationIssue.change_id == change.id,
                     ValidationIssue.check_id.in_([r.id for r in failed]),
                     ValidationIssue.status == "accepted",
-                    ValidationIssue.route == "customer_concession"))).scalars().all())
+                    ValidationIssue.route == "customer_concession"))).scalars().all()
+                if await ValidationIssueService.quality_decided(session, i)}
             failed = [r for r in failed if r.id not in conceded]
         outstanding = [r for r in rows if r.status not in ("passed", "failed")]
         return (

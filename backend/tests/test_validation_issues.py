@@ -502,7 +502,12 @@ async def _mail(session_factory, vi, iid, kind="customer_email"):
         await s.commit()
 
 
-async def test_concession_needs_sales_and_a_customer_mail(client, vi, session_factory):
+async def test_concession_needs_sales_and_a_customer_mail(client, vi, session_factory, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): Sales closes the concession
+    # on the customer's mail; with the switch on Quality decides it
+    # (test_ecr_solid_gates.test_concession_is_qualitys_decision)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     issue = await _raised(client, vi, check_id=None, category="cosmetic")
     iid = issue["id"]
     # concession may be decided with the cause still open, informs the customer
@@ -941,7 +946,12 @@ async def _upload(client, auth, vi, iid, kind="customer_email"):
         data={"kind": kind, "validation_issue_id": str(iid)})
 
 
-async def test_upload_into_an_issue_with_rights(client, vi):
+async def test_upload_into_an_issue_with_rights(client, vi, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): Sales closes the concession
+    # on the customer's mail; with the switch on Quality decides it
+    # (test_ecr_solid_gates.test_concession_is_qualitys_decision)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     issue = await _raised(client, vi, check_id=None, category="cosmetic")
     iid = issue["id"]
     await _route(client, vi, iid, who="pm", route="customer_concession", actions=[])
