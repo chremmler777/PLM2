@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeRequest } from '../../types/change'
+import { useInternalOnlyStarter } from '../../hooks/queries/useCanStartChange'
 
 
 /**
@@ -25,7 +26,12 @@ export function CustomerRelevantEditor({ change, canEdit }: {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(!!change.customer_relevant)
+  // P3: a department that starts internal changes only (Development, Process
+  // Engineer, Tool Engineer) does not turn one into a customer change; Sales,
+  // Project Management or an admin do (the backend answers 403 otherwise).
+  const internalOnly = useInternalOnlyStarter()
   const editable = canEdit && (change.status === 'captured' || change.status === 'scoping')
+    && !(internalOnly && !change.customer_relevant)
 
   const save = useMutation({
     mutationFn: (customer_relevant: boolean) =>

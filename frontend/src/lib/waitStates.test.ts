@@ -415,7 +415,7 @@ describe('earlyStageWaits (spec §16)', () => {
       departmentName: () => 'Tool Engineer',
     })
     expect(out.map((w) => w.text)).toEqual([
-      'No lead assigned',
+      'No lead assigned: Project Management picks one',
       '1 open cancel vote from Ann',
       'Tool Engineer: not feasible (no Change PPT)',
       'Offer v2 no longer covers the scope: new offer version or approved deviation',

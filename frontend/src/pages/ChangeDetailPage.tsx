@@ -320,6 +320,7 @@ export default function ChangeDetailPage() {
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
   const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
   const schedulingDeptId = departments.find((d) => d.name === 'Scheduling')?.id;
+  const managementDeptId = departments.find((d) => d.name === 'Management')?.id;
   // A viewer (no department) is read-only even when named as lead.
   const isChangeLead = !actingAs && canWrite
     && userId != null && change?.lead_id != null && userId === change.lead_id;
@@ -331,6 +332,8 @@ export default function ChangeDetailPage() {
     && myActions.memberships.includes(salesDeptId);
   const isSchedulingMember = !!myActions && schedulingDeptId !== undefined
     && myActions.memberships.includes(schedulingDeptId);
+  const isManagementMember = !!myActions && managementDeptId !== undefined
+    && myActions.memberships.includes(managementDeptId);
   const isGovernanceDept = isQualityMember || isPmMember;
   const canSeeGovernance = isAdmin || isChangeLead || isGovernanceDept;
   // Governance authz (mirrors the backend 403 gates in change_service.py):
@@ -340,9 +343,11 @@ export default function ChangeDetailPage() {
   const canSignQuality = isAdmin || isQualityMember;
   const canApproveInternalCosts = isAdmin || isPmMember;
   const canEditQuotedPrice = isAdmin || isChangeLead || isSalesMember;
-  // The whole cost picture is PM/Sales/lead/admin business; a department sees
-  // its own bucket and nobody else's figures.
-  const canSeeCosts = isAdmin || isChangeLead || isSalesMember || isPmMember;
+  // The whole cost picture is PM/Sales/Management/lead/admin business; a
+  // department sees its own bucket and nobody else's figures. The backend's
+  // price rule decides (stage-state), else this mirror of it.
+  const canSeeCosts = stage?.can_see_prices
+    ?? (isAdmin || isChangeLead || isSalesMember || isPmMember || isManagementMember);
   // The description is written during capture, and capture is Sales' job — the
   // backend PATCH gate allows lead / Sales / admin, so the editor must too.
   // Project Management writes it where it captures (spec §14: a mother-plant

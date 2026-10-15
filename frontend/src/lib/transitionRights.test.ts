@@ -25,7 +25,29 @@ describe('mayTransition (spec §16 P1 4)', () => {
   })
   it('leaves other steps to their own gates', () => {
     expect(mayTransition({ status: 'quoting' }, 'costing', none)).toBe(true)
-    expect(mayTransition({ status: 'approved' }, 'in_implementation', none)).toBe(true)
+    expect(mayTransition({ status: 'quoting' }, 'quoted', { ...none, isSales: true })).toBe(true)
+  })
+  it('keeps the C1 mid-flow hops and every resume for the run team', () => {
+    const hops: [string, string][] = [
+      ['quoted', 'approved'], ['costing', 'approved'], ['approved', 'in_implementation'],
+      ['in_implementation', 'in_validation'], ['rejected', 'scoping'],
+      ['on_hold', 'in_assessment'], ['on_hold', 'quoted'],
+    ]
+    for (const [from, to] of hops) {
+      const c = { status: from as 'quoted' }
+      expect(mayTransition(c, to, none)).toBe(false)
+      expect(mayTransition(c, to, { ...none, isSales: true })).toBe(false)
+      expect(mayTransition(c, to, { ...none, isPm: true })).toBe(true)
+      expect(mayTransition(c, to, { ...none, isChangeLead: true })).toBe(true)
+      expect(mayTransition(c, to, { ...none, isAdmin: true })).toBe(true)
+    }
+  })
+  it('gives Sales no capture hop on an internal change that has a lead', () => {
+    const internal = { status: 'captured' as const, customer_relevant: false, lead_id: 7 }
+    expect(mayTransition(internal, 'scoping', { ...none, isSales: true })).toBe(false)
+    expect(mayTransition(internal, 'rejected', { ...none, isSales: true })).toBe(false)
+    expect(mayTransition(internal, 'scoping', { ...none, isChangeLead: true })).toBe(true)
+    expect(mayTransition({ ...internal, lead_id: null }, 'scoping', { ...none, isSales: true })).toBe(true)
   })
 })
 

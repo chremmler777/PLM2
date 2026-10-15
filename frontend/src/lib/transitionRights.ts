@@ -15,29 +15,41 @@ export interface Viewer {
   isSales: boolean
 }
 
-/** Stop, hold, recall and close-assessment moves: lead, PM, admin only. */
-const LEAD_PM_ADMIN_TARGETS = new Set<string>(['rejected', 'cancelled', 'on_hold', 'costing'])
+/**
+ * The run team's moves (lead, PM, admin): stop, hold, recall, close the
+ * assessment, and (ECR-solid C1) approve, start implementation and start
+ * validation. Every move out of on_hold is theirs too (see below).
+ */
+const LEAD_PM_ADMIN_TARGETS = new Set<string>([
+  'rejected', 'cancelled', 'on_hold', 'costing', 'approved', 'in_implementation', 'in_validation',
+])
 
 /**
  * Whether the viewer may move `change` to `to`. Only the transitions §16 names
  * are restricted here; every other step keeps its own gate (`needs`).
  */
 export function mayTransition(
-  change: Pick<ChangeRequest, 'status'> & Partial<Pick<ChangeRequest, 'allowed_transitions'>>,
+  change: Pick<ChangeRequest, 'status'>
+    & Partial<Pick<ChangeRequest, 'allowed_transitions' | 'customer_relevant' | 'lead_id'>>,
   to: string,
   v: Viewer,
 ): boolean {
   if (Array.isArray(change.allowed_transitions)) return change.allowed_transitions.includes(to)
   const leadPmAdmin = v.isAdmin || v.isChangeLead || v.isPm
   const from = change.status
+  // Resuming a hold (often "no PO yet") is the run team's (C1).
+  if (from === 'on_hold') return leadPmAdmin
+  // Sales captures customer changes; an internal change with a lead (P3: the
+  // engineering raiser) is its run team's to hand over or reject.
+  const salesCaptures = v.isSales && (change.customer_relevant !== false || change.lead_id == null)
   if (to === 'scoping') {
     // Kickoff from capture: Sales does the capture, so Sales may hand it over.
-    if (from === 'captured') return leadPmAdmin || v.isSales
+    if (from === 'captured') return leadPmAdmin || salesCaptures
     // Reopening a rejected change and recalling an assessment: lead/PM/admin.
     return leadPmAdmin
   }
   // Sales may reject at capture (the customer withdrew before scoping).
-  if (to === 'rejected' && from === 'captured') return leadPmAdmin || v.isSales
+  if (to === 'rejected' && from === 'captured') return leadPmAdmin || salesCaptures
   // Costing back from quote creation is a reopen, gated elsewhere; from
   // assessment it closes the round: lead/PM/admin.
   if (to === 'costing' && from !== 'in_assessment') return true

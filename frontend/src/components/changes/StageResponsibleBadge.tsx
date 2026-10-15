@@ -45,9 +45,19 @@ export const MOTHER_PLANT_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string
   captured: 'role.pmShort',
 }
 
+/**
+ * An internal change (the plant pays, P3) has no Sales side: its lead (the
+ * engineering raiser, else the project PM) hands it over to scoping.
+ */
+export const INTERNAL_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
+  ...STAGE_RESPONSIBLE,
+  captured: 'role.lead',
+}
+
 export function stageResponsibleKey(status: ChangeStatus, origin?: string | null): string | undefined {
   const table = origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE
-    : origin === 'mother_plant' ? MOTHER_PLANT_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE
+    : origin === 'mother_plant' ? MOTHER_PLANT_STAGE_RESPONSIBLE
+      : origin === 'internal' ? INTERNAL_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE
   return table[status]
 }
 

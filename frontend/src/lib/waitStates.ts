@@ -542,7 +542,7 @@ export function earlyStageWaits(
   }
 
   // Fallback without stage-state: the same rows, derived.
-  if (live && change.lead_id == null) push({ key: 'no_lead', text: 'No lead assigned' })
+  if (live && change.lead_id == null) push({ key: 'no_lead', text: 'No lead assigned: Project Management picks one' })
   const name = derived.departmentName ?? ((id: number) => `#${id}`)
   const votes = (derived.concerns ?? []).filter((c) => c.is_open && c.kind === 'reject_proposal')
   if (live && votes.length > 0) {

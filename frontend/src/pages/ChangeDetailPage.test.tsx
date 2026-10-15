@@ -724,6 +724,26 @@ describe('ChangeDetailPage costing tab', () => {
     expect(await screen.findByText('mock-pnl-card')).toBeDefined()
   })
 
+  it('shows the P&L to a Management member (P4) and follows the backend price rule', async () => {
+    change.status = 'costing' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 21, name: 'Management', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [21] })
+    wrap('/changes/1?tab=costing')
+    expect(await screen.findByText('mock-pnl-card')).toBeDefined()
+    cleanup()
+    // the backend says no: the card stays the department's part
+    vi.mocked(changesApi.stageState).mockResolvedValue(
+      { can_transition: {}, can_see_prices: false, waits: [] } as never)
+    wrap('/changes/1?tab=costing')
+    expect(await screen.findByText('mock-pnl-department-only')).toBeDefined()
+    vi.mocked(changesApi.stageState).mockRejectedValue(new Error('404'))
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
   it('opens the offer tab at quote creation', async () => {
     change.status = 'quoting' as ChangeDetail['status']
     change.customer_relevant = true
@@ -1147,7 +1167,10 @@ describe('ChangeDetailPage end-implementation confirm loading (finding 8)', () =
 })
 
 describe('ChangeDetailPage Resume goes back to the status before the hold (finding 9)', () => {
+  // C1: resuming a hold is the run team's; the viewer here is an admin.
+  const saved = { ...authState.current }
   afterEach(() => {
+    authState.current = { ...saved }
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
     vi.mocked(changesApi.changelog).mockResolvedValue([])
@@ -1155,6 +1178,7 @@ describe('ChangeDetailPage Resume goes back to the status before the hold (findi
 
   it('reads the changelog for the status entry that led into on_hold and resumes to its old_value', async () => {
     change.status = 'on_hold' as ChangeDetail['status']
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     // The API shape: ChangelogResponse decodes the stored JSON text, so a
     // status arrives as a plain value.
     vi.mocked(changesApi.changelog).mockResolvedValue([
@@ -1177,6 +1201,7 @@ describe('ChangeDetailPage Resume goes back to the status before the hold (findi
 
   it('reads JSON-encoded changelog values too (the stored column shape)', async () => {
     change.status = 'on_hold' as ChangeDetail['status']
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     vi.mocked(changesApi.changelog).mockResolvedValue([
       { id: 2, action: 'status_changed', action_description: 'quoted -> on_hold', performed_by: 1,
         performed_at: '2026-08-01T00:00:00', field_name: 'status', old_value: '"quoted"', new_value: '"on_hold"' },
@@ -1192,6 +1217,7 @@ describe('ChangeDetailPage Resume goes back to the status before the hold (findi
 
   it('falls back to in_assessment when the changelog carries no on_hold entry', async () => {
     change.status = 'on_hold' as ChangeDetail['status']
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     vi.mocked(changesApi.changelog).mockResolvedValue([] as never)
     wrap('/changes/1')
     fireEvent.click(await screen.findByRole('button', { name: 'Resume' }))

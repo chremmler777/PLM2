@@ -9,6 +9,10 @@ vi.mock('../../api/changes', () => ({
   changesApi: { update: vi.fn() },
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const perms = vi.hoisted(() => ({ internalOnly: false }))
+vi.mock('../../hooks/queries/useCanStartChange', () => ({
+  useInternalOnlyStarter: () => perms.internalOnly,
+}))
 
 const change = (over: Partial<ChangeRequest> = {}): ChangeRequest => ({
   id: 7, change_number: 'CR-2026-0007', project_id: 1, title: 'Housing fix',
@@ -26,6 +30,17 @@ describe('CustomerRelevantEditor', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    perms.internalOnly = false
+  })
+
+  it('does not offer an engineering lead (internal starter) the flip to customer (P3)', () => {
+    perms.internalOnly = true
+    render(wrap(<CustomerRelevantEditor change={change({ status: 'captured', customer_relevant: false })} canEdit />))
+    expect(screen.queryByTestId('customer-relevant-edit')).toBeNull()
+    cleanup()
+    // the way back (customer -> internal) stays open to the lead
+    render(wrap(<CustomerRelevantEditor change={change({ status: 'captured', customer_relevant: true })} canEdit />))
+    expect(screen.getByTestId('customer-relevant-edit')).toBeDefined()
   })
 
   it('shows the current value and no edit control when not editable', () => {

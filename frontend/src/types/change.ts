@@ -1328,6 +1328,8 @@ export interface StageStateResponse {
   /** May the viewer record the scoping meeting and its decision (lead, PM, admin). */
   can_record_meeting?: boolean;
   lead_assigned: boolean;
+  /** The one price rule (backend PriceViewer): admin, lead, PM, Sales, Management. */
+  can_see_prices?: boolean;
   title_auto: boolean;
   assessment: StageAssessment | null;
   routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;
