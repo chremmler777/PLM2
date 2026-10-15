@@ -481,6 +481,21 @@ async def lifespan(app: FastAPI):
     # pending outbox row is NOTIFY_DIGEST_MINUTES old (app/services/part_data_mail.py).
     from app.services.part_data_mail import digest_loop as part_data_mail_loop
     part_data_mail_task = asyncio.create_task(part_data_mail_loop())
+    # One mail per notification, ending with the PLM2 link (spec §0), while
+    # SMTP is enabled; every minute so a decision request is not hours late.
+    async def _mail_loop():
+        from app.models import AsyncSessionLocal
+        from app.services.mail_outbox import send_pending
+        while True:
+            if settings.smtp_enabled:
+                try:
+                    async with AsyncSessionLocal() as session:
+                        await send_pending(session)
+                except Exception as e:
+                    logger.warning(f"Notification mail run failed: {e}")
+            await asyncio.sleep(60)
+
+    mail_task = asyncio.create_task(_mail_loop())
 
     # MachineDB presses for the cost sheet: one background sync when
     # MACHINEDB_API_URL and MACHINEDB_SERVICE_TOKEN are set (never blocks
@@ -499,6 +514,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     reminder_task.cancel()
     part_data_mail_task.cancel()
+    mail_task.cancel()
     logger.info("Shutting down PLM application...")
 
 
