@@ -32,6 +32,24 @@ async def _project_org_id(session: AsyncSession, project_id: int) -> Optional[in
     )).scalar_one_or_none()
 
 
+async def is_live_member(session: AsyncSession, user_id: Optional[int],
+                         department_name: str) -> bool:
+    """An active user with a real (not acting-as) membership of the named
+    department. The one test for a named owner (C10 Sales owner, a project
+    responsible): an inactive user or one who left the department owns
+    nothing, and the department's work falls back to all of its members."""
+    if user_id is None:
+        return False
+    return (await session.execute(
+        select(UserDepartment.user_id)
+        .join(Department, Department.id == UserDepartment.department_id)
+        .join(User, User.id == UserDepartment.user_id)
+        .where(UserDepartment.user_id == user_id,
+               Department.name == department_name,
+               User.is_active.is_(True))
+    )).first() is not None
+
+
 class ProjectTeamService:
     @staticmethod
     async def user_can_manage(session: AsyncSession, user: User) -> bool:
@@ -155,13 +173,10 @@ class ProjectTeamService:
         )).scalar_one_or_none()
         if row is None:
             return None
-        # A responsible who left the department no longer counts.
-        is_member = (await session.execute(
-            select(UserDepartment.user_id).where(
-                UserDepartment.user_id == row.user_id,
-                UserDepartment.department_id == dept_id)
-        )).scalar_one_or_none() is not None
-        return row.user_id if is_member else None
+        # A responsible who is inactive or left the department no longer
+        # counts.
+        return (row.user_id if await is_live_member(
+            session, row.user_id, department_name) else None)
 
     @staticmethod
     async def role_for_user(session: AsyncSession, project_id: Optional[int],
@@ -290,6 +305,7 @@ class TeamRoles:
         self.user_id = user_id
         self._resp: dict[tuple[int, int], Optional[tuple[int, str]]] = {}
         self._dept_by_name: Optional[dict[str, int]] = None
+        self._live_sales: dict[int, bool] = {}
 
     async def department_id(self, name: str) -> Optional[int]:
         if self._dept_by_name is None:
@@ -335,6 +351,13 @@ class TeamRoles:
         Sales row it takes the project responsible's place: the owner sees
         it as main, the rest of Sales as backup with the owner's name."""
         dept = await self.row_department(row)
+        if sales_owner is not None and sales_owner[0] not in self._live_sales:
+            self._live_sales[sales_owner[0]] = await is_live_member(
+                self.session, sales_owner[0], SALES)
+        if sales_owner is not None and not self._live_sales[sales_owner[0]]:
+            # a stale owner (inactive, left Sales) owns nothing: the row
+            # falls back to the project team / all of Sales as main
+            sales_owner = None
         if (sales_owner is not None and dept is not None
                 and dept == await self.department_id(SALES)):
             if owned or sales_owner[0] == self.user_id:

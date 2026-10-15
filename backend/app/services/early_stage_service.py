@@ -116,7 +116,10 @@ class EarlyStageService:
         r = await EarlyStageService._roles(session, change, user)
         if r["run_team"]:
             return None
-        if frm == "captured" and to_status in ("scoping", "rejected") and r["sales"]:
+        # Sales captures customer changes; an internal change with a lead
+        # (P3: the engineering raiser) is its run team's to hand over.
+        if (frm == "captured" and to_status in ("scoping", "rejected") and r["sales"]
+                and (change.customer_relevant or change.lead_id is None)):
             return None
         if frm == "quoted" and to_status == "rejected" and r["sales"]:
             return None
@@ -787,7 +790,8 @@ class EarlyStageService:
         waits: list[dict] = []
 
         if live and change.lead_id is None:
-            waits.append({"kind": "no_lead", "text": "No lead assigned",
+            waits.append({"kind": "no_lead",
+                          "text": "No lead assigned: Project Management picks one",
                           "target_tab": "overview"})
         if change.status == "captured":
             missing = await ChangeService.kickoff_missing(session, change)
@@ -865,6 +869,7 @@ class EarlyStageService:
                           + "new offer version or approved deviation",
                           "target_tab": "offer"})
 
+        from app.services.price_redaction import PriceViewer
         return {
             "change_id": change.id,
             "status": change.status,
@@ -879,6 +884,8 @@ class EarlyStageService:
                     session, change, user) is None),
             "impact_edit_needs_reason": EarlyStageService.post_quote(change),
             "lead_assigned": change.lead_id is not None,
+            # One price rule (PriceViewer) for the API and the cost cards.
+            "can_see_prices": await PriceViewer(session, user).may_read(change),
             "can_record_meeting": (
                 change.status == "scoping"
                 and await EarlyStageService._may_record_meeting(session, change, user)),

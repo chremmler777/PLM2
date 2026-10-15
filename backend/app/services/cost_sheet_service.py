@@ -275,15 +275,21 @@ async def create_draft(db: AsyncSession, org_id: int, user_id: Optional[int],
     return draft
 
 
+# Departments that decide but never assess or book hours.
+NON_ROUTABLE_DEPARTMENTS = ("Management",)
+
+
 async def routable_department_ids(db: AsyncSession) -> list[int]:
     """The departments an ECR can be routed to as R/A/S/C
     (models.change.ASSESSMENT_LETTERS), in their sort order: every active
     department. The routing standards name most of them and a routing
     deviation can add any active department with any of those letters, so
     each of them may book hours that need a rate. Retired departments
-    (is_active false) cannot be routed any more."""
+    (is_active false) cannot be routed any more, and Management (P4: gives
+    OKs, books no hours) is never routed."""
     return list((await db.execute(select(Department.id).where(
-        Department.is_active.is_(True)).order_by(
+        Department.is_active.is_(True),
+        Department.name.not_in(NON_ROUTABLE_DEPARTMENTS)).order_by(
         Department.sort_order, Department.id))).scalars().all())
 
 

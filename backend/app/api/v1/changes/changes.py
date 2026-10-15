@@ -85,13 +85,13 @@ async def _project_org_id(db: AsyncSession, project_id) -> Optional[int]:
 
 
 async def _require_org_user(db: AsyncSession, user_id: int,
-                            org_id: Optional[int]) -> User:
+                            org_id: Optional[int], role: str = "Lead") -> User:
     """An active user of `org_id` (any org when the change has no project),
     else 400 - a lead from another organization would see nothing of it."""
     u = await db.get(User, user_id)
     if u is None or not u.is_active or (
             org_id is not None and u.organization_id != org_id):
-        raise HTTPException(status_code=400, detail="Lead user not found")
+        raise HTTPException(status_code=400, detail=f"{role} user not found")
     return u
 
 
@@ -146,10 +146,12 @@ async def create_change(
         lead_id = current_user.id
     if lead_id is not None:
         await _require_org_user(db, lead_id, project_org)
-    # C10: a customer change raised by Sales is owned by its raiser.
-    from app.services.early_stage_service import EarlyStageService as _ESS
+    # C10: a customer change raised by Sales is owned by its raiser: a real
+    # Sales member (an admin acting as Sales is not one), the same test the
+    # PATCH and the task list apply.
+    from app.services.project_team_service import is_live_member
     raiser_owner = (current_user.id if not internal and not mother_plant
-                    and await _ESS._member_of(db, current_user, "Sales") else None)
+                    and await is_live_member(db, current_user.id, "Sales") else None)
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,
@@ -1770,22 +1772,19 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
 
 
 async def _require_sales_owner(db: AsyncSession, change, user_id: int,
-                               actor: User) -> None:
+                               actor: User, customer: bool) -> None:
     """C10: the owner is an active Sales member of the change's organization,
-    on a customer change; the move is in the changelog."""
+    on a customer change (`customer`: the change's state after this PATCH);
+    the move is in the changelog."""
     from app.services import mother_plants as mp
-    if not change.customer_relevant or mp.is_mother_plant(change):
+    if not customer or mp.is_mother_plant(change):
         raise HTTPException(status_code=400,
                             detail="An internal change has no Sales owner")
     owner = await _require_org_user(db, user_id,
-                                    await _project_org_id(db, change.project_id))
-    from app.models.workflow import Department, UserDepartment
-    in_sales = (await db.execute(
-        select(UserDepartment.user_id).join(
-            Department, Department.id == UserDepartment.department_id)
-        .where(UserDepartment.user_id == owner.id, Department.name == "Sales")
-    )).first() is not None
-    if not in_sales:
+                                    await _project_org_id(db, change.project_id),
+                                    role="Sales owner")
+    from app.services.project_team_service import is_live_member
+    if not await is_live_member(db, owner.id, "Sales"):
         raise HTTPException(status_code=400,
                             detail="The Sales owner must be a member of Sales")
     await ChangeService.append_changelog(
@@ -1820,6 +1819,15 @@ async def update_change(
                 detail=f"The change is {change.status}: its D1 data "
                        f"({', '.join(moving_d1)}) is read only")
     await _require_patch_rights(db, change, fields, current_user)
+    # P3: an engineering lead starts internal changes only; making one a
+    # customer change is Sales', Project Management's or an admin's call
+    # (the same people who start customer changes).
+    if (fields.get("customer_relevant") is True and not change.customer_relevant
+            and not await ChangeService.user_can_start_change(db, current_user)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, Project Management or an admin may make this "
+                   "a customer change")
     if "lead_id" in fields and fields["lead_id"] is not None \
             and fields["lead_id"] != change.lead_id:
         new_lead = await _require_org_user(
@@ -1830,8 +1838,11 @@ async def update_change(
             field_name="lead_id", old_value=change.lead_id, new_value=new_lead.id)
     if "sales_owner_id" in fields and fields["sales_owner_id"] is not None \
             and fields["sales_owner_id"] != change.sales_owner_id:
-        await _require_sales_owner(db, change, fields["sales_owner_id"],
-                                   current_user)
+        await _require_sales_owner(
+            db, change, fields["sales_owner_id"], current_user,
+            customer=bool(change.customer_relevant
+                          if fields.get("customer_relevant") is None
+                          else fields["customer_relevant"]))
     # A hand-typed title stops following the lead item (spec §16).
     if fields.get("title") is not None and fields["title"] != change.title:
         change.title_auto = False

@@ -2455,17 +2455,24 @@ class ChangeService:
                 release_rows.setdefault(r.change_id, {})[r.check_key] = r
 
         for c in open_changes:
+            # An internal change with a lead (P3: the engineering raiser) is
+            # handed over by its run team (lead, PM); Sales has no part in it.
+            run_team_kickoff = (not c.customer_relevant and c.lead_id is not None
+                                and not mp.is_mother_plant(c))
             if c.status == "captured" and (
-                    can_capture or (is_pm and mp.is_mother_plant(c))
-                    # P3: an engineering raiser leads its internal change and
-                    # hands it over to scoping itself
-                    or (not c.customer_relevant and holds_lead(c, user))):
-                # a mother-plant change is captured by Project Management
+                    (holds_lead(c, user) or is_pm) if run_team_kickoff else (
+                        can_capture or (is_pm and mp.is_mother_plant(c)))):
+                # a mother-plant change is captured by Project Management;
+                # with no lead yet, Project Management's part is to pick one
+                pm_row = (mp.is_mother_plant(c) or run_team_kickoff
+                          or (c.lead_id is None and is_pm and not in_sales))
                 tasks.append({**await _base(c), "kind": "kickoff",
                               "missing": await ChangeService.kickoff_missing(db, c),
-                              # project team: a mother-plant kickoff is PM's role
+                              **({"hint": "Assign a lead, then hand over to scoping"}
+                                 if c.lead_id is None and is_pm else {}),
+                              # project team: then it is PM's role, not Sales'
                               "role_department_id": (dept_by_name.get("Project Manager")
-                                                     if mp.is_mother_plant(c) else None)})
+                                                     if pm_row else None)})
             elif c.status == "scoping":
                 if is_pm:
                     tasks.append({
@@ -4197,6 +4204,9 @@ class ChangeService:
             if k in allowed and v is not None and getattr(change, k) != v:
                 setattr(change, k, v)
                 plain_changed = True
+        # C10: an internal change has no Sales owner, whatever the PATCH sent.
+        if not change.customer_relevant:
+            change.sales_owner_id = None
 
         # Handle affected_plant_ids (replace-set semantics; [] clears all)
         if ("affected_plant_ids" in fields and fields["affected_plant_ids"] is not None

@@ -351,7 +351,7 @@ async def test_development_picks_then_confirms_impact(client, auth, seed, depts,
 async def test_kickoff_needs_a_lead(client, auth, seed, depts, session_factory):
     c = await _change(client, auth, seed, lead=False)
     st = await _state(client, auth, c["id"])
-    assert any(w["kind"] == "no_lead" and w["text"] == "No lead assigned" for w in st["waits"])
+    assert any(w["kind"] == "no_lead" and w["text"] == "No lead assigned: Project Management picks one" for w in st["waits"])
     kick = next(w for w in st["waits"] if w["kind"] == "kickoff_missing")
     assert "change lead" in kick["missing"] and "quote deadline" in kick["missing"]
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",

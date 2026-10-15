@@ -110,11 +110,19 @@ async def test_lead_acting_as_department_loses_the_hop(client, admin, seed, dept
     assert res.status_code == 403
 
 
+@pytest.mark.parametrize("frm,to,body", HOPS)
 async def test_switch_off_restores_open_hops(client, admin, seed, depts,
-                                             session_factory, monkeypatch):
+                                             session_factory, monkeypatch,
+                                             frm, to, body):
     monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", False)
-    cid = await _change_at(client, admin, seed, session_factory, "rejected")
+    cid = await _change_at(client, admin, seed, session_factory, frm)
     dev = {**admin, ACTS: str(depts["Development"])}
-    res = await client.post(f"/api/v1/changes/{cid}/transition", json={
-        "to_status": "scoping", "reopen_reason": "back"}, headers=dev)
+    pm = {**admin, ACTS: str(depts["Project Manager"])}
+    # the button follows the run team's again (other gates, e.g. a missing
+    # acceptance, may still hide it for both)
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=dev)).json()
+    st_pm = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=pm)).json()
+    assert st["can_transition"][to] == st_pm["can_transition"][to]
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": to, **body}, headers=dev)
     assert res.status_code != 403, res.text

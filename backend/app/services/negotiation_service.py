@@ -41,15 +41,10 @@ class NegotiationService:
     async def may_read(session: AsyncSession, change: ChangeRequest,
                        actor: User) -> bool:
         """The commercial crowd: admin, the change lead, Project Management,
-        Sales. Same set that reads the summation and the costing positions —
-        a counter price is one of those numbers."""
-        from app.services.meeting_service import MeetingService
-        from app.services.change_people import holds_lead
-        if actor.effective_role == "admin" or holds_lead(change, actor):
-            return True
-        if await MeetingService.user_is_pm_member(session, actor):
-            return True
-        return await ChangeService._user_in_department(session, actor, "Sales")
+        Sales, Management (P4). One rule for every price read: it is
+        PriceViewer's (the change detail and list redaction use it too)."""
+        from app.services.price_redaction import PriceViewer
+        return await PriceViewer(session, actor).may_read(change)
 
     @staticmethod
     def may_delete(row: "ChangeNegotiation", actor: User) -> bool:
