@@ -207,7 +207,8 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     changes = (await session.execute(
         select(ChangeRequest).where(
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
-            ChangeRequest.required_by_date.is_not(None),
+            ChangeRequest.required_by_date.is_not(None)
+            | ChangeRequest.release_due_date.is_not(None),
         ))).scalars().all()
 
     for change in changes:
@@ -220,11 +221,20 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         state = await ChangeService.deadline_state(session, change)
         if state not in ("at_risk", "overdue"):
             continue
+        # One notice per deadline and state: the active one (quote until the
+        # offer went out, then release), named in the notice. A quote alert
+        # keeps its earlier key (no repeat for in-flight changes); a release
+        # alert names its date, so a quote alert never hides it and a moved
+        # release date is told again.
+        kind = change.active_deadline
+        due = change.release_due_date if kind == "release" else change.required_by_date
+        key = (f"chg:{change.id}:release:{due.date().isoformat()}:{state}"
+               if kind == "release" else f"chg:{change.id}:{state}")
+        word = "Release" if kind == "release" else "Quote"
         n = await _once(
-            session, recipients, kind=f"deadline_{state}",
-            subject_key=f"chg:{change.id}:{state}",
-            title=f"Change deadline {state.replace('_', ' ')}: {change.change_number}",
-            body=f"Required by {fmt_date(change.required_by_date)}.",
+            session, recipients, kind=f"deadline_{state}", subject_key=key,
+            title=f"{word} deadline {state.replace('_', ' ')}: {change.change_number}",
+            body=f"{word} due {fmt_date(due)}.",
             link=f"/changes/{change.id}",
         )
         counts[f"deadline_{state}"] += n

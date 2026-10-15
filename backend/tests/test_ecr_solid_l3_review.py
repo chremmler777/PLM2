@@ -271,7 +271,7 @@ async def test_re_sign_is_due_from_the_newer_offer(client, seed, team, session_f
     sales = await _as(client, "Sales")
     cid = await _create(client, sales, seed)
     old = datetime.utcnow() - timedelta(days=20)
-    await _set(session_factory, cid, status="approved", customer_response="accepted",
+    await _set(session_factory, cid, status="in_validation", customer_response="accepted",
                customer_response_at=old)
     async with session_factory() as s:
         o = ChangeOffer(change_id=cid, version=1, status="sent",
@@ -309,6 +309,8 @@ async def test_sign_off_rows_follow_the_switches(
     assert not await _tasks(client, pm, cid, "sign_off")   # a signature is enough
     monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", True)
     await _set(session_factory, cid, status="approved")
+    assert not await _tasks(client, pm, cid, "sign_off")   # no sign button here
+    await _set(session_factory, cid, status="in_validation")
     assert await _tasks(client, pm, cid, "sign_off")       # HARD #9 at release
     monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     assert not await _tasks(client, pm, cid, "sign_off")   # release does not check

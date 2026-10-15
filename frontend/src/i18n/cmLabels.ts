@@ -2397,6 +2397,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.sign_off': { de: 'Freigabe unterschreiben', en: 'Sign off' },
   'tasks.kind.internal_approval': { de: 'Interne Kosten freigeben', en: 'Approve the internal costs' },
   'tasks.kind.advance': { de: 'Bereit: weiterschalten', en: 'Ready: move it on' },
+  'tasks.kind.routing_deviation_decision': { de: 'Hinzugefügte Abteilung entscheiden', en: 'Decide added department' },
+  'tasks.kind.not_feasible': { de: 'Nicht machbar: entscheiden', en: 'Not feasible: decide' },
+  'tasks.hint.routing_deviation_decision': {
+    de: 'Die Bewertungsrunde wurde geändert: genehmigen oder mit Begründung ablehnen',
+    en: 'The assessment routing was changed: approve it, or reject it with a reason' },
+  'tasks.hint.not_feasible': {
+    de: '{x}: nicht machbar. Entscheiden: Override, neu routen oder ablehnen',
+    en: '{x} says not feasible: decide: override, reroute or reject' },
   'tasks.hint.deviation_decision': {
     de: 'Jemand bittet um einen Override: genehmigen oder mit Begründung ablehnen',
     en: 'Someone asks for an override: approve it, or reject it with a reason' },

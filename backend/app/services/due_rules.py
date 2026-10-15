@@ -136,7 +136,7 @@ async def apply_assessment_due(session, change) -> int:
 
 #: My Tasks "Needs you" (spec §0): decisions only this person can give.
 NEEDS_YOU_KINDS = frozenset({"deviation_decision", "sign_off", "internal_approval",
-                             "ppap_decision"})
+                             "ppap_decision", "routing_deviation_decision"})
 #: A customer wait is due at the next contact date (C4 default: +5 wd).
 CUSTOMER_CONTACT_WD = 5
 #: Rows that bring their own due date (the assessment's, the validation
@@ -203,7 +203,11 @@ async def annotate_tasks(session, tasks: list[dict], changes,
         if t["kind"].startswith(OWN_DUE_PREFIXES):
             due = t.get("due_date")
         else:
-            start = start or since.get(c.id) or c.created_at or now
+            entered = since.get(c.id)
+            if t["kind"] == "sign_off" and start is not None and entered is not None:
+                # a signature owed at validation is due from getting there
+                start = max(start, entered)
+            start = start or entered or c.created_at or now
             due = (add_wd(start, CUSTOMER_CONTACT_WD) if t["kind"] == "customer_response"
                    else task_due(start, c, t["kind"]))
             t["due_date"] = due

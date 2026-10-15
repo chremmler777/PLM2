@@ -451,7 +451,11 @@ export type ChangeTaskKind =
   /** C3 "Needs you": the internal approver's OK (HARD #8). */
   | 'internal_approval'
   /** C3: nothing holds the onward hop; the run team moves it on. */
-  | 'advance';
+  | 'advance'
+  /** C3 "Needs you": a pending routing change (added department) to decide. */
+  | 'routing_deviation_decision'
+  /** C3: a department answered 'not feasible'; the run team decides. */
+  | 'not_feasible';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -521,6 +525,10 @@ export interface ChangeTask {
   to_status?: ChangeStatus | null;
   open_count?: number;
   target_tab?: string | null;
+  /** The backend's one-line brief (not_feasible names the departments). */
+  hint?: string | null;
+  /** not_feasible: the departments that answered 'not feasible'. */
+  departments?: string[];
 }
 
 /** The viewer's standing on a role's work for a project (spec §18). */

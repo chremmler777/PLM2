@@ -331,7 +331,7 @@ class WorkflowService:
                 list(standard_departments),
                 title=f"Workflow task: {part.name} {revision.revision_name}",
                 body=f"Your department has a new task in '{stage_label}'.",
-                link="/my-tasks",
+                link="/my-tasks", kind="task_new",
             )
         if added_departments:
             from app.services.notification_service import NotificationService
@@ -344,6 +344,7 @@ class WorkflowService:
                 body=(f"Your department was added to the assessment of "
                       f"'{part.name}' and has an assessment to give."),
                 link=f"/changes/{instance.change_id}?tab=assessments",
+                kind="task_new",
             )
 
         if fyi_departments:

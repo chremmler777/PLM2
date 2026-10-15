@@ -48,7 +48,8 @@ async def test_one_mail_per_item_ending_with_the_plm2_link(session_factory, seed
 
 async def test_no_link_points_at_my_tasks(session_factory, seed, smtp_on):
     async with session_factory() as s:
-        await NotificationService.notify_users(s, [seed["engineer_id"]], "Hello")
+        await NotificationService.notify_users(s, [seed["engineer_id"]], "Hello",
+                                               kind="task_assigned")
         await s.commit()
         await mail_outbox.send_pending(s, sender=smtp_on.append)
     assert smtp_on[0].get_content().rstrip().endswith(

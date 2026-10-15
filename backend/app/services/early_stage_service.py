@@ -744,13 +744,18 @@ class EarlyStageService:
         proposers = await _pending_proposers(session, routing)
         names = await EarlyStageService._user_names(session, [proposer, change.lead_id])
         proposer_is_lead = change.lead_id is not None and change.lead_id in proposers
+        from app.services.change_service import ChangeService
+        lead_idle = change.lead_id is not None and bool(
+            await ChangeService.leadless_ids(session, [change]))
         if change.lead_id is None:
             decider, decider_id = "anyone_but_proposer", None
             text = "Routing change pending: anyone but the proposer decides"
-        elif proposer_is_lead:
+        elif proposer_is_lead or lead_idle:
             decider, decider_id = "pm", None
             text = ("Routing change includes a request by the change lead: waiting for "
-                    "Project Management to decide")
+                    "Project Management to decide" if proposer_is_lead else
+                    "Routing change pending: the change lead cannot act, waiting "
+                    "for Project Management to decide")
         else:
             decider, decider_id = "lead", change.lead_id
             text = ("Routing change pending: waiting for the change lead "
@@ -766,7 +771,7 @@ class EarlyStageService:
             "decider_name": names.get(decider_id) if decider_id else None,
             "can_decide": ChangeRoutingService.user_can_decide_deviation(
                 change, routing, user.id,
-                acting=is_acting(user), proposers=proposers),
+                acting=is_acting(user), proposers=proposers, lead_idle=lead_idle),
             "text": text,
         }
 

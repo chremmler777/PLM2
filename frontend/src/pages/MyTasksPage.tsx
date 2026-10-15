@@ -279,6 +279,9 @@ const TASK_TAB: Record<string, string> = {
   // why-blocked panel; the internal approval on the commercial tab.
   deviation_decision: '?tab=overview', sign_off: '?tab=overview',
   advance: '?tab=overview', internal_approval: '?tab=commercial',
+  // the routing change is decided on the assessments tab; a 'not feasible'
+  // answer on the overview's why-blocked panel (override, reroute, reject)
+  routing_deviation_decision: '?tab=assessments', not_feasible: '?tab=overview',
 };
 
 /** Where a task row leads: its tab, plus `task=<kind>` so the change opens
@@ -347,6 +350,12 @@ const taskHint = (task: ChangeTask): string | null => {
         : t('tasks.hint.sign_off');
     case 'internal_approval':
       return t('tasks.hint.internal_approval');
+    case 'routing_deviation_decision':
+      return t('tasks.hint.routing_deviation_decision');
+    case 'not_feasible':
+      return task.departments?.length
+        ? t('tasks.hint.not_feasible').replace('{x}', task.departments.join(', '))
+        : task.hint ?? null;
     case 'advance':
       return t('tasks.hint.advance').replace(
         '{x}', task.to_status ? (STATUS_LABELS[task.to_status] ?? humanize(task.to_status)) : '-');

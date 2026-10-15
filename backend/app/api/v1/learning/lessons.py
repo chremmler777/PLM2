@@ -663,13 +663,13 @@ async def create_lesson(
     if lesson.owner_id and lesson.owner_id != current_user.id:
         await NotificationService.notify_users(
             db, [lesson.owner_id],
-            title=f"You own a new lesson: {lesson.title}",
+            title=f"You own a new lesson: {lesson.title}", kind="task_assigned",
             link="/lessons",
         )
     if lesson.department_id:
         await NotificationService.notify_departments(
             db, [lesson.department_id],
-            title=f"New lesson awaiting review: {lesson.title}",
+            title=f"New lesson awaiting review: {lesson.title}", kind="task_new",
             link="/lessons",
         )
     await db.commit()
@@ -800,7 +800,7 @@ async def update_lesson(
     if lesson.owner_id and lesson.owner_id != previous_owner and lesson.owner_id != current_user.id:
         await NotificationService.notify_users(
             db, [lesson.owner_id],
-            title=f"You are now the owner of lesson: {lesson.title}",
+            title=f"You are now the owner of lesson: {lesson.title}", kind="task_assigned",
             link="/lessons",
         )
 
@@ -934,7 +934,7 @@ async def transition_lesson(
     if body.status == "verification" and lesson.department_id:
         await NotificationService.notify_departments(
             db, [lesson.department_id],
-            title=f"Lesson awaiting verification: {lesson.title}",
+            title=f"Lesson awaiting verification: {lesson.title}", kind="task_new",
             link="/lessons",
         )
     if body.status == "closed":
@@ -979,7 +979,7 @@ async def create_action(
     if action.assignee_id and action.assignee_id != current_user.id:
         await NotificationService.notify_users(
             db, [action.assignee_id],
-            title=f"Action assigned to you on lesson: {lesson.title}",
+            title=f"Action assigned to you on lesson: {lesson.title}", kind="task_assigned",
             body=action.description,
             link="/lessons",
         )
@@ -1020,7 +1020,7 @@ async def update_action(
         if body.assignee_id != current_user.id:
             await NotificationService.notify_users(
                 db, [body.assignee_id],
-                title=f"Action assigned to you on lesson: {lesson.title}",
+                title=f"Action assigned to you on lesson: {lesson.title}", kind="task_assigned",
                 body=action.description,
                 link="/lessons",
             )

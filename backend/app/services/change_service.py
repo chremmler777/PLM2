@@ -124,7 +124,8 @@ STAGE_TASK_TAB = {
     "escalate_risk": "implementation", "update_quote": "implementation",
     "sign_off": "overview", "internal_approval": "commercial",
     "validation_check": "release", "advance": "overview",
-    "deviation_decision": "overview",
+    "deviation_decision": "overview", "routing_deviation_decision": "assessments",
+    "not_feasible": "overview",
 }
 
 # A finished change's D1 master data and gates are the record: closed,
@@ -349,6 +350,32 @@ class ChangeService:
         lead asked (C6 fix 3), Quality for its rules, PM + Management for
         the commercial ones, the internal approvers for an internal Absorb."""
         from app.services.notification_service import NotificationService
+        ids = await ChangeService.override_decider_ids(session, change, dev, proposer_id)
+        if not ids:
+            return
+        from app.services.cm_rules import rule_label
+        what = (f"waives '{rule_label(dev.guard_key)}'" if dev.guard_key
+                else f"to '{dev.to_status}'")
+        from app.services.change_plan_service import ChangePlanService
+        asker = (await ChangePlanService._user_names(
+            session, [proposer_id])).get(proposer_id) or "Someone"
+        # an Absorb's note is price talk: the deciders read it in PLM2
+        why = ("" if dev.guard_key == "price_open" or not dev.reason
+               else f" Why: {dev.reason}")
+        await NotificationService.notify_once(
+            session, sorted(ids), kind="deviation_pending",
+            subject_key=f"dev:{dev.id}",
+            title=f"Decision needed: {change.change_number}",
+            body=f"{asker} asks for an override ({what}); it needs your OK.{why}",
+            link=f"/changes/{change.id}",
+        )
+
+    @staticmethod
+    async def override_decider_ids(session: AsyncSession, change: ChangeRequest,
+                                   dev, proposer_id: Optional[int]) -> set[int]:
+        """The people told an override needs their OK (and reminded when it
+        is due): the lead as before; with COMMERCIAL_V2 the rule's deciders
+        (cm_rules.decider_group). Never the proposer."""
         from app.services import cm_switches
         ids: set[int] = set()
         if not cm_switches.on("COMMERCIAL_V2"):
@@ -375,24 +402,7 @@ class ChangeService:
             ids.discard(proposer_id)
             if group == APPROVER:
                 ids.discard(change.raised_by)
-        if not ids:
-            return
-        from app.services.cm_rules import rule_label
-        what = (f"waives '{rule_label(dev.guard_key)}'" if dev.guard_key
-                else f"to '{dev.to_status}'")
-        from app.services.change_plan_service import ChangePlanService
-        asker = (await ChangePlanService._user_names(
-            session, [proposer_id])).get(proposer_id) or "Someone"
-        # an Absorb's note is price talk: the deciders read it in PLM2
-        why = ("" if dev.guard_key == "price_open" or not dev.reason
-               else f" Why: {dev.reason}")
-        await NotificationService.notify_once(
-            session, sorted(ids), kind="deviation_pending",
-            subject_key=f"dev:{dev.id}",
-            title=f"Decision needed: {change.change_number}",
-            body=f"{asker} asks for an override ({what}); it needs your OK.{why}",
-            link=f"/changes/{change.id}",
-        )
+        return ids
 
     @staticmethod
     def transition_deviation_refusal(change: ChangeRequest, dev, user) -> Optional[str]:
@@ -3198,6 +3208,10 @@ class ChangeService:
         from app.services.change_people import holds_lead
         from app.services.meeting_service import MeetingService
         tasks: list[dict] = []
+        if user.effective_role == "viewer":
+            # read-only (auth.py refuses every write): no row it could not
+            # act on, not even as the change lead (R24)
+            return tasks
         dep_ids = set(dep_ids or ())
 
         async def _base(c) -> dict:
@@ -3314,6 +3328,10 @@ class ChangeService:
                     .order_by(ChangeChangelog.id))).all():
                 hold_reason[cid] = notes
 
+        # a lead who cannot act is no main owner: Project Management's (R18)
+        idle_lead = (await ChangeService.leadless_ids(
+            db, [c for c in open_changes if c.status in ("captured", "on_hold")])
+            if is_pm else set())
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -3334,7 +3352,7 @@ class ChangeService:
                               # backs the lead up (R5: one main per row)
                               **({"main_user": (c.lead_id, c.lead_name or "")}
                                  if run_team_kickoff and not holds_lead(c, user)
-                                 else {}),
+                                 and c.id not in idle_lead else {}),
                               # project team: then it is PM's role, not Sales'
                               "role_department_id": (dept_by_name.get("Project Manager")
                                                      if pm_row else None)})
@@ -3345,7 +3363,7 @@ class ChangeService:
                               "reason": hold_reason.get(c.id),
                               **({"main_user": (c.lead_id, c.lead_name or "")}
                                  if c.lead_id is not None and not holds_lead(c, user)
-                                 else {}),
+                                 and c.id not in idle_lead else {}),
                               "role_department_id": dept_by_name.get("Project Manager")})
             elif c.status == "scoping":
                 if is_pm:
@@ -3769,9 +3787,61 @@ class ChangeService:
                     "since": dev.proposed_at,
                 })
 
+        # The two holds of closing the assessment that no other row names
+        # (R18): a pending routing change (its decider, as the notice and
+        # user_can_decide_deviation pick it: the lead, else Project
+        # Management members who filed none of it) and a 'not feasible'
+        # answer (the run team decides: override, reroute or reject).
+        judged = [c for c in open_changes if c.status in ("in_assessment", "costing")]
+        if judged:
+            from app.models.change import ChangeRouting
+            from app.services.change_people import is_acting
+            from app.services.change_routing_service import _pending_proposers
+            idle = await ChangeService.leadless_ids(db, judged)
+            dept_names: Optional[dict] = None
+            for c in judged:
+                routing = c.routing
+                if routing is not None and routing.deviation_status == "pending_approval":
+                    who = await _pending_proposers(db, routing)
+                    lead_free = c.lead_id is not None and c.lead_id not in who
+                    if user.id not in who and (
+                            (holds_lead(c, user) if lead_free and c.id not in idle
+                             else is_pm_member and not is_acting(user))):
+                        out.append({
+                            **await base(c), "kind": "routing_deviation_decision",
+                            "label": "Decide added department",
+                            "target_tab": "assessments", "needs_you": True,
+                            "since": routing.updated_at,
+                        })
+                no = [a for a in c.assessments if a.verdict == "not_feasible"]
+                to = ChangeService.next_step_target(c)
+                if not no or any(d.guard_key == "not_feasible" and d.to_status == to
+                                 and d.status in ("pending", "approved")
+                                 for d in c.transition_deviations):
+                    continue
+                if not (holds_lead(c, user) or (c.id in idle and is_pm_member)):
+                    continue
+                if dept_names is None:
+                    dept_names = dict((await db.execute(
+                        select(Department.id, Department.name))).all())
+                names = sorted({dept_names.get(a.department_id, "A department")
+                                for a in no})
+                out.append({
+                    **await base(c), "kind": "not_feasible",
+                    "departments": names, "target_tab": "overview",
+                    "hint": (f"{', '.join(names)} says not feasible: decide: "
+                             "override, reroute or reject"),
+                    "since": max((a.submitted_at for a in no if a.submitted_at),
+                                 default=None),
+                })
+
         # Sign-offs mirror the gates (R24/R30): bound to the latest offer
         # with COMMERCIAL_V2 (HARD #4), a missing signature only without it;
         # after approval only while RELEASE_V2 holds them at release (#9).
+        # Only where the gate is live and the screen offers the sign button
+        # (R5): quoted after the customer's yes (the Offer tab, Why blocked)
+        # and in_validation (Why blocked's release row). A signature owed
+        # in approved / in_implementation turns into a row at validation.
         release_rule = cm_switches.on("RELEASE_V2")
         bound = cm_switches.on("COMMERCIAL_V2")
 
@@ -3781,8 +3851,7 @@ class ChangeService:
                 return False
             if c.status == "quoted":
                 return c.customer_response == "accepted"
-            return release_rule and c.status in (
-                "approved", "in_implementation", "in_validation")
+            return release_rule and c.status == "in_validation"
         signable = [c for c in open_changes if _signable(c)] \
             if (is_pm_member or is_quality) else []
         latest_by: dict = {}
@@ -3810,7 +3879,8 @@ class ChangeService:
                 if other == user.id:
                     continue      # 4-eyes: the other side's signer
                 # owed since the customer's yes, or since the newer offer
-                # it must be signed for went out (a re-sign)
+                # it must be signed for went out (a re-sign); at validation
+                # not before the change got there (annotate_tasks)
                 since = max((t for t in (c.customer_response_at,
                                          getattr(latest, "sent_at", None))
                              if t is not None), default=None)
@@ -3876,17 +3946,22 @@ class ChangeService:
     async def advance_tasks(db: AsyncSession, user: User, changes: list, base,
                             *, is_pm_member: Optional[bool] = None) -> list[dict]:
         """C3: "Ready: move it on" for the run team (the lead; Project
-        Management when the change has no lead) once next_step_missing
-        lists nothing that holds the onward hop."""
+        Management when the change has no lead, or a lead who cannot act:
+        read-only or inactive, R18) once next_step_missing lists nothing
+        that holds the onward hop."""
         from app.services.change_people import holds_lead
         if user.effective_role == "viewer":
             return []         # a read-only lead: the hop would be refused (R24)
         if is_pm_member is None:
             is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
-        mine = [c for c in changes
+        cand = [c for c in changes
                 if c.status in ChangeService.ADVANCE_STATUSES
-                and (holds_lead(c, user) or (c.lead_id is None and is_pm_member))
                 and not ChangeService._advance_held(c)]
+        orphaned: set = set()
+        if is_pm_member:
+            orphaned = await ChangeService.leadless_ids(
+                db, [c for c in cand if not holds_lead(c, user)])
+        mine = [c for c in cand if holds_lead(c, user) or c.id in orphaned]
         if not mine:
             return []
         # owed since the change last moved (the last blocker cleared): its
@@ -3904,6 +3979,24 @@ class ChangeService:
             out.append({**await base(c), "kind": "advance", "to_status": nxt["to"],
                         "label": ChangeService.ADVANCE_VERBS.get(nxt["to"]),
                         "target_tab": "overview", "since": last.get(c.id)})
+        return out
+
+    @staticmethod
+    async def leadless_ids(db: AsyncSession, changes: list) -> set:
+        """Ids of the changes whose onward hop has no lead to make it: no
+        lead, or a lead who cannot act (inactive, or read-only: role viewer
+        with no active PLM department, _writers). Project Management takes
+        those (R18). One query at most, only for stored viewers."""
+        out = {c.id for c in changes if c.lead_id is None
+               or (c.lead is not None and not c.lead.is_active)}
+        viewers = {c.lead_id: c.lead for c in changes
+                   if c.id not in out and c.lead is not None
+                   and c.lead.role == "viewer"}
+        if viewers:
+            can = {u.id for u in await ChangeService._writers(
+                db, list(viewers.values()))}
+            out |= {c.id for c in changes
+                    if c.lead_id in viewers and c.lead_id not in can}
         return out
 
     #: The verb of each onward hop, the same as the cockpit's Next step
@@ -4105,7 +4198,7 @@ class ChangeService:
         # kind "routing_deviation_decision": somebody added a department to
         # the assessment (or otherwise changed the routing) and the decision
         # is this user's. Mirrors ChangeRoutingService.user_can_decide_deviation.
-        if change.status == "in_assessment":
+        if change.status in ("in_assessment", "costing"):
             from app.models.change import ChangeRouting
             from app.services.change_routing_service import (
                 ChangeRoutingService, _pending_proposers)
@@ -4118,7 +4211,9 @@ class ChangeService:
                     and ChangeRoutingService.user_can_decide_deviation(
                         change, routing, user.id,
                         acting=is_acting(user),
-                        proposers=await _pending_proposers(session, routing))):
+                        proposers=await _pending_proposers(session, routing),
+                        lead_idle=bool(await ChangeService.leadless_ids(
+                            session, [change])) and change.lead_id is not None)):
                 actions.append({
                     "kind": "routing_deviation_decision",
                     "label": "Decide added department",
@@ -5202,7 +5297,7 @@ class ChangeService:
             await NotificationService.notify_users(
                 session, [assignee_id],
                 title=f"Assessment assigned: {change.change_number}",
-                link=f"/changes/{change.id}")
+                link=f"/changes/{change.id}", kind="task_assigned")
         return a
 
     @staticmethod
@@ -5488,12 +5583,24 @@ class ChangeService:
         )
         return change
 
+    #: Where a PM / Quality signature may be given (COMMERCIAL_V2): the
+    #: quote (HARD #4) through validation (HARD #9 at release).
+    SIGNABLE_STATUSES = ("quoted", "approved", "in_implementation", "in_validation")
+
     @staticmethod
     async def sign_off(
         session: AsyncSession, change: ChangeRequest, role: str, user_id: int,
     ) -> ChangeRequest:
         if role not in SIGN_OFF_ROLES:
             raise ChangeError(f"Invalid sign-off role '{role}'")
+        # R25/R37: a signature is given from the quote on until release,
+        # never on a change still being scoped or one already done.
+        from app.services import cm_switches
+        if (cm_switches.on("COMMERCIAL_V2")
+                and change.status not in ChangeService.SIGNABLE_STATUSES):
+            raise ChangeError(
+                "A sign-off is given from 'quoted' until release; this change "
+                f"is '{change.status}'")
         other = change.quality_signed_by if role == "pm" else change.pm_signed_by
         if other is not None and other == user_id:
             raise ChangeError("PM and Quality sign-off must be different users")

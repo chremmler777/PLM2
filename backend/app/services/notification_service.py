@@ -24,11 +24,15 @@ class NotificationService:
         title: str,
         body: str | None = None,
         link: str | None = None,
+        kind: str | None = None,
     ) -> int:
-        """Create a notification per user. Returns how many were created."""
+        """Create a notification per user. Returns how many were created.
+        kind: what it is (mail_outbox.MAIL_KINDS decides what is mailed;
+        a kind-less notice is a badge only)."""
         unique_ids = set(user_ids)
         for user_id in unique_ids:
-            db.add(Notification(user_id=user_id, title=title, body=body, link=link))
+            db.add(Notification(user_id=user_id, title=title, body=body, link=link,
+                                kind=kind))
         if unique_ids:
             await db.flush()
         return len(unique_ids)
@@ -40,6 +44,7 @@ class NotificationService:
         title: str,
         body: str | None = None,
         link: str | None = None,
+        kind: str | None = None,
     ) -> int:
         """Notify every member of the given departments."""
         if not department_ids:
@@ -50,7 +55,8 @@ class NotificationService:
             )
         )
         member_ids = [u for (u,) in result.all()]
-        return await NotificationService.notify_users(db, member_ids, title, body, link)
+        return await NotificationService.notify_users(db, member_ids, title, body, link,
+                                                      kind=kind)
 
     @staticmethod
     async def notify_once(
@@ -159,7 +165,8 @@ class NotificationService:
                 return await NotificationService.notify_once(
                     db, ids, kind=kind, subject_key=subject_key,
                     title=title, body=text, link=link)
-            return await NotificationService.notify_users(db, ids, title, text, link)
+            return await NotificationService.notify_users(db, ids, title, text, link,
+                                                          kind=kind)
 
         n = await _send(mains, body)
         by_main: dict[str, list[int]] = {}

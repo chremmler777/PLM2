@@ -7,20 +7,25 @@ the answer is given in PLM2, never by reply (reply-to auto-answer and
 30-minute batching: cut 2).
 
 Only the immediate class is mailed (spec §0 Notifications): a task newly
-yours, a decision needed, an escalation to acknowledge, and the daily digest
-(MAIL_KINDS; kind-less notices are the older direct task and assignment
-notices). "Everything else is a badge": due reminders, late notices,
-deadline alerts, FYI and stage-entry notices, decisions told back, and a
+yours (task_assigned: to you; task_new: to your department), a decision
+needed, an escalation to acknowledge, and the daily digests (MAIL_KINDS).
+"Everything else is a badge": due reminders, late notices, deadline alerts,
+FYI and stage-entry notices, decisions told back, kind-less notices and a
 backup's info copy are stamped and never mailed.
 
 Off unless settings.smtp_enabled. A notification goes out at most once
 (notifications.mailed_at); one already read in PLM2, older than MAX_AGE (a
 backlog from before SMTP was switched on) or for a user without an active
-account and address is stamped and skipped, never retried."""
+account and address is stamped and skipped, never retried. A hub account's
+bare username gets "@settings.mail_default_domain"; without that setting it
+is no address. A mail the relay refuses for its recipient or content is
+stamped and skipped too; only a relay that cannot be reached stops the run
+(tried again next run)."""
 from __future__ import annotations
 
 import asyncio
 import logging
+import email.errors
 import smtplib
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -36,12 +41,19 @@ from app.models.notification import Notification
 logger = logging.getLogger(__name__)
 
 MAX_AGE = timedelta(hours=24)
-#: The kinds that are mailed; None = a kind-less direct notice.
+#: The kinds that are mailed. A kind-less notice is a badge.
 MAIL_KINDS = frozenset({
-    None, "task_assigned", "deviation_pending", "routing_deviation_pending",
+    "task_assigned", "task_new", "deviation_pending", "routing_deviation_pending",
     "revision_intake", "change_review", "change_info_sent",
     "routing_late_assessment", "validation_issue_escalated", "overdue_digest",
+    "change_digest",
 })
+#: This mail only is refused (its recipient, its content or a header):
+#: stamped and skipped. Anything else (the relay unreachable, dropped,
+#: refusing our login or sender) stops the run; the row is tried again
+#: next run, at most for MAX_AGE.
+MAIL_REFUSED = (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError,
+                email.errors.MessageError, ValueError, TypeError)
 
 
 def mailable(n: Notification) -> bool:
@@ -59,6 +71,19 @@ def plm2_url(link: Optional[str]) -> str:
     base = (s.plm2_public_url or f"{s.frontend_url.rstrip('/')}/plm2").rstrip("/")
     path = link or "/my-tasks"
     return f"{base}{path if path.startswith('/') else '/' + path}"
+
+
+def address(email: Optional[str]) -> Optional[str]:
+    """The mail address of a user's stored e-mail; a hub account's bare
+    username ("christoph.demmler") gets the configured domain. None when
+    there is no address to send to."""
+    e = (email or "").strip()
+    if not e:
+        return None
+    if "@" in e:
+        return e
+    domain = (get_settings().mail_default_domain or "").strip().lstrip("@")
+    return f"{e}@{domain}" if domain else None
 
 
 def compose(n: Notification, to: str) -> EmailMessage:
@@ -96,21 +121,26 @@ async def send_pending(session: AsyncSession, *,
         .where(Notification.mailed_at.is_(None))
         .order_by(Notification.id).limit(BATCH))).all()
     sent = 0
-    for n, email, active in rows:
-        skip = (n.is_read or not mailable(n) or not active or not (email or "").strip()
+    stamped = 0
+    for n, stored, active in rows:
+        to = address(stored)
+        skip = (n.is_read or not mailable(n) or not active or to is None
                 or (n.created_at is not None and n.created_at < now - MAX_AGE))
         if not skip:
-            msg = compose(n, email.strip())
             try:
+                msg = compose(n, to)
                 if sender is not None:
                     sender(msg)
                 else:
                     await asyncio.to_thread(smtp_send, msg)
+                sent += 1
+            except MAIL_REFUSED as e:   # this mail only (recipient, header)
+                logger.warning(f"Notification mail {n.id} refused, skipped: {e}")
             except Exception as e:      # the relay is down: try again next run
-                logger.warning(f"Notification mail {n.id} not sent: {e}")
+                logger.warning(f"Notification mail {n.id} not sent, relay down: {e}")
                 break
-            sent += 1
         n.mailed_at = now
-    if rows:
+        stamped += 1
+    if stamped:
         await session.commit()
     return sent

@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # Absolute base of the PLM2 UI for links in mails ("Answer in PLM2:
     # <link>"); empty = frontend_url + "/plm2".
     plm2_public_url: str = ""
+    # Hub accounts carry their bare username as e-mail ("christoph.demmler"):
+    # the mail outbox appends "@<this>" to such an address; empty = an
+    # address without "@" is not mailed (the notice stays in PLM2).
+    mail_default_domain: str = ""
 
     notification_task_assigned: bool = True
     notification_task_completed: bool = True

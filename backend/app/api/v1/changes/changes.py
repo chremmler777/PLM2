@@ -409,10 +409,19 @@ async def my_change_tasks(
     # a released change gives, with no other stage builder run on it.
     # Only the caller's own (lead) or lead-less ones (Project Management):
     # advance_tasks decides the rest, never over every released change (R34).
+    # A lead who cannot act (read-only, inactive) counts as no lead (R18):
+    # Project Management's then, so its members read those too.
+    whose = (ChangeRequest.lead_id == current_user.id) | ChangeRequest.lead_id.is_(None)
+    if current_user.effective_role != "viewer" and await ChangeService.member_of(
+            db, current_user, "Project Manager"):
+        placed = (select(UserDepartment.user_id)
+                  .join(Department, Department.id == UserDepartment.department_id)
+                  .where(Department.is_active.is_(True)))
+        idle = select(User.id).where(User.is_active.is_(False)
+                                     | ((User.role == "viewer") & User.id.not_in(placed)))
+        whose = whose | ChangeRequest.lead_id.in_(idle)
     released = (await db.execute(_org_scope(
-        select(ChangeRequest).where(
-            ChangeRequest.status == "released",
-            (ChangeRequest.lead_id == current_user.id) | ChangeRequest.lead_id.is_(None)),
+        select(ChangeRequest).where(ChangeRequest.status == "released", whose),
         current_user))).scalars().all()
     if released:
         async def _ident(c):
