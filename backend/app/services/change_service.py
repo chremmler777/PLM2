@@ -1935,6 +1935,32 @@ class ChangeService:
         return starter > 0
 
     @staticmethod
+    async def in_internal_starter_department(session: AsyncSession,
+                                             user: User) -> bool:
+        """Member of a can_start_internal_change department (P3: Development,
+        Process Engineer, Tool Engineer). Membership only, no admin
+        shortcut: it also decides that the raiser leads the change."""
+        from app.services.workflow_service import WorkflowService
+        dept_ids = await WorkflowService.effective_department_ids(session, user)
+        if not dept_ids:
+            return False
+        return bool((await session.execute(
+            select(func.count()).select_from(Department).where(
+                Department.id.in_(dept_ids),
+                Department.can_start_internal_change.is_(True),
+            ))).scalar())
+
+    @staticmethod
+    async def user_can_start_internal_change(session: AsyncSession,
+                                             user: User) -> bool:
+        """P3: an internal change (the plant pays, no quote) may be started
+        by anyone who may start a change at all, and by the engineering
+        departments flagged can_start_internal_change."""
+        if await ChangeService.user_can_start_change(session, user):
+            return True
+        return await ChangeService.in_internal_starter_department(session, user)
+
+    @staticmethod
     async def user_can_sign_off(session: AsyncSession, user: User, role: str) -> bool:
         """Quality & PM sign-off are department-gated: role='quality' requires
         admin or 'Quality' membership, role='pm' requires admin or 'Project

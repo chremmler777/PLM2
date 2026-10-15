@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { btnPrimary } from '../common/buttonStyles';
 import { Check, X } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import { changesApi } from '../../api/changes';
 import { t } from '../../i18n/cmLabels';
 import { groupItems } from '../../lib/itemCategory';
 import type { ChangeType } from '../../types/change';
-import { useChangePermissions } from '../../hooks/queries/useCanStartChange';
+import { useChangePermissions, useInternalOnlyStarter } from '../../hooks/queries/useCanStartChange';
 import { FALLBACK_MOTHER_PLANTS } from '../../api/motherPlant';
 import DateInput from '../gantt/DateInput';
 import { useDialogFocus } from '../../hooks/useDialogFocus';
@@ -139,6 +139,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(true);
   // Third origin (spec §14): a change engineered and sold by the mother plant.
   const permissions = useChangePermissions();
+  // P3: Development, Process and Tool Engineer start internal changes only.
+  const internalOnly = useInternalOnlyStarter();
+  useEffect(() => { if (internalOnly) setCustomerRelevant(false); }, [internalOnly]);
   const motherPlants = permissions?.mother_plants ?? FALLBACK_MOTHER_PLANTS;
   const [fromMotherPlant, setFromMotherPlant] = useState(false);
   const [motherPlant, setMotherPlant] = useState<MotherPlantDraft>(
@@ -598,17 +601,21 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         <fieldset className="mb-6">
           <legend className="block text-sm text-slate-300 mb-1">{t('start.customerRelevant')}</legend>
           <div className="space-y-2">
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <label className={`flex items-start gap-2 text-sm ${internalOnly ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
               <input
                 type="radio"
                 name="sc-customer-relevant"
                 className="mt-1"
+                data-testid="sc-customer-change"
+                disabled={internalOnly}
                 checked={customerRelevant === true && !fromMotherPlant}
                 onChange={() => { setCustomerRelevant(true); setFromMotherPlant(false); }}
               />
               <span>
                 <span className="text-slate-100">{t('start.customerChange')}</span>
-                <span className="block text-xs text-slate-500">{t('start.customerRelevantYesHint')}</span>
+                <span className="block text-xs text-slate-500">
+                  {internalOnly ? t('start.customerSalesOnly') : t('start.customerRelevantYesHint')}
+                </span>
               </span>
             </label>
             <label className="flex items-start gap-2 text-sm cursor-pointer">

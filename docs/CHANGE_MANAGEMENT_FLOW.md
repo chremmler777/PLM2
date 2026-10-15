@@ -987,6 +987,17 @@ frozen for everyone. Every add and remove is in the changelog with the
 user and the part number. UI shows the responsible role as
 a badge on the stage (`StageResponsibleBadge.tsx`).
 
+**Internal starters (ECR-solid P3, decided 2026-10-14).** Members of a
+`can_start_internal_change` department (Development, Process Engineer, Tool
+Engineer; migration 117) may start an INTERNAL change and lead it: the
+create endpoint sets the raiser as lead unless Project Management named one.
+A customer change from them is refused (403, "Your department starts
+internal changes only"); the start dialog preselects "Internal change" and
+greys the customer option. `GET /changes/permissions` answers
+`can_start_internal_change`. Everyone else's rules are unchanged (Sales and
+PM start any change; an internal one raised by Sales is led by the project's
+PM).
+
 **Run team (ECR-solid C1, 2026-10-14, switch `COMMERCIAL_V2`).** The run
 team is the change lead (`holds_lead`: an admin acting as a department is not
 the lead), Project Management members and admins. Besides reject, cancel,

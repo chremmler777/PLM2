@@ -42,6 +42,12 @@ export const engineeringChapter: ContentChapter = {
             'and Packaging Engineer assess. Process Engineer is routed when the scoping meeting ' +
             'gives it a letter.',
         },
+        {
+          p:
+            'Development, Process Engineer and Tool Engineer may start an internal change, one the ' +
+            'plant pays for: "Start change", then "Internal change". You lead it. A customer change ' +
+            'is started by Sales or Project Management.',
+        },
       ],
     },
     {

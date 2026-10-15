@@ -373,6 +373,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.customerRelevant': { de: 'Wer trägt die Kosten?', en: 'Who carries the cost?' },
   'start.customerChange': { de: 'Kundenänderung', en: 'Customer change' },
   'start.internalChange': { de: 'Interne Änderung', en: 'Internal change' },
+  'start.customerSalesOnly': {
+    de: 'Kundenänderungen legt der Vertrieb oder das Projektmanagement an. Sie starten interne Änderungen und führen sie.',
+    en: 'Customer changes are started by Sales or Project Management. You start internal changes and lead them.',
+  },
   'start.customerRelevantYesHint': {
     de: 'Läuft über den Angebotsprozess: Kunde muss den Preis akzeptieren, bevor freigegeben wird.',
     en: 'Goes through the quote workflow: the customer must accept a price before approval.',
@@ -1279,8 +1283,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Open question:',
   },
   'start.salesOnly': {
-    de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an',
-    en: 'Only Sales or Project Management raises change requests',
+    de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an; Entwicklung, Prozess und Werkzeugtechnik legen interne an',
+    en: 'Only Sales or Project Management raises change requests; Development, Process and Tool Engineer raise internal ones',
   },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },

@@ -105,13 +105,25 @@ async def create_change(
     from app.services import mother_plants as mp
     from app.services.mother_plant_service import MotherPlantService
     mother_plant = body.origin == mp.MOTHER_PLANT
+    internal = not mother_plant and not body.customer_relevant
     allowed = (await MotherPlantService.may_start(db, current_user) if mother_plant
                else await ChangeService.user_can_start_change(db, current_user))
+    # P3: Development, Process Engineer and Tool Engineer start internal
+    # changes (never a customer one) and lead them.
+    engineering_raiser = (internal and await ChangeService
+                          .in_internal_starter_department(db, current_user))
+    if not allowed and engineering_raiser:
+        allowed = True
     if not allowed:
+        may_internal = (not mother_plant and await ChangeService
+                        .in_internal_starter_department(db, current_user))
         raise HTTPException(
             status_code=403,
             detail=("Only Project Management (or an admin) may raise a "
                     f"change from {mp.plant_name(body)}" if mother_plant else
+                    "Your department starts internal changes only: a customer "
+                    "change is raised by Sales or Project Management"
+                    if may_internal else
                     "Only an admin or a member of a department allowed to start "
                     "changes (e.g. Sales) may raise a change"))
     # The project must be one the caller can see (their organization; an
@@ -128,6 +140,10 @@ async def create_change(
     lead_id = body.lead_id
     if lead_id is not None and not await MeetingService.user_is_pm(db, current_user):
         lead_id = None
+    # P3: an internal change raised by engineering is led by its raiser
+    # (spec §0), unless Project Management named a lead.
+    if lead_id is None and engineering_raiser:
+        lead_id = current_user.id
     if lead_id is not None:
         await _require_org_user(db, lead_id, project_org)
     try:
@@ -212,6 +228,9 @@ async def change_permissions(
     from app.services.mother_plant_service import MotherPlantService
     return {
         "can_start_change": await ChangeService.user_can_start_change(db, current_user),
+        # P3: internal changes only (Development, Process, Tool Engineer).
+        "can_start_internal_change": await ChangeService.user_can_start_internal_change(
+            db, current_user),
         # Mother-plant side track (spec §14): Project Management (and
         # admin) only, and the configured plants (default first).
         "can_start_mother_plant": await MotherPlantService.may_start(db, current_user),

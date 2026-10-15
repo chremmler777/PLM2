@@ -15,6 +15,8 @@ import client from '../../api/client';
 
 export interface ChangePermissions {
   can_start_change: boolean;
+  /** P3: internal changes only (Development, Process Engineer, Tool Engineer). */
+  can_start_internal_change?: boolean;
   /** Mother-plant side track (spec §14): starters plus Project Management. */
   can_start_mother_plant?: boolean;
   mother_plants?: string[];
@@ -42,5 +44,12 @@ export function useChangePermissions(): ChangePermissions | undefined {
 /** A change may be started at all: an ordinary one, or one from the mother plant. */
 export function useCanStartChange(): boolean {
   const data = useChangePermissions();
-  return data?.can_start_change !== false || data?.can_start_mother_plant === true;
+  return data?.can_start_change !== false || data?.can_start_internal_change === true
+    || data?.can_start_mother_plant === true;
+}
+
+/** P3: the caller may start internal changes only (no customer change). */
+export function useInternalOnlyStarter(): boolean {
+  const data = useChangePermissions();
+  return data?.can_start_change === false && data?.can_start_internal_change === true;
 }

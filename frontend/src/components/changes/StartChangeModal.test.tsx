@@ -68,6 +68,37 @@ describe('StartChangeModal', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/42')
   })
 
+  it('P3: an internal-only starter gets internal preselected and cannot pick customer', async () => {
+    const base = clientMocks.get.getMockImplementation()!
+    clientMocks.get.mockImplementation((url: string) => url.includes('/changes/permissions')
+      ? Promise.resolve({ data: { can_start_change: false, can_start_internal_change: true,
+        can_start_mother_plant: false } })
+      : base(url))
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{
+      projectId: 1,
+      part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
+    }} />)
+    await screen.findByText('20-3450-001-0 - Clip')
+    const customer = await screen.findByTestId('sc-customer-change') as HTMLInputElement
+    await waitFor(() => expect(customer.disabled).toBe(true))
+    expect(screen.getByText(t('start.customerSalesOnly'))).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Flash on rib' } })
+    fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
+    await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ customer_relevant: false })))
+  })
+
+  it('a customer starter keeps the customer option', async () => {
+    const base = clientMocks.get.getMockImplementation()!
+    clientMocks.get.mockImplementation((url: string) => url.includes('/changes/permissions')
+      ? Promise.resolve({ data: { can_start_change: true, can_start_internal_change: true } })
+      : base(url))
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    const customer = await screen.findByTestId('sc-customer-change') as HTMLInputElement
+    expect(customer.disabled).toBe(false)
+    expect(customer.checked).toBe(true)
+  })
+
   it('shows the project PM as the default lead when the project has one', async () => {
     clientMocks.get.mockImplementation((url: string) => {
       if (url.includes('/plants/projects'))
