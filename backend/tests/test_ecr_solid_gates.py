@@ -916,3 +916,45 @@ async def test_acceptance_withdraws_a_pending_absorb(
                              headers=people["Management"][1])).json()
     rows = acts if isinstance(acts, list) else acts.get("actions", [])
     assert not any(a.get("deviation_id") == dev["id"] for a in rows)
+
+
+async def test_failed_check_switch_off_is_soft_again(
+        client, admin, seed, depts, session_factory, monkeypatch):
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert r.status_code == 400
+    assert r.headers.get("X-Deviation-Required") == "released"  # soft, as before
+
+
+async def test_internal_approval_switch_off_skips_the_costing_check(
+        client, admin, seed, depts, people, session_factory, costing_pending, monkeypatch):
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+    cid = await _change(client, admin, seed, session_factory, "costing",
+                        customer=False, raised_by=seed["engineer_id"])
+    r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
+                          json={"release_due_date": _DUE},
+                          headers=people["Project Manager"][1])
+    assert r.status_code == 200, r.text
+
+
+async def test_quality_decides_a_validation_override_into_release(
+        client, admin, seed, depts, people, session_factory):
+    from app.models.change_validation import ValidationCheck
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    async with session_factory() as s:
+        s.add(ValidationCheck(change_id=cid, department_id=depts["Tool Engineer"],
+                              check_key="weight", status="open"))
+        await s.commit()
+    lead = await login(client, "eng@test.io", admin=False)
+    r = await _propose(client, lead, cid, "released", guard_key="validation_open")
+    assert r.status_code == 200, r.text
+    dev = r.json()
+    assert dev["deciders"]["group"] == "quality"
+    r = await _decide(client, people["Project Manager"][1], cid, dev["id"])
+    assert r.status_code == 400  # NEGATIVE: PM is not Quality here
+    assert (await _decide(client, people["Quality"][1], cid, dev["id"])).status_code == 200
