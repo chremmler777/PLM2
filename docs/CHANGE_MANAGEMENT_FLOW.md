@@ -797,6 +797,18 @@ Switch `ASSESSMENT_V2` (migration 128).
   view (the P9 deputy) gets the fields without the amount. The saving per
   year is a price: non-price readers get it blanked. Switch off: release
   deadline only, as before.
+- **HARD #8 is bound to the amount approved** (review L5 loop 2): in
+  `costing` after the internal approval, a summation total above
+  `internal_approved_amount` (a reopened costing, C16's reopen, price on
+  estimate, a raised estimate or a new position) refuses `costing ->
+  approved` ("Costs rose after the internal approval: the approver approves
+  the new total first") and allows the approval again. A department
+  finalizing above the approved total withdraws the approval
+  (`internal_approval_withdrawn`, amount only in the redacted field) and
+  tells the approvers once (`internal_reapprove:<id>:<approved at>`, no
+  amount: an approver may lack price view); their card and task come back
+  by themselves. After `approved` the quote-vs-estimate rule (`price_open`)
+  takes over.
 
 ### Impact edits after the lock (ECR-solid C16, 2026-10-15)
 Switch `ASSESSMENT_V2`. Before C16 the run team changed the impacted set in

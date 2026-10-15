@@ -62,3 +62,87 @@ async def test_sales_notice_skips_other_orgs_and_inactive_accounts(
         told = (await s.execute(select(Notification.user_id).where(
             Notification.subject_key == f"estimate_low:{pid}"))).scalars().all()
     assert told == [sales_id]
+
+
+# --- R7: HARD #8 is bound to the amount approved ------------------------------
+
+async def _approve(client, cid, auth):
+    return await client.post(_u(cid, "/internal-approval"), json={
+        "release_due_date": DUE, "rationale": "saving", "volume": 120000,
+        "saving": 2400, "saving_basis": "calculated"}, headers=auth)
+
+
+async def _finalized(session_factory, cid, dept):
+    from app.models.change import ChangeAssessment
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid,
+            ChangeAssessment.department_id == dept))).scalars().first()
+        d = json.loads(a.details or "{}")
+        d["costing_finalized_at"] = datetime.utcnow().isoformat()
+        a.details = json.dumps(d)
+        await s.commit()
+
+
+async def test_costs_raised_after_the_internal_approval_need_it_again(
+        client, cc, seed, session_factory):
+    await _set(session_factory, cc["cid"], customer_relevant=False)
+    await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                    basis_ref=REF)
+    await _finalized(session_factory, cc["cid"], cc["shop"])
+    res = await _approve(client, cc["cid"], cc["lead"])
+    assert res.status_code == 200, res.text
+    # Toolshop reopens and adds an estimated position after the approval
+    res = await client.post(_u(cc["cid"], f"/costing/departments/{cc['shop']}/reopen"),
+                            json={"reason": "insert recut at FZ after all"},
+                            headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                    label="Insert recut at FZ", basis_ref=REF)
+    # negative: while it is still a draft, costing -> approved is refused
+    res = await client.post(_u(cc["cid"], "/transition"),
+                            json={"to_status": "approved"}, headers=cc["lead"])
+    assert res.status_code in (400, 409) and "Costs rose" in res.text, res.text
+    # finalized above the approved total: the approval is withdrawn
+    res = await client.post(
+        _u(cc["cid"], f"/costing/departments/{cc['shop']}/finalize"), headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cc["cid"])
+        assert c.internal_approved_at is None and c.internal_approved_amount is None
+        log = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == cc["cid"]))).scalars().all()
+        assert "internal_approval_withdrawn" in log
+        told = (await s.execute(select(Notification).where(
+            Notification.subject_key.like(f"internal_reapprove:{cc['cid']}:%")))
+        ).scalars().all()
+        assert [n.user_id for n in told] == [cc["lead_id"]]
+        assert not any(ch.isdigit() for ch in told[0].body)       # no amount
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["lead"])).json()
+    assert st["can_approve_internal"] is True
+    res = await client.post(_u(cc["cid"], "/transition"),
+                            json={"to_status": "approved"}, headers=cc["lead"])
+    assert res.status_code in (400, 409), res.text
+    # approved again on the new total: HARD #8 holds again
+    res = await _approve(client, cc["cid"], cc["lead"])
+    assert res.status_code == 200, res.text
+    assert res.json()["internal_approved_amount"] == 10000.0
+
+
+async def test_an_unchanged_total_keeps_the_approval(client, cc, seed, session_factory):
+    await _set(session_factory, cc["cid"], customer_relevant=False)
+    await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                    basis_ref=REF)
+    await _finalized(session_factory, cc["cid"], cc["shop"])
+    assert (await _approve(client, cc["cid"], cc["lead"])).status_code == 200
+    res = await client.post(_u(cc["cid"], f"/costing/departments/{cc['shop']}/reopen"),
+                            json={"reason": "typo in the label"}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    res = await client.post(
+        _u(cc["cid"], f"/costing/departments/{cc['shop']}/finalize"), headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cc["cid"])).internal_approved_at is not None
+    # negative: a second approval of the same total is still refused
+    res = await _approve(client, cc["cid"], cc["lead"])
+    assert res.status_code == 400 and "already approved" in res.text

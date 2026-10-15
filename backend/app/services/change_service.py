@@ -1507,7 +1507,9 @@ class ChangeService:
                         who=text.removeprefix("Costing not finalized: ") or None)
             elif pending:
                 add("costing_input", "todo", n=len(pending))
-            if to == "approved" and change.internal_approved_at is None:
+            if to == "approved" and (
+                    change.internal_approved_at is None
+                    or await ChangeService.internal_approval_outgrown(session, change)):
                 add("internal_approval", "hard",
                     who=await ChangeService.internal_approver_text(session, change))
         if to == "quoted" and change.quoted_price is None:
@@ -2075,6 +2077,10 @@ class ChangeService:
                 if change.internal_approved_at is None:
                     raise ChangeError(
                         "Internal cost approval is required before approval")
+                if await ChangeService.internal_approval_outgrown(session, change):
+                    raise ChangeError(
+                        "Costs rose after the internal approval: the approver "
+                        "approves the new total first (HARD #8)")
         if to_status in ("quoting", "quoted") and not change.customer_relevant:
             raise ChangeError(
                 "Internal changes skip the quote — record internal cost approval instead")
@@ -6159,6 +6165,54 @@ class ChangeService:
         return change
 
     @staticmethod
+    async def internal_approval_outgrown(session: AsyncSession,
+                                         change: ChangeRequest) -> bool:
+        """HARD #8 holds for the amount approved: in costing after the
+        internal approval, a total above the approved snapshot (a reopened
+        costing, a raised estimate, a new position) needs the approver
+        again (spec §5, R7). After approved, a quote above an estimate runs
+        through price_open instead (C25)."""
+        from app.services import cm_switches
+        if (change.customer_relevant or change.status != "costing"
+                or change.internal_approved_at is None
+                or change.internal_approved_amount is None
+                or not cm_switches.on("ASSESSMENT_V2")):
+            return False
+        from app.services.cost_service import CostService
+        total = (await CostService.summation(session, change))["totals"]["grand_total"]
+        return float(total or 0) > float(change.internal_approved_amount) + 0.005
+
+    @staticmethod
+    async def withdraw_outgrown_internal_approval(
+            session: AsyncSession, change: ChangeRequest, actor_id: Optional[int]) -> bool:
+        """A costing finalized above the approved total withdraws the
+        internal approval: the approver's card and task come back by
+        themselves (one notice per withdrawn approval, no amount in it:
+        an approver may lack price view)."""
+        if not await ChangeService.internal_approval_outgrown(session, change):
+            return False
+        old_at, old_amount = change.internal_approved_at, change.internal_approved_amount
+        change.internal_approved_at = None
+        change.internal_approved_by = None
+        change.internal_approved_amount = None
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "internal_approval_withdrawn",
+            "Internal approval withdrawn: costs rose after it; the approver "
+            "approves the new total", actor_id,
+            field_name="internal_approved_amount", old_value=old_amount)
+        from app.services.notification_service import NotificationService
+        ids = await ChangeService.internal_approver_ids(session, change)
+        await NotificationService.notify_once(
+            session, [i for i in ids if i != actor_id], kind="task_new",
+            subject_key=f"internal_reapprove:{change.id}:{int(old_at.timestamp())}",
+            title=f"Costs rose after your approval: approve again: "
+                  f"{change.change_number}"[:255],
+            body="A department finalized costs above the approved total.",
+            link=f"/changes/{change.id}?tab=costing")
+        return True
+
+    @staticmethod
     async def approve_internal_costs(
         session: AsyncSession, change: ChangeRequest, actor: User,
         *, note: Optional[str] = None,
@@ -6180,7 +6234,8 @@ class ChangeService:
         # split existed — they still need an internal cost approval to reach approved.
         if change.status not in ("costing", "quoted"):
             raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
-        if change.internal_approved_at is not None:
+        if (change.internal_approved_at is not None
+                and not await ChangeService.internal_approval_outgrown(session, change)):
             raise ChangeError("Internal costs are already approved")
         # HARD #8: never the raiser, whoever calls this.
         if change.raised_by == actor.id:

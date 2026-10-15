@@ -255,6 +255,8 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         actor.id, new_value={"department_id": department_id,
                              "status": change.status},
         for_department_id=department_id)
+    # HARD #8: finalized above the approved total -> the approver again
+    await ChangeService.withdraw_outgrown_internal_approval(session, change, actor.id)
     return anchor
 
 
