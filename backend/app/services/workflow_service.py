@@ -873,6 +873,26 @@ class WorkflowService:
         return results
 
     @staticmethod
+    async def owning_open_change(db: AsyncSession, instance_id: int) -> str | None:
+        """The change number when this instance is run by a change: its
+        engine workflow, or the approval of a revision the change created
+        while that change is still open. None otherwise (or not found)."""
+        from app.models.change import ChangeRequest, TERMINAL_STATUSES
+        instance = await db.get(WfInstance, instance_id)
+        if instance is None:
+            return None
+        if instance.change_id is not None:
+            change = await db.get(ChangeRequest, instance.change_id)
+            return change.change_number if change is not None else str(instance.change_id)
+        if instance.part_revision_id is not None:
+            rev = await db.get(PartRevision, instance.part_revision_id)
+            if rev is not None and rev.originating_change_id is not None:
+                change = await db.get(ChangeRequest, rev.originating_change_id)
+                if change is not None and change.status not in TERMINAL_STATUSES:
+                    return change.change_number
+        return None
+
+    @staticmethod
     async def cancel_workflow(
         db: AsyncSession,
         instance_id: int,

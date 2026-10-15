@@ -336,7 +336,18 @@ async def cancel_workflow(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cancel an active workflow instance."""
+    """Cancel an active workflow instance. Admin only, and never the
+    workflow of an open change: a change is withdrawn or rejected through
+    the change flow, which cancels its workflows itself."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Only an admin may cancel a workflow")
+    owner = await WorkflowService.owning_open_change(db, instance_id)
+    if owner is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This workflow belongs to change {owner}; withdraw or "
+                   "reject the change instead")
     try:
         instance = await WorkflowService.cancel_workflow(
             db,
