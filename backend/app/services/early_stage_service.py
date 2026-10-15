@@ -583,6 +583,18 @@ class EarlyStageService:
         if a.submitted_at is not None or a.verdict != "pending":
             raise ChangeError("This assessment is already submitted")
         details = a.details_dict
+        # A draft is free JSON: a key only the earlier checklist asked is kept
+        # only on a row that was started on it, else a crafted draft would
+        # buy the in-flight exemption from the verdict evidence (R4).
+        dept = await session.get(Department, a.department_id)
+        dept_name = dept.name if dept is not None else None
+        det = draft.get("details")
+        if (isinstance(det, dict) and isinstance(det.get("impacts"), list)
+                and not ChangeService._started_on_legacy_checklist(dept_name, details)):
+            legacy = ChangeService.legacy_only_keys(dept_name)
+            draft = {**draft, "details": {**det, "impacts": [
+                e for e in det["impacts"]
+                if not (isinstance(e, dict) and e.get("key") in legacy)]}}
         details["draft"] = {"data": draft,
                             "saved_at": datetime.utcnow().isoformat(),
                             "saved_by": user.id}

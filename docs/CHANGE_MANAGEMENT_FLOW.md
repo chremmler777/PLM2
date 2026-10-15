@@ -493,7 +493,9 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   reference for every No without one). "ok", "checked" and the like are
   refused; a number with its unit counts. **Feasible with conditions** names
   the condition (5+ characters). In flight: an answer started on the
-  earlier checklist resubmits as it is; the questionnaire "not impacted"
+  earlier checklist resubmits as it is (judged by what the row already
+  carries; a new draft is saved without keys only the earlier checklist
+  asked, so a crafted draft buys no exemption); the questionnaire "not impacted"
   (Packaging) is unchanged.
 - Switch off: assessment takes risks only, a member closes a check item with
   a resolution note, the checklist takes bare Yes / No.

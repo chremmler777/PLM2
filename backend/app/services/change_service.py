@@ -5238,13 +5238,19 @@ class ChangeService:
         return items
 
     @staticmethod
+    def legacy_only_keys(dept_name: Optional[str]) -> set:
+        """Keys only the earlier checklist asked this department."""
+        return ({i[0] for i in checklist.LEGACY_ITEMS}
+                - checklist.keys_for(dept_name))
+
+    @staticmethod
     def _started_on_legacy_checklist(dept_name: Optional[str],
                                      stored: Optional[dict]) -> bool:
         """True when the answers already stored on the row (its answer or
         its kept draft) carry a key only the earlier checklist asked. The
-        incoming payload is not read: it is what is being judged."""
-        legacy_only = ({i[0] for i in checklist.LEGACY_ITEMS}
-                       - checklist.keys_for(dept_name))
+        incoming payload is not read: it is what is being judged. A draft
+        only keeps a legacy key the row already carried (save_draft)."""
+        legacy_only = ChangeService.legacy_only_keys(dept_name)
 
         def keys(entries) -> set:
             return {e.get("key") for e in entries or []

@@ -84,3 +84,45 @@ async def test_switch_off_takes_the_bare_checklist(client, tab, monkeypatch):
     monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     res = await _submit(client, tab, answered(DEPT, refs=False))
     assert res.status_code == 200, res.text
+
+
+async def test_a_crafted_legacy_draft_buys_no_exemption(client, tab, session_factory):
+    """R4: the in-flight exemption reads only what the row already carried;
+    a draft with a key only the earlier checklist asked is cleaned of it."""
+    url = f"/api/v1/changes/{tab['cid']}/assessments"
+    from sqlalchemy import select as _select
+    async with session_factory() as s:
+        aid = (await s.execute(_select(ChangeAssessment.id).where(
+            ChangeAssessment.change_id == tab["cid"]))).scalar_one()
+    res = await client.put(f"{url}/{aid}/draft", json={"draft": {"details": {
+        "impacts": [{"key": "dimensional_risk", "answer": "no"},
+                    {"key": "tool_modification", "answer": "no"}]}}},
+        headers=tab["auth"])
+    assert res.status_code == 200, res.text
+    kept = res.json()["draft"]["details"]["impacts"]
+    assert [e["key"] for e in kept] == ["tool_modification"]
+    # negative: the evidence rule still applies
+    res = await _submit(client, tab, answered(DEPT, refs=False))
+    assert res.status_code == 400 and "Impact no" in res.json()["detail"]
+    # and the payload's own legacy key does not buy it either
+    res = await _submit(client, tab, answered(DEPT, refs=False) + [
+        {"key": "dimensional_risk", "answer": "no"}])
+    assert res.status_code == 400 and "Impact no" in res.json()["detail"]
+
+
+async def test_a_row_started_on_the_earlier_checklist_keeps_its_exemption(
+        client, tab, session_factory):
+    """In flight: a draft stored before the evidence rule (legacy key on the
+    row) still submits the earlier set without references."""
+    import json as _json
+    from sqlalchemy import select as _select
+    from app.services import assessment_checklist as checklist
+    legacy = [{"key": k, "answer": "no"} for k, *_ in checklist.LEGACY_ITEMS]
+    async with session_factory() as s:
+        a = (await s.execute(_select(ChangeAssessment).where(
+            ChangeAssessment.change_id == tab["cid"]))).scalar_one()
+        a.details = _json.dumps({"draft": {"data": {"details": {"impacts": legacy}},
+                                           "saved_at": "2026-10-01T08:00:00"}})
+        await s.commit()
+    res = await _submit(client, tab, legacy)
+    assert res.status_code == 200, res.text
