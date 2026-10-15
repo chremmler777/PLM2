@@ -287,7 +287,11 @@ export const changesApi = {
   updateCostingOffer: (id: number, oid: number, body: Partial<CostingOfferIn> & { favorite?: boolean }) =>
     client.put<CostingOffer>(`/v1/changes/${id}/costing/offers/${oid}`, body).then((r) => r.data),
   /** Spec §4 [R4]: the quote vs the estimate an offer / approval was given on. */
-  checkEstimate: (id: number, pid: number, body: { verdict: 'within' | 'above'; over?: number }) =>
+  checkEstimate: (id: number, pid: number, body: {
+    verdict: 'within' | 'above'; over?: number
+    /** no quote recorded yet: the one that came in, in the same step */
+    vendor_name?: string; quote_ref?: string; cost?: number
+  }) =>
     client.post<CostPosition>(`/v1/changes/${id}/costing/positions/${pid}/estimate-check`, body)
       .then((r) => r.data),
   // Sales' binding pick at quoting. Choosing clears the siblings server-side;

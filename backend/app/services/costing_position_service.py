@@ -620,7 +620,11 @@ class CostingPositionService:
         CostingPositionService._validate_offer(offer, position)
         session.add(offer)
         await session.flush()
+        was = position.estimate_check
         CostingPositionService._quote_after_commit(change, position, offer)
+        if was is None and position.estimate_check == "pending":
+            await CostingPositionService._tell_check_pending(
+                session, change, position, actor)
         if offer.favorite:
             await CostingPositionService._clear_other_favorites(
                 session, position, offer)
@@ -649,7 +653,11 @@ class CostingPositionService:
             offer.vendor_name = offer.vendor_name.strip()
         CostingPositionService._validate_offer(offer, position)
         await session.flush()
+        was = position.estimate_check
         CostingPositionService._quote_after_commit(change, position, offer)
+        if was is None and position.estimate_check == "pending":
+            await CostingPositionService._tell_check_pending(
+                session, change, position, actor)
         if offer.favorite:
             await CostingPositionService._clear_other_favorites(
                 session, position, offer)
@@ -768,6 +776,58 @@ class CostingPositionService:
 
     # ------------------------------------------------------------------
     @staticmethod
+    def estimate_check_open(change: ChangeRequest, position: CostingPosition) -> bool:
+        """Spec §4 [R4]: the quote-vs-estimate comparison can be made on this
+        position now: an estimated line, an offer sent or the internal
+        approval given on it, the comparison not yet made (pending: a quote
+        with a number came in; None: the department records the quote that
+        came in, in the same step). Any status from then on but closed."""
+        from app.services import cm_switches
+        return (cm_switches.on("ASSESSMENT_V2") and position.estimated
+                and position.estimate_check in (None, "pending")
+                and (change.quoted_at is not None
+                     or change.internal_approved_at is not None)
+                and change.status not in ("closed", "cancelled", "rejected"))
+
+    @staticmethod
+    async def checkable_position_ids(session: AsyncSession, change: ChangeRequest,
+                                     positions: list[CostingPosition],
+                                     actor: User) -> set[int]:
+        """The positions this caller may compare with their estimate (served
+        as can_check_estimate, R24: the same rule as POST .../estimate-check).
+        One membership lookup for the list."""
+        open_ = [p for p in positions
+                 if CostingPositionService.estimate_check_open(change, p)]
+        if not open_:
+            return set()
+        from app.services.meeting_service import MeetingService
+        from app.services.workflow_service import WorkflowService
+        if (actor.effective_role == "admin"
+                or await MeetingService.user_is_pm_member(session, actor)):
+            return {p.id for p in open_}
+        mine = set(await WorkflowService.effective_department_ids(session, actor))
+        return {p.id for p in open_ if p.department_id in mine}
+
+    @staticmethod
+    async def _tell_check_pending(session: AsyncSession, change: ChangeRequest,
+                                  position: CostingPosition, actor: User) -> None:
+        """A quote came in on the estimate after the offer or approval (spec
+        §4 [R4]): the department is asked once (task newly theirs), unless
+        it entered the quote itself."""
+        from app.services.notification_service import NotificationService
+        from app.services.workflow_service import WorkflowService
+        if await WorkflowService.actor_in_department(
+                session, actor, position.department_id):
+            return
+        await NotificationService.notify_departments_once(
+            session, [position.department_id], kind="task_new",
+            subject_key=f"estimate_check:{position.id}",
+            title=f"Quote vs your estimate: {change.change_number}"[:255],
+            body=(f"A supplier quote came in on '{position.label}', estimated at "
+                  f"{position.est_cost:.2f}: within +5 % or above by how much?"),
+            link=f"/changes/{change.id}?tab=costing")
+
+    @staticmethod
     def _quote_after_commit(change: ChangeRequest, position: CostingPosition,
                             offer: CostingOffer) -> None:
         """Spec §4 [R4]: an estimated position gets its supplier quote (an
@@ -784,14 +844,17 @@ class CostingPositionService:
     @staticmethod
     async def estimate_check(session: AsyncSession, change: ChangeRequest,
                              position: CostingPosition, actor: User,
-                             verdict: str, over: Optional[float] = None
+                             verdict: str, over: Optional[float] = None,
+                             quote: Optional[dict] = None,
                              ) -> CostingPosition:
         """Spec §4 [R4] "Quote vs your estimate: within +5 % / above by x",
         nothing preselected. Above: the price is open again (price_open,
         HARD #9 at close) and one task goes out: a customer change to Sales
         ("Estimate low by x: send supplement or absorb"), an internal one to
-        the approver and the lead ("re-approve or absorb"). The Absorb (or
-        the customer's acceptance of a supplement) clears it."""
+        the approver and the lead ("absorb with a reason"). The Absorb (or
+        the customer's acceptance of a supplement) clears it. With no check
+        pending yet, the department records the quote that came in (supplier,
+        quote number, amount) in the same step."""
         from app.services import cm_switches
         from app.services.change_service import ChangeService
         from app.services.early_costing import _may_act
@@ -801,7 +864,7 @@ class CostingPositionService:
             raise CostingPositionForbidden(
                 "Only a member of that department, Project Management or an "
                 "admin compares its quote with its estimate")
-        if position.estimate_check != "pending":
+        if not CostingPositionService.estimate_check_open(change, position):
             raise CostingPositionError(
                 "Nothing to compare: no quote came in on an estimate an offer "
                 "or approval was given on")
@@ -809,6 +872,26 @@ class CostingPositionService:
             raise CostingPositionError("Say how the quote compares: within or above")
         if verdict == "above" and not (over and over > 0):
             raise CostingPositionError("Above: by how much (the amount over the estimate)")
+        if position.estimate_check is None:
+            # the quote came in and is compared in one step: the supplier,
+            # its quote number (evidence) and the amount
+            from app.services.cm_rules import reference_refusal
+            q = quote or {}
+            if not (q.get("vendor_name") or "").strip():
+                raise CostingPositionError(
+                    "Name the supplier whose quote came in, with its quote number")
+            why = reference_refusal((q.get("quote_ref") or "").strip(),
+                                    "Give the supplier's quote number",
+                                    "Q-2026-4471")
+            if why:
+                raise CostingPositionError(why)
+            # compared right here: no "pending" ask for the department
+            position.estimate_check = verdict
+            await CostingPositionService.create_offer(
+                session, change, position,
+                {"vendor_name": q["vendor_name"], "cost": q.get("cost"),
+                 "quote_ref": q["quote_ref"], "quoted_on": q.get("quoted_on")},
+                actor)
         position.estimate_check = verdict
         position.estimate_over = float(over) if verdict == "above" else None
         await session.flush()
@@ -823,20 +906,34 @@ class CostingPositionService:
             change.price_open = True
             await session.flush()
             from app.services.notification_service import NotificationService
+            key = f"estimate_low:{position.id}"
+            body = f"'{position.label}' was estimated at {position.est_cost:.2f}."
+            link = f"/changes/{change.id}?tab=offer"
+            ids: list = []
             if change.customer_relevant:
-                ids = ([change.sales_owner_id] if change.sales_owner_id else [])
                 title = (f"Estimate low by {float(over):.2f}: send supplement or "
                          f"absorb: {change.change_number}")
+                if change.sales_owner_id:
+                    ids = [change.sales_owner_id]
+                else:
+                    # no Sales owner: all of Sales, as the other Sales notices
+                    from app.models.workflow import Department
+                    sales = (await session.execute(select(Department.id).where(
+                        Department.name == "Sales"))).scalar_one_or_none()
+                    if sales is not None:
+                        await NotificationService.notify_departments_once(
+                            session, [sales], kind="task_new", subject_key=key,
+                            title=title[:255], body=body, link=link)
             else:
                 ids = list(await ChangeService.internal_approver_ids(session, change))
                 ids += [change.lead_id] if change.lead_id else []
+                # the internal exit is the Absorb override, decided by the
+                # approver (HARD #9); there is no re-approval step
                 title = (f"Cost {float(over):.2f} above the approved estimate: "
-                         f"re-approve or absorb: {change.change_number}")
+                         f"absorb with a reason: {change.change_number}")
             await NotificationService.notify_once(
                 session, [i for i in ids if i and i != actor.id], kind="task_new",
-                subject_key=f"estimate_low:{position.id}", title=title[:255],
-                body=f"'{position.label}' was estimated at {position.est_cost:.2f}.",
-                link=f"/changes/{change.id}?tab=offer")
+                subject_key=key, title=title[:255], body=body, link=link)
         return position
 
     @staticmethod

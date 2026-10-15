@@ -1005,8 +1005,12 @@ export interface CostPosition {
   basis_part_number?: string | null;
   basis_differs?: string | null;
   estimated?: boolean;
-  estimate_check?: 'pending' | 'within' | 'above' | null;
+  /** settled: the open price an 'above' caused was absorbed or accepted. */
+  estimate_check?: 'pending' | 'within' | 'above' | 'settled' | null;
   estimate_over?: number | null;
+  /** R24: this caller may compare the quote with the estimate now (any
+   *  status after the offer or approval; with no quote yet it records it). */
+  can_check_estimate?: boolean;
   /** A key from the costing-tags reference, or a free-text word. */
   tag?: string | null;
   kind: CostPositionKind;

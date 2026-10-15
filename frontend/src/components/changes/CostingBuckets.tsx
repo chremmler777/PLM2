@@ -381,6 +381,7 @@ export default function CostingBuckets({
                       <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}
+                      v2={!!change.assessment_v2}
                       departmentName={deptName(id)}
                       partWeightG={change.estimated_part_weight_g}
                       editable={editable && isPm} />

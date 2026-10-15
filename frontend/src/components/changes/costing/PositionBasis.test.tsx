@@ -37,8 +37,10 @@ describe('PositionBasis (spec §4, C25)', () => {
   })
 
   it('asks quote vs estimate with nothing preselected; above needs the amount', async () => {
-    render(wrap(<PositionBasis changeId={7} editable onChanged={() => {}}
-      position={pos({ estimate_check: 'pending' })} />))
+    // quoted status: the costing window is closed (editable false), the
+    // served flag opens the form (R24)
+    render(wrap(<PositionBasis changeId={7} editable={false} onChanged={() => {}}
+      position={pos({ estimate_check: 'pending', can_check_estimate: true })} />))
     const save = screen.getByTestId('estcheck-save-9') as HTMLButtonElement
     expect(save.disabled).toBe(true)
     fireEvent.click(screen.getByTestId('estcheck-9-above'))
@@ -47,6 +49,32 @@ describe('PositionBasis (spec §4, C25)', () => {
     fireEvent.click(save)
     await waitFor(() => expect(changesApi.checkEstimate).toHaveBeenCalledWith(
       7, 9, { verdict: 'above', over: 300 }))
+  })
+
+  it('records the quote that came in with the comparison, in one step', async () => {
+    render(wrap(<PositionBasis changeId={7} editable={false} onChanged={() => {}}
+      position={pos({ estimate_check: null, can_check_estimate: true })} />))
+    const save = screen.getByTestId('estcheck-save-9') as HTMLButtonElement
+    fireEvent.click(screen.getByTestId('estcheck-9-within'))
+    expect(save.disabled).toBe(true)                 // no supplier, number, amount
+    fireEvent.change(screen.getByTestId('estcheck-vendor-9'), { target: { value: 'FZ' } })
+    fireEvent.change(screen.getByTestId('estcheck-ref-9'), { target: { value: 'ok' } })
+    fireEvent.change(screen.getByTestId('estcheck-amount-9'), { target: { value: '920' } })
+    expect(save.disabled).toBe(true)                 // a number that says nothing
+    fireEvent.change(screen.getByTestId('estcheck-ref-9'), { target: { value: 'FZ-Q-2240' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.checkEstimate).toHaveBeenCalledWith(
+      7, 9, { verdict: 'within', vendor_name: 'FZ', quote_ref: 'FZ-Q-2240', cost: 920 }))
+  })
+
+  it('no form without the served flag; a settled one reads settled', () => {
+    render(wrap(<PositionBasis changeId={7} editable onChanged={() => {}}
+      position={pos({ estimate_check: 'pending', can_check_estimate: false })} />))
+    expect(screen.queryByTestId('estcheck-9')).toBeNull()
+    cleanup()
+    render(wrap(<PositionBasis changeId={7} editable={false} onChanged={() => {}}
+      position={pos({ estimate_check: 'settled', estimate_over: 300 })} />))
+    expect(screen.getByTestId('basis-9').textContent).toContain('settled')
   })
 
   it('reads the basis in words, read-only for others', () => {

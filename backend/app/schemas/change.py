@@ -1082,6 +1082,8 @@ class CostingPositionResponse(BaseModel):
     estimated: bool = False
     estimate_check: Optional[str] = None
     estimate_over: Optional[float] = None
+    # R24: this caller may compare the quote with the estimate now
+    can_check_estimate: bool = False
     machine_rate_own: bool = False
     # The rate the line is priced with (spec §15 phase 2): the snapshot taken
     # when it was costed. rate None + rate_missing = "No rate in the cost
@@ -1341,6 +1343,11 @@ class EstimateCheckIn(BaseModel):
     """Spec §4 [R4]: quote vs the estimate: within +5 % / above by x."""
     verdict: str                      # within | above
     over: Optional[float] = None      # above: by how much (money)
+    # no quote recorded yet: the one that came in, in the same step
+    vendor_name: Optional[str] = None
+    quote_ref: Optional[str] = None
+    cost: Optional[float] = None
+    quoted_on: Optional[date] = None
 
 
 class CostLeadTimeIn(BaseModel):

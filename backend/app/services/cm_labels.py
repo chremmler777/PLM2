@@ -84,6 +84,8 @@ TASK_KIND = {
     "obtain_info": ("Answer the open question", "Offene Frage beantworten"),
     "estimate_low": ("Quote above the estimate: supplement or absorb",
                      "Angebot über Schätzung: Nachtrag oder übernehmen"),
+    "estimate_check": ("Quote vs your estimate",
+                       "Angebot gegen Ihre Schätzung"),
     "close_question": ("Settle the answered question", "Beantwortete Frage abschließen"),
     "send_rejection": ("Send rejection letter", "Absage senden"),
     "costing_input": ("Costing input", "Kalkulationsbeitrag"),

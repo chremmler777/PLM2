@@ -203,7 +203,8 @@ class CostingPosition(Base):
     # reference (estimate: earlier tool, supplier figure + date), the part it
     # is the same as and what differs; and, once an offer was sent or the
     # internal approval given on an estimate, how the quote compares
-    # (estimate_check pending | within | above, estimate_over = by how much).
+    # (estimate_check pending | within | above | settled: the open price it
+    # caused was absorbed or accepted; estimate_over = by how much).
     basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
     basis_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     basis_part_id: Mapped[int | None] = mapped_column(

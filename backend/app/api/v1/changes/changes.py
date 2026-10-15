@@ -481,7 +481,7 @@ async def my_change_tasks(
                t.get("department_id") if t["kind"] in ("costing_input", "costing_update",
                                                         "plan_feedback", "info_ack",
                                                         "release_check", "progress_report",
-                                                        "validation_check")
+                                                        "validation_check", "estimate_check")
                else None)
         if key in seen:
             continue
@@ -2472,7 +2472,12 @@ async def list_costing_positions(
     visible = await CostingPositionService.readable_department_ids(
         db, change, current_user)
     rows = await CostingPositionService.list_positions(db, change, visible)
-    return await CostingPositionService.serialize(db, rows)
+    out = await CostingPositionService.serialize(db, rows)
+    checkable = await CostingPositionService.checkable_position_ids(
+        db, change, rows, current_user)
+    for row in out:
+        row["can_check_estimate"] = row["id"] in checkable
+    return out
 
 
 @router.post("/{change_id}/costing/positions",
@@ -2588,7 +2593,9 @@ async def check_quote_against_estimate(
         raise HTTPException(status_code=404, detail=str(e))
     try:
         await CostingPositionService.estimate_check(
-            db, change, position, current_user, body.verdict, body.over)
+            db, change, position, current_user, body.verdict, body.over,
+            quote=body.model_dump(include={"vendor_name", "quote_ref", "cost",
+                                           "quoted_on"}))
     except CostingPositionForbidden as e:
         raise HTTPException(status_code=403, detail=str(e))
     except CostingPositionError as e:

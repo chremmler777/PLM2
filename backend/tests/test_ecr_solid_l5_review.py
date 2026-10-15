@@ -123,6 +123,9 @@ async def test_quality_reads_no_saving_and_no_quote_vs_estimate_money(
     _, _, quality = await _user(client, session_factory, seed, "q", "Quality")
     pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
                           estimate_check="pending")
+    async with session_factory() as s:      # an offer went to the customer
+        (await s.get(ChangeRequest, cc["cid"])).quoted_at = datetime.utcnow()
+        await s.commit()
     res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/estimate-check"),
                             json={"verdict": "above", "over": 4200}, headers=cc["dale"])
     assert res.status_code == 200, res.text
@@ -157,3 +160,110 @@ async def test_estimate_checked_text_keeps_the_verdict():
     assert desc == "Quote vs estimate on 'Insert': above"
     assert redact_value({"position_id": 1, "verdict": "above", "over": 4200.0},
                         "estimate_checked")["over"] is None
+
+
+# --- C25: quote vs estimate after the offer or approval ----------------------
+
+async def _set(session_factory, cid, **fields):
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        for k, v in fields.items():
+            setattr(c, k, v)
+        await s.commit()
+
+
+async def test_pm_enters_the_quote_after_the_offer_and_the_department_is_asked(
+        client, cc, seed, session_factory):
+    """R5/R18: in quoted status the department has no costing window; the
+    pending check is its task, it is told once, and it can answer."""
+    _, _, quality = await _user(client, session_factory, seed, "q2", "Quality")
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"])
+    await _set(session_factory, cc["cid"], status="quoted", quoted_at=datetime.utcnow())
+    res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/offers"), json={
+        "vendor_name": "FZ", "cost": 5100.0, "quote_ref": "FZ-Q-2231"},
+        headers=cc["lead"])
+    assert res.status_code == 201, res.text
+    async with session_factory() as s:
+        told = (await s.execute(select(Notification.user_id).where(
+            Notification.subject_key == f"estimate_check:{pid}"))).scalars().all()
+        assert told == [cc["dale_id"]]
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=cc["dale"])).json()
+    row = next(t for t in tasks if t["kind"] == "estimate_check")
+    assert row["change_id"] == cc["cid"] and row["target_tab"] == "costing"
+    assert row["kind_label"] == "Quote vs your estimate"
+    rows = (await client.get(_u(cc["cid"], "/costing/positions"), headers=cc["dale"])).json()
+    assert next(r for r in rows if r["id"] == pid)["can_check_estimate"] is True
+    # negative: Quality is served no form and may not answer
+    rows = (await client.get(_u(cc["cid"], "/costing/positions"), headers=quality)).json()
+    assert all(not r["can_check_estimate"] for r in rows)
+    url = _u(cc["cid"], f"/costing/positions/{pid}/estimate-check")
+    assert (await client.post(url, json={"verdict": "within"},
+                              headers=quality)).status_code == 403
+    res = await client.post(url, json={"verdict": "within"}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=cc["dale"])).json()
+    assert not [t for t in tasks if t["kind"] == "estimate_check"]
+
+
+async def test_the_department_records_the_quote_and_compares_in_one_step(
+        client, cc, seed, session_factory):
+    """After approval, no Sales owner: the department records the quote that
+    came in with its number, says 'above by x'; all of Sales is told."""
+    sales_id, _, sales = await _user(client, session_factory, seed, "sa", "Sales")
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"])
+    await _set(session_factory, cc["cid"], status="approved",
+               quoted_at=datetime.utcnow(), sales_owner_id=None)
+    rows = (await client.get(_u(cc["cid"], "/costing/positions"), headers=cc["dale"])).json()
+    assert next(r for r in rows if r["id"] == pid)["can_check_estimate"] is True
+    url = _u(cc["cid"], f"/costing/positions/{pid}/estimate-check")
+    # negative: no supplier, a quote number that says nothing
+    res = await client.post(url, json={"verdict": "above", "over": 4200}, headers=cc["dale"])
+    assert res.status_code == 400 and "supplier" in res.json()["detail"]
+    res = await client.post(url, json={"verdict": "above", "over": 4200,
+                                       "vendor_name": "FZ", "quote_ref": "ok",
+                                       "cost": 9200}, headers=cc["dale"])
+    assert res.status_code == 400 and "quote number" in res.json()["detail"]
+    res = await client.post(url, json={"verdict": "above", "over": 4200,
+                                       "vendor_name": "FZ", "quote_ref": "FZ-Q-2240",
+                                       "cost": 9200}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["estimate_check"] == "above"
+    assert [o["quote_ref"] for o in body["offers"]] == ["FZ-Q-2240"]
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cc["cid"])).price_open is True
+        told = (await s.execute(select(Notification.user_id).where(
+            Notification.subject_key == f"estimate_low:{pid}"))).scalars().all()
+        assert told == [sales_id]
+        # the department entered it itself: no "asked" notice to it
+        asked = (await s.execute(select(Notification.user_id).where(
+            Notification.subject_key == f"estimate_check:{pid}"))).scalars().all()
+        assert asked == []
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+    assert any(t["kind"] == "estimate_low" for t in tasks)
+    # settled (Absorb or acceptance): a later open price brings no old task
+    from app.services.change_service import ChangeService
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cc["cid"])
+        await ChangeService._settle_estimate_checks(s, c)
+        c.price_open = True          # e.g. a scope change after approval
+        await s.commit()
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
+    assert not [t for t in tasks if t["kind"] == "estimate_low"]
+    # negative: answered once, closed
+    rows = (await client.get(_u(cc["cid"], "/costing/positions"), headers=cc["dale"])).json()
+    assert next(r for r in rows if r["id"] == pid)["can_check_estimate"] is False
+
+
+async def test_internal_wording_offers_absorb_only(client, cc, seed, session_factory):
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                          estimate_check="pending")
+    await _set(session_factory, cc["cid"], customer_relevant=False, status="approved",
+               internal_approved_at=datetime.utcnow())
+    res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/estimate-check"),
+                            json={"verdict": "above", "over": 500}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        titles = (await s.execute(select(Notification.title).where(
+            Notification.subject_key == f"estimate_low:{pid}"))).scalars().all()
+        assert titles and all("re-approve" not in t and "absorb" in t for t in titles)

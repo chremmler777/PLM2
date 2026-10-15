@@ -8,7 +8,10 @@
  * - Vendor quote: each offer's quote number, date and validity; finalize
  *   wants the number and the quote file on the counted offer.
  * - A quote that came in after an offer or approval on the estimate: "Quote
- *   vs your estimate: within +5 % / above by x", nothing preselected.
+ *   vs your estimate: within +5 % / above by x", nothing preselected. Served
+ *   per position (can_check_estimate) in any status from then on, also when
+ *   the costing window is closed; with no quote recorded yet the same form
+ *   takes the supplier, its quote number and the amount (one step).
  */
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
@@ -42,6 +45,11 @@ export function PositionBasis({ changeId, position: p, editable, onChanged, impa
   const [differs, setDiffers] = useState(p.basis_differs ?? '')
   const [verdict, setVerdict] = useState<'' | 'within' | 'above'>('')
   const [over, setOver] = useState('')
+  const [vendor, setVendor] = useState('')
+  const [quoteRef, setQuoteRef] = useState('')
+  const [amount, setAmount] = useState('')
+  // no quote recorded yet: the one that came in goes with the comparison
+  const recordsQuote = p.estimate_check !== 'pending'
   const save = useMutation({
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, mode === 'estimate'
       ? { basis: 'estimate', basis_ref: ref.trim() || null }
@@ -52,7 +60,9 @@ export function PositionBasis({ changeId, position: p, editable, onChanged, impa
   })
   const check = useMutation({
     mutationFn: () => changesApi.checkEstimate(changeId, p.id, {
-      verdict: verdict as 'within' | 'above', ...(verdict === 'above' ? { over: Number(over) } : {}) }),
+      verdict: verdict as 'within' | 'above', ...(verdict === 'above' ? { over: Number(over) } : {}),
+      ...(recordsQuote ? { vendor_name: vendor.trim(), quote_ref: quoteRef.trim(),
+        cost: Number(amount) } : {}) }),
     onSuccess: onChanged,
     onError: (e: unknown) => { toastError(e, t('basis.failed')) },
   })
@@ -98,9 +108,23 @@ export function PositionBasis({ changeId, position: p, editable, onChanged, impa
       {p.basis === 'quote' && (p.offers ?? []).map((o) => (
         <QuoteRef key={o.id} changeId={changeId} offer={o} editable={editable} onChanged={onChanged} />
       ))}
-      {p.estimate_check === 'pending' && editable && (
+      {p.can_check_estimate && (
         <div className="flex flex-wrap items-center gap-2 rounded border border-amber-700/60 bg-amber-950/30 p-1.5"
           data-testid={`estcheck-${p.id}`}>
+          {recordsQuote && (
+            <>
+              <span className="text-amber-200">{t('basis.quoteIn')}</span>
+              <input className={`${input} w-28`} value={vendor} aria-label={t('basis.vendor')}
+                placeholder={t('basis.vendor')} data-testid={`estcheck-vendor-${p.id}`}
+                onChange={(e) => setVendor(e.target.value)} />
+              <input className={`${input} w-28`} value={quoteRef} aria-label={t('basis.quoteRef')}
+                placeholder={t('basis.quoteRef')} data-testid={`estcheck-ref-${p.id}`}
+                onChange={(e) => setQuoteRef(e.target.value)} />
+              <input type="number" min={0} className={`${input} w-24`} value={amount}
+                aria-label={t('basis.amount')} placeholder={t('basis.amount')}
+                data-testid={`estcheck-amount-${p.id}`} onChange={(e) => setAmount(e.target.value)} />
+            </>
+          )}
           <span className="text-amber-200">{t('basis.checkAsk')}</span>
           {(['within', 'above'] as const).map((v) => (
             <label key={v} className="inline-flex items-center gap-1 text-slate-200">
@@ -115,12 +139,16 @@ export function PositionBasis({ changeId, position: p, editable, onChanged, impa
               data-testid={`estcheck-over-${p.id}`} onChange={(e) => setOver(e.target.value)} />
           )}
           <button type="button" className={btnSm.primary} data-testid={`estcheck-save-${p.id}`}
-            disabled={!verdict || (verdict === 'above' && !(Number(over) > 0)) || check.isPending}
+            disabled={!verdict || (verdict === 'above' && !(Number(over) > 0)) || check.isPending
+              || (recordsQuote && (!vendor.trim() || quoteRef.trim().length < 5 || amount === ''))}
             onClick={() => check.mutate()}>{t('basis.save')}</button>
         </div>
       )}
       {p.estimate_check === 'above' && (
         <span className="text-amber-200">{t('basis.above').replace('{x}', String(p.estimate_over ?? ''))}</span>
+      )}
+      {p.estimate_check === 'settled' && (
+        <span className="text-slate-400">{t('basis.settled').replace('{x}', String(p.estimate_over ?? ''))}</span>
       )}
     </div>
   )

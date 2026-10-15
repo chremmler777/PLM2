@@ -124,7 +124,7 @@ STAGE_TASK_TAB = {
     "publish_plan": "implementation", "progress_report": "implementation",
     "escalate_risk": "implementation", "update_quote": "implementation",
     "sign_off": "overview", "internal_approval": "commercial",
-    "estimate_low": "commercial",
+    "estimate_low": "commercial", "estimate_check": "costing",
     "validation_check": "release", "advance": "overview",
     "deviation_decision": "overview", "routing_deviation_decision": "assessments",
     "not_feasible": "overview",
@@ -572,6 +572,7 @@ class ChangeService:
             # (HARD #9's exit), so the override is used up at once.
             dev.status = "consumed"
             change.price_open = False
+            await ChangeService._settle_estimate_checks(session, change)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "deviation_decided",
@@ -3317,7 +3318,7 @@ class ChangeService:
                 a.get("department_id") if kind in (
                     "costing_input", "costing_update", "plan_feedback",
                     "info_ack", "release_check", "progress_report",
-                    "validation_check") else None)
+                    "validation_check", "estimate_check") else None)
 
     @staticmethod
     async def stage_tasks(db: AsyncSession, user: User, open_changes: list,
@@ -3466,6 +3467,19 @@ class ChangeService:
             db, [c.id for c in open_changes
                  if c.status in ("in_assessment", "costing")], "costing")
             if cm_switches.on("ASSESSMENT_V2") and dep_ids else {})
+        # spec §4 [R4]: a quote came in on an estimate after the offer or
+        # approval; the department compares it (one query for the list)
+        pending_checks: dict[int, list] = {}
+        if cm_switches.on("ASSESSMENT_V2") and dep_ids:
+            from app.models.change_cost import CostingPosition as _CP
+            live_ids = [c.id for c in open_changes
+                        if c.status not in ("rejected", "on_hold")]
+            if live_ids:
+                for p in (await db.execute(select(_CP).where(
+                        _CP.change_id.in_(live_ids),
+                        _CP.department_id.in_(dep_ids),
+                        _CP.estimate_check == "pending"))).scalars().all():
+                    pending_checks.setdefault(p.change_id, []).append(p)
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -3771,6 +3785,20 @@ class ChangeService:
                         **await _base(c), **item, "hint": item["label"],
                     })
 
+            by_dept: dict[int, list] = {}
+            for p in pending_checks.get(c.id, []):
+                by_dept.setdefault(p.department_id, []).append(p)
+            for d, ps in by_dept.items():
+                tasks.append({
+                    **await _base(c), "kind": "estimate_check",
+                    "department_id": d,
+                    "hint": "Quote vs your estimate on "
+                            + ", ".join(f"'{p.label}'" for p in ps)
+                            + ": within +5 % or above by how much?",
+                    "since": min(p.updated_at for p in ps),
+                    "target_tab": "costing",
+                })
+
             # Spec §4 [R4]: a quote came in above the estimate an offer or
             # the internal approval was given on: one task while the price is
             # open (Sales: send a supplement or absorb; internal: the
@@ -3789,7 +3817,8 @@ class ChangeService:
                             "hint": (f"Estimate low by {total:.2f}: send a "
                                      "supplement or absorb" if c.customer_relevant
                                      else f"Cost {total:.2f} above the approved "
-                                     "estimate: re-approve or absorb (reason)"),
+                                     "estimate: absorb with a reason (the "
+                                     "approver decides)"),
                             "since": max((p.updated_at for p in over), default=None),
                             "target_tab": "offer",
                         })
@@ -5023,6 +5052,23 @@ class ChangeService:
         return sorted(set(rows))
 
     @staticmethod
+    async def _settle_estimate_checks(session: AsyncSession,
+                                      change: ChangeRequest) -> None:
+        """The open price an 'above' quote caused is settled (Absorb, or
+        the customer accepted the offer pricing it): those positions read
+        'settled', so a later price_open for another cause (a scope change
+        after approval, start at risk) does not bring back their old
+        'Estimate low' task."""
+        from sqlalchemy import update as _update
+        from app.models.change_cost import CostingPosition
+        await session.execute(
+            _update(CostingPosition)
+            .where(CostingPosition.change_id == change.id,
+                   CostingPosition.estimate_check == "above")
+            .values(estimate_check="settled")
+            .execution_options(synchronize_session="fetch"))
+
+    @staticmethod
     async def _positions_above(session: AsyncSession, change: ChangeRequest) -> list:
         """Positions whose quote came in above the estimate (spec §4 [R4])."""
         from app.models.change_cost import CostingPosition
@@ -6013,6 +6059,7 @@ class ChangeService:
         if response == "accepted" and change.price_open:
             # HARD #9's exit: the customer accepted the offer that prices it.
             change.price_open = False
+            await ChangeService._settle_estimate_checks(session, change)
             from app.services.cm_rules import ABSORB_RULE
             await ChangeService._load_deviations(session, change)
             for d in change.transition_deviations:

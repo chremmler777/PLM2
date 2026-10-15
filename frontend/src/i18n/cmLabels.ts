@@ -1001,6 +1001,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'summation.grams': { de: 'g', en: 'g' },
   'tasks.kind.costing_input': { de: 'Kosten erfassen', en: 'Enter costs' },
   'tasks.kind.estimate_low': { de: 'Angebot über Schätzung: Nachtrag oder übernehmen', en: 'Quote above the estimate: supplement or absorb' },
+  'tasks.kind.estimate_check': { de: 'Angebot gegen Ihre Schätzung', en: 'Quote vs your estimate' },
   'tasks.kind.create_quote': { de: 'Angebot erstellen', en: 'Create quote' },
   'tasks.hint.create_quote': {
     de: 'Angebot aus der Kostenzusammenfassung erstellen',
@@ -2863,6 +2864,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'basis.check.above': { de: 'darüber um', en: 'above by' },
   'basis.overBy': { de: 'Betrag', en: 'Amount' },
   'basis.above': { de: 'Angebot {x} über der Schätzung: Preis offen', en: 'Quote {x} above the estimate: price open' },
+  'basis.settled': { de: 'Angebot {x} über der Schätzung: erledigt', en: 'Quote {x} above the estimate: settled' },
+  'basis.quoteIn': { de: 'Lieferantenangebot eingegangen?', en: 'Supplier quote came in?' },
+  'basis.vendor': { de: 'Lieferant', en: 'Supplier' },
+  'basis.amount': { de: 'Angebotsbetrag', en: 'Quoted amount' },
   // --- spec §5 internal approval card -------------------------------------------
   'internal.cost': { de: 'Kosten', en: 'Cost' },
   'internal.estimateBanner': { de: 'Werkzeugkosten GESCHÄTZT: {x}', en: 'Tool cost ESTIMATE: {x}' },

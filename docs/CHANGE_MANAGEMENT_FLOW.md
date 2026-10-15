@@ -744,15 +744,24 @@ Switch `ASSESSMENT_V2` (migration 127).
 - **Quote vs your estimate** (spec [R4]): an offer with a quote number on a
   position that had an estimate, after an offer went to the customer
   (`quoted_at`) or the internal approval was given, marks the position
-  `estimate_check = pending`; the department answers, nothing preselected,
-  *within +5 %* or *above by x* (`POST /costing/positions/{id}/estimate-check`,
-  members, PM, admin). Above sets `price_open` (HARD #9 at close) and one
-  task: customer change, the Sales owner (Sales sees it) *"Estimate low by x:
-  send a supplement or absorb"*; internal, the approver and the lead *"Cost x
-  above the approved estimate: re-approve or absorb (reason)"* (task
-  `estimate_low`, told once `estimate_low:<position>`). Absorb (or the
-  customer's acceptance) clears `price_open` and the task. The automatic
-  comparison is cut 2.
+  `estimate_check = pending`; the department is told once
+  (`estimate_check:<position>`, unless it entered the quote itself) and gets
+  the task *"Quote vs your estimate"* (`estimate_check`, costing tab), and
+  answers, nothing preselected, *within +5 %* or *above by x*
+  (`POST /costing/positions/{id}/estimate-check`, members, PM, admin), in any
+  status from then on: the costing window does not apply. A quote that
+  reached the department directly is recorded in the same step (supplier,
+  quote number of 5+ characters, amount: the offer is created on the
+  position). The positions list serves `can_check_estimate` with the same
+  rule. Above sets `price_open` (HARD #9 at close) and one
+  task: customer change, the Sales owner (no Sales owner: all of Sales; Sales
+  sees it) *"Estimate low by x: send a supplement or absorb"*; internal, the
+  approver and the lead *"Cost x above the approved estimate: absorb with a
+  reason"* (the approver decides the Absorb; there is no re-approval step)
+  (task `estimate_low`, told once `estimate_low:<position>`). Absorb (or the
+  customer's acceptance) clears `price_open` and marks those positions
+  `settled`, so a later open price for another cause does not bring their
+  task back. The automatic comparison is cut 2.
 
 ### Close costing: ready to quote, the internal approval card (ECR-solid §5, 2026-10-15)
 Switch `ASSESSMENT_V2` (migration 128).

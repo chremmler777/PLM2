@@ -269,7 +269,7 @@ const TASK_TAB: Record<string, string> = {
   index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
   need_by_tell: '', set_quote_deadline: '', pick_impacted: '?tab=impacted',
   send_rejection: '?tab=scoping',
-  costing_input: '?tab=costing', estimate_low: '?tab=commercial',
+  costing_input: '?tab=costing', estimate_low: '?tab=commercial', estimate_check: '?tab=costing',
   create_quote: '?tab=commercial',
   // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
   // publishes from the same card.
