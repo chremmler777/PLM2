@@ -11,7 +11,8 @@ import { auditValueLabel, humanize } from '../../lib/humanLabels'
 const FIELD_WORDS: Record<string, (v: string) => string> = {
   channel: (v) => (t(`channel.${v}`) === `channel.${v}` ? humanize(v) : t(`channel.${v}`)),
   decision: (v) => ({ proceed: t('meeting.proceed'), reject: t('meeting.reject'),
-    needs_info: t('meeting.needsInfo') } as Record<string, string>)[v] ?? humanize(v),
+    // R37: the meeting outcome reads as its button does ("Not yet")
+    needs_info: t('meeting.notYet') } as Record<string, string>)[v] ?? humanize(v),
   kind: humanize, phase: humanize, answer: humanize, origin: humanize, branch: humanize,
   rasic_letter: (v) => v,
 }

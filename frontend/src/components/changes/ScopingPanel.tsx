@@ -106,6 +106,11 @@ export default function ScopingPanel(
   const motherPlant = change.origin === 'mother_plant'
   // HARD #7: a held flip goes back to internal only by Sales' answer
   const flipLocked = flipHolds(change)
+  // R37 same words everywhere: with SCOPING_V2 the meeting's needs_info is
+  // "Not yet" on the button, its dialog and the record
+  const decisionLabel = (d: string) =>
+    (d === 'needs_info' && change.scoping_v2 === true && !motherPlant
+      ? t('meeting.notYet') : DECISION_LABEL[d]) ?? d
   // C33 (served switch SCOPING_V2): questions and check items, 'Not yet'.
   const v2 = change.scoping_v2 === true && !motherPlant
   const qc = useQueryClient()
@@ -455,7 +460,7 @@ export default function ScopingPanel(
         </span>
         {m.decision ? (
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
-            {DECISION_LABEL[m.decision] ?? m.decision}
+            {decisionLabel(m.decision)}
           </span>
         ) : recordOpen && motherPlant ? (
           <span className="flex flex-wrap items-center justify-end gap-2">
@@ -678,10 +683,12 @@ export default function ScopingPanel(
         onConfirm={() => { setConfirmSent(false); markSent.mutate() }} />
       <ReasonDialog
         open={pending !== null}
-        title={pending?.decision === 'reject' ? t('meeting.rejectTitle') : t('meeting.needsInfoTitle')}
+        title={pending?.decision === 'reject' ? t('meeting.rejectTitle')
+          : v2 ? t('meeting.notYetTitle') : t('meeting.needsInfoTitle')}
         warning={pending?.decision === 'reject' ? t('meeting.rejectWarning') : t('meeting.needsInfoWarning')}
         label={pending?.decision === 'reject' ? t('meeting.rejectLabel') : t('meeting.needsInfoLabel')}
-        submitLabel={pending?.decision === 'reject' ? t('meeting.reject') : t('meeting.needsInfo')}
+        submitLabel={pending?.decision === 'reject' ? t('meeting.reject')
+          : v2 ? t('meeting.notYet') : t('meeting.needsInfo')}
         danger={pending?.decision === 'reject'}
         onSubmit={(reason) => {
           if (pending) decide.mutate({ ...pending, reason })
@@ -832,7 +839,7 @@ export default function ScopingPanel(
                     </span>
                     {m.decision && (
                       <span className="px-1.5 py-0 rounded-full bg-slate-700 text-slate-300">
-                        {DECISION_LABEL[m.decision] ?? m.decision}
+                        {decisionLabel(m.decision)}
                       </span>
                     )}
                     <span className="ml-auto text-slate-500">{t('scoping.showDetails')}</span>

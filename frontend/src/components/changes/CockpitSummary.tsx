@@ -459,7 +459,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const isScoping = change.status === 'scoping' && nextStep?.to === 'in_assessment'
   const nextTitle = isScoping ? t('scopingSteps.title') : t('next.title').replace('{status}', nextTo)
   const nextReady = isScoping ? t('scopingSteps.ready') : t('next.ready').replace('{status}', nextTo)
-  const nextNote = isScoping ? t('scopingSteps.note')
+  const nextNote = isScoping ? t(change.scoping_v2 ? 'scopingSteps.noteV2' : 'scopingSteps.note')
     : nextItems.some((i) => i.kind === 'hard') ? t('next.hardNote')
     // the footer follows the row kinds: a routing change is decided, not
     // overridden, so "each open rule needs an override" is not said of it
