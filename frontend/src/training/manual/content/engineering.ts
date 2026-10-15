@@ -100,7 +100,9 @@ export const engineeringChapter: ContentChapter = {
         },
         {
           points: [
-            ['"Yes"', 'opens "Remark": what has to be done. That line seeds your costing.'],
+            ['"Yes"', 'opens "Remark": what changes (part, tool, process sheet) and the evidence, e.g. "insert 3 re-cut, DRW-4471 rev C". You cannot submit a Yes without it. That line seeds your costing.'],
+            ['All "No"', 'means no impact for you: each No then needs its reference (the checklist, drawing or report that shows it). Type one reference and press "Use for every No without one"; change a row\'s own reference where it differs. "ok" or "checked" is refused.'],
+            ['"Feasible with conditions"', 'needs the condition in words ("if the tool is free in week 44").'],
             ['"External modification (supplier)"', 'Yes needs two documents on the row before you can submit: "Change presentation" (.ppt, .pptx or its .pdf export) and "Change RFQ" to the supplier (.pdf, .xlsx, .xls, .docx, .msg or .eml). Each has its own slot and reads "required" until filed. Your draft saves without them.'],
             ['"Rest to No"', 'sets only the rows you have not answered to No. Reviewers see how many came from it ("{n} × No ({b} set via Rest to No)"). Use it for rows you really checked.'],
             ['"+ Own item"', 'adds a row the list does not cover. It counts as Yes.'],

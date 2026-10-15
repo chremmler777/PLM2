@@ -78,13 +78,15 @@ async def test_complete_checklist_is_accepted_and_no_rows_are_kept(
     stored = await _stored(session_factory, tab)
     assert len(stored["impacts"]) == 10
     tool = next(e for e in stored["impacts"] if e["key"] == "tool_modification")
-    assert tool == {"key": "tool_modification", "answer": "yes", "impacted": True}
+    assert tool == {"key": "tool_modification", "answer": "yes", "impacted": True,
+                    "remark": "changes, see DRW-4471 rev C"}
     assert sum(1 for e in stored["impacts"] if e["answer"] == "no") == 9
 
 
 async def test_impacted_is_normalised_from_answer(client, admin_auth, tab, session_factory):
     impacts = answered(DEPT)
-    impacts[0].update(answer="yes", impacted=False)      # contradicting client
+    impacts[0].update(answer="yes", impacted=False,      # contradicting client
+                      remark="changes, see DRW-4471 rev C")
     impacts[1].update(answer="no", impacted=True)
     res = await _submit(client, admin_auth, tab, {"impacts": impacts})
     assert res.status_code == 200, res.text

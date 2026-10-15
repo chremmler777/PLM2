@@ -8,7 +8,8 @@ import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
 import ActivityChecklist, {
-  checklistProgress, docLabel, documentExtensions, impactsOf, missingDocuments, restToNo,
+  checklistProgress, docLabel, documentExtensions, impactsOf, missingDocuments, refToNos, restToNo,
+  saysWhat, verdictEvidence,
 } from './departmentForms/ActivityChecklist'
 import AttachmentDropzone from './AttachmentDropzone'
 import TransitionConfirmDialog from './TransitionConfirmDialog'
@@ -66,8 +67,11 @@ const VERDICTS = ['feasible', 'feasible_with_conditions', 'not_feasible'] as con
 export default function AssessmentSubmitForm({
   changeId, departmentId, departmentName, onDone, showEffort = true,
   changePptCount = 0, onVerdictChange, assessmentId, evidence = [], onUploaded,
-  serverDraft = null,
+  serverDraft = null, verdictRefs = false,
 }: {
+  /** Spec §4 (ASSESSMENT_V2): impact yes owes what + evidence per Yes,
+   *  impact no a reference per No, Feasible if... its condition. */
+  verdictRefs?: boolean
   changeId: number; departmentId: number; departmentName: string; onDone: () => void
   /** Internal change decks already filed against this assessment. A not-feasible
    *  verdict owes an explanation, so it cannot be sent without one — the same
@@ -177,7 +181,14 @@ export default function AssessmentSubmitForm({
       setFailure(toastError(e, 'Could not submit the assessment'))
     },
   })
-  const ready = !needsChangePpt && missingDocs.length === 0 && checklistDone && (notImpacted || (verdict !== ''
+  const evidenceNeed = verdictRefs && checklistDone && !notImpacted
+    ? verdictEvidence(defs, details) : null
+  const [noRef, setNoRef] = useState('')
+  const conditionMissing = verdictRefs && verdict === 'feasible_with_conditions'
+    && conditions.trim().length < 5
+  const ready = !needsChangePpt && missingDocs.length === 0 && checklistDone
+    && !(evidenceNeed && evidenceNeed.missing.length) && !conditionMissing
+    && (notImpacted || (verdict !== ''
     && (!showEffort || (effort !== '' && parseFloat(effort) >= 0))
     && (!Fields || details.impacted !== undefined)))
   return (
@@ -208,6 +219,26 @@ export default function AssessmentSubmitForm({
         <ActivityChecklist departmentId={departmentId} value={details} onChange={setDetails}
           changeId={changeId} assessmentId={assessmentId}
           attachments={evidence} onUploaded={onUploaded} highlightOpen={showOpen} />
+      )}
+      {evidenceNeed && evidenceNeed.missing.length > 0 && (
+        <div data-testid="verdict-evidence"
+          className="space-y-1 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-200">
+          <p>{(evidenceNeed.impact === 'yes' ? t('verdict.yesNeeds') : t('verdict.noNeeds'))
+            .replace('{x}', evidenceNeed.missing.join(', '))}</p>
+          {evidenceNeed.impact === 'no' && (
+            <div className="flex gap-2">
+              <input type="text" value={noRef} data-testid="verdict-noref"
+                onChange={(e) => setNoRef(e.target.value)} aria-label={t('verdict.noRef')}
+                placeholder={t('verdict.noRef')}
+                className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+              <button type="button" data-testid="verdict-noref-apply" disabled={!saysWhat(noRef)}
+                onClick={() => setDetails((d) => refToNos(d, noRef.trim()))}
+                className="rounded border border-slate-600 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+                {t('verdict.noRefApply')}
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {/* Not impacted answers everything: the rest of the form would only ask
           about work that does not exist. */}

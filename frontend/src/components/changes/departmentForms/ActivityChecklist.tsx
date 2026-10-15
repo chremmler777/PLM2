@@ -33,6 +33,8 @@ export interface ImpactItem {
   bulk?: boolean
   impacted: boolean
   remark?: string
+  /** Spec §4: with no Yes, the reference that shows this No. */
+  ref?: string
   choice?: string
   /** Legacy shape: answers stored against the activity catalog. */
   activity_id?: number | null
@@ -106,6 +108,46 @@ export function missingDocuments(
   return defs.flatMap((item) => (yes.has(item.key) ? item.requires_documents ?? [] : [])
     .filter((doc) => !filed.has(doc.kind))
     .map((doc) => ({ key: item.key, item, doc })))
+}
+
+const EMPTY_EVIDENCE = new Set(['ok', 'okay', 'tbd', 'na', 'n/a', 'done', 'checked', 'yes', 'no', 'none', '-'])
+
+/** Evidence in words, mirroring the backend (spec §4 verdict): a reference
+ *  that names something (5+ characters with a number, or two words), or a
+ *  number with its unit ("+0.4 s"). "ok", "checked" say nothing. */
+export function saysWhat(text: string | null | undefined): boolean {
+  const v = (text ?? '').trim()
+  if (!v || EMPTY_EVIDENCE.has(v.toLowerCase())) return false
+  const digit = /\d/.test(v)
+  if (digit && /[A-Za-zÄÖÜäöüß]/.test(v)) return true
+  const words = v.match(/[A-Za-z0-9ÄÖÜäöüß]+/g) ?? []
+  const empty = words.every((w) => EMPTY_EVIDENCE.has(w.toLowerCase()) || w.length <= 2)
+  return v.length >= 5 && !empty && (digit || words.length >= 2)
+}
+
+/** Spec §4 verdict: with a Yes, every Yes says what changes and its evidence
+ *  (remark); with none, every No of the served checklist carries its
+ *  reference. Returns the impact and the rows still owing it. */
+export function verdictEvidence(
+  defs: ChecklistItemDef[], value: Record<string, unknown> | null | undefined,
+): { impact: 'yes' | 'no'; missing: string[] } {
+  const rows = impactsOf(value).filter((i) => i.answer === 'yes' || i.answer === 'no')
+  const label = (i: ImpactItem) => defs.find((d) => d.key === i.key)?.label_en ?? i.label ?? i.key ?? ''
+  const yes = rows.filter((i) => i.answer === 'yes')
+  if (yes.length) {
+    return { impact: 'yes', missing: yes.filter((i) => !saysWhat(
+      i.key ? i.remark : `${i.label ?? ''} ${i.remark ?? ''}`)).map(label) }
+  }
+  const served = new Set(defs.map((d) => d.key))
+  const shown = new Set(rows.filter((i) => i.key && saysWhat(i.ref)).map((i) => i.key))
+  return { impact: 'no', missing: [...new Set(rows.filter((i) => i.key && served.has(i.key)
+    && !shown.has(i.key)).map(label))] }
+}
+
+/** Impact no: one reference for every No row that has none yet. */
+export function refToNos(value: Record<string, unknown>, ref: string): Record<string, unknown> {
+  return { ...value, impacts: impactsOf(value).map((i) => (
+    i.key && i.answer === 'no' && !saysWhat(i.ref) ? { ...i, ref } : i)) }
 }
 
 /** "Rest → No": every keyed row still unanswered becomes a marked No. */

@@ -102,12 +102,16 @@ async def test_several_risks_may_stand_at_once(client, admin_auth, assessing):
 
 
 async def test_a_direct_raise_can_only_be_a_risk(client, admin_auth, assessing):
-    """reject_proposal and needs_info are scoping's vocabulary — during
-    assessment a hand raise is a register entry, nothing else."""
-    for kind in ("reject_proposal", "needs_info"):
-        res = await _raise(client, admin_auth, assessing, kind=kind)
-        assert res.status_code == 400, res.text
-        assert "belong to scoping" in res.json()["detail"]
+    """reject_proposal is scoping's vocabulary — during assessment a hand
+    raise is a register entry. ECR-solid C8 (ASSESSMENT_V2): a needs_info
+    raise is a department's structured question, refused without its
+    picks (tests/test_ecr_solid_assessment_checks.py)."""
+    res = await _raise(client, admin_auth, assessing, kind="reject_proposal")
+    assert res.status_code == 400, res.text
+    assert "belong to scoping" in res.json()["detail"]
+    res = await _raise(client, admin_auth, assessing, kind="needs_info")
+    assert res.status_code == 400, res.text
+    assert "Pick what the question is about" in res.json()["detail"]
 
 
 async def test_the_risk_vocabulary_is_served(client, admin_auth):

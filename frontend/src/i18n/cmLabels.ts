@@ -572,7 +572,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'check.summary': { de: '{n} betroffen · {k} Risiken', en: '{n} impacted · {k} risks flagged' },
   'check.flagRisk': { de: '⚑ Risiko melden', en: '⚑ Flag risk' },
   'check.remark': { de: 'Bemerkung', en: 'Remark' },
-  'check.remarkPlaceholder': { de: 'Was ist zu tun?', en: 'What has to be done?' },
+  'check.remarkPlaceholder': { de: 'Was ändert sich, mit Nachweis (z. B. Einsatz 3 nacharbeiten, DRW-4471)', en: 'What changes, with evidence (e.g. insert 3 re-cut, DRW-4471)' },
   'check.addItem': { de: '+ Eigener Punkt', en: '+ Own item' },
   'check.itemLabel': { de: 'Eigener Punkt', en: 'Own item' },
   'check.itemPlaceholder': { de: 'Nicht im Katalog …', en: 'Not in the catalog …' },
@@ -2796,5 +2796,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'The question holds only your own submit. Customer or supplier: Sales gets the task with the mail text; our team: the lead.' },
   'achk.askPlaceholder': { de: 'Was genau fehlt Ihnen? Eine Zeile', en: 'What exactly do you need? One line' },
   'achk.cancel': { de: 'Abbrechen', en: 'Cancel' },
+  'verdict.yesNeeds': {
+    de: 'Auswirkung ja: bei jedem Ja in der Bemerkung sagen, was sich ändert (Teil, Werkzeug, Prozessblatt), mit Nachweis. Fehlt: {x}',
+    en: 'Impact yes: for each Yes, say in its remark what changes (part, tool, process sheet) and the evidence. Missing: {x}' },
+  'verdict.noNeeds': {
+    de: 'Keine Auswirkung: jedes Nein braucht seine Referenz (Checkliste, Zeichnung, Bericht). Fehlt: {x}',
+    en: 'No impact: each No needs its reference (checklist, drawing, report). Missing: {x}' },
+  'verdict.noRef': { de: 'Referenz, z. B. DRW-4471 Rev. C', en: 'Reference, e.g. DRW-4471 rev C' },
+  'verdict.noRefApply': { de: 'Für alle Nein ohne Referenz', en: 'Use for every No without one' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

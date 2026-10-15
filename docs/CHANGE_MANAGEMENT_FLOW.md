@@ -480,8 +480,19 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   with the mail text). The asker gets a badge when it is answered
   (`question_answered`). Per spec §0 the late clock is not paused: a wait
   on Sales counts as late.
+- **Verdict evidence** (spec §4, `_validate_verdict_evidence`), nothing
+  preselected: **impact yes** (any Yes row) = each Yes says in its remark
+  what changes (part, tool, process sheet) and the evidence ("insert 3
+  re-cut, DRW-4471 rev C"; a free line's label counts); **impact no** (every
+  row No) = each No of the department's current checklist carries its
+  reference (`ref`: checklist, drawing or report; the form offers one
+  reference for every No without one). "ok", "checked" and the like are
+  refused; a number with its unit counts. **Feasible with conditions** names
+  the condition (5+ characters). In flight: an answer started on the
+  earlier checklist resubmits as it is; the questionnaire "not impacted"
+  (Packaging) is unchanged.
 - Switch off: assessment takes risks only, a member closes a check item with
-  a resolution note.
+  a resolution note, the checklist takes bare Yes / No.
 
 ### Assessment documents & customer communication (2026-08-11)
 

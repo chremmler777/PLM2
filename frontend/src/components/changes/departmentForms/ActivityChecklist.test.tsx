@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ActivityChecklist, {
-  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, restToNo, riskKeyOf,
+  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, refToNos, restToNo,
+  riskKeyOf, saysWhat, verdictEvidence,
 } from './ActivityChecklist'
 
 const DEFS = [
@@ -256,5 +257,35 @@ describe('missingDocuments', () => {
     expect(missingDocuments([EXT], { impacts: [{ key: 'modification_external', answer: 'no',
       impacted: false }] }, [])).toEqual([])
     expect(missingDocuments([...DEFS, EXT], {}, [])).toEqual([])
+  })
+})
+
+describe('verdict evidence (spec §4)', () => {
+  it('says nothing with ok / checked, something with a ref or a number and unit', () => {
+    expect(saysWhat('ok')).toBe(false)
+    expect(saysWhat('checked')).toBe(false)
+    expect(saysWhat('asdfg')).toBe(false)
+    expect(saysWhat('DRW-4471 rev C')).toBe(true)
+    expect(saysWhat('+0.4s')).toBe(true)
+  })
+
+  it('impact no owes a reference per No row; one ref fills the rest', () => {
+    const value = { impacts: [
+      { key: 'cycle_time_change', answer: 'no', impacted: false },
+      { key: 'threed_change', answer: 'no', impacted: false, ref: 'DRW-1 rev A' }] }
+    expect(verdictEvidence(DEFS, value)).toEqual({ impact: 'no', missing: ['Cycle time change'] })
+    expect(verdictEvidence(DEFS, refToNos(value, 'CL-12 row 4')).missing).toEqual([])
+    // the row that had its own ref keeps it
+    const kept = (refToNos(value, 'CL-12 row 4').impacts as { ref?: string }[])[1].ref
+    expect(kept).toBe('DRW-1 rev A')
+  })
+
+  it('impact yes owes what changes per Yes, not refs on the No rows', () => {
+    const value = { impacts: [
+      { key: 'cycle_time_change', answer: 'yes', impacted: true, remark: 'ok' },
+      { key: 'threed_change', answer: 'no', impacted: false }] }
+    expect(verdictEvidence(DEFS, value)).toEqual({ impact: 'yes', missing: ['Cycle time change'] })
+    ;(value.impacts[0] as { remark: string }).remark = 'cycle +0.4 s, trial TR-22'
+    expect(verdictEvidence(DEFS, value).missing).toEqual([])
   })
 })

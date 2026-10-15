@@ -223,3 +223,38 @@ describe('BucketErrorBoundary', () => {
     spy.mockRestore()
   })
 })
+
+describe('AssessmentSubmitForm verdict evidence (spec §4, ASSESSMENT_V2)', () => {
+  afterEach(cleanup)
+  const submitBtn = () => screen.getByTestId('assessment-submit') as HTMLButtonElement
+
+  it('impact no holds the submit until every No has its reference', async () => {
+    render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2} verdictRefs
+      departmentName="Quality" showEffort={false} onDone={() => {}} />))
+    fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
+    fireEvent.click(await screen.findByTestId('check-no-cycle_time_change'))
+    fireEvent.click(screen.getByTestId('check-no-threed_change'))
+    expect(screen.getByTestId('verdict-evidence').textContent).toContain('Cycle time change')
+    expect(submitBtn().disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('verdict-noref'), { target: { value: 'ok' } })
+    expect((screen.getByTestId('verdict-noref-apply') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('verdict-noref'), { target: { value: 'CL-12 row 4' } })
+    fireEvent.click(screen.getByTestId('verdict-noref-apply'))
+    expect(screen.queryByTestId('verdict-evidence')).toBeNull()
+    expect(submitBtn().disabled).toBe(false)
+  })
+
+  it('feasible if... holds the submit until the condition is said', async () => {
+    render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2} verdictRefs
+      departmentName="Quality" showEffort={false} onDone={() => {}} />))
+    fireEvent.click(await screen.findByTestId('check-yes-cycle_time_change'))
+    fireEvent.change(screen.getByTestId('check-remark-cycle_time_change'),
+      { target: { value: 'cycle +0.4 s, TR-22' } })
+    fireEvent.click(screen.getByTestId('check-no-threed_change'))
+    fireEvent.change(screen.getByLabelText(/verdict/i),
+      { target: { value: 'feasible_with_conditions' } })
+    expect(submitBtn().disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText(t('conditions')), { target: { value: 'if tool free wk 44' } })
+    expect(submitBtn().disabled).toBe(false)
+  })
+})

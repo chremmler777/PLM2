@@ -24,6 +24,7 @@ from app.models.change import (
 )
 from app.models.entities import User, Project, Plant
 from app.services import assessment_checklist as checklist
+from app.services import cm_switches
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
 from app.models.workflow import Department
 
@@ -5051,6 +5052,59 @@ class ChangeService:
             if missing:
                 raise ChangeError(
                     "Checklist incomplete, unanswered: " + ", ".join(missing))
+            # In flight: an answer started on the earlier checklist resubmits
+            # as it is (the verdict evidence came with the new checklist).
+            if cm_switches.on("ASSESSMENT_V2") and not \
+                    ChangeService._started_on_legacy_checklist(dept_name, stored):
+                ChangeService._validate_verdict_evidence(dept_name, impacts)
+
+    @staticmethod
+    def _validate_verdict_evidence(dept_name: Optional[str], impacts: list) -> None:
+        """Spec §4 verdict (ASSESSMENT_V2): impact yes -> each Yes says what
+        changes (part, tool, process sheet) and its evidence (the row's
+        remark); impact no -> each No of the department's checklist carries
+        its reference (checklist, drawing, report: `ref`). Junk ("ok",
+        "checked") is refused like any evidence."""
+        from app.services.cm_rules import EMPTY_EVIDENCE, reference_refusal
+
+        def says_what(text: Optional[str]) -> bool:
+            """A reference, or a number with its unit ("+0.4 s")."""
+            v = (text or "").strip()
+            if not v or v.lower() in EMPTY_EVIDENCE:
+                return False
+            return reference_refusal(v) is None or (
+                any(c.isdigit() for c in v) and any(c.isalpha() for c in v))
+
+        def name(e: dict) -> str:
+            return (checklist.label_for(e["key"], dept_name) or e["key"]
+                    if e.get("key") else (e.get("label") or "a free line"))
+
+        answered = [e for e in impacts
+                    if isinstance(e, dict) and e.get("answer") in ("yes", "no")]
+        yes = [e for e in answered if e["answer"] == "yes"]
+        if yes:
+            # a free line's own label says what; its remark may add the rest
+            thin = [name(e) for e in yes if not says_what(
+                e.get("remark") if e.get("key")
+                else f"{e.get('label') or ''} {e.get('remark') or ''}")]
+            if thin:
+                raise ChangeError(
+                    "Impact yes: say for each Yes what changes (part, tool, "
+                    "process sheet) and the evidence, e.g. 'insert re-cut, DRW-4471 "
+                    "rev C': " + ", ".join(thin))
+            return
+        # the rows the current checklist asks (a legacy key rides along as
+        # it was stored)
+        current = checklist.keys_for(dept_name)
+        shown = {e["key"] for e in answered
+                 if e.get("key") in current and says_what(e.get("ref"))}
+        bare = list(dict.fromkeys(
+            name(e) for e in answered
+            if e.get("key") in current and e["key"] not in shown))
+        if bare:
+            raise ChangeError(
+                "Impact no: give each No its reference (the checklist, drawing "
+                "or report that shows it, e.g. 'DRW-4471 rev C'): " + ", ".join(bare))
 
     # The department extras the checklist carried before 2026-09-25 (on top
     # of the 13 common LEGACY_ITEMS); their keys live on in the new lists.
@@ -5344,6 +5398,12 @@ class ChangeService:
         # the customer is actually shown. A moldflow report proves the
         # department did the work; it is not the thing that gets sent out.
         # Every other verdict is ungated: evidence stays "if needed".
+        if (verdict == "feasible_with_conditions" and cm_switches.on("ASSESSMENT_V2")
+                and len((conditions or "").strip()) < 5):
+            # spec §4 "Feasible if...": the condition, in words
+            raise ChangeError(
+                "Feasible with conditions: say the condition (what must be true, "
+                "e.g. 'if the tool is free in week 44')")
         if verdict == "not_feasible":
             decks = 0
             if a.id is not None:
