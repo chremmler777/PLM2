@@ -13,7 +13,7 @@ import AssessmentBuckets from '../components/changes/AssessmentBuckets';
 import { resolveWaitStates, earlyStageWaits, deriveAssessmentState, revisionsInCheckOf } from '../lib/waitStates';
 import LeadPicker from '../components/changes/LeadPicker';
 import SalesOwnerPicker from '../components/changes/SalesOwnerPicker';
-import { mayTransition, mayMoveCarrier, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
+import { mayTransition, mayMoveCarrier, mayEditCapture, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
 import { useChangePermissions } from '../hooks/queries/useCanStartChange';
 import { plantText } from '../lib/plantName';
 import { assessmentVerdictLabel, changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
@@ -375,9 +375,8 @@ export default function ChangeDetailPage() {
   // Project Management writes it where it captures (spec §14: a mother-plant
   // change the PM started) or while nobody leads the change yet, the
   // backend's "pm_capture" right.
-  const canEditDescription = isAdmin || isChangeLead || isSalesMember
-    || (isPmMember && (change?.origin === 'mother_plant'
-      || (['captured', 'scoping'].includes(change?.status ?? '') && change?.lead_id == null)));
+  const canEditDescription = mayEditCapture(change,
+    { isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember });
   // Sales (plus lead/admin) publishes the plan and acknowledges the weight delta.
   const canPublishPlan = isAdmin || isChangeLead || isSalesMember;
   // Timing (spec 2026-09-25): plan editors and who publishes to the customer.
@@ -1165,7 +1164,7 @@ export default function ChangeDetailPage() {
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '-'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
           {/* §2: an internal change says what is wrong today and the target */}
-          <ProblemTargetEditor change={change} canEdit={!readOnly && (isAdmin || isChangeLead || isPmMember)} />
+          <ProblemTargetEditor change={change} canEdit={!readOnly && canEditDescription} />
           {/* A mother-plant change is never customer relevant here. */}
           {!motherPlant && <CustomerRelevantEditor change={change} canEdit={canMoveCarrier} />}
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mayTransition, mayMoveCarrier, endStateOf, endLabel, hasEnded, stoppedAtFrom } from './transitionRights'
+import { mayTransition, mayMoveCarrier, mayEditCapture, endStateOf, endLabel, hasEnded, stoppedAtFrom } from './transitionRights'
 
 const none = { isAdmin: false, isChangeLead: false, isPm: false, isSales: false }
 
@@ -94,5 +94,26 @@ describe('end states (spec §16 P1 7)', () => {
       { old_value: 'scoping', new_value: 'in_assessment' },
       { old_value: 'in_assessment', new_value: 'cancelled' },
     ])).toBe('in_assessment')
+  })
+})
+
+describe('mayEditCapture (PATCH rights: lead, Sales, pm_capture)', () => {
+  const none = { isAdmin: false, isChangeLead: false, isPm: false, isSales: false }
+  it('refuses a PM member on an internal change with a lead (the backend 403s)', () => {
+    expect(mayEditCapture({ origin: 'internal', status: 'scoping', lead_id: 22 },
+      { ...none, isPm: true })).toBe(false)
+  })
+  it('lets PM capture where nobody leads yet, or on a mother-plant change', () => {
+    expect(mayEditCapture({ origin: 'internal', status: 'captured', lead_id: null },
+      { ...none, isPm: true })).toBe(true)
+    expect(mayEditCapture({ origin: 'mother_plant', status: 'approved', lead_id: 3 },
+      { ...none, isPm: true })).toBe(true)
+  })
+  it('lets the lead, Sales and an admin edit', () => {
+    const c = { origin: 'internal' as const, status: 'scoping' as const, lead_id: 22 }
+    expect(mayEditCapture(c, { ...none, isChangeLead: true })).toBe(true)
+    expect(mayEditCapture(c, { ...none, isSales: true })).toBe(true)
+    expect(mayEditCapture(c, { ...none, isAdmin: true })).toBe(true)
+    expect(mayEditCapture(c, none)).toBe(false)
   })
 })

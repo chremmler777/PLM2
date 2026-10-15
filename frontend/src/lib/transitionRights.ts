@@ -76,6 +76,22 @@ export function mayMoveCarrier(
   return v.canStartChange && (v.isChangeLead || v.isPm || v.isSales)
 }
 
+/**
+ * May the viewer edit the capture fields (description, "what is wrong
+ * today", the target, ...)? Mirrors the backend PATCH rights (lead, Sales,
+ * "pm_capture"): Project Management only where it captures, a mother-plant
+ * change, or while nobody leads the change yet in capture or scoping.
+ */
+export function mayEditCapture(
+  change: Partial<Pick<ChangeRequest, 'origin' | 'status' | 'lead_id'>> | null | undefined,
+  v: Viewer,
+): boolean {
+  if (v.isAdmin || v.isChangeLead || v.isSales) return true
+  if (!v.isPm || !change) return false
+  return change.origin === 'mother_plant'
+    || (['captured', 'scoping'].includes(change.status ?? '') && change.lead_id == null)
+}
+
 export type EndState = 'rejected' | 'cancelled' | 'closed'
 
 /** The end a change reached, or null while it is still running (on hold runs). */
