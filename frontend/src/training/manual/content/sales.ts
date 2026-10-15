@@ -183,7 +183,7 @@ export const salesChapter: ContentChapter = {
             ['Confirm the plan.', 'Sales is always asked on the "Team confirmation" panel.'],
             ['"Publish plan to customer"', 'once the timing is validated and the bank build mode is set. It records that you sent the validated timing; export it with "MS Project" or "CSV" to attach.'],
             ['Escalated deviations', 'are yours to tell the customer. The escalation says what Sales tells them.'],
-            ['Validation issue, customer to be informed:', '"Record customer decision": "Accepts the deviation", "Requires a fix", "New timing" or "Pending". A concession only closes with the customer\'s mail filed into the issue.'],
+            ['Validation issue, customer to be informed:', '"Record customer decision": "Accepts the deviation", "Requires a fix", "New timing" or "Pending". On a concession you file the customer\'s mail into the issue; a Quality member then decides it (you get no "Accepts the deviation" there).'],
             ['A fix the customer pays:', 'you get the task to quote it. "Quote the fix", then "Fix quoted to the customer".'],
             ['Release:', 'tick "Customer informed of the implementation date / first shipment".'],
           ],
@@ -316,15 +316,16 @@ export const salesTasks: PracticeTaskSpec[] = [
   {
     key: 'sales_issue_customer_decision',
     role: 'sales',
-    title: 'Record the customer\'s decision on a validation issue',
+    title: 'File the customer\'s yes to a concession',
     status: 'needs-sandbox',
     screen: { kind: 'validation-issue', change: 'CR-TRAIN-0010' },
     brief:
       'VI-1 on CR-TRAIN-0010 is a small gloss difference. PM routed it as a customer ' +
-      'concession. The customer accepts it for good and sent a mail saying so. Record it.',
+      'concession. The customer accepts it for good and sent a mail saying so. File it so ' +
+      'Quality can decide.',
     why:
       'A concession without the customer\'s written word is our word against theirs at the ' +
-      'next complaint. The issue closes only with the mail filed into it.',
+      'next complaint. Quality decides the concession only once the mail is filed into the issue.',
     fixture: [
       'CR-TRAIN-0010 in_validation, VI-1 severity 1, route customer_concession, customer_inform true, no decision.',
       'Trainee acts as a Sales member.',
@@ -332,9 +333,7 @@ export const salesTasks: PracticeTaskSpec[] = [
     ],
     pass: [
       { assert: 'VI-1 has an attachment of kind customer_email', hint: 'The customer\'s mail is not filed into the issue. Use "Drop customer mail".' },
-      { assert: 'customer_decision is accept_deviation with a note', hint: 'The decision is not "Accepts the deviation", or the note is empty.' },
-      { assert: 'concession_until is empty', hint: 'The customer accepts it for good: leave "Concession until" empty.' },
-      { assert: 'VI-1 status is accepted', hint: 'The issue is still open. Is the decision recorded?' },
+      { assert: 'VI-1 status is route_decided (waiting for Quality)', hint: 'The concession is Quality\'s decision: filing the mail is your part.' },
     ],
   },
 ]

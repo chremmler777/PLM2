@@ -24,6 +24,8 @@ export const qualityChapter: ContentChapter = {
             head: ['Where', 'What you do'],
             rows: [
               ['Quoted', 'Give the "Quality sign-off". The cockpit asks for it once the customer accepted.'],
+              ['Any stage', 'Give the OK on overrides into implementation or release, and on validation rules. Never on your own request.'],
+              ['Validation', 'Decide a customer concession once Sales filed the customer\'s mail. It is the only way past a failed check.'],
               ['Any stage', 'Read the change on "D1" and "Audit" in the Governance group.'],
               ['Assessment', 'Only if the scoping meeting routed Quality. Then you answer the checklist like every department.'],
               ['Validation', 'Watch the validation issues. Read the release checklist (Quality owns no row). Add lessons learned.'],
@@ -50,9 +52,32 @@ export const qualityChapter: ContentChapter = {
             ['You do not see prices, on purpose.', 'Offer prices are shown to Sales, Project Management, the change lead and admins. The "Offer" tab shows you the sign-off without the figures, and money is blanked in the audit and its CSV. Your sign-off is on the process record, not the price.'],
             ['Four eyes:', '"PM and Quality sign-off must be different users". If you signed as PM, somebody else from Quality signs.'],
             ['Only Quality members', '(or an admin) see the Quality sign-off button.'],
+            ['A signature is for one offer version.', 'If Sales sends a newer version or a supplement after you signed, approval and release wait for you again. The button then reads "Sign again for v2"; the cockpit\'s "Missing before" list shows "Sign as Quality for v2" at any stage.'],
           ],
         },
         { shot: 'qa-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and the "Quality sign-off" button.' },
+      ],
+    },
+    {
+      id: 'qa-overrides',
+      title: 'Overrides you decide',
+      blocks: [
+        {
+          p:
+            'An override lets a change take a step although one rule says it is not ready. It lifts ' +
+            'that one rule only. The person who asks picks a reason and writes what covers the gap; ' +
+            'someone else gives the OK. For overrides into "In implementation" or "Released", and ' +
+            'for the validation rules, that someone is a Quality member: you.',
+        },
+        {
+          points: [
+            ['Where:', '"Decide override #n" in "Your actions" opens the panel on the Overview tab. You get one notification per override.'],
+            ['Approve', 'when the note says what covers the skipped rule (a date, a document, a reference). The asker is told.'],
+            ['Reject', 'with a note: the asker reads why. A reject without a note is refused.'],
+            ['Not yours:', 'items marked "No override" (a failed check, an open validation issue, missing sign-offs). They name their only way out.'],
+            ['Unused overrides lapse', 'when the change moves on; the rule then needs a new decision.'],
+          ],
+        },
       ],
     },
     {
@@ -111,7 +136,7 @@ export const qualityChapter: ContentChapter = {
         {
           points: [
             ['Watch the severity.', '"Blocks production" needs containment before anything else, and starts at level 2.'],
-            ['Watch the concessions.', 'A "Customer concession" closes only when Sales records "Accepts the deviation" with the customer\'s mail filed into the issue.'],
+            ['Decide the concessions.', 'A "Customer concession" is the only way past a failed check, and it is your decision: Sales files the customer\'s mail into the issue, then a Quality member records "Accepts the deviation". Sales, PM and admins cannot accept it.'],
             ['Watch the cause.', 'A fix route is decided only after the root cause is recorded. A cause without evidence is a guess.'],
           ],
         },

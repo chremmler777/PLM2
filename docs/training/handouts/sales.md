@@ -25,7 +25,7 @@ For Sales. One page for the session and the desk; the full chapter is in PLM2 un
 - **Your vendor choice is binding.** Against the department's star you give a reason.
 - **Every risk starts hidden on the offer.** Switch on what the customer reads. The page warns while a severity-3 risk is hidden: state it or price it, knowingly.
 - **You answer questions; the asker marks them solved.**
-- **A concession closes only with the customer's mail filed into the issue.**
+- **On a concession you file the customer's mail into the issue;** Quality decides it.
 
 ## The offer PDF
 
@@ -47,6 +47,6 @@ Coming, once the training copy can run them:
 
 - Build and send the first offer.
 - Send a second version after a round.
-- Record the customer's decision on a validation issue.
+- File the customer's yes to a concession.
 
 Training is recorded, not blocking. Confirm your session on the Training page ("Confirm your training"), then take the check.
