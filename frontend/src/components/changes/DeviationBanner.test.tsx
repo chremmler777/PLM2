@@ -98,7 +98,7 @@ describe('DeviationBanner', () => {
   // admin (never the proposer). The backend says so per row (can_decide);
   // the banner must not offer Approve / Reject to anyone else.
   it('offers Approve / Reject only on a deviation the viewer may decide', async () => {
-    const dev = { id: 3, to_status: 'in_assessment', reason: 'urgent', status: 'pending',
+    const dev = { id: 3, to_status: 'in_assessment', reason: 'urgent', status: 'pending' as const,
       proposed_by: 1, proposed_at: '2026-10-14T00:00:00' };
     vi.mocked(changesApi.listDeviations).mockResolvedValueOnce([{ ...dev, can_decide: false }]);
     renderBanner();
