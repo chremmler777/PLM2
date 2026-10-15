@@ -11,6 +11,18 @@ from app.schemas.common import NaiveUtcDatetime
 REASON_MAX_LENGTH = 100
 
 
+def _priority_ok(v: Optional[str]) -> Optional[str]:
+    """One of the stored priorities; 'urgent' is 'critical' (R24: a value
+    the flow does not know never passes silently)."""
+    if v is None:
+        return v
+    from app.models.change import CHANGE_PRIORITIES
+    if v not in CHANGE_PRIORITIES:
+        raise ValueError(f"priority must be one of {', '.join(CHANGE_PRIORITIES)} "
+                         "(urgent is 'critical')")
+    return v
+
+
 class ChangeCreate(BaseModel):
     project_id: int
     title: str = Field(min_length=1, max_length=255)
@@ -45,6 +57,8 @@ class ChangeCreate(BaseModel):
     problem_unit: Optional[str] = Field(None, max_length=20)
     target_value: Optional[float] = None
 
+    _priority = field_validator("priority")(_priority_ok)
+
 
 class ChangeUpdate(BaseModel):
     title: Optional[str] = None
@@ -78,6 +92,8 @@ class ChangeUpdate(BaseModel):
     problem_unit: Optional[str] = Field(None, max_length=20)
     target_value: Optional[float] = None
 
+
+    _priority = field_validator("priority")(_priority_ok)
 
 class TransitionRequest(BaseModel):
     to_status: str

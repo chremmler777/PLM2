@@ -33,7 +33,7 @@ describe('StartAtRiskCard (§7a)', () => {
 
   it('Quality writes the line; the asker never sees an approve button', async () => {
     vi.mocked(client.get).mockResolvedValue(state({ requested_at: '2026-10-15T09:00:00', requested_by: 5,
-      quality_note: 'No PPAP before SOP', quality_by_name: 'Q' }))
+      quality_note: 'No PPAP before SOP', quality_by_name: 'Q', decidable: true }))
     wrap(props({ canApprove: true, userId: 5 }))
     expect(await screen.findByText(/Waiting for a Project Management member/)).toBeDefined()
     expect(screen.queryByTestId('sar-approve')).toBeNull()
@@ -44,6 +44,30 @@ describe('StartAtRiskCard (§7a)', () => {
     expect(save.disabled).toBe(true)
     fireEvent.change(screen.getByTestId('sar-quality-note'), { target: { value: 'first lot 100 % checked' } })
     expect(save.disabled).toBe(false)
+  })
+
+  it('a PM member approves or refuses with why; a moot ask shows why, no button', async () => {
+    const asked = { requested_at: '2026-10-15T09:00:00', requested_by: 9, quality_note: 'No PPAP before SOP',
+      quality_by_name: 'Q' }
+    vi.mocked(client.get).mockResolvedValue(state({ ...asked, decidable: true }))
+    vi.mocked(client.post).mockResolvedValue(state({ available: true }))
+    wrap(props({ canApprove: true, userId: 5 }))
+    expect(await screen.findByTestId('sar-approve')).toBeDefined()
+    fireEvent.click(screen.getByTestId('sar-refuse-open'))
+    const refuse = screen.getByTestId('sar-refuse') as HTMLButtonElement
+    fireEvent.change(screen.getByTestId('sar-refuse-note'), { target: { value: 'no' } })
+    expect(refuse.disabled).toBe(true)        // NEGATIVE: a refusal says why
+    fireEvent.change(screen.getByTestId('sar-refuse-note'), { target: { value: 'Tool steel not released yet' } })
+    fireEvent.click(refuse)
+    await waitFor(() => expect(client.post).toHaveBeenCalledWith('/v1/changes/7/start-at-risk/refuse',
+      { note: 'Tool steel not released yet' }))
+    cleanup()
+    // NEGATIVE: the customer accepted meanwhile: no Approve, the reason instead
+    vi.mocked(client.get).mockResolvedValue(state({ ...asked, available: false, decidable: false,
+      refusal: 'The customer accepted: approve it the normal way' }))
+    wrap(props({ canApprove: true, userId: 5 }))
+    expect((await screen.findByTestId('sar-moot')).textContent).toContain('customer accepted')
+    expect(screen.queryByTestId('sar-approve')).toBeNull()
   })
 
   it('once started, every viewer reads it and that the price is open', async () => {

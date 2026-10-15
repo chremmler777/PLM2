@@ -2981,6 +2981,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'sar.waitQuality': { de: 'Wartet auf die Zeile von Qualität.', en: "Waiting for Quality's line." },
   'sar.qualityLine': { de: 'Qualität ({who}): {q}', en: 'Quality ({who}): {q}' },
   'sar.approve': { de: 'Start auf Risiko freigeben', en: 'Approve the start at risk' },
+  'sar.refuse': { de: 'Start auf Risiko ablehnen', en: 'Refuse the start at risk' },
+  'sar.refuseWhy': { de: 'Warum nicht (mind. 10 Zeichen, der Antragsteller wird informiert)', en: 'Why not (10+ characters, the asker is told)' },
   'sar.waitPm': { de: 'Wartet auf die Freigabe eines PM-Mitglieds (nicht der Antragsteller).', en: 'Waiting for a Project Management member to approve (not the one who asked).' },
   'sar.started': { de: 'Auf Risiko gestartet am {d}, freigegeben von {who}. Qualitätsrisiken: {q}.', en: 'Started at risk on {d}, approved by {who}. Quality risks: {q}.' },
   'sar.priceOpen': { de: 'Der Preis ist offen, bis der Kunde ein Angebot annimmt oder er absorbiert wird; ohne das wird nicht abgeschlossen.', en: 'The price is open until the customer accepts an offer or it is absorbed; the change does not close before.' },

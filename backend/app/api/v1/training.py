@@ -949,6 +949,7 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes/{change_id}/start-at-risk"),
     ("POST", "/changes/{change_id}/start-at-risk/quality"),
     ("POST", "/changes/{change_id}/start-at-risk/approve"),
+    ("POST", "/changes/{change_id}/start-at-risk/refuse"),
     # impact
     ("POST", "/changes/{change_id}/impacted-items"),
     ("DELETE", "/changes/{change_id}/impacted-items/{item_id}"),

@@ -1362,7 +1362,7 @@ export default function ChangeDetailPage() {
         <StartAtRiskCard changeId={changeId}
           canAsk={isSalesMember || isAdmin || isChangeLead || isPmMember}
           isQuality={isQualityMember || isAdmin} canApprove={isPmMember || isAdmin}
-          userId={actingAs ? null : (userId ?? null)} attachments={change.attachments ?? []} />
+          userId={userId ?? null} attachments={change.attachments ?? []} />
       )}
       {effectiveTab === 'offer' && change.commercial_v2 !== false && change.customer_relevant && (
         <ScopeChangeCards changeId={changeId} status={change.status}

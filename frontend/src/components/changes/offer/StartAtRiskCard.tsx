@@ -24,6 +24,8 @@ export interface StartAtRiskState {
   requested_by?: number | null
   requested_by_name?: string | null
   requested_at?: string | null
+  /** The ask can be decided now (no refusal stands in the way). */
+  decidable?: boolean
   quality_note?: string | null
   quality_by_name?: string | null
   approved_by_name?: string | null
@@ -39,6 +41,8 @@ export const sarApi = {
     client.post<StartAtRiskState>(`/v1/changes/${id}/start-at-risk/quality`, { note }).then((r) => r.data),
   approve: (id: number) =>
     client.post<StartAtRiskState>(`/v1/changes/${id}/start-at-risk/approve`, {}).then((r) => r.data),
+  refuse: (id: number, note: string) =>
+    client.post<StartAtRiskState>(`/v1/changes/${id}/start-at-risk/refuse`, { note }).then((r) => r.data),
 }
 
 const fill = (k: string, v: Record<string, string>) =>
@@ -74,6 +78,12 @@ export default function StartAtRiskCard({ changeId, canAsk, isQuality, canApprov
   })
   const quality = useMutation({ mutationFn: () => sarApi.quality(changeId, note.trim()), onSuccess: done, onError })
   const approve = useMutation({ mutationFn: () => sarApi.approve(changeId), onSuccess: done, onError })
+  const [why, setWhy] = useState('')
+  const [refusing, setRefusing] = useState(false)
+  const refuse = useMutation({
+    mutationFn: () => sarApi.refuse(changeId, why.trim()),
+    onSuccess: (d) => { setRefusing(false); setWhy(''); done(d) }, onError,
+  })
   if (!s) return null
   if (s.approved_at) {
     return (
@@ -116,9 +126,27 @@ export default function StartAtRiskCard({ changeId, canAsk, isQuality, canApprov
       {s.quality_note && (
         <p data-testid="sar-quality" className="text-slate-300">{fill('sar.qualityLine', { who: s.quality_by_name ?? '-', q: s.quality_note })}</p>
       )}
-      {s.requested_at && s.quality_note && (canApprove && userId !== s.requested_by ? (
-        <button type="button" data-testid="sar-approve" disabled={approve.isPending}
-          onClick={() => approve.mutate()} className={buttonClass('primary', 'sm')}>{t('sar.approve')}</button>
+      {s.requested_at && s.quality_note && !s.decidable && s.refusal && (
+        // nothing to decide any more (e.g. the customer accepted): say why
+        <p data-testid="sar-moot" className="text-slate-400">{s.refusal}</p>
+      )}
+      {s.requested_at && s.quality_note && s.decidable && (canApprove && userId !== s.requested_by ? (
+        <div className="space-y-1">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" data-testid="sar-approve" disabled={approve.isPending}
+              onClick={() => approve.mutate()} className={buttonClass('primary', 'sm')}>{t('sar.approve')}</button>
+            <button type="button" data-testid="sar-refuse-open" aria-expanded={refusing}
+              onClick={() => setRefusing((r) => !r)} className={buttonClass('secondary', 'sm')}>{t('sar.refuse')}</button>
+          </div>
+          {refusing && (
+            <div className="flex flex-wrap gap-2">
+              <input data-testid="sar-refuse-note" value={why} onChange={(e) => setWhy(e.target.value)}
+                aria-label={t('sar.refuseWhy')} placeholder={t('sar.refuseWhy')} className={`${inputCls} min-w-0 flex-1`} />
+              <button type="button" data-testid="sar-refuse" disabled={refuse.isPending || why.trim().length < 10}
+                onClick={() => refuse.mutate()} className={buttonClass('danger', 'sm')}>{t('sar.refuse')}</button>
+            </div>
+          )}
+        </div>
       ) : <p className="text-amber-200">{t('sar.waitPm')}</p>)}
     </section>
   )

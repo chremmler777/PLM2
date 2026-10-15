@@ -47,7 +47,11 @@ def refusal(change: ChangeRequest) -> Optional[str]:
     if not change.customer_relevant:
         return "An internal change is approved internally, not started at risk"
     if change.priority != "critical":
-        return "Start at risk is for urgent changes only (P8)"
+        # R5/R24: who can make it urgent (Sales cannot set the priority)
+        lead = getattr(change.__dict__.get("lead"), "full_name", None)  # no lazy load
+        return ("Start at risk is for urgent changes only (P8): "
+                + (f"{lead} (the lead)" if lead else "the change lead")
+                + " or an admin marks the change urgent first")
     if change.status not in START_STATUSES:
         return ("Start at risk is asked once costing runs and until the "
                 f"customer's yes; this change is '{change.status}'")
@@ -103,17 +107,26 @@ class StartAtRiskService:
         await ChangeService.append_changelog(
             session, change, "start_at_risk_requested",
             f"Start at risk asked: {evidence}", user.id, notes=evidence)
+        # R33: Quality acts first; PM is told once Quality's line is in
         from app.services.notification_service import NotificationService
         depts = [d for (d,) in (await session.execute(
-            select(Department.id).where(Department.name.in_(
-                ("Quality", "Project Manager"))))).all()]
+            select(Department.id).where(Department.name == "Quality"))).all()]
         await NotificationService.notify_departments_once(
             session, depts, change=change, kind="decision_needed",
             subject_key=f"start_at_risk:{change.id}:{int(change.start_at_risk_requested_at.timestamp())}",
-            title=f"Start at risk asked: Quality line, then PM approval: "
+            title=f"Start at risk asked: add the quality risks: "
                   f"{change.change_number}"[:255],
             body=evidence, link=f"/changes/{change.id}?tab=offer")
         return change
+
+    @staticmethod
+    async def _pm_member_ids(session: AsyncSession, change: ChangeRequest) -> list[int]:
+        """Active Project Management members in the change's organization."""
+        from app.services.change_people import department_members_of_change_org
+        ids = [d for (d,) in (await session.execute(
+            select(Department.id).where(Department.name == "Project Manager",
+                                        Department.is_active.is_(True)))).all()]
+        return await department_members_of_change_org(session, change, ids)
 
     @staticmethod
     async def quality_line(session: AsyncSession, change: ChangeRequest, user: User,
@@ -137,6 +150,47 @@ class StartAtRiskService:
             session, change, "start_at_risk_quality",
             f"Start at risk: quality risks: {change.start_at_risk_quality_note}",
             user.id, notes=change.start_at_risk_quality_note)
+        # R33: now a PM member can decide: told once, never the asker
+        from app.services.notification_service import NotificationService
+        people = [u for u in await StartAtRiskService._pm_member_ids(session, change)
+                  if u not in (change.start_at_risk_requested_by, user.id)]
+        await NotificationService.notify_once(
+            session, people, kind="decision_needed",
+            subject_key=f"start_at_risk:{change.id}:approve:"
+                        f"{int(change.start_at_risk_requested_at.timestamp())}",
+            title=f"Start at risk: approve or refuse: {change.change_number}"[:255],
+            body=change.start_at_risk_quality_note, link=f"/changes/{change.id}?tab=offer")
+        return change
+
+    @staticmethod
+    async def refuse(session: AsyncSession, change: ChangeRequest, user: User,
+                     note: str) -> ChangeRequest:
+        """A Project Management member (or an admin) says no, with why: the
+        ask is cleared (a new go-ahead may ask again); the asker is told."""
+        if change.start_at_risk_requested_at is None or started(change):
+            raise ChangeError("No start at risk is waiting for a decision")
+        is_pm = await StartAtRiskService._member(session, user, "Project Manager")
+        if not (is_pm or user.effective_role == "admin"):
+            raise StartAtRiskForbidden(
+                "A Project Management member (or an admin) refuses a start at risk")
+        note = " ".join((note or "").split())
+        if len(note) < 10:
+            raise ChangeError("Say why not (10+ characters); the asker is told")
+        asker = change.start_at_risk_requested_by
+        for f in ("evidence", "requested_by", "requested_at", "quality_note",
+                  "quality_by", "quality_at"):
+            setattr(change, f"start_at_risk_{f}", None)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "start_at_risk_refused",
+            f"Start at risk refused: {note}", user.id, notes=note)
+        if asker is not None and asker != user.id:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [asker], kind="decision_made",
+                subject_key=f"start_at_risk:{change.id}:refused:{int(datetime.utcnow().timestamp())}",
+                title=f"Start at risk refused: {change.change_number}"[:255],
+                body=note, link=f"/changes/{change.id}?tab=offer")
         return change
 
     @staticmethod
@@ -188,6 +242,10 @@ class StartAtRiskService:
             change.start_at_risk_approved_by])
         return {
             "available": refusal(change) is None and not started(change),
+            # the ask can still be decided (approve or refuse): no refusal
+            # stands in the way (the customer did not accept meanwhile)
+            "decidable": (change.start_at_risk_requested_at is not None
+                          and not started(change) and refusal(change) is None),
             "refusal": refusal(change) if not started(change) else None,
             "evidence": change.start_at_risk_evidence,
             "requested_by_name": names.get(change.start_at_risk_requested_by),

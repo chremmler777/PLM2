@@ -1201,3 +1201,67 @@ async def test_a_supplement_counts_a_risk_the_offer_showed(client, risky, sessio
     res = await client.post(_url(cid, f"/{s1['id']}/send"),
                             json={"change_note": "Insert rework quoted higher"}, headers=sales)
     assert res.status_code == 200, res.text
+
+
+async def test_start_at_risk_notices_refuse_and_a_moot_ask(client, urgent, session_factory):
+    """R33: the ask tells Quality only; Quality's line tells the PM members
+    but the asker. A PM member may refuse with why (the asker is told, the
+    ask is cleared). An ask the customer's yes made moot leaves no row."""
+    from app.models.notification import Notification
+    from app.models.change import ChangeRequest
+    cid = urgent["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    users = urgent["users"]
+    r = await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"}, headers=sales)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        told = {n.user_id for n in (await s.execute(select(Notification).where(
+            Notification.subject_key.like(f"start_at_risk:{cid}:%")))).scalars().all()}
+    assert users["pm"] not in told        # NEGATIVE: PM cannot act yet
+    await client.post(_sar(cid, "/quality"), json={"note": "No PPAP before SOP, lot checked"}, headers=q)
+    async with session_factory() as s:
+        told = {n.user_id for n in (await s.execute(select(Notification).where(
+            Notification.subject_key.like(f"start_at_risk:{cid}:approve:%")))).scalars().all()}
+    assert users["pm"] in told and users["sales"] not in told
+    # NEGATIVE: Quality does not refuse; a refusal says why
+    assert (await client.post(_sar(cid, "/refuse"), json={"note": "Tool steel not released"},
+                              headers=q)).status_code == 403
+    assert (await client.post(_sar(cid, "/refuse"), json={"note": "no"},
+                              headers=pm)).status_code == 400
+    r = await client.post(_sar(cid, "/refuse"), json={"note": "Tool steel not released yet"},
+                          headers=pm)
+    assert r.status_code == 200, r.text
+    assert r.json()["requested_at"] is None and r.json()["available"] is True
+    async with session_factory() as s:
+        n = (await s.execute(select(Notification).where(
+            Notification.user_id == users["sales"],
+            Notification.subject_key.like(f"start_at_risk:{cid}:refused:%")))).scalar_one()
+        assert n.body == "Tool steel not released yet"
+    # a moot ask: asked and lined, then the customer accepts at quoted
+    o = await _create(client, sales, cid)
+    await _no_timing(client, sales, cid, o["id"])
+    assert (await client.post(_url(cid, f"/{o['id']}/send"), json={},
+                              headers=sales)).status_code == 200
+    await client.post(_sar(cid), json={"ref": "Mail 16 Oct: start now, PO follows"}, headers=sales)
+    await client.post(_sar(cid, "/quality"), json={"note": "No PPAP before SOP, lot checked"}, headers=q)
+    assert any(t["kind"] == "start_at_risk_approve" for t in await _tasks(client, pm))
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    assert not any(t["kind"] == "start_at_risk_approve" for t in await _tasks(client, pm))
+    st = (await client.get(_sar(cid), headers=pm)).json()
+    assert st["decidable"] is False and "accepted" in st["refusal"]
+
+
+async def test_the_urgent_refusal_names_who_marks_it_urgent(client, urgent, session_factory):
+    from app.models.change import ChangeRequest
+    cid = urgent["change_id"]
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        ch.priority = "medium"
+        await s.commit()
+    sales = await _auth(client, "sales")
+    st = (await client.get(_sar(cid), headers=sales)).json()
+    assert "or an admin marks the change urgent first" in st["refusal"]
+    admin = await _auth(client, "pm")
+    # NEGATIVE: 'urgent' is not a priority the flow knows ('critical' is)
+    r = await client.patch(f"/api/v1/changes/{cid}", json={"priority": "urgent"}, headers=admin)
+    assert r.status_code == 422, r.text

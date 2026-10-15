@@ -1074,6 +1074,26 @@ async def start_at_risk_quality(
     return await StartAtRiskService.state(db, change)
 
 
+class StartAtRiskRefuseIn(BaseModel):
+    note: str = Field(max_length=500)
+
+
+@router.post("/{change_id}/start-at-risk/refuse")
+async def refuse_start_at_risk(
+    change_id: int, body: StartAtRiskRefuseIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A Project Management member (or an admin) says no, with why."""
+    from app.services.start_at_risk_service import StartAtRiskService
+    change = await _change(db, change_id, current_user)
+    try:
+        await StartAtRiskService.refuse(db, change, current_user, body.note)
+    except ChangeError as e:
+        raise _sar_http(e)
+    await db.commit()
+    return await StartAtRiskService.state(db, change)
+
+
 @router.post("/{change_id}/start-at-risk/approve")
 async def approve_start_at_risk(
     change_id: int,

@@ -4445,11 +4445,12 @@ class ChangeService:
         # §7a start at risk: Quality's line, then the PM member's approval
         # (never the asker), both "Needs you"
         if cm_switches.on("START_AT_RISK"):
+            from app.services import start_at_risk_service as _sar
             for c in open_changes:
                 if (c.start_at_risk_requested_at is None
                         or c.start_at_risk_approved_at is not None
-                        or c.status not in ("costing", "quoting", "quoted")):
-                    continue
+                        or _sar.refusal(c) is not None):
+                    continue      # nothing to decide (e.g. the customer accepted)
                 if c.start_at_risk_quality_note is None:
                     if is_quality:
                         out.append({**await base(c), "kind": "start_at_risk_quality",
