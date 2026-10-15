@@ -1360,13 +1360,23 @@ class MeetingService:
                 or holds_lead(change, user)):
             return True, ("Only the person who raised the check item or the "
                           "change lead may reopen it")
-        if change.status != "in_assessment" or not any(
-                a.department_id in concern.owner_department_ids
-                and a.effective_status not in ("submitted", "waived")
-                for a in change.assessments):
+        # R5/R37: name an exit that exists (no per-department send-back yet,
+        # open question C16): in assessment the department records it as a
+        # risk on its assessment; later the lead changes the impacted set
+        # (costing reopens) or, from quoted on, opens a scope change.
+        lead = change.lead_name or "the change lead"
+        if change.status != "in_assessment":
             return False, (
-                "The department already submitted its assessment: ask it a "
-                "question instead, or ask the lead to send its assessment back")
+                "Assessment is over, so the check item stays closed: if its "
+                f"answer is wrong, tell {lead}, who changes the impacted set "
+                "(that reopens the costing) or opens a scope change after the offer")
+        if not any(a.department_id in concern.owner_department_ids
+                   and a.effective_status not in ("submitted", "waived")
+                   for a in change.assessments):
+            return False, (
+                "The department already submitted its assessment, so the check "
+                "item stays closed: if its answer is wrong, ask the department "
+                f"to record it as a risk on its assessment ({lead} sees it)")
         return None
 
     @staticmethod

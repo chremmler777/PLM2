@@ -261,6 +261,15 @@ async def test_served_flags_match_the_backend(client, assess):
     res = await client.post(_url(a, f"/concerns/{a['check']}/reopen"),
                             json={"reason": "that is rev B, not C"}, headers=a["raiser"])
     assert res.status_code == 400 and "already submitted" in res.json()["detail"]
+    # R5/R37: the refusal names an exit that exists, not a send-back
+    assert "risk on its assessment" in res.json()["detail"]
+    assert "send" not in res.json()["detail"]
+    # ... and the department can take it after its submit
+    res = await client.post(_url(a, "/concerns"), json={
+        "kind": "risk", "risk_type": "dimensional_issue", "severity": 2,
+        "note": "Drawing is rev B, not C", "department_id": a["proc"]},
+        headers=a["pe"])
+    assert res.status_code == 200, res.text
 
 
 async def test_a_consulted_department_owning_check_items_gets_the_task(

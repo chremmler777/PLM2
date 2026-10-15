@@ -828,16 +828,22 @@ begin_impact_edit` / `_reopen_after_locked_edit`), in `in_assessment`,
   change first steps back to `costing` (no offer went out yet);
 - each is told once (`impact_edited`, the assessment owner, else the
   department): *"Impacted items changed after your assessment: ART-B:
-  <reason>. If it changes your answer, ask the lead (Nathan) to send your
-  assessment back; your costing is open again."* (a department that has not
-  submitted yet reads *"Check your answer before you submit"*); logged
-  `impact_edited_after_lock`.
+  <reason>. If it changes your figures, correct your costing; if it changes
+  your technical answer, tell Nathan (a submitted assessment is not
+  reopened); your costing is open again."* In `in_assessment` a submitted
+  department reads *"If it changes your answer, record it as a risk on your
+  assessment (Nathan sees it)"*; one that has not submitted yet reads
+  *"Check your answer before you submit"*; logged `impact_edited_after_lock`.
 Who may edit is unchanged (lead, PM members, admin; P1-5). Intake attach and
 supersede (§1) pass their own reason. **Not built:** sending a submitted
 assessment back on its own (spec "technical impact yes reopens
-assessment"): the notice names the real next step (ask the lead to send
-the assessment back) and the costing reopens; a recall stays the lead's
-(open question for Christoph).
+assessment"; open question for Christoph). Until then every text names an
+exit that exists (review L5 loop 2): the risk on the own assessment, the
+reopened costing, the lead by name. Reopening a closed check item after
+its department submitted is refused the same way: in assessment *"ask the
+department to record it as a risk on its assessment"*; after assessment
+*"tell <lead>, who changes the impacted set (that reopens the costing) or
+opens a scope change after the offer"*.
 From `quoted` on: the scope change below, unchanged.
 
 ### Who owns the tool change (ECR-solid C21, 2026-10-15)

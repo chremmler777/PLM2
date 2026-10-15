@@ -84,9 +84,13 @@ async def test_an_edit_after_the_lock_needs_a_reason_and_reopens_costing(
             Notification.kind == "impact_edited"))).scalars().all()
         assert [n.user_id for n in told] == [locked["dev_user"]]
         assert "ART-LI-B" in told[0].body and "costing is open again" in told[0].body
-        # R5: a submitted answer is not editable: the notice names who sends
-        # it back, never a bare "Check your answer"
-        assert "ask the lead" in told[0].body and "send your assessment back" in told[0].body
+        # R5/R37: a submitted answer is not reopened: in costing the notice
+        # names the exits that exist (the reopened costing, the lead by
+        # name), never a bare "Check your answer" nor a send-back that
+        # does not exist
+        body = told[0].body
+        assert "correct your costing" in body and "tell " in body
+        assert "send" not in body and "Check your answer" not in body
 
 
 async def test_a_department_member_may_not_edit_after_the_lock(client, locked):
@@ -114,4 +118,27 @@ async def test_switch_off_keeps_the_silent_edit(client, admin_auth, locked, monk
     monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     res = await client.post(_u(locked, "/impacted-items"),
                             json={"part_id": locked["b"]}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_in_assessment_the_notice_names_the_risk_and_it_works(
+        client, admin_auth, locked, session_factory):
+    """R5 (review L5 loop 2): the exit the notice names is one the
+    department can take: a risk on its own submitted assessment."""
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, locked["cid"])
+        c.status = "in_assessment"
+        await s.commit()
+    res = await client.post(_u(locked, "/impacted-items"), json={
+        "part_id": locked["b"], "reason": "Customer added the mirror part B"},
+        headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        body = (await s.execute(select(Notification.body).where(
+            Notification.kind == "impact_edited"))).scalars().one()
+    assert "record it as a risk on your assessment" in body
+    res = await client.post(_u(locked, "/concerns"), json={
+        "kind": "risk", "risk_type": "dimensional_issue", "severity": 2,
+        "note": "Mirror part B needs its own insert", "department_id": locked["dev"]},
+        headers=locked["dev_auth"])
     assert res.status_code == 200, res.text
