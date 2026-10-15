@@ -101,7 +101,7 @@ const STAGES: Stage[] = [
     sub: 'Cost lines, lead times, vendor offers', task: 'task: costing_input',
     responsible: 'Departments (Toolshop is its own department, separate from Tool Engineer, and sees no prices); PM runs it; PM, Sales and Management see all',
     artifacts: 'cost lines with lead time; vendor quotes + favorite vote; internal hours; weight estimate (compared with the weighed part at validation)',
-    what: 'Costing runs per department (2026-10-14): a department costs its part right after its own feasible assessment submit, while the change is still in assessment, and finalizes it (at least one line or position; finalized is read-only for the department until it reopens it, PM and admin may still fix it). The cockpit shows "Costing: 3/5 finalized". Into costing (soft): every R and A assessment submitted, none not feasible, no routing change pending; departments that finalized early stay finalized, so costing can be complete on entry. Each department states its internal hours and external positions, an estimate or vendor quotes with document, cost, shipping and lead time, and votes a favorite vendor. A department whose assessment marked nothing impacted owes no costing input; cost inputs are a to-do, not a gate. The planned P&L starts here. The cost carrier fixed at scoping decides the branch: a customer change goes to the offer once costing is closed (PM, Sales or lead; the same checks again), an internal change to Project Management approving the internal costs with the release deadline.',
+    what: 'Costing runs per department (2026-10-14): a department costs its part right after its own feasible assessment submit, while the change is still in assessment, and finalizes it (at least one line or position; finalized is read-only for the department until it reopens it, PM and admin may still fix it). The cockpit shows "Costing: 3/5 finalized". Into costing (soft): every R and A assessment submitted, none not feasible, no routing change pending; departments that finalized early stay finalized, so costing can be complete on entry. Each department states its internal hours and external positions, an estimate or vendor quotes with document, cost, shipping and lead time, and votes a favorite vendor. A department whose assessment marked nothing impacted owes no costing input. The planned P&L starts here. The cost carrier fixed at scoping decides the branch: a customer change goes to the offer once costing is closed (PM, Sales or lead; the same checks again, and every owing department finalized, soft: an override of that rule sends an urgent quote), an internal change to an engineering approver (never its raiser) approving the internal costs with the release deadline, on the same finalized costing.',
   },
   {
     key: 'quoting', name: 'Offer', badge: 'Sales', state: 'built',
@@ -122,7 +122,7 @@ const STAGES: Stage[] = [
     key: 'approved', name: 'Approved: timing', badge: 'Team', state: 'built',
     sub: 'Detailed plan, team confirms, baseline',
     task: 'tasks: plan_feedback · timing_validate',
-    responsible: 'Sales records acceptance / PM approves internal; the run team (change lead, PM, admin) records the approval and starts implementation; then PM + Scheduling + all teams',
+    responsible: 'Sales records acceptance / an engineering approver (never the raiser) approves internal; the run team (change lead, PM, admin) records the approval and starts implementation; then PM + Scheduling + all teams',
     artifacts: 'detailed plan; team confirmations; baseline; bank build decision; published plan (a stamp, not a gate); MS Project / CSV export',
     what: 'The go decision, then timing validation. The quote deadline froze into its permanent on-time or late fact when the offer was sent; now the release deadline is live. The detailed plan is seeded from the quote plan; every R and A department, Scheduling and Sales confirm it or raise a concern at the current plan revision (an edit makes confirmations stale). Sales, PM, Scheduling or the lead validate the timing, which sets the baseline on every block; it can be validated again during implementation, which sets a new baseline. Side steps, not gates: Scheduling, PM or the lead decide the bank build (running change, or planned scrap with a scrap quote price), and Sales publishes the plan to the customer. Into implementation (soft): timing validated (first start), impact confirmed, a check workflow for every impacted item category, and D1 Technical release? = Yes.',
   },
@@ -139,13 +139,13 @@ const STAGES: Stage[] = [
     sub: 'Checks, release checklist, lessons', task: 'tasks: release_check · lessons_step',
     responsible: 'Each department (its own checks); PM',
     artifacts: 'check results; release checklist (16 items); lessons learned; validation issues; weighed part vs estimate with the Sales re-quote task; revision flow (to build)',
-    what: 'Tool sampled, measured, cycle time taken, each department on its own checks. A failed check offers to raise a validation issue, and a person raises it (an issue can also be raised without a check): contained, root cause found, and routed by PM or lead to internal rework, supplier rework, design change, customer concession or a follow-up change, with an escalation level from department to management and customer. PM, Sales or the lead can also send the change back to implementation by hand, with a reason. Release waits for passed checks, no open validation issue, every impacted revision through its check workflow, the checklist, the lessons step and no open plan deviation.',
+    what: 'Tool sampled, measured, cycle time taken, each department on its own checks. A failed check offers to raise a validation issue, and a person raises it (an issue can also be raised without a check): contained, root cause found, and routed by PM or lead to internal rework, supplier rework, design change, customer concession or a follow-up change, with an escalation level from department to management and customer. PM, Sales or the lead can also send the change back to implementation by hand, with a reason. Release waits for passed checks, no open validation issue, every impacted revision through its check workflow, the checklist, the lessons step and no open plan deviation. A failed check and an open issue are hard: no override lifts them, not even an admin; the way out is a fix and retest, or a concession the customer accepts.',
   },
   {
     key: 'released', name: 'Released', badge: 'PM', state: 'built',
     sub: 'Summary, then closed', responsible: 'PM',
     artifacts: 'release; summary plan vs actual; P&L offer vs doing; closure',
-    what: 'Released (soft) once the validation checks passed, no validation issue is open, every impacted revision went through its check workflow, the checklist is complete, the lessons step is done and no plan deviation is open. The summary compares the plan with what happened and the offer with the actual P&L. The PM closes the change.',
+    what: 'Released once no check failed and no validation issue is open (hard, the only exit a concession) and PM and Quality signed the latest offer sent (hard), and once every check is answered, every impacted revision went through its check workflow, the checklist is complete, the lessons step is done and no plan deviation is open (soft, each an override of its own rule). The summary compares the plan with what happened and the offer with the actual P&L. The PM closes the change; while a price is open the close waits (hard) until the customer accepts or the money is absorbed with the OK of Project Management or Management.',
   },
 ]
 
@@ -155,9 +155,10 @@ const RULES = [
   'Tasks are mandatory: no accept or claim step; submitting names the owner.',
   'Sales owns the customer: mails tracked on the change and filed into each validation issue; escalations to the customer go through Sales.',
   'Two deadlines, one active: quote-by until quoted (freezes the on-time fact; after capture it moves only by Push back with a reason); release-due entered at acceptance, at internal approval or from the SOP of KTX Weissenburg / Solingen, moved only with a reason, recorded in the audit trail.',
-  'P&L offer vs doing: planned frozen at the go decision (customer acceptance, or the PM\'s internal cost approval), actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',
+  'P&L offer vs doing: planned frozen at the go decision (customer acceptance, or the engineering approver\'s internal cost approval), actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',
   'The detailed plan leads from approval on: after the baseline PM, Sales, Scheduling, the lead or an admin move dates, and every move is a deviation with a reason. Open deviations do not stop the work, but they hold the release (soft) until each one is locked or escalated.',
-  'An open validation issue or plan deviation holds the release (soft: an approved deviation releases anyway); each issue carries an escalation level: L1 department, L2 project, L3 management and customer.',
+  'A failed check or an open validation issue holds the release (hard: no override, not even an admin; the exit is a fix and retest, or a concession); an open plan deviation holds it too (soft: an approved override of that rule releases anyway). Each issue carries an escalation level: L1 department, L2 project, L3 management and customer.',
+  'Hard rules have no override and name their only way out. Every soft rule has one Override, bound to that rule only: a reason pick and a note, and the OK of somebody else (the lead, PM or an admin; Quality for starting implementation, release and validation; PM or Management for prices).',
   'Moves back carry a reason: back to scoping after a not-feasible verdict, reopen costing, reopen a rejected change, back from validation to implementation. A change can be rejected at capture, scoping, assessment and quoted, not in costing or quoting; a rejected customer change closes only once the rejection letter is attached and marked sent.',
   'D1 sheet gates are soft and only Yes passes: Technical release? is on every change and holds the start of implementation; Feasible? (into assessment) and Budget checked? (into costing) hold only where they were added.',
   'On hold resumes only into the stage it was taken from, or the change is cancelled. Cancel is final and needs a reason. Only the run team (change lead, PM, admin) puts on hold, resumes and reopens a rejected change. A hold needs a reason (what it waits for); the lead gets "On hold: resume or cancel" in My Tasks, PM backs up.',
@@ -746,7 +747,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         {spine(Y.verdict, DH, Y.costing, 'verdict-costing', 'soft: all R/A submitted, none not feasible, no routing change pending')}
         {spine(Y.costing, NH, Y.carrier, 'costing-carrier')}
         {spine(Y.carrier, DH, Y.costGate, 'carrier-costgate', 'customer change')}
-        {spine(Y.costGate, GH, Y.quoting, 'costgate-quoting', 'Close costing (PM, Sales, lead)')}
+        {spine(Y.costGate, GH, Y.quoting, 'costgate-quoting', 'Close costing (PM, Sales, lead), costing finalized')}
         {spine(Y.quoting, NH, Y.quoted, 'quoting-quoted', 'offer v1 sent (auto)')}
         {spine(Y.quoted, NH, Y.fork, 'quoted-fork')}
         {spine(Y.fork, DH, Y.approved, 'fork-approved', 'accepted + PM and Quality sign-off (two people), Record approval (hard)')}
@@ -760,7 +761,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         {spine(Y.checks, DH, Y.checklist, 'checks-checklist', 'all checks passed')}
         {spine(Y.checklist, NH, Y.lessons, 'checklist-lessons', 'every item done, or n/a with a note')}
         {spine(Y.lessons, NH, Y.releaseGate, 'lessons-releasegate', 'lessons step done')}
-        {spine(Y.releaseGate, GH2, Y.released, 'releasegate-released', 'released (soft guard)')}
+        {spine(Y.releaseGate, GH2, Y.released, 'releasegate-released', 'released (hard + soft rules)')}
         {spine(Y.released, NH, Y.closed, 'released-closed', 'PM closes')}
 
         {/* --- capture: straight to rejected, or off to the mother plant -- */}
@@ -1000,7 +1001,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           name="Lessons learned" sub="at least one lesson, or a reason for none"
           task="task: lessons_step" testId="procmap-node-lessons" />
         <Gate y={Y.releaseGate} x={WIDE_X} w={WIDE_W} h={GH2}
-          name="Release gate (soft) | checks passed, no open validation issue, revisions checked | checklist complete, lessons done, no open plan deviation"
+          name="Release gate | hard: no failed check, no open issue, PM + Quality signed the latest offer | soft: checks answered, revisions checked, checklist, lessons, plan deviations"
           testId="procmap-gate-release" />
 
         {/* The issue, step by step: raised, contained, cause, route. */}

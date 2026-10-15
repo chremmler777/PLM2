@@ -134,7 +134,7 @@ export const pmChapter: ContentChapter = {
             ['A forgotten department:', '"Add a department to the assessment" with a letter and a reason. The department sees its task at once; the request is decided by somebody other than you: the change lead, or another Project Manager if you are the lead (four eyes).'],
             ['A department that should not assess:', 'as the lead, "Take off routing" on its late flag in the cockpit, with a reason. It is a routing deviation too and waits for approval: until it is decided the department stays on the hook ("Removal requested, awaiting decision") and the change cannot move to costing.'],
             ['"Not our responsibility":', 'a department can decline. The lead decides; if rejected, the assessment stays with them.'],
-            ['"Not feasible":', 'the "Next step" card offers "Reject change", "Back to scoping" or "Override with a reason". An override is a deviation somebody else approves.'],
+            ['"Not feasible":', 'the "Next step" card offers "Reject change", "Back to scoping" or "Override with a reason". The override lifts the "not feasible" rule only, and somebody else gives the OK.'],
             ['All answered:', '"Close assessment → Costing". The confirm dialog lists every verdict and open risk.'],
           ],
         },
@@ -253,9 +253,9 @@ export const pmChapter: ContentChapter = {
         {
           steps: [
             { title: 'Lessons learned', body: 'Make sure the team adds its lessons. Then "Complete lessons step", or give the reason there are none.' },
-            { title: 'Release', body: '"Release change" once the release step shows no blocker: every validation check passed, no open validation issue, every impacted revision through its check workflow, every checklist row answered, the lessons step completed and no open plan deviation.' },
+            { title: 'Release', body: '"Release change" once the release step shows no blocker: every validation check passed, no open validation issue, PM and Quality signed the latest offer, every impacted revision through its check workflow, every checklist row answered, the lessons step completed and no open plan deviation. A failed check or an open issue has no override.' },
             { title: 'Read the summary', body: 'Plan against actual timing, offer against actual cost. The difference is the lesson for the next quote.' },
-            { title: 'Close', body: '"Close change".' },
+            { title: 'Close', body: '"Close change". While a price is open it waits: the customer accepts, or "Absorb" with a reason and the OK of Project Management or Management.' },
           ],
         },
       ],

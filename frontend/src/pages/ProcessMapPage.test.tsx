@@ -74,7 +74,8 @@ describe('ProcessMapPage', () => {
       'Start implementation',
       'soft: every impacted item has its revision; open deviations do not hold this step',
       'all checks passed',
-      'released (soft guard)',
+      'released (hard + soft rules)',
+      'Close costing (PM, Sales, lead), costing finalized',
       'capture complete (soft, deviation-overridable)',
     ]) {
       expect(chart).toContain(guard)
@@ -109,8 +110,9 @@ describe('ProcessMapPage', () => {
       expect(impl).toContain(part)
     }
     const release = screen.getByTestId('procmap-gate-release').textContent ?? ''
-    for (const part of ['checks passed', 'no open validation issue', 'revisions checked',
-      'checklist complete', 'lessons done', 'no open plan deviation']) {
+    // ECR-solid L2: the failed check, open issue and sign-offs are hard
+    for (const part of ['hard: no failed check', 'no open issue', 'PM + Quality signed the latest offer',
+      'soft: checks answered', 'revisions checked', 'checklist', 'lessons', 'plan deviations']) {
       expect(release).toContain(part)
     }
   })
@@ -183,9 +185,11 @@ describe('ProcessMapPage', () => {
     // Dates after the baseline: Scheduling moves them too; deciding stays with PM, Sales, lead, admin.
     expect(rules).toContain('PM, Sales, Scheduling, the lead or an admin move dates')
     expect(screen.getByTestId('procmap-decision-dates').textContent).toContain('Scheduling')
-    // The release hold is soft, and the P&L freezes at the go decision.
-    expect(rules).toContain('holds the release (soft: an approved deviation releases anyway)')
-    expect(rules).toContain("the PM's internal cost approval")
+    // ECR-solid L2: a failed check or open issue holds the release HARD; a
+    // plan deviation softly. The P&L freezes at the go decision.
+    expect(rules).toContain('holds the release (hard: no override, not even an admin')
+    expect(rules).toContain('an approved override of that rule releases anyway')
+    expect(rules).toContain("the engineering approver's internal cost approval")
     const text = container.textContent ?? ''
     expect(text).not.toContain('Sales only')
     expect(text).not.toContain('any member records the decision')
@@ -412,7 +416,7 @@ describe('ProcessMapPage', () => {
     expect(capture).toContain('Sales (can_start_change); PM may start')
     expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
-    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(13)
+    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(14)
     expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
   })
 

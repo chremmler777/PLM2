@@ -51,8 +51,8 @@ flowchart TD
     C -->|reject with reason| X
     C -.->|not feasible: back to scoping, reason| B
     C -->|soft: all R/A submitted, none not feasible,<br/>no routing change pending, else override by deviation| D[costing]
-    D -->|customer change| E[quoting: Offer]
-    D -->|internal change: internal approval| H
+    D -->|customer change; soft C5: every department's<br/>costing finalized, else override| E[quoting: Offer]
+    D -->|internal change: internal approval HARD #8<br/>engineering approver, never the raiser; soft C5| H
     E -->|offer v1 sent, auto| F[quoted: negotiation]
     F -->|reject with reason<br/>declined only records the answer| X
     X -->|customer change: rejection letter<br/>attached and marked sent, HARD| M
@@ -61,8 +61,8 @@ flowchart TD
     H -->|soft: timing validated on first start, impact confirmed,<br/>check workflow per item category, D1 Technical release = Yes| I[in_implementation]
     I -->|soft: every impacted item has its revision,<br/>open plan deviations do not hold this step| J[in_validation: Release]
     J -->|check failed: validation issue,<br/>routes 1 to 3 with a recovery group,<br/>or by hand with a reason| I
-    J -->|soft: checks passed, no open validation issue,<br/>revisions through their check workflow, checklist,<br/>lessons done, no open plan deviation| K[released]
-    K -->|PM closes| M[closed]
+    J -->|HARD #3: no failed check, no open validation issue<br/>exit: concession; HARD #9: PM + Quality signed the latest offer<br/>soft: checks answered, revisions through their check workflow,<br/>checklist, lessons done, no open plan deviation| K[released]
+    K -->|PM closes; HARD #9: no open price<br/>exits: customer accepts or Absorb| M[closed]
     MA[captured, origin mother_plant] --> MB[scoping-lite:<br/>impact lock + team informed]
     MB -->|HARD: impact locked, team informed, SOP date set| H
 ```
@@ -78,7 +78,7 @@ flowchart TD
 | `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
 | `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
 | `in_validation` | Release tab: validation checks plus the release checklist (16 items; 13 on a change that ended before the rework) and the lessons learned step; a failed check raises a validation issue (§3 "Validation issues") | departments, PM |
-| `released` → `closed` | Change is live. The release (soft guard) needs: validation checks passed, no open validation issue, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation. Summary with the P&L offer vs doing; then PM wraps it up | PM |
+| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation. Close is HARD-blocked while a price is open (`price_open`). Summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -731,9 +731,11 @@ is open.
 
 ### The new soft guards, together
 
-Both new guards sit in `ChangeService._guard`, so an approved transition
-deviation can lift them (`DeviationRequired`), unlike the hard gates checked
-outside `_guard` (impact lock, approval, rejection letter):
+Both new guards sit in `ChangeService._guard_reasons`, so an approved
+override bound to their rule can lift them (`DeviationRequired`), unlike the
+hard gates checked outside it (impact lock, approval, rejection letter, and
+since ECR-solid L2 a failed check, an open validation issue, the sign-offs at
+release and an open price at close; see §5 "Gates"):
 - `approved -> in_implementation`: timing must be validated (this section).
 - `in_validation -> released`: release checklist complete, lessons step
   done and no open plan deviation (previous section), checked after the
@@ -1098,6 +1100,65 @@ acts as a department is exactly that department there.
 every new HARD gate and notification of the ECR-solid branch reads its group
 at call time (`cm_switches.on(name)`), so a group can be switched off without
 touching the code behind it. `IMPACT_CONFIRM_STEP_ENABLED` stays False.
+
+**Gates: HARD and SOFT, one Override per rule, Absorb (ECR-solid lane L2).**
+Exactly these are HARD (no override lifts them; spec §0): (1) impact lock at
+proceed, never empty; (2) open questions at proceed; (3) a failed validation
+check or an open validation issue at release, the only exit a concession (an
+issue on the check closed `accepted` via `customer_concession`), not even an
+admin lifts it (C7, `RELEASE_V2`); (4) acceptance of the current offer and
+both sign-offs for approval; (5) the rejection letter; (6) the run team's
+mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (built with
+the card in lane L4); (8) internal: the internal approval before
+`costing → approved`, given by an engineering approver who is not the raiser
+(`settings.internal_approvers`, env `INTERNAL_APPROVERS`, default
+`christoph.demmler`; with none of them an active user, a Project Manager
+member or an admin, still never the raiser; no switch); (9) at release the
+PM and Quality sign-offs bound to the latest offer sent
+(`pm_signed_offer_id`/`quality_signed_offer_id`, set by the sign-off,
+`RELEASE_V2`), at close no `price_open` (`COMMERCIAL_V2`), exits: the
+customer accepts the offer (clears it) or **Absorb**; (10) own check items and
+questions at the department's submit (lanes L4/L5). The new ones are checked
+in `ChangeService.solid_hard_refusal`, called by `transition()` and by
+`EarlyStageService.hard_refusal`, so the step's button is hidden.
+
+Everything else is SOFT: `ChangeService._guard_reasons` returns every rule
+that holds a hop, each with a key (`cm_rules.GuardReason`). An **Override**
+(a transition deviation, `POST /changes/{id}/deviations {to_status, reason,
+guard_key?, reason_code}`) is bound to ONE rule (`guard_key`, migration 118);
+a hop held by two rules needs two overrides, one bound to another rule lifts
+nothing (C6, `COMMERCIAL_V2`). The reason pick is customer date / done in
+parallel / does not apply / other, plus a note. The OK is never the
+proposer's: by default the lead, a Project Management member or an admin;
+overrides into `in_implementation` or `released` and validation rules: a
+Quality member; price rules (`scope_change_uncovered`, `price_drop`) and
+Absorb: a Project Management or Management member (internal Absorb: the
+internal approver). The deciders get one notification per override
+(`deviation_pending`, deduped; the PM department when the lead asked or there
+is no lead). A deviation asked before the binding (no `guard_key`) still
+covers its target as before, so in-flight changes move; a pending one is
+bound to the rule holding the hop when it is approved. Switch off: the old
+rule (any approved deviation to the status, lead or admin decides).
+
+**C5 (spec §5, `ASSESSMENT_V2`).** Closing costing (`costing → quoting`, and an
+internal change's `costing → approved`) waits for every department's
+finalized costing: SOFT rule `costing_not_finalized`, refusal "Costing not
+finalized: Process Engineer (Nathan, due Thu 22 Oct), Toolshop". The
+internal approval is refused on the same rule unless an override of it is
+approved (the hop then consumes it). Supplier waits ("Wait for FZ / Price on
+estimate") come with lane L5.
+
+**Absorb.** `POST /changes/{id}/absorb {reason_code: goodwill | small_amount |
+our_error | other, note}` by Sales (customer change), the lead, PM or an
+admin, while `price_open` is set. It files an override bound to `price_open`;
+its approval clears `price_open` at once (changelog `price_absorbed`).
+
+**Why blocked.** `next_step.items` (cockpit "Missing before ...") carry the
+rule (`rule`), the owner and due in words (`who`), a hard rule's only exits
+(`exits`: concession, absorb, customer_accepts, sign) and the rule's override
+state (`override`). The cockpit shows one "Override" link per soft rule (only
+to a viewer who may take the step), "No override" plus the exits for a hard
+one, and "Absorb" on an open price for who may ask it.
 
 **Acts-as (admin testing):** an admin can pick any role from a header dropdown
 and the *backend* treats them as an engineer in exactly that department —

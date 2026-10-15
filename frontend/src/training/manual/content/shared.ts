@@ -199,8 +199,8 @@ export const flowChapter: ContentChapter = {
             'Before PM can take over, the capture needs a description, at least one attachment, a ' +
             'change lead and, for a customer change, the quote deadline. The form says what is ' +
             'missing: "Not ready to hand over to scoping yet, missing:". The check is soft: an ' +
-            'urgent request can be handed over on an approved deviation, with the reason on the ' +
-            'record.',
+            'urgent request can be handed over on an approved override of that rule, with the ' +
+            'reason on the record.',
         },
       ],
     },
@@ -280,7 +280,9 @@ export const flowChapter: ContentChapter = {
         },
         {
           p:
-            'PM presses "Close costing". Then the "Offer" tab is Sales\'s: rough timing, price, risks, ' +
+            'PM presses "Close costing" once every department has finalized its costing. Until ' +
+            'then the step names who is missing and by when; an urgent quote goes out only on an ' +
+            'approved override. Then the "Offer" tab is Sales\'s: rough timing, price, risks, ' +
             'document. Sending offer v1 moves the change to "Quoted". Each sent version is valid 30 ' +
             'days from the customer\'s receipt.',
         },
@@ -372,7 +374,7 @@ export const flowChapter: ContentChapter = {
             ],
           },
         },
-        { callout: 'No change is released while a validation issue is open, unless an approved deviation overrides the release check.', tone: 'rule' },
+        { callout: 'No change is released while a check failed or a validation issue is open. No override lifts this, not even an admin: fix and retest, or a concession the customer accepts.', tone: 'rule' },
         { shot: 'flow-issue-card', alt: 'A validation issue card VI-1 with its stepper, severity chip, "L2" badge and one primary button.' },
       ],
     },
@@ -434,7 +436,23 @@ export const flowChapter: ContentChapter = {
             ['Two deadlines, one active.', 'The quote deadline until the offer is sent, the release deadline from acceptance on. Both move only with a reason.'],
             ['The plan leads after approval.', 'Bank build, work, sampling, recovery: all hang off the detailed plan.'],
             ['After the baseline, every date move is a deviation.', 'With a reason, visible to everyone.'],
-            ['Four eyes where it matters.', 'PM and Quality sign-offs, the route of a validation issue, routing changes, attendance records.'],
+            ['Four eyes where it matters.', 'PM and Quality sign-offs, the route of a validation issue, routing changes, attendance records, every override.'],
+          ],
+        },
+        {
+          p:
+            'Two kinds of rule hold a step. A hard rule has no override: the "Missing before" list ' +
+            'says "No override" and names the only way out (a concession, the customer accepting, ' +
+            'Absorb, a signature). A soft rule has one "Override" link. An override lifts that one ' +
+            'rule and nothing else: pick why (customer date, done in parallel, does not apply, other), ' +
+            'say what covers it, and somebody else gives the OK. The lead, a Project Manager or an ' +
+            'admin by default; Quality for starting implementation, release and validation; ' +
+            'Project Management or Management for prices.',
+        },
+        {
+          points: [
+            ['Internal spend is approved by an engineering approver.', 'Never by the person who raised the change.'],
+            ['An open price holds the close.', 'The customer accepts the offer, or "Absorb" with a reason and the OK of Project Management or Management.'],
           ],
         },
       ],
