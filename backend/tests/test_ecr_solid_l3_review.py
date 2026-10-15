@@ -103,8 +103,10 @@ async def test_a_read_late_notice_is_not_sent_again(session_factory, seed, monke
         for n in await _notes(s, kind="overdue"):
             n.is_read = False
         await s.commit()
-        assert await mail_outbox.send_pending(s, sender=sent.append) == 0
-    assert sent == []
+        await mail_outbox.send_pending(s, sender=sent.append)
+    # only the involved people's daily digest goes out, no late notice
+    assert [m["Subject"] for m in sent if "late" in m["Subject"].lower()] == []
+    assert all(m["Subject"].startswith("Your changes today") for m in sent)
 
 
 async def test_only_immediate_notices_are_mailed(session_factory, seed, monkeypatch):

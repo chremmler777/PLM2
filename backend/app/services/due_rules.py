@@ -6,9 +6,11 @@ Two due rules, one escalation rule, all in working days (Mon-Fri):
   (priority 'critical') or others wait on it (FAST_KINDS).
 - Assessment: min(now + 7 d, deadline - 3 wd), deadline = the quote deadline
   or the need-by date, whichever is earlier; floor 2 wd (urgent 1 wd).
-- Late at due + 1 wd: department assessments and engine tasks then show in
-  the lead's "Overdue" group and the overdue digest, Sales' stage rows in
-  the digest (escalation_of); other rows are flagged Late for their owner.
+- Late at due + 1 wd: department assessments, engine tasks and the
+  computed rows that owe a number or a decision (costing input, sign-offs,
+  internal approval, overrides) then show in the lead's "Overdue" group and
+  the overdue digest, Sales' stage rows in the digest (escalation_of);
+  other rows are flagged Late for their owner.
 
 With ASSESSMENT_V2 off the assessment due is the old flat 7 days and task
 rows keep the change's deadline as their due date (callers check on())."""
@@ -75,6 +77,32 @@ def deadline_of(change) -> tuple[Optional[datetime], Optional[str]]:
     if not out:
         return None, None
     return min(out, key=lambda x: x[0])
+
+
+def clock_floor() -> Optional[datetime]:
+    """settings.cm_task_clock_from as a datetime, None when unset or bad."""
+    from app.core.config import get_settings
+    raw = (get_settings().cm_task_clock_from or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def start_of(kind: str, own: Optional[datetime], entered: Optional[datetime],
+             created: Optional[datetime], now: datetime) -> datetime:
+    """When a computed row became owed: its own start (the question asked,
+    the override proposed, the customer's yes), else when the change
+    entered its status, else its creation; a sign-off owed at validation
+    not before the change got there; never before the task clock's go-live
+    (clock_floor). One rule for My Tasks and the sweep."""
+    if kind == "sign_off" and own is not None and entered is not None:
+        own = max(own, entered)
+    start = own or entered or created or now
+    floor = clock_floor()
+    return max(start, floor) if floor is not None else start
 
 
 def task_due(since: datetime, change, kind: str) -> datetime:
@@ -145,21 +173,28 @@ OWN_DUE_PREFIXES = ("assessment", "validation_issue_")
 
 
 #: Who sees a late row besides its owner (spec §0 one escalation rule):
-#: department assessments and engine tasks reach the lead's "Overdue" group
-#: and the digest (notification_sweep, ChangeService.lead_escalations); Sales'
-#: stage rows reach the digest (overdue_digest.SALES_ROWS). Every other row
-#: is flagged Late in the owner's list only (cut 1). The UI words the Late
-#: chip by this, so it never promises an escalation that does not happen.
-LEAD_ESCALATED_KINDS = frozenset({"assessment"})
+#: department assessments, engine tasks and the computed rows that owe a
+#: number or a decision (owed_items.WATCHED_KINDS) reach the lead's
+#: "Overdue" group (notification_sweep, ChangeService.lead_escalations) and,
+#: with RELEASE_V2, the overdue digest; Sales' stage rows reach the digest
+#: (overdue_digest.SALES_ROWS). The rest (questions, plan feedback, the
+#: onward hop, ...) is flagged Late in the owner's list only (cut 1). The UI
+#: words the Late chip by this, so it never promises an escalation that does
+#: not happen: no lead, no lead; RELEASE_V2 off, no digest.
+LEAD_ESCALATED_KINDS = frozenset({"assessment", "costing_input", "sign_off",
+                                  "internal_approval", "deviation_decision"})
 DIGEST_KINDS = frozenset({"kickoff", "create_quote", "customer_response"})
 
 
 def escalation_of(task: dict, change) -> Optional[str]:
-    """'lead' | 'digest' | None for a late My Tasks row."""
+    """'lead_digest' | 'lead' | 'digest' | None for a late My Tasks row."""
+    digest = cm_switches.on("RELEASE_V2")
     if task["kind"] in LEAD_ESCALATED_KINDS:
-        return "lead"
+        if getattr(change, "lead_id", None) is not None:
+            return "lead_digest" if digest else "lead"
+        return "digest" if digest else None
     if (task["kind"] in DIGEST_KINDS and getattr(change, "customer_relevant", False)
-            and cm_switches.on("RELEASE_V2")):
+            and digest):
         return "digest"
     return None
 
@@ -203,11 +238,7 @@ async def annotate_tasks(session, tasks: list[dict], changes,
         if t["kind"].startswith(OWN_DUE_PREFIXES):
             due = t.get("due_date")
         else:
-            entered = since.get(c.id)
-            if t["kind"] == "sign_off" and start is not None and entered is not None:
-                # a signature owed at validation is due from getting there
-                start = max(start, entered)
-            start = start or entered or c.created_at or now
+            start = start_of(t["kind"], start, since.get(c.id), c.created_at, now)
             due = (add_wd(start, CUSTOMER_CONTACT_WD) if t["kind"] == "customer_response"
                    else task_due(start, c, t["kind"]))
             t["due_date"] = due

@@ -3,16 +3,18 @@
 Cut 1: one notification a day to the configured managers
 (settings.overdue_digest_recipients; Christoph by default), one line per
 change with what is late: department assessments and change tasks past
-due + 1 working day, Sales' stage tasks (hand-over, quote, customer answer)
-by the task rule, and overdue change deadlines. Nothing
+due + 1 working day, the computed rows that owe a number or a decision
+(owed_items: costing input, sign-offs, internal approval, overrides),
+Sales' stage tasks (hand-over, quote, customer answer) by the task rule,
+and overdue change deadlines. Nothing
 late, no digest. Sent at most once per recipient and day, read or not.
 Lateness is the sweep's own test (notification_sweep.escalated). Each
 recipient sees only the changes of their organization (change_service
 _org_scope; admins see all), so a non-admin deputy never reads other
 organizations' titles, leads or owners.
-Cut 2 replaces the list with a manager per department; the per-change digest
-for involved people (spec §0 "Digest: one line per change", §4 "lead's
-digest told") is cut 2 as well."""
+Cut 2 replaces the list with a manager per department. The per-change
+digest for the people involved in a change is app/services/change_digest.py
+(same late items, late_by_change)."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -55,13 +57,30 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
     """One line per change with everything late on it, oldest change first;
     only the viewer's organization's changes when a viewer is given."""
     from app.services.change_service import _org_scope
-    from app.services.notification_sweep import escalated
     now = now or datetime.utcnow()
     changes = {c.id: c for c in (await session.execute(_org_scope(select(ChangeRequest).where(
         ChangeRequest.status.not_in(TERMINAL_STATUSES)), viewer))).scalars().all()}
     if not changes:
         return []
+    items = await late_by_change(session, changes, now)
+    out = []
+    for cid in sorted(items, key=lambda i: changes[i].change_number):
+        c = changes[cid]
+        lead = f", lead {c.lead_name}" if getattr(c, "lead_name", None) else ""
+        out.append(f"{c.change_number} ({c.status}{lead}): " + "; ".join(items[cid]))
+    return out
+
+
+async def late_by_change(session: AsyncSession, changes: dict,
+                         now: datetime, *, deadlines: bool = True) -> dict[int, list[str]]:
+    """What is late on each of these changes ({id: change}), in words: one
+    list per change with anything late (the digests' shared source).
+    deadlines: list a passed deadline too (the change digest names the
+    deadline on its own)."""
+    from app.services.notification_sweep import escalated
     items: dict[int, list[str]] = {}
+    if not changes:
+        return items
 
     def add(cid: int, text: str) -> None:
         items.setdefault(cid, []).append(text)
@@ -77,19 +96,21 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
             continue
         add(a.change_id, f"{names.get(a.department_id, 'a department')} assessment "
                          f"(due {fmt_date(a.due_date)})")
+    from app.services.notification_sweep import change_task_query
+    q, change_of = change_task_query()
     for t, cid in (await session.execute(
-            select(WfInstanceTask, WfInstance.change_id)
-            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
-            .where(WfInstance.change_id.in_(changes), WfInstance.status == "active",
-                   WfInstanceTask.status == "active",
-                   WfInstanceTask.is_actionable.is_(True),
-                   WfInstanceTask.due_date.is_not(None),
-                   WfInstanceTask.due_date < now))).all():
+            q.where(change_of.in_(list(changes)),
+                    WfInstanceTask.due_date < now))).all():
         if not escalated(t.due_date, now):
             continue
         who = f", {t.owner_name}" if t.owner_id is not None and t.owner_name else ""
         add(cid, f"{names.get(t.department_id, 'a department')}{who} "
                  f"(due {fmt_date(t.due_date)})")
+
+    from app.services.owed_items import late_items, owed_items
+    for i in late_items(await owed_items(session, list(changes.values()), now,
+                                         with_owners=False), now):
+        add(i["change"].id, f"{i['label']} ({i['owner']}, due {fmt_date(i['due'])})")
 
     since = dict((await session.execute(
         select(ChangeChangelog.change_id, func.max(ChangeChangelog.performed_at))
@@ -111,20 +132,14 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
             owner = f" ({c.sales_owner_name})" if c.sales_owner_id else ""
             add(c.id, f"Sales{owner}: {what} (due {fmt_date(due)})")
 
-    for c in changes.values():
+    for c in changes.values() if deadlines else ():
         kind = c.active_deadline
         due = (c.release_due_date if kind == "release"
                else c.required_by_date if kind == "quote" else None)
         if due is not None and due < now:
             add(c.id, f"{'release' if kind == 'release' else 'quote'} deadline "
                       f"passed {fmt_date(due)}")
-
-    out = []
-    for cid in sorted(items, key=lambda i: changes[i].change_number):
-        c = changes[cid]
-        lead = f", lead {c.lead_name}" if getattr(c, "lead_name", None) else ""
-        out.append(f"{c.change_number} ({c.status}{lead}): " + "; ".join(items[cid]))
-    return out
+    return items
 
 
 async def send_overdue_digest(session: AsyncSession,

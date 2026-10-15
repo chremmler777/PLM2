@@ -6,8 +6,11 @@ re-sends a state it already reported (spec §0: one per item).
 ECR-solid one escalation rule (spec §0, ASSESSMENT_V2): the owner is reminded
 on the due date; at due + 1 working day the owner hears it is late and the
 item escalates to the change lead (the lead's "Overdue" group); the deadline
-alerts reach the Sales owner too (C20). RELEASE_V2 adds the daily overdue
-digest (C27/P6, app/services/overdue_digest.py). Switched off: the earlier
+alerts reach the Sales owner too (C20). The computed My Tasks rows that
+owe a decision or a number (owed_items: costing input, sign-offs, the
+internal approval, overrides) follow the same rule. RELEASE_V2 adds the daily overdue
+digest (C27/P6, app/services/overdue_digest.py) and the daily digest for
+the people involved in a change (app/services/change_digest.py). Switched off: the earlier
 timing (due-soon 2 days ahead, escalation at the due date).
 
 main.py's reminder loop calls sweep_once(), which commits."""
@@ -35,6 +38,24 @@ def escalated(due: Optional[datetime], now: datetime) -> bool:
     if due is None:
         return False
     return due_rules.is_late(due, now) if cm_switches.on("ASSESSMENT_V2") else due < now
+
+
+def change_task_query():
+    """Active actionable engine tasks with the change they work for: a
+    change-scoped instance (WfInstance.change_id) or a part revision the
+    change originated (PartRevision.originating_change_id). ONE selection
+    of "a change's tasks" for the sweep, the lead's group and the digest
+    (R37). Rows: (task, change_id); change_id None = not a change's task."""
+    from sqlalchemy import func
+    from app.models.part import PartRevision
+    cid = func.coalesce(WfInstance.change_id, PartRevision.originating_change_id)
+    return (select(WfInstanceTask, cid.label("change_id"))
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .outerjoin(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+            .where(WfInstance.status == "active",
+                   WfInstanceTask.status == "active",
+                   WfInstanceTask.is_actionable.is_(True),
+                   WfInstanceTask.due_date.is_not(None))), cid
 
 
 async def _once(session, user_ids, **kw) -> int:
@@ -70,9 +91,15 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             WfInstanceTask.owner_id.is_not(None),
             WfInstanceTask.due_date.is_not(None),
         ))).scalars().all()
+    # the one rule (and its "the change lead sees it" wording) is for a
+    # change's tasks; another workflow's tasks keep the earlier timing
+    q, cid = change_task_query()
+    of_change = set((await session.execute(
+        q.with_only_columns(WfInstanceTask.id).where(cid.is_not(None))
+    )).scalars().all()) if one_rule and tasks else set()
 
     for task in tasks:
-        if one_rule:
+        if one_rule and task.id in of_change:
             # reminded on the due date; "late" only at due + 1 wd
             if escalated(task.due_date, now):
                 n = await _once(
@@ -111,22 +138,19 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             )
             counts["due_soon"] += n
 
-    # Overdue tasks on CHANGE-scoped instances escalate to the change lead
-    # too, claimed or not — the owned-task sweep above filters on owner_id,
-    # so an unclaimed overdue task (the Phase-E primary path: assessments
-    # linked to engine tasks) would otherwise notify nobody. Lead-scoped
-    # dedup key keeps it independent of the owner's; lead == owner is
-    # skipped to avoid a duplicate ping. Part-revision-scoped instances are
-    # left as-is.
+    # Overdue tasks of a change escalate to the change lead too, claimed or
+    # not — the owned-task sweep above filters on owner_id, so an unclaimed
+    # overdue task (the Phase-E primary path: assessments linked to engine
+    # tasks) would otherwise notify nobody. Lead-scoped dedup key keeps it
+    # independent of the owner's; lead == owner is skipped to avoid a
+    # duplicate ping. A change's tasks: change-scoped instances and the
+    # part revisions it originated (change_task_query, as the lead's
+    # "Overdue" group counts them).
+    q, cid = change_task_query()
     lead_task_rows = (await session.execute(
-        select(WfInstanceTask, ChangeRequest.id, ChangeRequest.lead_id)
-        .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
-        .join(ChangeRequest, ChangeRequest.id == WfInstance.change_id)
+        q.add_columns(ChangeRequest.lead_id)
+        .join(ChangeRequest, ChangeRequest.id == cid)
         .where(
-            WfInstance.status == "active",
-            WfInstanceTask.status == "active",
-            WfInstanceTask.is_actionable.is_(True),
-            WfInstanceTask.due_date.is_not(None),
             WfInstanceTask.due_date < now,
             ChangeRequest.lead_id.is_not(None),
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
@@ -204,6 +228,35 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             )
             counts["overdue"] += n
 
+    # The computed rows under the same rule (owed_items: costing input,
+    # sign-offs, the internal approval, overrides): who owes it is reminded
+    # on the due date; at due + 1 wd the lead hears it (the lead's
+    # "Overdue" group and the digest list it from the same items).
+    if one_rule:
+        from app.services.owed_items import owed_items
+        live = (await session.execute(select(ChangeRequest).where(
+            ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()
+        for item in await owed_items(session, live, now):
+            c, due = item["change"], item["due"]
+            if escalated(due, now):
+                if c.lead_id is None or item["owner_ids"] == [c.lead_id]:
+                    continue
+                counts["overdue"] += await _once(
+                    session, [c.lead_id], kind="overdue",
+                    subject_key=f"{item['key']}:overdue:lead",
+                    title=f"{item['label']} late (escalation): {c.change_number}",
+                    body=(f"{item['label']} on your change is late (was due "
+                          f"{fmt_date(due)}); owed by {item['owner']}."),
+                    link=f"/changes/{c.id}")
+            elif due.date() <= now.date() and item["owner_ids"]:
+                counts["due_soon"] += await _once(
+                    session, item["owner_ids"], kind="due_soon",
+                    subject_key=f"{item['key']}:due_soon",
+                    title=f"Due today: {item['label']} ({c.change_number})",
+                    body=f"{item['label']} on {c.change_number} is due today "
+                         f"({fmt_date(due)}).",
+                    link=f"/changes/{c.id}")
+
     changes = (await session.execute(
         select(ChangeRequest).where(
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
@@ -249,5 +302,8 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     # C27 / P6: the daily overdue digest for the configured managers.
     from app.services.overdue_digest import send_overdue_digest
     counts["overdue_digest"] = await send_overdue_digest(session, now=now)
+    # spec §0 Digest: one line per change for its lead, raiser, Sales owner
+    from app.services.change_digest import send_change_digest
+    counts["change_digest"] = await send_change_digest(session, now=now)
 
     return counts

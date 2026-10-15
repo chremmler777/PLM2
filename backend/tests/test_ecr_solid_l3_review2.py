@@ -315,3 +315,218 @@ async def test_release_alert_after_a_quote_alert(session_factory, seed):
         assert rel.body.startswith("Release due ")
         await run_notification_sweep(s); await s.commit()
         assert len(await _notes(s, kind="deadline_overdue")) == 2   # once per item
+
+
+# ---------------------------------------------------------------------------
+# Computed rows follow the one escalation rule (spec §0, C20/C27)
+# ---------------------------------------------------------------------------
+async def _owing_costing(session_factory, team, cid, submitted_at):
+    from app.models.change import ChangeAssessment
+    async with session_factory() as s:
+        s.add(ChangeAssessment(change_id=cid, department_id=team["dept"]["Tool Engineer"],
+                               status="submitted", rasic_letter="R", verdict="feasible",
+                               submitted_at=submitted_at))
+        await s.commit()
+
+
+async def test_late_costing_reaches_the_lead_the_group_and_the_digest(
+        client, seed, team, session_factory, monkeypatch):
+    from app.services.notification_sweep import run_notification_sweep
+    monkeypatch.setattr(get_settings(), "overdue_digest_recipients", "admin")
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "costing late")
+    pm_id = team["user"]["Project Manager"]
+    await _set(session_factory, cid, status="in_assessment", lead_id=pm_id)
+    await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=10))
+    tool = await _as(client, "Tool Engineer")
+    row = (await _tasks(client, tool, cid, "costing_input"))[0]
+    assert row["late"] is True and row["escalation"] == "lead_digest"
+    async with session_factory() as s:
+        await run_notification_sweep(s); await s.commit()
+        lead = await _notes(s, user_id=pm_id, kind="overdue")
+        assert [n.title for n in lead] == [
+            f"Costing input: Tool Engineer late (escalation): {row['change_number']}"]
+        assert not await _notes(s, user_id=team["user"]["Tool Engineer"], kind="due_soon")
+        digest = (await _notes(s, kind="overdue_digest"))[0]
+        assert "Costing input: Tool Engineer (Tool Engineer, due" in digest.body
+        await run_notification_sweep(s); await s.commit()
+        assert len(await _notes(s, user_id=pm_id, kind="overdue")) == 1   # once
+    res = await client.get("/api/v1/changes/my-escalations",
+                           headers=await _as(client, "Project Manager"))
+    assert res.status_code == 200, res.text
+    assert [e["label"] for e in res.json() if e["kind"] == "costing_input"] == [
+        "Costing input: Tool Engineer"]
+
+
+async def test_costing_due_today_reminds_the_department_not_the_lead(
+        client, seed, team, session_factory):
+    from app.services import due_rules
+    from app.services.notification_sweep import run_notification_sweep
+    now = datetime.utcnow()
+    start = due_rules.sub_wd(now, 2)
+    if due_rules.add_wd(start, 2).date() != now.date():
+        pytest.skip("weekend: no working day due today")
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "costing today")
+    pm_id = team["user"]["Project Manager"]
+    await _set(session_factory, cid, status="in_assessment", lead_id=pm_id)
+    await _owing_costing(session_factory, team, cid, start)
+    async with session_factory() as s:
+        await run_notification_sweep(s); await s.commit()
+        reminded = {n.user_id for n in await _notes(s, kind="due_soon")}
+        assert reminded == {team["user"]["Tool Engineer"], team["user"]["tool2"]}
+        assert not await _notes(s, user_id=pm_id, kind="overdue")
+
+
+async def test_late_rows_without_a_lead_or_digest_say_so(
+        client, seed, team, session_factory, monkeypatch):
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "no lead")
+    await _set(session_factory, cid, status="in_assessment", lead_id=None)
+    await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=10))
+    tool = await _as(client, "Tool Engineer")
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "digest"
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] is None
+    await _set(session_factory, cid, lead_id=team["user"]["Project Manager"])
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "lead"
+
+
+async def test_late_sign_off_and_override_reach_the_lead(client, seed, team, session_factory):
+    from app.models.change import ChangeTransitionDeviation
+    from app.services.notification_sweep import run_notification_sweep
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "sign late")
+    dev_id = team["user"]["Development"]
+    old = datetime.utcnow() - timedelta(days=10)
+    await _set(session_factory, cid, status="quoted", customer_response="accepted",
+               customer_response_at=old, lead_id=dev_id)
+    async with session_factory() as s:
+        # the lead asked: Project Management decides, the lead hears it is late
+        s.add(ChangeTransitionDeviation(change_id=cid, to_status="approved", reason="r",
+                                        proposed_by=dev_id, status="pending",
+                                        proposed_at=old))
+        await s.commit()
+        await run_notification_sweep(s); await s.commit()
+        titles = sorted(n.title for n in await _notes(s, user_id=dev_id, kind="overdue"))
+    assert any(t.startswith("PM sign-off late") for t in titles)
+    assert any(t.startswith("Quality sign-off late") for t in titles)
+    assert any(t.startswith("Decide override #") for t in titles)
+
+
+async def test_task_clock_floor_keeps_in_flight_rows_from_being_late(
+        client, seed, team, session_factory, monkeypatch):
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "in flight")
+    await _set(session_factory, cid, status="in_assessment")
+    await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=30))
+    tool = await _as(client, "Tool Engineer")
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["late"] is True
+    monkeypatch.setattr(get_settings(), "cm_task_clock_from",
+                        datetime.utcnow().date().isoformat())
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["late"] is False
+
+
+# ---------------------------------------------------------------------------
+# The daily digest for the people involved (spec §0 Digest, §4)
+# ---------------------------------------------------------------------------
+async def test_involved_people_get_one_line_per_change_once_a_day(
+        client, seed, team, session_factory, monkeypatch):
+    from app.models.change import ChangeConcern
+    from app.services.notification_sweep import run_notification_sweep
+    monkeypatch.setattr(get_settings(), "overdue_digest_recipients", "")
+    u = team["user"]
+    sales = await _as(client, "Sales")
+    busy = await _create(client, sales, seed, "busy")
+    quiet = await _create(client, sales, seed, "quiet")
+    now = datetime.utcnow()
+    await _set(session_factory, busy, status="in_assessment", lead_id=u["Project Manager"],
+               sales_owner_id=u["Sales"], required_by_date=now - timedelta(days=1))
+    await _set(session_factory, quiet, status="in_assessment", lead_id=u["Project Manager"],
+               required_by_date=now + timedelta(days=60))
+    async with session_factory() as s:
+        s.add(ChangeConcern(change_id=busy, kind="needs_info", note="which grain?",
+                            raised_by=u["Development"], answered_at=now - timedelta(hours=2),
+                            answer_note="VW grain"))
+        s.add(ChangeConcern(change_id=busy, kind="needs_info", note="volume?",
+                            raised_by=u["Development"]))
+        await s.commit()
+        await run_notification_sweep(s); await s.commit()
+        got = await _notes(s, kind="change_digest")
+        by_user = {n.user_id: n for n in got}
+        # lead, raiser (Sales created it) and Sales owner: one each
+        assert set(by_user) == {u["Project Manager"], u["Sales"]}
+        body = by_user[u["Project Manager"]].body
+        lines = body.splitlines()
+        assert len(lines) == 1                       # the quiet change has no line
+        assert "quote deadline" in lines[0] and "(overdue)" in lines[0]
+        assert "1 answered since yesterday" in lines[0]
+        assert "waiting on 1 answer" in lines[0]
+        # once a day, read or not
+        for n in got:
+            n.is_read = True
+        await s.commit()
+        await run_notification_sweep(s); await s.commit()
+        assert len(await _notes(s, kind="change_digest")) == len(got)
+    # negative: switch off, no digest
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    from app.services.change_digest import send_change_digest
+    async with session_factory() as s:
+        assert await send_change_digest(s, now=now + timedelta(days=1)) == 0
+
+
+async def test_read_only_raiser_gets_no_digest(client, seed, team, session_factory):
+    vid = await _viewer(session_factory, seed, "ro.raiser")
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "ro")
+    await _set(session_factory, cid, status="in_assessment", raised_by=vid,
+               required_by_date=datetime.utcnow() - timedelta(days=1))
+    from app.services.change_digest import send_change_digest
+    async with session_factory() as s:
+        await send_change_digest(s); await s.commit()
+        assert not await _notes(s, kind="change_digest", user_id=vid)
+
+
+# ---------------------------------------------------------------------------
+# One selection of a change's tasks; other workflows keep their wording
+# ---------------------------------------------------------------------------
+async def test_part_revision_task_escalates_and_other_workflows_keep_their_words(
+        session_factory, seed):
+    from app.models.part import Part, PartRevision
+    from app.models.workflow import Department, WfInstance, WfInstanceTask, WfTemplate
+    from app.services.notification_sweep import run_notification_sweep
+    old = datetime.utcnow() - timedelta(days=10)
+    async with session_factory() as s:
+        d = Department(name="Process Engineer", flow_type="action", is_active=True)
+        t = WfTemplate(name="T", description="x", version=1, is_active=True, created_by=1)
+        s.add_all([d, t]); await s.flush()
+        c = ChangeRequest(change_number="C-PR-1", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"],
+                          status="in_implementation")
+        s.add(c); await s.flush()
+        part = Part(project_id=seed["project_id"], part_number="PR-1", name="p",
+                    part_type="internal_mfg", created_by=seed["admin_id"],
+                    updated_by=seed["admin_id"])
+        s.add(part); await s.flush()
+        rev = PartRevision(part_id=part.id, revision_name="B", originating_change_id=c.id,
+                           phase="review",
+                           created_by=seed["admin_id"])
+        s.add(rev); await s.flush()
+        own = WfInstance(template_id=t.id, part_revision_id=rev.id, status="active",
+                         current_stage_order=1, started_by=seed["admin_id"])
+        other = WfInstance(template_id=t.id, status="active", current_stage_order=1,
+                           started_by=seed["admin_id"])
+        s.add_all([own, other]); await s.flush()
+        for inst in (own, other):
+            s.add(WfInstanceTask(instance_id=inst.id, stage_order=1, department_id=d.id,
+                                 rasic_letter="R", status="active", is_actionable=True,
+                                 owner_id=seed["engineer_id"], due_date=old))
+        await s.commit()
+        await run_notification_sweep(s); await s.commit()
+        lead = await _notes(s, user_id=seed["admin_id"], kind="overdue")
+        assert [n.title for n in lead] == ["Task late (escalation)"]
+        mine = sorted(n.title for n in await _notes(s, user_id=seed["engineer_id"],
+                                                     kind="overdue"))
+        # the change's task under the one rule; the other workflow as before
+        assert mine == ["Task late", "Task overdue"]

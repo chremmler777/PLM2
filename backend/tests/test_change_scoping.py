@@ -128,6 +128,8 @@ async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
         headers=admin_auth)
     assert res.status_code == 200, res.text
     await record_proceed_meeting(session_factory, change["id"], actor_id=seed["admin_id"])
+    # the hard impact lock first, so the (SOFT, L2) deadline rule is what holds
+    await lock_impact(session_factory, change["id"])
     blocked = await client.post(f"/api/v1/changes/{change['id']}/transition",
                                 json={"to_status": "in_assessment"}, headers=admin_auth)
     assert blocked.status_code == 400

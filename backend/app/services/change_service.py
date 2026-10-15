@@ -1149,6 +1149,20 @@ class ChangeService:
                 "days_overdue": (now - t.due_date).days,
             })
 
+        # The computed rows under the same rule (owed_items): costing input,
+        # sign-offs, the internal approval, overrides past due + 1 wd.
+        from app.services.owed_items import late_items, owed_items
+        for i in late_items(await owed_items(session, changes, now,
+                                             with_owners=False), now):
+            c = i["change"]
+            out.append({
+                "kind": i["kind"], "change_id": c.id,
+                "change_number": c.change_number, "change_title": c.title,
+                "label": i["label"], "owner_id": None, "owner_name": i["owner"],
+                "due_date": i["due"].isoformat(),
+                "days_overdue": (now - i["due"]).days,
+            })
+
         # Active-phase deadlines at risk or already overdue (quote deadline
         # pre-quote, release deadline once acceptance/approval set one).
         for c in changes:
@@ -4014,8 +4028,9 @@ class ChangeService:
     def _advance_held(c) -> bool:
         """What next_step_missing would list anyway, read from the loaded
         change without a query: a department's costing still open, a 'not
-        feasible' answer, the internal approval missing. Saves its ~20
-        queries per change on the polled task list (R34)."""
+        feasible' answer, the internal approval missing, no customer yes yet,
+        no bank-build decision. Saves its ~20 queries per change on the
+        polled task list (R34)."""
         from app.services import early_costing
         to = ChangeService.next_step_target(c)
         if (to in ("costing", "quoting") and c.status in ("in_assessment", "costing")
@@ -4026,6 +4041,11 @@ class ChangeService:
                 return True
             if to == "approved" and c.internal_approved_at is None:
                 return True
+        # the customer has not said yes (hard), the bank build is open (todo)
+        if to == "approved" and c.status == "quoted" and c.customer_response != "accepted":
+            return True
+        if to == "in_implementation" and c.bank_build_mode is None:
+            return True
         return False
 
     @staticmethod
