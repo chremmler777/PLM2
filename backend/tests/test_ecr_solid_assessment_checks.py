@@ -261,6 +261,37 @@ async def test_served_flags_match_the_backend(client, assess):
     assert res.status_code == 400 and "already submitted" in res.json()["detail"]
 
 
+async def test_a_consulted_department_owning_check_items_gets_the_task(
+        client, assess, seed, session_factory):
+    """R18: routed C (no submit owed), it still owns its check items: the
+    task names them, and goes once they are closed."""
+    a = assess
+    shop_id, shop, shop_auth = await _user(client, session_factory, seed, "shop", "Toolshop")
+    async with session_factory() as s:
+        s.add(ChangeAssessment(change_id=a["cid"], department_id=shop, stage_order=1,
+                               rasic_letter="C", status="active"))
+        chk = ChangeConcern(change_id=a["cid"], kind="needs_info",
+                            note="Check gate wear on tool", raised_by=a["raiser_id"],
+                            department_id=shop, flag_type="check", check_what="other")
+        s.add(chk)
+        await s.commit()
+        cid = chk.id
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=shop_auth)).json()
+    row = next(t for t in tasks if t["kind"] == "assessment" and t["change_id"] == a["cid"])
+    assert row["hint"] == "Close your check items (1)"
+    acts = (await client.get(_url(a, "/my-actions"), headers=shop_auth)).json()
+    assert any(x["kind"] == "assessment" and "check items" in x["label"]
+               for x in acts["actions"])
+    res = await client.post(_url(a, f"/concerns/{cid}/check"),
+                            json={"outcome": "answered", "value": "0.5", "unit": "mm"},
+                            headers=shop_auth)
+    assert res.status_code == 200, res.text
+    # negative: nothing left to close, no submit owed: no task
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=shop_auth)).json()
+    assert not [t for t in tasks if t["kind"] == "assessment"
+                and t["change_id"] == a["cid"]]
+
+
 # --- C8: questions from the assessment ---------------------------------------
 
 def _q(dept, **extra):

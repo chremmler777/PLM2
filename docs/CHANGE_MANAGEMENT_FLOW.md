@@ -470,7 +470,10 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   5+ characters): any closed check item, by the raiser or the lead, while an
   owning department still has its assessment open (after the submit there
   is nothing left to hold: ask a question or have the assessment sent back).
-  The served `can_reopen` uses the same rule. The closer is told.
+  The served `can_reopen` uses the same rule. The closer is told. A
+  department routed C or S owes no submit, but while it owns open check
+  items its assessment row is its task (*"Close your check items (n)"*, in
+  My Tasks and the cockpit) until they are closed.
 - **"Blocked? Ask a question" (C8).** A department raises `needs_info` with
   `flag_type` question from its own open assessment: one line, what it is
   about (check-what, part or whole change) and who can answer (customer /

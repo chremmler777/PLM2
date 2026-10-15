@@ -370,6 +370,8 @@ async def my_change_tasks(
             )
         )
         from app.services.early_stage_service import EarlyStageService
+        from app.services import cm_switches as _cms
+        checks_v2 = _cms.on("ASSESSMENT_V2")
         pairs = rows.all()
         # The assessment is the FIRST routing stage (plus deviation-added
         # departments); later-stage PM/Sales rows are no assessment (§16).
@@ -394,10 +396,17 @@ async def my_change_tasks(
             # that already did its Responsible work in an earlier stage that
             # it still owes something. Exception: a non-blocking row somebody
             # explicitly took (owner) is that person's to-do.
+            # R18: so is a C/S department's that owns open check items
+            # (spec §4): it closes them in its bucket, and nobody else may
+            checks = (len([x for x in c.concerns if x.is_check and x.is_open
+                           and a.department_id in x.owner_department_ids])
+                      if c.status == "in_assessment" and checks_v2 else 0)
             if (a.rasic_letter not in BLOCKING_LETTERS
-                    and a.effective_owner_id != current_user.id):
+                    and a.effective_owner_id != current_user.id and not checks):
                 continue
             tasks.append({
+                **({"hint": f"Close your check items ({checks})"}
+                   if checks and a.rasic_letter not in BLOCKING_LETTERS else {}),
                 "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
                 "title": c.title,
                 "project_id": c.project_id, "project_number": c.project_number,

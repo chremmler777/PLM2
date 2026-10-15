@@ -4455,14 +4455,22 @@ class ChangeService:
             # my-tasks filter in changes.py my_change_tasks). Exception: a
             # non-blocking row somebody explicitly took (owner) is that
             # person's to-do.
+            # R18: a C/S department owning open check items closes them
+            # (spec §4), as in my-tasks
+            checks = (len([x for x in change.concerns if x.is_check and x.is_open
+                           and a.department_id in x.owner_department_ids])
+                      if change.status == "in_assessment"
+                      and cm_switches.on("ASSESSMENT_V2") else 0)
             if (a.rasic_letter not in BLOCKING_LETTERS
-                    and a.effective_owner_id != user.id):
+                    and a.effective_owner_id != user.id and not checks):
                 continue
             if a.department_id not in dept_ids and a.effective_owner_id != user.id:
                 continue
             actions.append({
                 "kind": "assessment",
-                "label": f"Submit assessment for {dept_names.get(a.department_id, a.department_id)}",
+                "label": (f"Close the check items for {dept_names.get(a.department_id, a.department_id)} ({checks})"
+                          if checks and a.rasic_letter not in BLOCKING_LETTERS else
+                          f"Submit assessment for {dept_names.get(a.department_id, a.department_id)}"),
                 "target_tab": "assessments",
                 "assessment_id": a.id,
                 "department_id": a.department_id,
