@@ -1043,6 +1043,12 @@ class ChangeTransitionDeviation(Base):
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ECR-solid C6 (migration 118): the soft rule this override waives, its
+    # words when asked, and the reason pick. NULL guard_key = a row from
+    # before the binding: it waives whatever holds its target (legacy).
+    guard_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    guard_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="transition_deviations")
 
