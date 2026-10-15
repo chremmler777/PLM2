@@ -3413,6 +3413,7 @@ class ChangeService:
         idle_lead = (await ChangeService.leadless_ids(
             db, [c for c in open_changes if c.status in ("captured", "on_hold")])
             if is_pm else set())
+        scoping_entered: Optional[dict] = None
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -3463,8 +3464,19 @@ class ChangeService:
                     # every hold of 'proceed' with its owner (questions,
                     # PPAP decision, the flip's Sales answer, no parts):
                     # "Ready: proceed" only when none is left
-                    holds = await MeetingService.proceed_holds(db, c, names=names,
-                                                                with_text=False)
+                    if scoping_entered is None:
+                        # when each scoping change entered its status: the
+                        # PPAP decision's due day, as the change page shows
+                        # it (one grouped query for the whole list)
+                        from app.models.change import ChangeChangelog as _CL
+                        sc_ids = [x.id for x in open_changes if x.status == "scoping"]
+                        scoping_entered = dict((await db.execute(
+                            select(_CL.change_id, func.max(_CL.performed_at))
+                            .where(_CL.change_id.in_(sc_ids), _CL.field_name == "status")
+                            .group_by(_CL.change_id))).all()) if sc_ids else {}
+                    holds = await MeetingService.proceed_holds(
+                        db, c, names=names, with_text=False,
+                        entered=scoping_entered.get(c.id) or c.created_at)
                     tasks.append({
                         **await _base(c), "kind": "scoping_wrapup",
                         # None: no manual confirm (switch off), nothing owed.

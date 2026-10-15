@@ -241,7 +241,7 @@ async def test_customer_change_the_room_sets_internal_owes_ppap_and_proceeds(
     rows = await _tasks(client, pm, cid, "scoping_wrapup")
     assert len(rows) == 1 and rows[0]["open_questions"] == 0
     assert [h["key"] for h in rows[0]["holds"]] == ["ppap_decision"]
-    assert rows[0]["holds"][0]["owner"].startswith("Quality")
+    assert rows[0]["holds"][0]["owner"].startswith("Quality, due ")
     assert len(await _tasks(client, quality, cid, "ppap_decision")) == 1
     res = await _proceed(client, admin_auth, cid, mid)
     assert res.status_code == 400 and "PPAP decision" in res.json()["detail"]
