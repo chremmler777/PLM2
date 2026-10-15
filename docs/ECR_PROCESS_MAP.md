@@ -135,7 +135,7 @@ Import scripts bypass the intake. Status: BUILT.
 
 - **Scoped views everywhere**: a department sees its own input only, at
   assessment AND costing. PM and Sales see all blocks.
-- **Tasks are mandatory**: no accept/claim step; the first department member who edits the assessment owns it. Due 2 working days (urgent 1); late at due + 1 working day (assessments and engine tasks: lead and daily digest; Sales' stage rows: digest).
+- **Tasks are mandatory**: no accept/claim step; the first department member who edits the assessment owns it. Tasks due 2 working days (urgent 1); assessments 7 days, earlier near the deadline; late one working day after (assessments, engine tasks, costing, sign-offs, approvals, overrides: lead and daily digest; Sales' stage rows: digest).
 - **Sales owns the customer**: mails tracked on the change and filed into
   each validation issue (everyone uploads); escalations to the customer go
   through Sales.

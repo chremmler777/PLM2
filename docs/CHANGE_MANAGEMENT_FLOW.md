@@ -1232,23 +1232,35 @@ one, and "Absorb" on an open price for who may ask it.
 - **Every next step is a task (C3, no switch).** Besides the stage rows,
   `ChangeService._move_forward_tasks` adds: `deviation_decision` (an
   override or Absorb this person may decide: `deviation_decide_refusal`, the
-  decide endpoint's rule; never the proposer), `sign_off` (PM or Quality
-  member, per missing side for the latest offer, from "Customer accepted" on
-  and in approved / implementation / validation; never the other side's
-  signer), `internal_approval` (the internal approver once costing is final
-  under C5; never the raiser), `validation_check` (an implementing
-  department's open checks, Release tab) and `advance` ("Ready: move it on":
-  the lead, else Project Management, once `next_step_missing` lists nothing;
-  a released change's close too; its button is the hop's own verb, "Close
-  assessment", and makes the move from the task card and "Your actions"
-  alike). The cockpit lists the same rows. A read-only account (viewer, no
-  active PLM department) gets none of these rows; a configured internal
-  approver who cannot write is skipped, so the Project Management fallback
-  decides (R24). Sign-off rows follow the gates: bound to the latest offer
-  with `COMMERCIAL_V2` (a signature only without it), after approval only
-  while `RELEASE_V2` checks them at release.
-- **"Needs you"** (`due_rules.NEEDS_YOU_KINDS`): overrides, sign-offs, the
-  internal approval, `ppap_decision` (when lane L4 adds it) and a concession
+  decide endpoint's rule; never the proposer), `routing_deviation_decision`
+  (a pending routing change: the lead, or Project Management members who
+  filed none of it when the lead asked, there is no lead or the lead cannot
+  act; Assessments tab), `not_feasible` (a department answered "not
+  feasible": the lead decides override, reroute or reject; gone once an
+  override of the rule is asked), `sign_off` (PM or Quality member, per
+  missing side for the latest offer, where the screen has the sign button:
+  quoted after "Customer accepted", and in validation for the release;
+  never the other side's signer; a signature still owed after approval
+  shows up when validation starts), `internal_approval` (the internal
+  approver once costing is final under C5; never the raiser),
+  `validation_check` (an implementing department's open checks, Release tab)
+  and `advance` ("Ready: move it on": the lead, else Project Management, once
+  `next_step_missing` lists nothing; a released change's close too; its
+  button is the hop's own verb, "Close assessment", and makes the move from
+  the task card and "Your actions" alike). The cockpit lists the same rows.
+  A read-only account (viewer, no active PLM department) gets no My Tasks
+  row at all, not even as a change's lead (every write would be refused);
+  a lead who cannot act (read-only or inactive, `ChangeService.leadless_ids`)
+  counts as no lead, so Project Management takes the onward hop and the
+  routing decision (R18). A configured internal approver who cannot write
+  is skipped, so the Project Management fallback decides (R24). Sign-off
+  rows follow the gates: bound to the latest offer with `COMMERCIAL_V2` (a
+  signature only without it), at validation only while `RELEASE_V2` checks
+  them at release. `POST /sign-off` takes a signature from quoted until
+  validation only (`COMMERCIAL_V2`), never on a change being scoped or done.
+- **"Needs you"** (`due_rules.NEEDS_YOU_KINDS`): overrides, routing changes,
+  sign-offs, the internal approval, `ppap_decision` (when lane L4 adds it)
+  and a concession
   to decide (`validation_issue_customer` on a `customer_concession` route) sit
   in their own group on top, by due. Backup rows never do.
 - **Two due rules (C20, `ASSESSMENT_V2`, `app/services/due_rules.py`).** A
@@ -1266,20 +1278,33 @@ one, and "Absorb" on an open price for who may ask it.
   earlier (deliberately: the header shows the phase's one, `active_deadline`); floor 2 wd
   (urgent 1). Set when the change enters assessment and when a department is
   added. Rows carry `deadline_date`/`deadline_kind` ("due Thu (quote deadline
-  Mon)"), `urgent` and `late`. Switch off: rows keep the change's deadline as
-  their due date, the assessment a flat 7 days.
+  Mon)": the weekday within the coming week, else the date), `urgent` and
+  `late`. One start rule for the rows and the sweep (`due_rules.start_of`);
+  `settings.cm_task_clock_from` (go-live date, empty = none) is the earliest
+  start, so changes in flight at go-live are not all Late on day one.
+  Switch off: rows keep the change's deadline as their due date, the
+  assessment a flat 7 days.
 - **One escalation rule.** The owner of a department assessment or engine
   task (owned unlinked assessments included) is reminded on the due date
   ("Task due today", "Assessment due today"); at due + 1 working day the
   owner hears it is late, the item escalates to the change lead (notification
-  and the "Overdue" group, `lead_escalations`) and the digest. One test
+  and the "Overdue" group, `lead_escalations`) and the digest. The computed
+  rows that owe a number or a decision follow the same rule
+  (`app/services/owed_items.py`, read per change, not per viewer): costing
+  input, sign-offs, the internal approval and overrides. Who owes it (the
+  department's members, PM / Quality members, the approvers, the override's
+  deciders) is reminded on the due date ("Due today: ..."); at due + 1 wd
+  the lead hears it (not when the lead is the only one who owes it), it is
+  in the lead's "Overdue" group and in the overdue digest. One test
   decides "late" everywhere (`notification_sweep.escalated` = `due_rules.is_late`,
   so a Friday due date is late on Monday after its time, never over the
-  weekend). Sales' late stage rows reach the digest. Every other row (sign-off,
-  internal approval, override, costing input, plan feedback, checks, "Ready:
-  move it on") is marked "Late" for its owner only in cut 1; the row's
-  `escalation` ('lead' / 'digest' / none) words the Late chip, so it never
-  promises more. Quote and release deadline alerts reach the Sales owner too.
+  weekend). Sales' late stage rows reach the digest. The rest (questions,
+  plan feedback, checks, "Ready: move it on") is marked "Late" for its owner
+  only in cut 1. The row's `escalation` words the Late chip so it never
+  promises more: `lead_digest`, `lead` (digest switched off), `digest` (no
+  lead, or Sales' rows) or none. Quote and release deadline alerts reach the
+  Sales owner too; each names its deadline ("Release due 3 Nov"), and a
+  release alert is not hidden by an earlier quote alert.
   A sweep notice is sent once per item and person, read or not
   (`notify_once(include_read=True)`); the reminder loop commits each run
   (`sweep_once`). Switch off: the earlier timing (due-soon 2 days ahead,
@@ -1290,17 +1315,24 @@ one, and "Absorb" on an open price for who may ask it.
   one line per change: late assessments and change tasks, Sales' late
   hand-over, quote or customer answer, passed deadlines. Nothing late, no
   digest; never twice a day, read or not. A non-admin recipient sees only
-  their organization's changes. Cut 2: a manager per department, and the
-  per-change digest for involved people (spec §0 "one line per change", §4
-  "lead's digest told").
+  their organization's changes. Cut 2: a manager per department.
+- **Digest for the people involved (`RELEASE_V2`, `change_digest.py`).** Once
+  a day each lead, raiser and Sales owner of a live change (active accounts
+  that can write) gets one notice, one line per change of theirs with news
+  or a problem: phase, deadline (with "at risk" / "overdue"), questions
+  answered or closed since yesterday, waits (open questions, the customer),
+  and what is late (the overdue digest's own items). A change with nothing
+  to tell has no line; no line, no digest. Supplier waits join with lane L5.
 - **Stage entry notice (C3, `RELEASE_V2`).** Entering `in_implementation` or
   `in_validation` tells the implementing departments (the ones that priced
   the work) once per change and stage.
 - **Ownership.** No claim button: the first real member of the department
   who edits its assessment (the draft autosave) owns it ("Holmes is working
   on this"); a second editor does not take it over, an admin's edit owns
-  nothing; routing or "Assign" (hand over) still name someone first.
-- **Task card.** Every My Tasks link opens the change with `?task=<kind>`:
+  nothing; routing still names someone first. A "Hand over" button (the
+  spec's second path; `POST /assessments/{id}/assign` exists) has no UI yet.
+- **Task card.** Every My Tasks link opens the change with `?task=<kind>`
+  (plus `dept`, `dev` or `side` when a change has two rows of the kind):
   "Your part: <task>, due <date> (deadline). Next: <button>" to where the work
   is done ("Ready: move it on" makes the move itself); on the tab where the
   work already is it names the step ("... (below)") instead of a second
@@ -1310,10 +1342,15 @@ one, and "Absorb" on an open price for who may ask it.
   While `smtp_enabled` (default off) a one-minute loop mails each new one once,
   plain text ending "Answer in PLM2: <link>" (`plm2_public_url`, else
   `frontend_url` + `/plm2`). Only the immediate class is mailed
-  (`mail_outbox.MAIL_KINDS`: task newly yours, decision needed, escalation to
-  acknowledge, the digest); due reminders, late notices, deadline alerts,
-  stage and FYI notices and a backup's info copy stay badges. Read, older than
-  24 h or addressless ones are skipped; existing notifications were stamped
+  (`mail_outbox.MAIL_KINDS`: task newly yours, `task_assigned` to you or
+  `task_new` to your department, decision needed, escalation to acknowledge,
+  the two digests); due reminders, late notices, deadline alerts, stage and
+  FYI notices, kind-less notices (lesson reminders, "Cost carrier changed")
+  and a backup's info copy stay badges. Read, older than 24 h or addressless
+  ones are skipped; a hub account's bare username gets
+  `settings.mail_default_domain` (empty: not mailed). A mail the relay
+  refuses for its recipient or content is skipped; only an unreachable relay
+  stops the run (retried next minute). Existing notifications were stamped
   mailed by the migration.
   Batching and reply-to answers: cut 2.
 
