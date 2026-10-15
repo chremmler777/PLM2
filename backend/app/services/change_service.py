@@ -462,9 +462,7 @@ class ChangeService:
         reasons = await ChangeService._guard_reasons(session, change, to_status)
         if not reasons:
             return [], []
-        from sqlalchemy import inspect as _inspect
-        if "transition_deviations" in _inspect(change).unloaded:
-            await session.refresh(change, ["transition_deviations"])
+        await ChangeService._load_deviations(session, change)
         approved = [d for d in change.transition_deviations
                     if d.to_status == to_status and d.status == "approved"]
         legacy = next((d for d in approved if d.guard_key is None), None)
@@ -477,6 +475,12 @@ class ChangeService:
             elif d not in covering:
                 covering.append(d)
         return covering, uncovered
+
+    @staticmethod
+    async def _load_deviations(session: AsyncSession, change: ChangeRequest) -> None:
+        from sqlalchemy import inspect as _inspect
+        if "transition_deviations" in _inspect(change).unloaded:
+            await session.refresh(change, ["transition_deviations"])
 
     @staticmethod
     def pending_override(change: ChangeRequest, to_status: str,
@@ -1993,6 +1997,16 @@ class ChangeService:
 
         for d in covering:
             d.status = "consumed"
+        from app.services.cm_rules import ABSORB_RULE as _ABSORB
+        if cm_switches.on("COMMERCIAL_V2"):
+            await ChangeService._load_deviations(session, change)
+            # An approved override is an OK for the step out of THIS status:
+            # one not used here lapses when the change leaves it, so it never
+            # silently covers its rule again later without a new decision.
+            for d in change.transition_deviations:
+                if (d.status == "approved" and d not in covering
+                        and d.guard_key != _ABSORB):
+                    d.status = "lapsed"
 
         # Side effects on entry
         if to_status == "scoping" and change.status == "in_assessment":
@@ -5012,6 +5026,12 @@ class ChangeService:
         if response == "accepted" and change.price_open:
             # HARD #9's exit: the customer accepted the offer that prices it.
             change.price_open = False
+            from app.services.cm_rules import ABSORB_RULE
+            await ChangeService._load_deviations(session, change)
+            for d in change.transition_deviations:
+                if d.guard_key == ABSORB_RULE and d.status == "pending":
+                    # nothing left to absorb: the Decide task goes away
+                    d.status = "withdrawn"
             await ChangeService.append_changelog(
                 session, change, "price_closed",
                 "Open price closed: the customer accepted the offer", user_id,

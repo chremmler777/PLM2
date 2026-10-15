@@ -1157,7 +1157,11 @@ internal approver). The deciders get one notification per override
 (`deviation_pending`, deduped; the PM department when the lead asked or there
 is no lead). A deviation asked before the binding (no `guard_key`) still
 covers its target as before, so in-flight changes move; a pending one is
-bound to the rule holding the hop when it is approved. Switch off: the old
+bound to the rule holding the hop when it is approved. An approved override
+is an OK for the step out of the status it was given in: one not used when
+the change leaves that status turns `lapsed` (a later return of its rule
+needs a new decision), and a pending Absorb turns `withdrawn` when the
+customer's acceptance clears the open price. Switch off: the old
 rule (any approved deviation to the status, lead or admin decides).
 
 **C5 (spec §5, `ASSESSMENT_V2`).** Closing costing (`costing → quoting`, and an

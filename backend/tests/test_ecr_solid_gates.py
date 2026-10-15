@@ -880,3 +880,39 @@ async def test_internal_open_price_names_its_own_exit(client, admin, seed, depts
     ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
     item = next(i for i in ch["next_step"]["items"] if i["key"] == "price_open")
     assert item["exits"] == ["absorb_internal"]  # no customer to accept
+
+
+async def test_unused_override_lapses_when_the_change_moves_on(
+        client, admin, seed, depts, people, session_factory):
+    """An approved override is an OK for the step out of the status it was
+    given in: one not used lapses when the change leaves it, so it never
+    covers its rule again later without a new decision."""
+    cid = await _scoping_two_rules(client, admin, seed, session_factory)
+    lead = await login(client, "eng@test.io", admin=False)
+    pm = people["Project Manager"][1]
+    dev = (await _propose(client, lead, cid, "in_assessment",
+                          guard_key="no_quote_deadline")).json()
+    assert (await _decide(client, pm, cid, dev["id"])).status_code == 200
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={
+        "to_status": "on_hold", "reason": "customer pauses the project until Nov"},
+        headers=pm)
+    assert r.status_code == 200, r.text
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations", headers=pm)).json()
+    assert rows[0]["status"] == "lapsed"
+
+
+async def test_acceptance_withdraws_a_pending_absorb(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _change(client, admin, seed, session_factory, "quoted", price_open=True)
+    dev = (await client.post(f"/api/v1/changes/{cid}/absorb", json={
+        "reason_code": "small_amount", "note": "EUR 300 over, not worth it"},
+        headers=people["Sales"][1])).json()
+    r = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
+        "response": "accepted", "release_due_date": _DUE}, headers=admin)
+    assert r.status_code == 200, r.text
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations", headers=admin)).json()
+    assert next(d for d in rows if d["id"] == dev["id"])["status"] == "withdrawn"
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions",
+                             headers=people["Management"][1])).json()
+    rows = acts if isinstance(acts, list) else acts.get("actions", [])
+    assert not any(a.get("deviation_id") == dev["id"] for a in rows)

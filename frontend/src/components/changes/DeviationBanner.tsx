@@ -39,6 +39,8 @@ const STATUS_STYLE: Record<string, string> = {
   approved: 'bg-emerald-900 text-emerald-200',
   rejected: 'bg-red-900 text-red-200',
   consumed: 'bg-slate-700 text-slate-400',
+  lapsed: 'bg-slate-700 text-slate-400',
+  withdrawn: 'bg-slate-700 text-slate-400',
 };
 
 export default function DeviationBanner({ changeId, blockedTo, from, blockedReason, rule, customerRelevant = true, leadName, seq, onRetry, onClose }: Props) {

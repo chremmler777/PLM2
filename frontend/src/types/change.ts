@@ -1137,7 +1137,9 @@ export interface TransitionDeviation {
   id: number;
   to_status: string;
   reason: string;
-  status: 'pending' | 'approved' | 'rejected' | 'consumed';
+  /** lapsed: approved but not used before the change left that status;
+   * withdrawn: an Absorb the customer's acceptance made moot. */
+  status: 'pending' | 'approved' | 'rejected' | 'consumed' | 'lapsed' | 'withdrawn';
   proposed_by: number;
   proposed_at: string;
   decided_by?: number | null;
