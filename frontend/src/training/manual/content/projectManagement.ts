@@ -182,7 +182,12 @@ export const pmChapter: ContentChapter = {
             'costs". The card shows the cost and "Tool cost ESTIMATE" while a line is priced on an ' +
             'estimate. Pick why we spend it; with money also the volume per year, the saving per year ' +
             '(0 for a quality change) and whether it is calculated or an estimate. The payback in ' +
-            'months is computed. At no cost it is one click and the reason.',
+            'months is computed. At no cost it is one click and the reason. The approval holds for ' +
+            'the amount approved: when a department finalizes costs above it while the change is ' +
+            'still in costing, the approval is withdrawn and the approver is asked again ("Costs ' +
+            'rose after your approval"). After approval a quote above an estimate goes to the lead ' +
+            '(no lead: PM) as "Quote above the estimate": ask to absorb it with a reason, the ' +
+            'approver decides.',
         },
         { shot: 'pm-cost-summary', alt: 'The "Cost summary" card with "By department" totals and the "Timing" block showing "Longest lead time".' },
       ],

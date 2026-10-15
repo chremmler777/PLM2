@@ -121,6 +121,13 @@ export const qualityChapter: ContentChapter = {
             ['Submit', 'with "Submit assessment". A risk never blocks it.'],
           ],
         },
+        {
+          p:
+            'In the check workflow of a changed tool, Quality is accountable (A) for "Sampling / ' +
+            'trial": the Tool Engineer runs it, Process supports, and you approve the result before ' +
+            '"Final release". The tool change itself is the Tool Engineer\'s (R), with Project ' +
+            'Management accountable.',
+        },
       ],
     },
     {
