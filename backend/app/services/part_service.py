@@ -679,6 +679,12 @@ class ChangelogService:
         # entry.entry_hash = ChangelogService.calculate_entry_hash(entry)
 
         session.add(entry)
+        # Part data / status events go to the project's part data mail list
+        # (outbox row in this same transaction; the digest sends it).
+        from app.services.part_data_mail import enqueue as enqueue_part_data_mail
+        await enqueue_part_data_mail(
+            session, part_id=part_id, action=action, summary=action_description,
+            performed_by=performed_by, revision_id=revision_id)
         await session.flush()
         logger.debug(f"Logged action '{action}' for part {part_id}")
         return entry

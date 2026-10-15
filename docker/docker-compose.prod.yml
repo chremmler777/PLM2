@@ -55,6 +55,16 @@ services:
       # search answers 503 "not configured"; the rest of PLM keeps working.
       MATERIALDB_BASE_URL: ${MATERIALDB_BASE_URL:-}
       MATERIALDB_SERVICE_TOKEN: ${MATERIALDB_SERVICE_TOKEN:-}
+      # Part data mail via Microsoft Graph as "KTX Apps" (same Entra app and
+      # names as TWOS). Any ENTRA_* empty = nothing is sent, outbox rows are
+      # marked skipped. NOTIFY_TRIAL_RECIPIENT set = everything goes only there.
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      NOTIFY_SENDER: ${NOTIFY_SENDER:-apps-noreply@us.ktx.group}
+      NOTIFY_TRIAL_RECIPIENT: ${NOTIFY_TRIAL_RECIPIENT:-}
+      NOTIFY_BASE_URL: ${NOTIFY_BASE_URL:-https://apps.ad.us.ktx.group/plm2}
+      NOTIFY_DIGEST_MINUTES: ${NOTIFY_DIGEST_MINUTES:-5}
       # Issuing company on the customer offer PDF. Empty = the KTX Toccoa
       # default in backend/app/services/company_profile.py; lists (address,
       # footer) are separated by '|'.

@@ -470,6 +470,11 @@ async def lifespan(app: FastAPI):
 
     reminder_task = asyncio.create_task(_reminder_loop())
 
+    # Part data mail: every minute, one digest mail per project whose oldest
+    # pending outbox row is NOTIFY_DIGEST_MINUTES old (app/services/part_data_mail.py).
+    from app.services.part_data_mail import digest_loop as part_data_mail_loop
+    part_data_mail_task = asyncio.create_task(part_data_mail_loop())
+
     # MachineDB presses for the cost sheet: one background sync when
     # MACHINEDB_API_URL and MACHINEDB_SERVICE_TOKEN are set (never blocks
     # startup; the sheet runs on the last synced copy otherwise).
@@ -486,6 +491,7 @@ async def lifespan(app: FastAPI):
     tool_tonnage_task.cancel()
     # Shutdown
     reminder_task.cancel()
+    part_data_mail_task.cancel()
     logger.info("Shutting down PLM application...")
 
 

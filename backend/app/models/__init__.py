@@ -52,6 +52,7 @@ from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile, DfmAuditEvent
 from app.models.field_note import FieldNote, FieldNoteComment
 from app.models.training import TrainingVersion, TrainingSignoff, TrainingAttempt
 from app.models.tool_shrink import ToolShrinkDecision
+from app.models.mail import MailRecipient, MailOutbox
 
 __all__ = [
     "Base",
@@ -82,6 +83,8 @@ __all__ = [
     "TrainingSignoff",
     "TrainingAttempt",
     "ToolShrinkDecision",
+    "MailRecipient",
+    "MailOutbox",
     "DfmTopic",
     "DfmEntry",
     "DfmEntryFile",

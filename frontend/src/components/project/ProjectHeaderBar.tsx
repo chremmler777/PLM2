@@ -8,6 +8,7 @@ import MilestoneStrip from '../MilestoneStrip';
 import StartChangeButton from '../changes/StartChangeButton';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
 import { ProjectTeamCard } from './ProjectTeamCard';
+import { ProjectMailListCard } from './ProjectMailListCard';
 import { CUSTOMER_NAMING_LABELS, type Project } from './projectTypes';
 
 export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: {
@@ -80,6 +81,9 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: 
             </div>
             <div className="px-3 pt-2 pb-2 border-t border-slate-700">
               <ProjectTeamCard projectId={project.id} />
+            </div>
+            <div className="px-3 pt-2 pb-2 border-t border-slate-700">
+              <ProjectMailListCard projectId={project.id} />
             </div>
             <div className="px-3 pt-2 pb-1 border-t border-slate-700">
               <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Timing gates</p>

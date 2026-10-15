@@ -80,6 +80,23 @@ class Settings(BaseSettings):
     # Frontend URL for email links
     frontend_url: str = "http://localhost:5173"
 
+    # Part data mail (app/services/part_data_mail.py): Microsoft Graph as
+    # "KTX Apps", the same Entra app and env names as TWOS. Empty tenant,
+    # client or secret means "not configured": outbox rows are marked skipped
+    # and nothing is sent.
+    entra_tenant_id: str = ""
+    entra_client_id: str = ""
+    entra_client_secret: str = ""
+    notify_sender: str = "apps-noreply@us.ktx.group"
+    #: While set, every mail goes only to this address, subject prefixed
+    #: "[TRIAL] ", body opening with the intended recipients.
+    notify_trial_recipient: str = ""
+    #: Base for links in mails: PLM2 is served under the hub at /plm2.
+    notify_base_url: str = "https://apps.ad.us.ktx.group/plm2"
+    #: A project's pending events wait this long (from the oldest) and go out
+    #: as one digest mail.
+    notify_digest_minutes: int = 5
+
     # Password reset settings
     password_reset_expire_hours: int = 24
 

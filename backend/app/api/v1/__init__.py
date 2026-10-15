@@ -3,6 +3,9 @@ from fastapi import APIRouter, Depends
 from app.api.v1.health import router as health_router
 from app.api.v1.plants import router as plants_router
 from app.api.v1.project_team import router as project_team_router
+from app.api.v1.mail_recipients import (
+    projects_router as mail_recipients_router, notifications_router as mail_notifications_router,
+)
 from app.api.v1.catalog_parts import router as catalog_parts_router
 from app.api.v1.paints import router as paints_router
 
@@ -118,6 +121,8 @@ api_router.include_router(change_costing_context_router, dependencies=_TRAINING_
 api_router.include_router(audit_router)
 api_router.include_router(plants_router)
 api_router.include_router(project_team_router)
+api_router.include_router(mail_recipients_router)
+api_router.include_router(mail_notifications_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
 api_router.include_router(catalog_parts_router)
