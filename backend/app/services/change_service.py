@@ -6278,21 +6278,21 @@ class ChangeService:
             # money, the volume and the yearly saving it runs on, and whether
             # that saving is calculated or estimated (payback is computed).
             # All at no cost: one click + the rationale.
+            # Every missing part of the case in one refusal (one round trip).
             from app.models.change import INTERNAL_RATIONALES, SAVING_BASES
+            missing = []
             if rationale not in INTERNAL_RATIONALES:
-                raise ChangeError(
-                    "Say why we spend it: " + ", ".join(INTERNAL_RATIONALES))
+                missing.append("why we spend it (" + ", ".join(INTERNAL_RATIONALES) + ")")
             if abs(float(summ["totals"]["grand_total"] or 0)) > 0.004:
                 if not (volume and volume > 0):
-                    raise ChangeError(
-                        "Give the annual volume the saving runs on (pieces per year)")
+                    missing.append("the annual volume the saving runs on (pieces per year)")
                 if saving is None or saving < 0:
-                    raise ChangeError(
-                        "Give the saving per year (0 when there is none, e.g. "
-                        "a quality change)")
+                    missing.append("the saving per year (0 when there is none, e.g. "
+                                   "a quality change)")
                 if saving_basis not in SAVING_BASES:
-                    raise ChangeError(
-                        "Say whether the saving is calculated or an estimate")
+                    missing.append("whether the saving is calculated or an estimate")
+            if missing:
+                raise ChangeError("Say " + "; ".join(missing))
             change.internal_rationale = rationale
             change.internal_volume = volume
             change.internal_saving = saving

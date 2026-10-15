@@ -62,6 +62,12 @@ async def test_with_money_the_case_owes_volume_and_saving(
                               pricing="estimate", est_cost=4800.0,
                               created_by=seed["admin_id"]))
         await s.commit()
+    # one round trip: every missing part of the case in one refusal
+    res = await client.post(_url(internal), json={"release_due_date": DUE},
+                            headers=admin_auth)
+    detail = res.json()["detail"]
+    assert res.status_code == 400 and all(w in detail for w in (
+        "why we spend it", "annual volume", "saving per year", "calculated or an estimate"))
     base = {"release_due_date": DUE, "rationale": "saving"}
     for extra, words in (({}, "annual volume"),
                          ({"volume": 120000}, "saving per year"),
