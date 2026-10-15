@@ -1437,7 +1437,8 @@ class ChangeService:
                 add("lead", "soft", rule="no_lead")
             if change.customer_relevant and change.required_by_date is None:
                 add("quote_deadline", "soft", rule="no_quote_deadline")
-            concerns = MeetingService.open_concerns(change)
+            # HARD #2: questions and cancel votes; C33 check items go along
+            concerns = MeetingService.open_blocking(change)
             if concerns:
                 add("open_concerns", "hard", n=len(concerns))
         if to in ("costing", "quoting") and change.status in (
@@ -3381,6 +3382,10 @@ class ChangeService:
                               "role_department_id": dept_by_name.get("Project Manager")})
             elif c.status == "scoping":
                 if is_pm:
+                    # C33 "Not yet: waiting for 3 answers (Sales, Process)",
+                    # flipping to "Ready: proceed" once nothing holds it.
+                    from app.services.meeting_service import MeetingService
+                    holding = MeetingService.open_blocking(c)
                     tasks.append({
                         **await _base(c), "kind": "scoping_wrapup",
                         # None: no manual confirm (switch off), nothing owed.
@@ -3388,6 +3393,10 @@ class ChangeService:
                                              if c.impact_confirm_step else None),
                         "has_decision": any(m.decision in ("proceed", "reject")
                                             for m in c.meetings),
+                        "open_questions": len(holding),
+                        "waiting_on": MeetingService.asking_sides(
+                            holding, {i: n for n, i in dept_by_name.items()}),
+                        "open_checks": len(MeetingService.open_checks(c)),
                     })
                 if (can_confirm and c.impact_confirmed_at is None
                         and c.impact_confirm_step):
@@ -3696,6 +3705,26 @@ class ChangeService:
                         "question_note": newest.note,
                         "since": newest.answered_at,
                     })
+
+            # C33: the confirm item of an Assumed answer, owed by the person
+            # named to confirm it (default the Sales owner) by its due date,
+            # in any live status: the assumption travels into the assessment
+            # and the offer until it is confirmed.
+            if c.status not in TERMINAL_STATUSES:
+                for q in c.concerns:
+                    if q.confirm_open and q.confirm_by_id == user.id:
+                        due = (datetime.combine(q.confirm_due, datetime.min.time())
+                               if q.confirm_due else None)
+                        tasks.append({
+                            **await _base(c), "kind": "confirm_assumption",
+                            "concern_id": q.id,
+                            "reason": (f"{q.assumed_value}"
+                                       f"{' ' + q.assumed_unit if q.assumed_unit else ''}"
+                                       f": {q.note}"),
+                            "due_date": due,
+                            "overdue": due is not None and due < datetime.utcnow(),
+                            "target_tab": "scoping",
+                        })
 
         # Post-quote scope change (spec §16): costing reopens for the affected
         # departments only, until a newer offer or an approved deviation covers it.
@@ -4506,9 +4535,11 @@ class ChangeService:
         """
         if change.status in TERMINAL_STATUSES:
             return []
+        # C33: a check item is not asked of anybody: the owning department
+        # checks it in its assessment.
         return sorted(
             (c for c in change.concerns
-             if c.is_open and c.kind == "needs_info" and c.answered_at is None),
+             if c.is_open and c.is_question and c.answered_at is None),
             key=lambda c: c.id)
 
     @staticmethod
@@ -4524,7 +4555,7 @@ class ChangeService:
             return []
         return sorted(
             (c for c in change.concerns
-             if c.is_open and c.kind == "needs_info" and c.answered_at is not None),
+             if c.is_open and c.is_question and c.answered_at is not None),
             key=lambda c: c.answered_at)
 
     @staticmethod
@@ -4534,7 +4565,7 @@ class ChangeService:
         decision): this one disappears the moment Sales marks it solved, which
         is what the task list keys off."""
         return next((c for c in change.concerns
-                     if c.is_open and c.kind == "needs_info"
+                     if c.is_open and c.is_question
                      and c.department_id is None), None)
 
     @staticmethod
@@ -5080,14 +5111,16 @@ class ChangeService:
         # its open risks — that is what the register is for. Holding the submit
         # on them would force people to withdraw a risk they still believe in
         # just to get past the button.
-        held = (await session.execute(
+        # C33 "same as #n": a co-owning department is held like the
+        # raised-for one (HARD #10, own check items at the own submit).
+        held = [c for c in (await session.execute(
             select(ChangeConcern).where(
                 ChangeConcern.change_id == change.id,
-                ChangeConcern.department_id == department_id,
                 ChangeConcern.kind != "risk",
                 ChangeConcern.withdrawn_at.is_(None),
                 ChangeConcern.resolved_by_meeting_id.is_(None),
-            ))).scalars().all()
+                ChangeConcern.retracted_at.is_(None),
+            ))).scalars().all() if department_id in c.owner_department_ids]
         if held:
             points = "; ".join(f"#{c.id} ({c.kind}): {c.note}" for c in held)
             raise ChangeError(

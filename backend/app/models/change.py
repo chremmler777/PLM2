@@ -356,6 +356,13 @@ class ChangeRequest(Base):
         return impact_confirm_step(self)
 
     @property
+    def scoping_v2(self) -> bool:
+        """Served switch SCOPING_V2 (cm_switches): C33 questions and check
+        items, C13, intake follow-ups. The UI reads this one flag."""
+        from app.services import cm_switches
+        return cm_switches.on("SCOPING_V2")
+
+    @property
     def impact_confirmed_by_name(self) -> Optional[str]:
         return self.impact_confirmed_by_user.full_name if self.impact_confirmed_by_user is not None else None
 
@@ -736,6 +743,9 @@ class ChangeMeeting(Base):
     # internal. Proceed is refused until set; a flip against the change's
     # capture is audited and Sales is told.
     cost_carrier: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # C33 "Go with conditions" (migration 121): the check items open when
+    # this meeting decided 'proceed', [{id, department_id, check_what, note}].
+    go_conditions: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -803,6 +813,20 @@ class ChangeNegotiation(Base):
 
 
 CONCERN_KINDS = ("reject_proposal", "needs_info", "risk")
+
+# C33 (spec §3, SCOPING_V2): a scoping flag (kind needs_info) is one of two
+# things. A QUESTION blocks 'proceed' (HARD #2): scope cannot be decided
+# without its answer. A CHECK item (the default) is checked by the raised-for
+# department in its own assessment (HARD #10 at that department's submit).
+# NULL on legacy rows reads as a question.
+FLAG_TYPES = ("question", "check")
+# What a flag asks to be checked (spec §3 quick add).
+CHECK_WHAT = ("drawing", "volume", "cycle_time", "weight", "tool", "material",
+              "tolerance", "schedule", "other")
+# Who can answer a question (spec §3 "Make it a question").
+ANSWER_FROM = ("customer", "our_team", "supplier")
+# How a question was answered (spec §0 Answer form).
+ANSWER_KINDS = ("confirmed", "assumed")
 
 # What a "risk" concern is about. A fixed vocabulary rather than free text so
 # the register can be counted across changes — "how often does fill bite us"
@@ -929,6 +953,34 @@ class ChangeConcern(Base):
     resolved_by_meeting_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_meetings.id"), nullable=True)
 
+    # --- C33 (migration 121): question or check item, and its structure ----
+    # 'question' | 'check' (FLAG_TYPES); NULL = legacy, read as a question.
+    flag_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # What to check (CHECK_WHAT) and on which part; NULL part = whole change.
+    check_what: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    part_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parts.id"), nullable=True)
+    # A question: who can answer it (ANSWER_FROM) and what the answer changes
+    # in the scope.
+    answer_from: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    scope_effect: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "Same as #n": further departments that own this item with the
+    # raised-for one (ints).
+    co_department_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The answer form (spec §0): Confirmed (evidence) or Assumed (value +
+    # unit or "n/a", risk if wrong, who confirms by when).
+    answer_kind: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    answer_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    assumed_value: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    assumed_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    assumed_risk: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confirm_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    confirm_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+
     change: Mapped["ChangeRequest"] = relationship(
         back_populates="concerns", foreign_keys=[change_id])
     raised_by_user: Mapped["User"] = relationship(
@@ -942,6 +994,30 @@ class ChangeConcern(Base):
     @property
     def is_answered(self) -> bool:
         return self.answered_at is not None
+
+    @property
+    def is_check(self) -> bool:
+        """A C33 check item: the owning department checks it in its
+        assessment; it never blocks 'proceed'."""
+        return self.kind == "needs_info" and self.flag_type == "check"
+
+    @property
+    def is_question(self) -> bool:
+        """A scoping question (legacy needs_info rows included): blocks
+        'proceed' while open (HARD #2)."""
+        return self.kind == "needs_info" and self.flag_type != "check"
+
+    @property
+    def owner_department_ids(self) -> list[int]:
+        """The raised-for department and every "same as" co-owner."""
+        out = [self.department_id] if self.department_id is not None else []
+        return out + [int(d) for d in (self.co_department_ids or [])
+                      if int(d) not in out]
+
+    @property
+    def confirm_open(self) -> bool:
+        """An Assumed answer nobody has confirmed yet (the confirm item)."""
+        return self.answer_kind == "assumed" and self.confirmed_at is None
 
     @property
     def risk_type_label(self) -> Optional[str]:

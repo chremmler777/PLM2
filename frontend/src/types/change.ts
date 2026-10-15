@@ -238,6 +238,8 @@ export interface ChangeRequest {
   /** Served switch: true while Development confirms the impacted set by hand;
    *  false while the set locks itself at the scoping 'proceed' decision. */
   impact_confirm_step?: boolean;
+  /** Served switch SCOPING_V2: C33 questions / check items, intake follow-ups. */
+  scoping_v2?: boolean;
   /** The scope of the change in the project manager's words (2026-10-14). */
   scope_definition?: string | null;
   internal_approved_by?: number | null;
@@ -455,7 +457,9 @@ export type ChangeTaskKind =
   /** C3 "Needs you": a pending routing change (added department) to decide. */
   | 'routing_deviation_decision'
   /** C3: a department answered 'not feasible'; the run team decides. */
-  | 'not_feasible';
+  | 'not_feasible'
+  /** C33: an Assumed answer to confirm with evidence by its date. */
+  | 'confirm_assumption';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -485,6 +489,11 @@ export interface ChangeTask {
   // scoping wrap-up rows
   impact_confirmed?: boolean | null;
   has_decision?: boolean;
+  /** C33: open questions / cancel votes holding proceed, who they wait on,
+   *  and the check items that go along. */
+  open_questions?: number;
+  waiting_on?: string[];
+  open_checks?: number;
   // obtain_info rows: what the customer was asked for, and how much of it
   reason?: string | null;
   question_count?: number;
@@ -1143,7 +1152,57 @@ export interface ChangeConcern {
   withdrawn_by?: number | null;
   withdrawn_by_name?: string | null;
   settled_as?: 'settled' | 'withdrawn' | null;
+  /** C33: a scoping flag is a question (blocks proceed) or a check item
+   *  (checked in the owning department's assessment). null = legacy question. */
+  flag_type?: FlagType | null;
+  check_what?: CheckWhat | null;
+  part_id?: number | null;
+  part_number?: string | null;
+  /** A question: who can answer it, and what the answer changes in the scope. */
+  answer_from?: AnswerFrom | null;
+  scope_effect?: string | null;
+  co_department_ids?: number[] | null;
+  /** The raised-for department and "same as" co-owners, by name. */
+  owner_department_names?: string[];
+  /** A check item's due: its department's assessment due (once routed). */
+  owner_due?: string | null;
+  /** The answer form: Confirmed (evidence) or Assumed (value, unit, risk). */
+  answer_kind?: 'confirmed' | 'assumed' | null;
+  answer_ref?: string | null;
+  assumed_value?: string | null;
+  assumed_unit?: string | null;
+  assumed_risk?: string | null;
+  confirm_by_id?: number | null;
+  confirm_by_name?: string | null;
+  confirm_due?: string | null;
+  confirmed_at?: string | null;
+  /** May the viewer switch question / check item (asker or PM)? */
+  can_switch?: boolean | null;
 }
+
+export type FlagType = 'question' | 'check';
+export type CheckWhat = 'drawing' | 'volume' | 'cycle_time' | 'weight' | 'tool'
+  | 'material' | 'tolerance' | 'schedule' | 'other';
+export const CHECK_WHAT: CheckWhat[] = ['drawing', 'volume', 'cycle_time', 'weight',
+  'tool', 'material', 'tolerance', 'schedule', 'other'];
+export type AnswerFrom = 'customer' | 'our_team' | 'supplier';
+
+/** C33 answer form body (POST .../answer). */
+export interface AnswerForm {
+  answer_kind: 'confirmed' | 'assumed';
+  note?: string;
+  ref?: string;
+  mail_id?: number;
+  assumed_value?: string;
+  assumed_unit?: string;
+  assumed_risk?: string;
+  confirm_by_id?: number;
+  confirm_due?: string;
+}
+
+/** C33: is this flag a check item (never blocks proceed)? */
+export const isCheckItem = (c: Pick<ChangeConcern, 'kind' | 'flag_type'>) =>
+  c.kind === 'needs_info' && c.flag_type === 'check';
 
 export interface ChangeMeeting {
   id: number;
@@ -1163,6 +1222,9 @@ export interface ChangeMeeting {
   created_at: string;
   decided_by: number | null;
   decided_at: string | null;
+  /** C33 "Go with conditions": the check items open at 'proceed'. */
+  go_conditions?: { id: number; department_id: number | null; check_what?: string | null;
+    note: string }[] | null;
 }
 
 /** R and A assess (blocking); S supports; C is consulted; I is informed

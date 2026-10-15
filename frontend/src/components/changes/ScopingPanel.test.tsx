@@ -807,6 +807,46 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(changesApi.decideMeeting).not.toHaveBeenCalled()
   })
 
+  it('C33: a check item never holds proceed; it goes along as a condition', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
+    vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 41, change_id: 7, kind: 'needs_info', flag_type: 'check', check_what: 'drawing',
+        note: 'Rib thickness', raised_by: 9, raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z',
+        is_open: true, department_id: 2, owner_department_names: ['Quality'] },
+    ] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true, scoping_v2: true })} />))
+    // not a question card: it sits in the check items list
+    expect(await screen.findByTestId('check-row-41')).toBeTruthy()
+    expect(screen.queryByTestId('needs-info-card-41')).toBeNull()
+    fireEvent.click(await screen.findByTestId('meeting-proceed-21'))
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(false)
+    expect(go.textContent).toBe(t('proceed.go').replace('{n}', '1'))
+    fireEvent.click(go)
+    await waitFor(() => expect(changesApi.decideMeeting).toHaveBeenCalledWith(7, 21, 'proceed', undefined))
+  })
+
+  it("C33: 'Not yet' with open questions decides without asking for a new reason", async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
+    vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 42, change_id: 7, kind: 'needs_info', flag_type: 'question', note: 'Resin lot?',
+        raised_by: 9, raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z', is_open: true,
+        department_id: 2, asking_department_name: 'Quality' },
+    ] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true, scoping_v2: true })} />))
+    const notYet = await screen.findByTestId('meeting-not-yet-21')
+    expect(notYet.textContent).toBe(t('meeting.notYet'))
+    expect(notYet.getAttribute('title')).toContain('Quality')
+    // negative: proceed stays held by the question
+    fireEvent.click(screen.getByTestId('meeting-proceed-21'))
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByText('Not yet', { selector: 'button:not([data-testid])' }))
+    fireEvent.click(notYet)
+    await waitFor(() => expect(changesApi.decideMeeting).toHaveBeenCalledWith(7, 21, 'needs_info', undefined))
+  })
+
   it('shows a refused proceed in a dialog with the server message', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
     vi.mocked(changesApi.decideMeeting).mockRejectedValueOnce({

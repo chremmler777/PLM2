@@ -110,15 +110,17 @@ export const pmChapter: ContentChapter = {
             { title: 'Record it', body: '"+ Record a meeting" on the "Scoping" tab: channel, "Meeting date", "Participants". Attendance only, not responsibility.' },
             { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supportive", "Consulted", "Informed (notified only)" or "Not involved". The standard routing is pre-selected; the room overrules it. An "Informed" department gets the notification and no task.' },
             { title: 'Confirm the cost carrier', body: '"Cost carrier" is required before the assessment can start. Flipping it is audited and Sales is notified.' },
-            { title: 'Decide', body: '"Proceed & start assessment", "Needs more info" or "Reject". Proceed starts the assessment for every R and A department.' },
+            { title: 'Decide', body: '"Proceed & start assessment", "Not yet" or "Reject". Proceed starts the assessment for every R and A department. With open check items the button reads "Proceed: 3 check items go to departments": they go along as conditions, each due with its department\'s assessment.' },
           ],
         },
         {
           callout:
-            'Open questions and cancel votes block "Proceed". Risks do not: a change goes ahead with ' +
-            'its risks on the record. The person who raised a question or vote, or you as PM, ' +
-            'settles it first. "Needs more info" keeps the change in scoping and gives Sales the ' +
-            'task to get the answer from the customer.',
+            'Scoping is triage, not analysis. Open questions and cancel votes block "Proceed"; check ' +
+            'items and risks do not. The proceed dialog lists the open questions: "Answer now", or ' +
+            '"Make it a check item" if the scope can be decided without it. A department that owns ' +
+            'check items but has no letter shows "Route Quality: C" (or R). "Not yet" closes nobody\'s ' +
+            'question and, while questions are open, needs no reason. Your "Wrap up scoping" task ' +
+            'says what it waits on, then "Ready: proceed".',
           tone: 'warn',
         },
         { shot: 'pm-scoping-meeting', alt: 'The scoping meeting form with RASIC letters per department, the cost carrier and "Save meeting".' },

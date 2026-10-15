@@ -15,12 +15,16 @@ import { AttachmentRow } from './AttachmentRow'
 import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
 import TransitionConfirmDialog from './TransitionConfirmDialog'
+import ScopingFlags from './scoping/ScopingFlags'
+import ProceedFixList from './scoping/ProceedFixList'
 import DateInput from '../gantt/DateInput'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
-import type {
-  Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier, MeetingParticipant, RasicLetter,
+import {
+  isCheckItem,
+  type Attachment, type ChangeConcern, type ChangeMeeting, type ChangeRequest, type CostCarrier,
+  type ImpactedItem, type MeetingParticipant, type RasicLetter,
 } from '../../types/change'
 import {
   askingSide, canAnswerQuestion, carrierOf, isPersonContact, openFlagLines,
@@ -98,6 +102,8 @@ export default function ScopingPanel(
   // record says which departments are informed; the backend refuses
   // "proceed" (it would enter assessment) and there is no cost carrier.
   const motherPlant = change.origin === 'mother_plant'
+  // C33 (served switch SCOPING_V2): questions and check items, 'Not yet'.
+  const v2 = change.scoping_v2 === true && !motherPlant
   const qc = useQueryClient()
   const { userId } = useAuth()
   const { data: concerns = [] } = useQuery({
@@ -302,8 +308,9 @@ export default function ScopingPanel(
   // Every needs-info flag is a question, whoever raised it and however it is
   // attributed: auto-raised by a decision, hand-raised in the strip, or filed
   // against a department. One flow, one card — the strip keeps the objections.
+  // C33: check items are not questions; they have their own list.
   const needsInfo = [...concerns]
-    .filter((c) => c.kind === 'needs_info')
+    .filter((c) => c.kind === 'needs_info' && !isCheckItem(c))
     .sort((a, b) => a.raised_at.localeCompare(b.raised_at))
   const openQuestions = needsInfo.filter((c) => c.is_open)
   const solvedQuestions = needsInfo.filter((c) => !c.is_open)
@@ -335,7 +342,8 @@ export default function ScopingPanel(
       })}
       askingSide={askingSide(c, deptName)}
       canSettle={(!actingAs && c.raised_by === userId) || isPm}
-      origin={originOf(c)} onChanged={invalidate} />
+      origin={originOf(c)} onChanged={invalidate}
+      structured={v2} confirmerName={change.sales_owner_name ?? change.lead_name} />
   )
   const outstanding = [...meetings].reverse().find(
     (m: ChangeMeeting) => m.decision === 'reject' || m.decision === 'needs_info')
@@ -377,6 +385,8 @@ export default function ScopingPanel(
   // Open flags block 'proceed' (risks never do): the decision says so in a
   // dialog that lists them rather than failing on the server.
   const openFlags = openFlagLines(concerns, (id) => departments.find((d) => d.id === id)?.name)
+  // C33: check items never hold proceed; they go along as its conditions.
+  const openChecks = concerns.filter((c) => c.is_open && isCheckItem(c))
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptRasic((prev) => {
@@ -459,9 +469,16 @@ export default function ScopingPanel(
               {t('meeting.proceed')}
             </button>
             <button type="button" className={btnSm.secondary}
-              disabled={decide.isPending}
-              onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
-              {t('meeting.needsInfo')}
+              disabled={decide.isPending} data-testid={`meeting-not-yet-${m.id}`}
+              title={v2 && openQuestions.length > 0 ? t('tasks.hint.scopingWaiting')
+                .replace('{n}', String(openQuestions.length))
+                .replace('{x}', [...new Set(openQuestions.map((q) => askingSide(q, deptName)))].join(', '))
+                : undefined}
+              onClick={() => (v2 && openQuestions.length > 0
+                // C33: the open questions are the reason; nothing new is asked
+                ? decide.mutate({ meetingId: m.id, decision: 'needs_info' })
+                : setPending({ meetingId: m.id, decision: 'needs_info' }))}>
+              {v2 ? t('meeting.notYet') : t('meeting.needsInfo')}
             </button>
             <button type="button"
               className={`${btnSm.secondary} text-red-300 hover:text-red-200 hover:border-red-700`}
@@ -511,6 +528,21 @@ export default function ScopingPanel(
           }).join(', ')}
         </p>
       )}
+      {(m.go_conditions?.length ?? 0) > 0 && (
+        <details className="text-xs text-slate-400" data-testid={`meeting-conditions-${m.id}`}>
+          <summary className="cursor-pointer">
+            {t('meeting.goConditions').replace('{n}', String(m.go_conditions!.length))}
+          </summary>
+          <ul className="ml-4 list-disc">
+            {m.go_conditions!.map((g) => (
+              <li key={g.id}>
+                {g.department_id != null ? `${departments.find((d) => d.id === g.department_id)?.name ?? `#${g.department_id}`}: ` : ''}
+                {g.note.split('\n')[0]}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {carrierOfMeeting(m) && !motherPlant && (
         <p className="text-xs text-slate-500" data-testid={`meeting-carrier-line-${m.id}`}>
           {t('meeting.costCarrier')}: {carrierName(carrierOfMeeting(m))}
@@ -538,10 +570,12 @@ export default function ScopingPanel(
       return {
         to: 'in_assessment',
         title: t('meeting.proceedBlockedTitle'),
-        consequence: t('meeting.proceedBlocked'),
+        consequence: v2 ? t('proceed.questionsOpen') : t('meeting.proceedBlocked'),
         open: openFlags,
         holdWhileOpen: true,
-        confirmLabel: t('meeting.proceedConfirm'),
+        confirmLabel: v2 && openChecks.length > 0
+          ? t('proceed.go').replace('{n}', String(openChecks.length))
+          : t('meeting.proceedConfirm'),
       }
     }
     return {
@@ -558,7 +592,10 @@ export default function ScopingPanel(
         ...(!confirmStep && !change.impact_confirmed_at && impactedCount
           ? [t('meeting.proceedLocksImpact').replace('{n}', String(impactedCount))] : []),
         ...lines],
-      confirmLabel: t('meeting.proceedConfirm'),
+      // C33 Go with conditions: the open check items go to their departments
+      confirmLabel: v2 && openChecks.length > 0
+        ? t('proceed.go').replace('{n}', String(openChecks.length))
+        : t('meeting.proceedConfirm'),
     }
   })()
 
@@ -570,7 +607,14 @@ export default function ScopingPanel(
           const m = confirmProceed!
           setConfirmProceed(null)
           decide.mutate({ meetingId: m.id, decision: 'proceed' })
-        }} />
+        }}>
+        {v2 && confirmProceed && (
+          <ProceedFixList changeId={changeId}
+            meeting={meetings.find((m: ChangeMeeting) => m.id === confirmProceed.id) ?? confirmProceed}
+            concerns={concerns} attachments={attachments} departments={departments}
+            confirmerName={change.sales_owner_name ?? change.lead_name} onChanged={invalidate} />
+        )}
+      </TransitionConfirmDialog>
       <TransitionConfirmDialog busy={false}
         confirm={refusal ? {
           to: 'in_assessment', title: t('meeting.proceedBlockedTitle'),
@@ -678,9 +722,19 @@ export default function ScopingPanel(
           </div>
         )}
 
+        {/* C33: the quick add and the check items, grouped by owner. */}
+        {v2 && open && (
+          <ScopingFlags changeId={changeId} concerns={concerns}
+            impactedItems={(change as { impacted_items?: ImpactedItem[] }).impacted_items ?? []}
+            departments={departments} myDepartmentIds={myDepartmentIds}
+            changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]}
+            editable={open} onChanged={invalidate} />
+        )}
+
         {/* Everything else the team flagged, in one strip. */}
         <ConcernStrip changeId={changeId} editable={open} departments={departments}
-          isPm={isPm} hideConcernIds={needsInfo.map((c) => c.id)}
+          voteOnly={v2}
+          isPm={isPm} hideConcernIds={concerns.filter((c) => c.kind === 'needs_info').map((c) => c.id)}
           myDepartmentIds={myDepartmentIds}
           changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]} />
       </section>

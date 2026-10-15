@@ -111,7 +111,8 @@ export function openFlagLines(
   concerns: ChangeConcern[], departmentName?: (id: number) => string | undefined,
 ): string[] {
   return concerns
-    .filter((c) => c.is_open && c.kind !== 'risk')
+    // C33: a check item never holds proceed
+    .filter((c) => c.is_open && c.kind !== 'risk' && c.flag_type !== 'check')
     .sort((a, b) => a.id - b.id)
     .map((c) => {
       const kind = c.kind === 'needs_info' ? t('concern.kind.question')

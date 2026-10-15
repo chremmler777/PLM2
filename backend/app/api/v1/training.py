@@ -984,6 +984,11 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes/{change_id}/concerns/{concern_id}/answer"),
     ("POST", "/changes/{change_id}/concerns/{concern_id}/withdraw"),
     ("POST", "/changes/{change_id}/concerns/{concern_id}/retract"),
+    # C33: question / check item switch, same as / add to, confirm an
+    # assumption
+    ("POST", "/changes/{change_id}/concerns/{concern_id}/type"),
+    ("POST", "/changes/{change_id}/concerns/{concern_id}/join"),
+    ("POST", "/changes/{change_id}/concerns/{concern_id}/confirm"),
     ("DELETE", "/changes/{change_id}/concerns/{concern_id}"),
     # plan
     ("POST", "/changes/{change_id}/plan/seed"),

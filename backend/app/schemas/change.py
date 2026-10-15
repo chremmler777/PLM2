@@ -374,6 +374,8 @@ class ChangeResponse(BaseModel):
     # set locks automatically at the scoping 'proceed' decision instead of
     # Development's manual confirm. Frontend and backend read this one flag.
     impact_confirm_step: bool = False
+    # Served switch SCOPING_V2 (C33 questions / check items, intake follow-ups).
+    scoping_v2: bool = False
     # The scope of the change, in the project manager's words (migration 115).
     scope_definition: Optional[str] = None
     # The part weight, quoted at costing and weighed at validation. Both halves
@@ -444,6 +446,7 @@ class ChangeResponse(BaseModel):
             row["sales_owner_name"] = data.sales_owner_name
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
             row["impact_confirm_step"] = data.impact_confirm_step
+            row["scoping_v2"] = data.scoping_v2
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
             row["validated_weight_by_name"] = data.validated_weight_by_name
             row["bank_build_set_by_name"] = data.bank_build_set_by_name
@@ -1134,6 +1137,37 @@ class ConcernCreate(BaseModel):
     severity: Optional[int] = None
     # Set when the risk is raised from an assessment checklist row.
     checklist_key: Optional[str] = Field(default=None, max_length=120)
+    # C33 (SCOPING_V2): question | check. Omitted = the legacy shape (a
+    # question without structure); the UI always sends it, default check.
+    flag_type: Optional[str] = None
+    check_what: Optional[str] = None
+    # The part it is about (impacted set); omitted = the whole change.
+    part_id: Optional[int] = None
+    # A question: who can answer it and what the answer changes in the scope.
+    answer_from: Optional[str] = None
+    scope_effect: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ConcernTypeIn(BaseModel):
+    """C33: make it a question / a check item (asker or Project Management)."""
+    flag_type: str
+    answer_from: Optional[str] = None
+    scope_effect: Optional[str] = Field(default=None, max_length=2000)
+    department_id: Optional[int] = None
+    check_what: Optional[str] = None
+
+
+class ConcernJoinIn(BaseModel):
+    """C33: 'same as #n' (your department co-owns it) and/or 'add to #n'."""
+    department_id: Optional[int] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ConcernConfirmIn(BaseModel):
+    """C33: confirm an Assumed answer (evidence: a filed document or ref)."""
+    ref: Optional[str] = Field(default=None, max_length=255)
+    # A customer mail filed on the change (attachment kind customer_email).
+    mail_id: Optional[int] = None
 
 
 class CostLeadTimeIn(BaseModel):
@@ -1180,6 +1214,18 @@ class BankBuildIn(BaseModel):
 class ConcernAnswerIn(BaseModel):
     # Optional: a response document filed into the concern counts as content.
     note: Optional[str] = None
+    # C33 answer form (SCOPING_V2): confirmed | assumed. Omitted = the legacy
+    # free answer.
+    answer_kind: Optional[str] = None
+    ref: Optional[str] = Field(default=None, max_length=255)
+    # A customer mail filed on the change (attachment kind customer_email):
+    # the evidence of a Confirmed answer to a customer question.
+    mail_id: Optional[int] = None
+    assumed_value: Optional[str] = Field(default=None, max_length=60)
+    assumed_unit: Optional[str] = Field(default=None, max_length=20)
+    assumed_risk: Optional[str] = Field(default=None, max_length=2000)
+    confirm_by_id: Optional[int] = None
+    confirm_due: Optional[date] = None
 
 
 class ScopeDefinitionIn(BaseModel):
@@ -1235,6 +1281,30 @@ class ConcernResponse(BaseModel):
     resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None
     is_open: bool = True
+    # C33: question | check (NULL legacy = question), and its structure.
+    flag_type: Optional[str] = None
+    check_what: Optional[str] = None
+    part_id: Optional[int] = None
+    part_number: Optional[str] = None
+    answer_from: Optional[str] = None
+    scope_effect: Optional[str] = None
+    co_department_ids: Optional[List[int]] = None
+    # The raised-for department and co-owners, by name; a check item's due
+    # (= that department's assessment due, once it is routed).
+    owner_department_names: List[str] = []
+    owner_due: Optional[datetime] = None
+    # The answer form (Confirmed / Assumed) and its confirm item.
+    answer_kind: Optional[str] = None
+    answer_ref: Optional[str] = None
+    assumed_value: Optional[str] = None
+    assumed_unit: Optional[str] = None
+    assumed_risk: Optional[str] = None
+    confirm_by_id: Optional[int] = None
+    confirm_by_name: Optional[str] = None
+    confirm_due: Optional[date] = None
+    confirmed_at: Optional[datetime] = None
+    # May the caller switch its type (asker or Project Management)?
+    can_switch: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -1258,6 +1328,8 @@ class MeetingResponse(BaseModel):
     selected_department_ids: List[int] = []
     department_rasic: Optional[Dict[int, str]] = None
     cost_carrier: Optional[str] = None
+    # C33 "Go with conditions": the check items open at 'proceed'.
+    go_conditions: Optional[List[Dict[str, Any]]] = None
     created_by: int
     created_at: datetime
     decided_by: Optional[int] = None

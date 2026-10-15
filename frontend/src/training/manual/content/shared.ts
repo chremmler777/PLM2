@@ -237,8 +237,8 @@ export const flowChapter: ContentChapter = {
         {
           steps: [
             { title: 'The impacted set', body: 'Development picks the impacted items on the "Impacted" tab (the lead and PM may pick too) and confirms them with "Confirm impact (Development)". Nothing is assessed until it is confirmed.' },
-            { title: 'Questions and cancel votes', body: 'Anyone on the team can raise a question for the customer or vote to reject. Sales answers questions; the asker or PM closes them. Open ones block "Proceed".' },
-            { title: 'The scoping meeting', body: 'PM records it with the departments and their letters (R, A, S, C, I) and the cost carrier. The decision is "Proceed & start assessment", "Needs more info" or "Reject".' },
+            { title: 'Check items, questions and cancel votes', body: 'Scoping only decides which parts, who assesses and go or no-go. Anyone adds a point in one line with "Add check item": the department checks it later in its own assessment. Only what the scope cannot be decided without becomes a question ("Make it a question"): say who can answer and what the answer changes. Questions and cancel votes block "Proceed"; check items go along as conditions. The asker or PM closes a question.' },
+            { title: 'The scoping meeting', body: 'PM records it with the departments and their letters (R, A, S, C, I) and the cost carrier. The decision is "Proceed & start assessment", "Not yet" or "Reject".' },
           ],
         },
         {

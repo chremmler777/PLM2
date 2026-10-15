@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change import (
     ChangeRequest, ChangeMeeting, ChangeConcern, CONCERN_KINDS,
     RISK_TYPES, RISK_SEVERITIES, TASK_LETTERS, BLOCKING_LETTERS,
-    MEETING_DECISIONS, MEETING_CHANNELS, SCOPING_STATUSES)
+    MEETING_DECISIONS, MEETING_CHANNELS, SCOPING_STATUSES,
+    FLAG_TYPES, CHECK_WHAT, ANSWER_FROM, ANSWER_KINDS)
+from app.services import cm_switches
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services.change_service import ChangeService, ChangeError
@@ -286,6 +288,9 @@ class MeetingService:
         kind: str, note: str, department_id: Optional[int] = None,
         risk_type: Optional[str] = None, severity: Optional[int] = None,
         checklist_key: Optional[str] = None,
+        flag_type: Optional[str] = None, check_what: Optional[str] = None,
+        part_id: Optional[int] = None, answer_from: Optional[str] = None,
+        scope_effect: Optional[str] = None,
     ) -> ChangeConcern:
         """Two phases, two meanings for department_id.
 
@@ -355,6 +360,19 @@ class MeetingService:
                         f"'{checklist_key}' is not a checklist item for this department")
         if not (note or "").strip():
             raise ChangeError("A concern needs a note saying what the problem is")
+        # C33 (spec §3, SCOPING_V2): a scoping flag is a QUESTION (blocks
+        # 'proceed') or a CHECK item (the raised-for department checks it in
+        # its assessment). A raise without flag_type is the legacy shape and
+        # stays a question; the UI always says which.
+        structured = (kind == "needs_info" and not in_assessment
+                      and cm_switches.on("SCOPING_V2"))
+        if structured:
+            flag_type, check_what, part_id, answer_from, scope_effect = \
+                await MeetingService._validate_flag(
+                    session, change, flag_type, check_what, part_id,
+                    answer_from, scope_effect, department_id)
+        else:
+            flag_type = check_what = part_id = answer_from = scope_effect = None
         if in_assessment:
             if department_id is None:
                 raise ChangeError(
@@ -380,7 +398,20 @@ class MeetingService:
         # two departments can still hold each of them. Risks are exempt: a
         # register is a list, and one person routinely sees a fill risk AND a
         # dimensional one on the same change.
-        if kind != "risk" and any(
+        if structured:
+            # C33: several questions per department; the limit is one open
+            # question per asker, raised-for department and check-what (it
+            # replaces the per-person-per-kind rule). Check items are a list.
+            twin = next((c for c in change.concerns
+                         if flag_type == "question" and c.is_open and c.is_question
+                         and c.raised_by == user.id
+                         and c.department_id == department_id
+                         and c.check_what == check_what), None)
+            if twin is not None:
+                raise ChangeError(
+                    f"You already asked this (#{twin.id}: {twin.note}): add to "
+                    f"#{twin.id} or mark yours 'same as #{twin.id}'")
+        elif kind != "risk" and any(
                 c.is_open and c.raised_by == user.id and c.kind == kind
                 and c.department_id == department_id
                 for c in change.concerns):
@@ -391,7 +422,9 @@ class MeetingService:
             department_id=department_id,
             risk_type=risk_type if kind == "risk" else None,
             severity=severity if kind == "risk" else None,
-            checklist_key=checklist_key)
+            checklist_key=checklist_key,
+            flag_type=flag_type, check_what=check_what, part_id=part_id,
+            answer_from=answer_from, scope_effect=scope_effect)
         session.add(concern)
         await session.flush()
         await ChangeService.append_changelog(
@@ -405,8 +438,297 @@ class MeetingService:
                        "risk_type": concern.risk_type,
                        "risk_type_label": concern.risk_type_label,
                        "severity": concern.severity,
-                       "checklist_key": checklist_key},
+                       "checklist_key": checklist_key,
+                       **({"flag_type": flag_type, "check_what": check_what,
+                           "part_id": part_id} if structured else {})},
             notes=concern.note)
+        return concern
+
+    @staticmethod
+    async def _validate_flag(
+        session: AsyncSession, change: ChangeRequest, flag_type: Optional[str],
+        check_what: Optional[str], part_id: Optional[int],
+        answer_from: Optional[str], scope_effect: Optional[str],
+        department_id: Optional[int],
+    ) -> tuple:
+        """C33: the structure of a scoping flag (spec §3 quick add / "Make it
+        a question"). Returns (flag_type, check_what, part_id, answer_from,
+        scope_effect), normalised. A raise without flag_type is a legacy
+        question and keeps its old, free shape."""
+        if flag_type is None:
+            return "question", None, None, None, None
+        if flag_type not in FLAG_TYPES:
+            raise ChangeError(
+                f"Invalid flag type '{flag_type}': question or check")
+        if check_what not in CHECK_WHAT:
+            raise ChangeError(
+                "Pick what to check: one of " + ", ".join(CHECK_WHAT))
+        if part_id is not None and part_id not in {
+                i.part_id for i in change.impacted_items}:
+            raise ChangeError(
+                "Pick a part of this change's impacted set, or leave it for "
+                "the whole change")
+        if flag_type == "check":
+            if department_id is None:
+                raise ChangeError(
+                    "A check item needs the department that checks it "
+                    "('Raised for')")
+            return flag_type, check_what, part_id, None, None
+        return (flag_type, check_what, part_id,
+                *MeetingService._question_fields(answer_from, scope_effect))
+
+    @staticmethod
+    def _question_fields(answer_from: Optional[str],
+                         scope_effect: Optional[str]) -> tuple[str, str]:
+        """A question owes "who can answer" and "what the answer changes in
+        the scope" (spec §3): if nothing in the scope hangs on it, it is a
+        check item."""
+        if answer_from not in ANSWER_FROM:
+            raise ChangeError(
+                "Say who can answer the question: customer, our_team or supplier")
+        effect = (scope_effect or "").strip()
+        if len(effect) < 5:
+            raise ChangeError(
+                "Say what the answer changes in the scope (parts, who assesses, "
+                "go/no-go). Can we decide the scope without it? Then it is a "
+                "check item")
+        return answer_from, effect
+
+    # ---- C33: switch type, same as / add to, Confirmed / Assumed ----------
+
+    @staticmethod
+    async def _open_scoping_flag(change: ChangeRequest, concern_id: int,
+                                 session: AsyncSession) -> ChangeConcern:
+        if not cm_switches.on("SCOPING_V2"):
+            raise ChangeError("Questions and check items are switched off (SCOPING_V2)")
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if concern.kind != "needs_info" or not concern.is_open:
+            raise ChangeError("Only an open question or check item can be changed")
+        if change.status not in SCOPING_STATUSES:
+            raise ChangeError(
+                "Questions and check items are sorted during capture and scoping")
+        return concern
+
+    @staticmethod
+    async def set_flag_type(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        flag_type: str, *, answer_from: Optional[str] = None,
+        scope_effect: Optional[str] = None, department_id: Optional[int] = None,
+        check_what: Optional[str] = None,
+    ) -> ChangeConcern:
+        """Make it a question / make it a check item (spec §3): the asker or
+        Project Management, any time during scoping [KEEP]. A question owes
+        who answers and what the answer changes; a check item owes the
+        department that checks it."""
+        concern = await MeetingService._open_scoping_flag(change, concern_id, session)
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if not ((concern.raised_by == user.id and not acting)
+                or await MeetingService.user_is_pm_member(session, user)):
+            raise MeetingForbidden(
+                "Only the person who raised it, or Project Management, may "
+                "switch a question and a check item")
+        if flag_type not in FLAG_TYPES:
+            raise ChangeError(f"Invalid flag type '{flag_type}': question or check")
+        if check_what is not None:
+            if check_what not in CHECK_WHAT:
+                raise ChangeError("Pick what to check: one of " + ", ".join(CHECK_WHAT))
+            concern.check_what = check_what
+        if department_id is not None:
+            dept = await session.get(Department, department_id)
+            if dept is None or not dept.is_active:
+                raise ChangeError(f"Unknown or inactive department {department_id}")
+            concern.department_id = department_id
+        before = "check" if concern.is_check else "question"
+        if flag_type == "question":
+            concern.answer_from, concern.scope_effect = MeetingService._question_fields(
+                answer_from or concern.answer_from, scope_effect or concern.scope_effect)
+            if concern.check_what is None:
+                concern.check_what = "other"
+        elif concern.department_id is None:
+            raise ChangeError(
+                "A check item needs the department that checks it ('Raised for')")
+        elif concern.check_what is None:
+            concern.check_what = "other"
+        concern.flag_type = flag_type
+        await session.flush()
+        if before != flag_type:
+            await ChangeService.append_changelog(
+                session, change, "concern_type_changed",
+                f"#{concern.id} is now a {'question' if flag_type == 'question' else 'check item'}"
+                f": {concern.note}", user.id,
+                old_value={"concern_id": concern.id, "flag_type": before},
+                new_value={"concern_id": concern.id, "flag_type": flag_type})
+        return concern
+
+    @staticmethod
+    async def join_flag(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        *, department_id: Optional[int] = None, note: Optional[str] = None,
+    ) -> ChangeConcern:
+        """Spec §3 "same as #n" (the caller's department co-owns the item)
+        and "add to #n" (a line appended to it) instead of a second flag on
+        the same pick."""
+        concern = await MeetingService._open_scoping_flag(change, concern_id, session)
+        line = (note or "").strip()
+        if department_id is None and not line:
+            raise ChangeError("Say what to add, or which department it is the same for")
+        if department_id is not None:
+            if user.effective_role != "admin" and not await \
+                    WorkflowService.actor_in_department(session, user, department_id):
+                raise MeetingForbidden(
+                    "'Same as' adds your own department as co-owner")
+            dept = await session.get(Department, department_id)
+            if dept is None or not dept.is_active:
+                raise ChangeError(f"Unknown or inactive department {department_id}")
+            if department_id not in concern.owner_department_ids:
+                concern.co_department_ids = [
+                    *(concern.co_department_ids or []), department_id]
+        if line:
+            who = user.full_name or user.username
+            concern.note = f"{concern.note}\n+ {who}: {line}"
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_joined",
+            f"#{concern.id} "
+            + (f"same for department {department_id}" if department_id else "")
+            + (" and " if department_id and line else "")
+            + (f"added to: {line}" if line else ""), user.id,
+            new_value={"concern_id": concern.id, "department_id": department_id},
+            notes=line or None)
+        return concern
+
+    @staticmethod
+    async def _confirm_evidence(
+        session: AsyncSession, change: ChangeRequest, concern: ChangeConcern,
+        ref: Optional[str], mail_id: Optional[int] = None,
+    ) -> Optional[str]:
+        """Why this is not yet a Confirmed answer, or None (spec §0 Answer
+        form): a customer question needs a filed customer mail (picked) or
+        the customer's document filed on the question; anything else a
+        filed document or a reference id."""
+        from app.models.change import ChangeAttachment
+        from app.services.cm_rules import reference_refusal
+        if mail_id is not None:
+            mail = await session.get(ChangeAttachment, mail_id)
+            if (mail is None or mail.change_id != change.id
+                    or mail.kind != "customer_email"):
+                return "Pick a customer mail filed on this change"
+            return None
+        docs = (await session.execute(
+            select(func.count()).select_from(ChangeAttachment).where(
+                ChangeAttachment.change_id == change.id,
+                ChangeAttachment.concern_id == concern.id,
+                ChangeAttachment.kind == "info_response")
+        )).scalar() or 0
+        if docs:
+            return None
+        if concern.answer_from == "customer":
+            return ("A customer question is Confirmed only by the customer's "
+                    "mail or document filed on it; without it, answer Assumed")
+        return reference_refusal(ref, "Confirmed needs evidence: a filed "
+                                      "document or a reference")
+
+    @staticmethod
+    async def _apply_answer_form(
+        session: AsyncSession, change: ChangeRequest, concern: ChangeConcern,
+        *, answer_kind: str, ref: Optional[str], mail_id: Optional[int] = None,
+        assumed_value: Optional[str],
+        assumed_unit: Optional[str], assumed_risk: Optional[str],
+        confirm_by_id: Optional[int], confirm_due,
+    ) -> None:
+        if answer_kind not in ANSWER_KINDS:
+            raise ChangeError("Answer Confirmed (with evidence) or Assumed")
+        if answer_kind == "confirmed":
+            why = await MeetingService._confirm_evidence(
+                session, change, concern, ref, mail_id)
+            if why:
+                raise ChangeError(why)
+            concern.answer_kind = "confirmed"
+            concern.answer_ref = await MeetingService._evidence_text(
+                session, ref, mail_id)
+            concern.assumed_value = concern.assumed_unit = concern.assumed_risk = None
+            concern.confirm_by_id = concern.confirm_due = None
+            return
+        value = (assumed_value or "").strip()
+        unit = (assumed_unit or "").strip()
+        risk = (assumed_risk or "").strip()
+        na = value.lower() in ("n/a", "na")
+        if not value or (not na and not any(ch.isdigit() for ch in value)):
+            raise ChangeError(
+                "Assumed: give the value as a number (with its unit), or 'n/a'")
+        if not na and not unit:
+            raise ChangeError("Assumed: give the unit of the value")
+        if len(risk) < 5:
+            raise ChangeError("Assumed: say what happens if the assumption is wrong")
+        if confirm_by_id is None:
+            confirm_by_id = change.sales_owner_id or change.lead_id
+        if confirm_by_id is not None and await session.get(User, confirm_by_id) is None:
+            raise ChangeError(f"User {confirm_by_id} not found")
+        if confirm_due is None:
+            from app.services.due_rules import add_wd
+            confirm_due = add_wd(datetime.utcnow(), 5).date()
+        concern.answer_kind = "assumed"
+        concern.answer_ref = (ref or "").strip() or None
+        concern.assumed_value = "n/a" if na else value
+        concern.assumed_unit = None if na else unit
+        concern.assumed_risk = risk
+        concern.confirm_by_id = confirm_by_id
+        concern.confirm_due = confirm_due
+        concern.confirmed_at = concern.confirmed_by = None
+
+    @staticmethod
+    async def _evidence_text(session: AsyncSession, ref: Optional[str],
+                             mail_id: Optional[int]) -> Optional[str]:
+        """What the answer's evidence is called on the record: the ref, else
+        the picked mail ("Mail: <file name>")."""
+        text = (ref or "").strip()
+        if text:
+            return text
+        if mail_id is not None:
+            from app.models.change import ChangeAttachment
+            mail = await session.get(ChangeAttachment, mail_id)
+            if mail is not None:
+                return f"Mail: {mail.filename}"[:255]
+        return None
+
+    @staticmethod
+    async def confirm_assumption(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        ref: Optional[str] = None, mail_id: Optional[int] = None,
+    ) -> ChangeConcern:
+        """The confirm item of an Assumed answer: whoever was named to
+        confirm it, or anyone who may answer the question, records the
+        evidence; the answer becomes Confirmed. Any live status: the
+        assumption travels into the assessment and the offer."""
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if not concern.confirm_open:
+            raise ChangeError("Nothing to confirm: the answer is not an open assumption")
+        if not (concern.confirm_by_id == user.id
+                or await MeetingService.can_answer_question(
+                    session, change, concern, user)):
+            raise MeetingForbidden(
+                "Only the person named to confirm it, the asking department, "
+                "Sales or Project Management may confirm this assumption")
+        why = await MeetingService._confirm_evidence(
+            session, change, concern, ref, mail_id)
+        if why:
+            raise ChangeError(why)
+        concern.answer_kind = "confirmed"
+        concern.answer_ref = (await MeetingService._evidence_text(
+            session, ref, mail_id)) or concern.answer_ref
+        concern.confirmed_at = datetime.utcnow()
+        concern.confirmed_by = user.id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "assumption_confirmed",
+            f"#{concern.id} assumption {concern.assumed_value}"
+            f"{' ' + concern.assumed_unit if concern.assumed_unit else ''} confirmed"
+            + (f" ({ref.strip()})" if (ref or "").strip() else ""), user.id,
+            new_value={"concern_id": concern.id})
         return concern
 
     @staticmethod
@@ -485,9 +807,9 @@ class MeetingService:
             settled_as = "author"
         elif await MeetingService.user_is_pm_member(session, user):
             settled_as = "pm"
-        elif (department_owns_it
-              and await WorkflowService.actor_in_department(
-                  session, user, concern.department_id)):
+        elif department_owns_it and any(
+                [await WorkflowService.actor_in_department(session, user, d)
+                 for d in concern.owner_department_ids]):
             settled_as = "department"
         allowed = settled_as is not None
         if not allowed:
@@ -607,7 +929,11 @@ class MeetingService:
     @staticmethod
     async def answer_concern(
         session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
-        note: Optional[str] = None,
+        note: Optional[str] = None, *, answer_kind: Optional[str] = None,
+        ref: Optional[str] = None, mail_id: Optional[int] = None,
+        assumed_value: Optional[str] = None,
+        assumed_unit: Optional[str] = None, assumed_risk: Optional[str] = None,
+        confirm_by_id: Optional[int] = None, confirm_due=None,
     ) -> ChangeConcern:
         """Somebody writes the answer to an open question: a COMMENT on it,
         not a verdict on it. In scoping: the asking department (or the
@@ -653,9 +979,21 @@ class MeetingService:
                 raise ChangeError(
                     "Only the asking department (or the person who asked), "
                     "Sales or Project Management may answer this question")
+            # C33 answer form (spec §0): Confirmed (evidence) or Assumed
+            # (value + unit, risk if wrong, who confirms by when). Without
+            # answer_kind the legacy free answer stands.
+            if answer_kind is not None:
+                if not cm_switches.on("SCOPING_V2"):
+                    raise ChangeError(
+                        "Confirmed / Assumed answers are switched off (SCOPING_V2)")
+                await MeetingService._apply_answer_form(
+                    session, change, concern, answer_kind=answer_kind, ref=ref,
+                    mail_id=mail_id, assumed_value=assumed_value, assumed_unit=assumed_unit,
+                    assumed_risk=assumed_risk, confirm_by_id=confirm_by_id,
+                    confirm_due=confirm_due)
             # An answer needs content — either words, or the document that
             # carries them filed into this question's container.
-            if not note and not await ChangeService.has_info_response(
+            elif not note and not await ChangeService.has_info_response(
                     session, change, concern_id=concern.id):
                 raise ChangeError(
                     "An answer needs content: write it or attach the response "
@@ -664,12 +1002,19 @@ class MeetingService:
         concern.answered_at = datetime.utcnow()
         concern.answered_by = user.id
         await session.flush()
+        form = ""
+        if concern.answer_kind == "assumed":
+            form = (f" (Assumed: {concern.assumed_value}"
+                    f"{' ' + concern.assumed_unit if concern.assumed_unit else ''})")
+        elif concern.answer_kind == "confirmed":
+            form = " (Confirmed" + (f": {concern.answer_ref}" if concern.answer_ref else "") + ")"
         await ChangeService.append_changelog(
             session, change, "concern_answered",
-            f"Concern #{concern.id} answered"
-            + (f": {note}" if note else " (see attached document)"),
+            f"Concern #{concern.id} answered{form}"
+            + (f": {note}" if note else "" if form else " (see attached document)"),
             user.id,
-            new_value={"concern_id": concern.id}, notes=note or None)
+            new_value={"concern_id": concern.id, "answer_kind": concern.answer_kind},
+            notes=note or None)
         return concern
 
     @staticmethod
@@ -680,6 +1025,23 @@ class MeetingService:
         return [c for c in change.concerns
                 if c.is_open and c.kind != "risk"
                 and c.department_id == department_id]
+
+    @staticmethod
+    def open_blocking(change: ChangeRequest) -> list[ChangeConcern]:
+        """The open flags that hold 'proceed' (HARD #2): cancel votes and
+        questions. C33 check items never do (SCOPING_V2): they go to their
+        department's assessment as conditions of the go."""
+        flags = MeetingService.open_concerns(change)
+        if not cm_switches.on("SCOPING_V2"):
+            return flags
+        return [c for c in flags if not c.is_check]
+
+    @staticmethod
+    def open_checks(change: ChangeRequest) -> list[ChangeConcern]:
+        """Open C33 check items (empty with SCOPING_V2 off)."""
+        if not cm_switches.on("SCOPING_V2"):
+            return []
+        return [c for c in MeetingService.open_concerns(change) if c.is_check]
 
     @staticmethod
     def open_concerns(change: ChangeRequest) -> list[ChangeConcern]:
@@ -709,11 +1071,40 @@ class MeetingService:
             if c.department_id:
                 who += f" ({names.get(c.department_id, c.department_id)})"
             lines.append(f"{kinds.get(c.kind, c.kind)} by {who}: {c.note}")
+        if cm_switches.on("SCOPING_V2"):
+            return (f"{len(open_concerns)} open concern(s) block 'proceed' "
+                    "(questions and cancel votes; check items do not): "
+                    + "; ".join(lines)
+                    + ". Each must be withdrawn or settled first (its asker or "
+                    "Project Management), or made a check item if the scope "
+                    "can be decided without it")
         return (f"{len(open_concerns)} open concern(s) block 'proceed': "
                 + "; ".join(lines)
                 + ". Each must be withdrawn or settled first (its author or "
                 "Project Management), or answered by a 'needs info' or "
                 "'reject' decision")
+
+    @staticmethod
+    async def _asking_sides(session: AsyncSession,
+                            concerns: list[ChangeConcern]) -> list[str]:
+        """Who the open questions wait on, in words: the asking department,
+        else the asker; each once, in question order."""
+        dept_ids = {c.department_id for c in concerns if c.department_id}
+        names = dict((await session.execute(
+            select(Department.id, Department.name).where(
+                Department.id.in_(dept_ids)))).all()) if dept_ids else {}
+        return MeetingService.asking_sides(concerns, names)
+
+    @staticmethod
+    def asking_sides(concerns: list[ChangeConcern], names: dict) -> list[str]:
+        """_asking_sides with the department names at hand (lists)."""
+        out: list[str] = []
+        for c in sorted(concerns, key=lambda c: c.id):
+            side = (names.get(c.department_id) if c.department_id
+                    else c.raised_by_name or f"user #{c.raised_by}")
+            if side and side not in out:
+                out.append(side)
+        return out
 
     @staticmethod
     async def decide_meeting(
@@ -738,10 +1129,14 @@ class MeetingService:
                 "before proceeding")
         # Proceeding over an unanswered objection is the failure this exists to
         # stop. Either its author withdraws it, or the decision answers it.
+        # C33: only questions and cancel votes hold it (HARD #2); check items
+        # go with the change as conditions.
         open_concerns = MeetingService.open_concerns(change)
-        if decision == "proceed" and open_concerns:
+        blocking = MeetingService.open_blocking(change)
+        if decision == "proceed" and blocking:
             raise ChangeError(
-                await MeetingService.open_flags_refusal(session, open_concerns))
+                await MeetingService.open_flags_refusal(session, blocking))
+
         # Picked parts are still required: proceeding locks the set they make
         # up (switch off, cm_switches), and an empty set locks nothing.
         if (decision == "proceed" and not change.impacted_items
@@ -760,24 +1155,48 @@ class MeetingService:
         # before it can start. Only 'proceed' needs no justification.
         if decision == "reject" and not reason:
             raise ChangeError("A reason is required to reject a change")
+        v2 = cm_switches.on("SCOPING_V2")
+        waiting = [c for c in blocking if c.is_question]
+        if decision == "needs_info" and not reason and v2 and waiting:
+            # "Not yet: waiting for 3 answers (Sales, Process)": the open
+            # questions are the reason; no new one is raised.
+            sides = await MeetingService._asking_sides(session, waiting)
+            reason = (f"Not yet: waiting for {len(waiting)} answer"
+                      f"{'s' if len(waiting) != 1 else ''} ({', '.join(sides)})")
+            raise_question = False
+        else:
+            raise_question = True
         if decision == "needs_info" and not reason:
             raise ChangeError(
                 "State what information is missing before the change can start")
         meeting.decision = decision
         meeting.decision_reason = reason
-        # A negative decision answers the open concerns; they close with it.
-        if decision in ("reject", "needs_info"):
+        # A rejection answers the open concerns; they close with it. C13
+        # (SCOPING_V2): 'Not yet' (needs_info) closes nothing: every
+        # department's question stays open and keeps its owner.
+        if decision == "reject" or (decision == "needs_info" and not v2):
             for c in open_concerns:
                 c.resolved_by_meeting_id = meeting.id
+        if decision == "proceed" and v2:
+            checks = MeetingService.open_checks(change)
+            meeting.go_conditions = [
+                {"id": c.id, "department_id": c.department_id,
+                 "co_department_ids": c.co_department_ids or [],
+                 "check_what": c.check_what, "part_id": c.part_id,
+                 "note": c.note} for c in checks] or None
         meeting.decided_by = user.id
         meeting.decided_at = datetime.utcnow()
         await session.flush()
-        if decision == "needs_info":
+        if decision == "needs_info" and raise_question:
             await MeetingService._flag_missing_information(
                 session, change, user, reason, meeting_id=meeting.id)
+        conditions = len(meeting.go_conditions or [])
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_decided",
             f"Scoping meeting #{meeting.id}: {decision}"
+            + (f" with conditions: {conditions} check item"
+               f"{'s' if conditions != 1 else ''} go to departments"
+               if conditions else "")
             + (f": {reason}" if reason else ""), user.id,
             field_name="decision", new_value=decision,
             notes=reason or meeting.notes)

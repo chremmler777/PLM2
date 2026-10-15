@@ -143,7 +143,8 @@ Run these when discussing any stage's implementation:
   advance button at `scoping`; it points at the scoping tab.
   `changeStatus.ts::DECIDED_BY_MEETING`.
 - **Concerns** — any team member may flag `reject_proposal` (cancel vote) or
-  `needs_info` (question) with a note; naming a department is attribution only.
+  `needs_info` (question; with `SCOPING_V2` a question or a check item, see
+  "Scoping is triage" below) with a note; naming a department is attribution only.
   Risks are **not** raisable here — the register belongs to assessment. Settling
   ("mark solved") belongs to the author or a Project Manager member — attribution
   hands the named department (Sales, typically) nothing, admins are *not* exempt,
@@ -167,6 +168,65 @@ Run these when discussing any stage's implementation:
 - After a negative decision, an **attachment slot** appears for Sales/PM to file
   what they send the customer — rejection letter, open questions, or a
   counter-proposal.
+
+### Scoping is triage: questions and check items (C33, C13, 2026-10-15)
+Switch `SCOPING_V2` (`app/services/cm_switches.py`, default ON, served to the
+UI as `scoping_v2` on every change). Live test 1 showed the room
+over-analysing: departments flagged points they should assess on their own.
+Scoping decides only *which parts, who assesses, go/no-go*.
+
+- **Quick add** (Scoping tab, one line, under 15 s): the point, **Raised for**
+  (preselected: last used, else the viewer's own department on the change),
+  **Check** (drawing / volume / cycle time / weight / tool / material /
+  tolerance / schedule / other) and the part or *Whole change*. The default is
+  a **check item** ("Unsure? Leave it.").
+- **Make it a question** (toggle; the asker or a PM member can switch either
+  way any time in scoping, `POST /concerns/{id}/type`): the UI asks *"Can we
+  decide parts, assessors and go/no-go without this?"*. Only a *no* is a
+  question, and it owes **who can answer** (customer / our team / supplier)
+  and **what the answer changes in the scope** (refused without, spec R2).
+- **Several questions per department**: the limit is one open question per
+  asker, raised-for department and check-what (it replaces "one per person per
+  kind" for questions); a second on the same pick is refused naming the open
+  one. Beside the quick add the UI lists open items on the same pick with
+  **Same as #n** (the raised-for department becomes co-owner, own department
+  only) and **Add to #n** (the line is appended), `POST /concerns/{id}/join`.
+  Check items have no limit. Cancel votes keep "one per person".
+- **Questions hold `proceed` (HARD #2); check items never do.** Legacy flags
+  (`flag_type` NULL, migration 121 backfills `question`) and a raise without
+  `flag_type` (old API shape) are questions, so in-flight changes behave as
+  before.
+- **Answer form** (`POST /concerns/{id}/answer` with `answer_kind`), nothing
+  preselected: **Confirmed** = evidence: a customer question only by a filed
+  customer mail (picked, `mail_id`) or the customer's document uploaded into
+  the question; others also by a reference (5+ characters, not "ok"/"tbd").
+  **Assumed** = value as a number with its unit (or "n/a"), the risk if wrong;
+  confirmed by the Sales owner (else the lead) within 5 working days. An
+  Assumed answer leaves a **confirm task** (`confirm_assumption`, My Tasks, due
+  at `confirm_due`) for that person in any live status until someone who may
+  answer it confirms it with evidence (`POST /concerns/{id}/confirm`).
+  Answering still does not close: the asker or PM closes [KEEP].
+- **Proceed dialog**: open questions as a fix list (*Answer now* with the
+  answer form, *Make it a check item*), check items collapsed by owner with
+  *Promote to question*, and for a department that owns check items but is not
+  routed *Route <dept>: C / R* (C first for Process and Quality; writes the
+  meeting's RASIC). The button reads *"Proceed: 12 check items go to
+  departments"*. **Go with conditions**: the meeting stores the open check
+  items (`change_meetings.go_conditions`) and the changelog says how many.
+- **Check items in assessment**: each belongs to its department (and co-owners)
+  and is due with that department's assessment (`owner_due` on the concern
+  list). The department cannot submit its assessment while one of its own
+  check items is open (HARD #10, the existing department hold, now also for
+  co-owners); a member closes it with a resolution note.
+- **C13, "Not yet"** (the meeting's `needs_info`, button *Not yet* in the UI):
+  closes nobody's question. With questions open it needs no reason; it records
+  *"Not yet: waiting for 2 answers (Process Engineer, Tool Engineer)"* and
+  raises nothing new. Without open questions it asks what is missing, which
+  becomes the decider department's question as before. **Reject** still closes
+  every flag [KEEP]. The PM's *Wrap up scoping* row reads *"Not yet: waiting
+  for n answer(s) (...)"* and flips to *"Ready: proceed"*.
+- Switch OFF: every scoping flag is a question again and `needs_info` resolves
+  the open flags (the 2026-10-14 behaviour).
 
 ### The needs-info loop (2026-08-11)
 

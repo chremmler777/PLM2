@@ -181,7 +181,11 @@ async def test_an_open_risk_does_not_block_the_decision(
 
 
 async def test_negative_decision_resolves_the_open_concerns(
-        client, eng_auth, seed, session_factory):
+        client, eng_auth, seed, session_factory, monkeypatch):
+    """The legacy behaviour (SCOPING_V2 off). With it on, 'Not yet' closes
+    nobody's question (C13): tests/test_ecr_solid_scoping_v2.py."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
     cid = await _change_in_scoping(client, eng_auth, seed, "6")
     mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
     assert (await _raise(client, eng_auth, cid,

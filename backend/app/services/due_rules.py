@@ -169,7 +169,9 @@ NEEDS_YOU_KINDS = frozenset({"deviation_decision", "sign_off", "internal_approva
 CUSTOMER_CONTACT_WD = 5
 #: Rows that bring their own due date (the assessment's, the validation
 #: issue engine's): the task rule leaves them alone.
-OWN_DUE_PREFIXES = ("assessment", "validation_issue_")
+OWN_DUE_PREFIXES = ("assessment", "validation_issue_",
+                    # C33: an Assumed answer is confirmed by its own date
+                    "confirm_assumption")
 
 
 #: Who sees a late row besides its owner (spec §0 one escalation rule):

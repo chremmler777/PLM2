@@ -23,6 +23,7 @@ from app.models.change import (
     ChangeImpactedItem, SIGN_OFF_ROLES, BLOCKING_LETTERS,
 )
 from app.models.workflow import UserDepartment, Department
+from app.models.part import Part
 from app.services.change_service import (
     ALLOWED_TRANSITIONS, ChangeService, ChangeError, DeviationRequired, _org_scope,
 )
@@ -48,6 +49,7 @@ from app.schemas.change import (
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
+    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn,
     ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
@@ -3002,6 +3004,32 @@ async def list_concerns(
             Department.id.in_(concern_dept_ids)))).all()) if concern_dept_ids else {}
     # A risk deleted by its raiser is gone from the register; the changelog
     # keeps the record.
+    # C33: owners by name, a check item's due (its department's assessment
+    # due), the part, the person named to confirm an assumption. One query
+    # each, never one per row.
+    owner_ids = {d for c in change.concerns for d in c.owner_department_ids}
+    if owner_ids - set(concern_depts):
+        concern_depts.update(dict((await db.execute(
+            select(Department.id, Department.name).where(
+                Department.id.in_(owner_ids - set(concern_depts))))).all()))
+    due_by_dept: dict[int, datetime] = {}
+    for a in change.assessments:
+        due = a.effective_due_date
+        if due is not None and a.effective_status not in ("submitted", "waived"):
+            due_by_dept[a.department_id] = min(
+                due, due_by_dept.get(a.department_id, due))
+    part_ids = {c.part_id for c in change.concerns if c.part_id}
+    part_numbers = dict((await db.execute(
+        select(Part.id, Part.part_number).where(Part.id.in_(part_ids)))).all()) \
+        if part_ids else {}
+    confirm_ids = {c.confirm_by_id for c in change.concerns if c.confirm_by_id}
+    if confirm_ids - set(names):
+        for uid, full_name in await db.execute(
+                select(User.id, User.full_name).where(
+                    User.id.in_(confirm_ids - set(names)))):
+            names[uid] = full_name
+    is_pm_member = await MeetingService.user_is_pm_member(db, current_user)
+    acting = getattr(current_user, "acts_as_department_id", None) is not None
     for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
         if c.kind == "needs_info":
@@ -3010,6 +3038,16 @@ async def list_concerns(
             row.asking_department_name = concern_depts.get(c.department_id)
             row.can_answer = c.is_open and await MeetingService.can_answer_question(
                 db, change, c, current_user)
+            row.owner_department_names = [concern_depts.get(d, f"#{d}")
+                                          for d in c.owner_department_ids]
+            if c.is_check:
+                dues = [due_by_dept[d] for d in c.owner_department_ids
+                        if d in due_by_dept]
+                row.owner_due = min(dues) if dues else None
+            row.part_number = part_numbers.get(c.part_id)
+            row.confirm_by_name = names.get(c.confirm_by_id)
+            row.can_switch = c.is_open and (
+                (c.raised_by == current_user.id and not acting) or is_pm_member)
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
             row.answered_by_name = names.get(c.answered_by)
@@ -3034,12 +3072,69 @@ async def raise_concern(
             db, change, current_user, body.kind, body.note,
             department_id=body.department_id,
             risk_type=body.risk_type, severity=body.severity,
-            checklist_key=body.checklist_key)
+            checklist_key=body.checklist_key,
+            flag_type=body.flag_type, check_what=body.check_what,
+            part_id=body.part_id, answer_from=body.answer_from,
+            scope_effect=body.scope_effect)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(concern)
     return concern
+
+
+async def _concern_act(change_id: int, current_user: User, db: AsyncSession, act):
+    """Run a C33 act on a concern: 404 without the change, 403 for a
+    MeetingForbidden, 400 for any other refusal; commit and return it."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        concern = await act(change)
+    except MeetingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(concern)
+    return concern
+
+
+@router.post("/{change_id}/concerns/{concern_id}/type", response_model=ConcernResponse)
+async def set_concern_type(
+    change_id: int, concern_id: int, body: ConcernTypeIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C33: make it a question or a check item (the asker or Project
+    Management, during capture and scoping)."""
+    return await _concern_act(change_id, current_user, db, lambda change: (
+        MeetingService.set_flag_type(
+            db, change, concern_id, current_user, body.flag_type,
+            answer_from=body.answer_from, scope_effect=body.scope_effect,
+            department_id=body.department_id, check_what=body.check_what)))
+
+
+@router.post("/{change_id}/concerns/{concern_id}/join", response_model=ConcernResponse)
+async def join_concern(
+    change_id: int, concern_id: int, body: ConcernJoinIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C33: 'same as #n' (your department co-owns it) and/or 'add to #n'."""
+    return await _concern_act(change_id, current_user, db, lambda change: (
+        MeetingService.join_flag(db, change, concern_id, current_user,
+                                 department_id=body.department_id, note=body.note)))
+
+
+@router.post("/{change_id}/concerns/{concern_id}/confirm", response_model=ConcernResponse)
+async def confirm_concern_assumption(
+    change_id: int, concern_id: int, body: ConcernConfirmIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C33: confirm an Assumed answer with evidence (the named confirmer,
+    the asking department, Sales or Project Management)."""
+    return await _concern_act(change_id, current_user, db, lambda change: (
+        MeetingService.confirm_assumption(db, change, concern_id, current_user,
+                                          ref=body.ref, mail_id=body.mail_id)))
 
 
 async def _withdraw_concern(
@@ -3097,7 +3192,11 @@ async def answer_concern(
         raise HTTPException(status_code=404, detail="Change not found")
     try:
         concern = await MeetingService.answer_concern(
-            db, change, concern_id, current_user, note=body.note)
+            db, change, concern_id, current_user, note=body.note,
+            answer_kind=body.answer_kind, ref=body.ref, mail_id=body.mail_id,
+            assumed_value=body.assumed_value, assumed_unit=body.assumed_unit,
+            assumed_risk=body.assumed_risk, confirm_by_id=body.confirm_by_id,
+            confirm_due=body.confirm_due)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

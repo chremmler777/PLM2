@@ -27,7 +27,7 @@ export const engineeringChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Scoping', 'Development picks and confirms the impacted set. Everyone else can raise a question or a cancel vote.'],
+              ['Scoping', 'Development picks the impacted set. Add what your department must check with "Add check item"; it comes back in your assessment. Ask a question only if the scope cannot be decided without it.'],
               ['In Assessment', 'Answer every checklist row, flag risks on the rows, give a verdict.'],
               ['Costing', 'Price your part: your own time, estimates or vendor quotes, a lead time on every line.'],
               ['Timing', 'Confirm the detailed plan for your department, or raise a concern.'],
@@ -70,6 +70,7 @@ export const engineeringChapter: ContentChapter = {
         },
         {
           points: [
+            ['Your check items', 'from scoping are listed for your department, due with your assessment. You cannot submit while one is open: close it with what you found (a drawing reference, a number with its unit) or why it is not relevant.'],
             ['"Not our responsibility"', 'if it really is not yours. Give the reason and, if you can, who should assess instead. The lead decides.'],
             ['Customer mails', 'are shown in the bucket. The customer communication is Sales\'s, but you may file a mail you received.'],
           ],

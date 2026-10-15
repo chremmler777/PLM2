@@ -212,7 +212,9 @@ async def test_proceed_refusal_lists_every_open_flag(
     assert "2 open concern(s)" in detail
     assert "question by LT apqp5 (APQP): Tolerance?" in detail
     assert "cancel vote by" in detail and "Too costly" in detail
-    assert "'needs info' or 'reject' decision" in detail
+    # C33/C13 (SCOPING_V2): 'Not yet' answers nothing; a question the scope
+    # does not hang on is made a check item
+    assert "made a check item" in detail
 
 
 # --- 3. the impact lock happens at proceed ----------------------------------

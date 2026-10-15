@@ -21,11 +21,12 @@ import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
+import AnswerForm from './scoping/AnswerForm'
 import type { Attachment, ChangeConcern } from '../../types/change'
 
 export default function NeedsInfoCard({
   changeId, concern: c, attachments, canAnswer, canSettle, editable, onChanged, origin,
-  askingSide,
+  askingSide, structured = false, confirmerName,
 }: {
   changeId: number
   concern: ChangeConcern
@@ -42,6 +43,11 @@ export default function NeedsInfoCard({
   onChanged: () => void
   /** Where the question came from — a meeting decision, typically. */
   origin?: string
+  /** C33 (SCOPING_V2): the structured question (what, part, who answers,
+   *  what it changes) with the Confirmed / Assumed answer form. */
+  structured?: boolean
+  /** Who confirms an Assumed answer by default (Sales owner, else lead). */
+  confirmerName?: string | null
 }) {
   const [answer, setAnswer] = useState(c.answer_note ?? '')
   const [settling, setSettling] = useState(false)
@@ -59,6 +65,11 @@ export default function NeedsInfoCard({
   // wait banner key off, so all three agree on what "answered" means.
   const answered = c.answered_at != null || !!c.answer_note
 
+  const makeCheck = useMutation({
+    mutationFn: () => changesApi.setConcernType(changeId, c.id, { flag_type: 'check' }),
+    onSuccess: onChanged,
+    onError: (e: unknown) => { toastError(e, 'Could not make it a check item') },
+  })
   const postAnswer = useMutation({
     mutationFn: (note: string) => changesApi.answerConcern(changeId, c.id, note.trim()),
     onSuccess: onChanged,
@@ -149,7 +160,24 @@ export default function NeedsInfoCard({
           slide deck that was sent, the drawing it refers to. No heading between
           them, because they are one thing. */}
       <div className="space-y-1" data-testid={`needs-info-question-${c.id}`}>
-        <p className={`text-sm ${solved ? '' : 'text-slate-100'}`}>{c.note}</p>
+        <p className={`text-sm whitespace-pre-wrap ${solved ? '' : 'text-slate-100'}`}>{c.note}</p>
+        {structured && (c.check_what || c.answer_from || c.scope_effect) && (
+          <p className="text-[11px] text-slate-400" data-testid={`needs-info-structure-${c.id}`}>
+            {[c.check_what ? t(`flag.what.${c.check_what}`) : null,
+              c.part_number ?? (c.check_what ? t('flag.wholeChange') : null),
+              c.answer_from ? `${t('flag.answerFrom')} ${t(`flag.from.${c.answer_from}`)}` : null,
+              c.scope_effect ? `${t('flag.scopeEffect')} ${c.scope_effect}` : null,
+            ].filter(Boolean).join(' · ')}
+          </p>
+        )}
+        {structured && !solved && editable && c.can_switch && (
+          <button type="button" data-testid={`needs-info-make-check-${c.id}`}
+            className="text-xs text-sky-300 hover:text-sky-200" disabled={makeCheck.isPending}
+            title={t('flag.scopeTest')}
+            onClick={() => makeCheck.mutate()}>
+            {t('flag.makeCheck')}
+          </button>
+        )}
         {questionDocs.length > 0 && (
           <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
             {questionDocs.map((a) => (
@@ -180,6 +208,29 @@ export default function NeedsInfoCard({
         <p className="text-[11px] uppercase tracking-wide text-slate-500">
           {t('concern.answer')}
         </p>
+        {c.answer_kind && (
+          <p className="text-xs" data-testid={`needs-info-answer-kind-${c.id}`}>
+            {c.answer_kind === 'assumed' ? (
+              <span className="text-amber-200">
+                {t('answer.assumedLine')
+                  .replace('{v}', `${c.assumed_value ?? ''}${c.assumed_unit ? ` ${c.assumed_unit}` : ''}`)
+                  .replace('{r}', c.assumed_risk ?? '-')}
+                {' · '}
+                {t('answer.confirmLine').replace('{who}', c.confirm_by_name ?? '-')
+                  .replace('{d}', c.confirm_due ? formatDate(c.confirm_due) : '-')}
+              </span>
+            ) : (
+              <span className="text-emerald-300">
+                {t('answer.confirmedLine').replace('{ref}', c.answer_ref ?? t('concern.answerDocs'))}
+              </span>
+            )}
+          </p>
+        )}
+        {structured && c.answer_kind === 'assumed' && !c.confirmed_at && editable
+          && (canAnswer || c.can_answer) && (
+          <AnswerForm changeId={changeId} concern={c} attachments={attachments}
+            confirming onDone={onChanged} />
+        )}
         {answered && (
           <p className="text-sm" data-testid={`needs-info-answer-${c.id}`}>
             {c.answer_note}
@@ -206,7 +257,11 @@ export default function NeedsInfoCard({
               '{x}', askingSide ?? c.asking_department_name ?? c.raised_by_name ?? `#${c.raised_by}`)}
           </p>
         )}
-        {!solved && editable && canAnswer && (
+        {!solved && editable && canAnswer && structured && !c.answer_kind && (
+          <AnswerForm changeId={changeId} concern={c} attachments={attachments}
+            confirmerName={confirmerName} onDone={onChanged} />
+        )}
+        {!solved && editable && canAnswer && !structured && (
           <>
             <textarea value={answer} rows={2}
               data-testid={`needs-info-answer-note-${c.id}`}

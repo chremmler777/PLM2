@@ -259,6 +259,7 @@ const TASK_TAB: Record<string, string> = {
   kickoff: '', hold_resume: '', scoping_wrapup: '?tab=scoping',
   impact_confirm: '?tab=impacted', customer_response: '',
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
+  confirm_assumption: '?tab=scoping',
   send_rejection: '?tab=scoping',
   costing_input: '?tab=costing',
   create_quote: '?tab=commercial',
@@ -320,6 +321,13 @@ const taskHint = (task: ChangeTask): string | null => {
         ? t('tasks.hint.hold_resume').replace('{x}', task.reason.trim())
         : t('tasks.hint.hold_resumeNoReason');
     case 'scoping_wrapup': {
+      // C33: "Not yet: waiting for 2 answers (Sales, Process)" / "Ready: proceed"
+      if (task.open_questions != null && !task.has_decision) {
+        return task.open_questions > 0
+          ? t('tasks.hint.scopingWaiting').replace('{n}', String(task.open_questions))
+            .replace('{x}', (task.waiting_on ?? []).join(', '))
+          : t('tasks.hint.scopingReady')
+      }
       const open = [
         // null: no manual confirm (switch off), nothing to confirm.
         ...(task.impact_confirmed === false ? [t('tasks.hint.impactOpen')] : []),
@@ -377,6 +385,8 @@ const taskHint = (task: ChangeTask): string | null => {
     }
     case 'customer_response':
       return t('tasks.hint.customer_response');
+    case 'confirm_assumption':
+      return t('tasks.hint.confirm_assumption').replace('{x}', task.reason ?? '');
     default:
       return null;
   }

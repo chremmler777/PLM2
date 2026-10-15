@@ -80,7 +80,7 @@ export const salesChapter: ContentChapter = {
         {
           points: [
             ['Customer mails', 'are filed on the change as a tracked list. Everybody may upload one; you own the relationship.'],
-            ['A question from the team', 'arrives as an open question at scoping. "Sales answers this question." Answer it and drop the customer\'s reply. The asker or PM then marks it solved; you never do.'],
+            ['A question from the team', 'arrives as an open question at scoping. Answer it "Confirmed" or "Assumed". A customer question is "Confirmed" only by the customer\'s mail (pick it from the filed mails) or document. Without it answer "Assumed": the value with its unit and the risk if it is wrong. You then get "Confirm an assumption" in My Tasks, due in 5 working days. The asker or PM marks the question solved; you never do.'],
             ['"Needs more info"', 'from the scoping meeting gives you the task to get the missing information from the customer.'],
             ['A rejected change', 'shows "Send rejection letter": attach the letter, send it, then "Sent to customer, close ECR".'],
           ],

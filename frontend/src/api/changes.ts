@@ -5,6 +5,7 @@ import type {
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
+  FlagType, CheckWhat, AnswerFrom, AnswerForm,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn, CostingContext,
@@ -343,7 +344,28 @@ export const changesApi = {
   raiseConcern: (id: number, body: {
     kind: ConcernKind; note: string; department_id?: number;
     risk_type?: RiskType; severity?: RiskSeverity; checklist_key?: string;
+    // C33 quick add
+    flag_type?: FlagType; check_what?: CheckWhat; part_id?: number;
+    answer_from?: AnswerFrom; scope_effect?: string;
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
+  /** C33: make it a question / a check item (asker or PM). */
+  setConcernType: (id: number, concernId: number, body: {
+    flag_type: FlagType; answer_from?: AnswerFrom; scope_effect?: string;
+    department_id?: number; check_what?: CheckWhat;
+  }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/type`, body)
+    .then((r) => r.data),
+  /** C33: "same as #n" (my department co-owns it) and/or "add to #n". */
+  joinConcern: (id: number, concernId: number, body: { department_id?: number; note?: string }) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/join`, body)
+      .then((r) => r.data),
+  /** C33: confirm an Assumed answer with evidence (ref or a filed mail). */
+  confirmConcern: (id: number, concernId: number, body: { ref?: string; mail_id?: number }) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/confirm`, body)
+      .then((r) => r.data),
+  /** C33 answer form: Confirmed (evidence) or Assumed (value, unit, risk). */
+  answerConcernForm: (id: number, concernId: number, body: AnswerForm) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/answer`, body)
+      .then((r) => r.data),
 
   // The risk vocabulary is the backend's list, not a hard-coded one here.
   riskTypes: (departmentId?: number) =>

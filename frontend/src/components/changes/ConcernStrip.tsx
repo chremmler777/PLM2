@@ -69,8 +69,11 @@ function SeverityBadge({ value, testId }: { value?: number | null; testId: strin
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
   hideConcernIds = [], onlyDepartmentId, isPm = false, attachments = [],
-  changeDepartmentIds = [],
+  changeDepartmentIds = [], voteOnly = false,
 }: {
+  /** C33 (SCOPING_V2): questions and check items have their own quick add;
+   *  this strip only raises cancel votes. */
+  voteOnly?: boolean
   changeId: number
   editable: boolean
   /** Concerns shown as their own containers elsewhere on the page. */
@@ -93,7 +96,8 @@ export default function ConcernStrip({
   const qc = useQueryClient()
   const { userId, isAdmin } = useAuth()
   // The scoping form: a question or a cancel vote, in the raiser's words.
-  const [kind, setKind] = useState<Exclude<ConcernKind, 'risk'>>('needs_info')
+  const [kind, setKind] = useState<Exclude<ConcernKind, 'risk'>>(
+    voteOnly ? 'reject_proposal' : 'needs_info')
   // The risk form (assessment): nothing is guessed — the type is picked, the
   // severity is a deliberate choice (2 = the honest middle), the note says
   // what it is.
@@ -576,12 +580,16 @@ export default function ConcernStrip({
           risk for the raiser's own department. */}
       {adding && !scoped && (
         <div className="flex gap-2 items-start flex-wrap" data-testid="concern-form">
+          {voteOnly ? (
+            <span className="text-xs font-semibold text-red-200 py-1">{t('concern.wouldReject')}</span>
+          ) : (
           <select value={kind} aria-label={t('concern.kind')}
             onChange={(e) => setKind(e.target.value as Exclude<ConcernKind, 'risk'>)}
             className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
             <option value="needs_info">{t('concern.wantsInfo')}</option>
             <option value="reject_proposal">{t('concern.wouldReject')}</option>
           </select>
+          )}
           {onlyDepartmentId === undefined && options.length > 0 && (
             <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
               onChange={(e) => { setDeptPicked(true); setDeptId(e.target.value ? Number(e.target.value) : undefined) }}
