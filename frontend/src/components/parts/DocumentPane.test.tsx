@@ -7,16 +7,16 @@ vi.mock('../../api/client', () => ({ default: {}, API_BASE_URL: '/api' }))
 describe('DocumentPane', () => {
   afterEach(cleanup)
 
-  it('shows a pdf inline with the file and revision named', () => {
-    render(<DocumentPane document={{ fileId: 7, filename: 'd.pdf', kind: 'pdf', revisionName: 'E1 · 003' }} />)
-    expect((screen.getByTestId('doc-iframe') as HTMLIFrameElement).src).toContain('/api/v1/parts/revision-files/7/inline')
-    expect(screen.getByTestId('doc-header').textContent).toContain('d.pdf · E1 · 003')
+  it('shows a picture inline with the file and revision named', () => {
+    render(<DocumentPane document={{ fileId: 7, filename: 'p.jpg', kind: 'image', revisionName: 'E1 · 003' }} />)
+    expect((screen.getByTestId('doc-image') as HTMLImageElement).src).toContain('/api/v1/parts/revision-files/7/inline')
+    expect(screen.getByTestId('doc-header').textContent).toContain('p.jpg · E1 · 003')
   })
 
-  it('renders children for 3d', () => {
+  it('renders children for 3d and never an iframe', () => {
     render(<DocumentPane document={{ fileId: 1, filename: 'm.stp', kind: '3d', revisionName: 'E1' }}><div>viewer-here</div></DocumentPane>)
     expect(screen.getByText('viewer-here')).toBeTruthy()
-    expect(screen.queryByTestId('doc-iframe')).toBeNull()
+    expect(document.querySelector('iframe')).toBeNull()
   })
 
   it('shows the red mirror banner with the exact wording and opens the source', () => {
@@ -35,29 +35,21 @@ describe('DocumentPane', () => {
     expect(screen.getByText(/No document to show/)).toBeTruthy()
   })
 
-  it('uses an explicit inline url when the document carries one', () => {
-    render(<DocumentPane document={{ fileId: 9, filename: 'study.pdf', kind: 'pdf', revisionName: 'Gate position', inlineUrl: '/api/v1/parts/7/dfm/files/9/inline' }} />)
-    expect((screen.getByTestId('doc-iframe') as HTMLIFrameElement).src).toContain('/api/v1/parts/7/dfm/files/9/inline')
-    expect(screen.getByTestId('doc-header').textContent).toContain('study.pdf · Gate position')
-  })
-
-  it('prefers the source label over the revision name, for messages opened from the DFM flow', () => {
-    render(<DocumentPane document={{
-      fileId: 9, filename: 'ISOFIX_DFM_rev2.pdf', kind: 'pdf', revisionName: 'Gate position ISOFIX',
-      sourceLabel: 'Answer #8 · KTX to Toolmaker', inlineUrl: '/api/v1/parts/7/dfm/files/9/inline',
-    }} />)
-    expect(screen.getByTestId('doc-header').textContent).toContain('ISOFIX_DFM_rev2.pdf · Answer #8 · KTX to Toolmaker')
+  it('shows a given placeholder instead of the default line', () => {
+    render(<DocumentPane document={null} placeholder={<button>Open drawing</button>} />)
+    expect(screen.getByText('Open drawing')).toBeTruthy()
+    expect(screen.queryByText(/No document to show/)).toBeNull()
   })
 
   it('shows a close button that calls onClose when given', () => {
     const onClose = vi.fn()
-    render(<DocumentPane document={{ fileId: 9, filename: 'study.pdf', kind: 'pdf', revisionName: 'Gate position' }} onClose={onClose} />)
+    render(<DocumentPane document={{ fileId: 9, filename: 'p.png', kind: 'image', revisionName: 'E1' }} onClose={onClose} />)
     fireEvent.click(screen.getByTestId('doc-close'))
     expect(onClose).toHaveBeenCalled()
   })
 
   it('has no close button when onClose is not given', () => {
-    render(<DocumentPane document={{ fileId: 9, filename: 'study.pdf', kind: 'pdf', revisionName: 'Gate position' }} />)
+    render(<DocumentPane document={{ fileId: 9, filename: 'p.png', kind: 'image', revisionName: 'E1' }} />)
     expect(screen.queryByTestId('doc-close')).toBeNull()
   })
 })

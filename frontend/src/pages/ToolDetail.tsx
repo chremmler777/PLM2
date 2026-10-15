@@ -3,7 +3,7 @@
  * pane, no revision strip and no customer numbers; it shows what it
  * produces, its sold state (Task 10) and the DFM archive (Task 11).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import client from '../api/client';
 import StartChangeModal from '../components/changes/StartChangeModal';
@@ -12,7 +12,6 @@ import RevisionLabel from '../components/parts/RevisionLabel';
 import PartThumbnail from '../components/parts/PartThumbnail';
 import ToolFieldsCard from '../components/tools/ToolFieldsCard';
 import ToolShrinkCard from '../components/tools/ToolShrinkCard';
-import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
 import DfmArchive from '../components/dfm/DfmArchive';
 import { toolScope } from '../api/dfm';
 import { producedArticles, type ToolRelation } from '../components/tools/toolRelations';
@@ -53,13 +52,6 @@ interface Props {
 export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null, onMarkPhase, phasePending = false }: Props) {
   const notes = usePartFieldNoteIndex(part.id);
   const [showStartChange, setShowStartChange] = useState(false);
-  const [openDoc, setOpenDoc] = useState<PaneDocument | null>(null);
-  const paneRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (openDoc) paneRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  }, [openDoc]);
-
   const { data: relations, isLoading: relationsLoading } = useQuery({
     queryKey: ['part-relations', part.id],
     queryFn: async () => (await client.get(`/v1/parts/${part.id}/relations`)).data as ToolRelation[],
@@ -120,16 +112,11 @@ export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null,
           producedNotes={produced.map((a) => a.notes)} projectId={part.project_id} />
         <ToolShrinkCard partId={part.id} projectId={part.project_id} />
 
-        {openDoc && (
-          <div ref={paneRef} className="bg-slate-800 rounded-lg border border-slate-700 mb-8 overflow-hidden">
-            <DocumentPane document={openDoc} onClose={() => setOpenDoc(null)} />
-          </div>
-        )}
         <div data-field-key="dfm.status" className="flex items-center gap-1 mb-2 text-sm text-slate-400">
           DFM status notes
           <FieldNoteMarker partId={part.id} fieldKey="dfm.status" label="DFM status" note={notes.get('dfm.status')} projectId={part.project_id} />
         </div>
-        <DfmArchive scope={toolScope(part.id)} projectId={part.project_id} onOpenPdf={setOpenDoc} />
+        <DfmArchive scope={toolScope(part.id)} projectId={part.project_id} />
 
         {showStartChange && (
           <StartChangeModal open onClose={() => setShowStartChange(false)}

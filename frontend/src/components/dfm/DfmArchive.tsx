@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createTopic, dfmKey, listTopics, projectScope, type DfmScope } from '../../api/dfm';
-import type { PaneDocument } from '../parts/DocumentPane';
+import { openDocumentWindow, type WindowDocument } from '../parts/openDocumentWindow';
 import DfmAuditLog from './DfmAuditLog';
 import DfmFlow from './DfmFlow';
 import { ARCHIVE_HINT, archiveLabel, lastStepText, TITLE_PLACEHOLDER, waitingSummary } from './dfmFlow';
@@ -22,14 +22,15 @@ interface Props {
   scope: DfmScope;
   /** Tool scope: the tool's project, for the "General tooling DFM" link; hidden when absent. */
   projectId?: number | null;
-  onOpenPdf(doc: PaneDocument): void;
+  /** Opens a PDF of the ledger; by default in its own window. */
+  onOpenPdf?(doc: WindowDocument): void;
   /** Topic to open first (the pop-out window's ?topic=). */
   initialTopic?: number | null;
   /** Rendered in its own window: fill the height, no "Open in window". */
   inWindow?: boolean;
 }
 
-export default function DfmArchive({ scope, projectId = null, onOpenPdf, initialTopic = null, inWindow = false }: Props) {
+export default function DfmArchive({ scope, projectId = null, onOpenPdf = openDocumentWindow, initialTopic = null, inWindow = false }: Props) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<number | null>(initialTopic);
   const [newTitle, setNewTitle] = useState<string | null>(null);  // null = not adding

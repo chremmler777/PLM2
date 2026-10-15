@@ -74,14 +74,44 @@ describe('ProjectDetailPage article panel', () => {
     expect(screen.getAllByText(/mirrored by 20-1994-002-0/).length).toBeGreaterThan(0)
   })
 
-  it('Open on the drawing switches the pane to the inline pdf, selecting a revision switches back', async () => {
+  it('Open on the drawing pops it up in its own window and the pane keeps the 3D model', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({ focus: vi.fn() } as unknown as Window)
     mount()
     fireEvent.click(await screen.findByText(/Handle LH/))
     await screen.findByText('3D (2)')
     fireEvent.click(screen.getByText('Open'))
-    expect((await screen.findByTestId('doc-iframe') as HTMLIFrameElement).src).toContain('/v1/parts/revision-files/103/inline')
-    fireEvent.click(screen.getByTestId('rev-tab-10'))
-    await waitFor(() => expect(screen.queryByTestId('doc-iframe')).toBeNull())
+    expect(open).toHaveBeenCalledWith('/v1/parts/revision-files/103/inline', 'plm2-doc-103', 'popup,width=1200,height=900')
+    expect(screen.getByTestId('doc-header').textContent).toContain('lh.stp')
+    expect(screen.getByText('viewer')).toBeTruthy()
+    open.mockRestore()
+  })
+
+  it('a mirror whose source has no 3D offers its drawing as a button that pops it up', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({ focus: vi.fn() } as unknown as Window)
+    const drawingOnly = [files9[2]]
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects') return Promise.resolve({ data: [{ id: 2, name: 'Seat Trim', code: '1994', status: 'active' }] })
+      if (url === '/v1/parts/project/2') return Promise.resolve({ data: [LH, RH] })
+      if (url === '/v1/parts/project/2/structure') return Promise.resolve({ data: structure })
+      if (url === '/v1/parts/5/revisions') return Promise.resolve({ data: structure.articles[0].revisions.map((r) => ({ ...r, part_id: 5, created_at: '2026-05-28' })) })
+      if (url === '/v1/parts/6/revisions') return Promise.resolve({ data: structure.articles[1].revisions.map((r) => ({ ...r, part_id: 6, created_at: '2026-05-28' })) })
+      if (url === '/v1/parts/revisions/9/files') return Promise.resolve({ data: drawingOnly })
+      return Promise.resolve({ data: [] })
+    })
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/projects/2']}><Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes></MemoryRouter>
+      </QueryClientProvider>)
+    fireEvent.click(await screen.findByText(/Handle RH/))
+    expect(await screen.findByTestId('mirror-banner')).toBeTruthy()
+    expect(screen.queryByTestId('doc-header')).toBeNull()
+    // The pane is re-mounted once RH's own revision list arrives; click the settled button.
+    await waitFor(() => {
+      fireEvent.click(screen.getByTestId('mirror-open-drawing'))
+      expect(open).toHaveBeenCalledWith('/v1/parts/revision-files/103/inline', 'plm2-doc-103', 'popup,width=1200,height=900')
+    })
+    expect(screen.getByTestId('mirror-open-drawing').textContent).toContain('lh.pdf')
+    open.mockRestore()
   })
 
   it('a mirror with no own 3D shows the source viewer under the red banner and the mirror chip', async () => {

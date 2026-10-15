@@ -218,8 +218,9 @@ records which file went from whom to whom and when.
 - Each card shows the route ("Toolmaker → KTX"), the file(s), which message
   it answers ("reply to #2 Original", click to jump there) and its status:
   "Answered by KTX 09-23" or "Waiting on Tier 1 · 4 days".
-- **Checking a file:** click its name on the card. PDFs open in the viewer
-  next to the flow; PPT and other files download and open in their program.
+- **Checking a file:** click its name on the card. PDFs open in their own
+  window (click again to bring it to the front); PPT and other files download
+  and open in their program.
   Every view and download is in the audit log.
 - The status line on top says what is pending, for example "Waiting on KTX
   for 1 day: Original #7 from Toolmaker".

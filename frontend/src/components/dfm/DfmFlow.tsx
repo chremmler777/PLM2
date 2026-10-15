@@ -22,13 +22,13 @@ import {
 } from '../../api/dfm';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { formatDate } from '../../lib/format';
-import type { PaneDocument } from '../parts/DocumentPane';
+import { openDocumentWindow, type WindowDocument } from '../parts/openDocumentWindow';
 import { apiErrorMessage } from '../../lib/apiError';
 import DfmAuditLog from './DfmAuditLog';
 import DfmEntryForm from './DfmEntryForm';
 import {
   archiveLabel, arrowSpan, CARD_MARGIN_PX, CARD_MAX_PX, cardActions, cardLane, currentIds, dayLabel, flowRows, formatDays, initials,
-  KIND_STYLE, laneCenterPct, laneIndex, newOriginalStep, nextStepText, PARTY_STYLE, shortDate, sourceLabel,
+  KIND_STYLE, laneCenterPct, laneIndex, newOriginalStep, nextStepText, PARTY_STYLE, shortDate,
   type DfmStep,
 } from './dfmFlow';
 import { fitZoom, isCompact, useDfmZoom, ZOOM_MAX, ZOOM_MIN } from './dfmZoom';
@@ -36,7 +36,8 @@ import { fitZoom, isCompact, useDfmZoom, ZOOM_MAX, ZOOM_MIN } from './dfmZoom';
 interface Props {
   scope: DfmScope;
   topicId: number;
-  onOpenPdf(doc: PaneDocument): void;
+  /** Opens a PDF of the ledger; by default in its own window. */
+  onOpenPdf?(doc: WindowDocument): void;
   /** Back to the topic list (the "DFM archive" breadcrumb); also after a delete. */
   onBack(): void;
   /** Open the "+ New DFM" form right away (a topic just created). */
@@ -62,7 +63,7 @@ const iconBtn = 'h-7 min-w-7 px-2 text-sm text-slate-300 hover:text-white hover:
 const outlineBtn = 'px-3 py-1 rounded-md ring-1 ring-inset ring-slate-600 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed text-sm';
 
 export default function DfmFlow({
-  scope, topicId, onOpenPdf, onBack, onPopOut, fill = false, initialJumpEntryId = null, autoOpenForm = false,
+  scope, topicId, onOpenPdf = openDocumentWindow, onBack, onPopOut, fill = false, initialJumpEntryId = null, autoOpenForm = false,
 }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<{ step: DfmStep; n: number } | null>(
@@ -197,10 +198,10 @@ export default function DfmFlow({
       onDone={() => { setForm(null); refresh(); }} onCancel={() => setForm(null)} />
   );
 
-  const fileLink = (e: Omit<DfmEntry, 'history'>, f: DfmEntry['files'][number]) =>
+  const fileLink = (f: DfmEntry['files'][number]) =>
     f.original_filename.toLowerCase().endsWith('.pdf') ? (
       <button key={f.id} data-testid={`dfm-file-${f.id}`}
-        onClick={() => onOpenPdf({ fileId: f.id, filename: f.original_filename, kind: 'pdf', revisionName: topic.title, sourceLabel: sourceLabel(e), inlineUrl: dfmFileUrl(scope, f.id, 'inline') })}
+        onClick={() => onOpenPdf({ fileId: f.id, filename: f.original_filename, inlineUrl: dfmFileUrl(scope, f.id, 'inline') })}
         className="font-mono text-xs text-blue-300 hover:underline text-left break-all">{f.original_filename}</button>
     ) : (
       <a key={f.id} data-testid={`dfm-file-${f.id}`} href={dfmFileUrl(scope, f.id, 'download')}
@@ -225,7 +226,7 @@ export default function DfmFlow({
       </div>
       {e.files.length > 0 && (
         <div data-testid={`dfm-files-${e.id}`} className="flex flex-col gap-0.5 mt-1.5">
-          {e.files.map((f) => <span key={f.id}>{fileLink(e, f)}</span>)}
+          {e.files.map((f) => <span key={f.id}>{fileLink(f)}</span>)}
         </div>
       )}
       {e.note && <div className="text-xs text-slate-300 whitespace-pre-wrap mt-1 leading-snug">{e.note}</div>}

@@ -1,21 +1,18 @@
 /**
  * DocumentPane - the one area on the article panel that shows what you are
  * looking at: the 3D viewer (passed in as children so assembly mode keeps
- * working), a drawing PDF, or a picture. A mirror part with no own data shows
- * the source part's document under a red warning.
+ * working) or a picture. Drawings and PDFs never show here: they open in their
+ * own window (openDocumentWindow), so the pane keeps the 3D model. A mirror
+ * part with no own data shows the source part's document under a red warning.
  */
 import type { ReactNode } from 'react';
-import { API_BASE_URL } from '../../api/client';
+import { documentInlineUrl } from './openDocumentWindow';
 
 export interface PaneDocument {
   fileId: number;
   filename: string;
-  kind: '3d' | 'pdf' | 'image';
+  kind: '3d' | 'image';
   revisionName: string;
-  /** Override for documents that are not revision files (DFM archive). */
-  inlineUrl?: string;
-  /** What the document came from, shown in the title bar instead of revisionName (e.g. "Answer #8 · KTX to Toolmaker"). */
-  sourceLabel?: string;
 }
 
 export interface MirrorNotice {
@@ -29,13 +26,12 @@ interface Props {
   mirror?: MirrorNotice | null;
   onOpenPart?(partId: number): void;
   onClose?(): void;
+  /** Shown instead of the default "No document" line when there is nothing to show. */
+  placeholder?: ReactNode;
   children?: ReactNode;
 }
 
-export default function DocumentPane({ document, mirror, onOpenPart, onClose, children }: Props) {
-  const inlineUrl = document
-    ? (document.inlineUrl ?? `${API_BASE_URL}/v1/parts/revision-files/${document.fileId}/inline`)
-    : null;
+export default function DocumentPane({ document, mirror, onOpenPart, onClose, placeholder, children }: Props) {
   return (
     <div className="relative border-b border-slate-700">
       {mirror && (
@@ -55,7 +51,7 @@ export default function DocumentPane({ document, mirror, onOpenPart, onClose, ch
       {document ? (
         <>
           <div data-testid="doc-header" className="flex items-center justify-between gap-2 px-3 py-1 text-xs text-slate-400 bg-slate-800/60">
-            <span className="font-mono truncate">{document.filename} · {document.sourceLabel ?? document.revisionName}</span>
+            <span className="font-mono truncate">{document.filename} · {document.revisionName}</span>
             {onClose && (
               <button data-testid="doc-close" onClick={onClose} className="flex-shrink-0 text-slate-400 hover:text-slate-200">
                 ✕ Close
@@ -63,17 +59,14 @@ export default function DocumentPane({ document, mirror, onOpenPart, onClose, ch
             )}
           </div>
           {document.kind === '3d' && <div className="h-80 overflow-hidden relative">{children}</div>}
-          {document.kind === 'pdf' && (
-            <iframe data-testid="doc-iframe" title={document.filename} src={inlineUrl ?? undefined} className="w-full h-[32rem] bg-white" />
-          )}
           {document.kind === 'image' && (
             <div className="h-80 flex items-center justify-center bg-slate-900">
-              <img src={inlineUrl ?? undefined} alt={document.filename} className="max-h-full max-w-full object-contain" />
+              <img data-testid="doc-image" src={documentInlineUrl(document)} alt={document.filename} className="max-h-full max-w-full object-contain" />
             </div>
           )}
         </>
       ) : (
-        <div className="h-24 flex items-center justify-center text-xs text-slate-500">No document to show on this revision</div>
+        <div className="h-24 flex items-center justify-center text-xs text-slate-500">{placeholder ?? 'No document to show on this revision'}</div>
       )}
     </div>
   );

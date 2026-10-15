@@ -1,8 +1,8 @@
 /**
- * Documents tab: revision strip, document pane (drawing / 3D), grouped files,
+ * Documents tab: revision strip, document pane (3D / picture; drawings pop up), grouped files,
  * uploads, and the customer data / customer package entry points.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client, { API_BASE_URL } from '../../api/client';
@@ -13,6 +13,7 @@ import CustomerPackageDialog from '../parts/CustomerPackageDialog';
 import RevisionStrip from '../parts/RevisionStrip';
 import DocumentPane, { type PaneDocument, type MirrorNotice } from '../parts/DocumentPane';
 import RevisionFilesGrouped, { docKindFor } from '../parts/RevisionFilesGrouped';
+import { openDocumentWindow, opensInWindow } from '../parts/openDocumentWindow';
 import { revisionLabel } from '../parts/RevisionBadge';
 import ThumbnailSnapshot from '../parts/ThumbnailSnapshot';
 import type { CaptureFn } from '../../lib/thumbnail';
@@ -20,7 +21,7 @@ import { apiErrorMessage } from '../../lib/apiError';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import { useAssemblyFiles, useRevisionFiles } from '../../hooks/queries/useProjectDetail';
 import type { ArticleSelection } from '../../hooks/useArticleSelection';
-import { LOCKED_REVISION_STATUSES, type Part, type PartRevision, type Project } from './projectTypes';
+import { LOCKED_REVISION_STATUSES, type Part, type PartRevision, type Project, type RevisionFile } from './projectTypes';
 
 export default function DocumentsTab({ projectId, project, parts, structure, sel, part }: {
   projectId: number;
@@ -124,20 +125,32 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
   const revName = selectedRevision ? revisionLabel(selectedRevision.revision_name, selectedRevision.customer_index) : '';
   let paneDoc: PaneDocument | null = null;
   let paneMirror: MirrorNotice | null = null;
-  if (openDoc) {
-    const kind = docKindFor(openDoc);
-    if (kind) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind, revisionName: revName };
+  let panePlaceholder: ReactNode = undefined;
+  // Drawings and PDFs open in their own window; only plain pictures use the pane.
+  const openFile = (f: RevisionFile) =>
+    opensInWindow(f) ? openDocumentWindow({ fileId: f.id, filename: f.filename }) : sel.setOpenDocId(f.id);
+  if (openDoc && docKindFor(openDoc) === 'image' && !opensInWindow(openDoc)) {
+    paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind: 'image', revisionName: revName };
   } else if (viewingFile || assemblyActive) paneDoc = { fileId: viewingFile?.id ?? 0, filename: assemblyActive ? 'Assembly' : viewingFile!.filename, kind: '3d', revisionName: revName };
   else if (article?.mirror_of && mirrorSource) {
     const src = mirrorFiles.data ?? [];
-    const pick = src.find((f) => f.has_viewer) ?? src.find((f) => f.file_type === 'drawing' && docKindFor(f)) ?? null;
+    const model = src.find((f) => f.has_viewer) ?? null;
     const sourceActiveRev = mirrorSource.revisions.find((r) => r.is_active);
     const sourceRevName = sourceActiveRev
       ? revisionLabel(sourceActiveRev.revision_name, sourceActiveRev.customer_index)
       : mirrorSource.part_number;
-    if (pick) {
-      const kind = pick.has_viewer ? '3d' : docKindFor(pick);
-      if (kind) paneDoc = { fileId: pick.id, filename: pick.filename, kind, revisionName: sourceRevName };
+    if (model) paneDoc = { fileId: model.id, filename: model.filename, kind: '3d', revisionName: sourceRevName };
+    else {
+      // No 3D on the source: offer its drawing, which opens in its own window.
+      const drawing = src.find((f) => f.file_type === 'drawing' && opensInWindow(f)) ?? null;
+      if (drawing) {
+        panePlaceholder = (
+          <button data-testid="mirror-open-drawing" onClick={() => openDocumentWindow({ fileId: drawing.id, filename: drawing.filename })}
+            className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-medium">
+            Open drawing {drawing.filename}
+          </button>
+        );
+      }
     }
     paneMirror = { sourcePartId: mirrorSource.part_id, sourceNumber: mirrorSource.customer_part_number ?? mirrorSource.part_number, sourceName: mirrorSource.name };
   }
@@ -189,7 +202,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
         <div className="p-6 text-center">
           {article?.mirror_of && (
             <div className="mb-4 text-left">
-              <DocumentPane document={paneDoc} mirror={paneMirror} onOpenPart={sel.openPart}>
+              <DocumentPane document={paneDoc} mirror={paneMirror} onOpenPart={sel.openPart} placeholder={panePlaceholder}>
                 <Viewer3D fileId={paneDoc?.fileId ?? null} viewerUrl={paneViewerUrl} />
               </DocumentPane>
             </div>
@@ -220,7 +233,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
       ) : (
         <>
           {/* Document pane: openDoc (Open) -> 3D viewer -> mirror fallback -> none */}
-          <DocumentPane document={paneDoc} mirror={paneMirror} onOpenPart={sel.openPart}>
+          <DocumentPane document={paneDoc} mirror={paneMirror} onOpenPart={sel.openPart} placeholder={panePlaceholder}>
             <Viewer3D
               fileId={assemblyActive ? null : paneDoc?.fileId ?? null}
               viewerUrl={assemblyActive ? null : paneViewerUrl}
@@ -253,7 +266,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
               viewingFileId={viewingFile?.id ?? null}
               revisionName={revName}
               onView={(f) => { sel.setViewingFileId(f.id); sel.setOpenDocId(null); }}
-              onOpen={(f) => sel.setOpenDocId(f.id)}
+              onOpen={openFile}
             />
             {!revisionLocked && sel.revisionId && (
               <div

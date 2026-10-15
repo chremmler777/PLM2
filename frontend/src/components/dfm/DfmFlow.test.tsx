@@ -215,16 +215,25 @@ describe('DfmFlow', () => {
     expect(target.getAttribute('data-highlighted')).toBe('false')
   })
 
-  it('opens PDFs in the pane and downloads other files', async () => {
+  it('opens PDFs through onOpenPdf and downloads other files', async () => {
     const onOpenPdf = wrap()
     fireEvent.click(await screen.findByTestId('dfm-file-41'))
     expect(onOpenPdf).toHaveBeenCalledWith({
-      fileId: 41, filename: 'dfm_rev1.pdf', kind: 'pdf', revisionName: 'Gate position',
-      sourceLabel: 'Original #1 · Toolmaker to KTX', inlineUrl: '/api/v1/parts/7/dfm/files/41/inline',
+      fileId: 41, filename: 'dfm_rev1.pdf', inlineUrl: '/api/v1/parts/7/dfm/files/41/inline',
     })
     const link = screen.getByTestId('dfm-file-42') as HTMLAnchorElement
     expect(link.tagName).toBe('A')
     expect(link.href).toContain('/api/v1/parts/7/dfm/files/42/download')
+  })
+
+  it('opens a PDF in its own window by default, never in a pane', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({ focus: vi.fn() } as unknown as Window)
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <DfmFlow scope={toolScope(7)} topicId={1} onBack={vi.fn()} />
+    </QueryClientProvider>)
+    fireEvent.click(await screen.findByTestId('dfm-file-41'))
+    expect(open).toHaveBeenCalledWith('/api/v1/parts/7/dfm/files/41/inline', 'plm2-doc-dfm-41', 'popup,width=1200,height=900')
+    open.mockRestore()
   })
 
   it('keeps the lane headers sticky at the top of the flow, first in the scrolling body', async () => {

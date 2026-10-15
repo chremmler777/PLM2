@@ -182,9 +182,8 @@ describe('DetailPane branches on a tool selection', () => {
     expect(screen.queryByTestId('detail-tab-tool')).toBeNull()
   })
 
-  it('scrolls an opened DFM pdf into view and shows a title bar naming the message, with a close button', async () => {
-    const scrollSpy = vi.fn()
-    Element.prototype.scrollIntoView = scrollSpy
+  it('opens a DFM pdf in its own window, not in a pane', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({ focus: vi.fn() } as unknown as Window)
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/parts/20/relations') return Promise.resolve({ data: toolRelations })
       if (url === '/v1/parts/20/dfm/topics') return Promise.resolve({ data: [relaySummary({ id: 1, tool_part_id: 20 })] })
@@ -194,9 +193,8 @@ describe('DetailPane branches on a tool selection', () => {
     render(<Harness sel={toolSelection()} initialTab="dfm" />)
     fireEvent.click(await screen.findByTestId('dfm-topic-1'))
     fireEvent.click(await screen.findByTestId('dfm-file-41'))
-    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth', block: 'start' }))
-    expect((await screen.findByTestId('doc-header')).textContent).toContain('Original #1 · Toolmaker to KTX')
-    fireEvent.click(screen.getByTestId('doc-close'))
+    expect(open).toHaveBeenCalledWith(expect.stringContaining('/v1/parts/20/dfm/files/41/inline'), 'plm2-doc-dfm-41', 'popup,width=1200,height=900')
     expect(screen.queryByTestId('doc-header')).toBeNull()
+    open.mockRestore()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import PartDetail from './PartDetail'
@@ -19,7 +19,8 @@ describe('PartDetail files card', () => {
       if (url === '/v1/parts/5') return Promise.resolve({ data: { id: 5, project_id: 2, part_number: '20-1', name: 'Cover', part_type: 'internal_mfg', item_category: 'article', active_revision_id: 9, lifecycle_phase: 'rfq',
         revisions: [{ id: 9, revision_name: 'E1', phase: 'review', status: 'approved', parent_revision_id: null, source: 'customer', customer_index: '003', part_phase_at_receipt: 'rfq', created_at: '2026-05-28' }] } })
       if (url === '/v1/parts/revisions/9/files') return Promise.resolve({ data: [
-        { id: 103, revision_id: 9, filename: 'd.pdf', file_type: 'drawing', mime_type: 'application/pdf', file_size: 1, cad_format: null, has_viewer: false, uploaded_at: '2026-05-28' }] })
+        { id: 103, revision_id: 9, filename: 'd.pdf', file_type: 'drawing', mime_type: 'application/pdf', file_size: 1, cad_format: null, has_viewer: false, uploaded_at: '2026-05-28' },
+        { id: 104, revision_id: 9, filename: 'photo.jpg', file_type: 'document', mime_type: 'image/jpeg', file_size: 1, cad_format: null, has_viewer: false, uploaded_at: '2026-05-28' }] })
       if (url === '/v1/parts/5/where-used') return Promise.resolve({ data: [
         { part_id: 6, part_number: '20-2', name: 'Base', revision_name: 'E1', customer_index: null, quantity: 1, unit: 'pcs', parents: [] }] })
       if (url === '/v1/parts/6') return Promise.resolve({ data: { id: 6, project_id: 2, part_number: '20-2', name: 'Base', part_type: 'internal_mfg', item_category: 'article', active_revision_id: 10, lifecycle_phase: 'rfq',
@@ -28,22 +29,27 @@ describe('PartDetail files card', () => {
       return Promise.resolve({ data: [] })
     })
   })
-  afterEach(cleanup)
+  afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
-  it('lists the active revision files grouped and opens a drawing inline', async () => {
+  const openButtonOf = (filename: string) =>
+    within(screen.getByText(filename).closest('div.justify-between') as HTMLElement).getByText('Open')
+
+  it('lists the active revision files grouped and pops a drawing up in its own window, not the pane', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({ focus: vi.fn() } as unknown as Window)
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={['/parts/5']}><Routes><Route path="/parts/:partId" element={<PartDetail />} /></Routes></MemoryRouter></QueryClientProvider>)
     expect(await screen.findByText('2D (1)')).toBeTruthy()
-    fireEvent.click(screen.getByText('Open'))
-    expect((await screen.findByTestId('doc-iframe') as HTMLIFrameElement).src).toContain('/v1/parts/revision-files/103/inline')
+    fireEvent.click(openButtonOf('d.pdf'))
+    expect(open).toHaveBeenCalledWith('/v1/parts/revision-files/103/inline', 'plm2-doc-103', 'popup,width=1200,height=900')
+    expect(screen.getByText('No document to show on this revision')).toBeTruthy()
   })
 
   it('resets the open/viewing document selection when in-page navigation moves to another part', async () => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={['/parts/5']}><Routes><Route path="/parts/:partId" element={<PartDetail />} /></Routes></MemoryRouter></QueryClientProvider>)
     expect(await screen.findByText('2D (1)')).toBeTruthy()
-    fireEvent.click(screen.getByText('Open'))
-    expect(await screen.findByTestId('doc-iframe')).toBeTruthy()
+    fireEvent.click(openButtonOf('photo.jpg'))
+    expect((await screen.findByTestId('doc-image') as HTMLImageElement).src).toContain('/v1/parts/revision-files/104/inline')
 
     // "Used in" chip drives in-page navigation via useNavigate: React Router
     // does not remount PartDetail for a param-only route change, so this is
@@ -51,7 +57,7 @@ describe('PartDetail files card', () => {
     fireEvent.click(await screen.findByText('20-2'))
 
     await screen.findByText('Base')
-    expect(screen.queryByTestId('doc-iframe')).toBeNull()
+    expect(screen.queryByTestId('doc-image')).toBeNull()
     expect(await screen.findByText('No document to show on this revision')).toBeTruthy()
   })
 })

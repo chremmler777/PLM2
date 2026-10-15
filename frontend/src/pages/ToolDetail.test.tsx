@@ -13,11 +13,8 @@ vi.mock('../components/changes/StartChangeModal', () => stub('start-change'))
 vi.mock('../components/changes/StartChangeButton', () => stub('start-change-button'))
 vi.mock('../components/tools/ToolShrinkCard', () => stub('tool-shrinkage'))
 vi.mock('../components/dfm/DfmArchive', () => ({
-  default: (p: { onOpenPdf: (d: unknown) => void }) => (
-    <button data-testid="dfm-archive" onClick={() => p.onOpenPdf({
-      fileId: 41, filename: 'ISOFIX_DFM_rev2.pdf', kind: 'pdf', revisionName: 'Gate position ISOFIX',
-      sourceLabel: 'Answer #8 · KTX to Toolmaker', inlineUrl: '/x',
-    })} />
+  default: (p: { onOpenPdf?: (d: unknown) => void }) => (
+    <div data-testid="dfm-archive" data-own-handler={String(!!p.onOpenPdf)} />
   ),
 }))
 
@@ -123,14 +120,9 @@ describe('ToolDetail', () => {
     expect(screen.queryByText(/Files ·/)).toBeNull()
   })
 
-  it('scrolls an opened DFM pdf into view and shows a title bar naming the message, with a close button', async () => {
-    const scrollSpy = vi.fn()
-    Element.prototype.scrollIntoView = scrollSpy
+  it('leaves DFM pdfs to the archive default (own window) and has no document pane', async () => {
     renderTool()
-    fireEvent.click(await screen.findByTestId('dfm-archive'))
-    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth', block: 'start' }))
-    expect((await screen.findByTestId('doc-header')).textContent).toContain('ISOFIX_DFM_rev2.pdf · Answer #8 · KTX to Toolmaker')
-    fireEvent.click(screen.getByTestId('doc-close'))
+    expect((await screen.findByTestId('dfm-archive')).getAttribute('data-own-handler')).toBe('false')
     expect(screen.queryByTestId('doc-header')).toBeNull()
   })
 })

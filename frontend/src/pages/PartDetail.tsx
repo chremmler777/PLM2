@@ -19,6 +19,7 @@ import { revisionLabel } from '../components/parts/RevisionBadge';
 import RevisionLabel from '../components/parts/RevisionLabel';
 import { useAuth } from '../contexts/AuthContext';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
+import { openDocumentWindow, opensInWindow } from '../components/parts/openDocumentWindow';
 import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFilesGrouped';
 import Viewer3D from '../components/Viewer3D';
 import { API_BASE_URL } from '../api/client';
@@ -246,7 +247,7 @@ export default function PartDetail() {
   let paneDoc: PaneDocument | null = null;
   if (openDoc) {
     const kind = docKindFor(openDoc);
-    if (kind) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind, revisionName: revName };
+    if (kind === 'image') paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind, revisionName: revName };
   } else if (viewingFile) paneDoc = { fileId: viewingFile.id, filename: viewingFile.filename, kind: '3d', revisionName: revName };
 
   const marker = (fieldKey: string, label: string) => (
@@ -421,7 +422,7 @@ export default function PartDetail() {
           </DocumentPane>
           <div className="mt-3">
             <RevisionFilesGrouped files={files ?? []} locked={true} viewingFileId={viewingId} revisionName={activeRevision?.revision_name ?? ''}
-              onView={(f) => { setViewingId(f.id); setOpenId(null); }} onOpen={(f) => setOpenId(f.id)} />
+              onView={(f) => { setViewingId(f.id); setOpenId(null); }} onOpen={(f) => (opensInWindow(f) ? openDocumentWindow({ fileId: f.id, filename: f.filename }) : setOpenId(f.id))} />
           </div>
         </div>
 
