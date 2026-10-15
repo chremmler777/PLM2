@@ -186,16 +186,31 @@ class ValidationIssueService:
                               issue: ValidationIssue) -> bool:
         """Was the concession's yes recorded by a Quality member? Off the
         switch, any recorded yes counts (the rule before C7)."""
+        return issue.id in await ValidationIssueService.quality_decided_ids(
+            session, [issue])
+
+    @staticmethod
+    async def quality_decided_ids(session: AsyncSession, issues: list) -> set:
+        """The ids of `issues` whose yes was Quality's, in one query at most.
+        The flag stored at decision time (acts-as aware, the same rule as a
+        Quality override) answers; a row from before migration 119 without
+        it falls back to the decider's real membership."""
         if not ValidationIssueService.quality_decides_concessions():
-            return True
-        if issue.customer_decided_by is None:
-            return False
-        return bool((await session.execute(
-            select(func.count()).select_from(UserDepartment)
-            .join(Department, Department.id == UserDepartment.department_id)
-            .where(UserDepartment.user_id == issue.customer_decided_by,
-                   Department.name == QUALITY_DEPARTMENT,
-                   Department.is_active.is_(True)))).scalar())
+            return {i.id for i in issues}
+        out = {i.id for i in issues if i.customer_decided_as_quality}
+        legacy = {i.customer_decided_by for i in issues
+                  if i.customer_decided_as_quality is None
+                  and i.customer_decided_by is not None}
+        if legacy:
+            members = set((await session.execute(
+                select(UserDepartment.user_id)
+                .join(Department, Department.id == UserDepartment.department_id)
+                .where(UserDepartment.user_id.in_(legacy),
+                       Department.name == QUALITY_DEPARTMENT,
+                       Department.is_active.is_(True)))).scalars())
+            out |= {i.id for i in issues if i.customer_decided_as_quality is None
+                    and i.customer_decided_by in members}
+        return out
 
     @staticmethod
     async def check_retired(session: AsyncSession,
@@ -1448,10 +1463,11 @@ class ValidationIssueService:
         RELEASE_V2 the yes is Quality's alone (HARD #3)."""
         svc = ValidationIssueService
         if issue.route == "customer_concession" and svc.quality_decides_concessions():
-            if v.quality:
-                return list(CUSTOMER_DECISIONS)
-            return ([d for d in CUSTOMER_DECISIONS if d != "accept_deviation"]
-                    if v.admin or v.sales else [])
+            # Quality gives the yes; what else the customer said (fix, new
+            # timing) Sales records
+            others = ([d for d in CUSTOMER_DECISIONS if d != "accept_deviation"]
+                      if v.admin or v.sales else [])
+            return (["accept_deviation"] if v.quality else []) + others
         return list(CUSTOMER_DECISIONS) if v.admin or v.sales else []
 
     @staticmethod
@@ -1471,8 +1487,25 @@ class ValidationIssueService:
                          "customer's mail into the issue, a Quality member "
                          "accepts it")
         else:
-            svc._require(v.admin or v.sales or (concession and v.quality),
+            svc._require(v.admin or v.sales,
                          "Only Sales records the customer's decision")
+        if (concession and decision == "accept_deviation"
+                and issue.status == "accepted"
+                and not await svc.quality_decided(session, issue)):
+            # An accepted concession whose yes was not Quality's (Sales
+            # before the rule): Quality confirms it, so HARD #3's one exit
+            # is never used up without counting (no dead end, R18).
+            note = _txt(spec.get("note"), "A note on the customer decision")
+            issue.customer_decision_note = note
+            issue.customer_decided_at = datetime.utcnow()
+            issue.customer_decided_by = user.id
+            issue.customer_decided_as_quality = True
+            issue.updated_at = datetime.utcnow()
+            await session.flush()
+            await svc._log(session, change, issue, "customer_decision",
+                           "concession confirmed by Quality", user.id,
+                           notes=note, decision=decision)
+            return issue
         svc._require_open(issue)
         if decision not in CUSTOMER_DECISIONS:
             raise ChangeError(
@@ -1494,6 +1527,7 @@ class ValidationIssueService:
         issue.customer_decision_note = note
         issue.customer_decided_at = datetime.utcnow()
         issue.customer_decided_by = user.id
+        issue.customer_decided_as_quality = v.quality
         issue.customer_inform = True
         if spec.get("concession_until") is not None:
             issue.concession_until = _d(spec["concession_until"])
@@ -1840,12 +1874,17 @@ class ValidationIssueService:
                     note: str, user: User) -> ValidationIssue:
         svc = ValidationIssueService
         v = await svc.viewer(session, change, user)
-        svc._require(v.admin or v.pm or v.lead,
+        svc._require(v.admin or v.pm or v.lead or v.quality,
                      "Only Project Management, the change lead or an admin close "
                      "an issue")
         issue = await svc.get_issue(session, change, iid)
         svc._require_open(issue)
         note = _txt(note, "A closure note")
+        raised_in_error = (issue.status in ("open", "contained")
+                           and svc.quality_decides_concessions())
+        svc._require(v.admin or v.pm or v.lead or raised_in_error,
+                     "Only Project Management, the change lead or an admin close "
+                     "an issue")
         # A check no longer asked can never pass again: its issue closes
         # with a note, like an unlinked one, whatever step it is at.
         retired = issue.check_id is not None and await svc.check_retired(
@@ -1859,6 +1898,20 @@ class ValidationIssueService:
                 f"{issue.ref} is {issue.status}: finish the fix actions first "
                 "(an issue closes from re-validation, or before a route when "
                 "it was raised in error)")
+        if (not retired and issue.status in ("open", "contained")
+                and svc.quality_decides_concessions()):
+            # HARD #3: an open issue holds the release; closing it as raised
+            # in error is Quality's call with the evidence, never a free-text
+            # shortcut of the run team or an admin
+            svc._require(v.quality,
+                         "An open validation issue holds the release: only a "
+                         "Quality member closes it as raised in error")
+            from app.services.cm_rules import reference_refusal
+            refusal = reference_refusal(
+                note, "Why it was raised in error (measurement, drawing or "
+                      "document reference)")
+            if refusal:
+                raise ChangeError(refusal)
         await svc._close(session, change, issue, "closed", note, user.id)
         return issue
 
@@ -1923,6 +1976,12 @@ class ValidationIssueService:
         department answers the linked check again) or close (no check)."""
         svc = ValidationIssueService
         if not issue.is_open:
+            if (v.quality and issue.status == "accepted"
+                    and issue.route == "customer_concession"
+                    and not await svc.quality_decided(session, issue)):
+                # HARD #3: a concession accepted without Quality's yes waits
+                # for Quality to confirm it before it counts at release
+                return ["customer"], "customer", []
             # a late invoice or the quote of the fix still land after close
             extra = []
             if v.cost_role:
@@ -1947,8 +2006,11 @@ class ValidationIssueService:
         if not decided and can_route and change.status in WORK_STATUSES and not (
                 issue.severity == 3 and not issue.containment):
             acts.append("route")
+        # with RELEASE_V2 Quality decides once Sales filed the customer's
+        # mail; before that the card waits on Sales (spec §10)
         quality_concession = (v.quality and issue.route == "customer_concession"
-                              and svc.quality_decides_concessions())
+                              and svc.quality_decides_concessions()
+                              and await svc.has_customer_mail(session, issue))
         if ((v.admin or v.sales) and issue.customer_inform and (
                 issue.customer_decision in (None, "pending")
                 or issue.route == "customer_concession")) or quality_concession:
@@ -1967,8 +2029,12 @@ class ValidationIssueService:
         # back in implementation the re-check waits (step_note says so)
         if issue.status == "revalidation" and issue.check_id is not None \
                 and not retired and change.status == "in_validation":
-            if v.admin or v.pm or v.in_dept(chk.department_id if chk else
-                                            issue.department_id):
+            dept = chk.department_id if chk else issue.department_id
+            # HARD #3: a failed check is retested by its own department only
+            shortcut = (v.admin or v.pm) and not (
+                chk is not None and chk.status == "failed"
+                and svc.quality_decides_concessions())
+            if shortcut or v.in_dept(dept):
                 acts.append("recheck")
         if (v.admin or v.pm or v.lead) and (
                 retired or (issue.check_id is None

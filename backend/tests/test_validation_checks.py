@@ -19,6 +19,7 @@ from app.models.change import ChangeAssessment
 from app.models.change_validation import ValidationCheck
 from app.models.entities import Project, User
 from app.models.workflow import Department, UserDepartment
+from app.services import cm_switches
 from tests.conftest import login, ENGINEER_PASSWORD
 
 pytestmark = pytest.mark.asyncio
@@ -273,7 +274,7 @@ async def test_measurements_need_their_number_to_pass(client, val):
     assert (await _check(client, tool, val, "Tool Engineer", "cycle_time",
                          status="failed")).status_code == 201
     res = await _check(client, tool, val, "Tool Engineer", "cycle_time",
-                       value=42.25)
+                       value=42.25, note="retest after cooling change, PS-114 rev B")
     assert res.status_code == 201, res.text
     # Seconds in, seconds out — stored exactly as measured, never converted
     # into the costing's minutes-per-part on the way in.
@@ -283,6 +284,47 @@ async def test_measurements_need_their_number_to_pass(client, val):
                   if c["check_key"] == "cycle_time"
                   and d["department_name"] == "Tool Engineer")
     assert (stored["value"], stored["unit"]) == (42.25, "seconds")
+
+
+async def test_failed_check_is_lifted_only_by_its_departments_retest(
+        client, admin_auth, val, session_factory, monkeypatch):
+    """HARD #3 (C7): a FAILED check is answered again only by a retest, in
+    validation, by its own department, saying what changed since. An admin
+    or a PM member cannot flip it to passed through the check endpoint (the
+    linked issue would auto-close and both halves of HARD #3 vanish)."""
+    tool = await _auth(client, val, "Tool Engineer")
+    pm = await _auth(client, val, "Project Manager")
+    assert (await _check(client, tool, val, "Tool Engineer", "weight",
+                         status="failed", value=540.0,
+                         note="12 % over the estimate")).status_code == 201
+    for auth in (admin_auth, pm):  # NEGATIVE: no PM or admin shortcut
+        res = await _check(client, auth, val, "Tool Engineer", "weight",
+                           value=505.0, note="looked again, fine now")
+        assert res.status_code == 400, res.text
+        assert "own department" in res.json()["detail"]
+    # NEGATIVE: the department itself needs what changed since
+    for note in (None, "ok"):
+        res = await _check(client, tool, val, "Tool Engineer", "weight",
+                           value=505.0, **({"note": note} if note else {}))
+        assert res.status_code == 400, res.text
+        assert "What changed since the failure" in res.json()["detail"]
+    # NEGATIVE: not outside validation
+    await _set_status(session_factory, val["change_id"], "in_implementation")
+    res = await _check(client, admin_auth, val, "Tool Engineer", "weight",
+                       value=505.0, note="gate shortened, tool change TC-88")
+    assert res.status_code == 400, res.text
+    await _set_status(session_factory, val["change_id"], "in_validation")
+    res = await _check(client, tool, val, "Tool Engineer", "weight",
+                       value=505.0, note="gate shortened, tool change TC-88")
+    assert res.status_code == 201, res.text
+    assert res.json()["status"] == "passed"
+    # switch off: the old rule (PM / admin at any time)
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    assert (await _check(client, tool, val, "Tool Engineer", "weight",
+                         status="failed", value=540.0,
+                         note="12 % over the estimate")).status_code == 201
+    assert (await _check(client, admin_auth, val, "Tool Engineer", "weight",
+                         value=505.0)).status_code == 201
 
 
 # --- the weight, and the quote it moves -------------------------------------

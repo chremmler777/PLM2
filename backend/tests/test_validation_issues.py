@@ -897,7 +897,7 @@ async def test_my_actions_kinds(client, vi, session_factory):
 
 # --- wiring into the change (phase 2) --------------------------------------------
 
-async def test_release_guard_names_open_issues(client, vi, session_factory):
+async def test_release_guard_names_open_issues(client, vi, session_factory, monkeypatch):
     issue = await _raised(client, vi, check_id=None, category="other")
     async with session_factory() as s:
         chk = await s.get(ValidationCheck, vi["check_id"])
@@ -912,6 +912,12 @@ async def test_release_guard_names_open_issues(client, vi, session_factory):
                             headers=admin)).json()
     assert "1 validation issue open" in rel["blockers"]
     pm = await _auth(client, vi, "pm")
+    # HARD #3 (RELEASE_V2): raised in error is Quality's close, not PM's
+    r = await client.post(_url(vi, f"/{issue['id']}/close"), headers=pm,
+                          json={"note": "raised in error"})
+    assert r.status_code == 403, r.text
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     await client.post(_url(vi, f"/{issue['id']}/close"), headers=pm,
                       json={"note": "raised in error"})
     rel = (await client.get(f"/api/v1/changes/{vi['change_id']}/release",
@@ -919,7 +925,8 @@ async def test_release_guard_names_open_issues(client, vi, session_factory):
     assert not any("validation issue" in b for b in rel["blockers"])
 
 
-async def test_check_answer_through_the_api_closes_the_linked_issue(client, vi):
+async def test_check_answer_through_the_api_closes_the_linked_issue(
+        client, vi, session_factory):
     issue = await _raised(client, vi)
     iid = issue["id"]
     await _ready(client, vi, iid)
@@ -932,7 +939,19 @@ async def test_check_answer_through_the_api_closes_the_linked_issue(client, vi):
     r = await client.post(checks, headers=pm, json={**body, "status": "failed"})
     assert r.status_code == 201, r.text
     assert (await client.get(_url(vi, f"/{iid}"), headers=pm)).json()["status"] == "fixing"
+    # HARD #3: the retest is the department's, in validation, saying what
+    # changed since (the fix route sent the change back to implementation)
     r = await client.post(checks, headers=pm, json={**body, "status": "passed"})
+    assert r.status_code == 400, r.text
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, vi["change_id"])
+        c.status = "in_validation"
+        await s.commit()
+    r = await client.post(checks, headers=pm, json={**body, "status": "passed"})
+    assert r.status_code == 400, r.text
+    tool = await _auth(client, vi, "tool")
+    r = await client.post(checks, headers=tool, json={
+        **body, "status": "passed", "note": "new slide insert, TC-0815"})
     assert r.status_code == 201, r.text
     out = (await client.get(_url(vi, f"/{iid}"), headers=pm)).json()
     assert out["status"] == "closed"

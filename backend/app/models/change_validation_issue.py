@@ -87,6 +87,10 @@ class ValidationIssue(Base):
     customer_decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     customer_decided_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
+    # HARD #3 (C7): the yes was recorded by a Quality member (acts-as aware);
+    # NULL on rows written before migration 119 = read the real membership
+    customer_decided_as_quality: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True)
     concession_until: Mapped[date | None] = mapped_column(Date, nullable=True)
     # new_timing: the date the customer agreed (it moved release_due_date)
     new_timing_date: Mapped[date | None] = mapped_column(Date, nullable=True)

@@ -413,6 +413,11 @@ class ValidationService:
                                   check_key=check_key, status="open")
             session.add(row)
         old_status, old_value = row.status, row.value
+        if old_status == "failed" and status != "failed":
+            refusal = await ValidationService.failed_overwrite_refusal(
+                session, change, department_id, spec.get("note"), actor)
+            if refusal:
+                raise ValidationError(refusal)
         row.status = status
         # A value is kept when the caller does not restate it: correcting a
         # 'passed' to 'failed' should not silently erase the measurement that
@@ -451,6 +456,33 @@ class ValidationService:
         from app.services.validation_issue_service import ValidationIssueService
         await ValidationIssueService.on_check_answered(session, change, row, actor)
         return row
+
+    @staticmethod
+    async def failed_overwrite_refusal(
+        session: AsyncSession, change: ChangeRequest, department_id: int,
+        note, actor: User,
+    ) -> str | None:
+        """HARD #3 (C7, RELEASE_V2): a FAILED check is answered again only by
+        a retest, in validation, by a member of its department (acts-as
+        aware, no PM or admin shortcut), with what changed since the
+        failure (spec §10). Otherwise the failure, and the issue linked to
+        it, could be lifted without a fix or a concession. None = allowed."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2"):
+            return None
+        if change.status != VALIDATION_STATUS:
+            return ("A failed check is answered again only by a retest while "
+                    "the change is in validation")
+        from app.services.workflow_service import WorkflowService
+        if not await WorkflowService.actor_in_department(
+                session, actor, department_id):
+            return ("A failed check is retested by its own department: no "
+                    "Project Management or admin shortcut (HARD #3; the other "
+                    "exit is a concession, Quality's decision)")
+        from app.services.cm_rules import reference_refusal
+        return reference_refusal(
+            note, "What changed since the failure (parameter, tool, material "
+                  "or method + reference)")
 
     @staticmethod
     async def _stamp_validated_weight(
@@ -546,13 +578,14 @@ class ValidationService:
             from app.services.validation_issue_service import ValidationIssueService
             # HARD #3: only a concession a Quality member decided counts (an
             # admin, PM or Sales alone cannot produce the exit)
-            conceded = {i.check_id for i in (await session.execute(
+            accepted = (await session.execute(
                 select(ValidationIssue).where(
                     ValidationIssue.change_id == change.id,
                     ValidationIssue.check_id.in_([r.id for r in failed]),
                     ValidationIssue.status == "accepted",
                     ValidationIssue.route == "customer_concession"))).scalars().all()
-                if await ValidationIssueService.quality_decided(session, i)}
+            ok = await ValidationIssueService.quality_decided_ids(session, accepted)
+            conceded = {i.check_id for i in accepted if i.id in ok}
             failed = [r for r in failed if r.id not in conceded]
         outstanding = [r for r in rows if r.status not in ("passed", "failed")]
         return (
