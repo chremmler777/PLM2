@@ -1117,7 +1117,7 @@ const ART = {
 }
 
 const ARTIFACTS: { key: string; y: number; lines: string[]; pnl?: string }[] = [
-  { key: 'captured', y: Y.captured, lines: ['request + description', 'at least one attachment', 'quote-by date (customer changes)'] },
+  { key: 'captured', y: Y.captured, lines: ['request + description', 'customer file + quote-by date (customer)', 'problem + target (internal); urgent: need-by'] },
   { key: 'scoping', y: Y.scoping, lines: ['meeting decision + reason', 'concern rows', 'customer letters / questions'] },
   { key: 'assessment', y: Y.assessment, lines: ['Change PPT (per department)', 'RFQ (external modification)', 'customer mails (change level)'] },
   { key: 'costing', y: Y.costing, lines: ART.costing, pnl: 'P&L planned starts here' },

@@ -390,12 +390,17 @@ async def satisfy_capture_gate(client, auth, change_id: int, *,
     res = await client.patch(
         f"/api/v1/changes/{change_id}",
         json={"description": "Captured by Sales",
-              "required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
+              "required_by_date": "2026-12-31T12:00:00Z",
+              # §2 (SCOPING_V2): an internal change says what is wrong today
+              # and the target (ignored by the kickoff of a customer change)
+              "problem_value": 12.4, "problem_unit": "g", "target_value": 12.0},
+        headers=auth)
     assert res.status_code == 200, res.text
+    # §2: the customer's own file (typed); it is an attachment for any change
     res = await client.post(
         f"/api/v1/changes/{change_id}/attachments",
         files={"file": ("capture.txt", b"capture evidence", "text/plain")},
-        headers=auth)
+        data={"kind": "customer_file"}, headers=auth)
     assert res.status_code in (200, 201), res.text
 
 

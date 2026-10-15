@@ -63,6 +63,14 @@ async def test_internal_change_needs_no_date(client, eng_auth, seed):
     change = await _create(client, eng_auth, seed, description="what changes")
     await make_internal(client, eng_auth, change["id"])
     await _attach(client, eng_auth, change["id"])
+    # §2 (SCOPING_V2): an internal change says what is wrong today and the
+    # target instead of a quote deadline
+    res = await _kickoff(client, eng_auth, change["id"])
+    assert res.status_code == 400 and "what is wrong today" in res.json()["detail"]
+    res = await client.patch(f"/api/v1/changes/{change['id']}", json={
+        "problem_value": 4.0, "problem_unit": "% scrap", "target_value": 1.0},
+        headers=eng_auth)
+    assert res.status_code == 200, res.text
     res = await _kickoff(client, eng_auth, change["id"])
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "scoping"

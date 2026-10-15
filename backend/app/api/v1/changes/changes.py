@@ -50,7 +50,7 @@ from app.schemas.change import (
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
     ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, PpapDecisionIn, CustomerFlipAnswerIn,
-    RecheckAnswerIn, IndexScopeIn, IndexDeadlineIn,
+    RecheckAnswerIn, IndexScopeIn, IndexDeadlineIn, NeedByTellIn,
     ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
@@ -174,6 +174,21 @@ async def create_change(
             mother_plant_sop=body.mother_plant_sop,
             sales_owner_id=raiser_owner,
         )
+        # §2 (SCOPING_V2): the urgent need-by, reason and evidence, and the
+        # internal problem and target, travel with the capture.
+        from app.services import capture_rules
+        for k in ("urgent_reason", "urgent_evidence", "problem_value",
+                  "problem_unit", "target_value"):
+            v = getattr(body, k)
+            if v is not None:
+                setattr(change, k, v.strip() if isinstance(v, str) else v)
+        if (body.release_due_date is not None and body.priority == "critical"
+                and capture_rules.v2() and capture_rules._plain(change)):
+            await ChangeService._apply_release_deadline(
+                db, change, body.release_due_date, "Need-by (urgent)", current_user.id)
+        why = capture_rules.urgent_refusal(change)
+        if why:
+            raise ChangeError(why)
         # Spec §16: the impacted items travel with the capture, in the same
         # transaction, so a change never exists half-captured.
         if body.title_auto is not None:
@@ -1766,6 +1781,13 @@ _PATCH_RIGHTS = {
     "cm_external": ("lead", "quality", "pm"),
     "implementation_mode": ("lead", "quality", "pm"),
     "affected_plant_ids": ("lead", "quality", "pm"),
+    # §2: why urgent and its evidence (with the priority); what is wrong
+    # today and the target of an internal change: capture fields
+    "urgent_reason": ("lead", "sales", "pm_capture"),
+    "urgent_evidence": ("lead", "sales", "pm_capture"),
+    "problem_value": ("lead", "sales", "pm_capture"),
+    "problem_unit": ("lead", "sales", "pm_capture"),
+    "target_value": ("lead", "sales", "pm_capture"),
 }
 _PATCH_ROLE_DEPT = {"sales": "Sales", "quality": "Quality",
                     "scheduling": "Scheduling"}
@@ -3102,6 +3124,31 @@ async def _concern_act(change_id: int, current_user: User, db: AsyncSession, act
     return concern
 
 
+@router.post("/{change_id}/need-by/tell", response_model=ChangeResponse)
+async def post_need_by_tell(
+    change_id: int, body: NeedByTellIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§3 urgent: Sales told the customer the need-by is not realistic (new
+    date or start at risk), with the filed mail or a reference."""
+    from app.services import capture_rules
+    from app.services.index_followup_service import FollowupForbidden
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await capture_rules.tell_customer(db, change, current_user, ref=body.ref,
+                                          mail_id=body.mail_id)
+    except FollowupForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
+
+
 @router.post("/{change_id}/ppap-decision", response_model=ChangeResponse)
 async def post_ppap_decision(
     change_id: int, body: PpapDecisionIn,
@@ -3398,7 +3445,8 @@ async def decide_meeting(
     try:
         meeting = await MeetingService.decide_meeting(
             db, change, meeting_id, body.decision, current_user,
-            reason=body.reason)
+            reason=body.reason, need_by_check=body.need_by_check,
+            need_by_proposed=body.need_by_proposed)
     except MeetingForbidden as e:
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:

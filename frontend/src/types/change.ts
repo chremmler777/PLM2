@@ -122,6 +122,8 @@ export interface DeviationRequest {
 
 export type AttachmentKind =
   | 'general' | 'info_request' | 'info_response' | 'rejection_letter' | 'rfq'
+  /** §2: the customer's own file (drawing, 3D, EC sheet); intake links them (C9). */
+  | 'customer_file'
   /** The internal deck behind a department's answer — a not-feasible verdict
    *  cannot be sent without one (backend-enforced). Filed per assessment. */
   | 'change_ppt'
@@ -252,6 +254,17 @@ export interface ChangeRequest {
   flip_ref?: string | null;
   /** §1: a full ECR started beside a live change carrying the same part. */
   related_change_id?: number | null;
+  /** §2 urgent (priority critical; need-by = release_due_date) and the internal problem. */
+  urgent_reason?: string | null;
+  urgent_evidence?: string | null;
+  problem_value?: number | null;
+  problem_unit?: string | null;
+  target_value?: number | null;
+  /** §3 urgent proceed: need-by realistic? and whether Sales told the customer. */
+  need_by_check?: 'yes' | 'at_risk' | 'no' | null;
+  need_by_proposed?: string | null;
+  need_by_told_ref?: string | null;
+  need_by_told_at?: string | null;
   /** The scope of the change in the project manager's words (2026-10-14). */
   scope_definition?: string | null;
   internal_approved_by?: number | null;
@@ -483,7 +496,9 @@ export type ChangeTaskKind =
   /** §1: Sales: the new index replaces the old one; deadline holds? */
   | 'index_deadline'
   /** §1: an Assumed "not asked yet" deadline to confirm by its date. */
-  | 'index_deadline_confirm';
+  | 'index_deadline_confirm'
+  /** §3 urgent: need-by not realistic: Sales tells the customer. */
+  | 'need_by_tell';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the

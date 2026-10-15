@@ -14,6 +14,7 @@ vi.mock('../../api/changes', () => ({
     get: vi.fn().mockRejectedValue(new Error('no detail')),
     uploadAttachment: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
+    transition: vi.fn().mockResolvedValue({}),
   },
 }))
 vi.mock('../../contexts/AuthContext', () => ({
@@ -444,7 +445,8 @@ describe('StartChangeModal', () => {
       await screen.findByText('20-3450-001-0 - Clip')
       const missing = screen.getByTestId('start-ready-missing')
       expect(missing.textContent).toContain('Description')
-      expect(missing.textContent).toContain('At least one attachment')
+      // §2: a customer change needs the customer's own file
+      expect(missing.textContent).toContain('Customer file')
       expect(missing.textContent).toContain('Quote deadline')
       // Soft: Create is not held by it.
       fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
@@ -482,7 +484,45 @@ describe('StartChangeModal', () => {
       expect(screen.getByTestId('start-files').textContent).toContain('customer-mail.msg')
       fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
       fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
-      await waitFor(() => expect(changesApi.uploadAttachment).toHaveBeenCalledWith(42, file))
+      // §2: on a customer change the dropped files are the customer's own
+      await waitFor(() => expect(changesApi.uploadAttachment).toHaveBeenCalledWith(42, file,
+        { kind: 'customer_file' }))
+    })
+
+    it('§2 urgent is refused without need-by, reason and evidence', async () => {
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+      const create = screen.getByRole('button', { name: /Create change/ }) as HTMLButtonElement
+      expect(create.disabled).toBe(false)
+      fireEvent.click(screen.getByTestId('start-urgent'))
+      expect(create.disabled).toBe(true)
+      fireEvent.change(screen.getByTestId('start-urgent-reason'), { target: { value: 'line_stop' } })
+      fireEvent.change(screen.getByTestId('start-urgent-evidence'), { target: { value: 'ok' } })
+      expect(create.disabled).toBe(true)
+      fireEvent.change(screen.getByTestId('start-urgent-evidence'), { target: { value: 'Mail buyer 10-15' } })
+      const needBy = screen.getByLabelText('Need-by date (urgent)')
+      fireEvent.change(needBy, { target: { value: '30.10.2026' } })
+      fireEvent.blur(needBy)
+      await waitFor(() => expect(create.disabled).toBe(false))
+      fireEvent.click(create)
+      await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(expect.objectContaining({
+        priority: 'critical', urgent_reason: 'line_stop', urgent_evidence: 'Mail buyer 10-15',
+        release_due_date: '2026-10-30T12:00:00' })))
+    })
+
+    it('§2 a complete capture is created and handed over in one click', async () => {
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+      fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Rib' } })
+      const date = screen.getByLabelText('Quote deadline')
+      fireEvent.change(date, { target: { value: '05.11.2026' } })
+      fireEvent.blur(date)
+      fireEvent.change(screen.getByTestId('start-file-input'),
+        { target: { files: [new File(['x'], 'drawing.pdf', { type: 'application/pdf' })] } })
+      fireEvent.click(await screen.findByTestId('start-create-handover'))
+      await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(42, 'scoping'))
     })
   })
 })

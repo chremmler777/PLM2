@@ -98,6 +98,11 @@ NEGOTIATION_CHANNELS = ("meeting", "call", "email")
 BANK_BUILD_MODES = ("running_change", "planned_scrap")
 ATTACHMENT_PHASES = ("baseline", "post_scoping")
 SCOPING_STATUSES = ("captured", "scoping")
+#: ECR-solid §2: why a change is urgent (priority 'critical').
+URGENT_REASONS = ("line_stop", "safety", "quality_escape", "launch_date",
+                  "customer_demand", "other")
+#: §3: urgent proceed, "Need-by realistic?"
+NEED_BY_CHECKS = ("yes", "at_risk", "no")
 
 
 class ChangeRequest(Base):
@@ -265,6 +270,26 @@ class ChangeRequest(Base):
     # Sales tasks still show to all of Sales, with this name on them.
     sales_owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
+    # ECR-solid §2 (migration 124): an urgent change (priority 'critical')
+    # names its reason (URGENT_REASONS) and evidence; its need-by date is
+    # release_due_date. An internal change says what is wrong today (a
+    # number with its unit) and the target.
+    urgent_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    urgent_evidence: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    problem_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    problem_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    target_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # §3 urgent proceed: "Need-by realistic?" yes | at_risk | no (+ proposed
+    # date); not yes: Sales tells the customer (need_by_told_*).
+    need_by_check: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    need_by_proposed: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    need_by_checked_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    need_by_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    need_by_told_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    need_by_told_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    need_by_told_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # ECR-solid §1 (migration 123): a full ECR started beside a live change
     # that carries the same part points at it, and it back (both ways).
     related_change_id: Mapped[int | None] = mapped_column(

@@ -50,6 +50,13 @@ export const engineeringChapter: ContentChapter = {
             'Project Management; if your change turns out to be one, ask Sales or Project Management ' +
             'to switch its cost carrier to "Customer change" (Overview, during capture or scoping).',
         },
+        {
+          p:
+            'An internal change is complete with a description, one evidence file or photo, and ' +
+            '"Wrong today": the number with its unit (for example 12.4 g, 4 % scrap) and the target. ' +
+            'Volume and saving come later, at the internal approval. With all of it the form offers ' +
+            '"Create and hand over": created and in scoping in one click.',
+        },
       ],
     },
     {

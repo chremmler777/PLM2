@@ -40,6 +40,10 @@ export const changesApi = {
     impacted_part_ids?: number[]; lead_part_id?: number;
     /** The title is composed from the lead item and follows it. */
     title_auto?: boolean;
+    /** §2: urgent (priority critical): need-by, reason, evidence. */
+    release_due_date?: string; urgent_reason?: string; urgent_evidence?: string;
+    /** §2: internal: what is wrong today (number + unit) and the target. */
+    problem_value?: number; problem_unit?: string; target_value?: number;
   }) => client.post<ChangeRequest>('/v1/changes', body).then((r) => r.data),
 
   /** Who may lead the change: lead, PM members, admin (spec §16 P1 5). */
@@ -348,6 +352,9 @@ export const changesApi = {
     flag_type?: FlagType; check_what?: CheckWhat; part_id?: number;
     answer_from?: AnswerFrom; scope_effect?: string;
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
+  /** §3 urgent: Sales told the customer about the need-by. */
+  needByTell: (id: number, body: { ref?: string; mail_id?: number }) =>
+    client.post<ChangeRequest>(`/v1/changes/${id}/need-by/tell`, body).then((r) => r.data),
   /** §1: new customer indices on parts this change carried, and their follow-ups. */
   indexFollowups: (id: number) =>
     client.get<IndexFollowup[]>(`/v1/changes/${id}/index-followups`).then((r) => r.data),
@@ -430,8 +437,10 @@ export const changesApi = {
     client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/withdraw`, {
       resolution_note: resolutionNote ?? null,
     }).then((r) => r.data),
-  decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info', reason?: string) =>
-    client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision, reason }).then((r) => r.data),
+  decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info', reason?: string,
+    needBy?: { need_by_check: string; need_by_proposed?: string }) =>
+    client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision, reason, ...(needBy ?? {}) })
+      .then((r) => r.data),
   approveInternalCosts: (
     id: number,
     body: { note?: string | null; release_due_date?: string; release_due_reason?: string | null },

@@ -1110,6 +1110,8 @@ class MeetingService:
     async def decide_meeting(
         session: AsyncSession, change: ChangeRequest, meeting_id: int,
         decision: str, user: User, reason: Optional[str] = None,
+        need_by_check: Optional[str] = None,
+        need_by_proposed: Optional[datetime] = None,
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
         if decision not in MEETING_DECISIONS:
@@ -1158,6 +1160,12 @@ class MeetingService:
             raise ChangeError(
                 "Confirm the cost carrier (customer or internal change) before "
                 "proceeding")
+        # §3 urgent (SCOPING_V2): "Need-by realistic?" at proceed; anything
+        # but yes gives Sales "Tell customer: new date or start at risk?"
+        if decision == "proceed":
+            from app.services import capture_rules
+            await capture_rules.check_need_by(session, change, user.id,
+                                              need_by_check, need_by_proposed)
         # Both of the negative outcomes owe the originator an answer: reject
         # says why the change cannot go ahead, needs_info says what is missing
         # before it can start. Only 'proceed' needs no justification.

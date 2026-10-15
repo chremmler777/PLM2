@@ -76,8 +76,9 @@ async def test_sales_sees_kickoff_with_the_unmet_parts(client, seed, roles):
     assert len(rows) == 1
     row = rows[0]
     assert row["change_id"] == cid
-    assert row["missing"] == ["description", "at least one attachment",
-                              "quote deadline", "change lead"]
+    # §2 (SCOPING_V2): a customer change needs the customer's own file
+    assert row["missing"] == ["description", "quote deadline", "change lead",
+                              "customer file"]
     # ...and it is not the PM's row
     assert not [t for t in await _tasks(client, sales)
                 if t["kind"] == "scoping_wrapup"]

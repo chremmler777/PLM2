@@ -263,6 +263,7 @@ const TASK_TAB: Record<string, string> = {
   customer_flip: '?tab=scoping',
   assessment_recheck: '?tab=assessments', index_decision: '?tab=assessments',
   index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
+  need_by_tell: '',
   send_rejection: '?tab=scoping',
   costing_input: '?tab=costing',
   create_quote: '?tab=commercial',
@@ -306,6 +307,10 @@ const KICKOFF_ITEM: Record<string, string> = {
   description: 'kickoff.description', attachment: 'kickoff.attachment',
   'at least one attachment': 'kickoff.attachment', date: 'deadline.quote',
   'quote deadline': 'deadline.quote', 'change lead': 'next.item.lead',
+  // §2 capture
+  'customer file': 'next.item.customer_file', 'what is wrong today': 'next.item.problem',
+  target: 'next.item.target', 'need-by date': 'next.item.need_by',
+  'urgent reason and evidence': 'next.item.urgent_reason',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -400,6 +405,7 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.kind.index_decision');
     case 'index_deadline':
     case 'index_deadline_confirm':
+    case 'need_by_tell':
       return t(`tasks.kind.${task.kind}`);
     default:
       return null;

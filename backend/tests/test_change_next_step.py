@@ -32,7 +32,8 @@ async def test_captured_lists_the_kickoff_gaps(client, admin_auth, seed):
                                  customer_relevant=True)
     step = await next_step(client, admin_auth, change["id"])
     assert step["to"] == "scoping"
-    assert keys(step) == ["description", "attachment", "quote_deadline", "lead"]
+    # §2 (SCOPING_V2): a customer change needs the customer's own file
+    assert keys(step) == ["description", "quote_deadline", "lead", "customer_file"]
     assert {i["kind"] for i in step["items"]} == {"soft"}
 
 

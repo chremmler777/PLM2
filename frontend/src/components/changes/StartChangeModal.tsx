@@ -18,6 +18,7 @@ import MotherPlantFields, {
   emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
 } from './motherPlant/MotherPlantFields';
 import { plantText } from '../../lib/plantName';
+import { UrgentFields, emptyUrgent, urgentMissing, type UrgentDraft } from './CaptureV2';
 
 // Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
@@ -76,13 +77,20 @@ const errDetail = (e: unknown): string | undefined => apiErrorMessage(e, '') || 
  */
 function kickoffMissing(k: {
   description: string; files: number; quoteDeadline: string; customer: boolean;
+  problem?: boolean; target?: boolean;
 }): string[] {
   return [
     ...(k.description.trim() ? [] : [t('kickoff.description')]),
-    ...(k.files > 0 ? [] : [t('kickoff.attachment')]),
+    // §2: a customer change needs the customer's own file (dropped files go
+    // in as customer files), an internal one an evidence file or photo
+    ...(k.files > 0 ? [] : [k.customer ? t('next.item.customer_file') : t('kickoff.attachment')]),
     ...(k.customer && !k.quoteDeadline ? [t('deadline.quote')] : []),
+    ...(!k.customer && k.problem === false ? [t('next.item.problem')] : []),
+    ...(!k.customer && k.target === false ? [t('next.item.target')] : []),
   ];
 }
+
+const isNumber = (v: string) => v.trim() !== '' && !Number.isNaN(Number(v));
 
 interface PickedPart {
   id: number;
@@ -160,6 +168,12 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
     setFiles((prev) => [...prev, ...incoming.filter(
       (f) => !prev.some((p) => p.name === f.name && p.size === f.size))]);
   };
+  // §2: urgent (need-by, reason, evidence); internal: problem today and target
+  const [urgentOn, setUrgentOn] = useState(false);
+  const [urgent, setUrgent] = useState<UrgentDraft>(emptyUrgent);
+  const [problemValue, setProblemValue] = useState('');
+  const [problemUnit, setProblemUnit] = useState('');
+  const [targetValue, setTargetValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // Server-side refusals (e.g. 403 for a user outside a change-starting
   // department) are shown in place, not only as a toast that scrolls away.
@@ -241,13 +255,18 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   // kickoff needs its description, so the dialog asks for it up front.
   if (fromMotherPlant) missing.push(...(description.trim() ? [] : ['description']), ...motherPlantMissing(motherPlant));
   else if (customerRelevant === undefined) missing.push('cost carrier');
+  // §2: urgent is refused without its need-by, reason and evidence
+  if (!fromMotherPlant && urgentOn) missing.push(...urgentMissing(urgent));
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
+  const internalChange = !fromMotherPlant && customerRelevant === false;
   const handOverMissing = fromMotherPlant ? [] : kickoffMissing({
     description, files: files.length, quoteDeadline, customer: customerRelevant === true,
+    problem: isNumber(problemValue) && problemUnit.trim() !== '',
+    target: isNumber(targetValue),
   });
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (handOver = false) => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
     if (customerRelevant === undefined && !fromMotherPlant) return;
     setSubmitting(true);
@@ -275,6 +294,13 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             mother_plant_sop: motherPlant.sop,
           }
           : { customer_relevant: customerRelevant !== false }),
+        ...(!fromMotherPlant && urgentOn ? {
+          priority: 'critical', release_due_date: `${urgent.needBy}T12:00:00`,
+          urgent_reason: urgent.reason, urgent_evidence: urgent.evidence.trim(),
+        } : {}),
+        ...(internalChange && isNumber(problemValue) ? { problem_value: Number(problemValue) } : {}),
+        ...(internalChange && problemUnit.trim() ? { problem_unit: problemUnit.trim() } : {}),
+        ...(internalChange && isNumber(targetValue) ? { target_value: Number(targetValue) } : {}),
       });
       // The items went in the create request. A backend that ignored them
       // (older API) leaves some unattached: those are added one by one, lead
@@ -319,7 +345,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         const refused: string[] = [];
         for (const f of files) {
           try {
-            await changesApi.uploadAttachment(change.id, f);
+            // §2: on a customer change these are the customer's own files
+            await changesApi.uploadAttachment(change.id, f,
+              customerRelevant === true ? { kind: 'customer_file' } : undefined);
           } catch (e) {
             refused.push(`${f.name}${errDetail(e) ? ` (${errDetail(e)})` : ''}`);
           }
@@ -346,6 +374,15 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         }
         if (refused.length > 0) {
           toast.error(plantText('mp.attachFailed', motherPlant.name).replace('{x}', refused.join(', ')));
+        }
+      }
+      // §2 "Create and hand over": complete capture goes to scoping in the
+      // same click; a refusal is named and the change stays captured.
+      if (handOver) {
+        try {
+          await changesApi.transition(change.id, 'scoping');
+        } catch (e) {
+          toast.error(`Created, not handed over${errDetail(e) ? `: ${errDetail(e)}` : ''}`);
         }
       }
       // Every change list (the Changes page, the project's list) shows it on the way back.
@@ -729,6 +766,39 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 </ul>
               )}
             </div>
+            {/* §2: an internal change says what is wrong today and the target */}
+            {internalChange && (
+              <div data-testid="start-problem">
+                <p className="block text-sm text-slate-300 mb-1">{t('problem.label')}</p>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <input value={problemValue} onChange={(e) => setProblemValue(e.target.value)} inputMode="decimal"
+                    aria-label={t('problem.value')} placeholder={t('problem.value')} data-testid="start-problem-value"
+                    className="w-24 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5" />
+                  <input value={problemUnit} onChange={(e) => setProblemUnit(e.target.value)}
+                    aria-label={t('problem.unit')} placeholder={t('problem.unit')} data-testid="start-problem-unit"
+                    className="w-28 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5" />
+                  <span className="text-slate-400">→ {t('problem.target')}</span>
+                  <input value={targetValue} onChange={(e) => setTargetValue(e.target.value)} inputMode="decimal"
+                    aria-label={t('problem.target')} placeholder={t('problem.target')} data-testid="start-target-value"
+                    className="w-24 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5" />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{t('problem.hint')}</p>
+              </div>
+            )}
+            {/* §2: urgent needs its need-by, reason and evidence */}
+            <div>
+              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <input type="checkbox" checked={urgentOn} data-testid="start-urgent"
+                  onChange={(e) => setUrgentOn(e.target.checked)} />
+                {t('urgent.toggle')}
+              </label>
+              {urgentOn && (
+                <div className="mt-2 space-y-1">
+                  <UrgentFields value={urgent} onChange={setUrgent} idPrefix="start-urgent" />
+                  <p className="text-xs text-slate-500">{t('urgent.toggleHint')}</p>
+                </div>
+              )}
+            </div>
             {/* Soft: never blocks Create, only says what the hand-over will miss. */}
             {handOverMissing.length > 0 ? (
               <div data-testid="start-ready-missing"
@@ -766,13 +836,28 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           >
             {t('common.cancel')}
           </button>
-          <button type="button"
-            className={btnPrimary}
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-          >
-            {t('start.create')}
-          </button>
+          {/* §2: a complete capture goes to scoping in one click */}
+          {!fromMotherPlant && handOverMissing.length === 0 ? (
+            <>
+              <button type="button" data-testid="start-create-draft"
+                className="px-3 py-2 text-sm text-slate-300 hover:text-slate-100"
+                disabled={!canSubmit} onClick={() => handleSubmit(false)}>
+                {t('start.createDraft')}
+              </button>
+              <button type="button" data-testid="start-create-handover"
+                className={btnPrimary} disabled={!canSubmit} onClick={() => handleSubmit(true)}>
+                {t('start.createHandOver')}
+              </button>
+            </>
+          ) : (
+            <button type="button"
+              className={btnPrimary}
+              disabled={!canSubmit}
+              onClick={() => handleSubmit(false)}
+            >
+              {t('start.create')}
+            </button>
+          )}
         </div>
       </div>
     </div>

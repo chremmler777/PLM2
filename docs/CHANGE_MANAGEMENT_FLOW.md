@@ -114,6 +114,32 @@ Run these when discussing any stage's implementation:
   2026-10-14 the lock happens automatically at the meeting's `proceed`
   (see "Inside `scoping`").
 
+### Capture (ECR-solid §2, 2026-10-15)
+Switch `SCOPING_V2` (`app/services/capture_rules.py`, migration 124); the
+soft kickoff guard above reads `kickoff_missing`, which adds:
+- **Customer change**: a typed customer file (attachment kind
+  `customer_file`, which the start form gives every dropped file of a
+  customer change, or a filed `customer_email`) instead of "any attachment"
+  (`customer file`), plus the quote deadline as before.
+- **Internal change**: "what is wrong today" as a number with its unit
+  (`problem_value` + `problem_unit`) and the `target_value` (`what is wrong
+  today`, `target`); description and one evidence file or photo as before.
+  Volume and saving come at the internal approval.
+- **Urgent** (priority `critical`): the need-by date (`release_due_date`,
+  settable at capture for an urgent change), a reason pick (`urgent_reason`:
+  line_stop, safety, quality_escape, launch_date, customer_demand, other) and
+  evidence (`urgent_evidence`, a reference: "ok"/"tbd" refused). Create and
+  PATCH are refused without them (400); mother-plant changes keep their own
+  SOP and are left out. The header reads "Urgent · Need-by 24 Oct, 8 wd
+  left, now: Scoping".
+- **Create and hand over**: a complete capture is created and moved to
+  scoping in one click; "Create as draft" keeps it captured.
+- **Urgent proceed** (§3): `decide proceed` on an urgent change needs
+  `need_by_check` (yes / at_risk / no + `need_by_proposed`); anything but yes
+  notifies the Sales owner (else Sales) once and gives all of Sales the task
+  `need_by_tell` ("Tell customer: new date or start at risk?", owner named),
+  answered with a filed mail or a reference (`POST /changes/{id}/need-by/tell`).
+
 ### Inside `scoping`
 - **Scope (defined by PM)** (2026-10-14): the project manager writes down what
   is in scope of the change, as free text (`change_requests.scope_definition`,

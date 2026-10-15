@@ -53,6 +53,7 @@ import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEd
 import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import IndexFollowups from '../components/changes/IndexFollowups';
+import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/changes/CaptureV2';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -571,11 +572,23 @@ export default function ChangeDetailPage() {
   const assessmentState = baseAssessment && costingDeviation
     ? { ...baseAssessment, override: costingDeviation.status as 'pending' | 'approved' }
     : baseAssessment;
+  // §2 (SCOPING_V2): a customer change needs the customer's own file, an
+  // internal one what is wrong today and the target, an urgent one its
+  // need-by, reason and evidence (the backend's kickoff_missing, same order)
+  const plain = change.origin !== 'mother_plant' && change.origin !== 'engineering_review'
+  const v2Capture = !!change.scoping_v2 && plain
+  const customerFile = (change.attachments ?? []).some((a) => a.kind === 'customer_file' || a.kind === 'customer_email')
   const kickoffMissing = [
     ...(change.description?.trim() ? [] : [t('kickoff.description')]),
-    ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
+    ...(v2Capture && change.customer_relevant ? []
+      : (change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
     ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
     ...(change.lead_id == null ? [t('cockpit.noLead')] : []),
+    ...(v2Capture && change.customer_relevant && !customerFile ? [t('next.item.customer_file')] : []),
+    ...(v2Capture && !change.customer_relevant && (change.problem_value == null || !change.problem_unit)
+      ? [t('next.item.problem')] : []),
+    ...(v2Capture && !change.customer_relevant && change.target_value == null ? [t('next.item.target')] : []),
+    ...(v2Capture && change.priority === 'critical' && !change.release_due_date ? [t('next.item.need_by')] : []),
   ];
   // The override dialog names the lead as a decider only when the lead is
   // not the one asking (never your own OK; the backend asks PM then).
@@ -965,6 +978,8 @@ export default function ChangeDetailPage() {
                   {project}
                 </Link>
               )}
+              {/* §2: an urgent change says its need-by and where it stands */}
+              <NeedByLine change={change} />
             </span>
             {impl?.ready_to_go && (
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-100">
@@ -985,6 +1000,7 @@ export default function ChangeDetailPage() {
             </span>
           </h1>
           <CockpitSummary {...cockpitProps} variant="compact" onShowOverview={() => setTab('overview')} />
+          <NeedByLine change={change} />
           {headerActions}
         </div>
       )}
@@ -1133,6 +1149,9 @@ export default function ChangeDetailPage() {
         <span id="change-main" className="sr-only" tabIndex={-1} />
       {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
+          {/* §3 urgent: the need-by is not realistic: Sales tells the customer */}
+          <NeedByTellCard change={change} isSales={isSalesMember && !readOnly}
+            attachments={change.attachments ?? []} />
           <TransitionDeviationsPanel changeId={changeId} deviations={deviations}
             decidableIds={(myActions?.actions ?? []).filter((a) => a.kind === 'deviation_decision')
               .map((a) => a.deviation_id).filter((x): x is number => x != null)}
@@ -1145,6 +1164,8 @@ export default function ChangeDetailPage() {
           </p>
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '-'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
+          {/* §2: an internal change says what is wrong today and the target */}
+          <ProblemTargetEditor change={change} canEdit={!readOnly && (isAdmin || isChangeLead || isPmMember)} />
           {/* A mother-plant change is never customer relevant here. */}
           {!motherPlant && <CustomerRelevantEditor change={change} canEdit={canMoveCarrier} />}
 

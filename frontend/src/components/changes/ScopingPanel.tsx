@@ -18,6 +18,7 @@ import TransitionConfirmDialog from './TransitionConfirmDialog'
 import ScopingFlags from './scoping/ScopingFlags'
 import ProceedFixList from './scoping/ProceedFixList'
 import { CustomerFlipCard, PpapDecisionCard } from './scoping/PpapFlipCards'
+import { NeedByCheck, isUrgentV2, needByHold, type NeedByAnswer } from './CaptureV2'
 import DateInput from '../gantt/DateInput'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
@@ -140,6 +141,8 @@ export default function ScopingPanel(
   const [carried, setCarried] = useState(false)
   // Proceeding (and closing a rejected change) is asked once more.
   const [confirmProceed, setConfirmProceed] = useState<ChangeMeeting | null>(null)
+  // §3 urgent: "Need-by realistic?" in the proceed dialog, nothing preselected
+  const [needBy, setNeedBy] = useState<NeedByAnswer>({ check: '', proposed: '' })
   const [confirmSent, setConfirmSent] = useState(false)
 
   // Recommended assessors for this change type (stage-1 Responsible depts): the
@@ -265,7 +268,13 @@ export default function ScopingPanel(
   const decide = useMutation({
     mutationFn: (vars: {
       meetingId: number; decision: 'proceed' | 'reject' | 'needs_info'; reason?: string
-    }) => changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason),
+      needBy?: NeedByAnswer
+    }) => (vars.needBy && vars.needBy.check
+      ? changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason, {
+        need_by_check: vars.needBy.check,
+        ...(vars.needBy.check === 'no' ? { need_by_proposed: `${vars.needBy.proposed}T12:00:00` } : {}),
+      })
+      : changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason)),
     onSuccess: () => { setDecideError(null); invalidate() },
     onError: (e: unknown, vars) => {
       const msg = apiErrorMessage(e, 'Could not record the decision')
@@ -591,6 +600,8 @@ export default function ScopingPanel(
       to: 'in_assessment',
       title: t('meeting.proceedTitle'),
       consequence: t('meeting.proceedConsequence'),
+      // §3 urgent: the need-by question is answered before the step
+      holdNote: needByHold(change, needBy),
       open: [
         ...(assessors === 0 && m.department_rasic ? [t('meeting.proceedNoAssessor')] : []),
         ...(flipped ? [t('meeting.costCarrierFlip')
@@ -611,12 +622,16 @@ export default function ScopingPanel(
   return (
     <div className="space-y-4 text-sm">
       <TransitionConfirmDialog confirm={proceedConfirm} busy={decide.isPending}
-        onClose={() => setConfirmProceed(null)}
+        onClose={() => { setConfirmProceed(null); setNeedBy({ check: '', proposed: '' }) }}
         onConfirm={() => {
           const m = confirmProceed!
           setConfirmProceed(null)
-          decide.mutate({ meetingId: m.id, decision: 'proceed' })
+          decide.mutate({ meetingId: m.id, decision: 'proceed', needBy })
+          setNeedBy({ check: '', proposed: '' })
         }}>
+        {v2 && confirmProceed && isUrgentV2(change) && openFlags.length === 0 && hard7.length === 0 && (
+          <NeedByCheck change={change} value={needBy} onChange={setNeedBy} />
+        )}
         {v2 && confirmProceed && (
           <ProceedFixList changeId={changeId}
             meeting={meetings.find((m: ChangeMeeting) => m.id === confirmProceed.id) ?? confirmProceed}

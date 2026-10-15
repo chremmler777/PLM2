@@ -36,6 +36,14 @@ class ChangeCreate(BaseModel):
     impacted_part_ids: Optional[List[int]] = None
     lead_part_id: Optional[int] = None
     title_auto: Optional[bool] = None
+    # §2 (SCOPING_V2): urgent (priority 'critical'): need-by, reason, evidence
+    release_due_date: Optional[NaiveUtcDatetime] = None
+    urgent_reason: Optional[str] = Field(None, max_length=30)
+    urgent_evidence: Optional[str] = Field(None, max_length=255)
+    # internal: what is wrong today (number + unit) and the target
+    problem_value: Optional[float] = None
+    problem_unit: Optional[str] = Field(None, max_length=20)
+    target_value: Optional[float] = None
 
 
 class ChangeUpdate(BaseModel):
@@ -63,6 +71,12 @@ class ChangeUpdate(BaseModel):
     required_by_reason: Optional[str] = None
     release_due_date: Optional[NaiveUtcDatetime] = None
     release_due_reason: Optional[str] = None
+    # §2: urgent reason + evidence; internal problem and target
+    urgent_reason: Optional[str] = Field(None, max_length=30)
+    urgent_evidence: Optional[str] = Field(None, max_length=255)
+    problem_value: Optional[float] = None
+    problem_unit: Optional[str] = Field(None, max_length=20)
+    target_value: Optional[float] = None
 
 
 class TransitionRequest(BaseModel):
@@ -378,6 +392,17 @@ class ChangeResponse(BaseModel):
     scoping_v2: bool = False
     # §1: a full ECR started beside a live change carrying the same part.
     related_change_id: Optional[int] = None
+    # §2 urgent (priority 'critical'; need-by = release_due_date) and the
+    # internal problem / target; §3 the urgent proceed's need-by check.
+    urgent_reason: Optional[str] = None
+    urgent_evidence: Optional[str] = None
+    problem_value: Optional[float] = None
+    problem_unit: Optional[str] = None
+    target_value: Optional[float] = None
+    need_by_check: Optional[str] = None
+    need_by_proposed: Optional[datetime] = None
+    need_by_told_ref: Optional[str] = None
+    need_by_told_at: Optional[datetime] = None
     # HARD #7 ppap_decision (internal changes) and the customer flip.
     ppap_decision: Optional[str] = None
     ppap_basis: Optional[str] = None
@@ -1376,6 +1401,15 @@ class MeetingDecideIn(BaseModel):
     decision: str  # proceed | reject | needs_info
     # Required for reject and needs_info; ignored for proceed.
     reason: Optional[str] = None
+    # §3 urgent proceed: need-by realistic? yes | at_risk | no (+ proposed date)
+    need_by_check: Optional[str] = None
+    need_by_proposed: Optional[NaiveUtcDatetime] = None
+
+
+class NeedByTellIn(BaseModel):
+    """§3: Sales told the customer (new date or start at risk)."""
+    ref: Optional[str] = Field(default=None, max_length=255)
+    mail_id: Optional[int] = None
 
 
 class MeetingResponse(BaseModel):

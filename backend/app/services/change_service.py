@@ -1296,10 +1296,14 @@ class ChangeService:
         missing = []
         if not (change.description or "").strip():
             missing.append("description")
+        from app.services import capture_rules
+        extra = await capture_rules.missing(session, change)
         att_count = (await session.execute(
             select(func.count()).select_from(ChangeAttachment).where(
                 ChangeAttachment.change_id == change.id))).scalar() or 0
-        if att_count == 0:
+        # §2 (SCOPING_V2): a customer change needs the customer's own file
+        # ("customer file" in extra), any attachment is not enough
+        if att_count == 0 and "customer file" not in extra:
             missing.append("at least one attachment")
         # Internal changes have no quote deadline in the two-phase model, and
         # a mother-plant change has no quote at all.
@@ -1310,7 +1314,8 @@ class ChangeService:
         # Somebody has to own what is handed over (spec §16 P1-5).
         if change.lead_id is None:
             missing.append("change lead")
-        return missing
+        # §2: customer file, internal problem and target, urgent need-by
+        return missing + [m for m in extra if m not in missing]
 
     #: The D1 sheet's questions, as the D1 tab labels them.
     GATE_LABELS = {"feasibility": "Feasible?", "budget": "Budget checked?",
@@ -1414,7 +1419,14 @@ class ChangeService:
                 add({"description": "description",
                      "at least one attachment": "attachment",
                      "quote deadline": "quote_deadline",
-                     "change lead": "lead"}[m], "soft", rule="capture_incomplete")
+                     "change lead": "lead",
+                     # §2 (SCOPING_V2)
+                     "customer file": "customer_file",
+                     "what is wrong today": "problem",
+                     "target": "target",
+                     "need-by date": "need_by",
+                     "urgent reason and evidence": "urgent_reason"}.get(m, m),
+                    "soft", rule="capture_incomplete")
         elif to == "approved" and change.status == "scoping":
             # Mother plant: MotherPlantService.approval_blocker, all hard.
             from app.services.mother_plant_service import MotherPlantService
@@ -3842,6 +3854,18 @@ class ChangeService:
             from app.services.index_followup_service import IndexFollowupService
             out += await IndexFollowupService.task_rows(db, user, open_changes,
                                                         dep_ids, base)
+            # §3 urgent: the need-by is not realistic: Sales tells the customer
+            from app.services import capture_rules
+            tell = [c for c in open_changes if capture_rules.need_by_open(c)]
+            if tell and await ChangeService.member_of(db, user, "Sales"):
+                for c in tell:
+                    out.append({
+                        **await base(c), "kind": "need_by_tell",
+                        "target_tab": "overview", "since": c.need_by_checked_at,
+                        "reason": c.need_by_check,
+                        **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                           if c.sales_owner_id not in (None, user.id) else {}),
+                    })
             from app.services import ppap_decision_service as ppap
             is_sales = None
             for c in open_changes:
@@ -5437,7 +5461,14 @@ class ChangeService:
             "issuer", "is_series", "cm_internal", "cm_external",
             "implementation_mode", "customer_relevant", "car_line",
             "sales_owner_id",
+            # §2: urgent reason + evidence; internal problem and target
+            "urgent_reason", "urgent_evidence", "problem_value", "problem_unit",
+            "target_value",
         }
+        from app.services import capture_rules
+        urgent_fields = {"priority", "urgent_reason", "urgent_evidence",
+                         "release_due_date"}
+        touches_urgent = any(k in fields for k in urgent_fields)
 
         # Validate implementation_mode before applying any changes
         impl_mode = fields.get("implementation_mode")
@@ -5525,6 +5556,16 @@ class ChangeService:
                                change.release_due_reason) == change.release_due_reason):
             fields.pop("release_due_date")
             fields.pop("release_due_reason", None)
+        if ("release_due_date" in fields and change.release_due_date is None
+                and fields["release_due_date"] is not None
+                and (fields.get("priority") or change.priority) == "critical"
+                and capture_rules.v2() and capture_rules._plain(change)):
+            # §2: an urgent change's need-by IS the release deadline, set at capture
+            changed = True
+            new_date = fields.pop("release_due_date")
+            reason = fields.pop("release_due_reason", None) or "Need-by (urgent)"
+            await ChangeService._apply_release_deadline(
+                session, change, new_date, reason, user_id)
         if "release_due_date" in fields:
             changed = True
             new_date = fields.pop("release_due_date")
@@ -5554,6 +5595,11 @@ class ChangeService:
         # C10: an internal change has no Sales owner, whatever the PATCH sent.
         if not change.customer_relevant:
             change.sales_owner_id = None
+        # §2: an urgent change names its need-by, reason and evidence
+        if touches_urgent:
+            why = capture_rules.urgent_refusal(change)
+            if why:
+                raise ChangeError(why)
 
         # Handle affected_plant_ids (replace-set semantics; [] clears all)
         if ("affected_plant_ids" in fields and fields["affected_plant_ids"] is not None
