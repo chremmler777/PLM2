@@ -85,9 +85,9 @@ def back_to_internal_refusal(change: ChangeRequest) -> Optional[str]:
     if not cm_switches.on("SCOPING_V2") or not flip_holds(change):
         return None
     why = f" ({change.customer_flip_reason})" if change.customer_flip_reason else ""
-    who = change.sales_owner_name or "Sales"
+    who = f"{change.sales_owner_name}'s" if change.sales_owner_name else "Sales'"
     return (f"{change.change_number} became a customer change{why}. Only "
-            f"{who}'s answer 'notification only' takes it back to internal. "
+            f"{who} answer 'notification only' takes it back to internal. "
             "No override lifts it")
 
 
