@@ -146,3 +146,45 @@ async def test_an_unchanged_total_keeps_the_approval(client, cc, seed, session_f
     # negative: a second approval of the same total is still refused
     res = await _approve(client, cc["cid"], cc["lead"])
     assert res.status_code == 400 and "already approved" in res.text
+
+
+# --- R5/R23: the internal 'estimate low' goes to who may act on it ----------
+
+async def test_internal_estimate_low_goes_to_the_lead_not_the_approvers(
+        client, cc, seed, session_factory):
+    pm2_id, _, pm2 = await _user(client, session_factory, seed, "pm2", "Project Manager")
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                          estimate_check="pending")
+    await _set(session_factory, cc["cid"], customer_relevant=False, status="approved",
+               internal_approved_at=datetime.utcnow())
+    res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/estimate-check"),
+                            json={"verdict": "above", "over": 500}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        told = (await s.execute(select(Notification.user_id).where(
+            Notification.subject_key == f"estimate_low:{pid}"))).scalars().all()
+    assert told == [cc["lead_id"]]
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=cc["lead"])).json()
+    row = next(t for t in tasks if t["kind"] == "estimate_low")
+    assert "500.00" in row["hint"] and "absorb" in row["hint"]
+    # negative: the fallback approver (PM, not the lead) has no row to act on
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm2)).json()
+    assert not [t for t in tasks if t["kind"] == "estimate_low"]
+
+
+async def test_internal_estimate_low_without_a_lead_goes_to_pm(
+        client, cc, seed, session_factory):
+    pm2_id, _, pm2 = await _user(client, session_factory, seed, "pm3", "Project Manager")
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                          estimate_check="pending")
+    await _set(session_factory, cc["cid"], customer_relevant=False, status="approved",
+               internal_approved_at=datetime.utcnow(), lead_id=None)
+    res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/estimate-check"),
+                            json={"verdict": "above", "over": 500}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        told = set((await s.execute(select(Notification.user_id).where(
+            Notification.subject_key == f"estimate_low:{pid}"))).scalars().all())
+    assert {cc["lead_id"], pm2_id} <= told and cc["dale_id"] not in told
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm2)).json()
+    assert [t for t in tasks if t["kind"] == "estimate_low"]

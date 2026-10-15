@@ -3486,6 +3486,17 @@ class ChangeService:
                         _CP.department_id.in_(dep_ids),
                         _CP.estimate_check == "pending"))).scalars().all():
                     pending_checks.setdefault(p.change_id, []).append(p)
+        # spec §4 [R4]: quotes above the estimate on changes with an open
+        # price (one query for the list, R34)
+        above: dict[int, list] = {}
+        if cm_switches.on("ASSESSMENT_V2"):
+            from app.models.change_cost import CostingPosition as _CP
+            open_price = [c.id for c in open_changes if c.price_open]
+            if open_price:
+                for p in (await db.execute(select(_CP).where(
+                        _CP.change_id.in_(open_price),
+                        _CP.estimate_check == "above"))).scalars().all():
+                    above.setdefault(p.change_id, []).append(p)
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -3807,15 +3818,16 @@ class ChangeService:
 
             # Spec §4 [R4]: a quote came in above the estimate an offer or
             # the internal approval was given on: one task while the price is
-            # open (Sales: send a supplement or absorb; internal: the
-            # approver and the lead re-approve or absorb). Absorb clears it.
-            if c.price_open and cm_switches.on("ASSESSMENT_V2"):
-                over = [p for p in await ChangeService._positions_above(db, c)]
+            # open (Sales: send a supplement or absorb; internal: the lead,
+            # PM without a lead, proposes the Absorb, the approver decides
+            # it through the deviation's own task). Absorb clears it.
+            if c.price_open:
+                over = above.get(c.id, [])
                 if over:
                     mine = ((in_sales or c.sales_owner_id == user.id)
                             if c.customer_relevant else
-                            (holds_lead(c, user) or user.id in set(
-                                await ChangeService.internal_approver_ids(db, c))))
+                            (holds_lead(c, user)
+                             or (c.lead_id is None and is_pm_member)))
                     if mine:
                         total = sum(p.estimate_over or 0 for p in over)
                         tasks.append({
@@ -3823,7 +3835,7 @@ class ChangeService:
                             "hint": (f"Estimate low by {total:.2f}: send a "
                                      "supplement or absorb" if c.customer_relevant
                                      else f"Cost {total:.2f} above the approved "
-                                     "estimate: absorb with a reason (the "
+                                     "estimate: ask to absorb with a reason (the "
                                      "approver decides)"),
                             "since": max((p.updated_at for p in over), default=None),
                             "target_tab": "offer",
@@ -5091,15 +5103,6 @@ class ChangeService:
                    CostingPosition.estimate_check == "above")
             .values(estimate_check="settled")
             .execution_options(synchronize_session="fetch"))
-
-    @staticmethod
-    async def _positions_above(session: AsyncSession, change: ChangeRequest) -> list:
-        """Positions whose quote came in above the estimate (spec §4 [R4])."""
-        from app.models.change_cost import CostingPosition
-        return list((await session.execute(
-            select(CostingPosition).where(
-                CostingPosition.change_id == change.id,
-                CostingPosition.estimate_check == "above"))).scalars().all())
 
     @staticmethod
     def owes_costing_input(assessment: ChangeAssessment) -> bool:

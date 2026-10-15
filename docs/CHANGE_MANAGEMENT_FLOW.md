@@ -764,8 +764,12 @@ Switch `ASSESSMENT_V2` (migration 127).
   rule. Above sets `price_open` (HARD #9 at close) and one
   task: customer change, the Sales owner (no Sales owner: all of Sales; Sales
   sees it) *"Estimate low by x: send a supplement or absorb"*; internal, the
-  approver and the lead *"Cost x above the approved estimate: absorb with a
-  reason"* (the approver decides the Absorb; there is no re-approval step)
+  lead (no lead: Project Management), who may propose the Absorb and reads
+  prices, *"Cost x above the approved estimate: ask to absorb with a
+  reason"*; the approver decides the Absorb on the deviation's own task.
+  The spec's "re-approve or absorb" reads as this Absorb, decided by the
+  approver: there is no separate re-approval step after `approved`
+  (DECIDED BY CLAUDE, open to Christoph)
   (task `estimate_low`, told once `estimate_low:<position>`). Absorb (or the
   customer's acceptance) clears `price_open` and marks those positions
   `settled`, so a later open price for another cause does not bring their

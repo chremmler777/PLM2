@@ -925,12 +925,20 @@ class CostingPositionService:
                             session, [sales], change=change, kind="task_new", subject_key=key,
                             title=title[:255], body=body, link=link)
             else:
-                ids = list(await ChangeService.internal_approver_ids(session, change))
-                ids += [change.lead_id] if change.lead_id else []
-                # the internal exit is the Absorb override, decided by the
-                # approver (HARD #9); there is no re-approval step
+                # the internal exit is the Absorb override: the lead (PM
+                # without a lead) proposes it, the approver decides it on the
+                # deviation's own task (HARD #9); there is no re-approval
+                # step. Both recipients read prices (lead, PM member).
+                if change.lead_id:
+                    ids = [change.lead_id]
+                else:
+                    from app.services.change_people import department_members_of_change_org
+                    from app.models.workflow import Department
+                    pm = (await session.execute(select(Department.id).where(
+                        Department.name == "Project Manager"))).scalars().all()
+                    ids = await department_members_of_change_org(session, change, pm)
                 title = (f"Cost {float(over):.2f} above the approved estimate: "
-                         f"absorb with a reason: {change.change_number}")
+                         f"ask to absorb with a reason: {change.change_number}")
             await NotificationService.notify_once(
                 session, [i for i in ids if i and i != actor.id], kind="task_new",
                 subject_key=key, title=title[:255], body=body, link=link)
