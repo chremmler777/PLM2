@@ -22,3 +22,34 @@ def impact_confirm_step(change) -> bool:
     if getattr(change, "origin", None) == "engineering_review":
         return True
     return bool(IMPACT_CONFIRM_STEP_ENABLED)
+
+
+# ---------------------------------------------------------------------------
+# ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
+# gate and every new notification of the branch reads one of these at call
+# time, so a group can be switched off without a deploy of the code behind
+# it. All default ON; each group is tested ON and OFF.
+# ---------------------------------------------------------------------------
+# C33 quick add, C13, intake (C9, live-change check, supersede, rechecks).
+SCOPING_V2 = True
+# C8, C20 due rules, C5, supplier wait, no-cost button, costing basis,
+# quote-vs-estimate.
+ASSESSMENT_V2 = True
+# C1 run-team hops, C6, C12, C14, acceptance binding, scope change card,
+# supplement, price diff, Absorb.
+COMMERCIAL_V2 = True
+# C7, computed checks, Fix task, concession, newer-index guard, sign-offs at
+# release, C27 digest.
+RELEASE_V2 = True
+# §7a start at risk (P8 decided: yes, urgent only).
+START_AT_RISK = True
+
+SWITCH_GROUPS = ("SCOPING_V2", "ASSESSMENT_V2", "COMMERCIAL_V2", "RELEASE_V2",
+                 "START_AT_RISK")
+
+
+def on(name: str) -> bool:
+    """Is this switch group on? Read at call time (monkeypatch-friendly)."""
+    if name not in SWITCH_GROUPS:
+        raise KeyError(f"Unknown switch group '{name}'")
+    return bool(globals()[name])

@@ -41,6 +41,12 @@ export const pmChapter: ContentChapter = {
             'project\'s "Project team" card. Name that team for each project you run: it decides ' +
             'whose badge each task counts on.',
         },
+        {
+          p:
+            'Some steps only the run team takes: the lead, Project Management members and admins. ' +
+            'Approve, start implementation, start validation, reopen a rejected change and resume ' +
+            'a change on hold. Everyone else does not see these buttons.',
+        },
       ],
     },
     {

@@ -41,6 +41,15 @@ from app.services.change_service import (
 POST_QUOTE_STATUSES = ("quoted", "approved")
 # The hops whose rights §16 P1-4 sets.
 RUN_TEAM_TARGETS = ("rejected", "cancelled", "on_hold")
+# ECR-solid C1 (switch COMMERCIAL_V2): the mid-flow hops are the run team's
+# too. A random department member approving, starting implementation or
+# validation, reopening a rejection or lifting a hold (often "no PO yet")
+# would put the wrong name on the changelog. Every hop out of on_hold counts.
+RUN_TEAM_MIDFLOW_HOPS = (
+    ("quoted", "approved"), ("costing", "approved"),
+    ("approved", "in_implementation"), ("in_implementation", "in_validation"),
+    ("rejected", "scoping"),
+)
 TITLE_MAX_LENGTH = 255
 
 
@@ -87,7 +96,10 @@ class EarlyStageService:
           the change lead, Project Management members, admin;
         - kick off (captured -> scoping): Sales, PM, lead, admin;
         - Sales may also reject at capture, and a quoted change the customer
-          declined (the commercial answer is theirs).
+          declined (the commercial answer is theirs);
+        - ECR-solid C1 (switch COMMERCIAL_V2): approve, start implementation,
+          start validation, reopen a rejection and every resume from hold
+          are the run team's too (RUN_TEAM_MIDFLOW_HOPS).
         Only hops that exist are judged: an illegal one keeps its 400."""
         frm = change.status
         if to_status not in ALLOWED_TRANSITIONS.get(frm, set()):
@@ -96,7 +108,10 @@ class EarlyStageService:
             to_status in RUN_TEAM_TARGETS
             or (frm == "captured" and to_status == "scoping")
             or (frm == "in_assessment" and to_status in ("scoping", "costing")))
-        if not early_hop:
+        from app.services import cm_switches
+        midflow_hop = cm_switches.on("COMMERCIAL_V2") and (
+            (frm, to_status) in RUN_TEAM_MIDFLOW_HOPS or frm == "on_hold")
+        if not (early_hop or midflow_hop):
             return None
         r = await EarlyStageService._roles(session, change, user)
         if r["run_team"]:
@@ -105,11 +120,18 @@ class EarlyStageService:
             return None
         if frm == "quoted" and to_status == "rejected" and r["sales"]:
             return None
+        if frm == "on_hold" and to_status != "cancelled":
+            return ("Only the change lead, Project Management or an admin may "
+                    "resume this change")
         verb = {
+            "approved": "approve this change",
+            "in_implementation": "start implementation",
+            "in_validation": "start validation",
             "rejected": "reject this change",
             "cancelled": "cancel this change",
             "on_hold": "put this change on hold",
             "scoping": ("hand this change over to scoping" if frm == "captured"
+                        else "reopen this change" if frm == "rejected"
                         else "recall this change to scoping"),
             "costing": "close the assessment",
         }.get(to_status, f"move this change to '{to_status}'")

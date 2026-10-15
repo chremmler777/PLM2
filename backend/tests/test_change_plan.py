@@ -439,9 +439,11 @@ async def test_validate_timing_refusals_and_success(client, world, session_facto
     res = await client.post(f"/api/v1/changes/{cid}/plan/validate-timing", headers=sales)
     assert res.status_code == 400 and "empty" in res.json()["detail"]
     await _seed(client, sales, cid, plan="detailed")
-    # the guard names what is missing
+    # the guard names what is missing (starting implementation is the run
+    # team's hop, ECR-solid C1: PM here, not Sales)
     res = await client.post(f"/api/v1/changes/{cid}/transition",
-                            json={"to_status": "in_implementation"}, headers=sales)
+                            json={"to_status": "in_implementation"},
+                            headers=await _auth(client, "pm"))
     assert res.status_code == 400
     assert "Timing not validated" in res.json()["detail"]
     # only editors validate
@@ -470,7 +472,8 @@ async def test_validate_timing_refusals_and_success(client, world, session_facto
     fb = (await client.get(f"/api/v1/changes/{cid}/plan/feedback", headers=sales)).json()
     assert fb["validated_at"] is not None and fb["validated_by_name"] == "Plan sales"
     res = await client.post(f"/api/v1/changes/{cid}/transition",
-                            json={"to_status": "in_implementation"}, headers=sales)
+                            json={"to_status": "in_implementation"},
+                            headers=await _auth(client, "pm"))
     assert res.status_code == 200, res.text
     log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=sales)).json()
     assert "timing_validated" in [e["action"] for e in log]

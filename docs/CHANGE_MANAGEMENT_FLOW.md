@@ -976,6 +976,24 @@ frozen for everyone. Every add and remove is in the changelog with the
 user and the part number. UI shows the responsible role as
 a badge on the stage (`StageResponsibleBadge.tsx`).
 
+**Run team (ECR-solid C1, 2026-10-14, switch `COMMERCIAL_V2`).** The run
+team is the change lead (`holds_lead`: an admin acting as a department is not
+the lead), Project Management members and admins. Besides reject, cancel,
+hold, recall and close assessment (§16 P1-4) only they make the mid-flow
+hops: `quoted → approved`, `costing → approved`, `approved →
+in_implementation`, `in_implementation → in_validation`, `rejected →
+scoping` (reopen) and every hop out of `on_hold` (resume). Anyone else gets
+403 ("Only the change lead, Project Management or an admin may ...") and does
+not see the button (`EarlyStageService.transition_refusal`, reused by
+`transition_rights`). Hops the service makes itself (an accepted offer that
+approves) are not affected. Switch off: these hops are open again.
+
+**Switch groups (`app/services/cm_switches.py`, all default ON).**
+`SCOPING_V2`, `ASSESSMENT_V2`, `COMMERCIAL_V2`, `RELEASE_V2`, `START_AT_RISK`:
+every new HARD gate and notification of the ECR-solid branch reads its group
+at call time (`cm_switches.on(name)`), so a group can be switched off without
+touching the code behind it. `IMPACT_CONFIRM_STEP_ENABLED` stays False.
+
 **Acts-as (admin testing):** an admin can pick any role from a header dropdown
 and the *backend* treats them as an engineer in exactly that department —
 admin bypass dropped while acting, every gate observable, mutations audited
