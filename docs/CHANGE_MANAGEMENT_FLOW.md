@@ -959,8 +959,13 @@ Planner/Scheduler → Scheduling).
 **ECR-solid additions (migration 117, 2026-10-14).** **Toolshop** is its own
 department (P7), separate from Tool Engineer: the toolmakers' hours and work,
 no tool-data or price rights. **Management** gives the OK on price drops and
-Absorb (P4) and therefore reads prices (`PriceViewer`); until it has members,
-a Project Management member gives that OK. Quality still signs without price.
+Absorb (P4) and therefore reads prices. One price rule serves every read:
+`PriceViewer` (change detail and list redaction); `NegotiationService.may_read`
+(summation, counter prices, offers, P&L) delegates to it, and stage-state
+serves it as `can_see_prices` for the cost cards. Management is never routed
+and gets no cost-sheet rate row (`cost_sheet_service.NON_ROUTABLE_DEPARTMENTS`).
+Until it has members, a Project Management member gives that OK. Quality still
+signs without price.
 Migration 117 also adds the columns later lanes fill: `sales_owner_id`,
 `price_open`, `pm_signed_offer_id` / `quality_signed_offer_id` (backfilled to
 the accepted offer, else the latest sent one), and on
@@ -996,18 +1001,32 @@ internal changes only"); the start dialog preselects "Internal change" and
 greys the customer option. `GET /changes/permissions` answers
 `can_start_internal_change`. Everyone else's rules are unchanged (Sales and
 PM start any change; an internal one raised by Sales is led by the project's
-PM).
+PM). Turning an internal change into a customer change (`PATCH
+customer_relevant=true`) needs the same right as starting one (Sales, PM,
+admin): an engineering lead gets 403 and the Cost carrier editor does not
+offer it (the way back stays open). An internal change with a lead is its run
+team's to hand over: the kickoff task goes to the lead and Project Management
+only, and Sales has no capture hop (scoping, reject) on it; the stage badge
+at capture reads "Lead", not "Sales". A change with no lead shows "No lead
+assigned: Project Management picks one", and Project Management's kickoff row
+is its own ("Assign a lead, then hand over to scoping").
 
 **Sales owner (ECR-solid C10).** `change_requests.sales_owner_id` names who
 owns the customer side: the raiser when in Sales, else the project's Sales
 responsible (project team), else nobody; internal and mother-plant changes
 have none (an internal change made customer-relevant gets the project's Sales
-contact; the other way clears it). Sales and Project Management change it
+contact; the other way clears it, also when the same PATCH names an owner:
+that PATCH is refused). Sales and Project Management change it
 (`PATCH sales_owner_id`, an active Sales member of the organization only,
 changelog `sales_owner_changed`; candidates: `GET
 /changes/{id}/sales-owner-candidates`). Sales tasks still show to all of
 Sales from creation: the owner sees them as "main", the rest of Sales as
-"backup" with the owner's name, and anyone in Sales may act. The Status card
+"backup" with the owner's name, and anyone in Sales may act. One test decides
+a valid owner everywhere (`project_team_service.is_live_member`: an active user
+with a real Sales membership): the raiser becomes owner only as a real Sales
+member (an admin acting as Sales does not), and a stale owner (inactive, or
+left Sales) owns nothing, so the Sales rows fall back to all of Sales as
+"main". The Status card
 shows the owner under the lead; the list shows it beside the Sales badge in
 the Sales stages. **"Mine"** on the list = lead, raiser, Sales owner, or one
 of my departments owes an open R/A assessment or an unfinalized cost input
@@ -1023,8 +1042,11 @@ in_implementation`, `in_implementation → in_validation`, `rejected →
 scoping` (reopen) and every hop out of `on_hold` (resume). Anyone else gets
 403 ("Only the change lead, Project Management or an admin may ...") and does
 not see the button (`EarlyStageService.transition_refusal`, reused by
-`transition_rights`). Hops the service makes itself (an accepted offer that
-approves) are not affected. Switch off: these hops are open again.
+`transition_rights`; the client fallback `lib/transitionRights.ts` mirrors it
+while stage-state loads). No service step approves on its own yet: after
+"Customer accepted" and the sign-offs, the lead or PM records the approval by
+hand. A My Tasks row for these forward hops comes with C3 (lane L3). Switch
+off: these hops are open again.
 
 **Acting-as and the lead (ECR-solid C32).** Every right the change lead
 holds goes through `change_people.holds_lead`: the release (`ReleaseService.

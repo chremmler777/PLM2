@@ -56,7 +56,7 @@ export const pmChapter: ContentChapter = {
         {
           steps: [
             { title: 'Read the capture', body: 'Reason, affected items, the customer\'s documents. The "Next step" card lists what is still missing before scoping can start.' },
-            { title: 'Check the lead', body: 'On the "Status" card: "Lead", or "No lead assigned". Pick one with "Pick a lead", or "Me". Scoping waits for a lead.' },
+            { title: 'Check the lead', body: 'On the "Status" card: "Lead", or "No lead assigned". Picking the lead is yours: "Pick a lead", or "Me". Scoping waits for a lead.' },
             { title: 'Hand over', body: '"Hand over to scoping". Sales and the lead can still correct the capture fields afterwards.' },
           ],
         },
