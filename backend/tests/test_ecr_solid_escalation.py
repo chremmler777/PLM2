@@ -178,8 +178,9 @@ async def test_stage_entry_tells_the_implementing_departments(session_factory, s
         s.add_all([UserDepartment(user_id=u.id, department_id=d.id),
                    UserDepartment(user_id=q.id, department_id=other.id)])
         c = await _change(s, seed, "C-E-8")
+        # C23: a position with money is work (an empty one is not)
         s.add(CostingPosition(change_id=c.id, department_id=d.id, label="work",
-                              created_by=seed["admin_id"]))
+                              est_cost=500.0, created_by=seed["admin_id"]))
         await s.commit()
         assert await ChangeService.notify_stage_entered(s, c, "in_validation") == 1
         await s.commit()
