@@ -477,7 +477,8 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
   our team / supplier). Own department only, refused once it submitted, no
   check items here. It holds only that department's submit (HARD #10, the
   existing hold); scoping questions' rules for answering apply (asking
-  department, Sales, PM; answer form), plus the lead for a question for our
+  department, Sales, PM; answer form only: a free note without Confirmed or
+  Assumed is refused), plus the lead for a question for our
   team (routed to them: an internal change's engineering lead answers it),
   and the department closes it. Told
   once (`task_new`, subject `ask:<id>`): customer or supplier → the Sales

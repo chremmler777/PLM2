@@ -1566,7 +1566,15 @@ class MeetingService:
                     "Sales or Project Management may answer this question")
             # C33 answer form (spec §0): Confirmed (evidence) or Assumed
             # (value + unit, risk if wrong, who confirms by when). Without
-            # answer_kind the legacy free answer stands.
+            # answer_kind the legacy free answer stands, except for a C8
+            # question from an assessment: it holds a submit, so "ok" is no
+            # answer (R4)
+            if (answer_kind is None and v2 and concern.flag_type == "question"
+                    and cm_switches.on("SCOPING_V2")):
+                raise ChangeError(
+                    "Answer it Confirmed (with its evidence: a filed mail, a "
+                    "document or a reference) or Assumed (value with its unit, "
+                    "the risk if wrong)")
             if answer_kind is not None:
                 if not cm_switches.on("SCOPING_V2"):
                     raise ChangeError(
