@@ -18,7 +18,7 @@ import MotherPlantFields, {
   emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
 } from './motherPlant/MotherPlantFields';
 import { plantText } from '../../lib/plantName';
-import { UrgentFields, emptyUrgent, urgentMissing, type UrgentDraft } from './CaptureV2';
+import { ProblemUnits, UrgentFields, emptyUrgent, urgentMissing, type UrgentDraft } from './CaptureV2';
 
 // Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
@@ -777,7 +777,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                     className="w-24 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5" />
                   <input value={problemUnit} onChange={(e) => setProblemUnit(e.target.value)}
                     aria-label={t('problem.unit')} placeholder={t('problem.unit')} data-testid="start-problem-unit"
+                    list="start-problem-units"
                     className="w-28 rounded-lg bg-slate-900 border border-slate-700 px-2 py-1.5" />
+                  <ProblemUnits id="start-problem-units" />
                   <span className="text-slate-400">→ {t('problem.target')}</span>
                   <input value={targetValue} onChange={(e) => setTargetValue(e.target.value)} inputMode="decimal"
                     aria-label={t('problem.target')} placeholder={t('problem.target')} data-testid="start-target-value"

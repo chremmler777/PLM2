@@ -36,6 +36,17 @@ describe('CustomerRelevantEditor', () => {
     expect(screen.getByTestId('customer-relevant-edit')).toBeDefined()
   })
 
+  it('a held flip offers no way back: only Sales\' notification only (HARD #7)', () => {
+    render(wrap(<CustomerRelevantEditor change={change({ status: 'scoping', customer_relevant: true,
+      scoping_v2: true, customer_flip_at: '2026-10-15T10:00:00', flip_answer: null })} canEdit />))
+    expect(screen.queryByTestId('customer-relevant-edit')).toBeNull()
+    expect(screen.getByTestId('customer-relevant-flip-lock').textContent).toContain('notification only')
+    cleanup()
+    render(wrap(<CustomerRelevantEditor change={change({ status: 'scoping', customer_relevant: false,
+      scoping_v2: true, customer_flip_at: '2026-10-15T10:00:00', flip_answer: 'notification' })} canEdit />))
+    expect(screen.getByTestId('customer-relevant-edit')).toBeDefined()
+  })
+
   it('shows the current value and no edit control when not editable', () => {
     render(wrap(<CustomerRelevantEditor change={change({ status: 'approved' })} canEdit={false} />))
     expect(screen.getByText('Internal change')).toBeDefined()

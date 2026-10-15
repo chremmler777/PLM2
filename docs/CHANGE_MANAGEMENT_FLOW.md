@@ -1055,8 +1055,14 @@ Switch `SCOPING_V2` (`revision_intake_service.py`,
 `index_followup_service.py`, migration 123). Off: the paragraph above.
 - **What changed** (every route but administrative): the areas (geometry,
   tolerance, material, colour/grain, other / not sure) and a file or compare
-  reference (>= 5 characters, "ok"/"tbd" refused), or **no visible change**
+  reference (>= 5 characters with a number or two words; "ok", "tbd",
+  "n/a n/a" refused), or **no visible change**
   with a reason. On an impacted item it drives the follow-up below.
+- **Administrative while a live change carries the part** (R19): the reason
+  must name it (>= 5 characters, a number or a few words; "ok", "n/a n/a",
+  "asdfg" refused, `cm_rules.reference_refusal`), and the leads of the live
+  changes carrying the part are told once ("activated administratively
+  (<reason>)"), as for every other route.
 - **Live change holds the part**: the newest live change (not released,
   closed, cancelled, rejected) carrying the part is the suggestion
   (`attach_ecr`, preselected; the dialog names it with status and lead).

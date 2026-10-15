@@ -14,6 +14,8 @@ services and the API can import it without cycles.
 """
 from __future__ import annotations
 
+import re
+
 from typing import Optional
 
 
@@ -178,7 +180,12 @@ def reference_refusal(text: Optional[str], what: str = "A reference",
     value = (text or "").strip()
     if not value:
         return f"{what} is required, e.g. {example}"
-    if value.lower() in EMPTY_EVIDENCE or len(value) < 5:
+    words = re.findall(r"[A-Za-z0-9ÄÖÜäöüß]+", value)
+    # 'n/a n/a', 'ok ok': only empty words or letters; 'asdfg': one word with
+    # no number (R4: a document number, a date, or words that name it)
+    empty = all(w.lower() in EMPTY_EVIDENCE or len(w) <= 2 for w in words)
+    named = any(c.isdigit() for c in value) or len(words) >= 2
+    if value.lower() in EMPTY_EVIDENCE or len(value) < 5 or empty or not named:
         return (f"{what}: '{value}' says nothing. Name the evidence (at least "
-                f"5 characters), e.g. {example}")
+                f"5 characters: a number, a date or a few words), e.g. {example}")
     return None

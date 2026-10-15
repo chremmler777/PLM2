@@ -2650,6 +2650,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.set_quote_deadline': { de: 'Angebotstermin setzen', en: 'Set the quote deadline' },
   'tasks.kind.need_by_tell': { de: 'Kunde informieren: neuer Termin oder Start auf Risiko?', en: 'Tell customer: new date or start at risk?' },
   // §1 intake: live change, what changed, customer-driven
+  'intake.adminOverLive': {
+    de: '{n} trägt dieses Teil: warum ohne die Änderung aktivieren (z. B. nur Schriftfeld)? Die Leitung von {n} wird informiert.',
+    en: '{n} carries this part: why activate without it (e.g. title block only)? The lead of {n} is told.',
+  },
   'intake.liveChange': {
     de: '{n} ({s}, Leitung {l}) enthält {p} bereits: an diese Änderung anhängen?',
     en: '{n} ({s}, lead {l}) already carries {p}: attach the index to it?' },

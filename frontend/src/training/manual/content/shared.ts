@@ -439,7 +439,7 @@ export const flowChapter: ContentChapter = {
               ['"Full ECR"', 'A new change starts at capture, with the part as the lead item.'],
               ['"Attach to an open change"', 'The index joins a change that is already running on the project.'],
               ['"Engineering review"', 'A light track. The departments serving the part answer "No impact" or "Impact". All "No impact": the index goes live. Any impact: Development escalates to a full ECR.'],
-              ['"Administrative"', 'The index goes live now. A reason is required (title block, re-upload, no content change).'],
+              ['"Administrative"', 'The index goes live now. A reason is required (title block, re-upload, no content change). When an open change carries the part, the reason must name it and that change\'s lead is told.'],
             ],
           },
         },

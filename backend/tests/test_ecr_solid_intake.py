@@ -114,6 +114,26 @@ async def test_administrative_needs_no_what_changed(client, world):
     assert r.status_code == 200, r.text
 
 
+async def test_administrative_over_a_live_change_needs_a_reason_and_tells_its_lead(
+        client, session_factory, world):
+    """R19: activating at once while a live change carries the part needs a
+    real reason, and the live change's lead is told once."""
+    cid = await _change_carrying(session_factory, world, "in_assessment")
+    await _receive(client, world["part_id"])
+    i = await _intake(client, world["part_id"])
+    for weak in ("x", "asdfg", "n/a n/a"):
+        r = await _decide(client, i["id"], "administrative", reason=weak)
+        assert r.status_code == 400, weak
+        assert "carries this part" in r.json()["detail"]
+    r = await _decide(client, i["id"], "administrative", reason="Title block only, same geometry")
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        notes = (await s.execute(select(Notification).where(
+            Notification.user_id == world["seed"]["admin_id"],
+            Notification.link == f"/changes/{cid}"))).scalars().all()
+    assert len(notes) == 1 and "activated administratively" in notes[0].body
+
+
 # ----------------------------------------------------------------------
 # Live change check
 # ----------------------------------------------------------------------

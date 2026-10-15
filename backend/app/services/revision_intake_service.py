@@ -345,7 +345,8 @@ class RevisionIntakeService:
     @staticmethod
     async def _tell_other_live_changes(session: AsyncSession, intake: RevisionIntake,
                                        part: Part, rev: PartRevision,
-                                       target: Optional[ChangeRequest], user_id: int) -> None:
+                                       target: Optional[ChangeRequest], user_id: int,
+                                       administrative: Optional[str] = None) -> None:
         """The other live changes carrying the part (not the one the index
         went to): their leads are told once, so a quote or costing built on
         the old index is checked (spec §1, involved people only)."""
@@ -356,7 +357,9 @@ class RevisionIntakeService:
         for c in others:
             if c.lead_id is None or c.lead_id == user_id:
                 continue
-            where = f" went to {target.change_number}" if target is not None else " was triaged"
+            where = (f" went to {target.change_number}" if target is not None
+                     else f" was activated administratively ({administrative})"
+                     if administrative else " was triaged")
             await NotificationService.notify_once(
                 session, [c.lead_id], kind="index_other_change",
                 subject_key=f"index_other:{intake.id}:{c.id}",
@@ -587,6 +590,16 @@ class RevisionIntakeService:
                 "(e.g. title block only, re-upload, no content change)")
         suggested, live = await RevisionIntakeService.suggestion(session, intake)
         v2 = _v2()
+        if v2 and route == "administrative" and live is not None:
+            # spec §1 / R19: a live change carries the part. Activating the
+            # index at once is allowed only with a real reason (not 'ok'),
+            # and the live changes' leads are told below
+            from app.services.cm_rules import reference_refusal
+            why = reference_refusal(
+                reason, f"{live.change_number} ({live.status}) carries this part: "
+                "the reason to activate the index without it", "title block only")
+            if why:
+                raise IntakeError(why)
         if v2 and route != "administrative":
             await RevisionIntakeService._what_changed(
                 intake, what_changed, what_changed_ref, no_change_reason)
@@ -597,7 +610,9 @@ class RevisionIntakeService:
                 raise IntakeError(
                     f"{live.change_number} ({live.status}) already carries "
                     f"{(await session.get(Part, intake.part_id)).part_number}: attach the "
-                    "index to it, or say why it needs its own change (reason pick)")
+                    "index to it, or say why it needs its own change (reason pick: "
+                    + ", ".join(f"{k} ({v.lower()})" for k, v in LIVE_CHANGE_REASON_LABELS.items())
+                    + "; other needs the reason text)")
             if live_change_reason == "other" and not reason:
                 raise IntakeError("Other: say why in the reason")
             intake.live_change_reason = live_change_reason
@@ -638,9 +653,10 @@ class RevisionIntakeService:
         intake.decided_at = datetime.utcnow()
         intake.change_id = change.id if change is not None else None
         await session.flush()
-        if v2 and route != "administrative":
+        if v2:
             await RevisionIntakeService._tell_other_live_changes(
-                session, intake, part, rev, change, user.id)
+                session, intake, part, rev, change, user.id,
+                administrative=reason if route == "administrative" else None)
         # Project team (spec §18): a Development backup triaging for the
         # project's Development responsible is recorded as "<backup> for <main>".
         from app.services.project_team_service import ProjectTeamService

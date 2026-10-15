@@ -25,7 +25,16 @@ const input = 'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs te
 export const URGENT_REASONS = ['line_stop', 'safety', 'quality_escape', 'launch_date', 'customer_demand', 'other'] as const
 
 /** A reference that names something (>= 5 characters, not "ok"/"tbd"). */
-export const okRef = (v: string) => v.trim().length >= 5 && !['ok', 'tbd', 'n/a', 'na', 'done'].includes(v.trim().toLowerCase())
+const EMPTY_WORDS = ['ok', 'okay', 'tbd', 'n/a', 'na', 'done', 'checked', 'yes', '-', '--']
+/** Mirror of cm_rules.reference_refusal: at least 5 characters, not only
+ *  empty words ('n/a n/a'), and a number or at least two words ('asdfg'). */
+export const okRef = (v: string) => {
+  const value = v.trim()
+  const words = value.match(/[A-Za-z0-9ÄÖÜäöüß]+/g) ?? []
+  const empty = words.every((w) => EMPTY_WORDS.includes(w.toLowerCase()) || w.length <= 2)
+  const named = /\d/.test(value) || words.length >= 2
+  return value.length >= 5 && !EMPTY_WORDS.includes(value.toLowerCase()) && !empty && named
+}
 
 /** Our own customer or internal change (not a mother-plant one, not a review). */
 export const plainChange = (c: Pick<ChangeRequest, 'origin'>) =>
@@ -105,6 +114,13 @@ export function NeedByLine({ change }: { change: ChangeRequest }) {
   )
 }
 
+/** R4: a number WITH A UNIT: the usual units to pick (typing another stays
+ *  possible). Render once per form; inputs point at it with list=. */
+export const PROBLEM_UNITS = ['g', 'kg', 'mm', 's', 'min', '%', 'pcs', 'pcs/h', 'ppm', 'h', 'N', 'Nm', 'bar', '°C', 'EUR']
+export function ProblemUnits({ id }: { id: string }) {
+  return <datalist id={id}>{PROBLEM_UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+}
+
 export function ProblemTargetEditor({ change, canEdit }: { change: ChangeRequest; canEdit: boolean }) {
   const qc = useQueryClient()
   const [value, setValue] = useState(change.problem_value != null ? String(change.problem_value) : '')
@@ -137,7 +153,9 @@ export function ProblemTargetEditor({ change, canEdit }: { change: ChangeRequest
         aria-label={t('problem.value')} placeholder={t('problem.value')} data-testid="problem-value"
         className={`${input} w-24`} />
       <input value={unit} onChange={(e) => setUnit(e.target.value)} aria-label={t('problem.unit')}
+        list="problem-units-edit"
         placeholder={t('problem.unit')} data-testid="problem-unit" className={`${input} w-24`} />
+      <ProblemUnits id="problem-units-edit" />
       <span className="text-slate-400">→ {t('problem.target')}</span>
       <input value={target} onChange={(e) => setTarget(e.target.value)} inputMode="decimal"
         aria-label={t('problem.target')} placeholder={t('problem.target')} data-testid="problem-target-value"

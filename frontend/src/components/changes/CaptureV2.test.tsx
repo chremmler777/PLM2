@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { NeedByLine, NeedByTellCard, ProblemTargetEditor, needByHold, workingDaysLeft } from './CaptureV2'
+import { NeedByLine, NeedByTellCard, ProblemTargetEditor, needByHold, okRef, workingDaysLeft } from './CaptureV2'
 import { PriorityEditor } from './PriorityEditor'
 import { changesApi } from '../../api/changes'
 
@@ -85,6 +85,12 @@ describe('§2 capture on the change', () => {
     fireEvent.change(screen.getByTestId('need-by-tell-ref'), { target: { value: 'Mail buyer 10-15' } })
     fireEvent.click(save)
     await waitFor(() => expect(changesApi.needByTell).toHaveBeenCalledWith(7, { ref: 'Mail buyer 10-15' }))
+  })
+
+  it('okRef refuses empty words and a lone word without a number', () => {
+    for (const bad of ['ok', 'n/a n/a', 'asdfg', 'ok ok', 'tbd']) expect(okRef(bad)).toBe(false)
+    for (const good of ['CP-4711 rev 3', 'Mail to customer 2026-10-15', 'title block only', 'PS-2231'])
+      expect(okRef(good)).toBe(true)
   })
 
   it('counts working days only', () => {

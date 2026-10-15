@@ -53,6 +53,19 @@ describe('RouteDialog (§1 intake)', () => {
       route: 'attach_ecr', change_id: 5, what_changed: ['geometry'], what_changed_ref: 'Compare CR-118' }))
   })
 
+  it('administrative while a live change carries the part needs a real reason', () => {
+    changes.list.mockResolvedValue([])
+    const onSubmit = show(intake())
+    fireEvent.click(screen.getByTestId('route-administrative').querySelector('input') as HTMLInputElement)
+    expect((screen.getByTestId('route-reason') as HTMLTextAreaElement).placeholder).toContain('CR-5 carries this part')
+    fireEvent.change(screen.getByTestId('route-reason'), { target: { value: 'x' } })
+    expect(submit().disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('route-reason'), { target: { value: 'Title block only' } })
+    expect(submit().disabled).toBe(false)
+    fireEvent.click(submit())
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ route: 'administrative', reason: 'Title block only' }))
+  })
+
   it('names every other live change carrying the part', () => {
     show(intake({ other_live_changes: [
       { id: 3, change_number: 'CR-3', status: 'quoted', lead_name: 'Payne' },

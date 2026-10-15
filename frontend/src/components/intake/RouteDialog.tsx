@@ -78,7 +78,11 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
   const pickedInternal = route === 'attach_ecr' && !!picked && !picked.customer_relevant
     && picked.origin !== 'mother_plant' && picked.origin !== 'engineering_review'
   const driverMissing = v2 && pickedInternal && customerDriven === ''
+  // R19: activating at once while a live change carries the part needs a
+  // real reason (the backend refuses 'ok'); the live change's lead is told
+  const adminOverLive = v2 && route === 'administrative' && !!live
   const blocked = pending || (reasonNeeded && !reason.trim()) || (route === 'attach_ecr' && changeId === '')
+    || (adminOverLive && reason.trim().length < 5)
     || frozenRefused || whatMissing || (liveReasonNeeded && liveReason === '') || driverMissing
   const toggleArea = (a: string) => {
     setNoChange(false)
@@ -87,7 +91,9 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
 
   const reasonId = useId()
   const changeSelectId = useId()
-  const reasonHint = route === 'administrative' ? 'For example: title block only, no content change'
+  const reasonHint = adminOverLive
+    ? t('intake.adminOverLive').replace('{n}', live?.change_number ?? '')
+    : route === 'administrative' ? 'For example: title block only, no content change'
     : reasonNeeded ? 'Why not the suggested route?' : 'Anything the team should know'
 
   return (
