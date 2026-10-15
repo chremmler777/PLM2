@@ -1002,9 +1002,15 @@ greys the customer option. `GET /changes/permissions` answers
 `can_start_internal_change`. Everyone else's rules are unchanged (Sales and
 PM start any change; an internal one raised by Sales is led by the project's
 PM). Turning an internal change into a customer change (`PATCH
-customer_relevant=true`) needs the same right as starting one (Sales, PM,
-admin): an engineering lead gets 403 and the Cost carrier editor does not
-offer it (the way back stays open). An internal change with a lead is its run
+customer_relevant=true`, capture or scoping) is a starter's call: a Sales or
+Project Management member or an admin, whether or not they lead the change.
+The engineering lead (or a lead from any department that does not start
+changes, e.g. Quality) gets 403 "Only Sales, Project Management or an admin
+may make this a customer change", and neither the Cost carrier editor nor the
+D1 panel offers it (`lib/transitionRights.mayMoveCarrier`, from
+`permissions.can_start_change`). The way back (customer to internal) stays
+the lead's or an admin's. Moving the lead to the project PM on the flip
+comes with the customer flip of lane L4 (spec §0 [R4]). An internal change with a lead is its run
 team's to hand over: the kickoff task goes to the lead and Project Management
 only, and Sales has no capture hop (scoping, reject) on it; the stage badge
 at capture reads "Lead", not "Sales". A change with no lead shows "No lead

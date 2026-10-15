@@ -13,7 +13,8 @@ import AssessmentBuckets from '../components/changes/AssessmentBuckets';
 import { resolveWaitStates, earlyStageWaits, deriveAssessmentState, revisionsInCheckOf } from '../lib/waitStates';
 import LeadPicker from '../components/changes/LeadPicker';
 import SalesOwnerPicker from '../components/changes/SalesOwnerPicker';
-import { mayTransition, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
+import { mayTransition, mayMoveCarrier, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
+import { useChangePermissions } from '../hooks/queries/useCanStartChange';
 import { plantText } from '../lib/plantName';
 import { assessmentVerdictLabel, changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
@@ -346,6 +347,13 @@ export default function ChangeDetailPage() {
   // The whole cost picture is PM/Sales/Management/lead/admin business; a
   // department sees its own bucket and nobody else's figures. The backend's
   // price rule decides (stage-state), else this mirror of it.
+  // The cost carrier moves the way PATCH customer_relevant allows (P3/C10):
+  // to customer by Sales, PM or an admin, back by the lead or an admin.
+  const changePerms = useChangePermissions();
+  const canMoveCarrier = mayMoveCarrier(!!change?.customer_relevant, {
+    isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember,
+    canStartChange: changePerms?.can_start_change === true,
+  });
   const canSeeCosts = stage?.can_see_prices
     ?? (isAdmin || isChangeLead || isSalesMember || isPmMember || isManagementMember);
   // The description is written during capture, and capture is Sales' job — the
@@ -1087,7 +1095,7 @@ export default function ChangeDetailPage() {
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '-'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
           {/* A mother-plant change is never customer relevant here. */}
-          {!motherPlant && <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />}
+          {!motherPlant && <CustomerRelevantEditor change={change} canEdit={canMoveCarrier} />}
 
           {/* Customer correspondence sits above the document lists: it is what
               everyone comes looking for, and it belongs to no phase. */}
@@ -1272,7 +1280,7 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'd1' && (
         <D1MasterPanel changeId={changeId}
           canEditD1={isAdmin || isChangeLead || isQualityMember || isPmMember}
-          canEditCustomerRelevant={isAdmin || isChangeLead} />
+          canEditCustomerRelevant={canMoveCarrier} />
       )}
 
       {effectiveTab === 'audit' && (

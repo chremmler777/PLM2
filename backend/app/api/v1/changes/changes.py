@@ -1712,6 +1712,16 @@ _PATCH_ROLE_DEPT = {"sales": "Sales", "quality": "Quality",
                     "scheduling": "Scheduling"}
 
 
+def _patch_rights(change, key, value) -> tuple:
+    """The roles that may move `key` to `value`. P3/C10: making an internal
+    change a customer change is a starter's call (Sales, Project Management,
+    admin: update_change also checks user_can_start_change), whether or not
+    they lead it; the way back stays the lead's."""
+    if key == "customer_relevant" and value is True and not change.customer_relevant:
+        return ("lead", "pm", "sales")
+    return _PATCH_RIGHTS[key]
+
+
 def _patch_changes_field(change, key, value) -> bool:
     """Does this PATCH value actually move the field? Unchanged values (the
     D1 panel resends every field) need no right."""
@@ -1754,8 +1764,9 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
         return held[role]
 
     for key in moving:
+        rights = _patch_rights(change, key, fields[key])
         allowed = False
-        for role in _PATCH_RIGHTS[key]:
+        for role in rights:
             if await has(role):
                 allowed = True
                 break
@@ -1765,7 +1776,7 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
                  "pm_capture": "Project Management",
                  "sales": "Sales", "quality": "Quality",
                  "scheduling": "Scheduling"}[r]
-                for r in _PATCH_RIGHTS[key]))
+                for r in rights))
             raise HTTPException(
                 status_code=403,
                 detail=f"Only {who} or an admin may change {key}")
@@ -1818,16 +1829,17 @@ async def update_change(
                 status_code=400,
                 detail=f"The change is {change.status}: its D1 data "
                        f"({', '.join(moving_d1)}) is read only")
-    await _require_patch_rights(db, change, fields, current_user)
     # P3: an engineering lead starts internal changes only; making one a
     # customer change is Sales', Project Management's or an admin's call
-    # (the same people who start customer changes).
+    # (the same people who start customer changes), lead or not. Asked
+    # first, so the engineering lead hears who can do it.
     if (fields.get("customer_relevant") is True and not change.customer_relevant
             and not await ChangeService.user_can_start_change(db, current_user)):
         raise HTTPException(
             status_code=403,
             detail="Only Sales, Project Management or an admin may make this "
                    "a customer change")
+    await _require_patch_rights(db, change, fields, current_user)
     if "lead_id" in fields and fields["lead_id"] is not None \
             and fields["lead_id"] != change.lead_id:
         new_lead = await _require_org_user(

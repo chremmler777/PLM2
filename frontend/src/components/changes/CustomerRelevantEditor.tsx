@@ -6,14 +6,15 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeRequest } from '../../types/change'
-import { useInternalOnlyStarter } from '../../hooks/queries/useCanStartChange'
 
 
 /**
  * F1(b): overview-tab display + edit of `customer_relevant` — the flag that
  * decides whether a change routes through the customer quote path or the
  * internal cost-approval path. Editable only while the routing decision is
- * still open (captured/scoping) and only for the change lead or an admin.
+ * still open (captured/scoping) and only for whoever may move it that way
+ * (`canEdit`, from lib/transitionRights mayMoveCarrier: internal to customer
+ * is Sales', Project Management's or an admin's; back is the lead's).
  *
  * Reads as "Cost carrier: Customer change / Internal change" rather than a
  * yes/no on "customer-relevant" — the question is really who pays, and the
@@ -26,12 +27,7 @@ export function CustomerRelevantEditor({ change, canEdit }: {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(!!change.customer_relevant)
-  // P3: a department that starts internal changes only (Development, Process
-  // Engineer, Tool Engineer) does not turn one into a customer change; Sales,
-  // Project Management or an admin do (the backend answers 403 otherwise).
-  const internalOnly = useInternalOnlyStarter()
   const editable = canEdit && (change.status === 'captured' || change.status === 'scoping')
-    && !(internalOnly && !change.customer_relevant)
 
   const save = useMutation({
     mutationFn: (customer_relevant: boolean) =>

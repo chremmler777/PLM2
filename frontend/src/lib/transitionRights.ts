@@ -57,6 +57,22 @@ export function mayTransition(
   return true
 }
 
+/**
+ * May the viewer move the cost carrier the way it would go next (P3 / C10,
+ * mirrors PATCH customer_relevant)? Internal to customer is a starter's call:
+ * Sales, Project Management or an admin (`canStartChange`, the backend's
+ * permissions answer), whether or not they lead the change; an engineering
+ * lead may not. Customer to internal stays the lead's (or an admin's).
+ */
+export function mayMoveCarrier(
+  customerRelevant: boolean,
+  v: Viewer & { canStartChange: boolean },
+): boolean {
+  if (v.isAdmin) return true
+  if (customerRelevant) return v.isChangeLead
+  return v.canStartChange && (v.isChangeLead || v.isPm || v.isSales)
+}
+
 export type EndState = 'rejected' | 'cancelled' | 'closed'
 
 /** The end a change reached, or null while it is still running (on hold runs). */

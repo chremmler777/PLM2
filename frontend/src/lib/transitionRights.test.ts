@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mayTransition, endStateOf, endLabel, hasEnded, stoppedAtFrom } from './transitionRights'
+import { mayTransition, mayMoveCarrier, endStateOf, endLabel, hasEnded, stoppedAtFrom } from './transitionRights'
 
 const none = { isAdmin: false, isChangeLead: false, isPm: false, isSales: false }
 
@@ -48,6 +48,25 @@ describe('mayTransition (spec §16 P1 4)', () => {
     expect(mayTransition(internal, 'rejected', { ...none, isSales: true })).toBe(false)
     expect(mayTransition(internal, 'scoping', { ...none, isChangeLead: true })).toBe(true)
     expect(mayTransition({ ...internal, lead_id: null }, 'scoping', { ...none, isSales: true })).toBe(true)
+  })
+})
+
+describe('mayMoveCarrier (P3 / C10)', () => {
+  const starter = { ...none, canStartChange: true }
+  const engineer = { ...none, canStartChange: false }
+  it('lets Sales and PM make an internal change a customer change without leading it', () => {
+    expect(mayMoveCarrier(false, { ...starter, isSales: true })).toBe(true)
+    expect(mayMoveCarrier(false, { ...starter, isPm: true })).toBe(true)
+    expect(mayMoveCarrier(false, { ...none, canStartChange: false, isAdmin: true })).toBe(true)
+  })
+  it('refuses the engineering lead and a non-starter lead (Quality) the flip', () => {
+    expect(mayMoveCarrier(false, { ...engineer, isChangeLead: true })).toBe(false)
+    expect(mayMoveCarrier(false, engineer)).toBe(false)
+  })
+  it('keeps the way back for the lead and the admin', () => {
+    expect(mayMoveCarrier(true, { ...engineer, isChangeLead: true })).toBe(true)
+    expect(mayMoveCarrier(true, { ...starter, isSales: true })).toBe(false)
+    expect(mayMoveCarrier(true, { ...starter, isPm: true })).toBe(false)
   })
 })
 
