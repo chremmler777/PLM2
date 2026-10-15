@@ -99,7 +99,9 @@ async def _close(client, auth, a, **body):
 async def test_check_item_holds_own_submit_until_closed_with_evidence(client, assess):
     a = assess
     res = await _submit(client, a["pe"], a, a["proc"])
-    assert res.status_code == 400 and "open concerns" in res.json()["detail"]
+    assert res.status_code == 400
+    assert ("#%d check item 'Check the gate position': close it with what you found"
+            % a["check"]) in res.json()["detail"]
     # negative: evidence that says nothing, a value without unit, no pick
     for body, words in (({"outcome": "answered", "ref": "ok"}, "says nothing"),
                         ({"outcome": "answered", "value": "2.4"}, "unit"),
@@ -335,8 +337,10 @@ async def test_question_holds_only_own_submit_and_reaches_sales_owner(
     assert res.status_code == 200, res.text
     qid = res.json()["id"]
     assert res.json()["flag_type"] == "question"
-    # holds Tool Engineer's own submit (HARD #10), not Process'
-    assert (await _submit(client, a["te"], a, a["tool"])).status_code == 400
+    # holds Tool Engineer's own submit (HARD #10), not Process', and says
+    # who owes the next move
+    res = await _submit(client, a["te"], a, a["tool"])
+    assert res.status_code == 400 and "waiting for Sales to answer" in res.json()["detail"]
     await _close(client, a["pe"], a, outcome="answered", ref="DRW-4471 rev C")
     await _submit(client, a["pe"], a, a["proc"], ok=True)
     async with session_factory() as s:
@@ -364,6 +368,8 @@ async def test_question_holds_only_own_submit_and_reaches_sales_owner(
         heard = (await s.execute(select(Notification).where(
             Notification.subject_key == f"answered:{qid}"))).scalars().all()
         assert len(heard) == 1
+    res = await _submit(client, a["te"], a, a["tool"])
+    assert res.status_code == 400 and "answered, settle it" in res.json()["detail"]
     res = await client.post(_url(a, f"/concerns/{qid}/withdraw"),
                             json={"resolution_note": "120k pcs assumed, 2 cavities"},
                             headers=a["te"])

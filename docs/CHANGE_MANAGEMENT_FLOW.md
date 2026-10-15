@@ -803,13 +803,16 @@ begin_impact_edit` / `_reopen_after_locked_edit`), in `in_assessment`,
   change first steps back to `costing` (no offer went out yet);
 - each is told once (`impact_edited`, the assessment owner, else the
   department): *"Impacted items changed after your assessment: ART-B:
-  <reason>. Check your answer; your costing is open again."*; logged
+  <reason>. If it changes your answer, ask the lead (Nathan) to send your
+  assessment back; your costing is open again."* (a department that has not
+  submitted yet reads *"Check your answer before you submit"*); logged
   `impact_edited_after_lock`.
 Who may edit is unchanged (lead, PM members, admin; P1-5). Intake attach and
 supersede (§1) pass their own reason. **Not built:** sending a submitted
 assessment back on its own (spec "technical impact yes reopens
-assessment"): the department checks its answer from the notice and its
-reopened costing; a recall stays the lead's (open question for Christoph).
+assessment"): the notice names the real next step (ask the lead to send
+the assessment back) and the costing reopens; a recall stays the lead's
+(open question for Christoph).
 From `quoted` on: the scope change below, unchanged.
 
 ### Who owns the tool change (ECR-solid C21, 2026-10-15)

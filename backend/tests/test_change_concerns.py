@@ -374,7 +374,7 @@ async def test_a_legacy_hold_still_blocks_and_is_settled_with_a_note(
                                 json={"department_id": held, "verdict": "feasible"})
     assert blocked.status_code == 400
     detail = blocked.json()["detail"]
-    assert "open concerns" in detail and "Tolerance cannot be held" in detail
+    assert "hold its submit" in detail and "Tolerance cannot be held" in detail
 
     # the change itself is untouched — still in assessment
     assert got["status"] == "in_assessment"

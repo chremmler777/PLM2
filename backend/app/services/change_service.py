@@ -5294,6 +5294,21 @@ class ChangeService:
         return items
 
     @staticmethod
+    def _hold_line(change: ChangeRequest, c) -> str:
+        """One item holding a department's submit (R37 words): what it is,
+        its state and who owes the next move."""
+        if c.is_check:
+            return f"#{c.id} check item '{c.note}': close it with what you found"
+        if c.kind != "needs_info":
+            return f"#{c.id} cancel vote '{c.note}': its raiser or PM withdraws it"
+        if c.answered_at is not None:
+            return f"#{c.id} question '{c.note}': answered, settle it (Close question)"
+        who = ("Sales" if c.answer_from in ("customer", "supplier")
+               else (change.lead_name or "the lead") if c.answer_from == "our_team"
+               else "Sales or Project Management")
+        return f"#{c.id} question '{c.note}': waiting for {who} to answer"
+
+    @staticmethod
     def legacy_only_keys(dept_name: Optional[str]) -> set:
         """Keys only the earlier checklist asked this department."""
         return ({i[0] for i in checklist.LEGACY_ITEMS}
@@ -5532,10 +5547,15 @@ class ChangeService:
                 ChangeConcern.retracted_at.is_(None),
             ))).scalars().all() if department_id in c.owner_department_ids]
         if held:
-            points = "; ".join(f"#{c.id} ({c.kind}): {c.note}" for c in held)
+            if not cm_switches.on("ASSESSMENT_V2"):
+                points = "; ".join(f"#{c.id} ({c.kind}): {c.note}" for c in held)
+                raise ChangeError(
+                    "This department has open concerns on the change: resolve "
+                    f"them before submitting its assessment: {points}")
             raise ChangeError(
-                "This department has open concerns on the change: resolve "
-                f"them before submitting its assessment: {points}")
+                "Not yet: this department's open questions and check items hold "
+                "its submit (HARD #10): "
+                + "; ".join(ChangeService._hold_line(change, c) for c in held))
         # The row write below completes the engine task and may advance the
         # stage and repair it: take the instance lock first, the one lock
         # order every routing write path keeps.

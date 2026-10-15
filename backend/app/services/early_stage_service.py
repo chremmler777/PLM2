@@ -437,7 +437,15 @@ class EarlyStageService:
                              if a.department_id == did
                              and (a.effective_owner_id or a.responsible_id)} - {user_id})
             title = f"Impacted items changed after your assessment: {change.change_number}"[:255]
-            body = (f"{what}: {reason}. Check your answer"
+            # R5: a next step the department can take. A submitted answer is
+            # not editable: the lead sends it back (recall) if it changes it.
+            submitted = any(a.department_id == did and a.submitted_at is not None
+                            for a in change.assessments)
+            step = (f"If it changes your answer, ask the lead "
+                    f"({change.lead_name or 'the change lead'}) to send your "
+                    "assessment back" if submitted
+                    else "Check your answer before you submit")
+            body = (f"{what}: {reason}. {step}"
                     + ("; your costing is open again" if did in reopened else "") + ".")
             key = f"impact_edit:{getattr(entry, 'id', 0)}:{did}"
             if owners:

@@ -237,7 +237,7 @@ async def test_a_legacy_open_concern_still_holds_the_submit(
         await s.commit()
     res = await _submit(client, admin_auth, assessing)
     assert res.status_code == 400, res.text
-    assert "open concerns" in res.json()["detail"]
+    assert "hold its submit" in res.json()["detail"]
 
 
 async def test_a_risk_does_not_flag_its_department_as_blocked(

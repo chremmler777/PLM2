@@ -84,6 +84,9 @@ async def test_an_edit_after_the_lock_needs_a_reason_and_reopens_costing(
             Notification.kind == "impact_edited"))).scalars().all()
         assert [n.user_id for n in told] == [locked["dev_user"]]
         assert "ART-LI-B" in told[0].body and "costing is open again" in told[0].body
+        # R5: a submitted answer is not editable: the notice names who sends
+        # it back, never a bare "Check your answer"
+        assert "ask the lead" in told[0].body and "send your assessment back" in told[0].body
 
 
 async def test_a_department_member_may_not_edit_after_the_lock(client, locked):
