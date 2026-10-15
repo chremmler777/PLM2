@@ -91,7 +91,7 @@ TASK_KIND = {
     "costing_input": ("Costing input", "Kalkulationsbeitrag"),
     "costing_update": ("Costing update after scope change", "Kalkulation nach Umfangsänderung"),
     "create_quote": ("Create the quote", "Angebot erstellen"),
-    "customer_response": ("Record the customer response", "Kundenantwort erfassen"),
+    "customer_response": ("Record the customer answer", "Kundenantwort erfassen"),
     # §6 [R3] the scope change card
     "scope_change_decide": ("Scope change: accept or refuse",
                             "Umfangsänderung: annehmen oder ablehnen"),

@@ -101,7 +101,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.hint.hold_resumeNoReason': { de: 'Angehalten (ohne Grund im Protokoll)', en: 'On hold (no reason on record)' },
   'tasks.kind.scoping_wrapup': { de: 'Scoping abschließen', en: 'Wrap up scoping' },
   'tasks.kind.impact_confirm': { de: 'Umfang wählen und bestätigen', en: 'Pick and confirm impact' },
-  'tasks.kind.customer_response': { de: 'Kundenantwort', en: 'Customer response' },
+  'tasks.kind.customer_response': { de: 'Kundenantwort', en: 'Customer answer' },
   'tasks.hint.kickoff': { de: 'Kickoff ausstehend, fehlt: {x}', en: 'Kickoff pending, missing: {x}' },
   'tasks.hint.kickoffReady': { de: 'Kickoff ausstehend', en: 'Kickoff pending' },
   'tasks.hint.impactOpen': { de: 'Impact bestätigen', en: 'impact to confirm' },
@@ -2924,6 +2924,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'override.reason.competitor': { de: 'Wettbewerb', en: 'Competitor' },
   'override.reason.goodwill': { de: 'Kulanz', en: 'Goodwill' },
   'override.reason.error': { de: 'Fehler im Angebot', en: 'Error in the offer' },
+  'cust.title': { de: 'Kundenantwort', en: 'Customer answer' },
   'cust.evidence': { de: 'Nachweis', en: 'Evidence' },
   // --- L6 §6 [R3] scope change card ------------------------------------------------
   'sc.title': { de: 'Umfangsänderungen des Kunden', en: 'Customer scope changes' },

@@ -1715,9 +1715,14 @@ class ChangeService:
         names = await ChangePlanService._user_names(
             session, [i for i in (change.lead_id, change.sales_owner_id,
                                   change.raised_by) if i is not None])
-        lead = names.get(change.lead_id) or "Project Management"
-        sales = names.get(change.sales_owner_id) or "Sales"
-        capture = names.get(change.sales_owner_id) or names.get(change.raised_by) or lead
+        # R5: a role with the name, so a viewer knows whom to ask
+        lead = (f"Lead: {names[change.lead_id]}" if names.get(change.lead_id)
+                else "Project Management")
+        sales = (f"Sales: {names[change.sales_owner_id]}"
+                 if names.get(change.sales_owner_id) else "Sales")
+        capture = (sales if names.get(change.sales_owner_id)
+                   else f"Raiser: {names[change.raised_by]}" if names.get(change.raised_by)
+                   else lead)
         for i in items:
             if "who" in i:
                 continue
@@ -6515,29 +6520,37 @@ class ChangeService:
                 session, change, "rejected", user_id,
                 rejection_reason=f"Customer declined {version} ({evidence['ref']})")
             return change
-        # accepted
+        # accepted: every missing part named at once (R6: one refusal, not four)
+        missing: list[str] = []
         if release_due_date is None and change.release_due_date is None:
-            raise ChangeError(
+            missing.append(
                 "Recording acceptance requires a release deadline (release_due_date)")
-        evidence = await ChangeService._answer_evidence(
-            session, change, answer,
-            "The evidence of the customer's yes (the PO or mail filed on the "
-            "change, or the PO number)", user_id=user_id)
+        try:
+            evidence = await ChangeService._answer_evidence(
+                session, change, answer,
+                "The evidence of the customer's yes (the PO or mail filed on the "
+                "change, or the PO number)", user_id=user_id)
+        except ChangeError as e:
+            missing.append(str(e))
+            evidence = None
         if offer is not None:
             match = answer.get("po_match")
             if match not in ("yes", "no"):
-                raise ChangeError(
+                missing.append(
                     f"Say whether the PO matches offer v{offer.version} exactly "
                     "(yes / no)")
             differs = (answer.get("differs") or "").strip()
             if match == "no" and len(differs) < 5:
-                raise ChangeError(
+                missing.append(
                     "The PO differs: name the parts that differ and any other "
                     "P/Ns on it")
             if not answer.get("confirm_total"):
-                raise ChangeError(
+                missing.append(
                     f"Confirm the customer says yes to v{offer.version} at its "
                     "total (confirm_total)")
+        if missing:
+            raise ChangeError(" · ".join(missing))
+        if offer is not None:
             evidence.update(po_match=match, differs=differs or None,
                             total=offer.total_one_time, version=offer.version)
             # spec §7: the index match is computed, a warning only

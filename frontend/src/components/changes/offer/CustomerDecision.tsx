@@ -185,7 +185,7 @@ export default function CustomerDecision({
   return (
     <div data-testid="customer-decision" className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={sectionLabel}>Customer response</span>
+        <span className={sectionLabel}>{t('cust.title')}</span>
         <span data-testid="customer-response"
           className={`rounded border px-1.5 py-0 text-[11px] ${RESPONSE_CHIP[change.customer_response] ?? RESPONSE_CHIP.pending}`}>
           {RESPONSE_LABEL[change.customer_response] ?? change.customer_response}

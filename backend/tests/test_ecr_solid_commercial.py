@@ -1379,3 +1379,18 @@ async def test_after_approval_a_new_part_is_its_own_change_with_the_mail(
             ChangeAttachment.change_id == new_id))).scalars().all()
     assert [f.filename for f in files] == ["wish.msg"]
     assert files[0].stored_path != str(tmp_path / "changes" / str(cid) / "abc_wish.msg")
+
+
+async def test_accept_names_every_missing_part_at_once(client, quoted, session_factory):
+    from app.models.change import ChangeRequest
+    cid = quoted["change_id"]
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).release_due_date = None
+        await s.commit()
+    sales = await _auth(client, "sales")
+    res = await _answer(client, cid, sales, {"response": "accepted"})
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    for words in ("release deadline", "evidence", "PO matches offer v1",
+                  "Confirm the customer says yes"):
+        assert words in detail, detail
