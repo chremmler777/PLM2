@@ -123,6 +123,8 @@ export default function ChangeDetailPage() {
   // ?task=<kind>[&dept=<id>]: opened from My Tasks, the task card shows on top.
   const taskParam = searchParams.get('task');
   const taskDeptParam = Number(searchParams.get('dept'));
+  const taskDevParam = Number(searchParams.get('dev'));
+  const taskSideParam = searchParams.get('side');
   const focusIssueId = Number.isInteger(issueParam) && issueParam > 0 ? issueParam : null;
   const [blocked, setBlocked] = useState<{ to: string; reason: string; rule?: string | null } | null>(null);
   // Bumped on every reported block, even an identical one, so the banner's
@@ -1100,6 +1102,8 @@ export default function ChangeDetailPage() {
       {taskParam && (
         <TaskCard changeId={changeId} kind={taskParam}
           departmentId={Number.isInteger(taskDeptParam) && taskDeptParam > 0 ? taskDeptParam : null}
+          deviationId={Number.isInteger(taskDevParam) && taskDevParam > 0 ? taskDevParam : null}
+          side={taskSideParam === 'pm' || taskSideParam === 'quality' ? taskSideParam : null}
           actions={myActions?.actions ?? []}
           currentTab={effectiveTab}
           onAdvance={advance}

@@ -23,13 +23,17 @@ describe('TaskCard (spec §0 task links)', () => {
   afterEach(cleanup)
 
   it('says your part, the due date with its deadline, and the next button', async () => {
+    // "due Thu (quote deadline Mon)": weekdays within the coming week
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-14T12:00:00'))
     vi.mocked(changesApi.myTasks).mockResolvedValue([row()] as never)
     const onGo = vi.fn()
     wrap(<TaskCard changeId={7} kind="assessment" departmentId={2} onGo={onGo} onClose={vi.fn()}
       actions={[{ kind: 'assessment', label: 'Submit assessment for Process', target_tab: 'assessments', department_id: 2 }]} />)
     const card = await screen.findByTestId('task-card')
     expect(card.textContent).toContain('Your part: Assessment')
-    expect(screen.getByTestId('task-card-due').textContent).toContain('(quote deadline 19 Oct)')
+    expect(screen.getByTestId('task-card-due').textContent).toBe(', due Thu (quote deadline Mon)')
+    vi.useRealTimers()
     fireEvent.click(screen.getByTestId('task-card-next'))
     expect(onGo).toHaveBeenCalledWith('assessments')
     expect(screen.getByTestId('task-card-next').textContent).toBe('Submit assessment for Process')
@@ -68,6 +72,18 @@ describe('TaskCard (spec §0 task links)', () => {
       onClose={vi.fn()} actions={[{ kind: 'internal_approval', label: 'Approve the internal costs', target_tab: 'commercial' }]} />)
     expect((await screen.findByTestId('task-card-here')).textContent).toBe('Approve the internal costs (below)')
     expect(screen.queryByTestId('task-card-next')).toBeNull()
+  })
+
+  it('of two overrides on one change, the card shows the one the link names', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      row({ kind: 'deviation_decision', department_id: null, deviation_id: 1, due_date: '2026-10-01T00:00:00' }),
+      row({ kind: 'deviation_decision', department_id: null, deviation_id: 2, due_date: '2027-03-09T00:00:00' }),
+    ] as never)
+    wrap(<TaskCard changeId={7} kind="deviation_decision" deviationId={2} onGo={vi.fn()} onClose={vi.fn()}
+      actions={[{ kind: 'deviation_decision', label: 'Decide override #1', deviation_id: 1, target_tab: 'overview' },
+                { kind: 'deviation_decision', label: 'Decide override #2', deviation_id: 2, target_tab: 'overview' }]} />)
+    expect((await screen.findByTestId('task-card-due')).textContent).toContain('9 Mar')
+    expect(screen.getByTestId('task-card-next').textContent).toBe('Decide override #2')
   })
 
   it('a task that is no longer yours says so and offers no next step', async () => {

@@ -8,22 +8,24 @@
 import type { ChangeTask } from '../types/change'
 import type { MyTask } from '../types/workflow'
 import { t } from '../i18n/cmLabels'
-import { formatDayMonth } from './format'
+import { formatDueDay } from './format'
 
-/** C20: what a row's due date runs against: "(quote deadline 20 Oct)",
+/** C20: what a row's due date runs against: "(quote deadline Mon)",
  *  "(need-by 3 Nov)" or "(urgent)"; null when nothing. */
 export function dueNote(task: Pick<ChangeTask, 'deadline_date' | 'deadline_kind' | 'urgent'>): string | null {
   if (task.urgent) return t('tasks.dueUrgent')
   if (!task.deadline_date || !task.deadline_kind) return null
   return t(task.deadline_kind === 'quote' ? 'tasks.dueQuoteDeadline' : 'tasks.dueNeedBy')
-    .replace('{d}', formatDayMonth(task.deadline_date))
+    .replace('{d}', formatDueDay(task.deadline_date))
 }
 
 /** The Late chip's tooltip: who sees the late row besides its owner, as the
- *  backend escalates it (one escalation rule, spec §0); never more. */
+ *  backend escalates it (one escalation rule, spec §0); never more: the
+ *  lead only when the change has one, the digest only while it is sent. */
 export function lateHint(escalation: ChangeTask['escalation']): string {
-  return t(escalation === 'lead' ? 'tasks.lateHint'
-    : escalation === 'digest' ? 'tasks.lateHintDigest' : 'tasks.lateHintOwn')
+  return t(escalation === 'lead_digest' ? 'tasks.lateHint'
+    : escalation === 'lead' ? 'tasks.lateHintLead'
+      : escalation === 'digest' ? 'tasks.lateHintDigest' : 'tasks.lateHintOwn')
 }
 
 const earlier = (a: string | null | undefined, b: string | null | undefined) =>

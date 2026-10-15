@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  addDaysIso, daysUntil, formatCalendarDate, formatCalendarDateShort, formatDate, formatDateShort, formatDateTime, formatDayMonth, formatDays, formatHours, formatMoney,
+  addDaysIso, daysUntil, formatCalendarDate, formatCalendarDateShort, formatDate, formatDateShort, formatDateTime, formatDayMonth, formatDays, formatDueDay, formatHours, formatMoney,
   formatMoneyDelta, formatNumber, formatPercent, formatPiecePrice, formatTime, numberEditText, parseApiDateTime,
   readNumberInput, todayIso,
 } from './format'
@@ -197,5 +197,19 @@ describe('numberEditText', () => {
     expect(numberEditText(1e-7)).toBe('0.0000001')
     expect(numberEditText(null)).toBe('')
     expect(numberEditText(NaN)).toBe('')
+  })
+})
+
+describe('formatDueDay (spec §0 "due Thu (quote deadline Mon)")', () => {
+  const now = new Date('2026-10-14T12:00:00')   // a Wednesday
+  it('names the weekday within the coming week', () => {
+    expect(formatDueDay('2026-10-14T00:00:00', now)).toBe('Wed')
+    expect(formatDueDay('2026-10-15', now)).toBe('Thu')
+    expect(formatDueDay('2026-10-20T00:00:00', now)).toBe('Tue')
+  })
+  it('day and month beyond it, or when past', () => {
+    expect(formatDueDay('2026-10-21', now)).toBe('21 Oct')
+    expect(formatDueDay('2026-10-13', now)).toBe('13 Oct')
+    expect(formatDueDay(null, now)).toBe('-')
   })
 })

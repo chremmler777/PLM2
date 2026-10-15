@@ -12,7 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { changesApi } from '../../api/changes';
 import { t } from '../../i18n/cmLabels';
-import { formatCalendarDateShort } from '../../lib/format';
+import { formatDueDay } from '../../lib/format';
 import { taskKindLabel } from '../../lib/humanLabels';
 import { dueNote } from '../../lib/myTasks';
 import { transitionLabel } from '../../lib/changeStatus';
@@ -30,8 +30,12 @@ interface Props {
   changeId: number;
   kind: string;
   departmentId?: number | null;
+  /** Which override or sign-off side, when a change has two of the kind. */
+  deviationId?: number | null;
+  side?: 'pm' | 'quality' | null;
   /** The viewer's cockpit actions: the next step's label and tab. */
-  actions: { kind: string; label: string; target_tab?: string | null; department_id?: number | null }[];
+  actions: { kind: string; label: string; target_tab?: string | null; department_id?: number | null;
+    deviation_id?: number | null; side?: string | null }[];
   onGo: (tab: string) => void;
   onClose: () => void;
   /** The tab on screen: there the card does not repeat the tab's button. */
@@ -40,17 +44,21 @@ interface Props {
   onAdvance?: (to: string) => void;
 }
 
-export default function TaskCard({ changeId, kind, departmentId, actions, onGo, onClose, currentTab, onAdvance }: Props) {
+export default function TaskCard({ changeId, kind, departmentId, deviationId, side, actions, onGo, onClose, currentTab, onAdvance }: Props) {
   const [help, setHelp] = useState(() => !helpDismissed());
   const { data: tasks, isLoading } = useQuery({
     queryKey: ['change-my-tasks'],
     queryFn: () => changesApi.myTasks(),
     staleTime: 30_000,
   });
-  const task = (tasks ?? []).find((x: ChangeTask) => x.change_id === changeId && x.kind === kind
-    && (departmentId == null || x.department_id == null || x.department_id === departmentId));
+  // optional narrowing: a link names the department, the override or the side
+  const fits = (x: { department_id?: number | null; deviation_id?: number | null; side?: string | null }) =>
+    (departmentId == null || x.department_id == null || x.department_id === departmentId)
+    && (deviationId == null || x.deviation_id == null || x.deviation_id === deviationId)
+    && (side == null || x.side == null || x.side === side);
+  const task = (tasks ?? []).find((x: ChangeTask) => x.change_id === changeId && x.kind === kind && fits(x));
   const action = actions.find((a) => (a.kind === kind || (kind === 'create_quote' && a.kind === 'offer_build'))
-    && (departmentId == null || a.department_id == null || a.department_id === departmentId));
+    && fits(a));
   if (isLoading) return null;
   const advanceTo = task?.kind === 'advance' && onAdvance ? task.to_status ?? null : null;
   const target = action?.target_tab ?? task?.target_tab ?? 'overview';
@@ -75,7 +83,7 @@ export default function TaskCard({ changeId, kind, departmentId, actions, onGo, 
               </span>
               {task.due_date && (
                 <span data-testid="task-card-due" className={task.overdue ? 'text-red-300' : 'text-slate-300'}>
-                  {', '}{t('taskcard.due').replace('{d}', formatCalendarDateShort(task.due_date))}
+                  {', '}{t('taskcard.due').replace('{d}', formatDueDay(task.due_date))}
                   {dueNote(task) && ` ${dueNote(task)}`}
                 </span>
               )}

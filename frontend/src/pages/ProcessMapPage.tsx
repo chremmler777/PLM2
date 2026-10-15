@@ -152,7 +152,7 @@ const STAGES: Stage[] = [
 const RULES = [
   'Scoped views everywhere: a department sees its own input only, at assessment AND costing. PM and Sales see all blocks.',
   'A pipeline per department: assessments run in parallel, and each department costs and finalizes its own part right after its own feasible submit, without waiting for the team. The step into costing still waits on every R and A assessment.',
-  'Tasks are mandatory: no accept or claim step; the first department member who edits the assessment owns it. Due 2 working days (urgent 1), late one working day after.',
+  'Tasks are mandatory: no accept or claim step; the first department member who edits the assessment owns it. Tasks due 2 working days (urgent 1); assessments 7 days, earlier near the deadline; late one working day after.',
   'Sales owns the customer: mails tracked on the change and filed into each validation issue; escalations to the customer go through Sales.',
   'Two deadlines, one active: quote-by until quoted (freezes the on-time fact; after capture it moves only by Push back with a reason); release-due entered at acceptance, at internal approval or from the SOP of KTX Weissenburg / Solingen, moved only with a reason, recorded in the audit trail.',
   'P&L offer vs doing: planned frozen at the go decision (customer acceptance, or the engineering approver\'s internal cost approval), actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',

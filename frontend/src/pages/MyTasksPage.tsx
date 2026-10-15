@@ -286,19 +286,26 @@ const TASK_TAB: Record<string, string> = {
 
 /** Where a task row leads: its tab, plus `task=<kind>` so the change opens
  *  with the task card ("Your part: ..., due ... Next: ..."). */
-function taskLink(task: Pick<ChangeTask, 'kind' | 'change_id' | 'department_id' | 'target_tab'>): string {
+function taskLink(task: Pick<ChangeTask, 'kind' | 'change_id' | 'department_id' | 'target_tab' | 'deviation_id' | 'side'>): string {
   const tab = TASK_TAB[task.kind] ?? (task.target_tab ? `?tab=${task.target_tab}` : '');
   const params = new URLSearchParams(tab.replace(/^\?/, ''));
   params.set('task', task.kind);
   if (task.department_id != null) params.set('dept', String(task.department_id));
+  // two overrides or both sign-off sides on one change: the card shows this one
+  if (task.deviation_id != null) params.set('dev', String(task.deviation_id));
+  if (task.side) params.set('side', task.side);
   return `/changes/${task.change_id}?${params.toString()}`;
 }
 
+// the backend's kickoff_missing words (and the older short keys)
+const KICKOFF_ITEM: Record<string, string> = {
+  description: 'kickoff.description', attachment: 'kickoff.attachment',
+  'at least one attachment': 'kickoff.attachment', date: 'deadline.quote',
+  'quote deadline': 'deadline.quote', 'change lead': 'next.item.lead',
+};
+
 const kickoffHint = (missing?: string[]): string => {
-  const parts = (missing ?? []).map((m) =>
-    m === 'description' ? t('kickoff.description')
-    : m === 'attachment' ? t('kickoff.attachment')
-    : m === 'date' ? t('deadline.quote') : m);
+  const parts = (missing ?? []).map((m) => (KICKOFF_ITEM[m] ? t(KICKOFF_ITEM[m]) : m));
   return parts.length === 0
     ? t('tasks.hint.kickoffReady')
     : t('tasks.hint.kickoff').replace('{x}', parts.join(', '));

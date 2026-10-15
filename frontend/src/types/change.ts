@@ -511,8 +511,10 @@ export interface ChangeTask {
   /** C20: past due + 1 working day. */
   late?: boolean;
   /** Who sees a late row besides its owner: the lead's "Overdue" group and
-   *  the digest (assessments), the digest (Sales' stage rows), nobody else. */
-  escalation?: 'lead' | 'digest' | null;
+   *  the digest (lead_digest) or the lead alone (lead, digest switched off)
+   *  for assessments and the rows that owe a number or a decision; the
+   *  digest alone (no lead, or Sales' stage rows); nobody else. */
+  escalation?: 'lead_digest' | 'lead' | 'digest' | null;
   /** C20: the deadline the row runs against ("due Thu (quote deadline Mon)"). */
   deadline_date?: string | null;
   deadline_kind?: 'quote' | 'need_by' | null;

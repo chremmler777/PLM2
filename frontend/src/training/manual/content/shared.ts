@@ -112,11 +112,12 @@ export const basicsChapter: ContentChapter = {
         { shot: 'basics-my-tasks', alt: '"My Tasks" with "Open tasks (6)", the "+6 as backup" note and a muted backup row marked "Backup" with "Main:" and a name. Below the list, not in the picture, a "New indexes" section lists index triage for a Development member.' },
         {
           points: [
-            ['"Needs you"', 'Decisions only you can give sit on top: an override to approve or reject, your sign-off, the internal cost approval. The soonest due comes first.'],
-            ['Every step is a task', 'When nothing holds a change any more, the lead gets "Ready: move it on". Its button makes the move, for example "Close assessment". Nobody has to notice it on their own.'],
-            ['Due dates', 'A task is due 2 working days after it reached you, 1 when the change is urgent. An assessment is due 7 days out, earlier when the quote deadline is close. The row says what it runs against, for example "(quote deadline 20 Oct)" or "(urgent)".'],
-            ['"Late"', 'One working day after the due date the row says "Late". For a department assessment the change lead sees it then in "Overdue", and it goes into the daily overdue digest; Sales\' late quote steps go into the digest. Point at "Late" to see who else sees it.'],
-            ['"is working on this"', 'There is no claim button. The first person in the department who edits the assessment owns it, and the row names them. Hand over with "Assign".'],
+            ['"Needs you"', 'Decisions only you can give sit on top: an override to approve or reject, a routing change, your sign-off, the internal cost approval. The soonest due comes first.'],
+            ['Every step is a task', 'When nothing holds a change any more, the lead gets "Ready: move it on". Its button makes the move, for example "Close assessment". A "not feasible" answer gives the lead "Not feasible: decide" (override, reroute or reject). Nobody has to notice it on their own.'],
+            ['Due dates', 'A task is due 2 working days after it reached you, 1 when the change is urgent. An assessment is due 7 days out, earlier when the quote deadline is close. The row says what it runs against, for example "due Thu (quote deadline Mon)" or "(urgent)". You are reminded on the due date.'],
+            ['"Late"', 'One working day after the due date the row says "Late". For an assessment, a costing, a sign-off, the internal approval or an override the change lead sees it then in "Overdue", and it goes into the daily overdue digest; Sales\' late quote steps go into the digest. Point at "Late" to see who else sees it.'],
+            ['"is working on this"', 'There is no claim button. The first person in the department who edits the assessment owns it, and the row names them.'],
+            ['Your daily digest', 'If you lead, raised or sell a change, one notice a day lists your changes with news: deadline, new answers, what it waits on, what is late. A quiet day sends nothing.'],
           ],
         },
         {

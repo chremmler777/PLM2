@@ -514,6 +514,8 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
   })
 
   it('says what the due date runs against and marks a late row', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-01T12:00:00'))   // the deadline is weeks out
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'create_quote', due_date: '2026-10-08T00:00:00', overdue: true,
                    late: true, deadline_kind: 'quote', deadline_date: '2026-10-20T00:00:00' }),
@@ -522,6 +524,43 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
     await screen.findByText('GB-CM-0007')
     expect(screen.getByTestId('task-due-note').textContent).toBe('(quote deadline 20 Oct)')
     expect(screen.getByTestId('task-late').textContent).toBe(t('tasks.late'))
+    vi.useRealTimers()
+  })
+
+  it('the Late chip names the lead and the digest only when they see it', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'sign_off', side: 'pm', due_date: '2026-10-08T00:00:00', late: true,
+                   escalation: 'lead' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'costing_input', department_id: 5,
+                   due_date: '2026-10-08T00:00:00', late: true, escalation: 'lead_digest' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    const titles = screen.getAllByTestId('task-late').map((e) => e.getAttribute('title'))
+    expect(titles).toContain(t('tasks.lateHintLead'))
+    expect(titles).toContain(t('tasks.lateHint'))
+  })
+
+  it('the hand-over row names what is missing in words', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', missing: ['description', 'at least one attachment',
+                                              'quote deadline', 'change lead'] }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    expect(screen.getByText(t('tasks.hint.kickoff').replace('{x}', [
+      t('kickoff.description'), t('kickoff.attachment'), t('deadline.quote'),
+      t('next.item.lead')].join(', ')))).toBeDefined()
+  })
+
+  it('a link names the override and the sign-off side', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'deviation_decision', deviation_id: 4, needs_you: true }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    fireEvent.click(screen.getAllByRole('button', { name: t('tasks.open') })[0])
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=overview&task=deviation_decision&dev=4')
   })
 
   it('an urgent row says so instead of the deadline', async () => {

@@ -113,6 +113,23 @@ export function formatCalendarDateShort(iso: string | null | undefined): string 
   return p ? `${p.d} ${MONTHS[p.m]} ${String(p.y).slice(-2)}` : iso
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/** A due day at a glance (spec §0 "due Thu (quote deadline Mon)"): the
+ *  weekday within the coming week, else "14 Nov". Read as a calendar day,
+ *  never shifted by the time zone. */
+export function formatDueDay(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return '-'
+  const p = calendarParts(iso)
+  if (!p) return formatDayMonth(iso)
+  const day = Date.UTC(p.y, p.m, p.d)
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const ahead = Math.round((day - today) / MS_DAY)
+  return ahead >= 0 && ahead < 7
+    ? WEEKDAYS[new Date(day).getUTCDay()]
+    : `${p.d} ${MONTHS[p.m]}`
+}
+
 /** "14 Nov": day and month only, for a sentence where the year is plain. */
 export function formatDayMonth(iso: string | null | undefined): string {
   if (!iso) return '-'
