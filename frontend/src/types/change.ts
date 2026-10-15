@@ -411,7 +411,7 @@ export interface ChangeDetail extends ChangeRequest {
 
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */
 export type ChangeTaskKind =
-  | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
+  | 'assessment' | 'kickoff' | 'hold_resume' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
   | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input'
   /** Sales builds the offer once the departments are done costing. */
   | 'create_quote'

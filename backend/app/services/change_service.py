@@ -111,7 +111,8 @@ IMPACT_LOCKED_STATUSES = ("in_implementation", "in_validation", "released",
 STAGE_TASK_EQUIV = {"create_quote": "offer_build"}
 # Where a stage task is done (mirrors the task list's TASK_TAB).
 STAGE_TASK_TAB = {
-    "kickoff": "overview", "scoping_wrapup": "scoping", "impact_confirm": "impacted",
+    "kickoff": "overview", "hold_resume": "overview",
+    "scoping_wrapup": "scoping", "impact_confirm": "impacted",
     "customer_response": "overview", "obtain_info": "scoping",
     "close_question": "scoping", "send_rejection": "scoping",
     "costing_input": "costing", "costing_update": "commercial",
@@ -1416,7 +1417,10 @@ class ChangeService:
         await ChangeService.append_changelog(
             session, change, action, desc, user_id,
             field_name="status", old_value=old, new_value=to_status,
-            notes=deviation.reason if deviation else None,
+            # C1: a hold's reason rides on its status row (the run team's
+            # "Resume or cancel" task reads it back)
+            notes=(deviation.reason if deviation else
+                   (escalation_note or None) if to_status == "on_hold" else None),
         )
 
         # Both memos get their own audit row, distinct from the status hop, so
@@ -2454,6 +2458,18 @@ class ChangeService:
                     ChangeReleaseCheck.change_id.in_(validation_ids)))).scalars().all():
                 release_rows.setdefault(r.change_id, {})[r.check_key] = r
 
+        # C1: why each held change is on hold (the latest hop to on_hold).
+        hold_reason: dict = {}
+        hold_ids = _ids("on_hold")
+        if hold_ids:
+            for cid, notes in (await db.execute(
+                    select(ChangeChangelog.change_id, ChangeChangelog.notes).where(
+                        ChangeChangelog.change_id.in_(hold_ids),
+                        ChangeChangelog.field_name == "status",
+                        ChangeChangelog.new_value == json.dumps("on_hold"))
+                    .order_by(ChangeChangelog.id))).all():
+                hold_reason[cid] = notes
+
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -2470,9 +2486,23 @@ class ChangeService:
                               "missing": await ChangeService.kickoff_missing(db, c),
                               **({"hint": "Assign a lead, then hand over to scoping"}
                                  if c.lead_id is None and is_pm else {}),
+                              # the lead hands it over; Project Management
+                              # backs the lead up (R5: one main per row)
+                              **({"main_user": (c.lead_id, c.lead_name or "")}
+                                 if run_team_kickoff and not holds_lead(c, user)
+                                 else {}),
                               # project team: then it is PM's role, not Sales'
                               "role_department_id": (dept_by_name.get("Project Manager")
                                                      if pm_row else None)})
+            elif c.status == "on_hold" and (holds_lead(c, user) or is_pm):
+                # C1: a hold is the run team's to resume or cancel; the lead
+                # owns it, Project Management backs up (no lead: PM's own).
+                tasks.append({**await _base(c), "kind": "hold_resume",
+                              "reason": hold_reason.get(c.id),
+                              **({"main_user": (c.lead_id, c.lead_name or "")}
+                                 if c.lead_id is not None and not holds_lead(c, user)
+                                 else {}),
+                              "role_department_id": dept_by_name.get("Project Manager")})
             elif c.status == "scoping":
                 if is_pm:
                     tasks.append({

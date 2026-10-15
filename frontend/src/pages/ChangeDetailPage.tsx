@@ -504,7 +504,7 @@ export default function ChangeDetailPage() {
     // Leaving a rejected change is a reopen, wherever the button lives.
     if (change.status === 'rejected') { setReopenOpen(true); return; }
     // Kicking off, closing the assessment and recalling it are asked once more.
-    if ((change.status === 'captured' && to === 'scoping')
+    if ((change.status === 'captured' && to === 'scoping') || to === 'on_hold'
       || (change.status === 'in_assessment' && (to === 'costing' || to === 'scoping'))) {
       setConfirmTo(to); return;
     }
@@ -583,6 +583,14 @@ export default function ChangeDetailPage() {
         consequence: `The change goes back to ${STATUS_LABELS[confirmTo as ChangeStatus] ?? confirmTo}, where it was put on hold. `
           + 'This step is recorded in the audit trail.',
         open: [], confirmLabel: verb };
+    }
+    // C1: a hold says why and what it waits for (the backend refuses one
+    // without); the reason rides on the run team's resume task.
+    if (confirmTo === 'on_hold') {
+      const verb = transitionLabel('on_hold', change.status);
+      return { to: confirmTo, title: verb, consequence: t('confirm.holdBody'),
+        open: [], confirmLabel: verb,
+        reason: { label: t('confirm.holdReason'), placeholder: t('confirm.holdReasonHint') } };
     }
     if (change.status === 'captured' && confirmTo === 'scoping') {
       return {

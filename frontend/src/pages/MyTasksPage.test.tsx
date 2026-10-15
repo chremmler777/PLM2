@@ -105,6 +105,14 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7')
   })
 
+  it('names why a held change waits and opens its overview (C1 hold)', async () => {
+    await renderWith(changeTask({ kind: 'hold_resume', status: 'on_hold', reason: 'No PO until 30 Oct' }))
+    expect(screen.getByText(t('tasks.kind.hold_resume'))).toBeDefined()
+    expect(screen.getByText('On hold because: No PO until 30 Oct')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7')
+  })
+
   it('says what scoping still owes and opens the scoping tab', async () => {
     await renderWith(changeTask({
       kind: 'scoping_wrapup', impact_confirmed: false, has_decision: false,

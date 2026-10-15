@@ -509,7 +509,7 @@ async def test_end_state_rejected_and_cancelled(client, auth, seed, depts, sessi
 
     c = await _change(client, auth, seed)
     await client.post(f"/api/v1/changes/{c['id']}/transition",
-                      json={"to_status": "on_hold"}, headers=auth)
+                      json={"to_status": "on_hold", "reason": "no PO yet"}, headers=auth)
     await client.post(f"/api/v1/changes/{c['id']}/transition", json={
         "to_status": "cancelled", "cancellation_reason": "dup"}, headers=auth)
     end = (await _state(client, auth, c["id"]))["end_state"]

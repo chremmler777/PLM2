@@ -1064,6 +1064,21 @@ while stage-state loads). No service step approves on its own yet: after
 hand. A My Tasks row for these forward hops comes with C3 (lane L3). Switch
 off: these hops are open again.
 
+**Hold (C1, switch `COMMERCIAL_V2`).** Putting a change on hold needs a
+reason, what it waits for (`POST /transition {to_status: on_hold, reason}`,
+400 without; the reason rides on the status changelog row as `notes`). While
+held, the run team has a My Tasks row "On hold: resume or cancel"
+(`hold_resume`, overview tab) showing the reason: the lead as main, Project
+Management as backup with the lead's name (no lead: PM's own). Holds taken
+before this rule keep working and show "On hold (no reason on record)". A
+resume date and its due-date nudge come with the due rules (C20, lane L3).
+Switch off: the reason is optional again.
+
+**Kickoff row owner (R5).** On an internal change with a lead the lead's
+kickoff row is "main"; Project Management sees it as "backup" with the lead's
+name, so one person owns it. A due date for the kickoff comes with C20
+(lane L3).
+
 **Acting-as and the lead (ECR-solid C32).** Every right the change lead
 holds goes through `change_people.holds_lead`: the release (`ReleaseService.
 is_pm_or_lead`), price view (`PriceViewer`), the all-department costing and

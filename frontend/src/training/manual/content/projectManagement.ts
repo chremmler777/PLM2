@@ -45,7 +45,9 @@ export const pmChapter: ContentChapter = {
           p:
             'Some steps only the run team takes: the lead, Project Management members and admins. ' +
             'Approve, start implementation, start validation, reopen a rejected change and resume ' +
-            'a change on hold. Everyone else does not see these buttons.',
+            'a change on hold. Everyone else does not see these buttons. "Put on hold" asks what ' +
+            'the change waits for; the lead then finds "On hold: resume or cancel" in My Tasks with ' +
+            'that reason, and you see it as backup.',
         },
       ],
     },

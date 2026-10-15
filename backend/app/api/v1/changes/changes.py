@@ -1365,6 +1365,16 @@ async def transition_change(
                 status_code=403,
                 detail="Only Project Management, the change lead or an admin "
                        f"may approve a change from {mp.plant_name(change)}")
+    # C1: a hold says why and what it waits for; the run team's "Resume or
+    # cancel" task carries it (a hold without one was a dead end).
+    from app.services import cm_switches
+    if (body.to_status == "on_hold" and cm_switches.on("COMMERCIAL_V2")
+            and body.to_status in ALLOWED_TRANSITIONS.get(change.status, set())
+            and not (body.reason or "").strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="Say why the change goes on hold and what it waits for: "
+                   "the reason is on the record and on the resume task")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,

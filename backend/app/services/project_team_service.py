@@ -353,6 +353,14 @@ class TeamRoles:
         Sales row it takes the project responsible's place: the owner sees
         it as main, the rest of Sales as backup with the owner's name."""
         dept = await self.row_department(row)
+        # A run-team row names its owner (the change lead): the viewer backs
+        # them up unless it is theirs.
+        main_user = row.pop("main_user", None)
+        if main_user is not None:
+            mine = owned or main_user[0] == self.user_id
+            row["role"] = "main" if mine else "backup"
+            row["main_name"] = None if mine else main_user[1]
+            return row
         if sales_owner is not None and sales_owner[0] not in self._live_sales:
             self._live_sales[sales_owner[0]] = await is_live_member(
                 self.session, sales_owner[0], SALES)

@@ -198,3 +198,60 @@ async def test_retired_sales_owns_nothing(client, seed, depts, session_factory, 
     res = await client.get(f"/api/v1/changes/{c['id']}/sales-owner-candidates",
                            headers=admin)
     assert res.status_code == 200 and res.json() == []
+
+
+# --- C1 hold: a reason, and a task for the run team ---------------------------
+
+async def _rows(client, headers, cid, kind):
+    return [t for t in (await client.get("/api/v1/changes/my-tasks",
+                                         headers=headers)).json()
+            if t["change_id"] == cid and t["kind"] == kind]
+
+
+async def test_hold_needs_a_reason_and_leaves_a_resume_task(
+        client, seed, depts, session_factory, monkeypatch):
+    dev, c = await _dev_internal(client, seed, depts, session_factory)
+    url = f"/api/v1/changes/{c['id']}/transition"
+    res = await client.post(url, json={"to_status": "on_hold"}, headers=dev)
+    assert res.status_code == 400
+    assert "on hold" in res.json()["detail"]
+    res = await client.post(url, json={"to_status": "on_hold",
+                                       "reason": "waiting for the tool trial"},
+                            headers=dev)
+    assert res.status_code == 200, res.text
+    rows = await _rows(client, dev, c["id"], "hold_resume")
+    assert len(rows) == 1
+    assert rows[0]["role"] == "main"
+    assert rows[0]["reason"] == "waiting for the tool trial"
+    # Project Management backs the lead up, with the lead's name
+    _, pam_mail = await _user(session_factory, seed, "Pam", depts["Project Manager"])
+    pam = await login(client, pam_mail, admin=False)
+    rows = await _rows(client, pam, c["id"], "hold_resume")
+    assert rows and rows[0]["role"] == "backup" and rows[0]["main_name"] == "Devon"
+    # nobody else owns the resume
+    _, sally_mail = await _user(session_factory, seed, "Sally", depts["Sales"])
+    sally = await login(client, sally_mail, admin=False)
+    assert await _rows(client, sally, c["id"], "hold_resume") == []
+    # resume clears the task
+    res = await client.post(url, json={"to_status": "captured"}, headers=dev)
+    assert res.status_code == 200, res.text
+    assert await _rows(client, dev, c["id"], "hold_resume") == []
+    # switch off: the reason is optional again
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", False)
+    res = await client.post(url, json={"to_status": "on_hold"}, headers=dev)
+    assert res.status_code == 200, res.text
+
+
+# --- R5/R18: kickoff of a led internal change: PM is backup ------------------
+
+async def test_pm_backs_up_the_kickoff_of_a_led_internal_change(
+        client, seed, depts, session_factory):
+    dev, c = await _dev_internal(client, seed, depts, session_factory)
+    rows = await _rows(client, dev, c["id"], "kickoff")
+    assert rows and rows[0]["role"] == "main"
+    _, pam_mail = await _user(session_factory, seed, "Pam", depts["Project Manager"])
+    pam = await login(client, pam_mail, admin=False)
+    rows = await _rows(client, pam, c["id"], "kickoff")
+    assert rows and rows[0]["role"] == "backup"
+    assert rows[0]["main_name"] == "Devon"

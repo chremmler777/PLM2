@@ -75,6 +75,8 @@ SETTLED_AS = {
 # My Tasks row kinds (GET /changes/my-tasks), spec §16: human kind labels.
 TASK_KIND = {
     "kickoff": ("Hand over to scoping", "An Klärung übergeben"),
+    "hold_resume": ("On hold: resume or cancel",
+                    "Angehalten: fortsetzen oder abbrechen"),
     "scoping_wrapup": ("Wrap up scoping", "Klärung abschließen"),
     "impact_confirm": ("Pick and confirm impacted items",
                        "Betroffene Teile wählen und bestätigen"),

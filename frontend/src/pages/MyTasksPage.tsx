@@ -256,7 +256,7 @@ function FormsSection() {
 
 // Where each kind of change task is actually done, and how it reads in a list.
 const TASK_TAB: Record<string, string> = {
-  kickoff: '', scoping_wrapup: '?tab=scoping',
+  kickoff: '', hold_resume: '', scoping_wrapup: '?tab=scoping',
   impact_confirm: '?tab=impacted', customer_response: '',
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
   send_rejection: '?tab=scoping',
@@ -290,6 +290,10 @@ const taskHint = (task: ChangeTask): string | null => {
   switch (task.kind) {
     case 'kickoff':
       return kickoffHint(task.missing);
+    case 'hold_resume':
+      return task.reason?.trim()
+        ? t('tasks.hint.hold_resume').replace('{x}', task.reason.trim())
+        : t('tasks.hint.hold_resumeNoReason');
     case 'scoping_wrapup': {
       const open = [
         // null: no manual confirm (switch off), nothing to confirm.

@@ -324,7 +324,8 @@ async def test_release_activates_revisions_and_stamps_eng_level(
 async def test_changelog_is_hash_chained(client, eng_auth, seed):
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
-    await _transition(client, eng_auth, change["id"], "on_hold")
+    res = await _transition(client, eng_auth, change["id"], "on_hold", reason="no PO yet")
+    assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{change['id']}/changelog", headers=eng_auth)
     assert res.status_code == 200, res.text
     entries = res.json()

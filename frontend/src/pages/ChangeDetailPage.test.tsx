@@ -161,6 +161,7 @@ vi.mock('../components/changes/CockpitSummary', () => ({
       <button type="button" onClick={() => onAdvance?.('scoping')}>mock-advance-scoping</button>
       <button type="button" onClick={() => onAdvance?.('quoting')}>mock-advance-quoting</button>
       <button type="button" onClick={() => onAdvance?.('approved')}>mock-advance-approved</button>
+      <button type="button" onClick={() => onAdvance?.('on_hold')}>mock-advance-on_hold</button>
       <button type="button" onClick={() => onDecideDeviation?.(5)}>mock-decide-deviation</button>
     </div>
   ),
@@ -972,6 +973,23 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     fireEvent.click(go)
     await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(
       1, 'scoping', { to: 'scoping', reason: 'Scope needs the carrier too' }))
+    authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
+  })
+
+  it('puts a change on hold only with a reason (C1 hold)', async () => {
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
+    change.status = 'in_assessment' as ChangeDetail['status']
+    vi.mocked(changesApi.transition).mockClear()
+    wrap('/changes/1')
+    fireEvent.click(await screen.findByText('mock-advance-on_hold'))
+    await screen.findByTestId('confirm-on_hold')
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(true)
+    expect(changesApi.transition).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: 'No PO until 30 Oct' } })
+    fireEvent.click(go)
+    await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(
+      1, 'on_hold', { to: 'on_hold', reason: 'No PO until 30 Oct' }))
     authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 
