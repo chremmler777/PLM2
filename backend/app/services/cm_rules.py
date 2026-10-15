@@ -58,6 +58,15 @@ PM_MGMT_RULES = frozenset({"scope_change_uncovered", "price_drop", ABSORB_RULE})
 #: Validation rules are Quality's call wherever they hold.
 QUALITY_RULES = frozenset({"validation_open", "validation_failed",
                            "validation_issues_open"})
+#: Soft rules that are decided, never overridden: they have their own
+#: decision (the routing change: Project Management approves or refuses the
+#: added department), so an override would be a second road to it.
+DECIDE_ONLY_RULES = {
+    "routing_deviation_pending": ("Decide the routing change (the added "
+                                  "department) in the Assessments tab: it is "
+                                  "decided, not overridden"),
+}
+
 #: Hops whose overrides are Quality's call (implementation start, release).
 QUALITY_TARGETS = frozenset({"in_implementation", "released"})
 

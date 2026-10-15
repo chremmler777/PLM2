@@ -49,7 +49,10 @@ async def rel_world(session_factory, seed):
             change_number="C-R-1", title="release me", reason="r",
             change_type="physical_part", project_id=seed["project_id"],
             raised_by=users["pm"], customer_relevant=True,
-            status="in_validation", validated_part_weight_g=41.5)
+            status="in_validation", validated_part_weight_g=41.5,
+            # approved the normal way: both signed (HARD #4); HARD #9 at
+            # release needs them present even with no offer on file
+            pm_signed_by=users["pm"], quality_signed_by=seed["admin_id"])
         s.add(change)
         await s.commit()
         return {"change_id": change.id, "users": users, "depts": depts}

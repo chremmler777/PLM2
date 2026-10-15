@@ -958,3 +958,278 @@ async def test_quality_decides_a_validation_override_into_release(
     r = await _decide(client, people["Project Manager"][1], cid, dev["id"])
     assert r.status_code == 400  # NEGATIVE: PM is not Quality here
     assert (await _decide(client, people["Quality"][1], cid, dev["id"])).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# L2 review loop 2
+# ---------------------------------------------------------------------------
+
+async def test_admin_acting_as_quality_concession_counts_at_release(
+        client, admin, seed, depts, people, session_factory):
+    """One Quality rule (R37): an admin acting as Quality may record the
+    concession's yes (like a Quality override), and then it counts at
+    release; the flag is stored with the decision."""
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    iid = await _concession(session_factory, cid, check_id, people["Sales"][0])
+    r = await client.post(
+        f"/api/v1/changes/{cid}/validation/issues/{iid}/customer",
+        json={"decision": "accept_deviation", "note": "customer mail 14 Oct: ship"},
+        headers={**admin, ACTS: str(depts["Quality"])})
+    assert r.status_code == 200, r.text
+    from app.models.change_validation_issue import ValidationIssue
+    async with session_factory() as s:
+        assert (await s.get(ValidationIssue, iid)).customer_decided_as_quality is True
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert "Validation failed" not in r.json().get("detail", "")
+
+
+async def test_quality_confirms_a_concession_sales_accepted(
+        client, admin, seed, depts, people, session_factory):
+    """No dead end (R18): an 'accepted' concession whose yes was Sales'
+    (before the rule) does not count; Quality confirms it on the card."""
+    from app.models.change_validation_issue import ValidationIssue
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    async with session_factory() as s:
+        i = ValidationIssue(change_id=cid, number=1, title="weight high", created_by=1,
+                            description="12.4 g vs 12.2", check_id=check_id,
+                            route="customer_concession", status="accepted",
+                            customer_decision="accept_deviation",
+                            customer_decided_by=people["Sales"][0],
+                            customer_decided_as_quality=False)
+        s.add(i); await s.commit(); iid = i.id
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert "Validation failed" in r.json()["detail"]  # NEGATIVE
+    issues = (await client.get(f"/api/v1/changes/{cid}/validation/issues",
+                               headers=people["Quality"][1])).json()
+    row = issues[0] if isinstance(issues, list) else issues["issues"][0]
+    assert row["primary_act"] == "customer"
+    url = f"/api/v1/changes/{cid}/validation/issues/{iid}/customer"
+    yes = {"decision": "accept_deviation", "note": "mail 12 Oct read, ship as is"}
+    r = await client.post(url, json=yes, headers=people["Sales"][1])
+    assert r.status_code == 403  # NEGATIVE: Sales cannot confirm its own yes
+    r = await client.post(url, json=yes, headers=people["Quality"][1])
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert "Validation failed" not in r.json().get("detail", "")
+
+
+async def test_quality_concession_task_waits_for_the_mail(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    await _concession(session_factory, cid, check_id, people["Sales"][0], mail=False)
+    issues = (await client.get(f"/api/v1/changes/{cid}/validation/issues",
+                               headers=people["Quality"][1])).json()
+    row = issues[0] if isinstance(issues, list) else issues["issues"][0]
+    assert "customer" not in row["next_acts"]  # NEGATIVE: Sales files first
+    assert row["customer_options"] == ["accept_deviation"]
+
+
+async def test_raised_in_error_is_qualitys_close(
+        client, admin, seed, depts, people, session_factory):
+    """HARD #3: an open issue is no longer closed by PM, the lead or an
+    admin with any note; Quality closes it as raised in error with the
+    evidence."""
+    from app.models.change_validation_issue import ValidationIssue
+    cid = await _change(client, admin, seed, session_factory, "in_validation",
+                        customer=False)
+    async with session_factory() as s:
+        i = ValidationIssue(change_id=cid, number=1, title="flash", created_by=1,
+                            description="flash on rib", status="open")
+        s.add(i); await s.commit(); iid = i.id
+    url = f"/api/v1/changes/{cid}/validation/issues/{iid}/close"
+    for auth in (admin, people["Project Manager"][1]):
+        r = await client.post(url, json={"note": "not an issue"}, headers=auth)
+        assert r.status_code == 403, r.text  # NEGATIVE
+    r = await client.post(url, json={"note": "ok"}, headers=people["Quality"][1])
+    assert r.status_code == 400  # NEGATIVE: no evidence
+    r = await client.post(url, json={"note": "drawing rev C allows flash 0.2, MR-2231"},
+                          headers=people["Quality"][1])
+    assert r.status_code == 200, r.text
+
+
+async def test_hard_rule_holding_the_move_refuses_the_override_ask(
+        client, admin, seed, depts, people, session_factory):
+    """C6 / HARD #1: an unlocked impacted set holds scoping -> assessment; the
+    refusal names it (no override headers) and an override ask is refused,
+    so nobody approves an override that lifts nothing."""
+    cid = await _change(client, admin, seed, session_factory, "scoping")
+    lead = await login(client, "eng@test.io", admin=False)
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "in_assessment"}, headers=lead)
+    assert r.status_code == 400
+    assert "Impacted set is not locked" in r.json()["detail"]
+    assert "X-Deviation-Required" not in r.headers
+    r = await _propose(client, lead, cid, "in_assessment", guard_key="no_proceed_meeting")
+    assert r.status_code == 400  # NEGATIVE
+    assert "no override lifts this" in r.json()["detail"]
+
+
+async def test_routing_change_is_decided_not_overridden(
+        client, admin, seed, depts, people, session_factory, monkeypatch):
+    from app.models.change import ChangeRouting
+    from app.services.change_routing_service import ChangeRoutingService
+
+    async def _none(session, change):
+        return []
+    monkeypatch.setattr(ChangeRoutingService, "blocking_rows", staticmethod(_none))
+    cid = await _change(client, admin, seed, session_factory, "in_assessment")
+    async with session_factory() as s:
+        s.add(ChangeRouting(change_id=cid, deviation_status="pending_approval",
+                            has_deviation=True))
+        await s.commit()
+    lead = await login(client, "eng@test.io", admin=False)
+    pm = people["Project Manager"][1]
+    r = await _propose(client, lead, cid, "costing", guard_key="routing_deviation_pending")
+    assert r.status_code == 400  # NEGATIVE: decided, never overridden
+    assert "decided, not overridden" in r.json()["detail"]
+    # an ask without a key binds to the other rule, never to the routing one
+    dev = await _propose(client, lead, cid, "costing")
+    assert dev.status_code == 200, dev.text
+    assert dev.json()["guard_key"] == "assessments_open"
+    assert (await _decide(client, pm, cid, dev.json()["id"])).status_code == 200
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "costing"}, headers=pm)
+    assert r.status_code == 400
+    assert "Decide the routing change" in r.json()["detail"]
+    assert "X-Deviation-Required" not in r.headers
+    assert "X-Deviation-Rule" not in r.headers
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=pm)).json()
+    block = st["transition_blocks"]["costing"]
+    assert block["kind"] == "decide" and block["deviation_possible"] is False
+
+
+async def test_pending_override_is_withdrawn_when_the_change_moves(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _scoping_two_rules(client, admin, seed, session_factory)
+    lead = await login(client, "eng@test.io", admin=False)
+    pm = people["Project Manager"][1]
+    dev = (await _propose(client, lead, cid, "in_assessment",
+                          guard_key="no_quote_deadline")).json()
+    r = await client.post(f"/api/v1/changes/{cid}/transition", json={
+        "to_status": "on_hold", "reason": "customer pauses the project until Nov"},
+        headers=pm)
+    assert r.status_code == 200, r.text
+    rows = (await client.get(f"/api/v1/changes/{cid}/deviations", headers=pm)).json()
+    assert rows[0]["status"] == "withdrawn"
+    r = await _decide(client, pm, cid, dev["id"])
+    assert r.status_code == 400  # NEGATIVE: nothing left to decide
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=pm)).json()
+    rows = acts if isinstance(acts, list) else acts.get("actions", [])
+    assert not any(a.get("deviation_id") == dev["id"] for a in rows)
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin)).json()
+    assert any(e["action"] == "deviation_withdrawn" for e in log)
+
+
+async def test_approval_is_no_immediate_notice_to_the_asker(
+        client, admin, seed, depts, people, session_factory):
+    """Spec §0 Notifications: the asker is told at once on a rejection; an
+    approval of a non-urgent change is a badge. The deciders' notice names
+    the asker and the reason."""
+    cid = await _scoping_two_rules(client, admin, seed, session_factory)
+    lead = await login(client, "eng@test.io", admin=False)
+    dev = (await _propose(client, lead, cid, "in_assessment",
+                          guard_key="no_quote_deadline")).json()
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        n = (await s.execute(select(Notification).where(
+            Notification.subject_key == f"dev:{dev['id']}"))).scalars().first()
+    assert "customer SOP 24 Oct" in n.body and "asks for an override" in n.body
+    assert (await _decide(client, people["Project Manager"][1], cid,
+                          dev["id"])).status_code == 200
+    assert await _told(session_factory, f"dev:{dev['id']}:decided") == set()
+
+
+async def test_internal_approver_acting_as_a_department_is_refused(
+        client, admin, seed, depts, people, session_factory, monkeypatch):
+    """HARD #8: a configured approver approves as themselves, never while
+    acting as a department."""
+    from app.core.config import get_settings
+    async with session_factory() as s:
+        await s.execute(update(User).where(User.id == seed["admin_id"])
+                        .values(username="boss_admin"))
+        await s.commit()
+    monkeypatch.setattr(get_settings(), "internal_approvers", "boss_admin")
+    cid = await _change(client, admin, seed, session_factory, "costing",
+                        customer=False, raised_by=seed["engineer_id"])
+    r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
+                          json={"release_due_date": _DUE},
+                          headers={**admin, ACTS: str(depts["Project Manager"])})
+    assert r.status_code == 403, r.text  # NEGATIVE
+    r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
+                          json={"release_due_date": _DUE}, headers=admin)
+    assert r.status_code == 200, r.text
+
+
+async def test_quality_signs_again_only_when_the_offer_changed_technically(
+        client, admin, seed, depts, people, session_factory):
+    """Spec §7: PM signs every newer offer; Quality only when the quote plan
+    or the parts (an index included) changed."""
+    from app.models.change_offer import ChangeOffer
+    cid = await _change(client, admin, seed, session_factory, "quoted",
+                        customer_response="accepted",
+                        release_due_date=datetime.utcnow() + timedelta(days=60))
+    snap = {"tasks": [], "items": [{"number": "886.197", "name": "Cover", "index": "C"}]}
+    async with session_factory() as s:
+        for v in (1, 2):
+            s.add(ChangeOffer(change_id=cid, version=v, status="sent", currency="EUR",
+                              data={"_snapshot": snap}, created_by=1,
+                              sent_at=datetime.utcnow() + timedelta(seconds=v)))
+        await s.commit()
+        v1 = (await s.execute(select(ChangeOffer.id).where(
+            ChangeOffer.change_id == cid, ChangeOffer.version == 1))).scalar()
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid).values(
+            pm_signed_by=people["Project Manager"][0], pm_signed_offer_id=v1,
+            quality_signed_by=people["Quality"][0], quality_signed_offer_id=v1))
+        await s.commit()
+    pm = people["Project Manager"][1]
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    keys = {i["key"] for i in ch["next_step"]["items"]}
+    assert "pm_signoff" in keys and "quality_signoff" not in keys  # price-only v2
+    # v3 changes a part index: Quality signs again
+    async with session_factory() as s:
+        s.add(ChangeOffer(change_id=cid, version=3, status="sent", currency="EUR",
+                          data={"_snapshot": {**snap, "items": [
+                              {"number": "886.197", "name": "Cover", "index": "D"}]}},
+                          created_by=1, sent_at=datetime.utcnow() + timedelta(seconds=9)))
+        await s.commit()
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    keys = {i["key"] for i in ch["next_step"]["items"]}
+    assert {"pm_signoff", "quality_signoff"} <= keys
+
+
+async def test_customer_acceptance_names_its_exit_and_release_needs_signatures(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _change(client, admin, seed, session_factory, "quoted")
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
+    keys = {i["key"]: i for i in ch["next_step"]["items"]}
+    assert keys["customer_accepted"]["exits"] == ["record_answer"]
+    # a customer change with no offer sent cannot release unsigned (HARD #9)
+    cid2 = await _change(client, admin, seed, session_factory, "in_validation")
+    r = await client.post(f"/api/v1/changes/{cid2}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert r.status_code == 400  # NEGATIVE
+    assert "PM and Quality sign-off missing" in r.json()["detail"]
+    assert "X-Deviation-Required" not in r.headers
+    ch = (await client.get(f"/api/v1/changes/{cid2}", headers=admin)).json()
+    row = next(i for i in ch["next_step"]["items"] if i["key"] == "release_signoffs")
+    assert row["sides"] == ["pm", "quality"] and "detail" not in row
+    await _sign(client, people, cid2)
+    r = await client.post(f"/api/v1/changes/{cid2}/transition",
+                          json={"to_status": "released"}, headers=admin)
+    assert "sign-off missing" not in r.json().get("detail", "")
+    # a change from the mother plant has no sign-offs: never held by them
+    cid3 = await _change(client, admin, seed, session_factory, "in_validation",
+                         origin="mother_plant")
+    from app.services.change_service import ChangeService
+    async with session_factory() as s:
+        assert await ChangeService.signoff_offer_refusal(
+            s, await s.get(ChangeRequest, cid3)) is None

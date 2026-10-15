@@ -121,6 +121,10 @@ async def test_blocked_transition_requires_approved_deviation(
     scop = await client.post(f"/api/v1/changes/{c['id']}/transition",
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text
+    # The deviation waives a soft guard only; the impact lock is a separate
+    # HARD gate named before any soft rule (see test_assessment_impact_gate.py,
+    # test_ecr_solid_gates). Stamp it so this test stays about consumption.
+    await lock_impact(session_factory, c["id"])
     blocked = await client.post(f"/api/v1/changes/{c['id']}/transition",
                                 json={"to_status": "in_assessment"}, headers=eng_auth)
     assert blocked.status_code == 400
@@ -132,10 +136,6 @@ async def test_blocked_transition_requires_approved_deviation(
     await client.post(f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
                       json={"decision": "approved"}, headers=admin_auth)
 
-    # The deviation waives the soft guard only; the impact lock is a separate hard
-    # gate (see test_assessment_impact_gate.py). Stamp it so this test stays about
-    # deviation consumption.
-    await lock_impact(session_factory, c["id"])
     ok = await client.post(f"/api/v1/changes/{c['id']}/transition",
                            json={"to_status": "in_assessment"}, headers=eng_auth)
     assert ok.status_code == 200, ok.text

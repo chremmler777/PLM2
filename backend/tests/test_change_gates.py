@@ -42,6 +42,8 @@ async def test_gate_blocks_transition_until_yes(client, eng_auth, seed, session_
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text
     await record_proceed_meeting(session_factory, cid, actor_id=seed["engineer_id"])
+    # 'proceed' locks the impacted set (the HARD rule is named before any soft one)
+    await lock_impact(session_factory, cid)
     # set the feasibility gate to "no" -> transition must be blocked without an approved deviation
     await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
                      json={"decision": "no"}, headers=eng_auth)
@@ -85,6 +87,7 @@ async def test_gates_exist_from_creation_and_block_by_default(client, eng_auth, 
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text
     await record_proceed_meeting(session_factory, cid, actor_id=seed["engineer_id"])
+    await lock_impact(session_factory, cid)  # 'proceed' locks the set
     blocked = await client.post(f"/api/v1/changes/{cid}/transition",
                                 json={"to_status": "in_assessment"}, headers=eng_auth)
     assert blocked.status_code == 400

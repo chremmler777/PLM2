@@ -271,7 +271,23 @@ class ChangeService:
             refusal = override_note_refusal(reason_code, reason, codes=OVERRIDE_REASONS)
             if refusal:
                 raise ChangeError(refusal)
-            reasons = await ChangeService._guard_reasons(session, change, to_status)
+            from app.services.cm_rules import DECIDE_ONLY_RULES
+            if guard_key in DECIDE_ONLY_RULES:
+                raise ChangeError(DECIDE_ONLY_RULES[guard_key])
+            reasons = [r for r in await ChangeService._guard_reasons(
+                session, change, to_status) if r.key not in DECIDE_ONLY_RULES]
+            from app.services.cm_switches import impact_confirm_step
+            if (to_status == "in_assessment" and change.impact_confirmed_at is None
+                    and not impact_confirm_step(change)):
+                # HARD #1 locks the set only at the 'proceed' decision, which
+                # also ends 'no proceed meeting': an override of that rule
+                # could be approved and still lift nothing (no dead end, R18)
+                if guard_key == "no_proceed_meeting":
+                    raise ChangeError(
+                        "Impacted set is not locked: it locks when the scoping "
+                        "meeting decides 'proceed', which also lifts this rule; "
+                        "no override lifts this")
+                reasons = [r for r in reasons if r.key != "no_proceed_meeting"]
             if guard_key is not None:
                 bound = next((r for r in reasons if r.key == guard_key), None)
                 if bound is None:
@@ -358,11 +374,17 @@ class ChangeService:
         from app.services.cm_rules import rule_label
         what = (f"waives '{rule_label(dev.guard_key)}'" if dev.guard_key
                 else f"to '{dev.to_status}'")
+        from app.services.change_plan_service import ChangePlanService
+        asker = (await ChangePlanService._user_names(
+            session, [proposer_id])).get(proposer_id) or "Someone"
+        # an Absorb's note is price talk: the deciders read it in PLM2
+        why = ("" if dev.guard_key == "price_open" or not dev.reason
+               else f" Why: {dev.reason}")
         await NotificationService.notify_once(
             session, sorted(ids), kind="deviation_pending",
             subject_key=f"dev:{dev.id}",
             title=f"Decision needed: {change.change_number}",
-            body=f"An override ({what}) needs your OK.",
+            body=f"{asker} asks for an override ({what}); it needs your OK.{why}",
             link=f"/changes/{change.id}",
         )
 
@@ -466,9 +488,13 @@ class ChangeService:
         approved = [d for d in change.transition_deviations
                     if d.to_status == to_status and d.status == "approved"]
         legacy = next((d for d in approved if d.guard_key is None), None)
+        from app.services.cm_rules import DECIDE_ONLY_RULES
         covering: list = []
         uncovered: list = []
         for r in reasons:
+            if r.key in DECIDE_ONLY_RULES:
+                uncovered.append(r)  # decided, never overridden
+                continue
             d = next((d for d in approved if d.guard_key == r.key), None) or legacy
             if d is None:
                 uncovered.append(r)
@@ -545,8 +571,11 @@ class ChangeService:
                 f"Open price absorbed (#{dev.id}): {dev.reason}", actor.id,
                 field_name="price_open", old_value=True, new_value=False,
                 notes=dev.reason)
-        if cm_switches.on("COMMERCIAL_V2") and dev.proposed_by != actor.id:
-            # The asker hears the answer once (spec §0 Notifications).
+        if (cm_switches.on("COMMERCIAL_V2") and dev.proposed_by != actor.id
+                and (decision == "rejected" or change.priority == "critical")):
+            # The asker hears the answer once (spec §0 Notifications): at
+            # once when it is a no (the asker must act) or the change is
+            # urgent; an approval otherwise is a badge and a changelog line.
             from app.services.notification_service import NotificationService
             what = (f"Override of '{rule_label(dev.guard_key)}'" if dev.guard_key
                     and dev.guard_key != ABSORB_RULE else
@@ -678,28 +707,61 @@ class ChangeService:
         """(sides 'pm'/'quality' whose sign-off is missing or given on an
         older offer than the latest sent, that offer). One rule for approval
         (HARD #4) and release (HARD #9): a signature counts for the offer it
-        was given on. Without a sent offer (internal, mother plant, legacy)
-        only a missing signature counts."""
+        was given on; Quality's also for a later version with the same
+        technical content (spec §7). Without a sent offer (internal, mother
+        plant, legacy) only a missing signature counts."""
         latest = (await ChangeService.latest_sent_offer(session, change)
                   if change.customer_relevant else None)
         sides = [side for side, by, oid in (
             ("pm", change.pm_signed_by, change.pm_signed_offer_id),
             ("quality", change.quality_signed_by, change.quality_signed_offer_id))
             if by is None or (latest is not None and oid != latest.id)]
+        if ("quality" in sides and change.quality_signed_by is not None
+                and latest is not None and change.quality_signed_offer_id is not None
+                and await ChangeService._same_technical_offer(
+                    session, change.quality_signed_offer_id, latest)):
+            # spec §7: PM signs every newer offer; Quality only when what it
+            # signed technically changed (quote plan or impacted parts, a part
+            # index included: snapshot_diff), not for a price-only version
+            sides.remove("quality")
         return sides, latest
+
+    @staticmethod
+    async def _same_technical_offer(session: AsyncSession, signed_offer_id: int,
+                                    latest) -> bool:
+        """Do the offer Quality signed and the latest one show the same
+        technical content (offer_service.snapshot_diff empty)? A version
+        without a frozen snapshot is never assumed to be the same."""
+        from app.models.change_offer import ChangeOffer
+        from app.services.offer_service import SNAPSHOT_KEY, snapshot_diff
+        signed = await session.get(ChangeOffer, signed_offer_id)
+        before = (signed.data or {}).get(SNAPSHOT_KEY) if signed is not None else None
+        after = (latest.data or {}).get(SNAPSHOT_KEY)
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            return False
+        return not snapshot_diff(before, after)
 
     @staticmethod
     async def signoff_offer_refusal(session: AsyncSession, change: ChangeRequest,
                                     before: str = "release") -> Optional[str]:
         """HARD #9 at release (and HARD #4 at approval): the PM and Quality
-        sign-offs are for the latest offer sent. Only where an offer was
-        sent (internal and mother-plant changes have none)."""
-        if not change.customer_relevant:
+        sign-offs are for the latest offer sent; with no offer sent, both
+        must at least be there (§7a). Customer changes that went through
+        an approval only (internal, mother-plant and engineering-review
+        changes have no sign-offs)."""
+        from app.services import mother_plants as mp
+        if (not change.customer_relevant or mp.is_mother_plant(change)
+                or getattr(change, "origin", None) == "engineering_review"):
             return None
         sides, latest = await ChangeService.signoff_sides_missing(session, change)
-        if latest is None or not sides:
+        if not sides:
             return None
         names = {"pm": "PM", "quality": "Quality"}
+        if latest is None:
+            # no offer sent (start at risk, legacy): the signatures must
+            # still be there (§7a binds them to the costing at approval)
+            return (f"{' and '.join(names[s] for s in sides)} sign-off missing: "
+                    f"sign it before {before}")
         return (f"{' and '.join(names[s] for s in sides)} sign-off missing for "
                 f"offer v{latest.version}, the latest sent: sign it for "
                 f"v{latest.version} before {before}")
@@ -1356,7 +1418,7 @@ class ChangeService:
                     from app.services.change_plan_service import ChangePlanService
                     owner = (await ChangePlanService._user_names(
                         session, [change.sales_owner_id])).get(change.sales_owner_id)
-                add("customer_accepted", "hard", who=owner)
+                add("customer_accepted", "hard", who=owner, exits=["record_answer"])
             if cm_switches.on("COMMERCIAL_V2"):
                 sides, latest = await ChangeService.signoff_sides_missing(session, change)
             else:
@@ -1425,12 +1487,14 @@ class ChangeService:
             n = await ReleaseService.open_deviation_count(session, change)
             if n:
                 add("plan_deviations", "soft", n=n, rule="plan_deviations_open")
-            if cm_switches.on("RELEASE_V2") and change.customer_relevant:
+            if (cm_switches.on("RELEASE_V2")
+                    and await ChangeService.signoff_offer_refusal(session, change)):
+                # the same rule as the HARD refusal (one truth, R37)
                 sides, latest = await ChangeService.signoff_sides_missing(session, change)
-                if sides and latest is not None:
+                if sides:
                     # the way out is a button: sign again for the latest offer
                     add("release_signoffs", "hard", exits=["sign"], sides=sides,
-                        detail=f"v{latest.version}",
+                        detail=f"v{latest.version}" if latest is not None else None,
                         who=" and ".join({"pm": "Project Management",
                                           "quality": "Quality"}[s] for s in sides))
         if to == "closed" and change.price_open and cm_switches.on("COMMERCIAL_V2"):
@@ -1803,6 +1867,17 @@ class ChangeService:
         return [i.id for i in instances]
 
     @staticmethod
+    def _impact_lock_refusal(change: ChangeRequest, to_status: str) -> None:
+        """HARD #1: assessment never starts on an unlocked impacted set."""
+        if to_status == "in_assessment" and change.impact_confirmed_at is None:
+            from app.services.cm_switches import impact_confirm_step
+            raise ChangeError(
+                "Impacted set is not locked: confirm impacted items before "
+                "starting assessment" if impact_confirm_step(change) else
+                "Impacted set is not locked: it locks when the scoping "
+                "meeting decides 'proceed'")
+
+    @staticmethod
     async def transition(
         session: AsyncSession, change: ChangeRequest, to_status: str,
         user_id: int, *, cancellation_reason: Optional[str] = None,
@@ -1960,12 +2035,20 @@ class ChangeService:
         covering: list = []
         from app.services import cm_switches
         if cm_switches.on("COMMERCIAL_V2"):
+            # C6: a HARD rule is named before any soft rule, so a refusal
+            # never invites an override that cannot unblock the move.
+            ChangeService._impact_lock_refusal(change, to_status)
             # C6: every soft rule that holds the hop needs its own approved
             # override; one bound to another rule lifts nothing here.
             covering, uncovered = await ChangeService.override_cover(
                 session, change, to_status)
-            if uncovered:
-                reason = uncovered[0]
+            from app.services.cm_rules import DECIDE_ONLY_RULES
+            overridable = [r for r in uncovered if r.key not in DECIDE_ONLY_RULES]
+            if uncovered and not overridable:
+                raise ChangeError(
+                    f"{uncovered[0]}. {DECIDE_ONLY_RULES[uncovered[0].key]}")
+            if overridable:
+                reason = overridable[0]
                 pending = ChangeService.pending_override(change, to_status, reason.key)
                 from app.services.cm_rules import DECIDER_WORDS, decider_group, rule_label
                 raise DeviationRequired(
@@ -2020,17 +2103,11 @@ class ChangeService:
                     "Rejection has not been confirmed as sent: record the send "
                     "(POST /rejection-sent) before closing")
 
-        if to_status == "in_assessment" and change.impact_confirmed_at is None:
-            from app.services.cm_switches import impact_confirm_step
-            raise ChangeError(
-                "Impacted set is not locked: confirm impacted items before "
-                "starting assessment" if impact_confirm_step(change) else
-                "Impacted set is not locked: it locks when the scoping "
-                "meeting decides 'proceed'")
+        ChangeService._impact_lock_refusal(change, to_status)
 
         for d in covering:
             d.status = "consumed"
-        from app.services.cm_rules import ABSORB_RULE as _ABSORB
+        from app.services.cm_rules import ABSORB_RULE as _ABSORB, rule_label
         if cm_switches.on("COMMERCIAL_V2"):
             await ChangeService._load_deviations(session, change)
             # An approved override is an OK for the step out of THIS status:
@@ -2040,6 +2117,17 @@ class ChangeService:
                 if (d.status == "approved" and d not in covering
                         and d.guard_key != _ABSORB):
                     d.status = "lapsed"
+                elif d.status == "pending" and d.guard_key != _ABSORB:
+                    # an ask for the step out of THIS status is moot once the
+                    # change left it: no dead 'Decide override' task remains
+                    d.status = "withdrawn"
+                    await ChangeService.append_changelog(
+                        session, change, "deviation_withdrawn",
+                        f"Override #{d.id} ({d.to_status}"
+                        + (f", waives '{rule_label(d.guard_key)}'" if d.guard_key else "")
+                        + f") withdrawn: the change moved to '{to_status}'",
+                        user_id, field_name="deviation",
+                        new_value={"deviation_id": d.id, "status": "withdrawn"})
 
         # Side effects on entry
         if to_status == "scoping" and change.status == "in_assessment":

@@ -184,11 +184,13 @@ class EarlyStageService:
         today (final walk P2-5), so the cockpit disables its next step with
         the reason instead of offering a button that answers 400.
 
-        block = {kind: 'hard' | 'gate' | 'guard', reason, gate_key,
-        target_tab, deviation_possible, pending_deviation_id}. 'hard' is a
-        rule no deviation lifts; 'gate' a D1 gate not answered Yes (target
-        tab 'd1'); 'guard' any other soft guard. A hop an approved deviation
-        already covers is not blocked and not listed. Reject, cancel and hold
+        block = {kind: 'hard' | 'gate' | 'guard' | 'decide', reason,
+        gate_key, target_tab, deviation_possible, pending_deviation_id}.
+        'hard' is a rule no deviation lifts; 'gate' a D1 gate not answered
+        Yes (target tab 'd1'); 'decide' a rule with its own decision (the
+        routing change), never overridden; 'guard' any other soft guard.
+        A hop an approved deviation already covers is not blocked and not
+        listed. Reject, cancel and hold
         are never listed: they are not the next step."""
         from app.models.change_cost import GATE_TARGET_STATUS
         out: dict = {}
@@ -209,7 +211,17 @@ class EarlyStageService:
                     session, change, to_status)
                 if not uncovered:
                     continue
-                reason = uncovered[0]
+                from app.services.cm_rules import DECIDE_ONLY_RULES
+                overridable = [r for r in uncovered if r.key not in DECIDE_ONLY_RULES]
+                if not overridable:
+                    # decided, not overridden (the routing change)
+                    out[to_status] = {
+                        "kind": "decide", "reason": uncovered[0],
+                        "rule": uncovered[0].key, "gate_key": None,
+                        "target_tab": "assessments", "deviation_possible": False,
+                        "pending_deviation_id": None}
+                    continue
+                reason = overridable[0]
                 pending = ChangeService.pending_override(change, to_status, reason.key)
             else:
                 reason = await ChangeService._guard(session, change, to_status)
@@ -881,7 +893,8 @@ class EarlyStageService:
             waits.append({"kind": "scope_not_covered",
                           "text": (f"Offer v{v} no longer covers the scope: "
                                    if v else "The offer no longer covers the scope: ")
-                          + "new offer version or approved deviation",
+                          + "new offer version, or an override (OK of Project "
+                          "Management or Management)",
                           "target_tab": "offer"})
 
         from app.services.price_redaction import PriceViewer

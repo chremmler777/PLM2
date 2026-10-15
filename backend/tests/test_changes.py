@@ -84,10 +84,12 @@ async def test_transition_blocked_without_impacted_items(client, eng_auth, seed)
     res = await _transition(client, eng_auth, change["id"], "scoping")
     assert res.status_code == 200, res.text
 
-    # Listed but not locked -> assessment still refuses.
+    # Listed but not locked -> assessment still refuses, naming the HARD
+    # lock before any soft rule (no override could lift it).
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
-    assert "approved override" in res.json()["detail"].lower()
+    assert "not locked" in res.json()["detail"].lower()
+    assert "X-Deviation-Required" not in res.headers
 
 
 async def test_illegal_transition_rejected(client, eng_auth, seed):
