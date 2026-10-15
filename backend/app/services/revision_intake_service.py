@@ -35,7 +35,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change import ChangeImpactedItem, ChangeRequest, SCOPING_STATUSES
 from app.models.entities import Plant, Project, User
 from app.models.part import Part, PartRevision, RevisionFile, RevisionStatus
-from app.models.revision_intake import CLOSED_STATUSES, ROUTES, RevisionIntake
+from app.models.revision_intake import (
+    CLOSED_STATUSES, LIVE_CHANGE_REASONS, NO_VISIBLE_CHANGE, ROUTES, WHAT_CHANGED_AREAS,
+    RevisionIntake,
+)
 from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
@@ -93,6 +96,21 @@ def _change_is_dead(change: Optional[ChangeRequest]) -> bool:
 
 def _val(v):
     return v.value if hasattr(v, "value") else v
+
+
+def _v2() -> bool:
+    from app.services import cm_switches
+    return cm_switches.on("SCOPING_V2")
+
+
+#: A live change: not dead and not past release.
+NOT_LIVE = ("released", "closed", "cancelled", "rejected")
+LIVE_CHANGE_REASON_LABELS = {
+    "separate_topic": "A separate topic from the live change",
+    "customer_separate_ec": "The customer runs it as a separate EC",
+    "live_change_too_far": "The live change is too far along",
+    "other": "Other",
+}
 
 
 class RevisionIntakeService:
@@ -269,8 +287,47 @@ class RevisionIntakeService:
             return None
         msg = await RevisionIntakeService.link_block_message(session, waiting)
         if msg:
+            if _v2():
+                # minimal C11 (spec §1): a newer index is never refused. It
+                # waits for triage on its own; attached to that change it
+                # supersedes the old one inside it (_link_item).
+                return None
             raise IntakeError(msg)
         return waiting
+
+    @staticmethod
+    async def live_change_for_part(session: AsyncSession, part_id: int,
+                                   project_id: Optional[int] = None,
+                                   exclude_id: Optional[int] = None) -> Optional[ChangeRequest]:
+        """The newest live change (not released, closed, cancelled or
+        rejected) whose impacted set holds the part: triage suggests
+        attaching to it (spec §1)."""
+        q = (select(ChangeRequest)
+             .join(ChangeImpactedItem, ChangeImpactedItem.change_id == ChangeRequest.id)
+             .where(ChangeImpactedItem.part_id == part_id,
+                    ChangeRequest.status.notin_(NOT_LIVE),
+                    ChangeRequest.origin != "engineering_review"))
+        if project_id is not None:
+            q = q.where(ChangeRequest.project_id == project_id)
+        if exclude_id is not None:
+            q = q.where(ChangeRequest.id != exclude_id)
+        return (await session.execute(
+            q.order_by(ChangeRequest.id.desc()).limit(1))).scalars().first()
+
+    @staticmethod
+    async def suggestion(session: AsyncSession, intake: RevisionIntake
+                         ) -> tuple[Optional[str], Optional[ChangeRequest]]:
+        """(suggested route, the live change carrying the part): with
+        SCOPING_V2 a live change that can still take the index makes
+        attach_ecr the suggestion; else the phase rule's route."""
+        if not _v2():
+            return intake.suggested_route, None
+        live = await RevisionIntakeService.live_change_for_part(
+            session, intake.part_id, intake.project_id,
+            exclude_id=intake.change_id if intake.status == "decided" else None)
+        if live is not None and live.status not in ATTACH_REFUSED:
+            return "attach_ecr", live
+        return intake.suggested_route, live
 
     @staticmethod
     async def create(session: AsyncSession, part: Part, revision: PartRevision,
@@ -459,7 +516,12 @@ class RevisionIntakeService:
     @staticmethod
     async def decide(session: AsyncSession, intake: RevisionIntake, route: str,
                      user: User, *, reason: Optional[str] = None,
-                     change_id: Optional[int] = None) -> RevisionIntake:
+                     change_id: Optional[int] = None,
+                     what_changed: Optional[list[str]] = None,
+                     what_changed_ref: Optional[str] = None,
+                     no_change_reason: Optional[str] = None,
+                     live_change_reason: Optional[str] = None,
+                     customer_driven: Optional[bool] = None) -> RevisionIntake:
         from app.services.part_service import ChangelogService
         if not await RevisionIntakeService.may_triage(session, user):
             raise IntakeForbidden(
@@ -485,10 +547,27 @@ class RevisionIntakeService:
             raise IntakeError(
                 "A reason is required to activate an index administratively "
                 "(e.g. title block only, re-upload, no content change)")
-        if route != intake.suggested_route and not reason:
+        suggested, live = await RevisionIntakeService.suggestion(session, intake)
+        v2 = _v2()
+        if v2 and route != "administrative":
+            await RevisionIntakeService._what_changed(
+                intake, what_changed, what_changed_ref, no_change_reason)
+        if v2 and route == "full_ecr" and suggested == "attach_ecr" and live is not None:
+            # spec §1: the live change carries the part; full_ecr anyway
+            # needs a reason pick
+            if live_change_reason not in LIVE_CHANGE_REASONS:
+                raise IntakeError(
+                    f"{live.change_number} ({live.status}) already carries "
+                    f"{(await session.get(Part, intake.part_id)).part_number}: attach the "
+                    "index to it, or say why it needs its own change (reason pick)")
+            if live_change_reason == "other" and not reason:
+                raise IntakeError("Other: say why in the reason")
+            intake.live_change_reason = live_change_reason
+            reason = reason or LIVE_CHANGE_REASON_LABELS[live_change_reason]
+        elif route != suggested and not reason:
             raise IntakeError(
                 f"Say why you pick {ROUTE_LABELS[route]} instead of the suggested "
-                f"{ROUTE_LABELS.get(intake.suggested_route, intake.suggested_route)}")
+                f"{ROUTE_LABELS.get(suggested, suggested)}")
         rev = await session.get(PartRevision, intake.revision_id)
         part = await session.get(Part, intake.part_id)
         if rev is None or part is None:
@@ -504,10 +583,11 @@ class RevisionIntakeService:
         change = None
         if route == "full_ecr":
             change = await RevisionIntakeService._start_full_ecr(
-                session, intake, part, rev, user, reason)
+                session, intake, part, rev, user, reason, related=live)
         elif route == "attach_ecr":
             change = await RevisionIntakeService._attach(
-                session, intake, part, rev, user, change_id, reason)
+                session, intake, part, rev, user, change_id, reason,
+                customer_driven=customer_driven)
         elif route == "engineering_review":
             from app.services.engineering_review_service import EngineeringReviewService
             change = await EngineeringReviewService.start(
@@ -543,6 +623,38 @@ class RevisionIntakeService:
         return intake
 
     @staticmethod
+    async def _what_changed(intake: RevisionIntake, areas: Optional[list[str]],
+                            ref: Optional[str], no_change_reason: Optional[str]) -> None:
+        """Spec §1 "What changed" (required): the areas and a file or compare
+        reference, or "no visible change" with a reason."""
+        from app.services.cm_rules import reference_refusal
+        picked = list(dict.fromkeys(areas or []))
+        if not picked:
+            raise IntakeError(
+                "What changed? Pick the areas (geometry, tolerance, material, "
+                "colour/grain, other / not sure) or 'no visible change'")
+        if NO_VISIBLE_CHANGE in picked:
+            if len(picked) > 1:
+                raise IntakeError("'No visible change' stands alone")
+            why = (no_change_reason or "").strip()
+            if len(why) < 5:
+                raise IntakeError("No visible change: say why the customer sent a "
+                                  "new index (e.g. title block only)")
+            intake.what_changed = [NO_VISIBLE_CHANGE]
+            intake.no_change_reason = why[:255]
+            intake.what_changed_ref = (ref or "").strip()[:255] or None
+            return
+        bad = [a for a in picked if a not in WHAT_CHANGED_AREAS]
+        if bad:
+            raise IntakeError(f"Unknown area: {', '.join(bad)}")
+        refusal = reference_refusal(ref, "What changed: the file or compare reference")
+        if refusal:
+            raise IntakeError(refusal)
+        intake.what_changed = picked
+        intake.what_changed_ref = ref.strip()[:255]
+        intake.no_change_reason = None
+
+    @staticmethod
     def _description(intake: RevisionIntake, part: Part, rev: PartRevision,
                      reason: Optional[str]) -> str:
         bits = [f"Customer {intake.revision_phase or ''} data".replace("  ", " ")
@@ -561,7 +673,8 @@ class RevisionIntakeService:
     async def _link_item(session: AsyncSession, change: ChangeRequest, part: Part,
                          rev: PartRevision, user_id: int, *, lead: bool,
                          attach: bool = False,
-                         reason: Optional[str] = None) -> None:
+                         reason: Optional[str] = None,
+                         intake: Optional[RevisionIntake] = None) -> None:
         """Link the new index to the change as the part's resulting revision,
         adding the part to the impacted set when it is not there yet.
 
@@ -580,14 +693,24 @@ class RevisionIntakeService:
         item = next((i for i in change.impacted_items if i.part_id == part.id), None)
         before = None
         edited = False
+        replaced: Optional[str] = None
         if item is not None:
             if item.resulting_revision_id not in (None, rev.id):
                 other = await session.get(PartRevision, item.resulting_revision_id)
-                raise IntakeError(
-                    f"{part.part_number} already carries revision "
-                    f"{other.revision_name if other else item.resulting_revision_id} in "
-                    f"{change.change_number}: a second new revision of the same part "
-                    f"cannot ride on it")
+                replaced = await RevisionIntakeService._supersede_in_change(
+                    session, change, part, item, other, rev, intake, user_id)
+                if replaced is None:
+                    raise IntakeError(
+                        f"{part.part_number} already carries revision "
+                        f"{other.revision_name if other else item.resulting_revision_id} in "
+                        f"{change.change_number}: a second new revision of the same part "
+                        f"cannot ride on it")
+            elif attach and intake is not None and _v2():
+                # the part was on the change on its active index: D replaces it
+                active_rev = (await session.get(PartRevision, part.active_revision_id)
+                              if part.active_revision_id else None)
+                replaced = item.eng_level_before or (
+                    active_rev.revision_name if active_rev else None)
         elif change.status in IMPACT_LOCKED_STATUSES:
             raise IntakeError(
                 f"{change.change_number} is '{change.status}': its impacted items "
@@ -624,11 +747,69 @@ class RevisionIntakeService:
             new_value={"part_id": part.id, "revision_id": rev.id})
         if change.status == "in_implementation":
             await ChangeService._ensure_check_workflow(session, change, item, user_id)
+        if replaced is not None and intake is not None:
+            # spec §1: on an impacted item "what changed" drives the follow-up
+            from app.services.index_followup_service import IndexFollowupService
+            await IndexFollowupService.on_new_index(
+                session, change, intake, part.id, replaced, rev.revision_name, user_id)
+
+    @staticmethod
+    async def _supersede_in_change(session: AsyncSession, change: ChangeRequest,
+                                   part: Part, item: ChangeImpactedItem,
+                                   old: Optional[PartRevision], rev: PartRevision,
+                                   intake: Optional[RevisionIntake],
+                                   user_id: int) -> Optional[str]:
+        """Minimal C11 (SCOPING_V2): the newer index D supersedes, inside the
+        change, what the part carried there: a pending customer index of this
+        change (its intake superseded, the revision archived) or the internal
+        minor the change spawned (its check workflow cancelled, archived).
+        Returns the replaced revision's name, or None when it may not be
+        replaced (anything else, the switch off, validation onward)."""
+        if old is None or not _v2() or change.status in ATTACH_REFUSED:
+            return None
+        from app.services.change_service import ChangeService
+        from app.services.part_service import ChangelogService
+        old_intake = (await session.execute(
+            select(RevisionIntake).where(RevisionIntake.revision_id == old.id)
+        )).scalar_one_or_none()
+        pending_here = (old_intake is not None and old_intake.activated_at is None
+                        and old_intake.change_id == change.id)
+        internal_minor = (old.source == "internal"
+                          and old.originating_change_id == change.id)
+        if not (pending_here or internal_minor):
+            return None
+        if pending_here:
+            old_intake.status = "superseded"
+            old_intake.superseded_by_id = intake.id if intake is not None else None
+        if internal_minor:
+            from app.models.workflow import WfInstance
+            from app.services.workflow_service import WorkflowService
+            for inst in (await session.execute(select(WfInstance).where(
+                    WfInstance.part_revision_id == old.id,
+                    WfInstance.status == "active"))).scalars().all():
+                await WorkflowService.cancel_workflow(
+                    session, inst.id, user_id,
+                    reason=f"Index {rev.revision_name} replaced {old.revision_name}")
+        old.status = RevisionStatus.ARCHIVED.value
+        item.resulting_revision_id = None
+        await session.flush()
+        await ChangelogService.log_action(
+            session, part_id=part.id, revision_id=old.id, action="intake_replaced",
+            action_description=(f"{old.revision_name} replaced by the newer index "
+                                f"{rev.revision_name} in {change.change_number} (archived)"),
+            performed_by=user_id)
+        await ChangeService.append_changelog(
+            session, change, "intake_replaced",
+            f"Index {rev.revision_name} replaces {old.revision_name} of {part.part_number}",
+            user_id, new_value={"part_id": part.id, "old_revision_id": old.id,
+                                "revision_id": rev.id})
+        return old.revision_name
 
     @staticmethod
     async def _start_full_ecr(session: AsyncSession, intake: RevisionIntake, part: Part,
                               rev: PartRevision, user: User,
-                              reason: Optional[str]) -> ChangeRequest:
+                              reason: Optional[str],
+                              related: Optional[ChangeRequest] = None) -> ChangeRequest:
         from app.services.change_service import ChangeService
         change = await ChangeService.create_change(
             session, project_id=intake.project_id,
@@ -642,13 +823,80 @@ class RevisionIntakeService:
             session, change, "intake_started",
             f"Started from the intake of index {rev.revision_name} ({part.part_number})",
             user.id, new_value={"intake_id": intake.id})
+        if _v2():
+            await RevisionIntakeService._hand_over(session, change, intake, part, rev,
+                                                   user, related)
         return change
+
+    @staticmethod
+    async def _hand_over(session: AsyncSession, change: ChangeRequest,
+                         intake: RevisionIntake, part: Part, rev: PartRevision,
+                         user: User, related: Optional[ChangeRequest]) -> None:
+        """C9 (spec §1 full_ecr): the customer's files linked (by reference,
+        kind customer_file), the Sales owner set by create_change (the
+        project's Sales contact), the related live change linked both ways,
+        and the Sales owner and the lead told once: set the quote deadline,
+        schedule scoping."""
+        from app.models.change import ChangeAttachment
+        from app.services.change_people import department_members_of_change_org
+        from app.services.change_service import ChangeService
+        from app.services.notification_service import NotificationService
+        files = (await session.execute(select(RevisionFile).where(
+            RevisionFile.revision_id == rev.id,
+            RevisionFile.is_deleted.is_(False)).order_by(RevisionFile.id))).scalars().all()
+        for f in files:
+            session.add(ChangeAttachment(
+                change_id=change.id, filename=f.filename[:255], stored_path=f.file_path,
+                content_type=f.mime_type or "application/octet-stream",
+                size_bytes=f.file_size or 0, sha256=f.file_hash or "",
+                phase="baseline", kind="customer_file", uploaded_by=user.id))
+        if related is not None:
+            change.related_change_id = related.id
+            change.description = (
+                f"{change.description}\nRelated: {related.change_number} ({related.status}) "
+                f"also carries {part.part_number}"
+                + (f"; own change because: {LIVE_CHANGE_REASON_LABELS.get(intake.live_change_reason, intake.live_change_reason)}"
+                   if intake.live_change_reason else ""))
+            if related.related_change_id is None:
+                related.related_change_id = change.id
+            await ChangeService.append_changelog(
+                session, related, "related_change",
+                f"{change.change_number} started beside it for index "
+                f"{rev.revision_name} of {part.part_number}", user.id,
+                new_value={"related_change_id": change.id})
+        await session.flush()
+        if files:
+            await ChangeService.append_changelog(
+                session, change, "attachment_added",
+                f"{len(files)} customer file(s) of index {rev.revision_name} linked",
+                user.id, new_value={"revision_id": rev.id,
+                                    "filenames": [f.filename for f in files]})
+        ids = [change.sales_owner_id] if change.sales_owner_id else []
+        if not ids:
+            sales = (await session.execute(select(Department.id).where(
+                Department.name == "Sales"))).scalar_one_or_none()
+            if sales is not None:
+                ids = await department_members_of_change_org(session, change, [sales])
+        title = (f"New customer index {rev.revision_name} on {part.part_number}: "
+                 f"set the quote deadline, kick off ({change.change_number})")[:255]
+        await NotificationService.notify_once(
+            session, [i for i in ids if i != user.id], kind="intake_handover",
+            subject_key=f"intake_handover:{change.id}", title=title,
+            body="Sales: set the quote deadline. Lead: schedule scoping.",
+            link=f"/changes/{change.id}")
+        if change.lead_id not in (None, user.id) and change.lead_id not in ids:
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="intake_handover",
+                subject_key=f"intake_handover:{change.id}", title=title,
+                body="Lead: schedule scoping. Sales sets the quote deadline.",
+                link=f"/changes/{change.id}")
 
     @staticmethod
     async def _attach(session: AsyncSession, intake: RevisionIntake, part: Part,
                       rev: PartRevision, user: User,
                       change_id: Optional[int],
-                      reason: Optional[str] = None) -> ChangeRequest:
+                      reason: Optional[str] = None,
+                      customer_driven: Optional[bool] = None) -> ChangeRequest:
         from app.services.change_service import ChangeService
         if change_id is None:
             raise IntakeError("Choose the open change to attach the index to")
@@ -661,12 +909,29 @@ class RevisionIntakeService:
             raise IntakeError(
                 f"{change.change_number} is '{change.status}': a new index can only "
                 f"join a change up to implementation. Start a full ECR instead")
+        from app.services import mother_plants as mp
+        internal = (_v2() and not change.customer_relevant
+                    and not mp.is_mother_plant(change)
+                    and change.origin != "engineering_review")
+        if internal and customer_driven is None:
+            raise IntakeError(
+                f"{change.change_number} is an internal change: is the new index "
+                "customer-driven? (yes for a customer drawing: it becomes a "
+                "customer change)")
         await RevisionIntakeService._link_item(session, change, part, rev, user.id,
-                                               lead=False, attach=True, reason=reason)
+                                               lead=False, attach=True, reason=reason,
+                                               intake=intake)
         await ChangeService.append_changelog(
             session, change, "intake_attached",
             f"Index {rev.revision_name} of {part.part_number} attached from the intake",
             user.id, new_value={"intake_id": intake.id})
+        if internal:
+            intake.customer_driven = bool(customer_driven)
+            if customer_driven:
+                from app.services.ppap_decision_service import PpapDecisionService
+                await PpapDecisionService.flip(
+                    session, change, user.id,
+                    f"customer index {rev.revision_name} of {part.part_number}")
         return change
 
     # ------------------------------------------------------------------
@@ -717,6 +982,11 @@ class RevisionIntakeService:
                   if part is not None and part.active_revision_id else None)
         retriage = (intake.status == "decided" and intake.activated_at is None
                     and intake.change_id is not None and _change_is_dead(change))
+        needs_triage = intake.status == "pending" or retriage
+        suggested, live = intake.suggested_route, None
+        if needs_triage:
+            # spec §1: a live change carrying the part is the suggestion
+            suggested, live = await RevisionIntakeService.suggestion(session, intake)
         return {
             "id": intake.id,
             "part_id": intake.part_id,
@@ -740,7 +1010,20 @@ class RevisionIntakeService:
             "waiting": intake.is_waiting,
             "revision_phase": intake.revision_phase,
             "part_phase": intake.part_phase,
-            "suggested_route": intake.suggested_route,
+            "suggested_route": suggested,
+            "phase_route": intake.suggested_route,
+            "live_change": ({
+                "id": live.id, "change_number": live.change_number,
+                "title": live.title, "status": live.status,
+                "lead_name": live.lead_name,
+                "customer_relevant": live.customer_relevant,
+                "attachable": live.status not in ATTACH_REFUSED,
+            } if live is not None else None),
+            "what_changed": intake.what_changed or [],
+            "what_changed_ref": intake.what_changed_ref,
+            "no_change_reason": intake.no_change_reason,
+            "live_change_reason": intake.live_change_reason,
+            "replaced_revision": intake.replaced_revision,
             "route": intake.route,
             "route_label": ROUTE_LABELS.get(intake.route) if intake.route else None,
             "reason": intake.reason,
@@ -755,8 +1038,9 @@ class RevisionIntakeService:
             "escalated_at": intake.escalated_at,
             "superseded_by_id": intake.superseded_by_id,
             "created_at": intake.created_at,
-            "needs_triage": intake.status == "pending" or retriage,
-            "can_decide": can_triage and (intake.status == "pending" or retriage),
+            "scoping_v2": _v2(),
+            "needs_triage": needs_triage,
+            "can_decide": can_triage and needs_triage,
         }
 
     @staticmethod

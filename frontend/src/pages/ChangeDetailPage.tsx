@@ -52,6 +52,7 @@ import AuditTimeline from '../components/changes/AuditTimeline';
 import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEditor';
 import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
+import IndexFollowups from '../components/changes/IndexFollowups';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -1229,6 +1230,15 @@ export default function ChangeDetailPage() {
         <div className="space-y-4">
           <ScopeDefinitionBlock change={change} hideWhenEmpty />
           <ScopingMappingHint changeId={changeId} assessments={change.assessments} departments={departments} />
+          {/* §1: a new customer index on a part this change carried: the
+              departments' rechecks, the lead's and Sales' questions. */}
+          {change.scoping_v2 && (
+            <IndexFollowups changeId={changeId} assessments={change.assessments ?? []}
+              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
+              mayLead={isAdmin || isChangeLead || isPmMember} isSales={isSalesMember}
+              leadName={change.lead_name} salesOwnerName={change.sales_owner_name}
+              attachments={change.attachments ?? []} readOnly={readOnly} />
+          )}
           {/* One bucket per routed department: status board collapsed, that
               department's workplace expanded. Everything that used to be a
               separate routing list or loose submit form lives inside it. */}

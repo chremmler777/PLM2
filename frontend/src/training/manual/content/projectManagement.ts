@@ -138,6 +138,7 @@ export const pmChapter: ContentChapter = {
             ['"Not our responsibility":', 'a department can decline. The lead decides; if rejected, the assessment stays with them.'],
             ['"Not feasible":', 'the "Next step" card offers "Reject change", "Back to scoping" or "Override with a reason". The override lifts the "not feasible" rule only, and somebody else gives the OK.'],
             ['All answered:', '"Close assessment → Costing". The confirm dialog lists every verdict and open risk.'],
+            ['A new customer index:', 'when Development attaches a newer index to your change, answer "Index D adds parts or departments?" (No, or Yes with which; due next working day). The departments that had submitted recheck the changed areas. Open rechecks and your answer hold "Close costing" (it lists them).'],
           ],
         },
         { shot: 'pm-routing-pending', alt: 'The "Routing change awaiting approval" banner on "Assessments" with one department marked "Removal requested, awaiting decision".' },

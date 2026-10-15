@@ -992,6 +992,10 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     # HARD #7: Quality's ppap_decision; the Sales answer to a customer flip
     ("POST", "/changes/{change_id}/ppap-decision"),
     ("POST", "/changes/{change_id}/customer-flip/answer"),
+    # §1: rechecks on a new index, the lead's and Sales' questions
+    ("POST", "/changes/{change_id}/rechecks/{recheck_id}/answer"),
+    ("POST", "/changes/{change_id}/index-followups/{intake_id}/scope"),
+    ("POST", "/changes/{change_id}/index-followups/{intake_id}/deadline"),
     ("DELETE", "/changes/{change_id}/concerns/{concern_id}"),
     # plan
     ("POST", "/changes/{change_id}/plan/seed"),

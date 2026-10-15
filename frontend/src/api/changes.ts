@@ -5,7 +5,7 @@ import type {
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
-  FlagType, CheckWhat, AnswerFrom, AnswerForm,
+  FlagType, CheckWhat, AnswerFrom, AnswerForm, IndexFollowup, RecheckAreaAnswer,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn, CostingContext,
@@ -348,6 +348,20 @@ export const changesApi = {
     flag_type?: FlagType; check_what?: CheckWhat; part_id?: number;
     answer_from?: AnswerFrom; scope_effect?: string;
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
+  /** §1: new customer indices on parts this change carried, and their follow-ups. */
+  indexFollowups: (id: number) =>
+    client.get<IndexFollowup[]>(`/v1/changes/${id}/index-followups`).then((r) => r.data),
+  answerRecheck: (id: number, recheckId: number, body: {
+    answers: RecheckAreaAnswer[]; something_else?: { what: string; evidence: string } | null
+  }) => client.post<IndexFollowup[]>(`/v1/changes/${id}/rechecks/${recheckId}/answer`, body)
+    .then((r) => r.data),
+  answerIndexScope: (id: number, intakeId: number, body: { answer: 'no' | 'yes'; note?: string }) =>
+    client.post<IndexFollowup[]>(`/v1/changes/${id}/index-followups/${intakeId}/scope`, body)
+      .then((r) => r.data),
+  answerIndexDeadline: (id: number, intakeId: number, body: {
+    answer: 'holds' | 'new_date' | 'not_asked'; ref?: string; mail_id?: number; new_date?: string
+  }) => client.post<IndexFollowup[]>(`/v1/changes/${id}/index-followups/${intakeId}/deadline`, body)
+    .then((r) => r.data),
   /** HARD #7: Quality's ppap_decision on an internal change. */
   ppapDecision: (id: number, body: { answer: 'no' | 'yes'; basis?: string; ref?: string; part_ids?: number[] }) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/ppap-decision`, body).then((r) => r.data),

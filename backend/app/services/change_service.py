@@ -1472,15 +1472,16 @@ class ChangeService:
                 add("routing_deviation", "soft", rule="routing_deviation_pending")
         if change.status == "costing":
             pending = await ChangeService.costing_pending_department_ids(session, change)
-            if pending:
-                if cm_switches.on("ASSESSMENT_V2"):
-                    # C5: closing costing waits for every finalized costing
-                    text = await ChangeService.costing_not_finalized_text(session, change)
-                    add("costing_input", "soft", n=len(pending),
+            if cm_switches.on("ASSESSMENT_V2"):
+                # C5: closing costing waits for every finalized costing (and
+                # §1: open rechecks, the lead's new-index question)
+                text = await ChangeService.costing_not_finalized_text(session, change)
+                if text:
+                    add("costing_input", "soft", n=len(pending) or 1,
                         rule="costing_not_finalized",
-                        who=(text or "").removeprefix("Costing not finalized: ") or None)
-                else:
-                    add("costing_input", "todo", n=len(pending))
+                        who=text.removeprefix("Costing not finalized: ") or None)
+            elif pending:
+                add("costing_input", "todo", n=len(pending))
             if to == "approved" and change.internal_approved_at is None:
                 add("internal_approval", "hard",
                     who=await ChangeService.internal_approver_text(session, change))
@@ -1806,8 +1807,11 @@ class ChangeService:
         One entry per department that owes its costing and has not
         finalized it; the assessment's owner and due date when known."""
         pending = await ChangeService.costing_pending_department_ids(session, change)
+        # §1: open rechecks and the lead's new-index question hold it too
+        from app.services.index_followup_service import IndexFollowupService
+        index_lines = await IndexFollowupService.open_lines(session, change)
         if not pending:
-            return None
+            return " · ".join(index_lines) if index_lines else None
         from app.services.change_plan_service import ChangePlanService
         by_dept = {a.department_id: a for a in change.assessments}
         names = dict((await session.execute(
@@ -1824,7 +1828,7 @@ class ChangeService:
             due = a.due_date.strftime("due %a %d %b") if a and a.due_date else None
             extra = ", ".join(x for x in (who, due) if x)
             parts.append(f"{names.get(d, f'dept {d}')}" + (f" ({extra})" if extra else ""))
-        return "Costing not finalized: " + ", ".join(parts)
+        return " · ".join(["Costing not finalized: " + ", ".join(parts)] + index_lines)
 
     @staticmethod
     async def _status_before_hold(session: AsyncSession,
@@ -3834,6 +3838,10 @@ class ChangeService:
         # in scoping ("Needs you"), and the Sales answer to a customer flip
         # (all of Sales, the owner named).
         if cm_switches.on("SCOPING_V2"):
+            # §1: rechecks, the lead's new-index question, Sales' deadline one
+            from app.services.index_followup_service import IndexFollowupService
+            out += await IndexFollowupService.task_rows(db, user, open_changes,
+                                                        dep_ids, base)
             from app.services import ppap_decision_service as ppap
             is_sales = None
             for c in open_changes:
@@ -5926,6 +5934,15 @@ class ChangeService:
         stored_path = att.stored_path
         await session.delete(att)
         await session.flush()
+        # A file linked by reference (C9: the intake's customer files) is
+        # the revision's own: never unlink a path somebody else still holds.
+        from app.models.part import RevisionFile
+        shared = (await session.execute(select(func.count()).select_from(RevisionFile)
+                                        .where(RevisionFile.file_path == stored_path))).scalar() \
+            or (await session.execute(select(func.count()).select_from(ChangeAttachment)
+                                      .where(ChangeAttachment.stored_path == stored_path))).scalar()
+        if shared:
+            stored_path = None
         await ChangeService.append_changelog(
             session, change, "attachment_removed", f"Removed {filename}", user_id,
             # kind + offer so a vendor quote's removal can be redacted by the

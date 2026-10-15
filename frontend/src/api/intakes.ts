@@ -51,6 +51,46 @@ export interface Intake {
   /** Project team (spec §18), on My Tasks triage rows. */
   role?: 'main' | 'backup';
   main_name?: string | null;
+  /** ECR-solid §1: the route the phase rule suggests (suggested_route may
+   * be attach_ecr because a live change carries the part). */
+  phase_route?: IntakeRoute | null;
+  /** The newest live change whose impacted set holds the part. */
+  live_change?: LiveChange | null;
+  what_changed?: string[];
+  what_changed_ref?: string | null;
+  no_change_reason?: string | null;
+  live_change_reason?: string | null;
+  replaced_revision?: string | null;
+  /** Served switch SCOPING_V2: what changed is part of the triage. */
+  scoping_v2?: boolean;
+}
+
+export interface LiveChange {
+  id: number;
+  change_number: string;
+  title: string;
+  status: string;
+  lead_name: string | null;
+  customer_relevant: boolean;
+  /** The change can still take the index (up to implementation). */
+  attachable: boolean;
+}
+
+/** §1 "What changed" areas; 'none' = no visible change (needs a reason). */
+export const WHAT_CHANGED_AREAS = ['geometry', 'tolerance', 'material', 'colour_grain', 'other'] as const;
+export type WhatChangedArea = (typeof WHAT_CHANGED_AREAS)[number];
+/** full_ecr although a live change carries the part: the reason pick. */
+export const LIVE_CHANGE_REASONS = ['separate_topic', 'customer_separate_ec', 'live_change_too_far', 'other'] as const;
+
+export interface DecideBody {
+  route: IntakeRoute;
+  reason?: string;
+  change_id?: number;
+  what_changed?: string[];
+  what_changed_ref?: string;
+  no_change_reason?: string;
+  live_change_reason?: string;
+  customer_driven?: boolean;
 }
 
 export interface IntakeList {
@@ -113,7 +153,7 @@ export const intakesApi = {
   list: (params: { part_id?: number; project_id?: number; status?: string; waiting?: boolean }) =>
     client.get<IntakeList>('/v1/intakes', { params }).then((r) => r.data),
   my: () => client.get<MyIntakes>('/v1/intakes/my').then((r) => r.data),
-  decide: (id: number, body: { route: IntakeRoute; reason?: string; change_id?: number }) =>
+  decide: (id: number, body: DecideBody) =>
     client.post<Intake>(`/v1/intakes/${id}/decide`, body).then((r) => r.data),
   review: (changeId: number) =>
     client.get<ReviewState>(`/v1/changes/${changeId}/review`).then((r) => r.data),
@@ -144,7 +184,11 @@ export const ROUTE_EXPLAIN: Record<IntakeRoute, string> = {
 };
 
 /** Why a route is suggested, by the snapshot taken at receipt (spec §17a). */
-export function suggestionReason(i: Pick<Intake, 'suggested_route' | 'revision_phase' | 'part_phase' | 'active_revision_name'>): string {
+export function suggestionReason(i: Pick<Intake, 'suggested_route' | 'revision_phase' | 'part_phase' | 'active_revision_name' | 'live_change'>): string {
+  if (i.suggested_route === 'attach_ecr' && i.live_change) {
+    return `${i.live_change.change_number} (${i.live_change.status}${
+      i.live_change.lead_name ? `, lead ${i.live_change.lead_name}` : ''}) carries this part`
+  }
   switch (i.suggested_route) {
     case 'administrative': return 'First data on a part still in RFQ';
     case 'full_ecr': return i.part_phase === 'series' ? 'The part is in series' : 'Official customer data';

@@ -376,6 +376,8 @@ class ChangeResponse(BaseModel):
     impact_confirm_step: bool = False
     # Served switch SCOPING_V2 (C33 questions / check items, intake follow-ups).
     scoping_v2: bool = False
+    # §1: a full ECR started beside a live change carrying the same part.
+    related_change_id: Optional[int] = None
     # HARD #7 ppap_decision (internal changes) and the customer flip.
     ppap_decision: Optional[str] = None
     ppap_basis: Optional[str] = None
@@ -1164,6 +1166,40 @@ class PpapDecisionIn(BaseModel):
     basis: Optional[str] = None      # a 'no': control_plan | process_sheet | customer_spec
     ref: Optional[str] = Field(default=None, max_length=255)
     part_ids: Optional[List[int]] = None   # a 'yes': the parts
+
+
+class RecheckAreaIn(BaseModel):
+    area: str
+    effect: Optional[bool] = None
+    ref: Optional[str] = Field(default=None, max_length=255)
+    what: Optional[str] = Field(default=None, max_length=1000)
+    evidence: Optional[str] = Field(default=None, max_length=255)
+
+
+class RecheckSomethingElseIn(BaseModel):
+    what: Optional[str] = Field(default=None, max_length=1000)
+    evidence: Optional[str] = Field(default=None, max_length=255)
+
+
+class RecheckAnswerIn(BaseModel):
+    """§1: a department rechecks its assessment on the new index."""
+    answers: List[RecheckAreaIn]
+    something_else: Optional[RecheckSomethingElseIn] = None
+
+
+class IndexScopeIn(BaseModel):
+    """§1: the lead: does the new index add parts or departments?"""
+    answer: str            # no | yes
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class IndexDeadlineIn(BaseModel):
+    """§1: Sales: the new index replaces the old one; does the deadline hold?"""
+    answer: str            # holds | new_date | not_asked
+    ref: Optional[str] = Field(default=None, max_length=255)
+    mail_id: Optional[int] = None
+    new_date: Optional[datetime] = None
+    confirm_by: Optional[datetime] = None
 
 
 class CustomerFlipAnswerIn(BaseModel):

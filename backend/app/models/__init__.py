@@ -38,7 +38,7 @@ from app.models.change_validation_issue import (
 )
 from app.models.change_actual_cost import ChangeActualCost
 from app.models.change_info import ChangeInfoReceipt
-from app.models.revision_intake import RevisionIntake, ChangeReviewAnswer
+from app.models.revision_intake import RevisionIntake, ChangeReviewAnswer, ChangeRecheck
 from app.models.cost_sheet import (
     CostSheetVersion, CostSheetRate, CostSheetMachineClass, CostSheetMachineRate,
     CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
@@ -129,7 +129,7 @@ __all__ = [
     "ChangeOffer",
     "ChangeActualCost",
     "ChangeInfoReceipt",
-    "RevisionIntake", "ChangeReviewAnswer",
+    "RevisionIntake", "ChangeReviewAnswer", "ChangeRecheck",
     "CostSheetVersion", "CostSheetRate", "CostSheetMachineClass", "CostSheetMachineRate",
     "CostSheetSamplingRate", "CostSheetOverhead", "OrgSetting",
     "FormDefinition",

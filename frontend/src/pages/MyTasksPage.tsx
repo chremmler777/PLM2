@@ -261,6 +261,8 @@ const TASK_TAB: Record<string, string> = {
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
   confirm_assumption: '?tab=scoping', ppap_decision: '?tab=scoping',
   customer_flip: '?tab=scoping',
+  assessment_recheck: '?tab=assessments', index_decision: '?tab=assessments',
+  index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
   send_rejection: '?tab=scoping',
   costing_input: '?tab=costing',
   create_quote: '?tab=commercial',
@@ -392,6 +394,13 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('ppap.question');
     case 'customer_flip':
       return t('flip.title');
+    case 'assessment_recheck':
+      return task.reason ?? null;
+    case 'index_decision':
+      return t('tasks.kind.index_decision');
+    case 'index_deadline':
+    case 'index_deadline_confirm':
+      return t(`tasks.kind.${task.kind}`);
     default:
       return null;
   }

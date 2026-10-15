@@ -443,7 +443,17 @@ export const flowChapter: ContentChapter = {
         {
           p:
             'Development decides alone. A reason is required for "Administrative" and for any route ' +
-            'other than the suggested one.',
+            'other than the suggested one. Development also says what changed (the areas and the ' +
+            'compare reference, or "No visible change" with a reason).',
+        },
+        {
+          p:
+            'If a running change already carries the part, attaching is suggested and the new index ' +
+            'replaces the old one inside that change. Then: the departments that already submitted ' +
+            'recheck the changed areas, the lead answers "Index D adds parts or departments?", and ' +
+            'Sales answers "D replaces C; does the quote deadline hold?". A full ECR from a new index ' +
+            'arrives with the customer files attached and the Sales owner named: Sales sets the quote ' +
+            'deadline, the lead schedules scoping.',
         },
       ],
     },

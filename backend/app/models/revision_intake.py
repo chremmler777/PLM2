@@ -15,7 +15,9 @@ ChangeReviewAnswer holds the engineering review's department answers.
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstraint, select
+from sqlalchemy import (
+    JSON, Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint, select,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -27,6 +29,16 @@ INTAKE_STATUSES = ("pending", "decided", "superseded", "rejected")
 CLOSED_STATUSES = ("superseded", "rejected")
 ROUTES = ("full_ecr", "attach_ecr", "engineering_review", "administrative")
 REVIEW_ANSWERS = ("no_impact", "impact")
+# ECR-solid §1 (migration 123): "what changed" at triage. 'none' = no visible
+# change (needs a reason, makes no rechecks).
+WHAT_CHANGED_AREAS = ("geometry", "tolerance", "material", "colour_grain", "other")
+NO_VISIBLE_CHANGE = "none"
+# full_ecr although a live change carries the part: the reason pick.
+LIVE_CHANGE_REASONS = ("separate_topic", "customer_separate_ec", "live_change_too_far",
+                       "other")
+# Sales: "D replaces C; deadline holds?"
+DEADLINE_ANSWERS = ("holds", "new_date", "not_asked")
+RECHECK_STATUSES = ("open", "answered")
 
 
 class RevisionIntake(Base):
@@ -67,6 +79,31 @@ class RevisionIntake(Base):
     superseded_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("revision_intakes.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # ECR-solid §1 (migration 123). What changed (required at triage, switch
+    # SCOPING_V2): areas + a compare reference, or ['none'] + a reason.
+    what_changed: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    what_changed_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    no_change_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # full_ecr although a live change carries the part (LIVE_CHANGE_REASONS)
+    live_change_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # attach to an internal change: customer-driven? (yes flips it)
+    customer_driven: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # The index it replaced inside the change (C for C -> D): set when the
+    # new index lands on a part the change already carried; the follow-ups
+    # (rechecks, the lead's and Sales' questions) hang off it.
+    replaced_revision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # The lead: "Index D adds parts or departments?" (no | yes + note)
+    scope_answer: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    scope_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    scope_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    scope_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Sales (open quote): "D replaces C; deadline holds?"
+    deadline_needed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    deadline_answer: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    deadline_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    deadline_confirm_by: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deadline_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     received_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[received_by], lazy="selectin")
@@ -122,3 +159,32 @@ class ChangeReviewAnswer(Base):
     def answered_by_name(self) -> Optional[str]:
         u = self.answered_by_user
         return u.full_name if u is not None else None
+
+
+class ChangeRecheck(Base):
+    """ECR-solid §1 (migration 123): a new index landed on a part the change
+    already carried; each routed department that had submitted rechecks its
+    assessment per changed area: 'no effect' (drawing ref / checklist row) or
+    'effect' (what + evidence), plus anything else that changed."""
+    __tablename__ = "change_rechecks"
+    __table_args__ = (
+        UniqueConstraint("intake_id", "department_id",
+                         name="uq_change_recheck_intake_department"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+    intake_id: Mapped[int] = mapped_column(ForeignKey("revision_intakes.id"), index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
+    part_id: Mapped[int | None] = mapped_column(ForeignKey("parts.id"), nullable=True)
+    from_revision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_revision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    areas: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # [{area, effect: bool, ref | what + evidence}]
+    answers: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    something_else: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effect: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    status: Mapped[str] = mapped_column(String(10), default="open", server_default="open")
+    answered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

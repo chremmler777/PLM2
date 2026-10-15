@@ -967,6 +967,58 @@ moved, the BOM tree and the viewer fall back past it. Import scripts
   released" from the linked revisions. My Tasks: triage (Development) and
   open review answers (`GET /v1/intakes/my`).
 
+### Intake triage and its follow-ups (ECR-solid §1, C9, C11, 2026-10-15)
+Switch `SCOPING_V2` (`revision_intake_service.py`,
+`index_followup_service.py`, migration 123). Off: the paragraph above.
+- **What changed** (every route but administrative): the areas (geometry,
+  tolerance, material, colour/grain, other / not sure) and a file or compare
+  reference (>= 5 characters, "ok"/"tbd" refused), or **no visible change**
+  with a reason. On an impacted item it drives the follow-up below.
+- **Live change holds the part**: the newest live change (not released,
+  closed, cancelled, rejected) carrying the part is the suggestion
+  (`attach_ecr`, preselected; the dialog names it with status and lead).
+  `full_ecr` anyway needs a reason pick (separate topic / customer runs a
+  separate EC / live change too far along / other + text) and links the two
+  changes both ways (`change_requests.related_change_id`).
+- **A newer index is never refused** (minimal C11): it waits for its own
+  triage (the customer package preview says where it will land). Attached
+  to the change that carries the part, it supersedes there: a pending
+  customer index of that change (its intake `superseded`, revision archived)
+  or the internal minor the change spawned (its check workflow cancelled,
+  archived); `intake_replaced` on the change and the part. Refused from
+  `in_validation` on, as attach is. Attach and supersede are triage actions,
+  not run-team impact edits.
+- **full_ecr hands over (C9)**: the index's files are linked on the change
+  as `customer_file` attachments (by reference: deleting one from the change
+  never removes the revision's file), the Sales owner is the project's Sales
+  contact, the lead the project PM; both are told once
+  (`intake_handover:<id>`): Sales sets the quote deadline, the lead
+  schedules scoping (the kickoff row then lists only the deadline).
+- **Follow-ups on an impacted item** (the part was on the change: the new
+  index D replaces C there):
+  - **Recheck** (`change_rechecks`, task `assessment_recheck`, 2 wd) for
+    every routed department that had submitted; per picked area "no effect"
+    (drawing ref or checklist row) or "effect" (what + evidence), plus
+    "something else changed"; nothing preselected; only that department
+    answers (`POST /changes/{id}/rechecks/{rid}/answer`). An effect in
+    assessment/costing reopens the department's finalized costing; from
+    quoting on it is a scope change of type customer index
+    (`scope_changed_after_quote` + `costing_update` for that department).
+    No visible change: no rechecks. A department that had not submitted sees
+    "Index changed to D: assess on D".
+  - **Lead** (task `index_decision`, 1 wd, past scoping): "Index D adds
+    parts or departments?" no / yes + which
+    (`POST /changes/{id}/index-followups/{intake}/scope`, run team).
+  - **Sales** (an open quote, task `index_deadline`): "D replaces C; deadline
+    holds?" holds (filed mail or ref) / new date (date + mail or ref) / not
+    asked yet (Assumed, confirm by +5 wd: `index_deadline_confirm` until
+    holds or new date) (`.../deadline`, Sales members).
+  - **Internal change**: triage asks "Customer-driven?" (yes for a customer
+    drawing); yes is the customer flip (HARD #7 section).
+  - Open rechecks and the lead's question join the C5 line ("Costing not
+    finalized: ... · Recheck on the new index: Process · New-index task").
+- Read: `GET /changes/{id}/index-followups` (the Assessments tab card).
+
 ### The tab structure (2026-09-25)
 
 Tabs, in order: Overview, Scoping, Impacted, Assessments, Costing, Offer

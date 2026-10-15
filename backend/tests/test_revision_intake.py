@@ -93,6 +93,11 @@ async def _intake(client, pid, key="dev"):
 
 
 async def _decide(client, intake_id, route, key="dev", **extra):
+    if route != "administrative" and "what_changed" not in extra:
+        # ECR-solid §1 (SCOPING_V2): what changed is part of every triage;
+        # these tests are about the routes (test_ecr_solid_intake covers it)
+        extra = {"what_changed": ["geometry"],
+                 "what_changed_ref": "Compare report CR-1", **extra}
     return await client.post(f"{API}/intakes/{intake_id}/decide",
                              json={"route": route, **extra}, headers=await _auth(client, key))
 
@@ -243,9 +248,12 @@ async def test_full_ecr_links_pending_revision_and_release_activates(client, ses
     # the change list knows it came from an intake
     rows = (await client.get(f"{API}/changes", headers=await _auth(client, "admin"))).json()
     assert next(c for c in rows if c["id"] == cid)["from_intake"] is True
-    # a newer index cannot supersede an index linked to a live change
+    # a newer index is received (minimal C11, SCOPING_V2): it waits for its
+    # own triage; the linked one stays linked (test_ecr_solid_intake)
     r = await _receive(client, world["part_id"], statement="official")
-    assert r.status_code == 409 and "linked to" in r.json()["detail"]
+    assert r.status_code == 201, r.text
+    async with session_factory() as s:
+        assert (await s.get(RevisionIntake, i["id"])).status == "decided"
     # the change's release activates exactly the linked revision
     from app.services.change_service import ChangeService
     async with session_factory() as s:

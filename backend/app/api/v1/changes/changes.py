@@ -50,6 +50,7 @@ from app.schemas.change import (
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
     ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, PpapDecisionIn, CustomerFlipAnswerIn,
+    RecheckAnswerIn, IndexScopeIn, IndexDeadlineIn,
     ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
@@ -461,6 +462,7 @@ async def my_change_tasks(
                t.get("concern_id"), t.get("issue_id"), t.get("check_key"),
                t.get("escalation_id"), t.get("action_id"),
                t.get("deviation_id"), t.get("side"),
+               t.get("recheck_id"), t.get("intake_id"),
                t.get("department_id") if t["kind"] in ("costing_input", "costing_update",
                                                         "plan_feedback", "info_ack",
                                                         "release_check", "progress_report",
@@ -3149,6 +3151,93 @@ async def post_customer_flip_answer(
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
     return await _price_safe(db, change, current_user, ChangeResponse)
+
+
+@router.get("/{change_id}/index-followups")
+async def get_index_followups(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§1: the new customer indices on parts this change carried, with the
+    departments' rechecks, the lead's and Sales' questions."""
+    from app.services.index_followup_service import IndexFollowupService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return await IndexFollowupService.for_change(db, change)
+
+
+async def _followup_act(change_id: int, current_user: User, db: AsyncSession, act):
+    from app.services.index_followup_service import FollowupForbidden, IndexFollowupService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await act(change)
+    except FollowupForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await IndexFollowupService.for_change(db, change)
+
+
+async def _intake_of(db: AsyncSession, change, intake_id: int):
+    from app.models.revision_intake import RevisionIntake
+    intake = await db.get(RevisionIntake, intake_id)
+    if intake is None or intake.change_id != change.id:
+        raise HTTPException(status_code=404, detail="Index follow-up not found")
+    return intake
+
+
+@router.post("/{change_id}/rechecks/{recheck_id}/answer")
+async def answer_recheck(
+    change_id: int, recheck_id: int, body: RecheckAnswerIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§1: per changed area 'no effect' (ref) or 'effect' (what + evidence)."""
+    from app.models.revision_intake import ChangeRecheck
+    from app.services.index_followup_service import IndexFollowupService
+
+    async def act(change):
+        recheck = await db.get(ChangeRecheck, recheck_id)
+        if recheck is None or recheck.change_id != change.id:
+            raise HTTPException(status_code=404, detail="Recheck not found")
+        await IndexFollowupService.answer_recheck(
+            db, change, recheck, current_user, [a.model_dump() for a in body.answers],
+            body.something_else.model_dump() if body.something_else else None)
+    return await _followup_act(change_id, current_user, db, act)
+
+
+@router.post("/{change_id}/index-followups/{intake_id}/scope")
+async def answer_index_scope(
+    change_id: int, intake_id: int, body: IndexScopeIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§1: the lead: does the new index add parts or departments?"""
+    from app.services.index_followup_service import IndexFollowupService
+
+    async def act(change):
+        await IndexFollowupService.answer_scope(
+            db, change, await _intake_of(db, change, intake_id), current_user,
+            body.answer, body.note)
+    return await _followup_act(change_id, current_user, db, act)
+
+
+@router.post("/{change_id}/index-followups/{intake_id}/deadline")
+async def answer_index_deadline(
+    change_id: int, intake_id: int, body: IndexDeadlineIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§1: Sales: does the quote deadline hold with the new index?"""
+    from app.services.index_followup_service import IndexFollowupService
+
+    async def act(change):
+        await IndexFollowupService.answer_deadline(
+            db, change, await _intake_of(db, change, intake_id), current_user,
+            body.answer, ref=body.ref, mail_id=body.mail_id, new_date=body.new_date,
+            confirm_by=body.confirm_by)
+    return await _followup_act(change_id, current_user, db, act)
 
 
 @router.post("/{change_id}/concerns/{concern_id}/type", response_model=ConcernResponse)

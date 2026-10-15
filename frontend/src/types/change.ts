@@ -250,6 +250,8 @@ export interface ChangeRequest {
   customer_flip_reason?: string | null;
   flip_answer?: 'notification' | 'offer' | null;
   flip_ref?: string | null;
+  /** §1: a full ECR started beside a live change carrying the same part. */
+  related_change_id?: number | null;
   /** The scope of the change in the project manager's words (2026-10-14). */
   scope_definition?: string | null;
   internal_approved_by?: number | null;
@@ -473,7 +475,15 @@ export type ChangeTaskKind =
   /** HARD #7: Quality's ppap_decision on an internal change ("Needs you"). */
   | 'ppap_decision'
   /** The change became a customer change: notification only or offer? */
-  | 'customer_flip';
+  | 'customer_flip'
+  /** §1: a new index on a part the change carried: the department rechecks. */
+  | 'assessment_recheck'
+  /** §1: the lead: does the new index add parts or departments? */
+  | 'index_decision'
+  /** §1: Sales: the new index replaces the old one; deadline holds? */
+  | 'index_deadline'
+  /** §1: an Assumed "not asked yet" deadline to confirm by its date. */
+  | 'index_deadline_confirm';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -1492,4 +1502,51 @@ export interface StageStateResponse {
   end_state: StageEndState | null;
   scope_change: { covered: boolean; offer_version?: number | null } | null;
   waits: StageWait[];
+}
+
+/** §1: one area of a recheck: 'no effect' with a ref, or 'effect' with what + evidence. */
+export interface RecheckAreaAnswer {
+  area: string;
+  effect: boolean;
+  ref?: string;
+  what?: string;
+  evidence?: string;
+}
+
+export interface ChangeRecheck {
+  id: number;
+  department_id: number;
+  department_name: string | null;
+  areas: string[];
+  status: 'open' | 'answered';
+  effect: boolean | null;
+  answers: RecheckAreaAnswer[];
+  something_else: string | null;
+  answered_by_name: string | null;
+  answered_at: string | null;
+  created_at: string | null;
+}
+
+/** §1: a new customer index on a part the change carried, and its follow-ups. */
+export interface IndexFollowup {
+  intake_id: number;
+  part_id: number;
+  part_number: string | null;
+  from_revision: string | null;
+  to_revision: string | null;
+  superseded: boolean;
+  what_changed: string[];
+  what_changed_ref: string | null;
+  no_change_reason: string | null;
+  rechecks: ChangeRecheck[];
+  lead_open: boolean;
+  scope_answer: 'no' | 'yes' | null;
+  scope_note: string | null;
+  scope_by_name: string | null;
+  scope_at: string | null;
+  deadline_open: boolean;
+  deadline_answer: 'holds' | 'new_date' | 'not_asked' | null;
+  deadline_ref: string | null;
+  deadline_confirm_by: string | null;
+  deadline_by_name: string | null;
 }

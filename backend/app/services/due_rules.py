@@ -171,7 +171,9 @@ CUSTOMER_CONTACT_WD = 5
 #: issue engine's): the task rule leaves them alone.
 OWN_DUE_PREFIXES = ("assessment", "validation_issue_",
                     # C33: an Assumed answer is confirmed by its own date
-                    "confirm_assumption")
+                    "confirm_assumption",
+                    # §1: a deadline "not asked yet" too
+                    "index_deadline_confirm")
 
 
 #: Who sees a late row besides its owner (spec §0 one escalation rule):

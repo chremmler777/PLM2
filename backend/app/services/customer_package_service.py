@@ -103,11 +103,22 @@ class CustomerPackageService:
             return row
         if waiting is not None:
             block = await RevisionIntakeService.link_block_message(session, waiting)
-            if block:
+            from app.services import cm_switches
+            if block and cm_switches.on("SCOPING_V2"):
+                # minimal C11: never refused; triage attaches it to that
+                # change, where it replaces the waiting index
+                from app.models.change import ChangeRequest
+                linked = await session.get(ChangeRequest, waiting.change_id)
+                row.pending_note = (
+                    f"{row.current_revision} is pending in "
+                    f"{linked.change_number if linked else 'a live change'}: the new "
+                    f"index goes to triage and replaces it there once attached")
+            elif block:
                 row.action, row.error = ACTION_ERROR, block
                 return row
-            row.pending_note = (f"{row.current_revision} is still pending triage; "
-                                f"a new index supersedes it")
+            else:
+                row.pending_note = (f"{row.current_revision} is still pending triage; "
+                                    f"a new index supersedes it")
         try:
             classify(row.filename)
             majors = await RevisionService._majors(session, row.part_id)

@@ -336,6 +336,25 @@ async def test_package_preview_resent_waiting_index_is_unchanged(client, world):
                                             "package_index": "ZZ"},
                            files=[("files", ("3CR807425_cover.stp", b"x", "model/step"))])
     row = pv.json()["rows"][0]
+    # minimal C11 (SCOPING_V2): a different index is never refused; it goes
+    # to triage and replaces the waiting one inside that change
+    assert row["action"] == "new_major" and row["error"] is None
+    assert "replaces it there" in row["pending_note"]
+
+
+async def test_package_preview_switch_off_refuses_a_different_index(
+        client, world, monkeypatch):
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
+    h = await _auth(client, "eng")
+    await _receive(client, world["part_id"], statement="official", customer_index="B")
+    i = await _intake(client, world["part_id"])
+    assert (await _decide(client, i["id"], "full_ecr")).status_code == 200
+    pv = await client.post(f"{API}/parts/{world['part_id']}/revisions/customer-package/preview",
+                           headers=h, data={"statement": "official", "received_at": "2026-09-24",
+                                            "package_index": "ZZ"},
+                           files=[("files", ("3CR807425_cover.stp", b"x", "model/step"))])
+    row = pv.json()["rows"][0]
     assert row["action"] == "error" and "linked to" in row["error"]
 
 

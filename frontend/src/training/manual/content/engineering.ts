@@ -310,6 +310,23 @@ export const engineeringChapter: ContentChapter = {
             'A reason is required for "Administrative" and whenever you pick another route than the ' +
             'suggested one.',
         },
+        {
+          points: [
+            ['"What changed?"', 'Tick the areas (geometry, tolerance, material, colour/grain, other / not sure) and name the compare report, the drawing change block or the file. "No visible change" needs a reason (for example title block only).'],
+            ['A running change already carries the part', 'The dialog names it ("CR-12 (In assessment, lead Holmes) already carries 886.197") and "Attach to an open change" is preselected with that change. Starting a "Full ECR" anyway needs a reason pick; the two changes are linked both ways.'],
+            ['A newer index while the old one is still pending in a change', 'It is never refused. Attach it to that change: it replaces the old index there. The departments that already submitted get "Recheck on the new index" for the areas you ticked.'],
+            ['Attaching to an internal change', 'Answer "Customer-driven?". Yes (a customer drawing) makes it a customer change and gives Sales a task.'],
+          ],
+        },
+        { h3: 'Recheck on the new index (every department)' },
+        {
+          p:
+            'When a new index replaces the one you assessed, "Recheck on the new index" appears in My ' +
+            'Tasks and on the Assessments tab. For each changed area pick "No effect" with the ' +
+            'drawing reference or checklist row, or "Effect" with what changes for you and the ' +
+            'evidence. Tick "Something else changed" if you see more. An effect before the quote ' +
+            'reopens your costing; after the quote it becomes a scope change.',
+        },
         { h3: 'Engineering review' },
         {
           p:

@@ -60,6 +60,10 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 ATTACHMENT_KINDS = ("general", "info_request", "info_response",
                     "rejection_letter", "rfq", "change_ppt", "customer_email",
                     "vendor_quote",
+                    # the customer's own file (drawing, 3D, EC sheet): a typed
+                    # customer file completes a customer capture (spec §2);
+                    # intake links the new index's files as these (C9)
+                    "customer_file",
                     # the mother plant's timing (MS Project XML), spec §14
                     "mother_plant_timing")
 
@@ -261,6 +265,10 @@ class ChangeRequest(Base):
     # Sales tasks still show to all of Sales, with this name on them.
     sales_owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
+    # ECR-solid §1 (migration 123): a full ECR started beside a live change
+    # that carries the same part points at it, and it back (both ways).
+    related_change_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_requests.id"), nullable=True)
     # ppap_decision (spec §3, HARD #7, migration 122): on an internal change
     # Quality answers "parameters / tool / material / cycle time changed on
     # any part?" before proceed. no: basis (PPAP_BASES) + ref; yes: the parts,

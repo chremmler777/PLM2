@@ -108,6 +108,16 @@ TASK_KIND = {
     "routing_deviation_decision": ("Decide added department",
                                    "Hinzugefügte Abteilung entscheiden"),
     "not_feasible": ("Not feasible: decide", "Nicht machbar: entscheiden"),
+    # HARD #7 (§3) and the customer flip (§0)
+    "ppap_decision": ("ppap decision", "PPAP-Entscheidung"),
+    "customer_flip": ("Customer notification or offer?", "Kundeninfo oder Angebot?"),
+    # §1: a new customer index on a part the change carries
+    "assessment_recheck": ("Recheck on the new index", "Auf neuen Index nachprüfen"),
+    "index_decision": ("New index: adds parts or departments?",
+                       "Neuer Index: weitere Teile oder Abteilungen?"),
+    "index_deadline": ("New index: deadline holds?", "Neuer Index: hält der Termin?"),
+    "index_deadline_confirm": ("Confirm the deadline with the customer",
+                               "Termin mit dem Kunden bestätigen"),
 }
 
 GROUPS = {

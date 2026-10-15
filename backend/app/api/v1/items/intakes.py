@@ -29,6 +29,14 @@ class DecideIn(BaseModel):
     route: str = Field(..., pattern="^(full_ecr|attach_ecr|engineering_review|administrative)$")
     reason: Optional[str] = Field(None, max_length=4000)
     change_id: Optional[int] = None
+    # ECR-solid §1 (SCOPING_V2): what changed (required except administrative)
+    what_changed: Optional[list[str]] = None
+    what_changed_ref: Optional[str] = Field(None, max_length=255)
+    no_change_reason: Optional[str] = Field(None, max_length=255)
+    # full_ecr although a live change carries the part: the reason pick
+    live_change_reason: Optional[str] = Field(None, max_length=30)
+    # attach to an internal change: customer-driven? (yes flips it)
+    customer_driven: Optional[bool] = None
 
 
 def _http(e: Exception) -> HTTPException:
@@ -86,7 +94,11 @@ async def decide_intake(
         intake = await RevisionIntakeService.get(db, intake_id, current_user)
         await RevisionIntakeService.decide(
             db, intake, body.route, current_user, reason=body.reason,
-            change_id=body.change_id)
+            change_id=body.change_id, what_changed=body.what_changed,
+            what_changed_ref=body.what_changed_ref,
+            no_change_reason=body.no_change_reason,
+            live_change_reason=body.live_change_reason,
+            customer_driven=body.customer_driven)
         await db.commit()
     except _ERRORS as e:
         await db.rollback()

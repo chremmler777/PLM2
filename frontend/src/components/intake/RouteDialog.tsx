@@ -10,9 +10,11 @@ import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 import FieldGroup from '../common/FieldGroup'
 import {
-  ROUTE_EXPLAIN, ROUTE_LABELS, suggestionReason, type Intake, type IntakeRoute,
+  LIVE_CHANGE_REASONS, ROUTE_EXPLAIN, ROUTE_LABELS, WHAT_CHANGED_AREAS, suggestionReason,
+  type DecideBody, type Intake, type IntakeRoute,
 } from '../../api/intakes'
 import { STATUS_LABELS } from '../../lib/changeStatus'
+import { t } from '../../i18n/cmLabels'
 import type { ChangeStatus } from '../../types/change'
 
 const ROUTES: IntakeRoute[] = ['engineering_review', 'full_ecr', 'attach_ecr', 'administrative']
@@ -26,13 +28,23 @@ export interface RouteDialogProps {
   intake: Intake
   pending?: boolean
   onClose: () => void
-  onSubmit: (body: { route: IntakeRoute; reason?: string; change_id?: number }) => void
+  onSubmit: (body: DecideBody) => void
 }
 
 export default function RouteDialog({ intake, pending = false, onClose, onSubmit }: RouteDialogProps) {
   const [route, setRoute] = useState<IntakeRoute>(intake.suggested_route ?? 'engineering_review')
   const [reason, setReason] = useState('')
-  const [changeId, setChangeId] = useState<number | ''>('')
+  // §1: a live change carrying the part is the suggestion, preselected
+  const live = intake.live_change ?? null
+  const [changeId, setChangeId] = useState<number | ''>(live?.attachable ? live.id : '')
+  // §1 "What changed" (SCOPING_V2): areas + compare ref, or no visible change + reason
+  const v2 = !!intake.scoping_v2
+  const [areas, setAreas] = useState<string[]>([])
+  const [noChange, setNoChange] = useState(false)
+  const [compareRef, setCompareRef] = useState('')
+  const [noChangeReason, setNoChangeReason] = useState('')
+  const [liveReason, setLiveReason] = useState('')
+  const [customerDriven, setCustomerDriven] = useState<'' | 'yes' | 'no'>('')
   const { data: changes = [] } = useQuery({
     queryKey: ['changes', { project_id: intake.project_id }],
     queryFn: () => changesApi.list({ project_id: intake.project_id }),
@@ -55,9 +67,23 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
     ? (pickedDetail.impacted_items ?? []).some((i) => i.part_id === intake.part_id)
     : undefined
   const frozenRefused = frozen && carried === false
-  const reasonNeeded = route === 'administrative' || route !== intake.suggested_route
+  // full_ecr although the live change could take it: a reason pick
+  const liveReasonNeeded = v2 && route === 'full_ecr' && intake.suggested_route === 'attach_ecr' && !!live
+  const reasonNeeded = route === 'administrative'
+    || (liveReasonNeeded ? liveReason === 'other' : route !== intake.suggested_route)
+  const whatNeeded = v2 && route !== 'administrative'
+  const whatMissing = whatNeeded && (noChange ? noChangeReason.trim().length < 5
+    : areas.length === 0 || compareRef.trim().length < 5)
+  // attaching to an internal change: customer-driven? (yes flips it)
+  const pickedInternal = route === 'attach_ecr' && !!picked && !picked.customer_relevant
+    && picked.origin !== 'mother_plant' && picked.origin !== 'engineering_review'
+  const driverMissing = v2 && pickedInternal && customerDriven === ''
   const blocked = pending || (reasonNeeded && !reason.trim()) || (route === 'attach_ecr' && changeId === '')
-    || frozenRefused
+    || frozenRefused || whatMissing || (liveReasonNeeded && liveReason === '') || driverMissing
+  const toggleArea = (a: string) => {
+    setNoChange(false)
+    setAreas((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]))
+  }
 
   const reasonId = useId()
   const changeSelectId = useId()
@@ -77,11 +103,29 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
             onClick={() => onSubmit({
               route, reason: reason.trim() || undefined,
               change_id: route === 'attach_ecr' && changeId !== '' ? changeId : undefined,
+              ...(whatNeeded ? (noChange
+                ? { what_changed: ['none'], no_change_reason: noChangeReason.trim(),
+                  what_changed_ref: compareRef.trim() || undefined }
+                : { what_changed: areas, what_changed_ref: compareRef.trim() }) : {}),
+              ...(liveReasonNeeded ? { live_change_reason: liveReason } : {}),
+              ...(v2 && pickedInternal ? { customer_driven: customerDriven === 'yes' } : {}),
             })}>
             {route === 'administrative' ? 'Activate now' : `Decide: ${ROUTE_LABELS[route]}`}
           </Button>
         </>
       )}>
+      {live && (
+        <p data-testid="live-change" role="note"
+          className="mb-3 rounded-lg border border-sky-700/60 bg-sky-950/30 px-3 py-2 text-sm text-sky-100">
+          {t('intake.liveChange')
+            .replace('{n}', live.change_number)
+            .replace('{s}', STATUS_LABELS[live.status as ChangeStatus] ?? live.status)
+            .replace('{l}', live.lead_name ?? '-')
+            .replace('{p}', intake.part_number ?? '')}
+          {!live.attachable && ` ${t('intake.liveNotAttachable')}`}
+        </p>
+      )}
+
       <FieldGroup legend="Route" legendHidden>
         <div className="space-y-2">
           {ROUTES.map((r) => {
@@ -137,6 +181,72 @@ export default function RouteDialog({ intake, pending = false, onClose, onSubmit
             </span>
           )}
         </div>
+      )}
+
+      {liveReasonNeeded && (
+        <div className="mt-3">
+          <label className="block text-sm text-slate-300" htmlFor={`${reasonId}-live`}>
+            {t('intake.liveReason').replace('{n}', live?.change_number ?? '')}{' '}
+            <span className="text-amber-300">(required)</span>
+          </label>
+          <select id={`${reasonId}-live`} value={liveReason} data-testid="live-reason"
+            onChange={(e) => setLiveReason(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 focus:border-sky-500 focus:outline-none">
+            <option value="">{t('intake.liveReasonPick')}</option>
+            {LIVE_CHANGE_REASONS.map((r) => <option key={r} value={r}>{t(`intake.liveReason.${r}`)}</option>)}
+          </select>
+        </div>
+      )}
+
+      {v2 && pickedInternal && (
+        <fieldset className="mt-3" data-testid="customer-driven">
+          <legend className="text-sm text-slate-300">
+            {t('intake.customerDriven').replace('{n}', picked?.change_number ?? '')}{' '}
+            <span className="text-amber-300">(required)</span>
+          </legend>
+          <div className="mt-1 flex gap-4 text-sm">
+            {(['yes', 'no'] as const).map((v) => (
+              <label key={v} className="flex cursor-pointer items-center gap-1.5 text-slate-200">
+                <input type="radio" name="customer-driven" checked={customerDriven === v}
+                  data-testid={`customer-driven-${v}`} onChange={() => setCustomerDriven(v)} />
+                {t(`intake.customerDriven.${v}`)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
+      {whatNeeded && (
+        <fieldset className="mt-3" data-testid="what-changed">
+          <legend className="text-sm text-slate-300">
+            {t('intake.whatChanged')} <span className="text-amber-300">(required)</span>
+          </legend>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            {WHAT_CHANGED_AREAS.map((a) => (
+              <label key={a} className="flex cursor-pointer items-center gap-1.5 text-slate-200">
+                <input type="checkbox" checked={areas.includes(a)} data-testid={`area-${a}`}
+                  onChange={() => toggleArea(a)} />
+                {t(`intake.area.${a}`)}
+              </label>
+            ))}
+            <label className="flex cursor-pointer items-center gap-1.5 text-slate-200">
+              <input type="checkbox" checked={noChange} data-testid="area-none"
+                onChange={(e) => { setNoChange(e.target.checked); if (e.target.checked) setAreas([]) }} />
+              {t('intake.area.none')}
+            </label>
+          </div>
+          <input value={compareRef} onChange={(e) => setCompareRef(e.target.value)}
+            data-testid="what-ref" aria-label={t('intake.compareRef')}
+            placeholder={t('intake.compareRef') + (noChange ? ` (${t('intake.optional')})` : '')}
+            className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+          {noChange && (
+            <input value={noChangeReason} onChange={(e) => setNoChangeReason(e.target.value)}
+              data-testid="no-change-reason" aria-label={t('intake.noChangeReason')}
+              placeholder={t('intake.noChangeReason')}
+              className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+          )}
+          <span className="mt-1 block text-xs text-slate-400">{t('intake.whatChangedHint')}</span>
+        </fieldset>
       )}
 
       <div className="mt-3">
