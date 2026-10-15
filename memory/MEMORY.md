@@ -32,7 +32,7 @@
 - [SharePoint lessons mirror](sharepoint-lessons-mirror-2026-09-15.md) — Toccoa LL list export + import script; LL-0001..0019 on local + prod as of 2026-09-15
 - [ECR routing & risks 2026-09-16](ecr-assessment-routing-2026-09-16.md) — add-department mid-assessment (4-eyes), per-department risk types + templates (mig 066), RASIC picker at scoping + not-our-responsibility (mig 067), own risk types in dropdown (mig 068), costing table + per-dept cost categories (mig 069), vendor on estimate lines (mig 070); prod DB still at 064
 - [ECR long-term cost effects](ecr-long-term-cost-effects-2026-09-16.md) — costing must also capture recurring per-piece effects on article price (cycle time, weight, PM cycle, scrap, refurbishment); noted 2026-09-16, not built
-- [Prod SSH fail2ban](prod-ssh-fail2ban-2026-09-22.md) — source ~/.ssh/agent.env before any ssh to ktx-server; never retry a failed auth
+- [Prod SSH fail2ban](prod-ssh-fail2ban-2026-09-22.md) — source ~/.ssh/agent.env + BatchMode=yes before any ssh to ktx-server; global hook ktx-ssh-guard.py enforces it; never retry a failed auth
 - [Prod data is truth](prod-data-is-truth-2026-09-22.md) — data ops run on prod against prod data; never push local DB, never decide from local state
 - [Mirror parts relation](mirror-parts-relation-2026-09-22.md) — mirrors are a mirror_of relation, never copies; UI (chip, tree marker, red viewer banner) shipped 2026-09-22
 - [1994 nominated E1 reset 2026-09-22](1994-nominated-e1-reset-2026-09-22.md) — prod 1994 = 12 nominated articles 001-012, drawing names, E1 · index, mirrors as relations, E1.1 on 206.886.197
@@ -56,3 +56,10 @@
 - [Tool shrink decision record 2026-10-05](tool-shrink-decision-record-2026-10-05.md) - PLM2 shrinkage source+reason+verify per tool, reported to MaterialDB; deployed 10/05 (plm2 112, MaterialDB c3e4f5a6b7d8)
 - [No hard reset in plm2](no-hard-reset-shared-repo.md) - other sessions keep uncommitted work; new commit on top, never reset --hard/stash/clean
 - [VW426 drawings import 2026-10-05](vw426-drawings-import-2026-10-05.md) - Atlas 1864 drawing releases A/B/C(/D) on prod; six 7.10.26 indexes assumed
+- [Strategic business tooling map 2026-10-08](strategic-business-tooling-map-2026-10-08.md) - Huascar strategic list -> RFQ quotes per tool/shop (quotes only, no estimator), RFQ25/26 CBD ex/incl tariff, tariff basis per shop, NextGen CBD column error
+- [Cavity layout 2026-10-10](cavity-layout-2026-10-10.md) - cavities are "2+2" text, never summed; mig 114 live on prod 56d621b6
+- [Revision update simplify (open)](revision-update-simplify-2026-10-10.md) - plan later: one simple 'new customer data' path + old drawing/new data; 206.886.197 incident
+- [ECR live test 1 2026-10-14](ecr-live-test-1-2026-10-14.md) - first live test: question stays asker task (asker+Sales+PM answer), open-flags popup, auto parts lock on proceed, PM scope text, per-dept assessment->costing pipeline
+- [1994 E1.1 FZ toolmaker data 2026-10-15](1994-e11-fz-toolmaker-2026-10-15.md) - 4 E1.1 drafts awaiting Brose confirmation; naming rule; data-exchange + moldflow backlog; stage via /tmp + docker cp
+- [Part-data mail 2026-10-15](part-data-mail-2026-10-15.md) - KTX Apps Graph mail like TWOS, 1994 list (EC kickoff + Karl), 5-min digest, trial first
+- [Session state 2026-10-15](session-state-2026-10-15.md) - end of day: deployed 0536924c/alembic 115, ecr-solid migration 115 clash, open decisions, backlog
