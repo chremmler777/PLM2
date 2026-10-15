@@ -711,7 +711,10 @@ Switch `ASSESSMENT_V2` (migration 126: `supplier_waits`).
   asked on (today or earlier), expected by (not in the past), optionally the
   position it prices; phase *costing* (assessment, costing) or
   *implementation* (approved, in implementation). Recorded by the
-  department, PM or admin; one open wait per department and vendor. While
+  department, PM or admin, only for an active department that works on the
+  change (routed for its assessment and costing; implementing it
+  afterwards); one open wait per department and vendor. The header and the
+  digest show the waits of the phase the change is in. While
   open: the department's finalize and "no cost" are refused; its
   `costing_input` row is due at expected-by (the late clock pauses, spec
   §0, also in the sweep and the lead's Overdue group via `owed_items`); C5

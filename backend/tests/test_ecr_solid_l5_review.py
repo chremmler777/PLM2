@@ -267,3 +267,36 @@ async def test_internal_wording_offers_absorb_only(client, cc, seed, session_fac
         titles = (await s.execute(select(Notification.title).where(
             Notification.subject_key == f"estimate_low:{pid}"))).scalars().all()
         assert titles and all("re-approve" not in t and "absorb" in t for t in titles)
+
+
+# --- R25: a supplier wait for a department that works on the change ----------
+
+async def test_wait_only_for_an_active_routed_department(client, cc, session_factory):
+    from app.models.workflow import Department
+    async with session_factory() as s:
+        off = Department(name="Logistics", flow_type="action", is_active=False)
+        unrouted = Department(name="Production", flow_type="action", is_active=True)
+        s.add_all([off, unrouted])
+        await s.commit()
+        off_id, unrouted_id = off.id, unrouted.id
+    # negative (PM, who may act for any department): inactive, unrouted, unknown
+    for dept, words in ((off_id, "active"), (unrouted_id, "no part"),
+                        (999999, "active")):
+        res = await _wait(client, cc["cid"], cc["lead"], dept)
+        assert res.status_code == 400 and words in res.json()["detail"], res.text
+    res = await _wait(client, cc["cid"], cc["lead"], cc["shop"])
+    assert res.status_code == 200, res.text
+
+
+async def test_a_costing_wait_leaves_the_header_when_costing_closes(
+        client, cc, session_factory):
+    assert (await _wait(client, cc["cid"], cc["dale"], cc["shop"])).status_code == 200
+    detail = (await client.get(_u(cc["cid"]), headers=cc["dale"])).json()
+    assert [w["vendor_name"] for w in detail["open_supplier_waits"]] == ["FZ"]
+    await _set(session_factory, cc["cid"], status="quoted")
+    detail = (await client.get(_u(cc["cid"]), headers=cc["dale"])).json()
+    assert detail["open_supplier_waits"] == []
+    # back in costing (a re-cost), it is there again
+    await _set(session_factory, cc["cid"], status="costing")
+    detail = (await client.get(_u(cc["cid"]), headers=cc["dale"])).json()
+    assert [w["vendor_name"] for w in detail["open_supplier_waits"]] == ["FZ"]

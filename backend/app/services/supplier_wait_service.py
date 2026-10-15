@@ -67,6 +67,16 @@ async def open_waits(session: AsyncSession, change_ids: list[int],
         q.order_by(SupplierWait.asked_on, SupplierWait.id))).scalars().all())
 
 
+async def current_waits(session: AsyncSession,
+                        changes: list[ChangeRequest]) -> list[SupplierWait]:
+    """The open waits of the phase each change is in now (one query): what
+    the header and the digest say. A costing wait outlives costing in the
+    table but not on screen; a change back in costing shows it again."""
+    phase = {c.id: phase_of(c) for c in changes}
+    ids = [cid for cid, ph in phase.items() if ph is not None]
+    return [w for w in await open_waits(session, ids) if w.phase == phase[w.change_id]]
+
+
 async def open_by_department(session: AsyncSession, change_ids: list[int],
                              phase: str) -> dict[tuple[int, int], SupplierWait]:
     """{(change id, department id): its latest-expected open wait}."""
@@ -114,6 +124,25 @@ async def create(session: AsyncSession, change: ChangeRequest, actor: User, *,
         raise SupplierWaitForbidden(
             "Only a member of that department, Project Management or an admin "
             "records its supplier wait")
+    # R25: an inactive or unknown department grants nothing, and a wait
+    # belongs to a department that works on this change: routed for the
+    # assessment and its costing, implementing it afterwards
+    dept = await session.get(Department, department_id)
+    if dept is None or not dept.is_active:
+        raise SupplierWaitError("Pick an active department of this change")
+    if phase == "costing":
+        works = any(a.department_id == department_id
+                    and a.effective_status != "waived"
+                    for a in change.assessments)
+    else:
+        from app.services.implementation_service import ImplementationService
+        works = department_id in await ImplementationService.implementing_department_ids(
+            session, change)
+    if not works:
+        raise SupplierWaitError(
+            f"{dept.name} has no part in this change's "
+            + ("assessment and costing" if phase == "costing" else "implementation")
+            + ": its supplier wait would hold nothing")
     vendor = (vendor_name or "").strip()
     if len(vendor) < 2:
         raise SupplierWaitError("Name the supplier you wait on")

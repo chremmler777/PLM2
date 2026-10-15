@@ -952,10 +952,12 @@ async def get_change(
     change.costing_owed_department_ids = _ec["owed"]
     change.costing_finalized_department_ids = _ec["finalized"]
     change.costing_no_cost = {str(k): v for k, v in _ec["no_cost"].items()}
-    # spec §0/§4: the header's "Waiting on <vendor> since <date>"
+    # spec §0/§4: the header's "Waiting on <vendor> since <date>": the
+    # waits of the phase the change is in (a costing wait left open says
+    # nothing once costing closed; it shows again if costing reopens)
     from app.services import supplier_wait_service as _sw
     change.open_supplier_waits = await _sw.serialize(
-        db, await _sw.open_waits(db, [change.id]))
+        db, await _sw.current_waits(db, [change]))
     change.costing_unpriced = []
     if change.status in ("costing", "quoting"):
         from app.services import costing_rates

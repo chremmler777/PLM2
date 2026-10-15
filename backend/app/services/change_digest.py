@@ -44,7 +44,7 @@ async def change_lines(session: AsyncSession, changes: list,
     from app.services import supplier_wait_service as _sw
     supplier = {}
     if cm_switches.on("ASSESSMENT_V2"):
-        for w in await _sw.open_waits(session, [c.id for c in changes]):
+        for w in await _sw.current_waits(session, changes):
             supplier.setdefault(w.change_id, []).append(w)
     out: dict[int, str] = {}
     since = now - WINDOW
