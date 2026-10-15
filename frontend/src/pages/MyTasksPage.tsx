@@ -259,7 +259,8 @@ const TASK_TAB: Record<string, string> = {
   kickoff: '', hold_resume: '', scoping_wrapup: '?tab=scoping',
   impact_confirm: '?tab=impacted', customer_response: '',
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
-  confirm_assumption: '?tab=scoping',
+  confirm_assumption: '?tab=scoping', ppap_decision: '?tab=scoping',
+  customer_flip: '?tab=scoping',
   send_rejection: '?tab=scoping',
   costing_input: '?tab=costing',
   create_quote: '?tab=commercial',
@@ -387,6 +388,10 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.customer_response');
     case 'confirm_assumption':
       return t('tasks.hint.confirm_assumption').replace('{x}', task.reason ?? '');
+    case 'ppap_decision':
+      return t('ppap.question');
+    case 'customer_flip':
+      return t('flip.title');
     default:
       return null;
   }

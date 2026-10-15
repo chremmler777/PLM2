@@ -49,7 +49,7 @@ from app.schemas.change import (
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
-    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn,
+    ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, PpapDecisionIn, CustomerFlipAnswerIn,
     ScopeDefinitionIn,
     CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
@@ -3098,6 +3098,57 @@ async def _concern_act(change_id: int, current_user: User, db: AsyncSession, act
     await db.commit()
     await db.refresh(concern)
     return concern
+
+
+@router.post("/{change_id}/ppap-decision", response_model=ChangeResponse)
+async def post_ppap_decision(
+    change_id: int, body: PpapDecisionIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """HARD #7: Quality answers "parameters / tool / material / cycle time
+    changed on any part?" on an internal change in capture or scoping. A
+    'yes' flips it to a customer change."""
+    from app.services.ppap_decision_service import PpapDecisionService, PpapForbidden
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await PpapDecisionService.decide(
+            db, change, current_user, body.answer, basis=body.basis, ref=body.ref,
+            part_ids=body.part_ids)
+    except PpapForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
+
+
+@router.post("/{change_id}/customer-flip/answer", response_model=ChangeResponse)
+async def post_customer_flip_answer(
+    change_id: int, body: CustomerFlipAnswerIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The Sales owner's answer to a customer flip: notification only (a
+    filed customer mail or a reference) or offer needed (quote deadline)."""
+    from app.services.ppap_decision_service import PpapDecisionService, PpapForbidden
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await PpapDecisionService.answer_flip(
+            db, change, current_user, body.answer, ref=body.ref,
+            mail_id=body.mail_id, quote_deadline=body.quote_deadline)
+    except PpapForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/concerns/{concern_id}/type", response_model=ConcernResponse)

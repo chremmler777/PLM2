@@ -1136,6 +1136,14 @@ class MeetingService:
         if decision == "proceed" and blocking:
             raise ChangeError(
                 await MeetingService.open_flags_refusal(session, blocking))
+        # HARD #7 (SCOPING_V2): an internal change proceeds once Quality
+        # answered the ppap_decision; a flipped one once the Sales owner
+        # answered "notification only or offer needed?".
+        if decision == "proceed":
+            from app.services.ppap_decision_service import PpapDecisionService
+            why = PpapDecisionService.proceed_refusal(change)
+            if why:
+                raise ChangeError(why)
 
         # Picked parts are still required: proceeding locks the set they make
         # up (switch off, cm_switches), and an empty set locks nothing.

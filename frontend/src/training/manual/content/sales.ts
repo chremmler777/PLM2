@@ -81,7 +81,8 @@ export const salesChapter: ContentChapter = {
           points: [
             ['Customer mails', 'are filed on the change as a tracked list. Everybody may upload one; you own the relationship.'],
             ['A question from the team', 'arrives as an open question at scoping. Answer it "Confirmed" or "Assumed". A customer question is "Confirmed" only by the customer\'s mail (pick it from the filed mails) or document. Without it answer "Assumed": the value with its unit and the risk if it is wrong. You then get "Confirm an assumption" in My Tasks, due in 5 working days. The asker or PM marks the question solved; you never do.'],
-            ['"Needs more info"', 'from the scoping meeting gives you the task to get the missing information from the customer.'],
+            ['"Not yet"', 'from the scoping meeting keeps the change in scoping while the open questions wait for their answers.'],
+            ['"Customer notification or offer needed?"', 'appears when an internal change became a customer change (Quality said parameters, tool, material or cycle time changed, or a customer index arrived). Answer "Notification only" with the filed mail or a reference, or "Offer needed" with the quote deadline. The change cannot proceed before you answer.'],
             ['A rejected change', 'shows "Send rejection letter": attach the letter, send it, then "Sent to customer, close ECR".'],
           ],
         },

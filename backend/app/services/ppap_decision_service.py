@@ -1,0 +1,264 @@
+"""ppap_decision and the customer flip (ECR-solid spec §0 "Customer flip",
+§3 "Internal", HARD #7; switch SCOPING_V2).
+
+- ppap_decision: on an internal change Quality answers, from scoping open,
+  "Parameters / tool / material / cycle time changed on any part?" Nothing is
+  preselected. 'no' names its basis (control plan / process sheet / customer
+  spec) and a reference; 'yes' names the parts and flips the change to a
+  customer change. An internal change proceeds only once it is answered
+  (HARD #7).
+- The customer flip (ppap 'yes', or a customer index on an internal change):
+  customer_relevant, the project's Sales contact as Sales owner, the project
+  PM as lead; the Sales owner answers "notification only" (filed mail or a
+  reference) or "offer needed" (the quote deadline). Proceed waits for that
+  answer. A flip at approved or later leaves the price open (HARD #9 at
+  close) until a supplement is accepted or the money is absorbed.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.change import ChangeAttachment, ChangeRequest, SCOPING_STATUSES
+from app.models.entities import User
+from app.services import cm_switches
+from app.services.change_service import ChangeError, ChangeService
+
+PPAP_ANSWERS = ("no", "yes")
+PPAP_BASES = ("control_plan", "process_sheet", "customer_spec")
+FLIP_ANSWERS = ("notification", "offer")
+#: Statuses from which a flip leaves the price open (spec §0 [R4]).
+AFTER_APPROVAL = ("approved", "in_implementation", "in_validation", "released")
+
+
+class PpapForbidden(ChangeError):
+    """The caller may not give this answer: 403."""
+
+
+def applies(change: ChangeRequest) -> bool:
+    """Does this change owe Quality's ppap_decision? An internal change
+    (origin internal, not a mother-plant change or an engineering review)
+    with SCOPING_V2 on. A change that flipped keeps its recorded answer."""
+    return (cm_switches.on("SCOPING_V2") and not change.customer_relevant
+            and getattr(change, "origin", None) == "internal")
+
+
+def flip_open(change: ChangeRequest) -> bool:
+    """A flip whose Sales answer is still owed."""
+    return change.customer_flip_at is not None and change.flip_answer is None
+
+
+class PpapDecisionService:
+
+    @staticmethod
+    def proceed_refusal(change: ChangeRequest) -> Optional[str]:
+        """HARD #7: why 'proceed' (scoping -> in_assessment) is refused, or
+        None."""
+        if not cm_switches.on("SCOPING_V2"):
+            return None
+        if applies(change) and change.ppap_decision is None:
+            return ("HARD #7: Quality answers the ppap_decision first "
+                    "(parameters / tool / material / cycle time changed on any "
+                    "part?). No override lifts it")
+        if flip_open(change):
+            who = change.sales_owner_name or "Sales"
+            return (f"HARD #7: the change became a customer change; proceed "
+                    f"waits for {who}: customer notification only, or offer "
+                    "needed?")
+        return None
+
+    @staticmethod
+    async def decide(
+        session: AsyncSession, change: ChangeRequest, user: User, answer: str, *,
+        basis: Optional[str] = None, ref: Optional[str] = None,
+        part_ids: Optional[list[int]] = None,
+    ) -> ChangeRequest:
+        """Quality's ppap_decision (one member; an admin acts as Quality)."""
+        if not cm_switches.on("SCOPING_V2"):
+            raise ChangeError("The ppap_decision is switched off (SCOPING_V2)")
+        if not applies(change):
+            raise ChangeError("Only an internal change owes a ppap_decision")
+        if change.status not in SCOPING_STATUSES:
+            raise ChangeError("The ppap_decision is answered during capture or scoping")
+        if not await ChangeService.member_of(session, user, "Quality"):
+            raise PpapForbidden("Only a Quality member answers the ppap_decision "
+                                "(admins: act as Quality)")
+        if answer not in PPAP_ANSWERS:
+            raise ChangeError("Answer no or yes: parameters / tool / material / "
+                              "cycle time changed on any part?")
+        if answer == "no":
+            if basis not in PPAP_BASES:
+                raise ChangeError("Say what 'no' is based on: control_plan, "
+                                  "process_sheet or customer_spec")
+            from app.services.cm_rules import reference_refusal
+            why = reference_refusal(ref, "The reference of that document")
+            if why:
+                raise ChangeError(why)
+            change.ppap_part_ids = None
+            change.ppap_basis = basis
+            change.ppap_ref = ref.strip()
+        else:
+            impacted = {i.part_id for i in change.impacted_items}
+            picked = list(dict.fromkeys(part_ids or []))
+            if not picked:
+                raise ChangeError("Pick the parts whose parameters, tool, material "
+                                  "or cycle time changed")
+            if set(picked) - impacted:
+                raise ChangeError("Pick parts of this change's impacted set")
+            change.ppap_part_ids = picked
+            change.ppap_basis = None
+            change.ppap_ref = (ref or "").strip() or None
+        change.ppap_decision = answer
+        change.ppap_decided_by = user.id
+        change.ppap_decided_at = datetime.utcnow()
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "ppap_decided",
+            f"ppap_decision: {answer}"
+            + (f" ({basis}: {change.ppap_ref})" if answer == "no"
+               else f" ({len(change.ppap_part_ids)} part(s))"),
+            user.id, field_name="ppap_decision", new_value={
+                "answer": answer, "basis": change.ppap_basis,
+                "ref": change.ppap_ref, "part_ids": change.ppap_part_ids})
+        if answer == "yes":
+            await PpapDecisionService.flip(
+                session, change, user.id, "ppap_decision yes: the customer must be told")
+        return change
+
+    @staticmethod
+    async def flip(session: AsyncSession, change: ChangeRequest, user_id: int,
+                   why: str) -> ChangeRequest:
+        """The customer flip (spec §0): customer change, the project's Sales
+        contact as Sales owner, the project PM as lead, and the Sales task
+        "Customer notification or offer needed?". Idempotent."""
+        if change.customer_relevant:
+            return change
+        from app.services import mother_plants as mp
+        if mp.is_mother_plant(change):
+            raise ChangeError(f"A change from {mp.plant_name(change)} is not "
+                              "customer relevant here")
+        if change.status in ("closed", "cancelled", "rejected"):
+            raise ChangeError(f"A {change.status} change does not flip")
+        from app.services.project_team_service import ProjectTeamService
+        old_lead = change.lead_id
+        change.customer_relevant = True
+        change.origin = "customer"
+        change.sales_owner_id = await ChangeService.default_sales_owner_id(
+            session, change.project_id, True, "customer")
+        pm = await ProjectTeamService.responsible_user_id(
+            session, change.project_id, "Project Manager")
+        if pm is not None:
+            change.lead_id = pm
+        change.customer_flip_at = datetime.utcnow()
+        change.customer_flip_reason = why[:255]
+        change.flip_answer = change.flip_ref = None
+        change.flip_answered_by = change.flip_answered_at = None
+        after_approval = change.status in AFTER_APPROVAL
+        if after_approval:
+            # [R4] once approved every offer is a supplement: the money stays
+            # open until it is accepted or absorbed (HARD #9 at close)
+            change.price_open = True
+        # the room's cost carrier follows: an undecided meeting that said
+        # 'internal' would flip it back at proceed
+        for m in change.meetings:
+            if m.decision is None and m.cost_carrier == "internal":
+                m.cost_carrier = "customer"
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "customer_flip",
+            f"Internal change became a customer change: {why}", user_id,
+            field_name="customer_relevant",
+            old_value={"customer_relevant": False, "lead_id": old_lead},
+            new_value={"customer_relevant": True, "lead_id": change.lead_id,
+                       "sales_owner_id": change.sales_owner_id,
+                       "price_open": change.price_open})
+        await PpapDecisionService._notify_flip(session, change, after_approval)
+        return change
+
+    @staticmethod
+    async def _notify_flip(session: AsyncSession, change: ChangeRequest,
+                           after_approval: bool) -> None:
+        """Task newly theirs (spec §0 Notifications): the Sales owner (else
+        Sales) and the new lead, once per change."""
+        from app.models.workflow import Department
+        from app.services.notification_service import NotificationService
+        from app.services.change_people import department_members_of_change_org
+        ids: list[int] = []
+        if change.sales_owner_id is not None:
+            ids.append(change.sales_owner_id)
+        else:
+            sales = (await session.execute(select(Department.id).where(
+                Department.name == "Sales"))).scalar_one_or_none()
+            if sales is not None:
+                ids += await department_members_of_change_org(session, change, [sales])
+        if change.lead_id is not None:
+            ids.append(change.lead_id)
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return
+        await NotificationService.notify_once(
+            session, ids, kind="customer_flip", subject_key=f"customer_flip:{change.id}",
+            title=f"Customer notification or offer needed? {change.change_number}"[:255],
+            body=(f"'{change.title}' became a customer change ({change.customer_flip_reason})."
+                  + (" It is past approval: an offer is a supplement; the price "
+                     "stays open until it is accepted or absorbed."
+                     if after_approval else "")),
+            link=f"/changes/{change.id}?tab=scoping&task=customer_flip")
+
+    @staticmethod
+    async def answer_flip(
+        session: AsyncSession, change: ChangeRequest, user: User, answer: str, *,
+        ref: Optional[str] = None, mail_id: Optional[int] = None,
+        quote_deadline: Optional[datetime] = None,
+    ) -> ChangeRequest:
+        """The Sales owner's answer to the flip (any Sales member may act):
+        notification only (a filed customer mail or a reference) or offer
+        needed (the quote deadline)."""
+        if not flip_open(change):
+            raise ChangeError("No customer flip waits for an answer")
+        if not await ChangeService.member_of(session, user, "Sales"):
+            raise PpapForbidden("Sales answers: notification only or offer needed")
+        if answer not in FLIP_ANSWERS:
+            raise ChangeError("Answer notification or offer")
+        if answer == "notification":
+            evidence = None
+            if mail_id is not None:
+                mail = await session.get(ChangeAttachment, mail_id)
+                if (mail is None or mail.change_id != change.id
+                        or mail.kind != "customer_email"):
+                    raise ChangeError("Pick a customer mail filed on this change")
+                evidence = f"Mail: {mail.filename}"
+            else:
+                from app.services.cm_rules import reference_refusal
+                why = reference_refusal(ref, "The notification's mail or reference")
+                if why:
+                    raise ChangeError(why)
+                evidence = ref.strip()
+            change.flip_ref = evidence[:255]
+        else:
+            if quote_deadline is None:
+                raise ChangeError("Offer needed: set the quote deadline")
+            if change.required_by_date != quote_deadline:
+                old = change.required_by_date
+                change.required_by_date = quote_deadline
+                change.required_by_set_by = user.id
+                change.required_by_set_at = datetime.utcnow()
+                await ChangeService.append_changelog(
+                    session, change, "deadline_set",
+                    f"Quote deadline {old} -> {quote_deadline} (customer flip)",
+                    user.id, field_name="required_by_date",
+                    old_value=str(old) if old else None, new_value=str(quote_deadline))
+            change.flip_ref = None
+        change.flip_answer = answer
+        change.flip_answered_by = user.id
+        change.flip_answered_at = datetime.utcnow()
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "customer_flip_answered",
+            f"Customer flip: {'notification only' if answer == 'notification' else 'offer needed'}"
+            + (f" ({change.flip_ref})" if change.flip_ref else ""), user.id,
+            new_value={"answer": answer, "ref": change.flip_ref})
+        return change

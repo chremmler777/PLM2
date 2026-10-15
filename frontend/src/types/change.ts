@@ -240,6 +240,16 @@ export interface ChangeRequest {
   impact_confirm_step?: boolean;
   /** Served switch SCOPING_V2: C33 questions / check items, intake follow-ups. */
   scoping_v2?: boolean;
+  /** HARD #7: Quality's ppap_decision (internal changes) and the customer flip. */
+  ppap_decision?: 'no' | 'yes' | null;
+  ppap_basis?: string | null;
+  ppap_ref?: string | null;
+  ppap_part_ids?: number[] | null;
+  ppap_decided_at?: string | null;
+  customer_flip_at?: string | null;
+  customer_flip_reason?: string | null;
+  flip_answer?: 'notification' | 'offer' | null;
+  flip_ref?: string | null;
   /** The scope of the change in the project manager's words (2026-10-14). */
   scope_definition?: string | null;
   internal_approved_by?: number | null;
@@ -459,7 +469,11 @@ export type ChangeTaskKind =
   /** C3: a department answered 'not feasible'; the run team decides. */
   | 'not_feasible'
   /** C33: an Assumed answer to confirm with evidence by its date. */
-  | 'confirm_assumption';
+  | 'confirm_assumption'
+  /** HARD #7: Quality's ppap_decision on an internal change ("Needs you"). */
+  | 'ppap_decision'
+  /** The change became a customer change: notification only or offer? */
+  | 'customer_flip';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the

@@ -228,6 +228,29 @@ Scoping decides only *which parts, who assesses, go/no-go*.
 - Switch OFF: every scoping flag is a question again and `needs_info` resolves
   the open flags (the 2026-10-14 behaviour).
 
+### HARD #7: ppap_decision and the customer flip (2026-10-15)
+Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
+- **ppap_decision**: an internal change (origin `internal`) owes Quality's
+  answer before `proceed`: *"Parameters / tool / material / cycle time changed
+  on any part?"*, nothing preselected. **No** names its basis (control plan /
+  process sheet / customer spec) and the document reference; **Yes** names the
+  parts. One Quality member answers (an admin acts as Quality),
+  `POST /changes/{id}/ppap-decision`; the card sits on the Scoping tab and the
+  row in Quality's "Needs you" (`ppap_decision`, due 1 wd). `proceed` and the
+  `scoping -> in_assessment` hop are refused until then (HARD #7, no override;
+  `ChangeService.solid_hard_refusal`, `MeetingService.decide_meeting`).
+- **Customer flip** (a *yes*, or a customer index on an internal change):
+  `customer_relevant` + origin `customer`, the project's Sales contact as Sales
+  owner, the project PM as lead (when the project names one), an undecided
+  meeting's cost carrier follows to *customer*. The Sales owner and the lead
+  are notified once (`customer_flip:<id>`); all of Sales see *"Customer
+  notification or offer needed?"* (`customer_flip`, 1 wd, owner named).
+  **Notification only** needs a filed customer mail or a reference (then no
+  quote deadline is owed: the `no_quote_deadline` rule skips it); **Offer
+  needed** sets the quote deadline (`POST /changes/{id}/customer-flip/answer`,
+  Sales members). `proceed` waits for this answer (part of HARD #7). A flip at
+  approved or later also sets `price_open` (HARD #9 at close).
+
 ### The needs-info loop (2026-08-11)
 
 A `needs_info` decision opens a tracked request/response cycle instead of a

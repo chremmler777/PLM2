@@ -99,6 +99,7 @@ async def client(session_factory, seed):
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
     async with _LeadKeepingClient(transport=transport, base_url="http://test") as c:
+        c.session_factory = session_factory
         yield c
     app.dependency_overrides.clear()
 
@@ -364,12 +365,20 @@ async def make_internal(client, auth, change_id: int):
     return res.json()
 
 
-async def satisfy_capture_gate(client, auth, change_id: int):
+async def satisfy_capture_gate(client, auth, change_id: int, *,
+                               answer_ppap: bool = True):
     """Kickoff (captured -> scoping) is soft-gated on a complete capture:
     a description, at least one attachment, and — for customer-relevant
     changes — the quote deadline, plus a change lead (spec §16). See
     ChangeService._guard. The date is set unconditionally here; it is
-    harmless on internal changes. A change with no lead gets its raiser."""
+    harmless on internal changes. A change with no lead gets its raiser.
+
+    HARD #7 (SCOPING_V2): an internal change proceeds only once Quality
+    answered the ppap_decision. Tests about other rules get Quality's 'no'
+    recorded here (ignored on a customer change); the gate itself is
+    covered by test_ecr_solid_ppap_flip.py, which passes answer_ppap=False."""
+    if answer_ppap:
+        await record_ppap_no(client, change_id)
     cur = await client.get(f"/api/v1/changes/{change_id}", headers=auth)
     if cur.status_code == 200 and cur.json().get("lead_id") is None:
         # Assigning the lead is PM's (or the admin's) act, not the
@@ -388,6 +397,19 @@ async def satisfy_capture_gate(client, auth, change_id: int):
         files={"file": ("capture.txt", b"capture evidence", "text/plain")},
         headers=auth)
     assert res.status_code in (200, 201), res.text
+
+
+async def record_ppap_no(client, change_id: int):
+    """Quality's ppap_decision 'no' (HARD #7), written directly."""
+    from datetime import datetime
+    from sqlalchemy import update
+    from app.models.change import ChangeRequest
+    async with client.session_factory() as s:
+        await s.execute(update(ChangeRequest).where(
+            ChangeRequest.id == change_id).values(
+            ppap_decision="no", ppap_basis="control_plan",
+            ppap_ref="CP-TEST rev 1", ppap_decided_at=datetime.utcnow()))
+        await s.commit()
 
 
 async def to_scoping(client, auth, change_id: int):

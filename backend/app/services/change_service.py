@@ -679,6 +679,12 @@ class ChangeService:
         (COMMERCIAL_V2) no close while a price is open (exits: customer
         acceptance or Absorb)."""
         from app.services import cm_switches
+        if to_status == "in_assessment" and change.status == "scoping":
+            # HARD #7 (SCOPING_V2): ppap_decision, and the flip's Sales answer
+            from app.services.ppap_decision_service import PpapDecisionService
+            why = PpapDecisionService.proceed_refusal(change)
+            if why:
+                return why
         if (to_status == "approved" and change.status == "quoted"
                 and change.customer_relevant and cm_switches.on("COMMERCIAL_V2")):
             # HARD #4 with C14's binding: the same rule as at release, so an
@@ -1435,8 +1441,15 @@ class ChangeService:
                 add("impact_confirmed", "hard")
             if change.lead_id is None:
                 add("lead", "soft", rule="no_lead")
-            if change.customer_relevant and change.required_by_date is None:
+            if (change.customer_relevant and change.required_by_date is None
+                    and change.flip_answer != "notification"):
                 add("quote_deadline", "soft", rule="no_quote_deadline")
+            # HARD #7 (SCOPING_V2): ppap_decision; the flip's Sales answer
+            from app.services import ppap_decision_service as ppap
+            if ppap.applies(change) and change.ppap_decision is None:
+                add("ppap_decision", "hard")
+            if ppap.flip_open(change):
+                add("customer_flip", "hard")
             # HARD #2: questions and cancel votes; C33 check items go along
             concerns = MeetingService.open_blocking(change)
             if concerns:
@@ -1646,8 +1659,11 @@ class ChangeService:
             if change.lead_id is None:
                 out.append(R("no_lead", "No lead (project manager) assigned"))
             # Internal changes have no quote deadline; only customer-relevant
-            # changes must set the required-by date before assessment.
-            if change.customer_relevant and change.required_by_date is None:
+            # changes must set the required-by date before assessment. A
+            # flipped change whose Sales owner answered "notification only"
+            # owes no quote.
+            if (change.customer_relevant and change.required_by_date is None
+                    and change.flip_answer != "notification"):
                 out.append(R("no_quote_deadline",
                              "No quote deadline set: define it in scoping"))
             # A change that already has routing has fanned out once — the proceed
@@ -3814,6 +3830,28 @@ class ChangeService:
         is_quality = await ChangeService.member_of(db, user, "Quality")
         from app.services import cm_switches
         from app.services.cm_rules import ABSORB_RULE
+        # HARD #7 (SCOPING_V2): Quality's ppap_decision on an internal change
+        # in scoping ("Needs you"), and the Sales answer to a customer flip
+        # (all of Sales, the owner named).
+        if cm_switches.on("SCOPING_V2"):
+            from app.services import ppap_decision_service as ppap
+            is_sales = None
+            for c in open_changes:
+                if (is_quality and c.status == "scoping" and ppap.applies(c)
+                        and c.ppap_decision is None):
+                    out.append({**await base(c), "kind": "ppap_decision",
+                                "target_tab": "scoping", "needs_you": True})
+                if ppap.flip_open(c):
+                    if is_sales is None:
+                        is_sales = await ChangeService.member_of(db, user, "Sales")
+                    if is_sales:
+                        out.append({
+                            **await base(c), "kind": "customer_flip",
+                            "target_tab": "scoping", "since": c.customer_flip_at,
+                            "reason": c.customer_flip_reason,
+                            **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                               if c.sales_owner_id not in (None, user.id) else {}),
+                        })
         for c in open_changes:
             for dev in c.transition_deviations:
                 if dev.status != "pending":

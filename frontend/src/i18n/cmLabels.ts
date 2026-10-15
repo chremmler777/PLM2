@@ -2529,6 +2529,41 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.confirm_assumption': { de: 'Annahme bestätigen', en: 'Confirm an assumption' },
   'tasks.hint.confirm_assumption': { de: 'Annahme bestätigen: {x}', en: 'Confirm the assumption: {x}' },
   'tasks.hint.scopingReady': { de: 'Bereit: freigeben', en: 'Ready: proceed' },
+  // HARD #7: ppap_decision and the customer flip
+  'ppap.title': { de: 'PPAP-Entscheidung (Qualität)', en: 'ppap decision (Quality)' },
+  'ppap.question': {
+    de: 'Parameter / Werkzeug / Material / Zykluszeit an einem Teil geändert?',
+    en: 'Parameters / tool / material / cycle time changed on any part?' },
+  'ppap.no': { de: 'Nein', en: 'No' },
+  'ppap.yes': { de: 'Ja: Teile wählen', en: 'Yes: pick the parts' },
+  'ppap.pickAnswer': { de: 'Nein oder Ja', en: 'no or yes' },
+  'ppap.basis': { de: 'Grundlage', en: 'Based on' },
+  'ppap.basis.control_plan': { de: 'Control Plan', en: 'Control plan' },
+  'ppap.basis.process_sheet': { de: 'Prozessblatt', en: 'Process sheet' },
+  'ppap.basis.customer_spec': { de: 'Kundenspezifikation', en: 'Customer spec' },
+  'ppap.refPlaceholder': { de: 'Dokument-Nr. und Rev.', en: 'Document no. and rev.' },
+  'ppap.parts': { de: 'Teile', en: 'parts' },
+  'ppap.yesMeans': {
+    de: 'Ja = Kundenänderung: Sales bekommt die Aufgabe "Kundeninfo oder Angebot?".',
+    en: 'Yes = customer notification task for Sales: the change becomes a customer change.' },
+  'ppap.save': { de: 'Entscheidung speichern', en: 'Save decision' },
+  'ppap.qualityOwes': {
+    de: 'Qualität beantwortet das vor der Freigabe (HARD #7).',
+    en: 'Quality answers this before proceed (HARD #7).' },
+  'ppap.decidedNo': { de: 'Nein, laut {b}: {r}', en: 'No, per {b}: {r}' },
+  'ppap.decidedYes': { de: 'Ja, {n} Teil(e): Kundenänderung', en: 'Yes, {n} part(s): customer change' },
+  'flip.title': { de: 'Kundeninfo oder Angebot nötig?', en: 'Customer notification or offer needed?' },
+  'flip.notification': { de: 'Nur Kundeninfo', en: 'Notification only' },
+  'flip.offer': { de: 'Angebot nötig', en: 'Offer needed' },
+  'flip.salesOwes': {
+    de: '{x} beantwortet das; die Freigabe wartet darauf.',
+    en: '{x} answers this; proceed waits for it.' },
+  'flip.answeredNotification': { de: 'Nur Kundeninfo: {r}', en: 'Notification only: {r}' },
+  'flip.answeredOffer': { de: 'Angebot nötig: Angebotstermin gesetzt', en: 'Offer needed: quote deadline set' },
+  'tasks.kind.ppap_decision': { de: 'PPAP-Entscheidung', en: 'ppap decision' },
+  'tasks.kind.customer_flip': { de: 'Kundeninfo oder Angebot?', en: 'Customer notification or offer?' },
+  'next.item.ppap_decision': { de: 'PPAP-Entscheidung der Qualität', en: "Quality's ppap decision" },
+  'next.item.customer_flip': { de: 'Sales: Kundeninfo oder Angebot?', en: 'Sales: notification or offer?' },
   'tasks.hint.scopingWaiting': { de: 'Noch nicht: wartet auf {n} Antwort(en) ({x})', en: 'Not yet: waiting for {n} answer(s) ({x})' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

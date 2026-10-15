@@ -17,6 +17,7 @@ import ConcernStrip from './ConcernStrip'
 import TransitionConfirmDialog from './TransitionConfirmDialog'
 import ScopingFlags from './scoping/ScopingFlags'
 import ProceedFixList from './scoping/ProceedFixList'
+import { CustomerFlipCard, PpapDecisionCard } from './scoping/PpapFlipCards'
 import DateInput from '../gantt/DateInput'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
@@ -387,6 +388,14 @@ export default function ScopingPanel(
   const openFlags = openFlagLines(concerns, (id) => departments.find((d) => d.id === id)?.name)
   // C33: check items never hold proceed; they go along as its conditions.
   const openChecks = concerns.filter((c) => c.is_open && isCheckItem(c))
+  // HARD #7: an internal change waits for Quality's ppap_decision; a flipped
+  // one for the Sales owner's "notification or offer" answer.
+  const hard7 = v2 ? [
+    ...(!change.customer_relevant && change.origin === 'internal' && change.ppap_decision == null
+      ? [`HARD #7 · ${t('next.item.ppap_decision')}`] : []),
+    ...(change.customer_flip_at && change.flip_answer == null
+      ? [`HARD #7 · ${t('next.item.customer_flip')}`] : []),
+  ] : []
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptRasic((prev) => {
@@ -566,12 +575,12 @@ export default function ScopingPanel(
     const flipped = c !== '' && carrierOf(change.customer_relevant) !== '' && c !== carrierOf(change.customer_relevant)
     // Open flags hold the step: the same dialog becomes the warning, listing
     // each flag and how it is cleared, and its confirm stays disabled.
-    if (openFlags.length > 0) {
+    if (openFlags.length > 0 || hard7.length > 0) {
       return {
         to: 'in_assessment',
         title: t('meeting.proceedBlockedTitle'),
         consequence: v2 ? t('proceed.questionsOpen') : t('meeting.proceedBlocked'),
-        open: openFlags,
+        open: [...openFlags, ...hard7],
         holdWhileOpen: true,
         confirmLabel: v2 && openChecks.length > 0
           ? t('proceed.go').replace('{n}', String(openChecks.length))
@@ -720,6 +729,17 @@ export default function ScopingPanel(
             </ul>
             <p className="text-[11px] text-slate-500">{t('concern.unassignedHint')}</p>
           </div>
+        )}
+
+        {/* HARD #7: Quality's ppap_decision on an internal change, and the
+            Sales answer once it became a customer change. */}
+        {v2 && (change.origin === 'internal' || change.ppap_decision != null) && (
+          <PpapDecisionCard change={change} editable={open} onChanged={invalidate}
+            isQuality={departments.some((d) => d.name === 'Quality' && myDepartmentIds.includes(d.id))} />
+        )}
+        {v2 && change.customer_flip_at && (
+          <CustomerFlipCard change={change} editable={change.status !== 'closed'}
+            isSales={canAnswerConcerns} attachments={attachments} onChanged={invalidate} />
         )}
 
         {/* C33: the quick add and the check items, grouped by owner. */}

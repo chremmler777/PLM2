@@ -261,6 +261,28 @@ class ChangeRequest(Base):
     # Sales tasks still show to all of Sales, with this name on them.
     sales_owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
+    # ppap_decision (spec §3, HARD #7, migration 122): on an internal change
+    # Quality answers "parameters / tool / material / cycle time changed on
+    # any part?" before proceed. no: basis (PPAP_BASES) + ref; yes: the parts,
+    # and the change flips to a customer change.
+    ppap_decision: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    ppap_basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ppap_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ppap_part_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    ppap_decided_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    ppap_decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The customer flip (spec §0): an internal change became a customer one
+    # (ppap yes, or a customer index). The Sales owner then answers
+    # "notification only" (filed mail / ref) or "offer needed" (quote
+    # deadline); proceed waits for that answer.
+    customer_flip_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    customer_flip_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    flip_answer: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    flip_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    flip_answered_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    flip_answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The lessons-learned step before release: done with at least one lesson,
     # or with a reason there is none. Guarded on in_validation -> released.
     lessons_done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

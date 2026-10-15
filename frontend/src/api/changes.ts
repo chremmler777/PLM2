@@ -348,6 +348,13 @@ export const changesApi = {
     flag_type?: FlagType; check_what?: CheckWhat; part_id?: number;
     answer_from?: AnswerFrom; scope_effect?: string;
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
+  /** HARD #7: Quality's ppap_decision on an internal change. */
+  ppapDecision: (id: number, body: { answer: 'no' | 'yes'; basis?: string; ref?: string; part_ids?: number[] }) =>
+    client.post<ChangeRequest>(`/v1/changes/${id}/ppap-decision`, body).then((r) => r.data),
+  /** The Sales owner's answer to a customer flip. */
+  answerCustomerFlip: (id: number, body: {
+    answer: 'notification' | 'offer'; ref?: string; mail_id?: number; quote_deadline?: string
+  }) => client.post<ChangeRequest>(`/v1/changes/${id}/customer-flip/answer`, body).then((r) => r.data),
   /** C33: make it a question / a check item (asker or PM). */
   setConcernType: (id: number, concernId: number, body: {
     flag_type: FlagType; answer_from?: AnswerFrom; scope_effect?: string;

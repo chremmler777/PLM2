@@ -376,6 +376,16 @@ class ChangeResponse(BaseModel):
     impact_confirm_step: bool = False
     # Served switch SCOPING_V2 (C33 questions / check items, intake follow-ups).
     scoping_v2: bool = False
+    # HARD #7 ppap_decision (internal changes) and the customer flip.
+    ppap_decision: Optional[str] = None
+    ppap_basis: Optional[str] = None
+    ppap_ref: Optional[str] = None
+    ppap_part_ids: Optional[List[int]] = None
+    ppap_decided_at: Optional[datetime] = None
+    customer_flip_at: Optional[datetime] = None
+    customer_flip_reason: Optional[str] = None
+    flip_answer: Optional[str] = None
+    flip_ref: Optional[str] = None
     # The scope of the change, in the project manager's words (migration 115).
     scope_definition: Optional[str] = None
     # The part weight, quoted at costing and weighed at validation. Both halves
@@ -1146,6 +1156,22 @@ class ConcernCreate(BaseModel):
     # A question: who can answer it and what the answer changes in the scope.
     answer_from: Optional[str] = None
     scope_effect: Optional[str] = Field(default=None, max_length=2000)
+
+
+class PpapDecisionIn(BaseModel):
+    """HARD #7: Quality's ppap_decision on an internal change."""
+    answer: str            # no | yes
+    basis: Optional[str] = None      # a 'no': control_plan | process_sheet | customer_spec
+    ref: Optional[str] = Field(default=None, max_length=255)
+    part_ids: Optional[List[int]] = None   # a 'yes': the parts
+
+
+class CustomerFlipAnswerIn(BaseModel):
+    """The Sales owner's answer to a customer flip."""
+    answer: str            # notification | offer
+    ref: Optional[str] = Field(default=None, max_length=255)
+    mail_id: Optional[int] = None
+    quote_deadline: Optional[datetime] = None
 
 
 class ConcernTypeIn(BaseModel):
