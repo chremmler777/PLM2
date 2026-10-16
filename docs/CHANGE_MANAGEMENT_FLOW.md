@@ -1727,6 +1727,15 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   "Change who fixes or the retest date"). `POST
   .../validation/issues/{iid}/fix` (Quality only; a real admin's own
   Quality row does not count, it acts as Quality).
+- **Retest date (A5-11):** a weekend pick moves to the next Monday (the
+  Fix form says so first; the log names the move).
+- **Exception route vs concession (A5-11, decided by Claude):** once PM or
+  the lead took a fix route (internal or supplier rework, design change)
+  the issue runs there and Quality's parallel concession is no longer
+  offered (the route dialog says so); the concession runs in parallel with
+  Quality's Fix task, not with the exception route. A failed check whose
+  issue was accepted under a concession reads "Under concession VI-n" and
+  offers no second "Raise issue".
 - **Concession, in parallel** (`POST .../issues/{iid}/concession`, Quality
   only): a customer change: the issue's route becomes the concession and
   the Sales owner is told to ask the customer ("Waiting for customer (Sales

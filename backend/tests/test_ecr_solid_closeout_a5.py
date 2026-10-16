@@ -14,6 +14,9 @@ from tests.test_ecr_solid_fix_concession import (  # noqa: F401
 )
 from tests.test_validation_checks import _auth, _url, val  # noqa: F401
 
+from app.services.validation_issue_service import add_workdays  # noqa: E402
+from app.utils.clock import business_today  # noqa: E402
+
 pytestmark = pytest.mark.asyncio
 
 GOOD_REF = "re-measured on CMM, report MR-2026-311"
@@ -243,7 +246,7 @@ async def test_a5_04c_one_person_owes_fix_and_retest_one_row_fix_first(
         await s.commit()
     await _fail_weight(client, fix)
     iid = (await _issue(client, fix))["id"]
-    due = date.today() + timedelta(days=3)
+    due = add_workdays(business_today(), 3)
     res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=await _who(client, fix, "Quality"),
                             json={"owner": "process_parameters", "retest_due": due.isoformat()})
     assert res.status_code == 200, res.text
@@ -267,7 +270,7 @@ async def test_a5_04c_the_coordinator_reads_get_the_fixer_then_retest(
                         "spec_source": "drawing 886.197 D, weight 505 g +/-10"}})
     assert res.status_code == 201 and res.json()["status"] == "failed", res.text
     iid = (await _issue(client, fix))["id"]
-    due = date.today() + timedelta(days=3)
+    due = add_workdays(business_today(), 3)
     await client.post(_iurl(fix, f"/{iid}/fix"), headers=await _who(client, fix, "Quality"),
                       json={"owner": "process_parameters", "retest_due": due.isoformat()})
     tasks = await _kinds(client, pm, fix["change_id"])
@@ -462,3 +465,20 @@ async def test_a5_10_negative_part_measured_needs_the_measuring_report(client, f
     res = await client.post(_url(fix, "/checks"), headers=tool,
                             json={**body, "note": "CMM report MR-2026-311"})
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+
+
+# --- A5-11 fix and concession edges -----------------------------------------
+
+async def test_a5_11_a_weekend_retest_moves_to_the_next_working_day(client, fix):
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    sat = business_today() + timedelta(days=(5 - business_today().weekday()) % 7 or 7)
+    assert sat.isoweekday() == 6
+    res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=await _who(client, fix, "Quality"),
+                            json={"owner": "process_parameters", "retest_due": sat.isoformat()})
+    assert res.status_code == 200, res.text
+    monday = sat + timedelta(days=2)
+    assert res.json()["retest_due"] == monday.isoformat()
+    # the notice and the log name the working day too
+    out = (await client.get(_iurl(fix, f"/{iid}"), headers=await _who(client, fix, "Quality"))).json()
+    assert out["retest_due"] == monday.isoformat()

@@ -14,7 +14,7 @@ import { useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { FixOwner, IssueOut } from '../../../types/validationIssue'
 import { issueCode } from '../../../types/validationIssue'
-import { todayIso } from '../../../lib/format'
+import { formatCalendarDate, todayIso } from '../../../lib/format'
 import DateInput from '../../gantt/DateInput'
 import { inputCls } from '../offer/offerFormat'
 import { FIX_OWNER_LABEL } from './issueModel'
@@ -83,6 +83,11 @@ export function FixForm({ changeId, issue, departments, onDone }: {
           <DateInput aria-label={t('fix.retest')} value={retest} min={todayIso()} commitOnChange
             onChange={setRetest} className={`${inputCls} w-full`} />
         </span>
+        {weekendRetest(retest) && (
+          <span data-testid="fix-retest-weekend" className="text-[11px] text-amber-300">
+            Not a working day: the retest moves to {formatCalendarDate(weekendRetest(retest)!)}
+          </span>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="fix-submit" disabled={!!blocked || save.isPending}
@@ -97,6 +102,17 @@ export function FixForm({ changeId, issue, departments, onDone }: {
 }
 
 /** Why the concession request cannot be sent yet, or null. */
+/** A5-11: a weekend retest moves to the next Monday (the backend does the
+ *  same); the form says so before it is sent. */
+export function weekendRetest(iso: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null
+  const d = new Date(`${iso}T12:00:00Z`)
+  const wd = d.getUTCDay()
+  if (wd !== 0 && wd !== 6) return null
+  d.setUTCDate(d.getUTCDate() + (wd === 6 ? 2 : 1))
+  return d.toISOString().slice(0, 10)
+}
+
 export function concessionBlocked(internal: boolean, note: string, notForShipment: boolean,
   qty: string, until: string, today: string = todayIso()): string | null {
   if (note.trim().length < 5) return t('concession.noteNeeded')

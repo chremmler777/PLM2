@@ -2219,6 +2219,11 @@ class ValidationIssueService:
             raise ChangeError("Give the retest date")
         if due < business_today():
             raise ChangeError(f"The retest date {due.isoformat()} is in the past")
+        moved = None
+        if due.isoweekday() > 5:
+            # A5-11: a retest is on a working day: a weekend pick moves to
+            # the next Monday (said in the log; the dialog says it first)
+            moved, due = due, add_workdays(due, 1)
         old = (issue.fix_owner_kind, issue.fix_department_id, issue.retest_due)
         issue.fix_owner_kind = kind
         issue.fix_department_id = dept_id
@@ -2230,7 +2235,9 @@ class ValidationIssueService:
         names = await svc._dept_names(session)
         await svc._log(session, change, issue, "fix_set",
                        f"fix: {names.get(dept_id)} ({svc.FIX_OWNER_WORDS[kind]}), "
-                       f"retest {due.isoformat()}", user.id,
+                       f"retest {svc.day(due)}"
+                       + (f" (moved from {svc.day(moved)}: not a working day)"
+                          if moved else ""), user.id,
                        owner=kind, department_id=dept_id,
                        retest_due=due.isoformat(),
                        **({"previous": {"owner": old[0], "department_id": old[1],

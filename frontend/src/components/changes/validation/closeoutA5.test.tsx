@@ -13,6 +13,8 @@ import { validationIssuesApi } from '../../../api/validationIssues'
 import IssueCard from './IssueCard'
 import { routeOptions } from './RouteDialog'
 import { raiserBlocked } from './issueModel'
+import { weekendRetest } from './FixConcessionForms'
+import { settledIssueForCheck } from '../ValidationPanel'
 
 vi.mock('../../../api/validationIssues', () => ({
   validationIssuesKey: (id: number) => ['change', id, 'validation-issues'],
@@ -92,5 +94,18 @@ describe('A5-01 route options and 4 eyes', () => {
   })
   it('an admin who raised the issue is blocked like anyone (4 eyes)', () => {
     expect(raiserBlocked(issue({ created_by: 1 }), { id: 1, isAdmin: true })).toBe(true)
+  })
+})
+
+describe('A5-11 fix and concession edges', () => {
+  it('a weekend retest moves to the next Monday', () => {
+    expect(weekendRetest('2026-10-17')).toBe('2026-10-19')
+    expect(weekendRetest('2026-10-18')).toBe('2026-10-19')
+    expect(weekendRetest('2026-10-16')).toBeNull()
+  })
+  it('an accepted concession settles the failed check: no second Raise', () => {
+    const acc = issue({ status: 'accepted', check_key: 'weight', department_id: 4, route: 'customer_concession' })
+    expect(settledIssueForCheck([acc], 4, 'weight')?.status).toBe('accepted')
+    expect(settledIssueForCheck([issue({ status: 'open', check_key: 'weight' })], 4, 'weight')).toBeUndefined()
   })
 })

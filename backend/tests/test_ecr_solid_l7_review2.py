@@ -23,6 +23,7 @@ from app.models.entities import User
 from app.models.notification import Notification
 from app.models.workflow import Department, UserDepartment
 from app.utils.clock import business_today
+from app.services.validation_issue_service import add_workdays
 from tests.test_ecr_solid_fix_concession import (  # noqa: F401
     REF, SPEC, _fail_weight, _issue, _iurl, _kinds, _who, fix,
 )
@@ -50,7 +51,7 @@ async def _pick_fix(client, fix, iid):
     res = await client.post(_iurl(fix, f"/{iid}/fix"),
                             headers=await _who(client, fix, "Quality"), json={
         "owner": "process_parameters",
-        "retest_due": (date.today() + timedelta(days=3)).isoformat()})
+        "retest_due": add_workdays(business_today(), 3).isoformat()})
     assert res.status_code == 200, res.text
     return res.json()
 
@@ -144,7 +145,7 @@ async def test_negative_admin_with_quality_and_check_rows_lifts_nothing(
     assert res.status_code == 403, res.text
     res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=admin_auth, json={
         "owner": "process_parameters",
-        "retest_due": (date.today() + timedelta(days=3)).isoformat()})
+        "retest_due": add_workdays(business_today(), 3).isoformat()})
     assert res.status_code == 403, res.text
     res = await client.post(_iurl(fix, f"/{iid}/concession"), headers=admin_auth,
                             json={"note": "ask for 518 g max, 500 parts"})

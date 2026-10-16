@@ -51,6 +51,11 @@ export function routeConsequences(route: IssueRoute, issue: IssueOut, changeStat
     ? `Loop back: the change goes back to implementation now (reason "${code}: ${issue.title}: <your reason>"). Validation of this check starts again once the fix is done.`
     : null
   const lines: string[] = []
+  if (fix && issue.fix_rule) {
+    // A5-11 (decided): the exception route takes the issue off Quality's
+    // parallel concession
+    lines.push("Quality's concession is no longer offered on this issue: the fix runs on this route.")
+  }
   if (fix) {
     lines.push(`Plan: a recovery group "Recovery ${code}" with one block per fix action and "Re-validation ${code}" is added after the failed validation. SOP and customer approval move with it; after the baseline it is recorded as plan deviations.`)
     lines.push('At least one fix action with an owner is required.')

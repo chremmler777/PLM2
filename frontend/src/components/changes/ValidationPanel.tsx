@@ -91,8 +91,15 @@ export const openIssueForCheck = (issues: IssueOut[], deptId: number, key: strin
   issues.find((i) => isIssueOpen(i) && i.check_key === key
     && (i.check_department_id ?? i.department_id) === deptId)
 
+/** A5-11: the issue that settled this failed check without a pass (an
+ *  accepted concession, or one closed), if any: no second issue is raised. */
+export const settledIssueForCheck = (issues: IssueOut[], deptId: number, key: string): IssueOut | undefined =>
+  issues.find((i) => !isIssueOpen(i) && i.check_key === key
+    && (i.status === 'accepted' || i.status === 'closed')
+    && (i.check_department_id ?? i.department_id) === deptId)
+
 function CheckRow({
-  changeId, deptId, check, editable, mine, plannedCycleMin, weightEstimateG, openIssue, onRaise, hasCosting = true,
+  changeId, deptId, check, editable, mine, plannedCycleMin, weightEstimateG, openIssue, settledIssue, onRaise, hasCosting = true,
 }: {
   changeId: number
   deptId: number
@@ -103,6 +110,8 @@ function CheckRow({
   weightEstimateG?: number | null
   /** The open issue this failed check already has. */
   openIssue?: IssueOut
+  /** A5-11: an accepted (concession) or closed issue on this check. */
+  settledIssue?: IssueOut
   /** Offered on a failed check without an open issue, to those who may raise. */
   onRaise?: () => void
   /** False on a change without a costing (mother plant): no planned figure to compare with. */
@@ -197,7 +206,13 @@ function CheckRow({
             {issueCode(openIssue)} open
           </a>
         )}
-        {check.status === 'failed' && !openIssue && onRaise && !retired && (
+        {check.status === 'failed' && !openIssue && settledIssue?.status === 'accepted' && (
+          <span data-testid={`validation-concession-${id}`}
+            className="ml-auto rounded border border-sky-800 bg-sky-950/40 px-1.5 py-0 text-[11px] leading-tight text-sky-200">
+            Under concession {issueCode(settledIssue)}
+          </span>
+        )}
+        {check.status === 'failed' && !openIssue && !settledIssue && onRaise && !retired && (
           <button type="button" data-testid={`validation-raise-${id}`} onClick={onRaise}
             className="ml-auto rounded border border-rose-800 px-2 py-0.5 text-[11px] text-rose-200 hover:bg-rose-950/50">
             Raise issue
@@ -397,6 +412,7 @@ function DepartmentBlock({
             plannedCycleMin={state.planned_cycle_time_min_per_part}
             weightEstimateG={state.weight_estimate_g}
             openIssue={openIssueForCheck(issues, dept.department_id, String(c.check_key))}
+            settledIssue={settledIssueForCheck(issues, dept.department_id, String(c.check_key))}
             onRaise={onRaise ? () => onRaise({
               checkKey: String(c.check_key),
               checkId: (c as ValidationCheck & { id?: number | null }).id ?? null,

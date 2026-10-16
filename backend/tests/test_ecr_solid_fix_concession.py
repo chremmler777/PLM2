@@ -21,6 +21,9 @@ from app.services import cm_switches
 from tests.conftest import ENGINEER_PASSWORD, login
 from tests.test_validation_checks import _auth, _confirm_limits, _state, _url, val  # noqa: F401
 
+from app.services.validation_issue_service import add_workdays  # noqa: E402
+from app.utils.clock import business_today  # noqa: E402
+
 pytestmark = pytest.mark.asyncio
 
 SPEC = {"lower_limit": 495.0, "upper_limit": 515.0,
@@ -115,7 +118,7 @@ async def test_negative_only_quality_picks_the_fix(client, fix, admin_auth):
     await _fail_weight(client, fix)
     issue = await _issue(client, fix)
     body = {"owner": "process_parameters",
-            "retest_due": (date.today() + timedelta(days=3)).isoformat()}
+            "retest_due": add_workdays(business_today(), 3).isoformat()}
     for name in ("Tool Engineer", "Project Manager"):
         res = await client.post(_iurl(fix, f"/{issue['id']}/fix"),
                                 headers=await _auth(client, fix, name), json=body)
@@ -138,7 +141,7 @@ async def test_fix_owner_works_the_check_department_retests_and_it_closes(client
     await _fail_weight(client, fix)
     issue = await _issue(client, fix)
     quality = await _who(client, fix, "Quality")
-    due = date.today() + timedelta(days=3)
+    due = add_workdays(business_today(), 3)
     res = await client.post(_iurl(fix, f"/{issue['id']}/fix"), headers=quality, json={
         "owner": "process_parameters", "retest_due": due.isoformat()})
     assert res.status_code == 200, res.text
@@ -375,7 +378,7 @@ async def test_concession_first_keeps_the_fix_task_and_the_fix_closes_it(client,
     tasks = await _kinds(client, quality, fix["change_id"])
     assert "validation_issue_fix" in tasks
     assert tasks["validation_issue_fix"]["role"] == "main"
-    due = date.today() + timedelta(days=3)
+    due = add_workdays(business_today(), 3)
     res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
         "owner": "process_parameters", "retest_due": due.isoformat()})
     assert res.status_code == 200, res.text
@@ -392,7 +395,7 @@ async def test_concession_first_keeps_the_fix_task_and_the_fix_closes_it(client,
     assert "fix: Process Engineer (Process Engineer), retest" in st["release_line"]
     assert "concession: waiting for customer" in st["release_line"]
     # a new retest date: the re-pick
-    later = due + timedelta(days=2)
+    later = add_workdays(due, 2)
     res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
         "owner": "process_parameters", "retest_due": later.isoformat()})
     assert res.status_code == 200 and res.json()["retest_due"] == later.isoformat()
@@ -443,7 +446,7 @@ async def test_negative_an_inactive_department_does_not_fix(client, fix, session
     quality = await _who(client, fix, "Quality")
     res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
         "owner": "other", "department_id": old_id,
-        "retest_due": (date.today() + timedelta(days=3)).isoformat()})
+        "retest_due": add_workdays(business_today(), 3).isoformat()})
     assert res.status_code == 400 and "active" in res.json()["detail"]
 
 
@@ -461,7 +464,7 @@ async def test_fix_department_without_members_hands_the_work_to_the_lead(
     quality = await _who(client, fix, "Quality")
     res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
         "owner": "process_parameters",
-        "retest_due": (date.today() + timedelta(days=3)).isoformat()})
+        "retest_due": add_workdays(business_today(), 3).isoformat()})
     assert res.status_code == 200, res.text
     pm = await _auth(client, fix, "Project Manager")
     work = (await _kinds(client, pm, fix["change_id"]))["validation_issue_fix_work"]
