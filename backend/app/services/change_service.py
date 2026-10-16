@@ -4102,6 +4102,9 @@ class ChangeService:
                         "validated_part_weight_g": c.validated_part_weight_g,
                         "hint": f"Validated part weight is {delta:+g} g against the "
                                 "estimate — update the quote or record the decision",
+                        # owed since the weight was validated, not since the
+                        # change entered its status (never born overdue)
+                        "since": c.validated_weight_at,
                     })
 
             # Independent of the stage chain: a question can be waiting at any

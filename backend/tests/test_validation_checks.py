@@ -5,7 +5,7 @@ into a decision: which checks each implementing department owes, who may sign
 them, what a measured weight does to the quote, when the release guard refuses,
 and what sending the change back round the loop has to say for itself.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -379,10 +379,16 @@ async def test_weight_pass_stamps_the_change_and_raises_the_sales_task(
     assert state["weight_delta_g"] == 30.0
     assert state["weight_quote_update_open"] is True
 
+    async with session_factory() as s:     # the change is weeks in its status
+        change = await s.get(ChangeRequest, val["change_id"])
+        change.created_at = datetime.utcnow() - timedelta(days=30)
+        await s.commit()
     rows = await _tasks(client, sales, "update_quote")
     assert len(rows) == 1
     assert rows[0]["delta_g"] == 30.0
     assert "+30 g" in rows[0]["hint"]
+    # due from the validated weight, not from an old status date: not born overdue
+    assert rows[0]["overdue"] is False and rows[0]["late"] is False
     # It is Sales' errand, not the tool shop's.
     assert await _tasks(client, tool, "update_quote") == []
 
