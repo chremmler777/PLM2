@@ -57,6 +57,7 @@ import ScopeChangeCards from '../components/changes/offer/ScopeChangeCards';
 import StartAtRiskCard from '../components/changes/offer/StartAtRiskCard';
 import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/changes/CaptureV2';
 import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
+import { ConcessionLine } from '../components/changes/release/AchievedCard';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -984,6 +985,8 @@ export default function ChangeDetailPage() {
               <NeedByLine change={change} />
               {/* §4: a supplier wait, beside the need-by */}
               <SupplierWaitLine change={change} />
+              {/* §10-§11: any concession in force */}
+              <ConcessionLine change={change} />
             </span>
             {impl?.ready_to_go && (
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-100">
@@ -1006,6 +1009,7 @@ export default function ChangeDetailPage() {
           <CockpitSummary {...cockpitProps} variant="compact" onShowOverview={() => setTab('overview')} />
           <NeedByLine change={change} />
           <SupplierWaitLine change={change} />
+          <ConcessionLine change={change} />
           {headerActions}
         </div>
       )}

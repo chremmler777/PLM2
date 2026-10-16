@@ -589,6 +589,10 @@ export const changesApi = {
   // A department answers its own check. `value` carries the measurement for the
   // two checks that have one (cycle time in seconds, weight in grams); a fail
   // carries the note that says what went wrong.
+  /** §11: what an internal change achieved, beside its target. */
+  recordAchieved: (id: number, body: { value: number; ref: string }) =>
+    client.post(`/v1/changes/${id}/achieved`, body).then((r) => r.data),
+
   setValidationCheck: (id: number, body: {
     department_id: number;
     check_key: ValidationCheckKey | (string & NonNullable<unknown>);

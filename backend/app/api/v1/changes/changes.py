@@ -14,6 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import get_current_user
@@ -1006,7 +1007,39 @@ async def get_change(
         select(RevisionIntake.id).where(RevisionIntake.change_id == change.id)
         .limit(1))).scalar_one_or_none() is not None
     out.next_step = await ChangeService.next_step_missing(db, change)
+    # §10-§11 (RELEASE_V2): the header shows any concession in force
+    from app.services import cm_switches
+    if cm_switches.on("RELEASE_V2") and change.status in (
+            "in_implementation", "in_validation", "released", "closed"):
+        from app.services.validation_issue_service import ValidationIssueService
+        out.active_concessions = await ValidationIssueService.active_concessions(db, change)
     return out
+
+
+class AchievedIn(BaseModel):
+    value: float
+    ref: str
+
+
+@router.post("/{change_id}/achieved", response_model=ChangeResponse)
+async def record_achieved(
+    change_id: int, body: AchievedIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§11: an internal change closes with what it achieved, beside the
+    target (the lead, Project Management or an admin; with its evidence)."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.record_achieved(db, change, body.value, body.ref, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.get("/{change_id}/my-actions")

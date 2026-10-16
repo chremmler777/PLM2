@@ -280,6 +280,14 @@ export interface ChangeRequest {
   problem_value?: number | null;
   problem_unit?: string | null;
   target_value?: number | null;
+  /** §11 internal: what it achieved beside the target, and the source. */
+  achieved_value?: number | null;
+  achieved_ref?: string | null;
+  achieved_at?: string | null;
+  /** Served switch RELEASE_V2 (§8-§11). */
+  release_v2?: boolean;
+  /** §10-§11: the concessions in force (header). */
+  active_concessions?: ActiveConcession[];
   /** §3 urgent proceed: need-by realistic? and whether Sales told the customer. */
   need_by_check?: 'yes' | 'at_risk' | 'no' | null;
   need_by_proposed?: string | null;

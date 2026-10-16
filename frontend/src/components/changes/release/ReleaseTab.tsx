@@ -19,6 +19,7 @@ import PnlCard from '../PnlCard'
 import { StepSection } from '../offer/ui'
 import { sectionLabel } from '../offer/offerFormat'
 import ReleaseChecklist from './ReleaseChecklist'
+import AchievedCard, { achievedApplies } from './AchievedCard'
 import { releaseKey } from './releaseKeys'
 import LessonsStep from './LessonsStep'
 import IssuesPanel, { issueBlockers, useValidationIssues } from '../validation/IssuesPanel'
@@ -227,6 +228,7 @@ export default function ReleaseTab({
       </StepSection>
 
       <StepSection id="release-final" n={4} title="Release & close" done={releasedDone}>
+        {achievedApplies(change) && <AchievedCard change={change} canEdit={canManage} />}
         {inValidation && (
           <div className="space-y-2">
             {blockers.length > 0 && (

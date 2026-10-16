@@ -1678,6 +1678,11 @@ class ChangeService:
                         detail=f"v{latest.version}" if latest is not None else None,
                         who=" and ".join({"pm": "Project Management",
                                           "quality": "Quality"}[s] for s in sides))
+        if to == "closed" and ChangeService.achieved_owed(change):
+            # §11: the achieved value beside the target, a field on the
+            # Release tab (SOFT, run team)
+            add("achieved", "soft", rule="achieved_missing",
+                detail=ChangeService.achieved_missing_text(change))
         if to == "closed" and change.price_open and cm_switches.on("COMMERCIAL_V2"):
             # HARD #9: exits are the customer's acceptance or an Absorb
             # internal: no customer to accept, the approver's Absorb is the exit
@@ -1935,6 +1940,10 @@ class ChangeService:
             # the validation blocker, so the more concrete refusal wins while
             # validation is still open.
             out.extend(await ReleaseService.guard_reasons(session, change))
+        if to_status == "closed" and ChangeService.achieved_owed(change):
+            # §11 (RELEASE_V2): an internal change closes with what it
+            # achieved beside the target (SOFT: the run team may override)
+            out.append(R("achieved_missing", ChangeService.achieved_missing_text(change)))
         # Gate wiring (additive): a gate constrains its target transition only when a
         # row exists. Changes with no gate rows behave exactly as before.
         # Every rule is collected now (C6), so the gates are read on hops an
@@ -2457,6 +2466,8 @@ class ChangeService:
             await EarlyStageService.wake_later_stages(session, change)
         if to_status in ("in_implementation", "in_validation"):
             await ChangeService.notify_stage_entered(session, change, to_status)
+        if to_status == "closed" and old == "released":
+            await ChangeService.notify_closed(session, change, user_id)
         if mother_plant and old == "scoping" and to_status == "approved":
             # After the status flips: the detailed plan is only writable in
             # approved.
@@ -4247,6 +4258,100 @@ class ChangeService:
         tasks += await ChangeService._move_forward_tasks(
             db, user, open_changes, dep_ids, _base)
         return tasks
+
+    # ------------------------------------------------------------------
+    # §11 close (RELEASE_V2)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def achieved_owed(change: ChangeRequest) -> bool:
+        """An internal change with a target closes with what it achieved."""
+        from app.services import cm_switches
+        return (cm_switches.on("RELEASE_V2") and not change.customer_relevant
+                and change.target_value is not None and change.achieved_value is None
+                and change.status in ("released", "in_validation"))
+
+    @staticmethod
+    def achieved_missing_text(change: ChangeRequest) -> str:
+        unit = f" {change.problem_unit}" if change.problem_unit else ""
+        return (f"Achieved value not entered (target {change.target_value:g}{unit}"
+                + (f", was {change.problem_value:g}{unit}" if change.problem_value is not None else "")
+                + ")")
+
+    @staticmethod
+    async def record_achieved(session: AsyncSession, change: ChangeRequest,
+                              value, ref: Optional[str], user) -> ChangeRequest:
+        """§11: what an internal change achieved, beside its target, with
+        where the number comes from. The lead, Project Management or an
+        admin, from validation until the change is closed."""
+        from app.services.change_people import holds_lead
+        from app.services.cm_rules import reference_refusal
+        if not (user.effective_role == "admin" or holds_lead(change, user)
+                or await ChangeService._user_in_department(session, user, "Project Manager")):
+            raise PermissionError("The lead, Project Management or an admin records "
+                                  "the achieved value")
+        if change.customer_relevant:
+            raise ChangeError("The achieved value is asked of internal changes "
+                              "(beside their target)")
+        if change.status not in ("in_validation", "released"):
+            raise ChangeError("The achieved value is recorded in validation or "
+                              "once released, before the change is closed")
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            raise ChangeError("The achieved value is a number")
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ChangeError("The achieved value is a number")
+        why = reference_refusal(ref, "Where the achieved number comes from",
+                                "measuring report MR-2026-130 or SPC chart line 4")
+        if why:
+            raise ChangeError(why)
+        old = change.achieved_value
+        change.achieved_value = round(value, 4)
+        change.achieved_ref = ref.strip()[:255]
+        change.achieved_by = user.id
+        change.achieved_at = datetime.utcnow()
+        await session.flush()
+        unit = f" {change.problem_unit}" if change.problem_unit else ""
+        await ChangeService.append_changelog(
+            session, change, "achieved_recorded",
+            f"Achieved {change.achieved_value:g}{unit} (target "
+            f"{change.target_value if change.target_value is not None else '-'}{unit})",
+            user.id, field_name="achieved_value",
+            old_value={"value": old} if old is not None else None,
+            new_value={"value": change.achieved_value, "target": change.target_value,
+                       "unit": change.problem_unit}, notes=change.achieved_ref)
+        return change
+
+    @staticmethod
+    async def notify_closed(session: AsyncSession, change: ChangeRequest,
+                            user_id: int) -> int:
+        """§11 (RELEASE_V2): closing tells the Sales owner (internal: the
+        lead) and Process; once per change, never the closer."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2"):
+            return 0
+        from app.services.change_people import department_members_of_change_org
+        from app.services.notification_service import NotificationService
+        users: set = set()
+        owner = change.sales_owner_id if change.customer_relevant else change.lead_id
+        if owner:
+            users.add(owner)
+        process = (await session.execute(select(Department.id).where(
+            Department.name == "Process Engineer"))).scalar_one_or_none()
+        if process is not None:
+            users |= set(await department_members_of_change_org(session, change, [process]))
+        users.discard(user_id)
+        body = f"'{change.title}' is closed."
+        if change.achieved_value is not None:
+            unit = f" {change.problem_unit}" if change.problem_unit else ""
+            body += (f" Achieved {change.achieved_value:g}{unit}"
+                     + (f" (target {change.target_value:g}{unit})"
+                        if change.target_value is not None else "") + ".")
+        return await NotificationService.notify_once(
+            session, sorted(users), kind="change_closed",
+            subject_key=f"chg:{change.id}:closed",
+            title=f"Closed: {change.change_number}"[:255], body=body,
+            link=f"/changes/{change.id}?tab=release")
 
     @staticmethod
     async def notify_stage_entered(session: AsyncSession, change: ChangeRequest,

@@ -63,6 +63,12 @@ class ImplementationBooking(Base):
     # came from: 'estimate' (a confirmed department estimate) | 'typed'.
     work_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # C15 (migration 138): booked for a colleague (Belk for the toolmakers,
+    # who have no account), and the lead's "Coordination" row.
+    booked_for: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    activity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # the status of the change when the hours were booked
+    status_at_booking: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
 
 class ImplementationReport(Base):

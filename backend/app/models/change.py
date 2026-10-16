@@ -304,6 +304,13 @@ class ChangeRequest(Base):
     problem_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     problem_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     target_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # §11 (migration 138, RELEASE_V2): an internal change closes with what it
+    # achieved, beside the target, and where that number comes from.
+    achieved_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    achieved_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    achieved_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    achieved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # §3 urgent proceed: "Need-by realistic?" yes | at_risk | no (+ proposed
     # date); not yes: Sales tells the customer (need_by_told_*).
     need_by_check: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -462,6 +469,13 @@ class ChangeRequest(Base):
         waits. The UI reads this one flag."""
         from app.services import cm_switches
         return cm_switches.on("ASSESSMENT_V2")
+
+    @property
+    def release_v2(self) -> bool:
+        """Served switch RELEASE_V2 (cm_switches): spec §8-§11 computed
+        checks, the Fix task, the concession, achieved value at close."""
+        from app.services import cm_switches
+        return cm_switches.on("RELEASE_V2")
 
     @property
     def commercial_v2(self) -> bool:

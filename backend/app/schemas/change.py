@@ -447,6 +447,12 @@ class ChangeResponse(BaseModel):
     assessment_v2: bool = False
     # Served switch START_AT_RISK (§7a): off = "No start before PO".
     commercial_v2: bool = True
+    # Served switch RELEASE_V2 (§8-§11).
+    release_v2: bool = True
+    # §11 internal: what the change achieved, beside target_value.
+    achieved_value: Optional[float] = None
+    achieved_ref: Optional[str] = None
+    achieved_at: Optional[datetime] = None
     start_at_risk_on: bool = True
     # §1: a full ECR started beside a live change carrying the same part.
     related_change_id: Optional[int] = None
@@ -549,6 +555,7 @@ class ChangeResponse(BaseModel):
             row["assessment_v2"] = data.assessment_v2
             row["start_at_risk_on"] = data.start_at_risk_on
             row["commercial_v2"] = data.commercial_v2
+            row["release_v2"] = data.release_v2
             row["pm_signed_by_name"] = data.pm_signed_by_name
             row["quality_signed_by_name"] = data.quality_signed_by_name
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
@@ -579,6 +586,8 @@ class ChangeResponse(BaseModel):
 class ChangeDetailResponse(ChangeResponse):
     # The project's plant (Project.plant_id): the plant the change is made in.
     project_plant_id: Optional[int] = None
+    # §10-§11 (RELEASE_V2): concessions in force, for the header
+    active_concessions: List[dict] = []
     impacted_items: List[ImpactedItemResponse] = []
     assessments: List[AssessmentResponse] = []
     attachments: List[AttachmentResponse] = []

@@ -103,6 +103,7 @@ RULE_LABELS = {
     "plan_deviations_open": "Plan deviations open",
     "scope_change_uncovered": "Scope change not covered by an offer",
     "price_drop": "Accepted total below the last offer",
+    "achieved_missing": "Achieved value not entered",
     ABSORB_RULE: "Price open",
 }
 
