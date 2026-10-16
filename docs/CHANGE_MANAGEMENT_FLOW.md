@@ -2220,7 +2220,10 @@ the change leaves that status turns `lapsed` (a later return of its rule
 needs a new decision), one still pending turns `withdrawn` (changelog
 `deviation_withdrawn`; no dead "Decide override" task is left), and a
 pending Absorb turns `withdrawn` when the customer's acceptance clears the
-open price. Switch off: the old
+open price. One carry (A3-08, R6): an override of *Assessments open* used
+for the move to costing also covers costing -> quoting while the same
+departments are waited on (the names in its reason); a changed waiting set
+needs a new override. Why blocked shows it as approved. Switch off: the old
 rule (any approved deviation to the status, lead or admin decides).
 
 **C5 (spec §5, `ASSESSMENT_V2`).** Closing costing (`costing → quoting`, and an

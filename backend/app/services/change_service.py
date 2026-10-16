@@ -523,11 +523,41 @@ class ChangeService:
                 uncovered.append(r)  # decided, never overridden
                 continue
             d = next((d for d in approved if d.guard_key == r.key), None) or legacy
+            if d is None and r.key == "assessments_open":
+                from app.services.change_routing_service import ChangeRoutingService
+                d = ChangeService.carried_assessments_override(
+                    change, to_status,
+                    await ChangeRoutingService.blocking_waiting(session, change))
             if d is None:
                 uncovered.append(r)
             elif d not in covering:
                 covering.append(d)
         return covering, uncovered
+
+    @staticmethod
+    def _waiting_names(text: Optional[str]) -> set[str]:
+        """The department names an 'assessments_open' reason waits on."""
+        if not text or "waiting on " not in text:
+            return set()
+        names = text.split("waiting on ", 1)[1].split(" · ", 1)[0]
+        return {n.strip() for n in names.split(",") if n.strip()}
+
+    @staticmethod
+    def carried_assessments_override(change: ChangeRequest, to_status: str,
+                                     waiting: Optional[list[str]]):
+        """A3-08 (R6): an approved override of 'assessments_open' used for
+        the move to costing still covers costing -> quoting while the same
+        departments are waited on: the same fact needs no second reason and
+        no second OK. A changed waiting set needs a new override."""
+        if (to_status != "quoting" or change.status != "costing" or not waiting):
+            return None
+        used = [d for d in change.transition_deviations
+                if d.to_status == "costing" and d.guard_key == "assessments_open"
+                and d.status == "consumed"]
+        if not used:
+            return None
+        d = max(used, key=lambda d: (d.decided_at or d.proposed_at, d.id))
+        return d if ChangeService._waiting_names(d.guard_reason) == set(waiting) else None
 
     @staticmethod
     async def _load_deviations(session: AsyncSession, change: ChangeRequest) -> None:
@@ -1570,8 +1600,15 @@ class ChangeService:
             if not blocking or open_rows or checks:
                 names = await ChangeRoutingService._department_names(
                     session, [a.department_id for a in open_rows])
+                # A3-08: the override approved for costing carries to quoting
+                # (the same waiting list the transition reads)
+                carried = (ChangeService.carried_assessments_override(
+                    change, to, await ChangeRoutingService.blocking_waiting(session, change))
+                    if to == "quoting" and change.status == "costing" else None)
                 add("assessments", "soft", n=len(open_rows), rule="assessments_open",
-                    who=" · ".join(x for x in (", ".join(names), checks) if x) or None)
+                    who=" · ".join(x for x in (", ".join(names), checks) if x) or None,
+                    **({"override": {"id": carried.id, "status": "approved"}}
+                       if carried is not None else {}))
             if any(a.verdict == "not_feasible" for a in change.assessments):
                 add("not_feasible", "soft", rule="not_feasible")
             if (change.routing is not None

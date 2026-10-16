@@ -1238,3 +1238,46 @@ async def test_customer_acceptance_names_its_exit_and_release_needs_signatures(
     async with session_factory() as s:
         assert await ChangeService.signoff_offer_refusal(
             s, await s.get(ChangeRequest, cid3)) is None
+
+
+async def test_assessments_open_override_carries_to_quoting_while_the_wait_is_the_same(
+        client, admin, seed, depts, people, session_factory, monkeypatch):
+    """A3-08 (R6): the OK given for 'Assessments open' on the move to
+    costing still covers costing -> quoting while the same departments are
+    waited on; a changed waiting set asks again (negative)."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_service import ChangeService
+    state = {"waiting": ["Tool Engineer"]}
+
+    async def _waiting(session, change):
+        return list(state["waiting"])
+
+    async def _pending(session, change):
+        return []
+    monkeypatch.setattr(ChangeRoutingService, "blocking_waiting", staticmethod(_waiting))
+    monkeypatch.setattr(ChangeService, "costing_pending_department_ids",
+                        staticmethod(_pending))
+    cid = await _change(client, admin, seed, session_factory, "in_assessment")
+    pm = people["Project Manager"][1]
+    lead = await login(client, "eng@test.io", admin=False)
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "costing"}, headers=pm)
+    assert r.status_code == 400 and "waiting on Tool Engineer" in r.json()["detail"]
+    dev = (await _propose(client, lead, cid, "costing",
+                          guard_key="assessments_open")).json()
+    assert (await _decide(client, pm, cid, dev["id"])).status_code == 200
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "costing"}, headers=pm)
+    assert r.status_code == 200, r.text
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    item = next((i for i in ch["next_step"]["items"] if i["key"] == "assessments"), None)
+    assert item is not None and item["override"] == {"id": dev["id"], "status": "approved"}
+    # negative: Quality now waited on too: a new OK is needed
+    state["waiting"] = ["Tool Engineer", "Quality"]
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "quoting"}, headers=pm)
+    assert r.status_code == 400 and "Assessments open" in r.json()["detail"], r.text
+    state["waiting"] = ["Tool Engineer"]
+    r = await client.post(f"/api/v1/changes/{cid}/transition",
+                          json={"to_status": "quoting"}, headers=pm)
+    assert r.status_code == 200, r.text
