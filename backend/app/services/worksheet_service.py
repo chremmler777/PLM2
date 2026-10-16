@@ -1,5 +1,6 @@
 """Rows for the project worksheet: one per article with the producing tool's
-values, the active revision, material, paint and the tool's DFM status.
+values, the active revision, material, paint, the tool's DFM status and its
+latest Moldflow row.
 Optional rows: purchased articles and tools that produce no article of the
 project. A fixed number of queries regardless of project size."""
 from collections import defaultdict
@@ -16,6 +17,7 @@ from app.models.supplier import Supplier
 from app.models.tool_shrink import ToolShrinkDecision
 from app.services import materialdb_client
 from app.services.dfm_service import flow_state
+from app.services.moldflow_service import rows_by_tool as moldflow_by_tool, worksheet_cell as moldflow_cell
 
 SHRINK_KEYS = {"parallel": "shrinkage_flow", "normal": "shrinkage_cross"}
 
@@ -140,6 +142,8 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
                                        DfmTopic.deleted_at.is_(None)))).scalars().all():
             topics_by_tool[t.tool_part_id].append(t)
 
+    moldflow = await moldflow_by_tool(session, tools)
+
     tools_of: dict = defaultdict(list)
     producing: set = set()
     mirror_of: dict = {}
@@ -180,11 +184,13 @@ async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional
             "tool": _tool(tool, toolmakers, shrink_sources) if tool else None,
             "other_tools": [t.part_number for t in made_by[1:]],
             "dfm": dfm_status(topics_by_tool.get(tool.id, []), today) if tool else None,
+            "moldflow": moldflow_cell(moldflow.get(tool.id, [])) if tool else None,
         })
     for t in tools.values():
         if t.id in producing:
             continue
         rows.append({**_identity(t, "tool_only"), "mirror_of": None, "revision": None,
                      "material": {**material_dict(t), "shrinkage": None}, "paint": _paint(None), "tool": _tool(t, toolmakers, shrink_sources),
-                     "other_tools": [], "dfm": dfm_status(topics_by_tool.get(t.id, []), today)})
+                     "other_tools": [], "dfm": dfm_status(topics_by_tool.get(t.id, []), today),
+                     "moldflow": moldflow_cell(moldflow.get(t.id, []))})
     return {"project_id": project_id, "rows": rows, "materialdb_error": materials_error}

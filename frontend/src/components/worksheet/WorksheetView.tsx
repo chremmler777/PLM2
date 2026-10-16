@@ -31,7 +31,7 @@ export interface WorksheetViewProps {
   onClose(): void;
 }
 
-const GROUPS = ['Identity', 'Revision', 'Material', 'Paint', 'Tool', 'DFM', 'Notes'] as const;
+const GROUPS = ['Identity', 'Revision', 'Material', 'Paint', 'Tool', 'DFM', 'Moldflow', 'Notes'] as const;
 
 export default function WorksheetView({ projectId, projectCode = null, onClose }: WorksheetViewProps) {
   const { data, isLoading, isError } = useWorksheet(projectId);

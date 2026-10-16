@@ -179,6 +179,30 @@ describe('ProjectStatusNav', () => {
     expect(btn.className).not.toContain('amber')
   })
 
+  it('shows the Moldflow chip and opens the per-tool overview in the panel', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/2/moldflow') return Promise.resolve({ data: { project_id: 2, can_edit: false, tools: [
+        { tool: { part_id: 9, part_number: '199405', name: 'T', cavities: '1' }, latest_id: 1,
+          articles: [{ part_id: 3, part_number: 'a', customer_part_number: '206.885.219', tier1_part_number: 'S00HT7-110', name: 'Cover trim center back' }],
+          rows: [{ id: 1, tool_part_id: 9, version: 'V1', cavity_layout: null, geometry_status: 'ready', gate_status: 'ready',
+            udb_status: 'open', material_label: null, udb_source: null, mf_requested_on: null, received_on: '2026-10-15',
+            ktx_review_on: '2026-10-15', sent_customer_on: '2026-10-15', customer_feedback_on: null, final_on: null,
+            customer_feedback: null, status: 'sent_to_customer', derived_status: 'sent_to_customer', blockers: null,
+            owner: null, notes: null, source_ref: null, updated_at: null }] },
+      ] } })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    const btn = await screen.findByTestId('status-nav-moldflow')
+    await vi.waitFor(() => expect(btn.textContent).toContain('Moldflow · 1 at customer'))
+    fireEvent.click(btn)
+    expect(btn.getAttribute('aria-expanded')).toBe('true')
+    const tool = await within(panel()).findByTestId('mf-tool-199405')
+    expect(tool.textContent).toContain('206.885.219 / S00HT7-110 Cover trim center back')
+    fireEvent.click(navButton(/Changes/))
+    expect(within(panel()).queryByTestId('moldflow-panel')).toBeNull()
+  })
+
   it('opens the project-wide DFM archive in the panel', async () => {
     mount()
     fireEvent.click(await screen.findByTestId('status-nav-dfm'))

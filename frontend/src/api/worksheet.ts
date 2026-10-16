@@ -6,6 +6,7 @@ import client from './client';
 import type { DfmParty } from './dfm';
 import type { FieldFlag } from './fieldNotes';
 import type { PartMaterial } from './materials';
+import type { MfStatus } from './moldflow';
 
 export interface WorksheetTool {
   part_id: number;
@@ -52,6 +53,20 @@ export interface WorksheetDfm {
   open_topics: number;
 }
 
+/** The tool's latest Moldflow row (highest version; among its layouts the one changed last). */
+export interface WorksheetMoldflow {
+  id: number;
+  version: string;
+  cavity_layout: string | null;
+  /** Rows (cavity layouts) of that version. */
+  layouts: number;
+  /** Distinct versions on the tool. */
+  versions: number;
+  status: MfStatus;
+  last_step: { key: string; label: string; on: string } | null;
+  blockers: string | null;
+}
+
 export interface WorksheetPaint {
   painted: boolean;
   colour: string | null;
@@ -83,6 +98,8 @@ export interface WorksheetRow {
   tool: WorksheetTool | null;
   other_tools: string[];
   dfm: WorksheetDfm | null;
+  /** null: no Moldflow row on the tool (or no tool). */
+  moldflow?: WorksheetMoldflow | null;
 }
 
 export interface Worksheet {

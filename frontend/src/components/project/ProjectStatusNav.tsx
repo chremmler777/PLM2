@@ -1,7 +1,7 @@
 /**
  * Project status nav bar under the one-line header. Left, the SEP Q-gate strip
- * in its collapsed form, always shown; right, Changes, Lessons and Tooling
- * DFM (the project-wide general tooling DFM). Each gate chip and button is a
+ * in its collapsed form, always shown; right, Changes, Lessons, Tooling
+ * DFM (the project-wide general tooling DFM) and Moldflow (timing per tool). Each gate chip and button is a
  * nav item: clicking one opens its content inline
  * below the bar, closing whatever was open; clicking the active item again or
  * pressing Escape closes it. Nothing is remembered across reloads.
@@ -11,10 +11,11 @@ import ProjectSepSection from '../ProjectSepSection';
 import ProjectChangesSection from '../ProjectChangesSection';
 import ProjectLessonsSection from '../ProjectLessonsSection';
 import ToolDfmTab from './ToolDfmTab';
+import MoldflowPanel from '../moldflow/MoldflowPanel';
 import { projectScope } from '../../api/dfm';
 import { useProjectStatus, type ChipTone, type StatusChip } from '../../hooks/queries/useProjectStatus';
 
-type OpenPanel = { kind: 'gate'; gateId: number } | { kind: 'changes' } | { kind: 'lessons' } | { kind: 'dfm' } | null;
+type OpenPanel = { kind: 'gate'; gateId: number } | { kind: 'changes' } | { kind: 'lessons' } | { kind: 'dfm' } | { kind: 'moldflow' } | null;
 
 const TONE_CLASS: Record<ChipTone, string> = {
   neutral: 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-400',
@@ -67,7 +68,7 @@ export default function ProjectStatusNav({ projectId }: { projectId: number }) {
 
   const toggleGate = (gateId: number) =>
     setOpen((o) => (o?.kind === 'gate' && o.gateId === gateId ? null : { kind: 'gate', gateId }));
-  const toggle = (kind: 'changes' | 'lessons' | 'dfm') =>
+  const toggle = (kind: 'changes' | 'lessons' | 'dfm' | 'moldflow') =>
     setOpen((o) => (o?.kind === kind ? null : { kind }));
 
   return (
@@ -90,6 +91,7 @@ export default function ProjectStatusNav({ projectId }: { projectId: number }) {
           <NavButton chip={status.changes} active={open?.kind === 'changes'} panelId={panelId} onClick={() => toggle('changes')} />
           <NavButton chip={status.lessons} active={open?.kind === 'lessons'} panelId={panelId} onClick={() => toggle('lessons')} />
           <NavButton chip={status.dfm} active={open?.kind === 'dfm'} panelId={panelId} onClick={() => toggle('dfm')} testId="status-nav-dfm" />
+          <NavButton chip={status.moldflow} active={open?.kind === 'moldflow'} panelId={panelId} onClick={() => toggle('moldflow')} testId="status-nav-moldflow" />
         </div>
       </nav>
       <section
@@ -103,6 +105,7 @@ export default function ProjectStatusNav({ projectId }: { projectId: number }) {
         {open?.kind === 'changes' && <ProjectChangesSection projectId={projectId} />}
         {open?.kind === 'lessons' && <ProjectLessonsSection projectId={projectId} />}
         {open?.kind === 'dfm' && <ToolDfmTab key={projectId} scope={projectScope(projectId)} />}
+        {open?.kind === 'moldflow' && <MoldflowPanel key={projectId} projectId={projectId} />}
       </section>
     </>
   );

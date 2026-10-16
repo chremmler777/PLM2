@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
 import { changesApi } from '../../api/changes';
 import { dfmKey, listTopics, projectScope, type DfmTopicSummary } from '../../api/dfm';
+import { getProjectMoldflow, moldflowKey, type MfStatus, type ProjectMoldflow } from '../../api/moldflow';
 
 export type ChipTone = 'neutral' | 'green' | 'amber';
 export interface StatusChip { label: string; tone: ChipTone; title: string }
@@ -44,6 +45,35 @@ export function dfmChip(topics: DfmTopicSummary[] | undefined): StatusChip {
   };
 }
 
+const MF_BUCKETS: { label: string; statuses: MfStatus[] }[] = [
+  { label: 'feedback', statuses: ['customer_feedback', 'rework'] },
+  { label: 'at customer', statuses: ['sent_to_customer'] },
+  { label: 'in review', statuses: ['received', 'in_review'] },
+  { label: 'running', statuses: ['running'] },
+  { label: 'ready', statuses: ['ready_for_mf'] },
+  { label: 'inputs open', statuses: ['inputs_open', 'not_started'] },
+  { label: 'final', statuses: ['final'] },
+];
+
+/** "Moldflow · 3 at customer · 2 ready" from each tool's latest row (the two most advanced buckets with tools);
+ *  amber while customer feedback or rework waits on KTX. */
+export function moldflowChip(data: ProjectMoldflow | undefined): StatusChip {
+  const base = { label: 'Moldflow', tone: 'neutral' as ChipTone, title: 'Moldflow timing per tool' };
+  const tools = Array.isArray(data?.tools) ? data!.tools : undefined;
+  if (!tools) return base;
+  const latest = tools.map((t) => t.rows.find((r) => r.id === t.latest_id)).filter((r) => r !== undefined);
+  if (latest.length === 0) return { ...base, title: `Moldflow timing: no Moldflow recorded for ${tools.length} tools` };
+  const counts = MF_BUCKETS.map((b) => ({ label: b.label, n: latest.filter((r) => b.statuses.includes(r.status)).length }))
+    .filter((c) => c.n > 0);
+  const text = counts.map((c) => `${c.n} ${c.label}`);
+  const none = tools.length - latest.length;
+  return {
+    label: `Moldflow · ${text.slice(0, 2).join(' · ')}`,
+    tone: counts.some((c) => c.label === 'feedback') ? 'amber' : 'neutral',
+    title: `Moldflow timing (latest version per tool): ${text.join(', ')}${none > 0 ? `; ${none} tools without Moldflow` : ''}`,
+  };
+}
+
 export function useProjectStatus(projectId: number) {
   const changes = useQuery({
     queryKey: ['changes', 'project', projectId],
@@ -61,7 +91,13 @@ export function useProjectStatus(projectId: number) {
     queryFn: () => listTopics(dfmScope),
     enabled: !!projectId,
   });
+  const moldflow = useQuery({
+    queryKey: moldflowKey(projectId),
+    queryFn: () => getProjectMoldflow(projectId),
+    enabled: !!projectId,
+  });
   return {
+    moldflow: moldflowChip(moldflow.data && !Array.isArray(moldflow.data) ? moldflow.data : undefined),
     dfm: dfmChip(Array.isArray(dfm.data) ? dfm.data : undefined),
     changes: changesChip(Array.isArray(changes.data) ? changes.data : undefined),
     lessons: lessonsChip(Array.isArray(references.data) ? references.data : undefined),

@@ -27,6 +27,7 @@ from app.api.v1.items.field_notes import router as field_notes_router
 from app.api.v1.items.materials import router as materials_router
 from app.api.v1.items.tool_shrink import router as tool_shrink_router
 from app.api.v1.items.worksheet import router as worksheet_router
+from app.api.v1.items.moldflow import router as moldflow_router
 from app.api.v1.items.intakes import router as intakes_router
 from app.api.v1.equipment import router as equipment_router
 from app.api.v1.tool_revisions import router as tool_revisions_router
@@ -96,6 +97,7 @@ api_router.include_router(field_notes_router)
 api_router.include_router(materials_router)
 api_router.include_router(tool_shrink_router)
 api_router.include_router(worksheet_router)
+api_router.include_router(moldflow_router)
 api_router.include_router(intakes_router, dependencies=_TRAINING_GATE)
 api_router.include_router(equipment_router)
 api_router.include_router(tool_revisions_router)

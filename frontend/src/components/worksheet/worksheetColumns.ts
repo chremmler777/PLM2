@@ -9,13 +9,14 @@
  */
 import { PARTY_LABELS } from '../../api/dfm';
 import type { FieldNoteSummary } from '../../api/fieldNotes';
-import type { WorksheetDfm, WorksheetRow } from '../../api/worksheet';
+import { MF_STATUS_LABELS } from '../../api/moldflow';
+import type { WorksheetDfm, WorksheetMoldflow, WorksheetRow } from '../../api/worksheet';
 import { fieldKeyAllowed, noteKey } from '../../lib/fieldNotes';
 import { materialText } from '../../lib/material';
 import { shortName } from '../../lib/partDisplay';
 
-export type ColumnGroup = 'Identity' | 'Revision' | 'Material' | 'Paint' | 'Tool' | 'DFM' | 'Notes';
-export type CellDisplay = 'thumbnail' | 'text' | 'mono' | 'number' | 'revision' | 'material' | 'colour' | 'dfm' | 'notes';
+export type ColumnGroup = 'Identity' | 'Revision' | 'Material' | 'Paint' | 'Tool' | 'DFM' | 'Moldflow' | 'Notes';
+export type CellDisplay = 'thumbnail' | 'text' | 'mono' | 'number' | 'revision' | 'material' | 'colour' | 'dfm' | 'moldflow' | 'notes';
 
 export interface WorksheetContext {
   byKey: Map<string, FieldNoteSummary>;
@@ -178,6 +179,14 @@ export function dfmLabel(dfm: WorksheetDfm | null): string | null {
   }
 }
 
+/** "V1 · At customer · Sent to customer 2026-10-15"; the blocker instead of the date when there is one. */
+export function moldflowLabel(mf: WorksheetMoldflow | null | undefined): string | null {
+  if (!mf) return null;
+  const head = `${mf.version}${mf.cavity_layout ? ` (${mf.cavity_layout})` : ''}`;
+  const tail = mf.blockers ? `Blocker: ${mf.blockers}` : mf.last_step ? `${mf.last_step.label} ${mf.last_step.on}` : null;
+  return [head, MF_STATUS_LABELS[mf.status] ?? mf.status, tail].filter(Boolean).join(' · ');
+}
+
 const onRow = (key: string) => (row: WorksheetRow): EditTarget => ({ partId: row.part_id, focus: key });
 const onArticle = (key: string) => (row: WorksheetRow): EditTarget | null =>
   row.row_kind === 'tool_only' ? null : { partId: row.part_id, focus: key };
@@ -294,6 +303,9 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     value: (r) => r.tool?.machine ?? null, edit: onTool('tool.machine') }),
   def({ key: 'dfm.status', label: 'DFM', group: 'DFM', display: 'dfm', filter: 'enum', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => dfmLabel(r.dfm), edit: onTool('dfm.status') }),
+  // Latest Moldflow version of the tool (one merged cell per tool group); edited in the project's Moldflow panel.
+  def({ key: 'moldflow.status', label: 'Moldflow', group: 'Moldflow', display: 'moldflow', noteOwner: null,
+    editableOn: 'tool', value: (r) => moldflowLabel(r.moldflow), title: (r) => moldflowLabel(r.moldflow), edit: nowhere }),
   def({ key: 'notes.summary', label: 'Notes', group: 'Notes', display: 'notes', noteOwner: null, editableOn: null,
     value: (r, ctx) => notesSummary(r, ctx), edit: nowhere }),
 ];

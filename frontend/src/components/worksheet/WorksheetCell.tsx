@@ -6,6 +6,7 @@ import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
 import type { FieldNoteSummary } from '../../api/fieldNotes';
 import type { WorksheetRow } from '../../api/worksheet';
 import { noteKey } from '../../lib/fieldNotes';
+import MoldflowStatusChip from '../moldflow/MoldflowStatusChip';
 import { cellNoteKey, colourSource, notePartId, otherColourKey, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
 
 export interface WorksheetCellProps {
@@ -58,6 +59,19 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, projectId
     case 'dfm':
       body = value === null ? null : <span className={DFM_TONE[row.dfm?.status ?? ''] ?? 'text-slate-300'}>{value}</span>;
       break;
+    case 'moldflow': {
+      const mf = row.moldflow;
+      body = !mf ? null : (
+        <span className="inline-flex items-center gap-1.5" title={value === null ? undefined : String(value)} data-testid={`ws-moldflow-${row.part_id}`}>
+          <span className="font-mono text-slate-300">{mf.version}{mf.cavity_layout ? ` (${mf.cavity_layout})` : ''}</span>
+          <MoldflowStatusChip status={mf.status} />
+          {mf.blockers
+            ? <span className="text-amber-300 max-w-[16rem] truncate">{mf.blockers}</span>
+            : mf.last_step && <span className="text-slate-400 tabular-nums">{mf.last_step.label} {mf.last_step.on}</span>}
+        </span>
+      );
+      break;
+    }
     case 'notes':
       body = value === null ? null : <span className="text-slate-400">{value}</span>;
       break;
