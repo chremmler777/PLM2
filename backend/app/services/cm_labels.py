@@ -99,6 +99,8 @@ TASK_KIND = {
                      "Umfangsänderung kalkuliert: Angebot überarbeiten"),
     "scope_change_tell": ("Tell the customer: scope change refused",
                           "Kunden informieren: Umfangsänderung abgelehnt"),
+    "scope_change_question": ("Ask the customer: scope change",
+                              "Kunden fragen: Umfangsänderung"),
     # §7a start at risk
     "start_at_risk_quality": ("Start at risk: add the quality risks",
                               "Start auf Risiko: Qualitätsrisiken ergänzen"),

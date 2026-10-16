@@ -517,7 +517,7 @@ export type ChangeTaskKind =
   /** §1: a new index on a part the change carried: the department rechecks. */
   | 'assessment_recheck'
   /** §6 [R3] scope change card: the lead decides, Sales revises or tells. */
-  | 'scope_change_decide' | 'revise_offer' | 'scope_change_tell'
+  | 'scope_change_decide' | 'revise_offer' | 'scope_change_tell' | 'scope_change_question'
   /** §7a start at risk: Quality's line, then the PM member's approval. */
   | 'start_at_risk_quality' | 'start_at_risk_approve'
   /** §1: the lead: does the new index add parts or departments? */
@@ -614,6 +614,11 @@ export interface ChangeTask {
   offer_currency?: string | null;
   margin_pct?: number | null;
   margin_delta_pts?: number | null;
+  /** A supplement's sign_off row (supplement: true): the delta (offer_total)
+   *  and the accepted total after it, no margin. */
+  accepted_total?: number | null;
+  /** revise_offer: every department said 'no cost impact': confirm, nothing to price. */
+  no_cost?: boolean;
   prev_version?: number | null;
   assumed_open?: number;
   /** §7 still talking: the next contact date of a customer_response row. */
@@ -1729,4 +1734,13 @@ export interface ScopeChangeCard {
   new_change_id?: number | null
   told_at?: string | null
   told_ref?: string | null
+  /** Ready with 'no cost impact' from every department: Sales confirms it
+   *  to the customer (told), nothing to price. */
+  no_cost?: boolean
+  /** §6 step 1: missing info is a question to the customer (Sales). */
+  question?: {
+    text: string; at?: string | null; open: boolean; by_name?: string | null
+    answer?: string | null; ref?: string | null; answered_at?: string | null
+    customer_copy?: string | null
+  } | null
 }

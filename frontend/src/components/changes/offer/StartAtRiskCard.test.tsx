@@ -64,7 +64,7 @@ describe('StartAtRiskCard (§7a)', () => {
     cleanup()
     // NEGATIVE: the customer accepted meanwhile: no Approve, the reason instead
     vi.mocked(client.get).mockResolvedValue(state({ ...asked, available: false, decidable: false,
-      refusal: 'The customer accepted: approve it the normal way' }))
+      refusal: 'The customer accepted: approval follows on its own once PM and Quality sign' }))
     wrap(props({ canApprove: true, userId: 5 }))
     expect((await screen.findByTestId('sar-moot')).textContent).toContain('customer accepted')
     expect(screen.queryByTestId('sar-approve')).toBeNull()

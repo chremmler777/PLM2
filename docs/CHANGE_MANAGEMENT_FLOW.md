@@ -1086,7 +1086,12 @@ nothing preselected:
   `answered_at`/`answered_by`, migration 131). The release date is prefilled
   from the need-by, else from the offer's weeks from order. An expired offer
   still needs its override reason [KEEP]. A refusal names every missing part
-  at once (release date, evidence, PO match, confirmed total).
+  at once (release date, evidence, PO match, confirmed total). Started at
+  risk with no offer sent, "accepted" is refused ("Send the offer first: the
+  customer accepts a priced version"): HARD #9's exit is a yes to a price.
+  The file an answer stands on (an acceptance, a decline, a supplement's
+  answer) and a scope card's mail or answer file cannot be removed
+  afterwards, by anyone but an admin (R4/R17, `_require_attachment_delete`).
 - **Still talking** (`negotiating`) names the next contact date (default +5
   working days, never in the past; `change_requests.customer_next_contact`).
   Sales' `customer_response` task stays (C4) and is due on that date.
@@ -1109,6 +1114,17 @@ why-blocked text names the versions, never the totals (R23: every viewer
 reads it); the reason and `price_drop_asked`'s note are blanked outside the
 price rule. A higher total asks nothing. Per-position diff: cut 2.
 
+**A new version while quoted (C14, spec §7).** Until approval the
+customer's yes is not final: Sales may write and send a new version after
+it (a scope card re-costed after the yes, a PO that differs; the Offer tab
+warns "Sending vN clears the customer's yes to vM"). Sending it clears the
+acceptance (`OfferService._clear_acceptance`: `customer_response` back to
+`pending`, `accepted_offer_id` cleared, the accepted version `superseded`
+with its evidence kept, a pending price-drop OK on it withdrawn; changelog
+`acceptance_cleared`); the customer answers the new version. HARD #4 binds
+the yes to the latest version sent: an acceptance of an older one never
+approves. Once approved the offer is closed: a supplement carries a change.
+
 **Sign-offs bound to the offer (C14).** A signature counts for the offer it
 was given on (`pm_signed_offer_id`, `quality_signed_offer_id`; L2). Sending a
 new version withdraws the ones given on an older version
@@ -1125,9 +1141,11 @@ both): the cockpit and the Offer tab offer the button; Quality, who sees no
 prices, gets the sign block in every signable status. The PM's sign-off row
 in My Tasks starts with the offer total, its margin and the margin move
 against the version before (on the internal cost frozen when the latest
-version was sent; today's for an older version), and the number of
-unconfirmed Assumed answers (`_pm_signoff_brief`, no summation per row);
-Quality's row carries no prices.
+version was sent; a version sent before that was frozen shows its total
+only), and the number of unconfirmed Assumed answers (`_pm_signoff_brief`,
+no summation per row). On a supplement the row shows the supplement (a
+delta, e.g. -300) and the accepted total after it (offer plus accepted
+supplements plus this one), never a margin. Quality's row carries no prices.
 
 **Approval follows on its own** (`ChangeService.try_auto_approve`): on the
 last of acceptance, PM sign-off and Quality sign-off, when HARD #4 holds and no
@@ -1181,6 +1199,14 @@ card, three steps, an owner each:
    filed on the change or its reference (5+ characters); a filed mail must
    be filed after the latest offer went out. The lead is told (no lead:
    Project Management); My Tasks `scope_change_decide` (Needs you).
+   **Missing info is a question** (migration 135, `change_scope_changes.question`):
+   the lead (run team) or Sales asks the customer from the card ("Missing
+   info? Ask the customer", 10+ characters); Sales owns it (My Tasks
+   `scope_change_question` with the mail text to copy, Sales owner notified)
+   and files the customer's answer with its evidence (a filed customer mail
+   or its reference). While it is open the accept waits (the lead's decide
+   row is hidden, the accept is refused with the question); a refusal does
+   not wait. The answer tells the lead and brings the decide row back.
 2. **Re-costed**: the lead (run team) accepts with the departments that
    re-cost it (preticked: the routed ones; only routed departments) or
    refuses with a reason (Sales: `scope_change_tell`, then "Customer told"
@@ -1193,7 +1219,14 @@ card, three steps, an owner each:
    has priced (`department_cost_moved`), else "No cost impact" with why (15+
    characters, logged). The card reads "Waiting for: Toolshop (by Thu)". The
    last one hands Sales `revise_offer` ("send a supplement" after approval;
-   Needs you for the Sales owner, who alone is notified). Accepting before
+   Needs you for the Sales owner, who alone is notified; the cockpit button
+   reads the same stage-aware words). Only active departments re-cost (an
+   inactive one is refused by name and not offered). When every department
+   said "No cost impact" there is nothing to price: the row reads "Scope
+   change at no cost: confirm to the customer", and Sales' "Confirmed to the
+   customer: no price change" with the mail reference settles the card
+   (`accepted` without an offer, changelog `scope_change_accepted`); it may
+   close the price the card opened and re-runs the automatic approval. Accepting before
    approval puts an added part known in PLM into the impacted items (a
    logged impact edit, `impact_edited_by_scope_change`, after the intake
    live-change check: other live changes carrying it are named and related);
@@ -1212,17 +1245,23 @@ effect re-costing at once; a second department joins the same card); a PO
 that differs from the offer at acceptance opens a `po_differs` card (the
 lead gets one notice for it). A card opened after approval (`post_accept`)
 opens the price (HARD #9) instead of holding the approval; one opened before
-(a PO that differs at the customer's yes included) holds the automatic
-approval until it is decided (a refusal re-runs it); refusing it or moving it to its own change
-closes the price again when it was the card that opened it; an Absorb
-settles it (`absorbed`). **SOFT `scope_change_uncovered`** (override: a
-Project Management or Management member) holds `quoted -> approved` (cards
-opened before the yes, so automatic approval waits), `-> in_implementation`
-and `-> released` while a card is open. With cards, `scope_change_state`
-reads the cards; a change flagged before the cards keeps the old rule (a
-newer offer or an approved override covers it). Not built yet: raising a
-question from a card when P/N or what is missing (the card refuses an
-empty "what"; P/N stays optional for a change to parts already on it).
+approval (a PO that differs at the customer's yes included) holds the
+automatic approval until it is decided (a refusal re-runs it). Refusing a
+card, moving it to its own change or confirming it at no cost closes the
+price again only when cards alone opened it: every opening of `price_open`
+is logged (`ChangeService.open_price`, also when it is open already: a
+supplement sent or declined, a quote above the estimate, a customer flip
+after approval, a start at risk, a card), and the price closes only when
+every opening since it last closed is a card settled without money and the
+first of them found the price closed (R25: a throw-away card never closes a
+price another cause opened; those go through the customer's yes or Absorb).
+An Absorb settles the cards (`absorbed`). **SOFT `scope_change_uncovered`**
+(override: a Project Management or Management member) holds `quoted ->
+approved` (cards opened before approval, a PO that differs included, so
+automatic approval waits), `-> in_implementation` and `-> released` while a
+card is open (`post_accept` on a card means opened after approval). With
+cards, `scope_change_state` reads the cards; a change flagged before the
+cards keeps the old rule (a newer offer or an approved override covers it).
 Switch off: no cards.
 
 ### Start at risk (ECR-solid §7a, P8, 2026-10-15)
@@ -1240,10 +1279,11 @@ migration 134; UI `StartAtRiskCard.tsx` on the Offer tab, no prices):
 2. Quality adds one line of quality risks (My Tasks `start_at_risk_quality`,
    Needs you); the Project Management members (not the asker) are told now.
 3. A Project Management member (who sees prices; second: an admin) approves
-   it, never the one who asked (`start_at_risk_approve`, Needs you), or
+   it, never the one who asked nor the one who wrote Quality's line (an
+   admin acting as Quality, R25) (`start_at_risk_approve`, Needs you), or
    refuses it with why (`POST .../start-at-risk/refuse`: the ask is cleared,
    the asker told). An ask the customer's yes made moot leaves no row or
-   button (the card says why). The change goes to `approved` from costing,
+   button (the card says why: approval follows once PM and Quality sign). The change goes to `approved` from costing,
    quoting or quoted (`ChangeService.transition(at_risk=True)`, only from
    `StartAtRiskService.approve`, lets this one hop through without the
    customer's acceptance; a later quoted -> approved needs HARD #4 again; a

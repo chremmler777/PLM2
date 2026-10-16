@@ -1369,12 +1369,17 @@ export default function ChangeDetailPage() {
           canRequest={isSalesMember || isAdmin || isChangeLead || isPmMember}
           mayDecide={isAdmin || isChangeLead || isPmMember}
           isSales={isSalesMember} myDepartmentIds={myActions?.memberships ?? []}
-          routed={(change.assessments ?? []).map((a) => ({ id: a.department_id,
-            name: departments.find((d) => d.id === a.department_id)?.name ?? `#${a.department_id}` }))}
+          routed={[...new Set((change.assessments ?? []).map((a) => a.department_id))]
+            // nobody can re-cost for an inactive department (backend refuses it);
+            // one row per department (a department may hold several assessments)
+            .filter((id) => allDepartments.find((d) => d.id === id)?.is_active !== false)
+            .map((id) => ({ id, name: departments.find((d) => d.id === id)?.name ?? `#${id}` }))}
           attachments={change.attachments ?? []} />
       )}
       {effectiveTab === 'offer' && (
         <OfferTab change={change}
+          onAbsorb={!readOnly && (isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember))
+            ? () => setAbsorbOpen(true) : undefined}
           canWrite={canEditQuotedPrice} canSeePrices={canSeeCosts}
           canSignPm={canSignPm} canSignQuality={canSignQuality}
           canApproveInternalCosts={canApproveInternalCosts}

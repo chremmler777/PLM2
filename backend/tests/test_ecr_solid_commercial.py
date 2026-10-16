@@ -1394,3 +1394,313 @@ async def test_accept_names_every_missing_part_at_once(client, quoted, session_f
     for words in ("release deadline", "evidence", "PO matches offer v1",
                   "Confirm the customer says yes"):
         assert words in detail, detail
+
+
+# ---------------------------------------------------------------------------
+# L6 loop 2: review fixes
+# ---------------------------------------------------------------------------
+async def test_a_throwaway_card_never_closes_a_price_something_else_opened(
+        client, approved, session_factory):
+    """HARD #9 / R25: a refused card closes the open price only when cards
+    alone opened it since it last closed. A declined supplement (or any
+    unlogged legacy cause) keeps it open: the lead cannot ask and refuse a
+    throw-away card to close it without Absorb's 4-eyes."""
+    from app.models.change import ChangeRequest
+    cid, sales, pm = approved["change_id"], approved["sales"], approved["pm"]
+    a = await _card(client, cid, sales, part_number=None)
+    r = await client.post(_scope(cid, f"/{a['id']}/decide"),
+                          json={"decision": "refuse", "note": "Not feasible in this tool"},
+                          headers=pm)
+    assert r.status_code == 200
+    assert (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()["price_open"] is False
+    # a declined supplement opens the price again (logged)
+    await _raise_position(session_factory, approved, 1300)
+    s1 = await _supplement(client, cid, sales)
+    assert (await client.post(_url(cid, f"/{s1['id']}/send"), json={"change_note": "Rework higher"},
+                              headers=sales)).status_code == 200
+    assert (await _answer(client, cid, sales, {"response": "declined",
+                                               "ref": "Mail 15 Oct, buyer refuses"})).status_code == 200
+    # NEGATIVE: the run team asks for a card and refuses it: the price stays open
+    b = await _card(client, cid, pm, part_number=None, what="Throw-away wish")
+    r = await client.post(_scope(cid, f"/{b['id']}/decide"),
+                          json={"decision": "refuse", "note": "Never mind this"}, headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).price_open is True
+    async with session_factory() as s:
+        log = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid, ChangeChangelog.field_name == "price_open")
+            .order_by(ChangeChangelog.id))).scalars().all()
+    assert [l.action for l in log][-3:] == ["price_opened"] * 3   # every opening logged
+
+
+async def test_a_card_never_closes_a_legacy_open_price(client, approved, session_factory):
+    """An open price with no changelog row (set before every cause was
+    logged) is not the card's to close."""
+    from app.models.change import ChangeRequest
+    cid, sales, pm = approved["change_id"], approved["sales"], approved["pm"]
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).price_open = True
+        await s.commit()
+    card = await _card(client, cid, pm, part_number=None)
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"),
+                          json={"decision": "refuse", "note": "Never mind this"}, headers=pm)
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).price_open is True     # NEGATIVE
+
+
+async def test_the_customers_answer_file_and_a_cards_mail_cannot_be_removed(
+        client, quoted, session_factory, tmp_path):
+    """R4/R17: the file an acceptance or a scope card stands on is frozen
+    (admin only), whoever uploaded it."""
+    from tests.conftest import login
+    cid = quoted["change_id"]
+    sales = await _auth(client, "sales")
+    po = await _mail(session_factory, quoted, "po.msg", None, tmp_path)
+    wish = await _mail(session_factory, quoted, "wish.msg", None, tmp_path)
+    res = await _answer(client, cid, sales, {**_YES, "ref": None, "attachment_id": po})
+    assert res.status_code == 200, res.text
+    await _card(client, cid, sales, ref=None, attachment_id=wish)
+    for att in (po, wish):
+        r = await client.delete(f"/api/v1/changes/{cid}/attachments/{att}", headers=sales)
+        assert r.status_code == 409, r.text           # NEGATIVE: the uploader
+    from app.models.change import ChangeAttachment
+    async with session_factory() as s:
+        (await s.get(ChangeAttachment, wish)).phase = "post_scoping"
+        await s.commit()
+    admin = await login(client, "admin@test.io")
+    r = await client.delete(f"/api/v1/changes/{cid}/attachments/{wish}", headers=admin)
+    assert r.status_code == 204, r.text           # the admin exit
+
+
+async def test_the_pm_brief_on_a_supplement_shows_the_delta_and_the_accepted_total(
+        client, approved, session_factory):
+    """R37: a supplement is a delta: no margin on it; the accepted total
+    after it (offer plus accepted supplements plus this one)."""
+    cid, sales, pm = approved["change_id"], approved["sales"], approved["pm"]
+    await _raise_position(session_factory, approved, 800)
+    s1 = await _supplement(client, cid, sales)
+    assert (await client.post(_url(cid, f"/{s1['id']}/send"), json={"change_note": "Insert cheaper"},
+                              headers=sales)).status_code == 200
+    assert (await _answer(client, cid, sales, {**_YES, "price_drop_code": "error",
+                                               "price_drop_note": "Rework was double counted in v1"}
+                          )).status_code == 200
+    row = next(t for t in await _tasks(client, pm)
+               if t["kind"] == "sign_off" and t["change_id"] == cid and t["side"] == "pm")
+    assert (row["offer_version"], row["offer_total"], row["supplement"]) == (2, -200.0, True)
+    assert row["accepted_total"] == 800.0
+    assert row["margin_pct"] is None and row.get("margin_delta_pts") is None
+
+
+async def test_an_at_risk_yes_needs_a_sent_offer(client, urgent, session_factory):
+    """§7a / HARD #9: started at risk with no offer sent, 'accepted' is
+    refused: the customer accepts a priced version."""
+    from app.models.change import ChangeRequest
+    cid = urgent["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    await _started_at_risk(client, cid, sales, pm, q)
+    r = await _answer(client, cid, sales, _YES)
+    assert r.status_code == 400 and "Send the offer first" in r.json()["detail"]   # NEGATIVE
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        assert (ch.price_open, ch.customer_response) == (True, "pending")
+
+
+async def test_po_differs_card_recosted_then_v2_is_answered_again_and_approves(
+        client, quoted, session_factory):
+    """Spec §7 C14: a new version sent while quoted clears the customer's yes;
+    the customer answers it again; approval follows on v2's acceptance."""
+    from app.models.change import ChangeRequest
+    from app.models.change_offer import ChangeOffer
+    cid = quoted["change_id"]
+    await _route_tool(session_factory, quoted)
+    sales, pm, tool, q = (await _auth(client, "sales"), await _auth(client, "pm"),
+                          await _auth(client, "tool"), await _quality(client))
+    tid = quoted["depts"]["Tool Engineer"]
+    assert (await _answer(client, cid, sales, {**_YES, "po_match": "no",
+                                               "differs": "PO adds a grained variant"})).status_code == 200
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+    assert r.json()["status"] == "quoted"
+    card = (await client.get(_scope(cid), headers=sales)).json()[0]
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"),
+                          json={"decision": "accept", "department_ids": [tid]}, headers=pm)
+    assert r.status_code == 200, r.text
+    await _raise_position(session_factory, quoted, 1200)
+    r = await client.post(_scope(cid, f"/{card['id']}/recosted"), json={"department_id": tid},
+                          headers=tool)
+    assert r.status_code == 200 and r.json()[0]["status"] == "ready", r.text
+    assert any(t["kind"] == "revise_offer" for t in await _tasks(client, sales))
+    # the task leads to a working step: v2 is written and sent
+    await _v2_with_discount(client, cid, sales, -5)
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        v1 = await s.get(ChangeOffer, quoted["offer_id"])
+        assert (ch.customer_response, ch.accepted_offer_id, v1.status) == (
+            "pending", None, "superseded")
+        assert v1.accept_evidence["ref"] == "PO 4500123456"      # the record stays
+    assert (await client.get(_scope(cid), headers=sales)).json()[0]["status"] == "offered"
+    # NEGATIVE: v1's yes no longer approves; the PM re-sign waits for the answer
+    assert (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()["status"] == "quoted"
+    r = await _answer(client, cid, sales, _YES)
+    assert r.status_code == 200, r.text
+    assert (await client.get(_scope(cid), headers=sales)).json()[0]["status"] == "accepted"
+    r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=pm)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "approved"
+
+
+async def test_a_price_only_v2_after_the_yes_never_approves_on_v1(client, quoted, session_factory):
+    from app.services.change_service import ChangeService
+    from app.models.change import ChangeRequest
+    cid = quoted["change_id"]
+    sales, pm, q = await _auth(client, "sales"), await _auth(client, "pm"), await _quality(client)
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    assert (await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"},
+                              headers=pm)).status_code == 200
+    await _v2_with_discount(client, cid, sales, -5)
+    for role, who in (("pm", pm), ("quality", q)):
+        r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+        assert r.status_code == 200, r.text
+    assert r.json()["status"] == "quoted"          # NEGATIVE: v2 not answered
+    # HARD #4 binds the yes to the latest version, also for an old record
+    async with session_factory() as s:
+        ch = await s.get(ChangeRequest, cid)
+        ch.customer_response, ch.accepted_offer_id = "accepted", quoted["offer_id"]
+        why = await ChangeService.solid_hard_refusal(s, ch, "approved")
+        assert why and "not to v2" in why
+        await s.rollback()
+
+
+async def test_a_card_at_no_cost_is_confirmed_to_the_customer_and_settles(
+        client, approved, session_factory):
+    """No dead end: every department says 'no cost impact': Sales confirms
+    it to the customer (mail or reference); the card settles and the price
+    the card opened closes."""
+    cid, sales, pm, tool = (approved["change_id"], approved["sales"], approved["pm"],
+                            await _auth(client, "tool"))
+    await _route_tool(session_factory, approved)
+    tid = approved["depts"]["Tool Engineer"]
+    card = await _card(client, cid, sales, part_number=None)
+    r = await client.post(_scope(cid, f"/{card['id']}/told"), json={"ref": "Mail 16 Oct to buyer"},
+                          headers=sales)
+    assert r.status_code == 400                     # NEGATIVE: nothing to tell yet
+    await client.post(_scope(cid, f"/{card['id']}/decide"),
+                      json={"decision": "accept", "department_ids": [tid]}, headers=pm)
+    r = await client.post(_scope(cid, f"/{card['id']}/recosted"), json={
+        "department_id": tid, "no_cost_note": "Same insert, only the engraving text changes"},
+        headers=tool)
+    assert r.json()[0]["status"] == "ready" and r.json()[0]["no_cost"] is True
+    row = next(t for t in await _tasks(client, sales) if t["kind"] == "revise_offer")
+    assert row["no_cost"] is True and "confirm to the customer" in row["kind_label"]
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=sales)).json()
+    acts = acts if isinstance(acts, list) else acts.get("actions", [])
+    assert any(a.get("label") == row["kind_label"] for a in acts)    # one word, two places
+    r = await client.post(_scope(cid, f"/{card['id']}/told"), json={"ref": "ok"}, headers=sales)
+    assert r.status_code == 400                     # NEGATIVE: a reference that says nothing
+    r = await client.post(_scope(cid, f"/{card['id']}/told"),
+                          json={"ref": "Mail 16 Oct to the buyer: no price change"}, headers=sales)
+    assert r.status_code == 200, r.text
+    assert r.json()[0]["status"] == "accepted"
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    assert ch["price_open"] is False
+    assert "scope_change" not in {i["key"] for i in ch["next_step"]["items"]}
+
+
+async def test_an_inactive_department_never_re_costs_a_card(client, quoted, session_factory):
+    from app.models.workflow import Department
+    cid = quoted["change_id"]
+    await _route_tool(session_factory, quoted)
+    sales, pm = await _auth(client, "sales"), await _auth(client, "pm")
+    async with session_factory() as s:
+        (await s.get(Department, quoted["depts"]["Tool Engineer"])).is_active = False
+        await s.commit()
+    card = await _card(client, cid, sales)
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"), json={
+        "decision": "accept", "department_ids": [quoted["depts"]["Tool Engineer"]]}, headers=pm)
+    assert r.status_code == 400 and "inactive" in r.json()["detail"]
+
+
+async def test_quality_line_writer_never_approves_the_start_at_risk(client, urgent):
+    from tests.conftest import login
+    cid = urgent["change_id"]
+    sales = await _auth(client, "sales")
+    admin = await login(client, "admin@test.io")
+    assert (await client.post(_sar(cid), json={"ref": "Mail 15 Oct: start now, PO follows"},
+                              headers=sales)).status_code == 200
+    assert (await client.post(_sar(cid, "/quality"), json={"note": "No PPAP before SOP, lot checked"},
+                              headers=admin)).status_code == 200
+    r = await client.post(_sar(cid, "/approve"), headers=admin)
+    assert r.status_code == 403 and "Quality's line" in r.json()["detail"]   # NEGATIVE
+    r = await client.post(_sar(cid, "/approve"), headers=await _auth(client, "pm"))
+    assert r.status_code == 200, r.text
+
+
+async def test_missing_info_on_a_card_is_a_question_sales_asks_the_customer(
+        client, quoted, session_factory):
+    """Spec §6 step 1: missing info is a question: the lead (or Sales) asks,
+    Sales owns it with the mail text to copy, it holds the accept (not a
+    refusal), and the customer's answer (evidence) hands it back to the lead."""
+    cid = quoted["change_id"]
+    await _route_tool(session_factory, quoted)
+    sales, pm, tool = (await _auth(client, "sales"), await _auth(client, "pm"),
+                       await _auth(client, "tool"))
+    tid = quoted["depts"]["Tool Engineer"]
+    card = await _card(client, cid, sales)
+    url = _scope(cid, f"/{card['id']}/question")
+    # NEGATIVE: a department does not ask the customer; a question that says nothing
+    assert (await client.post(url, json={"text": "Which grain: K31 or K45?"},
+                              headers=tool)).status_code == 403
+    assert (await client.post(url, json={"text": "grain?"}, headers=pm)).status_code == 400
+    r = await client.post(url, json={"text": "Which grain: K31 or K45?"}, headers=pm)
+    assert r.status_code == 200, r.text
+    q = r.json()[0]["question"]
+    assert q["open"] is True and "Which grain: K31 or K45?" in q["customer_copy"]
+    row = next(t for t in await _tasks(client, sales) if t["kind"] == "scope_change_question")
+    assert row["customer_copy"] and "K31" in row["reason"]
+    # the lead's decide waits; NEGATIVE: accept is held, a refusal is not
+    assert not any(t["kind"] == "scope_change_decide" for t in await _tasks(client, pm))
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"),
+                          json={"decision": "accept", "department_ids": [tid]}, headers=pm)
+    assert r.status_code == 400 and "waits for the customer's answer" in r.json()["detail"]
+    # NEGATIVE: the lead does not file the customer's answer; 'ok' is no evidence
+    ans = _scope(cid, f"/{card['id']}/answer")
+    assert (await client.post(ans, json={"answer": "K45", "ref": "Mail 17 Oct buyer"},
+                              headers=pm)).status_code == 403
+    assert (await client.post(ans, json={"answer": "K45", "ref": "ok"},
+                              headers=sales)).status_code == 400
+    r = await client.post(ans, json={"answer": "K45, as on the A-side",
+                                     "ref": "Mail 17 Oct from the buyer"}, headers=sales)
+    assert r.status_code == 200, r.text
+    assert r.json()[0]["question"]["open"] is False
+    assert not any(t["kind"] == "scope_change_question" for t in await _tasks(client, sales))
+    assert any(t["kind"] == "scope_change_decide" for t in await _tasks(client, pm))
+    r = await client.post(_scope(cid, f"/{card['id']}/decide"),
+                          json={"decision": "accept", "department_ids": [tid]}, headers=pm)
+    assert r.status_code == 200, r.text
+
+
+async def test_a_supplement_never_charges_a_fixed_fee_again(client, quoted, session_factory):
+    """A fixed-amount factor (engineering fee 2,500) went out with v1: the
+    supplement keeps percentages only, so it is not charged twice."""
+    from app.models.change_offer import ChangeOffer
+    async with session_factory() as s:
+        v1 = await s.get(ChangeOffer, quoted["offer_id"])
+        data = dict(v1.data)
+        data["factors"] = [({**f, "value": 2500, "enabled": True}
+                            if f.get("key") == "engineering_fee" else f)
+                           for f in data.get("factors") or []]
+        v1.data = data
+        await s.commit()
+    from tests.conftest import login, ENGINEER_PASSWORD
+    cid, sales, pm = quoted["change_id"], await _auth(client, "sales"), await _auth(client, "pm")
+    q = await login(client, "off-quality@test.io", ENGINEER_PASSWORD)
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    for role, who in (("pm", pm), ("quality", q)):
+        await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": role}, headers=who)
+    await _raise_position(session_factory, quoted, 1300)
+    s1 = await _supplement(client, cid, sales)
+    fee = next(f for f in s1["data"]["factors"] if f["key"] == "engineering_fee")
+    assert fee["enabled"] is False
+    assert s1["totals"]["total_one_time"] < 2500           # NEGATIVE: no fee again

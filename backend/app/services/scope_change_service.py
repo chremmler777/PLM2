@@ -30,6 +30,17 @@ CARD_STATUSES = ("quoted", "approved", "in_implementation", "in_validation")
 POST_APPROVAL = ("approved", "in_implementation", "in_validation")
 
 
+#: The text a card's price opening starts with (_maybe_close_price reads it).
+_OPENED_BY = "Scope change #"
+
+
+def _settled_without_money(card: ChangeScopeChange) -> bool:
+    """Refused, moved to its own change, or confirmed to the customer at no
+    cost: the card asks the customer for no money."""
+    return card.status in ("refused", "moved") or (
+        card.status == "accepted" and card.offer_id is None and card.told_at is not None)
+
+
 class ScopeChangeForbidden(ChangeError):
     """The caller may not do this: 403."""
 
@@ -44,6 +55,33 @@ async def cards(session: AsyncSession, change_ids: list[int]) -> list[ChangeScop
 
 async def open_cards(session: AsyncSession, change: ChangeRequest) -> list[ChangeScopeChange]:
     return [c for c in await cards(session, [change.id]) if c.status in SCOPE_OPEN]
+
+
+async def no_cost_ids(session: AsyncSession, rows: list[ChangeScopeChange]) -> set[int]:
+    """The ready cards every routed department re-costed as 'no cost
+    impact' (its latest word per department): nothing to price, Sales
+    confirms it to the customer instead of a supplement or new version.
+    One changelog query for all of them (My Tasks batches)."""
+    ready = {c.id: c for c in rows if c.status == "ready" and c.department_ids}
+    if not ready:
+        return set()
+    import json
+    from app.models.change import ChangeChangelog
+    logs = (await session.execute(
+        select(ChangeChangelog.new_value).where(
+            ChangeChangelog.change_id.in_({c.change_id for c in ready.values()}),
+            ChangeChangelog.action == "scope_change_recosted")
+        .order_by(ChangeChangelog.id))).scalars().all()
+    word: dict = {}
+    for raw in logs:
+        try:
+            v = json.loads(raw or "null")
+        except ValueError:
+            continue
+        if isinstance(v, dict) and v.get("scope_change_id") in ready:
+            word[(v["scope_change_id"], v.get("department_id"))] = bool(v.get("no_cost"))
+    return {cid for cid, c in ready.items()
+            if all(word.get((cid, d)) for d in c.department_ids)}
 
 
 def label(card: ChangeScopeChange) -> str:
@@ -167,15 +205,14 @@ class ScopeChangeService:
             f"Scope change {label(card)} ({kind})", user.id,
             new_value={"scope_change_id": card.id, "kind": kind,
                        "part_number": card.part_number}, notes=evidence)
-        if post_accept and not change.price_open:
+        if post_accept:
             # spec §6 [R4]: after the customer's yes the money is open until
-            # a supplement covering it is accepted or it is absorbed
-            change.price_open = True
-            await ChangeService.append_changelog(
-                session, change, "price_opened",
-                f"Scope change #{card.id} after acceptance: the price is open "
-                "until its supplement is accepted or absorbed", user.id,
-                field_name="price_open", old_value=False, new_value=True)
+            # a supplement covering it is accepted or it is absorbed. Logged
+            # also when open already: the card is one cause of it (the text
+            # names the card: _maybe_close_price reads it back)
+            await ChangeService.open_price(
+                session, change, f"{_OPENED_BY}{card.id} after acceptance: the "
+                "price is open until its supplement is accepted or absorbed", user.id)
         if department_ids is not None:
             await ScopeChangeService._start_recost(session, change, card, department_ids,
                                                    user.id)
@@ -270,6 +307,10 @@ class ScopeChangeService:
             return card
         if decision != "accept":
             raise ChangeError("Decide accept, refuse or new_change")
+        if card.question_open:
+            raise ChangeError(
+                f"Scope change #{card.id} waits for the customer's answer "
+                f"(Sales): {card.question['text']}")
         routed = {a.department_id for a in change.assessments}
         ids = sorted({int(d) for d in (department_ids or [])})
         if not ids:
@@ -277,6 +318,14 @@ class ScopeChangeService:
         stray = [d for d in ids if d not in routed]
         if stray:
             raise ChangeError("Only departments routed on this change re-cost it")
+        # nobody can mark an inactive department's re-costing done
+        idle = [n for (n,) in (await session.execute(
+            select(Department.name).where(Department.id.in_(ids),
+                                          Department.is_active.is_(False)))).all()]
+        if idle:
+            raise ChangeError(
+                f"{', '.join(sorted(idle))} is inactive: nobody can re-cost for it; "
+                "pick an active department")
         await ScopeChangeService._take_part(session, change, card, user)
         card.decided_by, card.decided_at, card.decision_note = user.id, now, note
         await ScopeChangeService._start_recost(session, change, card, ids, user.id)
@@ -469,7 +518,11 @@ class ScopeChangeService:
             await session.flush()
             from app.services.notification_service import NotificationService
             post = change.status in POST_APPROVAL
-            what = "Send supplement" if post else "Revise offer"
+            if card.id in await no_cost_ids(session, [card]):
+                # nothing to price: no version, no supplement (R5)
+                what = "Confirm to the customer at no cost"
+            else:
+                what = "Send supplement" if post else "Revise offer"
             title = f"{what}: scope change re-costed: {change.change_number}"[:255]
             # spec §0: involved people only: the Sales owner (the row shows
             # to all of Sales); no owner: Sales
@@ -487,13 +540,139 @@ class ScopeChangeService:
         await session.flush()
         return card
 
+    # ------------------------------------------------------------------
+    # 1b. missing info is a question (spec §6 step 1)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def customer_copy(change: ChangeRequest, card: ChangeScopeChange) -> Optional[str]:
+        """The mail text Sales copies for the card's question (spec §0 [R4])."""
+        if not card.question:
+            return None
+        where = f" for part {card.part_number}" if card.part_number else ""
+        return "\n".join([
+            f"Subject: {change.change_number} {change.title}: question on your "
+            "change wish",
+            "", "Hello,", "",
+            f"For your wish \"{card.what}\"{where} on {change.change_number} "
+            f"({change.title}) we need your answer before we can cost it:",
+            "", card.question["text"],
+            "", "Thank you, and best regards"])
+
+    @staticmethod
+    async def _notify_sales(session: AsyncSession, change: ChangeRequest, *,
+                            subject_key: str, title: str, body: str, skip: int) -> None:
+        """The Sales owner (the row shows to all of Sales); none: Sales."""
+        from app.services.notification_service import NotificationService
+        if change.sales_owner_id is not None:
+            if change.sales_owner_id != skip:
+                await NotificationService.notify_once(
+                    session, [change.sales_owner_id], kind="task_new",
+                    subject_key=subject_key, title=title[:255], body=body,
+                    link=f"/changes/{change.id}?tab=offer")
+            return
+        await NotificationService.notify_departments_once(
+            session, [d for d in [await ScopeChangeService._dept_id(session, "Sales")]
+                      if d is not None], change=change, kind="task_new",
+            subject_key=subject_key, title=title[:255], body=body,
+            link=f"/changes/{change.id}?tab=offer")
+
+    @staticmethod
+    async def ask(session: AsyncSession, change: ChangeRequest, card_id: int,
+                  user: User, text: Optional[str]) -> ChangeScopeChange:
+        """Missing info on a requested card is a question to the customer:
+        the lead (run team) or Sales asks; Sales owns it (a task with the
+        mail text to copy); it holds the accept until Sales files the
+        customer's answer. A refusal does not wait for it."""
+        card = await ScopeChangeService._card(session, change, card_id)
+        if card.status != "requested":
+            raise ChangeError(
+                f"Scope change #{card.id} is {card.status}: a question is asked "
+                "before it is decided")
+        if card.question_open:
+            raise ChangeError(
+                f"Scope change #{card.id} already asks: {card.question['text']}")
+        if not await ScopeChangeService.may_request(session, change, user):
+            raise ScopeChangeForbidden(
+                "The change lead, Project Management or Sales asks the customer")
+        text = " ".join((text or "").split())
+        if len(text) < 10:
+            raise ChangeError(
+                "Say what the customer must answer, in a sentence (10+ characters), "
+                "e.g. 'Which grain: K31 or K45?'")
+        card.question = {"text": text[:1000], "by": user.id,
+                         "at": datetime.utcnow().isoformat()}
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "scope_change_question",
+            f"Scope change #{card.id}: question to the customer: {text}"[:500], user.id,
+            new_value={"scope_change_id": card.id}, notes=text)
+        await ScopeChangeService._notify_sales(
+            session, change, subject_key=f"scope_change:{card.id}:question",
+            title=f"Ask the customer: scope change #{card.id}: {change.change_number}",
+            body=text, skip=user.id)
+        return card
+
+    @staticmethod
+    async def answer(session: AsyncSession, change: ChangeRequest, card_id: int,
+                     user: User, answer: Optional[str], *,
+                     attachment_id: Optional[int] = None, ref: Optional[str] = None,
+                     from_customer: bool = False) -> ChangeScopeChange:
+        """Sales files the customer's answer (Confirmed: the customer's mail
+        or document filed on the change, or its reference); the lead
+        decides the card next."""
+        card = await ScopeChangeService._card(session, change, card_id)
+        if not card.question_open:
+            raise ChangeError(f"Scope change #{card.id} has no open question")
+        r = await ScopeChangeService._roles(session, change, user)
+        if not r["sales"] and user.effective_role != "admin":
+            raise ScopeChangeForbidden("Sales files the customer's answer")
+        answer = " ".join((answer or "").split())
+        if len(answer) < 2:
+            raise ChangeError("Write the customer's answer")
+        if attachment_id:
+            att = await ChangeService.customer_evidence_file(
+                session, change, attachment_id, from_customer=from_customer,
+                actor_id=user.id, what="Pick the customer's mail or file filed on this change")
+            evidence = f"Mail: {att.filename}"[:255]
+        else:
+            from app.services.cm_rules import reference_refusal
+            why = reference_refusal(ref, "The customer's mail or its reference",
+                                    "Mail 17 Oct from the buyer")
+            if why:
+                raise ChangeError(why)
+            evidence = ref.strip()[:255]
+        card.question = {**card.question, "answer": answer[:1000], "ref": evidence,
+                         "attachment_id": int(attachment_id) if attachment_id else None,
+                         "answered_by": user.id,
+                         "answered_at": datetime.utcnow().isoformat()}
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "scope_change_answered",
+            f"Scope change #{card.id}: the customer answered ({evidence}): {answer}"[:500],
+            user.id, new_value={"scope_change_id": card.id}, notes=answer)
+        from app.services.notification_service import NotificationService
+        if change.lead_id and change.lead_id != user.id:
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="decision_needed",
+                subject_key=f"scope_change:{card.id}:answered",
+                title=f"Customer answered: accept or refuse scope change #{card.id}: "
+                      f"{change.change_number}"[:255],
+                body=answer, link=f"/changes/{change.id}?tab=offer")
+        return card
+
     @staticmethod
     async def told(session: AsyncSession, change: ChangeRequest, card_id: int,
                    user: User, ref: Optional[str]) -> ChangeScopeChange:
-        """Sales told the customer the scope change is refused."""
+        """Sales told the customer: the scope change is refused, or (every
+        department re-costed it at no cost) it is done at no price change.
+        The second settles the card (accepted, no offer) and may be the last
+        thing the approval or an open price waited on."""
         card = await ScopeChangeService._card(session, change, card_id)
-        if card.status != "refused" or card.told_at is not None:
-            raise ChangeError("Nothing to tell: the card is not a refusal waiting to be told")
+        free = card.status == "ready" and card.id in await no_cost_ids(session, [card])
+        if not free and (card.status != "refused" or card.told_at is not None):
+            raise ChangeError(
+                "Nothing to tell: the card is not a refusal waiting to be told, "
+                "nor re-costed at no cost")
         if not (await ScopeChangeService._roles(session, change, user))["sales"] \
                 and user.effective_role != "admin":
             raise ScopeChangeForbidden("Sales tells the customer")
@@ -502,12 +681,20 @@ class ScopeChangeService:
                                 "Mail 16 Oct to the buyer")
         if why:
             raise ChangeError(why)
-        card.told_ref, card.told_by, card.told_at = ref.strip()[:255], user.id, datetime.utcnow()
+        now = datetime.utcnow()
+        card.told_ref, card.told_by, card.told_at = ref.strip()[:255], user.id, now
+        if free:
+            card.status, card.closed_at = "accepted", now
         await session.flush()
         await ChangeService.append_changelog(
-            session, change, "scope_change_told",
-            f"Scope change #{card.id}: customer told it is refused ({card.told_ref})",
-            user.id, new_value={"scope_change_id": card.id})
+            session, change, "scope_change_accepted" if free else "scope_change_told",
+            (f"Scope change {label(card)}: no cost impact, customer told it "
+             f"comes at no price change ({card.told_ref})" if free else
+             f"Scope change #{card.id}: customer told it is refused ({card.told_ref})"),
+            user.id, new_value={"scope_change_id": card.id, "no_cost": free})
+        if free:
+            await ScopeChangeService._maybe_close_price(session, change, user.id)
+            await ChangeService.try_auto_approve(session, change, user.id)
         return card
 
     # ------------------------------------------------------------------
@@ -569,28 +756,46 @@ class ScopeChangeService:
     @staticmethod
     async def _maybe_close_price(session: AsyncSession, change: ChangeRequest,
                                  actor_id: int) -> None:
-        """A refused or moved card that opened the price (the latest opening
-        of `price_open` was this card's, and no other card opened after the
-        customer's yes is still open) closes it again: no money changes."""
+        """A card settled with no money asked (refused, moved to its own
+        change, or confirmed at no cost) closes the open price again, but
+        only when the price was opened by cards alone: every price_open row
+        since it last closed is a card's opening, each of those cards is
+        settled that way, and no card opened after approval is still open.
+        Any other cause (a supplement out or declined, a quote above the
+        estimate, a flip after approval, a start at risk) keeps it open:
+        HARD #9's exits are the customer's acceptance or Absorb (4-eyes)."""
         if not change.price_open:
             return
-        if any(c.post_accept for c in await open_cards(session, change)):
+        cards_now = await cards(session, [change.id])
+        if any(c.post_accept and c.status in SCOPE_OPEN for c in cards_now):
             return
         import json
+        import re
         from app.models.change import ChangeChangelog
-        last = (await session.execute(
-            select(ChangeChangelog.action, ChangeChangelog.action_description).where(
+        rows = (await session.execute(
+            select(ChangeChangelog.action, ChangeChangelog.action_description,
+                   ChangeChangelog.old_value, ChangeChangelog.new_value).where(
                 ChangeChangelog.change_id == change.id,
-                ChangeChangelog.field_name == "price_open",
-                ChangeChangelog.new_value == json.dumps(True))
-            .order_by(ChangeChangelog.performed_at.desc(), ChangeChangelog.id.desc())
-            .limit(1))).first()
-        if last is None or not last[1].startswith("Scope change #"):
-            return
+                ChangeChangelog.field_name == "price_open")
+            .order_by(ChangeChangelog.id.desc()))).all()
+        chain, first_was = [], None
+        for action, text, was, value in rows:
+            if value == json.dumps(False):
+                break                       # the price closed here last
+            chain.append((action, text or ""))
+            first_was = was
+        if not chain or first_was != json.dumps(False):
+            return      # opened with no row first (a legacy cause): keep it
+        by_id = {c.id: c for c in cards_now}
+        for action, text in chain:
+            m = re.match(rf"{re.escape(_OPENED_BY)}(\d+) ", text)
+            card = by_id.get(int(m.group(1))) if (m and action == "price_opened") else None
+            if card is None or not _settled_without_money(card):
+                return
         change.price_open = False
         await ChangeService.append_changelog(
             session, change, "price_closed",
-            "Open price closed: the scope change that opened it was not taken on",
+            "Open price closed: the scope change that opened it asks no money",
             actor_id, field_name="price_open", old_value=True, new_value=False)
 
     # ------------------------------------------------------------------
@@ -607,7 +812,9 @@ class ScopeChangeService:
         )).all()) if dept_ids else {}
         from app.services.change_plan_service import ChangePlanService
         users = await ChangePlanService._user_names(
-            session, [c.requested_by for c in rows] + [c.decided_by for c in rows])
+            session, [c.requested_by for c in rows] + [c.decided_by for c in rows]
+            + [(c.question or {}).get("by") for c in rows])
+        free = await no_cost_ids(session, rows)
         out = []
         for c in rows:
             done = set(c.departments_done or [])
@@ -625,5 +832,15 @@ class ScopeChangeService:
                 "recost_due": c.recost_due, "offer_id": c.offer_id,
                 "new_change_id": c.new_change_id, "told_at": c.told_at,
                 "told_ref": c.told_ref,
+                # ready with no cost anywhere: Sales confirms, nothing to price
+                "no_cost": c.id in free,
+                # step 1: missing info is a question (Sales asks the customer)
+                "question": ({**{k: c.question.get(k) for k in (
+                    "text", "at", "answer", "ref", "answered_at")},
+                    "open": c.question_open,
+                    "by_name": users.get(c.question.get("by")),
+                    "customer_copy": (ScopeChangeService.customer_copy(change, c)
+                                      if c.question_open else None)}
+                    if c.question else None),
             })
         return out

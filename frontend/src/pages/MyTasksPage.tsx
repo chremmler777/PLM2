@@ -293,6 +293,7 @@ const TASK_TAB: Record<string, string> = {
   routing_deviation_decision: '?tab=assessments', not_feasible: '?tab=overview',
   // §6 [R3] scope change cards: the lead and Sales on the offer tab
   scope_change_decide: '?tab=offer', revise_offer: '?tab=offer', scope_change_tell: '?tab=offer',
+  scope_change_question: '?tab=offer',
   start_at_risk_quality: '?tab=offer', start_at_risk_approve: '?tab=offer',
 };
 
@@ -397,17 +398,23 @@ const taskHint = (task: ChangeTask): string | null => {
       return task.reason?.trim() || t('tasks.hint.deviation_decision');
     case 'sign_off': {
       const base = task.offer_version != null
-        ? t('tasks.hint.sign_off_v').replace('{v}', String(task.offer_version))
+        ? t(task.supplement ? 'tasks.hint.sign_off_supp' : 'tasks.hint.sign_off_v').replace('{v}', String(task.offer_version))
         : t('tasks.hint.sign_off');
       if (task.side !== 'pm' || task.offer_total == null) return base;
       // §7 [R3]: the PM signs knowing the total, the margin move and the assumptions
-      const money = `${task.offer_total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${task.offer_currency ?? ''}`.trim();
+      const fmt = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${task.offer_currency ?? ''}`.trim();
+      const assumedTail = task.assumed_open ? `; ${t('tasks.hint.assumedOpen').replace('{n}', String(task.assumed_open))}` : '';
+      if (task.supplement && task.accepted_total != null) {
+        // R37: a supplement is a delta: no margin on it, the total after it
+        return `${base}: ${t('tasks.hint.supplementTotal').replace('{s}', fmt(task.offer_total))
+          .replace('{t}', fmt(task.accepted_total))}${assumedTail}`;
+      }
+      const money = fmt(task.offer_total);
       const margin = task.margin_pct != null ? `, ${t('tasks.hint.margin').replace('{m}', task.margin_pct.toFixed(1))}` : '';
       const delta = task.margin_delta_pts != null && task.prev_version != null
         ? ` ${t('tasks.hint.marginDelta').replace('{d}', `${task.margin_delta_pts > 0 ? '+' : ''}${task.margin_delta_pts.toFixed(1)}`).replace('{v}', String(task.prev_version))}`
         : '';
-      const assumed = task.assumed_open ? `; ${t('tasks.hint.assumedOpen').replace('{n}', String(task.assumed_open))}` : '';
-      return `${base}: ${money}${margin}${delta}${assumed}`;
+      return `${base}: ${money}${margin}${delta}${assumedTail}`;
     }
     case 'internal_approval':
       return t('tasks.hint.internal_approval');
@@ -436,7 +443,10 @@ const taskHint = (task: ChangeTask): string | null => {
     case 'scope_change_decide':
       return t('tasks.hint.scope_change_decide').replace('{x}', task.reason ?? '');
     case 'revise_offer':
-      return t(task.supplement ? 'tasks.hint.revise_supplement' : 'tasks.hint.revise_offer').replace('{x}', task.reason ?? '');
+      return t(task.no_cost ? 'tasks.hint.revise_no_cost'
+        : task.supplement ? 'tasks.hint.revise_supplement' : 'tasks.hint.revise_offer').replace('{x}', task.reason ?? '');
+    case 'scope_change_question':
+      return t('tasks.hint.scope_change_question').replace('{x}', task.reason ?? '');
     case 'scope_change_tell':
       return t('tasks.hint.scope_change_tell').replace('{x}', task.reason ?? '');
     case 'start_at_risk_quality':
@@ -680,7 +690,7 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
             </span>
           )}
           {/* a customer question: the mail text, ready to copy (spec §0 [R4]) */}
-          {task.kind === 'obtain_info' && task.customer_copy && (
+          {(task.kind === 'obtain_info' || task.kind === 'scope_change_question') && task.customer_copy && (
             <span className="mt-1 block">
               <CustomerCopy text={task.customer_copy} testId={`task-copy-${task.change_id}`} />
             </span>

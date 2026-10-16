@@ -53,6 +53,24 @@ describe('CustomerDecision', () => {
     await waitFor(() => expect(changesApi.signOff).toHaveBeenCalledWith(7, 'pm'))
   })
 
+  it('R5: a supplement declined past approval says the price stays open and offers Absorb', async () => {
+    const onAbsorb = vi.fn()
+    const v1 = sent({ id: 10, version: 1, status: 'accepted', sent_at: '2026-10-01T00:00:00' } as Partial<OfferOut>)
+    const s2 = sent({ id: 11, version: 2, kind: 'supplement', status: 'declined', sent_at: '2026-10-10T00:00:00' } as Partial<OfferOut>)
+    wrap(<CustomerDecision change={change({ status: 'approved', customer_response: 'accepted', price_open: true })}
+      latestSent={v1} offers={[s2, v1]} canRespond canSignPm={false} canSignQuality={false} userId={5}
+      onAbsorb={onAbsorb} />)
+    expect(screen.getByTestId('cust-declined-open').textContent).toContain('v2 declined by the customer')
+    fireEvent.click(screen.getByTestId('cust-absorb'))
+    expect(onAbsorb).toHaveBeenCalled()
+    cleanup()
+    // NEGATIVE: the price closed (absorbed): no line, no button
+    wrap(<CustomerDecision change={change({ status: 'approved', customer_response: 'accepted', price_open: false })}
+      latestSent={v1} offers={[s2, v1]} canRespond canSignPm={false} canSignQuality={false} userId={5}
+      onAbsorb={onAbsorb} />)
+    expect(screen.queryByTestId('cust-declined-open')).toBeNull()
+  })
+
   it('C14: a re-sign owed after approval is a button (accepted supplement)', async () => {
     const owed = change({ status: 'approved', customer_response: 'accepted', pm_signed_by: 3, quality_signed_by: 4,
       next_step: { to: 'in_implementation', items: [

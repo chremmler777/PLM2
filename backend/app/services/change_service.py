@@ -130,7 +130,7 @@ STAGE_TASK_TAB = {
     "not_feasible": "overview",
     # §6 [R3] scope change cards
     "scope_change_decide": "commercial", "revise_offer": "commercial",
-    "scope_change_tell": "commercial",
+    "scope_change_tell": "commercial", "scope_change_question": "commercial",
 }
 
 # A finished change's D1 master data and gates are the record: closed,
@@ -651,6 +651,19 @@ class ChangeService:
                 "may ask to absorb an open price")
 
     @staticmethod
+    async def open_price(session: AsyncSession, change: ChangeRequest,
+                         text: str, actor_id: int) -> None:
+        """Set `price_open` (HARD #9) with its changelog row, also when it
+        is open already: every cause of an open price is on the record, so a
+        refused scope card closes only a price nothing else opened since
+        (ScopeChangeService._maybe_close_price)."""
+        was = bool(change.price_open)
+        change.price_open = True
+        await ChangeService.append_changelog(
+            session, change, "price_opened", text, actor_id,
+            field_name="price_open", old_value=was, new_value=True)
+
+    @staticmethod
     async def propose_absorb(session: AsyncSession, change: ChangeRequest,
                              reason_code: str, note: str,
                              user: User) -> ChangeTransitionDeviation:
@@ -719,6 +732,15 @@ class ChangeService:
                 session, change, before="approval")
             if signed:
                 return signed
+            # HARD #4: the customer's yes is to the current offer (spec §7:
+            # a newer version sent while quoted is answered again)
+            latest = await ChangeService.latest_sent_offer(session, change)
+            if (latest is not None and change.accepted_offer_id is not None
+                    and latest.kind != "supplement"
+                    and latest.id != change.accepted_offer_id):
+                return (f"The customer's yes is to an older version, not to "
+                        f"v{latest.version}, the latest sent: record the "
+                        f"customer's answer to v{latest.version}")
         if to_status == "released" and cm_switches.on("RELEASE_V2"):
             from app.services.validation_service import ValidationService
             from app.services.validation_issue_service import ValidationIssueService
@@ -4146,13 +4168,26 @@ class ChangeService:
                                           if c.status in _scs.CARD_STATUSES
                                           or c.status == "released"])
         carded = {k.change_id for k in card_rows}
+        free = await _scs.no_cost_ids(db, card_rows)
         by_change = {c.id: c for c in open_changes}
         for k in card_rows:
             c = by_change.get(k.change_id)
             if c is None:
                 continue
             what = _scs.label(k)
-            if k.status == "requested" and (
+            if k.status == "requested" and k.question_open:
+                # step 1: missing info is a question: Sales asks the customer
+                # (the mail text to copy); the lead's decide waits for it
+                if in_sales:
+                    tasks.append({**await _base(c), "kind": "scope_change_question",
+                                  "scope_change_id": k.id,
+                                  "reason": f"{what}: {k.question['text']}",
+                                  "customer_copy": _scs.ScopeChangeService.customer_copy(c, k),
+                                  "target_tab": "offer",
+                                  "needs_you": c.sales_owner_id in (None, user.id),
+                                  **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                                     if c.sales_owner_id not in (None, user.id) else {})})
+            elif k.status == "requested" and (
                     holds_lead(c, user) or (c.lead_id is None and is_pm_member)):
                 tasks.append({**await _base(c), "kind": "scope_change_decide",
                               "scope_change_id": k.id, "reason": what,
@@ -4172,10 +4207,14 @@ class ChangeService:
                 tasks.append({**await _base(c), "kind": "revise_offer",
                               "scope_change_id": k.id, "reason": what,
                               "supplement": post, "target_tab": "offer",
+                              "no_cost": k.id in free,
                               # the label says what the notice said (R37)
-                              "kind_label": ("Scope change re-costed: send a supplement"
-                                             if post else
-                                             "Scope change re-costed: revise the offer"),
+                              "kind_label": (
+                                  "Scope change at no cost: confirm to the customer"
+                                  if k.id in free else
+                                  "Scope change re-costed: send a supplement"
+                                  if post else
+                                  "Scope change re-costed: revise the offer"),
                               "needs_you": c.sales_owner_id in (None, user.id),
                               **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
                                  if c.sales_owner_id not in (None, user.id) else {})})
@@ -4404,6 +4443,7 @@ class ChangeService:
             if (is_pm_member or is_quality) else []
         latest_by: dict = {}
         prev_by: dict = {}
+        sent_by: dict = {}
         if signable:
             from app.models.change_offer import ChangeOffer
             for o in (await db.execute(
@@ -4414,6 +4454,7 @@ class ChangeService:
                 if o.change_id in latest_by:
                     prev_by[o.change_id] = latest_by[o.change_id]
                 latest_by[o.change_id] = o      # by version: the last one wins
+                sent_by.setdefault(o.change_id, []).append(o)
         for c in signable:
             latest = latest_by.get(c.id)
             if bound or c.status != "quoted":
@@ -4447,7 +4488,8 @@ class ChangeService:
                     # spec §7 [R3]: the PM task starts with the total, the
                     # margin delta and the unconfirmed Assumed answers
                     row.update(await ChangeService._pm_signoff_brief(
-                        db, c, latest, prev=prev_by.get(c.id), prev_known=True))
+                        db, c, latest, prev=prev_by.get(c.id), prev_known=True,
+                        sent=sent_by.get(c.id, [])))
                 out.append(row)
 
         # HARD #8: the approver list is read once for the whole list
@@ -4916,7 +4958,9 @@ class ChangeService:
                                      "project_id", "project_number",
                                      "project_name", "mine", "hint", "overdue",
                                      "due_date", "since")}
-                item["label"] = (r.get("label")
+                # the row's own stage-aware label first (R37: one word for
+                # one step in My Tasks and here)
+                item["label"] = (r.get("label") or r.get("kind_label")
                                  or (cm_labels.TASK_KIND[kind][0]
                                      if kind in cm_labels.TASK_KIND
                                      else cm_labels.label("task_kind", kind)))
@@ -6504,7 +6548,9 @@ class ChangeService:
             if at_risk:
                 # §7a [R4]: declined after a start at risk: the work runs, the
                 # price stays open: Absorb, or the run team puts it on hold
-                change.price_open = True
+                await ChangeService.open_price(
+                    session, change, f"Customer declined {version} after the start "
+                    "at risk: the price stays open (Absorb or hold)", user_id)
                 from app.services.notification_service import NotificationService
                 await NotificationService.notify_once(
                     session, [i for i in (change.lead_id, change.sales_owner_id)
@@ -6520,6 +6566,12 @@ class ChangeService:
                 session, change, "rejected", user_id,
                 rejection_reason=f"Customer declined {version} ({evidence['ref']})")
             return change
+        if at_risk and offer is None:
+            # §7a / HARD #9: the exit is the customer's yes to a priced
+            # version; started at risk with nothing sent there is none
+            raise ChangeError(
+                "Send the offer first: the customer accepts a priced version "
+                "(Offer tab: Send)")
         # accepted: every missing part named at once (R6: one refusal, not four)
         missing: list[str] = []
         if release_due_date is None and change.release_due_date is None:
@@ -6597,7 +6649,10 @@ class ChangeService:
         change.customer_response_by = user_id
         change.customer_next_contact = None
         if at_risk and drop is not None:
-            change.price_open = True          # until PM / Management OK the lower total
+            # until PM / Management OK the lower total
+            await ChangeService.open_price(
+                session, change, f"v{drop['version']} accepted below "
+                f"v{drop['prev_version']}: the price stays open until the OK", user_id)
         elif change.price_open:
             change.price_open = False
             await ChangeService._settle_estimate_checks(session, change)
@@ -6749,7 +6804,9 @@ class ChangeService:
             offer.accept_evidence = evidence
             offer.answered_at, offer.answered_by = now, user_id
             change.customer_next_contact = None
-            change.price_open = True
+            await ChangeService.open_price(
+                session, change, f"Supplement v{offer.version} declined: the price "
+                "stays open (Absorb or hold)", user_id)
             await session.flush()
             from app.services.scope_change_service import ScopeChangeService
             await ScopeChangeService.on_customer_answer(session, change, offer, False, user_id)
@@ -6821,7 +6878,9 @@ class ChangeService:
             new_value={"offer_id": offer.id, "version": offer.version})
         if drop is not None:
             # the open price stays until PM / Management OK the lower total
-            change.price_open = True
+            await ChangeService.open_price(
+                session, change, f"Supplement v{offer.version} accepted at a lower "
+                "total: the price stays open until the OK", user_id)
             await ChangeService._ask_price_drop_ok(
                 session, change, drop, answer["price_drop_code"],
                 answer["price_drop_note"].strip(), user_id, to_status="closed")
@@ -6872,13 +6931,17 @@ class ChangeService:
 
     @staticmethod
     async def _pm_signoff_brief(session: AsyncSession, change: ChangeRequest,
-                                latest, *, prev=None, prev_known: bool = False) -> dict:
+                                latest, *, prev=None, prev_known: bool = False,
+                                sent: Optional[list] = None) -> dict:
         """What the PM signs (spec §7 [R3]): the offer total, its margin
         and the margin delta against the version sent before it (both on
-        the internal cost the latest version went out on; today's for a
-        version sent before that was frozen), and the unconfirmed Assumed
-        answers. PM reads prices; Quality's row never carries them. R34:
-        My Tasks passes the previous version it batched (prev_known)."""
+        the internal cost the latest version went out on), and the
+        unconfirmed Assumed answers. A supplement is a delta, not a total
+        (R37): the row shows it with the accepted total after it (offer plus
+        accepted supplements plus this one) and no margin. A version sent
+        before the internal cost was frozen shows its total only (R34: no
+        costing summation per row). PM reads prices; Quality's row never
+        carries them. My Tasks passes the versions it batched."""
         assumed = sum(1 for q in change.concerns
                       if q.answer_kind == "assumed" and q.confirmed_at is None
                       and q.withdrawn_at is None and q.retracted_at is None)
@@ -6886,31 +6949,39 @@ class ChangeService:
         if latest is None or latest.total_one_time is None:
             return out
         from app.models.change_offer import ChangeOffer
-        from app.services.offer_service import SEND_KEY, OfferService
-        frozen = ((latest.data or {}).get(SEND_KEY) or {}).get("internal_cost")
-        internal = (float(frozen) if frozen is not None
-                    else await OfferService._internal_cost(session, change))
-
-        def margin(total):
-            total = float(total or 0)
-            return round((total - internal) / total * 100.0, 1) if total else None
-
-        if not prev_known:
-            prev = (await session.execute(
+        from app.services.offer_service import SEND_KEY
+        if sent is None:
+            sent = list((await session.execute(
                 select(ChangeOffer).where(
                     ChangeOffer.change_id == change.id,
-                    ChangeOffer.version < latest.version,
                     ChangeOffer.sent_at.isnot(None))
-                .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
+                .order_by(ChangeOffer.version))).scalars().all())
+        if not prev_known:
+            prev = next((o for o in reversed(sent) if o.version < latest.version), None)
         out.update(offer_total=float(latest.total_one_time),
-                   offer_currency=latest.currency,
-                   margin_pct=margin(latest.total_one_time))
-        if prev is not None and prev.total_one_time is not None:
-            m_now, m_prev = out["margin_pct"], margin(prev.total_one_time)
+                   offer_currency=latest.currency, margin_pct=None)
+        if getattr(latest, "kind", None) == "supplement":
+            before = sum(float(o.total_one_time or 0) for o in sent
+                         if o.status == "accepted" and o.id != latest.id)
+            out.update(supplement=True,
+                       accepted_total=round(before + float(latest.total_one_time), 2))
+            return out
+        frozen = ((latest.data or {}).get(SEND_KEY) or {}).get("internal_cost")
+        if frozen is None:
+            return out
+
+        def margin(total, internal):
+            total = float(total or 0)
+            return round((total - internal) / total * 100.0, 1) if total > 0 else None
+
+        out["margin_pct"] = margin(latest.total_one_time, float(frozen))
+        if (prev is not None and prev.total_one_time is not None
+                and getattr(prev, "kind", None) != "supplement"):
+            m_prev = margin(prev.total_one_time, float(frozen))
             out.update(prev_version=prev.version,
-                       margin_delta_pts=(round(m_now - m_prev, 1)
-                                         if m_now is not None and m_prev is not None
-                                         else None))
+                       margin_delta_pts=(round(out["margin_pct"] - m_prev, 1)
+                                         if out["margin_pct"] is not None
+                                         and m_prev is not None else None))
         return out
 
     @staticmethod

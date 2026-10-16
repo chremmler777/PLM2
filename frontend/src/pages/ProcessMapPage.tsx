@@ -895,11 +895,11 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           label="Record approval (hard: internal approval)" lx={LX + 6} ly={Y.approved + 8} />
 
         {/* --- offer, negotiation, go-ahead ----------------------------- */}
-        <Decision y={Y.fork} name="Customer decision"
-          lines={['declined · further round · accepted']} testId="procmap-decision-customer" />
+        <Decision y={Y.fork} name="Customer answer"
+          lines={['declined · still talking · accepted']} testId="procmap-decision-customer" />
         <Edge testId="procmap-edge-fork-negotiation" color={LOOP}
           d={`M ${CX0} ${mid(Y.fork, DH)} L ${LX + LW} ${mid(Y.fork, DH)}`}
-          label="further round" lx={LX + LW + 6} ly={mid(Y.fork, DH) - 7} />
+          label="still talking" lx={LX + LW + 6} ly={mid(Y.fork, DH) - 7} />
         <Box x={LX} y={mid(Y.fork, DH) - 31} w={LW} h={62} stroke={LOOP} badge="Sales"
           name="Negotiation round" sub="new version: what changed"
           task="valid 30 days from receipt" testId="procmap-node-negotiation" />

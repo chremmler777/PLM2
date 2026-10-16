@@ -402,6 +402,11 @@ export const changesApi = {
       { department_id: departmentId, ...(noCostNote ? { no_cost_note: noCostNote } : {}) }).then((r) => r.data),
   scopeTold: (id: number, cardId: number, ref: string) =>
     client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/told`, { ref }).then((r) => r.data),
+  scopeAsk: (id: number, cardId: number, text: string) =>
+    client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/question`, { text }).then((r) => r.data),
+  scopeAnswer: (id: number, cardId: number, body: {
+    answer: string; attachment_id?: number; from_customer?: boolean; ref?: string
+  }) => client.post<ScopeChangeCard[]>(`/v1/changes/${id}/scope-changes/${cardId}/answer`, body).then((r) => r.data),
   indexFollowups: (id: number) =>
     client.get<IndexFollowup[]>(`/v1/changes/${id}/index-followups`).then((r) => r.data),
   answerRecheck: (id: number, recheckId: number, body: {

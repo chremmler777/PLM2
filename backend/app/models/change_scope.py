@@ -4,7 +4,9 @@ From 'quoted' on the customer may add or change something. One card per
 request, three steps with an owner each:
 
 1. requested: Sales records what the customer wants (P/N, what, by when,
-   the customer's mail or its reference). The lead decides.
+   the customer's mail or its reference). The lead decides. Missing info
+   is a question to the customer (Sales asks, files the answer); it holds
+   the accept, not a refusal.
 2. re-costed: the lead accepts (the departments to re-cost, preticked from
    the routing) or refuses (Sales tells the customer). After approval an
    added part may become its own linked change instead. Each department
@@ -47,7 +49,8 @@ class ChangeScopeChange(Base):
     expects_by: Mapped[date | None] = mapped_column(Date, nullable=True)
     evidence_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     attachment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # opened after approval: the price is open, approval not held
+    # opened after approval (the name says 'accept', it means approval):
+    # the price is open, approval not held
     post_accept: Mapped[bool] = mapped_column(Boolean, default=False)
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -66,3 +69,11 @@ class ChangeScopeChange(Base):
     told_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     told_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # step 1 "Missing info is a question" (migration 135): the customer
+    # question that holds the accept; {text, by, at} open, plus {answer, ref,
+    # attachment_id, answered_by, answered_at} once Sales filed the answer
+    question: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    @property
+    def question_open(self) -> bool:
+        return bool(self.question) and not self.question.get("answered_at")

@@ -58,7 +58,7 @@ export const qualityChapter: ContentChapter = {
             ['A signature is for one offer version.', 'If Sales sends a newer version or a supplement whose quote plan or parts changed (a new part index counts), approval and release wait for you again. A price-only version keeps your signature. The button then reads "Sign again for v2"; the cockpit\'s "Missing before" list shows "Sign as Quality for v2" at any stage.'],
           ],
         },
-        { shot: 'qa-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and the "Quality sign-off" button.' },
+        { shot: 'qa-signoff', alt: 'The Customer answer block with "Accepted", "PM sign-off ✓" and the "Quality sign-off" button.' },
       ],
     },
     {

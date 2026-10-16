@@ -329,6 +329,21 @@ describe('OfferTab', () => {
     expect(screen.getByTestId('offer-negotiation')).toBeDefined()
   })
 
+  it('§7 C14: accepted while quoted, a new version can be written and says it clears the yes', async () => {
+    const v1 = offer({ status: 'accepted', valid_until: '2026-12-25', days_left: null })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer({ id: 12, version: 2 }), v1])
+    renderTab(props({ change: change({ status: 'quoted', customer_response: 'accepted', accepted_offer_id: 11 }) }))
+    const warn = await screen.findByTestId('offer-send-warnings')
+    expect(warn.textContent).toContain("Sending v2 clears the customer's yes to v1")
+    cleanup()
+    // NEGATIVE: once approved the offer is closed (a supplement carries a change)
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
+    renderTab(props({ change: change({ status: 'approved', customer_response: 'accepted',
+      accepted_offer_id: 11, commercial_v2: false }) }))
+    await screen.findByTestId('offer-status')
+    expect(screen.queryByTestId('offer-new-version')).toBeNull()
+  })
+
   it('shows Accepted, not a countdown, once the customer accepted', async () => {
     const v2 = offer({ status: 'accepted', valid_until: '2026-10-25', days_left: null })
     vi.mocked(changeOfferApi.list).mockResolvedValue([v2])
@@ -460,8 +475,10 @@ describe('OfferTab', () => {
   it('an accepted offer offers no new version and shows the quote timing read-only', async () => {
     const v1 = offer({ status: 'accepted', valid_until: '2026-10-25' })
     vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
-    // quoted with the acceptance recorded (the change moves on at approval)
-    renderTab(props({ change: change({ status: 'quoted', customer_response: 'accepted', accepted_offer_id: 11 }) }))
+    // quoted with the acceptance recorded, COMMERCIAL_V2 off (on: §7 C14
+    // lets a new version clear the yes, see the C14 test)
+    renderTab(props({ change: change({ status: 'quoted', customer_response: 'accepted', accepted_offer_id: 11,
+      commercial_v2: false }) }))
     await screen.findByTestId('offer-status')
     expect(screen.queryByTestId('offer-new-version')).toBeNull()
     expect(screen.getByTestId('offer-timing-planner').dataset.readonly).toBe('true')

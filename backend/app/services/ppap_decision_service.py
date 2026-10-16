@@ -357,7 +357,10 @@ class PpapDecisionService:
             if change.status in AFTER_APPROVAL:
                 # [R4] past approval every offer is a supplement: the money
                 # stays open until it is accepted or absorbed (HARD #9)
-                change.price_open = True
+                await ChangeService.open_price(
+                    session, change, "Customer flip after approval, offer needed: "
+                    "the price is open until the supplement is accepted or "
+                    "absorbed", user.id)
         change.flip_answer = answer
         change.flip_answered_by = user.id
         change.flip_answered_at = datetime.utcnow()

@@ -28,6 +28,7 @@ export interface StartAtRiskState {
   decidable?: boolean
   quality_note?: string | null
   quality_by_name?: string | null
+  quality_by?: number | null
   approved_by_name?: string | null
   approved_at?: string | null
   price_open?: boolean
@@ -130,7 +131,7 @@ export default function StartAtRiskCard({ changeId, canAsk, isQuality, canApprov
         // nothing to decide any more (e.g. the customer accepted): say why
         <p data-testid="sar-moot" className="text-slate-400">{s.refusal}</p>
       )}
-      {s.requested_at && s.quality_note && s.decidable && (canApprove && userId !== s.requested_by ? (
+      {s.requested_at && s.quality_note && s.decidable && (canApprove && userId !== s.requested_by && userId !== s.quality_by ? (
         <div className="space-y-1">
           <div className="flex flex-wrap gap-2">
             <button type="button" data-testid="sar-approve" disabled={approve.isPending}

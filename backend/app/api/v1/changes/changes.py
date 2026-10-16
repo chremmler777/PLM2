@@ -2320,6 +2320,24 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
     if att.kind == "rejection_letter" and change.rejection_sent_at is not None:
         frozen("The rejection was sent: its letter is the record and cannot "
                "be removed")
+    # R4/R17: the customer's file a decision stands on (an acceptance, a
+    # decline, a supplement's answer, a scope change card) is its record
+    from app.models.change_offer import ChangeOffer
+    from app.models.change_scope import ChangeScopeChange
+    answered = (await db.execute(
+        select(ChangeOffer.accept_evidence).where(
+            ChangeOffer.change_id == change.id,
+            ChangeOffer.accept_evidence.isnot(None)))).scalars().all()
+    if any(isinstance(e, dict) and e.get("attachment_id") == att.id for e in answered):
+        frozen("The customer's answer stands on this file: it is the record "
+               "and cannot be removed")
+    for card_att, question in (await db.execute(
+            select(ChangeScopeChange.attachment_id, ChangeScopeChange.question).where(
+                ChangeScopeChange.change_id == change.id))).all():
+        if card_att == att.id or (isinstance(question, dict)
+                                  and question.get("attachment_id") == att.id):
+            frozen("A scope change card stands on this file (the customer's "
+                   "wish or answer): it is the record and cannot be removed")
     if att.concern_id is not None:
         concern = await db.get(ChangeConcern, att.concern_id)
         if concern is not None and not concern.is_open:

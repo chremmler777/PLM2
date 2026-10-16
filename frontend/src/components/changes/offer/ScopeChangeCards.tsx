@@ -19,6 +19,7 @@ import { buttonClass } from '../../common/buttonStyles'
 import type { Attachment, ScopeChangeCard } from '../../../types/change'
 import { inputCls, sectionLabel } from './offerFormat'
 import EvidencePick, { pickBody, pickNeedsTick } from './EvidencePick'
+import CustomerCopy from '../scoping/CustomerCopy'
 
 const fill = (k: string, v: Record<string, string | number>) =>
   Object.entries(v).reduce((acc, [kk, vv]) => acc.split(`{${kk}}`).join(String(vv)), t(k))
@@ -124,7 +125,7 @@ function RequestForm({ changeId, attachments, onDone }: ScopeChangeCardsProps & 
   )
 }
 
-function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, routed }: ScopeChangeCardsProps & { card: ScopeChangeCard }) {
+function Card({ card, changeId, status, canRequest, mayDecide, isSales, myDepartmentIds, routed, attachments }: ScopeChangeCardsProps & { card: ScopeChangeCard }) {
   const [picked, setPicked] = useState<number[]>(routed.map((r) => r.id))
   const [note, setNote] = useState('')
   const [toldRef, setToldRef] = useState('')
@@ -139,6 +140,22 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
   const [noCostFor, setNoCostFor] = useState<number | null>(null)
   const [noCost, setNoCost] = useState('')
   const told = useCardMutation(changeId, () => changesApi.scopeTold(changeId, card.id, toldRef.trim()))
+  // §6 step 1: missing info is a question to the customer (Sales owns it)
+  const [askOpen, setAskOpen] = useState(false)
+  const [askText, setAskText] = useState('')
+  const ask = useCardMutation(changeId, () => changesApi.scopeAsk(changeId, card.id, askText.trim()),
+    () => { setAskOpen(false); setAskText('') })
+  const [answer, setAnswer] = useState('')
+  const [ansMail, setAnsMail] = useState('')
+  const [ansRef, setAnsRef] = useState('')
+  const [ansFromCustomer, setAnsFromCustomer] = useState(false)
+  const fileAnswer = useCardMutation(changeId, () => changesApi.scopeAnswer(changeId, card.id, {
+    answer: answer.trim(), ...(ansMail ? pickBody(attachments, ansMail) : { ref: ansRef.trim() }),
+  }))
+  const answerOk = answer.trim().length >= 2
+    && (ansMail ? (!pickNeedsTick(attachments, ansMail) || ansFromCustomer) : ansRef.trim().length >= 5)
+  const question = card.question
+  const questionOpen = !!question?.open
   const step = STEP[card.status]
   const postApproval = ['approved', 'in_implementation', 'in_validation'].includes(status)
   return (
@@ -148,7 +165,7 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
         <span className="font-medium text-slate-100">#{card.id}{card.part_number ? ` ${card.part_number}` : ''}</span>
         <span className="text-slate-300">{card.what}</span>
         <span data-testid={`scope-status-${card.id}`} className="ml-auto rounded border border-slate-600 px-1.5 text-[11px] text-slate-300">
-          {t(`sc.status.${card.status}`)}{card.kind !== 'customer' ? ` · ${t(`sc.kind.${card.kind}`)}` : ''}
+          {t(card.status === 'ready' && card.no_cost ? 'sc.status.readyNoCost' : `sc.status.${card.status}`)}{card.kind !== 'customer' ? ` · ${t(`sc.kind.${card.kind}`)}` : ''}
         </span>
       </div>
       {step && (
@@ -172,7 +189,66 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
         </p>
       )}
       {card.status === 'ready' && (
-        <p className="text-sky-200">{postApproval ? t('sc.readySupplement') : t('sc.readyOffer')}</p>
+        <p className="text-sky-200">{card.no_cost ? t('sc.readyNoCost')
+          : postApproval ? t('sc.readySupplement') : t('sc.readyOffer')}</p>
+      )}
+      {card.status === 'accepted' && card.told_at && !card.offer_id && (
+        <p className="text-slate-400">{fill('sc.noCostDone', { d: formatCalendarDate(card.told_at), ref: card.told_ref ?? '' })}</p>
+      )}
+      {question && (
+        <div data-testid={`scope-question-${card.id}`} className="space-y-1">
+          <p className={questionOpen ? 'text-amber-200' : 'text-slate-400'}>
+            {fill('sc.question', { who: question.by_name ?? '-', q: question.text })}
+          </p>
+          {questionOpen && <p className="text-[11px] text-slate-500">{t('sc.questionWaits')}</p>}
+          {!questionOpen && question.answer && (
+            <p className="text-slate-300">{fill('sc.answered', { ref: question.ref ?? '', a: question.answer })}</p>
+          )}
+          {questionOpen && isSales && question.customer_copy && (
+            <CustomerCopy text={question.customer_copy} testId={`scope-question-copy-${card.id}`} />
+          )}
+          {questionOpen && isSales && (
+            <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+              <label className="self-center text-xs text-slate-400" htmlFor={`scope-answer-${card.id}`}>{t('sc.answer')}</label>
+              <input id={`scope-answer-${card.id}`} data-testid={`scope-answer-${card.id}`} value={answer}
+                onChange={(e) => setAnswer(e.target.value)} className={inputCls} />
+              <label className="self-center text-xs text-slate-400" htmlFor={`scope-answer-mail-${card.id}`}>{t('sc.mail')}</label>
+              <div className="flex flex-wrap gap-2">
+                <EvidencePick id={`scope-answer-mail-${card.id}`} testId={`scope-answer-mail-${card.id}`} label={t('sc.mail')}
+                  attachments={attachments} value={ansMail} onChange={setAnsMail}
+                  fromCustomer={ansFromCustomer} onFromCustomer={setAnsFromCustomer} />
+                <input data-testid={`scope-answer-ref-${card.id}`} value={ansRef} disabled={!!ansMail}
+                  onChange={(e) => setAnsRef(e.target.value)} aria-label={t('sc.ref')} placeholder={t('sc.ref')}
+                  className={`${inputCls} min-w-0 flex-1`} />
+              </div>
+              <div className="flex justify-end sm:col-span-2">
+                <button type="button" data-testid={`scope-answer-save-${card.id}`} disabled={!answerOk || fileAnswer.isPending}
+                  onClick={() => fileAnswer.mutate(undefined)} className={buttonClass('primary', 'sm')}>
+                  {t('sc.answerSave')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {card.status === 'requested' && !questionOpen && (mayDecide || canRequest) && (
+        <div className="space-y-1">
+          <button type="button" data-testid={`scope-ask-open-${card.id}`} aria-expanded={askOpen}
+            onClick={() => setAskOpen((o) => !o)} className="text-[11px] text-sky-300 underline">
+            {t('sc.ask')}
+          </button>
+          {askOpen && (
+            <div className="flex flex-wrap gap-2">
+              <input value={askText} onChange={(e) => setAskText(e.target.value)} data-testid={`scope-ask-text-${card.id}`}
+                aria-label={t('sc.askText')} placeholder={t('sc.askText')} className={`${inputCls} min-w-0 flex-1`} />
+              <button type="button" data-testid={`scope-ask-save-${card.id}`}
+                disabled={ask.isPending || askText.trim().length < 10}
+                onClick={() => ask.mutate(undefined)} className={buttonClass('secondary', 'sm')}>
+                {t('sc.askSave')}
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {card.status === 'refused' && (
         <p className="text-slate-400">{fill('sc.refusedBy', { who: card.decided_by_name ?? '-', why: card.decision_note ?? '' })}
@@ -207,7 +283,8 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
               onClick={() => decide.mutate({ decision: 'refuse' })} className={buttonClass('secondary', 'sm')}>
               {t('sc.refuse')}
             </button>
-            <button type="button" data-testid={`scope-accept-${card.id}`} disabled={decide.isPending || picked.length === 0}
+            <button type="button" data-testid={`scope-accept-${card.id}`} disabled={decide.isPending || picked.length === 0 || questionOpen}
+              title={questionOpen ? t('sc.questionWaits') : undefined}
               onClick={() => decide.mutate({ decision: 'accept' })} className={buttonClass('primary', 'sm')}>
               {t('sc.accept')}
             </button>
@@ -242,6 +319,16 @@ function Card({ card, changeId, status, mayDecide, isSales, myDepartmentIds, rou
         </div>
       ))}
 
+      {card.status === 'ready' && card.no_cost && isSales && (
+        <div className="flex flex-wrap gap-2">
+          <input value={toldRef} onChange={(e) => setToldRef(e.target.value)} data-testid={`scope-nocost-ref-${card.id}`}
+            aria-label={t('sc.noCostRef')} placeholder={t('sc.noCostRef')} className={`${inputCls} min-w-0 flex-1`} />
+          <button type="button" data-testid={`scope-nocost-told-${card.id}`} disabled={told.isPending || toldRef.trim().length < 5}
+            onClick={() => told.mutate(undefined)} className={buttonClass('primary', 'sm')}>
+            {t('sc.noCostTold')}
+          </button>
+        </div>
+      )}
       {card.status === 'refused' && !card.told_at && isSales && (
         <div className="flex flex-wrap gap-2">
           <input value={toldRef} onChange={(e) => setToldRef(e.target.value)} data-testid={`scope-told-ref-${card.id}`}

@@ -207,13 +207,13 @@ export const pmChapter: ContentChapter = {
         },
         {
           points: [
-            ['"Start at risk: approve or refuse"', 'an urgent change whose customer gave the go-ahead before the PO. Read the go-ahead and Quality\'s line of risks, then approve (the change is approved with the price open) or refuse with why (the asker is told). You never approve your own ask; an admin is the second.'],
-            ['"Scope change: accept or refuse"', 'Sales recorded what the customer wants to add or change. Accept it with the departments that re-cost it (the routed ones are preticked), or refuse it with a reason. After approval an added part can become its own linked change. While a scope change is open the approval, the start of implementation and the release wait (an override needs Project Management or Management).'],
-            ['Your sign-off row', 'in My Tasks reads "Sign for offer v2: 4,200.00 EUR, margin 12.0 % (-3.1 pts vs v1); 2 unconfirmed assumptions". A new version sent after you signed takes your signature back; once the customer accepts it (offer or supplement) you are told to sign it, and the row and the sign button come back.'],
+            ['"Start at risk: approve or refuse"', 'an urgent change whose customer gave the go-ahead before the PO. Read the go-ahead and Quality\'s line of risks, then approve (the change is approved with the price open) or refuse with why (the asker is told). You never approve your own ask, nor one whose Quality line you wrote; an admin is the second.'],
+            ['"Scope change: accept or refuse"', 'Sales recorded what the customer wants to add or change. Accept it with the departments that re-cost it (the routed, active ones are preticked), or refuse it with a reason. Information missing? "Missing info? Ask the customer": Sales asks and files the answer, your accept waits for it. Refusing a scope change never closes a price something else opened (a supplement, a quote above the estimate): that needs the customer\'s yes or Absorb. After approval an added part can become its own linked change. While a scope change is open the approval, the start of implementation and the release wait (an override needs Project Management or Management).'],
+            ['Your sign-off row', 'in My Tasks reads "Sign for offer v2: 4,200.00 EUR, margin 12.0 % (-3.1 pts vs v1); 2 unconfirmed assumptions". On a supplement it reads the supplement and the accepted total after it ("supplement -300.00 EUR, accepted total after it 3,900.00 EUR"), no margin. A new version sent after you signed takes your signature back; once the customer accepts it (offer or supplement) you are told to sign it, and the row and the sign button come back.'],
             ['"Accepted total below the last offer"', 'Sales accepted a version cheaper than the one sent before it and said why. You (or Management) decide the override; never the person who asked. Your OK approves the change when the rest holds.'],
           ],
         },
-        { shot: 'pm-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and "Quality sign-off" still open.' },
+        { shot: 'pm-signoff', alt: 'The Customer answer block with "Accepted", "PM sign-off ✓" and "Quality sign-off" still open.' },
       ],
     },
     {

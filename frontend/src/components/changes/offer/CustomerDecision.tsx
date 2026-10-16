@@ -56,8 +56,10 @@ export function addWorkingDaysIso(fromIso: string, n: number): string {
 }
 
 export default function CustomerDecision({
-  change, latestSent, canRespond, canSignPm, canSignQuality, userId, offers,
+  change, latestSent, canRespond, canSignPm, canSignQuality, userId, offers, onAbsorb,
 }: {
+  /** HARD #9's exit after a decline past approval: the page's Absorb dialog. */
+  onAbsorb?: () => void
   change: ChangeDetail
   /** The newest sent (or accepted) offer version, when offers exist. */
   latestSent?: OfferOut | null
@@ -126,7 +128,7 @@ export default function CustomerDecision({
     mutationFn: (vars: { response: string; body?: Parameters<typeof changesApi.customerResponse>[2] }) =>
       changesApi.customerResponse(change.id, vars.response, vars.body),
     onSuccess: () => { setAcceptOpen(false); setDeclineOpen(false); setTalkOpen(false); invalidate() },
-    onError: (e: unknown) => toastError(e, 'Could not record the customer response'),
+    onError: (e: unknown) => toastError(e, "Could not record the customer's answer"),
   })
   const signOff = useMutation({
     mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(change.id, role),
@@ -182,8 +184,22 @@ export default function CustomerDecision({
   // and after a start at risk; once accepted nothing about it changes.
   const open = change.status === 'quoted' || supplementOut || atRiskOut
 
+  // §6/§7a [R4]: declined past approval: the work runs, the price stays
+  // open: Absorb (PM / Management OK) or the run team puts it on hold (R5)
+  const newest = (offers ?? []).filter((o) => o.status !== 'draft').sort((a, b) => b.version - a.version)[0]
+  const declinedOpen = v2 && !!change.price_open && newest?.status === 'declined'
+    && ['approved', 'in_implementation', 'in_validation', 'released'].includes(change.status)
   return (
     <div data-testid="customer-decision" className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 space-y-3">
+      {declinedOpen && newest && (
+        <div data-testid="cust-declined-open" className="flex flex-wrap items-center gap-2 rounded border border-rose-900/70 bg-rose-950/20 p-2 text-xs text-rose-200">
+          <span>{fill('cust.declinedOpen', { v: newest.version })}</span>
+          {onAbsorb && (
+            <button type="button" data-testid="cust-absorb" onClick={onAbsorb}
+              className={buttonClass('secondary', 'sm', 'ml-auto')}>{t('why.absorb')}</button>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <span className={sectionLabel}>{t('cust.title')}</span>
         <span data-testid="customer-response"
@@ -315,7 +331,7 @@ export default function CustomerDecision({
           )}
           {drop && latestSent && (
             <div data-testid="accept-drop" className="space-y-1 rounded border border-amber-900/70 bg-amber-950/20 p-2 sm:col-span-2">
-              <p className="text-xs text-amber-200">{prevSent ? fill('cust.drop', {
+              <p className="text-xs text-amber-200">{prevSent ? fill(atRisk || supplementOut ? 'cust.dropAfter' : 'cust.drop', {
                 v: latestSent.version, t: total, p: prevSent.version,
                 pt: fmtMoney(prevSent.totals.total_one_time, prevSent.currency) })
                 : fill('cust.dropSupp', { v: latestSent.version, t: total })}</p>

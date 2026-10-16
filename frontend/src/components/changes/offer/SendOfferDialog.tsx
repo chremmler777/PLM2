@@ -88,10 +88,12 @@ export function SendList({ list }: { list: OfferSendList }) {
 }
 
 export default function SendOfferDialog({
-  changeId, offerId, fallback, onClose,
+  changeId, offerId, fallback, onClose, changeStatus,
 }: {
   changeId: number
   offerId: number
+  /** What the send does to the status (quoting: Quoted; else it stays). */
+  changeStatus?: string
   /** Shown only until the cached list has the offer. */
   fallback?: OfferOut
   onClose: () => void
@@ -153,7 +155,10 @@ export default function SendOfferDialog({
       title={offer.kind === 'supplement' ? `${t('supp.send')} v${offer.version}` : `Send offer v${offer.version}`}
       description={<>
         Total <span className="tabular-nums text-slate-100">{fmtMoney(offer.totals.total_one_time, offer.currency)}</span>.
-        {' '}{offer.kind === 'supplement' ? t('supp.sendText') : 'Sending sets the quoted price and moves the change to Quoted.'}
+        {' '}{offer.kind === 'supplement' ? t('supp.sendText')
+          : changeStatus === 'quoting' || changeStatus == null
+            ? 'Sending sets the quoted price and moves the change to Quoted.'
+            : 'Sending sets the quoted price; the change keeps its status, the customer answers this version.'}
       </>}
       footer={(
         <>

@@ -9,7 +9,7 @@ import type { ScopeChangeCard } from '../../../types/change'
 vi.mock('../../../api/changes', () => ({
   changesApi: {
     scopeChanges: vi.fn(), requestScopeChange: vi.fn(), decideScopeChange: vi.fn(),
-    scopeRecosted: vi.fn(), scopeTold: vi.fn(),
+    scopeRecosted: vi.fn(), scopeTold: vi.fn(), scopeAsk: vi.fn(), scopeAnswer: vi.fn(),
   },
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
@@ -108,5 +108,48 @@ describe('ScopeChangeCards (§6 [R3])', () => {
     fireEvent.change(screen.getByTestId('scope-told-ref-3'), { target: { value: 'Mail 16 Oct to buyer' } })
     fireEvent.click(told)
     await waitFor(() => expect(changesApi.scopeTold).toHaveBeenCalledWith(7, 3, 'Mail 16 Oct to buyer'))
+  })
+
+  it('re-costed at no cost everywhere: Sales confirms to the customer, nothing to price', async () => {
+    vi.mocked(changesApi.scopeChanges).mockResolvedValue([card({ status: 'ready', no_cost: true })])
+    vi.mocked(changesApi.scopeTold).mockResolvedValue([card({ status: 'accepted' })])
+    wrap(props({ status: 'approved' }))
+    expect((await screen.findByTestId('scope-card-3')).textContent).toContain('nothing to price')
+    const save = screen.getByTestId('scope-nocost-told-3') as HTMLButtonElement
+    expect(save.disabled).toBe(true)          // NEGATIVE: no mail reference yet
+    fireEvent.change(screen.getByTestId('scope-nocost-ref-3'), { target: { value: 'Mail 16 Oct to the buyer' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.scopeTold).toHaveBeenCalledWith(7, 3, 'Mail 16 Oct to the buyer'))
+  })
+
+  it('missing info is a question: the lead asks, accept waits, Sales files the answer', async () => {
+    const asked = [card({ question: {
+      text: 'Which grain: K31 or K45?', open: true, by_name: 'Pat', customer_copy: 'Hello, which grain?' } })]
+    vi.mocked(changesApi.scopeChanges).mockResolvedValueOnce([card()]).mockResolvedValue(asked)
+    vi.mocked(changesApi.scopeAsk).mockResolvedValue(asked)
+    wrap(props({ mayDecide: true, isSales: false, canRequest: false }))
+    fireEvent.click(await screen.findByTestId('scope-ask-open-3'))
+    const ask = screen.getByTestId('scope-ask-save-3') as HTMLButtonElement
+    fireEvent.change(screen.getByTestId('scope-ask-text-3'), { target: { value: 'grain?' } })
+    expect(ask.disabled).toBe(true)           // NEGATIVE: a question that says nothing
+    fireEvent.change(screen.getByTestId('scope-ask-text-3'), { target: { value: 'Which grain: K31 or K45?' } })
+    fireEvent.click(ask)
+    await waitFor(() => expect(changesApi.scopeAsk).toHaveBeenCalledWith(7, 3, 'Which grain: K31 or K45?'))
+    expect((await screen.findByTestId('scope-question-3')).textContent).toContain('Which grain')
+    expect((screen.getByTestId('scope-accept-3') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('scope-answer-save-3')).toBeNull()   // not Sales: no answer form
+    cleanup()
+    vi.mocked(changesApi.scopeChanges).mockResolvedValue([card({ question: {
+      text: 'Which grain: K31 or K45?', open: true, by_name: 'Pat', customer_copy: 'Hello, which grain?' } })])
+    vi.mocked(changesApi.scopeAnswer).mockResolvedValue([card()])
+    wrap(props())
+    expect(await screen.findByTestId('scope-question-copy-3')).toBeDefined()
+    const save = screen.getByTestId('scope-answer-save-3') as HTMLButtonElement
+    fireEvent.change(screen.getByTestId('scope-answer-3'), { target: { value: 'K45' } })
+    expect(save.disabled).toBe(true)          // NEGATIVE: no evidence yet
+    fireEvent.change(screen.getByTestId('scope-answer-ref-3'), { target: { value: 'Mail 17 Oct buyer' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.scopeAnswer).toHaveBeenCalledWith(7, 3,
+      { answer: 'K45', ref: 'Mail 17 Oct buyer' }))
   })
 })

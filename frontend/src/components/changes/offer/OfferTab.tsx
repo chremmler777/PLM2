@@ -51,16 +51,27 @@ export const supplementWindow = (change: Pick<ChangeDetail, 'status' | 'commerci
 /** Where a PM / Quality signature is given (backend SIGNABLE_STATUSES). */
 const SIGNABLE = ['quoted', 'approved', 'in_implementation', 'in_validation']
 
-/** Once the customer said yes the offer is history (backend _require_open). */
-export const offerClosed = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'>): boolean =>
+/** The customer said yes (backend _require_open). */
+const accepted = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'>): boolean =>
   !!change.accepted_offer_id || change.customer_response === 'accepted'
+
+/** §7 C14: while quoted the yes is not final: a new version may be written,
+ *  and sending it clears the acceptance (backend reopens_acceptance). */
+export const reopensAcceptance = (change: Pick<ChangeDetail, 'status' | 'commercial_v2' | 'customer_relevant'>): boolean =>
+  change.commercial_v2 !== false && !!change.customer_relevant && change.status === 'quoted'
+
+/** Once the customer said yes the offer is history (backend _require_open),
+ *  except while quoted (reopensAcceptance). */
+export const offerClosed = (change: Pick<ChangeDetail, 'accepted_offer_id' | 'customer_response'
+  | 'status' | 'commercial_v2' | 'customer_relevant'>): boolean =>
+  accepted(change) && !reopensAcceptance(change)
 
 /** §7a: started at risk and nothing accepted yet: the next version is still
  *  the offer (backend OfferService.create at_risk_offer), sent and answered
  *  in approved or later. */
 export const atRiskOffer = (change: Pick<ChangeDetail, 'start_at_risk_approved_at' | 'accepted_offer_id'
   | 'customer_response' | 'commercial_v2'>): boolean =>
-  change.commercial_v2 !== false && !!change.start_at_risk_approved_at && !offerClosed(change)
+  change.commercial_v2 !== false && !!change.start_at_risk_approved_at && !accepted(change)
 
 export interface OfferTabProps {
   change: ChangeDetail
@@ -78,6 +89,8 @@ export interface OfferTabProps {
   userId: number | null
   /** Internal changes: the cost summary (SummationView) the page renders. */
   costSummary?: ReactNode
+  /** HARD #9's exit: opens the page's Absorb dialog (null: not the viewer's). */
+  onAbsorb?: () => void
 }
 
 type SectionId = 'offer-timing' | 'offer-price' | 'offer-risks' | 'offer-document' | 'offer-negotiation'
@@ -408,7 +421,13 @@ function OfferWorkspace({ props, offers, offer }: {
     ...(planErrors > 0 ? [`The quote plan has ${errorsText(planErrors)} (Timing)`] : []),
   ]
   // Sent as it is, but most likely not what was meant: said, not blocked.
-  const sendWarnings = !data.recipient?.company?.trim() ? ['The recipient company is empty (Document)'] : []
+  const sendWarnings = [
+    ...(!data.recipient?.company?.trim() ? ['The recipient company is empty (Document)'] : []),
+    // §7 C14: said before the click: the customer answers the new version
+    ...(!isSupplement && accepted(change) && reopensAcceptance(change)
+      ? [t('offer.reopens').replace('{v}', String(offer.version))
+        .replace('{a}', acceptedOffer ? `v${acceptedOffer.version}` : t('offer.theQuote'))] : []),
+  ]
 
   return (
     <div className="space-y-4">
@@ -494,6 +513,7 @@ function OfferWorkspace({ props, offers, offer }: {
               <NegotiationCard changeId={change.id} status={change.status} canWrite={canWrite}
                 offerId={latestSent?.id ?? null} offers={offers} />
               <CustomerDecision change={change} latestSent={latestSent} offers={offers}
+                onAbsorb={props.onAbsorb}
                 canRespond={canWrite} canSignPm={props.canSignPm}
                 canSignQuality={props.canSignQuality} userId={props.userId} />
             </StepSection>
@@ -504,7 +524,7 @@ function OfferWorkspace({ props, offers, offer }: {
         </div>
       </div>
 
-      {sendOpen && <SendOfferDialog changeId={change.id} offerId={offer.id} fallback={offer}
+      {sendOpen && <SendOfferDialog changeId={change.id} offerId={offer.id} fallback={offer} changeStatus={change.status}
         onClose={() => setSendOpen(false)} />}
     </div>
   )

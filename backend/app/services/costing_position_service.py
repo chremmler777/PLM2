@@ -903,7 +903,9 @@ class CostingPositionService:
                                  "over": position.estimate_over},
             for_department_id=position.department_id)
         if verdict == "above":
-            change.price_open = True
+            await ChangeService.open_price(
+                session, change, f"Quote above the estimate on '{position.label}': "
+                "the price is open (supplement or absorb)", actor.id)
             await session.flush()
             from app.services.notification_service import NotificationService
             key = f"estimate_low:{position.id}"

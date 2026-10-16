@@ -601,6 +601,16 @@ class OfferService:
                 and change.status in SUPPLEMENT_STATUSES)
 
     @staticmethod
+    def reopens_acceptance(change: ChangeRequest) -> bool:
+        """Spec §7 C14 (COMMERCIAL_V2): while quoted (not yet approved) the
+        customer's yes is not final: a new version may be written, and
+        sending it clears the acceptance; the customer answers it again
+        (a scope card re-costed after the yes, a PO that differs)."""
+        from app.services import cm_switches
+        return (cm_switches.on("COMMERCIAL_V2") and change.customer_relevant
+                and change.status == "quoted")
+
+    @staticmethod
     async def _require_write(session, change, user) -> None:
         if not await OfferService.may_write(session, change, user):
             raise PlanForbidden(
@@ -618,6 +628,8 @@ class OfferService:
         edit, no second send that would move the price after the fact."""
         if change.accepted_offer_id is None and change.customer_response != "accepted":
             return
+        if OfferService.reopens_acceptance(change):
+            return      # spec §7: a new version sent clears the yes (send)
         accepted = (await session.get(ChangeOffer, change.accepted_offer_id)
                     if change.accepted_offer_id else None)
         if accepted is not None:
@@ -941,15 +953,21 @@ class OfferService:
     @staticmethod
     async def _supplement_data(session: AsyncSession, change: ChangeRequest,
                                base: ChangeOffer, offers: list[ChangeOffer]) -> dict:
-        """A supplement keeps the recipient, terms and factors of the last
-        version sent and prices only the changed positions; no risks,
-        scrap, piece price or timing of its own."""
+        """A supplement keeps the recipient, terms and percentage factors of
+        the last version sent and prices only the changed positions; no
+        fixed-amount factor (charged already), risks, scrap, piece price or
+        timing of its own."""
         data = normalise(copy.deepcopy(base.data))
         data.pop(SNAPSHOT_KEY, None)
         data.pop(SEND_KEY, None)
         data["cost_lines"] = await OfferService._supplement_lines(session, change, offers)
         data["risks"] = []
         data["free_fields"] = []
+        # a fixed amount (an engineering fee of 2,500) was charged with the
+        # version it came on: a supplement keeps the percentages only
+        for f in data.get("factors") or []:
+            if isinstance(f, dict) and f.get("type", "pct") != "pct":
+                f["enabled"] = False
         data["customer_note"] = ""
         data["changeover"] = default_data()["changeover"]
         data["piece_price"] = default_data()["piece_price"]
@@ -1220,8 +1238,14 @@ class OfferService:
             listed["internal_cost"] = round(float(internal or 0.0), 2)
             data[SEND_KEY] = listed
         offer.data = data
+        reopened = None
+        if (not supplement and OfferService.reopens_acceptance(change)
+                and (change.accepted_offer_id is not None
+                     or change.customer_response == "accepted")):
+            reopened = await OfferService._clear_acceptance(session, change, offer, user.id)
         for prev in await OfferService.list_offers(session, change):
-            if prev.id != offer.id and prev.status == "sent":
+            if prev.id != offer.id and (prev.status == "sent"
+                                        or (reopened is not None and prev.id == reopened)):
                 prev.status = "superseded"
         offer.status = "sent"
         offer.change_note = note
@@ -1232,13 +1256,9 @@ class OfferService:
         if supplement:
             # spec §6 [R4]: the money is open until the customer accepts the
             # supplement or it is absorbed (HARD #9 at close)
-            if not change.price_open:
-                change.price_open = True
-                await ChangeService.append_changelog(
-                    session, change, "price_opened",
-                    f"Supplement v{offer.version} sent: the price is open until "
-                    "the customer accepts it or it is absorbed", user.id,
-                    field_name="price_open", old_value=False, new_value=True)
+            await ChangeService.open_price(
+                session, change, f"Supplement v{offer.version} sent: the price is "
+                "open until the customer accepts it or it is absorbed", user.id)
         else:
             change.quoted_price = totals["total_one_time"]
         await session.flush()
@@ -1272,6 +1292,35 @@ class OfferService:
                 new_value={"offer_id": offer.id,
                            "concern_ids": [r["concern_id"] for r in listed["high_risks"]]})
         return offer
+
+    @staticmethod
+    async def _clear_acceptance(session: AsyncSession, change: ChangeRequest,
+                                offer: ChangeOffer, actor_id: int) -> Optional[int]:
+        """Spec §7 C14: a new version sent while quoted clears the customer's
+        yes to the older one (it stays on record, superseded, with its
+        evidence); the customer answers the new version. A price-drop OK
+        asked on the old yes is withdrawn: the new answer asks again.
+        Returns the id of the offer that was accepted."""
+        old_id = change.accepted_offer_id
+        old = await session.get(ChangeOffer, old_id) if old_id else None
+        change.accepted_offer_id = None
+        change.customer_response = "pending"
+        change.customer_response_at = None
+        change.customer_response_by = None
+        from app.services.cm_rules import PRICE_DROP_RULE
+        await ChangeService._load_deviations(session, change)
+        for d in change.transition_deviations:
+            if (d.guard_key == PRICE_DROP_RULE and d.status == "pending"
+                    and d.to_status == "approved"):
+                d.status = "withdrawn"
+        await session.flush()
+        what = f"v{old.version}" if old is not None else "the quote"
+        await ChangeService.append_changelog(
+            session, change, "acceptance_cleared",
+            f"Offer v{offer.version} sent while quoted: the customer's yes to "
+            f"{what} is cleared; the customer answers v{offer.version}", actor_id,
+            field_name="customer_response", old_value="accepted", new_value="pending")
+        return old_id
 
     @staticmethod
     async def _withdraw_stale_signatures(session: AsyncSession, change: ChangeRequest,

@@ -452,7 +452,11 @@ async def test_changelog_hides_prices_from_non_cost_roles(client, offer_world,
     assert "Offer v1 sent, valid until 2026-10-30" in text
 
 
-async def test_offer_is_closed_after_acceptance(client, offer_world):
+async def test_offer_is_closed_after_acceptance(client, offer_world, monkeypatch):
+    # COMMERCIAL_V2 off: the yes is final at once. On, a new version while
+    # quoted clears it (spec §7 C14, test_ecr_solid_commercial)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "COMMERCIAL_V2", False)
     cid = offer_world["change_id"]
     sales = await _auth(client, "sales")
     v1 = await _sent_v1(client, sales, cid)

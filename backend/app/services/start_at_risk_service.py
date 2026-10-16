@@ -56,7 +56,12 @@ def refusal(change: ChangeRequest) -> Optional[str]:
         return ("Start at risk is asked once costing runs and until the "
                 f"customer's yes; this change is '{change.status}'")
     if change.customer_response == "accepted":
-        return "The customer accepted: approve it the normal way"
+        # R5: the next step and its owner, not "the normal way"
+        missing = [n for n, by in (("PM", change.pm_signed_by),
+                                   ("Quality", change.quality_signed_by)) if by is None]
+        return ("The customer accepted: approval follows on its own once "
+                + (" and ".join(missing) + " sign" if missing else
+                   "nothing else holds it (Next step)"))
     return None
 
 
@@ -213,16 +218,18 @@ class StartAtRiskService:
         if user.id == change.start_at_risk_requested_by:
             raise StartAtRiskForbidden(
                 "The one who asked does not approve the start at risk (4-eyes)")
+        if user.id == change.start_at_risk_quality_by:
+            # R25: Quality's line and the approval are two people (an admin
+            # who wrote the line as Quality does not approve it too)
+            raise StartAtRiskForbidden(
+                "The one who wrote Quality's line does not approve the start at "
+                "risk (4-eyes)")
         now = datetime.utcnow()
         change.start_at_risk_approved_by = user.id
         change.start_at_risk_approved_at = now
-        if not change.price_open:
-            change.price_open = True
-            await ChangeService.append_changelog(
-                session, change, "price_opened",
-                "Started at risk: the price is open until the customer accepts "
-                "an offer or the money is absorbed", user.id,
-                field_name="price_open", old_value=False, new_value=True)
+        await ChangeService.open_price(
+            session, change, "Started at risk: the price is open until the "
+            "customer accepts an offer or the money is absorbed", user.id)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "start_at_risk_approved",
@@ -253,6 +260,7 @@ class StartAtRiskService:
             "requested_at": change.start_at_risk_requested_at,
             "quality_note": change.start_at_risk_quality_note,
             "quality_by_name": names.get(change.start_at_risk_quality_by),
+            "quality_by": change.start_at_risk_quality_by,
             "approved_by_name": names.get(change.start_at_risk_approved_by),
             "approved_at": change.start_at_risk_approved_at,
             "price_open": change.price_open,

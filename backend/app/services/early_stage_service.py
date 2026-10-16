@@ -488,6 +488,9 @@ class EarlyStageService:
                 "offer_version": None, "covered": not uncovered,
                 "covered_by_offer_version": None, "covered_by_deviation_id": None,
                 "cards": [c.id for c in uncovered],
+                # every uncovered card re-costed at no cost: Sales confirms
+                "no_cost": bool(uncovered) and {c.id for c in uncovered}
+                <= await scs.no_cost_ids(session, uncovered),
             }
         from app.models.change_offer import ChangeOffer
         offers = (await session.execute(
@@ -1037,11 +1040,19 @@ class EarlyStageService:
                           "text": routing_dev["text"], "target_tab": "assessments"})
         if scope is not None and not scope["covered"] and live:
             v = scope["offer_version"]
+            # R5: the exit that works at this stage (a supplement after
+            # approval; nothing to price when every department said no cost)
+            if scope.get("no_cost"):
+                exit_ = ("Sales confirms it to the customer at no price change, "
+                         "or an override")
+            elif change.status in ("approved", "in_implementation", "in_validation"):
+                exit_ = "send a supplement, or an override"
+            else:
+                exit_ = "new offer version, or an override"
             waits.append({"kind": "scope_not_covered",
                           "text": (f"Offer v{v} no longer covers the scope: "
                                    if v else "The offer no longer covers the scope: ")
-                          + "new offer version, or an override (OK of Project "
-                          "Management or Management)",
+                          + exit_ + " (OK of Project Management or Management)",
                           "target_tab": "offer"})
 
         from app.services.price_redaction import PriceViewer
