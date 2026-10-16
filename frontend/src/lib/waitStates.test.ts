@@ -57,8 +57,36 @@ describe('resolveWaitStates', () => {
     const [w] = resolveWaitStates(change({ status: 'in_assessment' }),
       [concern({ department_id: 4, asking_department_name: 'APQP' })], deptName)
     expect(w.text).toBe(t('wait.onSales.customerInfo')
-      .replace('{x}', 'What is the target price?'))
+      .replace('{x}', 'What is the target price?') + ` ${t('wait.notHolding')}`)
     expect(w.text).not.toContain('APQP')
+    // A6-06: it holds the department's submit, not the next step
+    expect(w.info).toBe(true)
+    expect(w.tab).toBe('assessments')
+  })
+
+  it('A6-06: a check item reads "<Dept> closes it" on Assessments, never Sales or Scoping', () => {
+    const [w] = resolveWaitStates(change({ status: 'in_assessment' }),
+      [concern({ flag_type: 'check', department_id: 2, owner_department_names: ['Development'],
+        note: 'wall thickness at rib' })], deptName)
+    expect(w.key).toBe('check-1')
+    expect(w.text).toBe(t('wait.checkItem').replace('{d}', 'Development')
+      .replace('{x}', 'wall thickness at rib'))
+    expect(w.text).not.toContain('Sales')
+    expect(w.tab).toBe('assessments')
+    expect(w.info).toBe(true)
+  })
+
+  it('A6-06: a department named by its own open item is not named again', () => {
+    const waits = resolveWaitStates(change({ status: 'in_assessment', blocked_department_ids: [2] }),
+      [concern({ flag_type: 'check', department_id: 2, owner_department_names: ['Development'] })],
+      deptName)
+    expect(waits.map((w) => w.key)).toEqual(['check-1'])
+  })
+
+  it('A6-06: a scoping question still holds proceed (not info)', () => {
+    const [w] = resolveWaitStates(change({ status: 'scoping' }), [concern()], deptName)
+    expect(w.info).toBeUndefined()
+    expect(w.tab).toBe('scoping')
   })
 
   it('waits on review once the answer is in', () => {

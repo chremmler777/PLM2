@@ -209,6 +209,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.worthKnowing': { de: 'Gut zu wissen', en: 'Worth knowing' },
   'cockpit.lead': { de: 'Verantwortlich (Lead)', en: 'Lead' },
   'cockpit.pendingDeviations': { de: 'Offene Übersteuerungen', en: 'Pending overrides' },
+  'cockpit.overrideWaiting': { de: 'Übersteuerung wartet auf {who} seit {d}', en: 'Override waiting for {who} since {d}' },
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
   'cockpit.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
   'cockpit.blockedDepartments': {
@@ -1162,6 +1163,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'wait.onSales.customerInfo': {
     de: 'Wartet auf Vertrieb - Kundeninfo wird eingeholt: {x}',
     en: 'Waiting on Sales - obtaining customer info: {x}',
+  },
+  // A6-06: a check item or an assessment question holds its department's
+  // submit only, not the change's next step
+  'wait.checkItem': {
+    de: 'Prüfpunkt offen, {d} schließt ihn: {x}',
+    en: 'Check item open, {d} closes it: {x}',
+  },
+  'wait.notHolding': {
+    de: '(hält den nächsten Schritt nicht auf)',
+    en: '(does not hold the next step)',
   },
   'wait.onReview': {
     de: 'Antwort liegt vor - wartet auf Prüfung: {x}',
@@ -2464,6 +2475,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'override.asked': { de: 'beantragt', en: 'asked' },
   'override.waitingApprover': { de: 'Wartet auf den Freigeber. Nie der Antragsteller.', en: 'Waiting for the approver. Never the requester.' },
   'override.waitingFor': { de: 'Wartet auf das OK von {who}', en: 'Waiting for the OK of {who}' },
+  'override.deciderUnknown': { de: 'die Entscheider', en: 'its deciders' },
   'absorb.title': { de: 'Offenen Preis absorbieren', en: 'Absorb the open price' },
   'absorb.lead': {
     de: 'Der offene Betrag wird nicht beim Kunden nachgefordert (intern: nicht neu freigegeben). Erst danach kann die Änderung geschlossen werden.',

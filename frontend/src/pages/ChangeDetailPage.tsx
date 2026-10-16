@@ -64,7 +64,7 @@ import { BOOK_HOURS_EVENT } from '../api/hours';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
-import { ruleText } from '../lib/overrideRules';
+import { deciderText, ruleText } from '../lib/overrideRules';
 import {
   OFF_PATH_STATUSES, everydayTabsFor, transitionLabel, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, stoppedTabLocked, stoppedDefaultTab, type ChangeTab,
@@ -877,6 +877,14 @@ export default function ChangeDetailPage() {
     onOverride: (to: ChangeStatus, rule: string) => setOverrideFor({ to, rule }),
     mayOverride: (to: string) => !readOnly && (may(to) || isAdmin || isChangeLead || isPmMember),
     onAbsorb: () => setAbsorbOpen(true),
+    // A6-06: the backend lets the next hop through: nothing listed holds it
+    nextHopFree: !!stage?.can_transition && !!change.next_step?.to
+      && stage.can_transition[change.next_step.to] === true
+      && !stage.transition_blocks?.[change.next_step.to],
+    pendingOverrides: deviations.filter((d) => d.status === 'pending').map((d) => ({
+      id: d.id, to: d.to_status, since: d.proposed_at,
+      who: d.deciders ? deciderText(d.deciders.group, d.deciders.lead_name) : t('override.deciderUnknown'),
+    })),
     onSign: readOnly ? undefined : (side: 'pm' | 'quality') => signOff.mutate(side),
     // 4-eyes (A4-08): never the other side's signer (the backend refuses it)
     maySign: (side: 'pm' | 'quality') => (side === 'pm'

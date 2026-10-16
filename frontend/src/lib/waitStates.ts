@@ -202,23 +202,47 @@ export function resolveWaitStates(
   // backend's obtain_info task follows the same split).
   const askingSide = change.status === 'captured' || change.status === 'scoping'
   const questions = concerns.filter((c) => c.is_open && c.kind === 'needs_info')
+  // A6-06: from assessment on, a question or check item holds only its own
+  // department's submit (HARD #10), never the change's next step: it is
+  // listed as info ("does not stop the next step"), named by who closes it,
+  // on the Assessments tab where it is worked.
+  const ownerOf = (c: ChangeConcern) => (c.owner_department_names?.length
+    ? c.owner_department_names.join(', ')
+    : c.asking_department_name
+      ?? (c.department_id != null ? departmentName(c.department_id) : null)
+      ?? c.raised_by_name ?? `#${c.raised_by}`)
+  const listed = new Set<string>()
   for (const c of questions) {
+    if (!askingSide && c.flag_type === 'check') {
+      listed.add(ownerOf(c))
+      waits.push({
+        key: `check-${c.id}`,
+        text: t('wait.checkItem').replace('{d}', ownerOf(c)).replace('{x}', excerpt(c.note)),
+        tab: 'assessments',
+        info: true,
+      })
+      continue
+    }
+    if (!askingSide) listed.add(ownerOf(c))
     waits.push(c.answered_at
       ? {
         key: `review-${c.id}`,
         text: t('wait.onReview').replace('{x}', excerpt(c.note)),
-        tab: 'scoping',
+        tab: askingSide ? 'scoping' : 'assessments',
+        ...(askingSide ? {} : { info: true }),
       }
       : {
         key: `sales-info-${c.id}`,
         text: !askingSide
-          ? t('wait.onSales.customerInfo').replace('{x}', excerpt(c.note))
+          ? (c.answer_from && c.answer_from !== 'customer'
+            ? t('wait.onSales.info').replace('{d}', ownerOf(c)).replace('{x}', excerpt(c.note))
+            : t('wait.onSales.customerInfo').replace('{x}', excerpt(c.note)))
+            + ` ${t('wait.notHolding')}`
           : t('wait.onSales.info')
-          .replace('{d}', c.asking_department_name
-            ?? (c.department_id != null ? departmentName(c.department_id) : null)
-            ?? c.raised_by_name ?? `#${c.raised_by}`)
-          .replace('{x}', excerpt(c.note)),
-        tab: 'scoping',
+            .replace('{d}', ownerOf(c))
+            .replace('{x}', excerpt(c.note)),
+        tab: askingSide ? 'scoping' : 'assessments',
+        ...(askingSide ? {} : { info: true }),
       })
   }
 
@@ -248,7 +272,9 @@ export function resolveWaitStates(
   }
 
   // A department cannot submit while it holds its own open concern.
-  const blocked = change.blocked_department_ids ?? []
+  // A department already named by its own open item above is not named twice.
+  const blocked = (change.blocked_department_ids ?? [])
+    .filter((d) => ![...listed].some((names) => names.split(', ').includes(departmentName(d))))
   if (change.status === 'in_assessment' && blocked.length > 0) {
     waits.push({
       key: 'blocked-departments',

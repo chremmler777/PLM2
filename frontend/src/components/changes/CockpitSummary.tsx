@@ -17,7 +17,7 @@ import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
 import type { WaitState } from '../../lib/waitStates'
-import { formatCalendarDate, formatDate } from '../../lib/format'
+import { formatCalendarDate, formatDate, formatDayMonth } from '../../lib/format'
 import { isIssueActionKind, issueTabFor } from '../../lib/issueTabs'
 import { plantText } from '../../lib/plantName'
 import PendingRemovalChip from './PendingRemovalChip'
@@ -114,6 +114,14 @@ interface Props {
       reachable while a hard step of its own still waits on the rule (an
       internal approval waiting for finalized costing). */
   mayOverride?: (to: string) => boolean
+  /** A6-06: the backend lets the next hop through (can_transition and no
+      transition_blocks entry): nothing listed then holds it, so every wait
+      is "worth knowing" and the primary is the step itself. */
+  nextHopFree?: boolean
+  /** A6-06: the pending overrides by who decides, for one line each
+      ("Waiting for Quality since 14 Oct") instead of a bare count. `to` is
+      the status it asks for: that move is not offered while it waits. */
+  pendingOverrides?: { id: number; to: string; who: string; since: string }[]
 }
 
 /** What the cockpit needs of the engineering review state. */
@@ -329,7 +337,12 @@ const Where = ({ to }: { to: string }) => (
 /** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
 interface Blocker { key: string; text: string; go?: () => void }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits: rawWaits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign, nextHopFree = false, pendingOverrides }: Props) {
+  // A6-06: only what holds the next hop is a blocker
+  const waits = nextHopFree ? rawWaits.map((w) => ({ ...w, info: true })) : rawWaits
+  const pendingCount = nextHopFree ? 0 : pendingDeviations
+  const overrideLine = (o: { who: string; since: string }) => t('cockpit.overrideWaiting')
+    .replace('{who}', o.who).replace('{d}', formatDayMonth(o.since))
   const motherPlant = change.origin === 'mother_plant'
   /** The late flag whose "Take off routing" dialog is open. */
   const [takeOff, setTakeOff] = useState<MyAction | null>(null)
@@ -494,10 +507,15 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       key: `gate-${g.gate_key}`, text: gateText(g),
       go: onResolveGate && canSeeGovernance ? () => onResolveGate(g.gate_key) : undefined,
     })),
-    ...(pendingDeviations > 0 ? [{
-      key: 'deviations', text: `${t('cockpit.pendingDeviations')}: ${pendingDeviations}`,
-      go: onDecideDeviation ? () => onDecideDeviation() : undefined,
-    }] : []),
+    ...(pendingCount > 0 ? (pendingOverrides?.length
+      ? pendingOverrides.map((o) => ({
+        key: `deviation-${o.id}`, text: overrideLine(o),
+        go: onDecideDeviation ? () => onDecideDeviation(o.id) : undefined,
+      }))
+      : [{
+        key: 'deviations', text: `${t('cockpit.pendingDeviations')}: ${pendingDeviations}`,
+        go: onDecideDeviation ? () => onDecideDeviation() : undefined,
+      }]) : []),
     ...(overdue > 0 ? [{
       key: 'overdue', text: `${t('cockpit.overdueAssessments')}: ${overdue}`,
       go: onGo ? () => onGo('assessments') : undefined,
@@ -521,8 +539,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const decidesNotFeasible = may('rejected') || may('scoping')
   const notFeasibleWho = (assessment?.not_feasible ?? [])
     .map((d) => d.department_name ?? `#${d.department_id}`).join(', ')
+  // A6-06: a move whose override is still pending would be refused: it is
+  // not offered beside "Waiting for <decider>"
+  const waitingOverride = new Set(nextHopFree ? [] : (pendingOverrides ?? []).map((o) => o.to))
   const steps = allSteps
-    .filter((st) => st.kind !== 'advance' || may(st.to))
+    .filter((st) => st.kind !== 'advance' || (may(st.to) && !waitingOverride.has(st.to)))
     .filter((st) => decidesNotFeasible || !(st.kind === 'action' && st.key === 'override-costing'))
     .map((st) => (!decidesNotFeasible && st.kind === 'wait' && st.key === 'not-feasible'
       ? { ...st, text: t('next.notFeasibleNotYours').replace('{x}', notFeasibleWho) } : st))
@@ -670,7 +691,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     const primaryStep = !demoted && buttons[0] && steps[0] === buttons[0] ? buttons[0] : null
     const firstWait = steps.find((st) => st.kind === 'wait')
     return (
-      <div data-testid="cockpit-compact" className="flex min-w-0 flex-1 items-center gap-2">
+      // A6-06: wraps rather than pushing the primary off the edge at 1280 px
+      <div data-testid="cockpit-compact" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {statusPill(true)}
         {hardBlockers.length > 0 ? (
           <button type="button" data-testid="compact-blockers" onClick={onShowOverview}
@@ -689,7 +711,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             {plural(t('cockpit.actionsCount'), mainActions.length)}
           </button>
         )}
-        <div className="ml-auto flex min-w-0 items-center gap-2">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {meetingDecides && ownHold ? (
             <button type="button" data-testid="compact-own-hold" className={btnSm.primary}
               onClick={() => runAction(ownHold)}>
@@ -857,7 +879,21 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <ul className="space-y-1.5 text-sm">
             {waits.filter((w) => !w.info).map(waitRow)}
             {blockingGates.map((g) => gateRow(g, true))}
-            {pendingDeviations > 0 && (
+            {pendingCount > 0 && pendingOverrides?.length ? pendingOverrides.map((o) => (
+              <li key={o.id} data-testid="blocked-pending-deviations" className="text-amber-300">
+                {onDecideDeviation ? (
+                  <button type="button" className={linkRow} onClick={() => onDecideDeviation(o.id)}>
+                    <Hourglass aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                    <span>{overrideLine(o)}<Where to={tabName('overview')} /></span>
+                  </button>
+                ) : (
+                  <span className="inline-flex items-start gap-1.5">
+                    <Hourglass aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                    {overrideLine(o)}
+                  </span>
+                )}
+              </li>
+            )) : pendingCount > 0 && (
               <li data-testid="blocked-pending-deviations" className="text-amber-300">
                 {onDecideDeviation ? (
                   <button type="button" className={linkRow} onClick={() => onDecideDeviation()}>

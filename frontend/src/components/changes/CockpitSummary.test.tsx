@@ -114,6 +114,26 @@ describe('CockpitSummary', () => {
     expect(screen.getByTestId('next-to-released').textContent).toBe('Release change')
   })
 
+  it('A6-06: when the backend lets the next hop through, nothing listed counts as a blocker', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'in_validation' })}
+      gates={[]} pendingDeviations={1} onAdvance={() => {}} advancing={false} nextHopFree
+      waits={[{ key: 'checks', text: 'Question: wall thickness?', tab: 'assessments' }]} />))
+    expect(screen.queryByTestId('next-resolve-blockers')).toBeNull()
+    expect(screen.getByTestId('cockpit-worth-knowing').textContent).toContain('wall thickness')
+    expect(screen.getByTestId('next-to-released').textContent).toBe('Release change')
+  })
+
+  it('A6-06: a pending override reads "waiting for <decider> since <date>" and its move is not offered', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'in_validation' })}
+      gates={[]} pendingDeviations={1} onAdvance={() => {}} advancing={false}
+      pendingOverrides={[{ id: 4, to: 'released', who: 'a Quality member', since: '2026-10-14T09:00:00' }]} />))
+    const line = screen.getByTestId('blocked-pending-deviations').textContent ?? ''
+    expect(line).toContain('Override waiting for a Quality member since')
+    expect(line).not.toContain(t('cockpit.pendingDeviations'))
+    // NEGATIVE: no competing "Release change" button while the override waits
+    expect(screen.queryByTestId('next-to-released')).toBeNull()
+  })
+
   it('does not list an action that is the same job as the next step', () => {
     render(wrap(<CockpitSummary change={change({ status: 'quoting' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
