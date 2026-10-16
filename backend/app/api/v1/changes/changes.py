@@ -1236,8 +1236,11 @@ async def recommended_departments(
         select(Department.id, Department.name)
         .where(Department.id.in_(letters), Department.is_active.is_(True))
         .order_by(Department.sort_order, Department.name))).all()
+    # R25: Management is never pre-marked for a task (Informed only).
+    from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
     return [{"id": i, "name": n, "rasic_letter": letters[i],
-             **({"raiser": True} if i == raiser else {})} for i, n in rows]
+             **({"raiser": True} if i == raiser else {})} for i, n in rows
+            if n not in NON_ROUTABLE_DEPARTMENTS or letters[i] == "I"]
 
 
 @router.get("/{change_id}/assessment-objects")

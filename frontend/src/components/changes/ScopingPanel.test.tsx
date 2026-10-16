@@ -333,6 +333,25 @@ describe('ScopingPanel department picker', () => {
     expect((await screen.findByTestId('meeting-depts-1')).textContent).toContain('Quality (S)')
   })
 
+  it('offers Management only as Informed: it gives OKs and is never routed (R25)', async () => {
+    deptState.current = [
+      { id: 2, name: 'Quality', is_active: true },
+      { id: 9, name: 'Management', is_active: true },
+    ]
+    vi.mocked(changesApi.createMeeting).mockClear()
+    render(wrap(<ScopingPanel change={change()} />))
+    await screen.findByTestId('rasic-9-I')
+    for (const l of ['R', 'A', 'S', 'C']) expect(screen.queryByTestId(`rasic-9-${l}`)).toBeNull()
+    expect(screen.getByTestId('rasic-2-R')).toBeTruthy()
+    // Picking the name informs, it never makes Management Responsible.
+    fireEvent.click(screen.getByRole('button', { name: /^Management$/ }))
+    expect(screen.getByTestId('rasic-9-I').getAttribute('aria-pressed')).toBe('true')
+    deptState.current = [
+      { id: 2, name: 'Quality', is_active: true },
+      { id: 8, name: 'Logistics', is_active: false },
+    ]
+  })
+
   it('offers only active departments', async () => {
     render(wrap(<ScopingPanel change={change()} />))
     expect(await screen.findByRole('button', { name: /^Quality$/ })).toBeTruthy()

@@ -97,7 +97,17 @@ class MeetingService:
                     f"Invalid RASIC letter '{v}' for department {k}: one of R, A, S, C, I")
             out[str(int(k))] = letter
         ids = await MeetingService._validate_departments(session, [int(k) for k in out])
+        await MeetingService._refuse_unroutable(session, {int(k): v for k, v in out.items()})
         return out, ids
+
+    @staticmethod
+    async def _refuse_unroutable(session: AsyncSession, letters: dict[int, str]) -> None:
+        """R25: Management and retired departments take no task letter
+        (Informed is fine)."""
+        from app.services.change_routing_service import ChangeRoutingService
+        why = await ChangeRoutingService.unroutable_refusals(session, letters)
+        if why:
+            raise ChangeError("; ".join(why))
 
     @staticmethod
     def _participant_matches(user: User, name: str, username: str,
@@ -177,6 +187,8 @@ class MeetingService:
         # The letter map is authoritative when given: the id list follows it.
         dept_ids = rasic_ids if rasic is not None else \
             await MeetingService._validate_departments(session, selected_department_ids or [])
+        if rasic is None:
+            await MeetingService._refuse_unroutable(session, {i: "R" for i in dept_ids})
         meeting = ChangeMeeting(
             change_id=change.id, meeting_date=meeting_date or datetime.utcnow(),
             channel=channel,
@@ -344,6 +356,9 @@ class MeetingService:
         elif "selected_department_ids" in fields and fields["selected_department_ids"] is not None:
             fields["selected_department_ids"] = await MeetingService._validate_departments(
                 session, fields["selected_department_ids"])
+            letters = meeting.department_rasic or {}
+            await MeetingService._refuse_unroutable(session, {
+                i: letters.get(str(i), "R") for i in fields["selected_department_ids"]})
             # An id-only edit drops letters for departments no longer picked.
             if meeting.department_rasic:
                 keep = {str(i) for i in fields["selected_department_ids"]}
@@ -1900,6 +1915,13 @@ class MeetingService:
                 problems.append(
                     "At least one department must be Responsible or Accountable "
                     "(R/A) before proceeding")
+            # R25: a room saved before the rule may still name Management or
+            # a retired department for a task; nobody could ever submit it.
+            if meeting.selected_department_ids:
+                from app.services.change_routing_service import ChangeRoutingService
+                problems += await ChangeRoutingService.unroutable_refusals(
+                    session, meeting.rasic_map if meeting.department_rasic else
+                    {i: "R" for i in meeting.selected_department_ids})
             # HARD #2: proceeding over an unanswered objection is the failure
             # this exists to stop (C33: check items go along as conditions);
             # HARD #7 the PPAP decision and the flip's Sales answer; HARD #1

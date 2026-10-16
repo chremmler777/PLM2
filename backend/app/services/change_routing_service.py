@@ -386,6 +386,10 @@ class ChangeRoutingService:
                             "Scoping selection contains no responsible/accountable "
                             "department in stage 1")
                     stage["departments"] = kept
+        # R25: Management (no cost-sheet rate) and a retired department never
+        # take a stage-1 task, whatever the template or an older room said:
+        # an assessment nobody can submit stalls stage 1.
+        stages = await ChangeRoutingService._drop_unroutable(session, stages)
 
         routing = ChangeRouting(
             change_id=change.id, template_id=template_id, template_version=template_version,
@@ -837,6 +841,50 @@ class ChangeRoutingService:
         if r is None:
             raise ValueError("Change has no routing yet")
         return r
+
+    @staticmethod
+    async def unroutable_refusals(session: AsyncSession,
+                                  letters: dict[int, str]) -> list[str]:
+        """One refusal per department that may not hold a task letter
+        (R/A/S/C): Management gives OKs and books no hours, a retired
+        department takes no new work. Informed (I) is always fine. The same
+        words as the routing-deviation add path."""
+        from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+        ids = [d for d, l in letters.items() if l in ASSESSMENT_LETTERS]
+        if not ids:
+            return []
+        out = []
+        for dept in (await session.execute(select(Department).where(
+                Department.id.in_(ids)).order_by(Department.name))).scalars():
+            if dept.name in NON_ROUTABLE_DEPARTMENTS:
+                out.append(f"{dept.name} gives OKs and books no hours: "
+                           "it is never routed")
+            elif not dept.is_active:
+                out.append(f"{dept.name} is retired: it cannot be routed")
+        return out
+
+    @staticmethod
+    async def _drop_unroutable(session: AsyncSession, stages: list[dict]) -> list[dict]:
+        """Stage 1 without Management or retired departments holding a task
+        letter (I stays: notification only)."""
+        from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+        ids = {d["department_id"] for st in stages if st["stage_order"] == 1
+               for d in st["departments"]}
+        if not ids:
+            return stages
+        bad = {i for (i,) in await session.execute(select(Department.id).where(
+            Department.id.in_(ids),
+            (Department.is_active.is_(False))
+            | Department.name.in_(NON_ROUTABLE_DEPARTMENTS)))}
+        if not bad:
+            return stages
+        for st in stages:
+            if st["stage_order"] == 1:
+                st["departments"] = [
+                    d for d in st["departments"]
+                    if d["department_id"] not in bad
+                    or d["rasic_letter"] not in ASSESSMENT_LETTERS]
+        return stages
 
     @staticmethod
     async def _lock_routing(session: AsyncSession, change: ChangeRequest) -> ChangeRouting:

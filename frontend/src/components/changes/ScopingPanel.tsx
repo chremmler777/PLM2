@@ -31,7 +31,7 @@ import {
 import {
   askingSide, canAnswerQuestion, carrierOf, flipHolds, unroutedCheckOwners, isPersonContact, openFlagLines, ppapApplies,
 } from '../../lib/scopingRules'
-import { departmentLabel, pickableDepartments } from '../../lib/departments'
+import { departmentLabel, isRoutable, pickableDepartments } from '../../lib/departments'
 import { plantText } from '../../lib/plantName'
 
 /** The room's letters, in the order the picker shows them. I (informed) is an
@@ -422,11 +422,22 @@ export default function ScopingPanel(
     ...(change.customer_flip_at && change.flip_answer == null
       ? [t('next.item.customer_flip')] : []),
   ] : []
+  // R25: the letters a department may take. Management gives OKs and books
+  // no hours (Informed only); a retired department carried on an old record
+  // takes nothing new, it can only be taken off.
+  const lettersFor = (id: number): RasicLetter[] => {
+    const d = departments.find((x) => x.id === id)
+    if (!d || isRoutable(d)) return RASIC_PICK
+    return d.is_active === false ? [] : ['I']
+  }
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptRasic((prev) => {
       if (id in prev) { const next = { ...prev }; delete next[id]; return next }
-      return { ...prev, [id]: recommendedLetter(id) }
+      const allowed = lettersFor(id)
+      if (!allowed.length) return prev
+      const rec = recommendedLetter(id)
+      return { ...prev, [id]: allowed.includes(rec) ? rec : allowed[0] }
     })
   }
   const setLetter = (id: number, letter: RasicLetter) => {
@@ -1011,7 +1022,7 @@ export default function ScopingPanel(
                     ) : (
                     <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
                       role="group" aria-label={`${d.name} RASIC`}>
-                      {RASIC_PICK.map((l) => (
+                      {lettersFor(d.id).map((l) => (
                         <button key={l} type="button" data-testid={`rasic-${d.id}-${l}`}
                           aria-pressed={letter === l} title={t(`rasic.${l}`)}
                           aria-label={`${l}, ${t(`rasic.${l}`)}`}
