@@ -124,10 +124,14 @@ async def test_switch_off_keeps_the_silent_edit(client, admin_auth, locked, monk
 async def test_in_assessment_the_notice_names_the_risk_and_it_works(
         client, admin_auth, locked, session_factory):
     """R5 (review L5 loop 2): the exit the notice names is one the
-    department can take: a risk on its own submitted assessment."""
+    department can take: a risk on its own submitted assessment (an answer
+    of impact no: impact yes is sent back, A3-06)."""
     async with session_factory() as s:
         c = await s.get(ChangeRequest, locked["cid"])
         c.status = "in_assessment"
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == locked["cid"]))).scalars().one()
+        a.details = json.dumps({"impacts": [{"key": "x", "answer": "no", "impacted": False}]})
         await s.commit()
     res = await client.post(_u(locked, "/impacted-items"), json={
         "part_id": locked["b"], "reason": "Customer added the mirror part B"},
@@ -167,3 +171,126 @@ async def test_the_relation_seed_is_an_impact_edit_too(
     assert res.status_code == 200 and res.json()["added"] == 1, res.text
     detail = (await client.get(_u(locked), headers=admin_auth)).json()
     assert detail["costing_finalized_department_ids"] == []
+
+
+async def test_in_assessment_an_impact_yes_answer_is_sent_back(
+        client, admin_auth, locked, session_factory):
+    """A3-06 (spec §4 minimal C16 'technical impact yes reopens
+    assessment'): the department whose objects moved and whose submitted
+    answer said impact yes gets its assessment back, with the reason."""
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, locked["cid"])
+        c.status = "in_assessment"
+        await s.commit()
+    res = await client.post(_u(locked, "/impacted-items"), json={
+        "part_id": locked["b"], "reason": "Customer added the mirror part B"},
+        headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == locked["cid"]))).scalars().one()
+        assert a.submitted_at is None and a.verdict == "pending"
+        assert a.details_dict["impacts"][0]["impacted"] is True     # answer kept
+        body = (await s.execute(select(Notification.body).where(
+            Notification.kind == "impact_edited"))).scalars().one()
+        assert "Your assessment is open again" in body
+        assert "Customer added the mirror part B" in body
+        from app.models.change import ChangeChangelog
+        log = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == locked["cid"],
+            ChangeChangelog.action == "assessment_sent_back"))).scalars().one()
+        assert "mirror part B" in log.notes
+    # the department answers again
+    from tests.checklist_helpers import answered
+    res = await client.post(_u(locked, "/assessments"), json={
+        "department_id": locked["dev"], "verdict": "feasible",
+        "details": {"impacts": answered("Development")}},
+        headers=locked["dev_auth"])
+    assert res.status_code == 200, res.text
+
+
+async def test_switch_off_or_costing_sends_nothing_back(
+        client, admin_auth, locked, session_factory, monkeypatch):
+    """A3-06 negative: in costing the submitted answer stays (the engine has
+    moved on: costing reopens, the notice names the lead); switch off too."""
+    res = await client.post(_u(locked, "/impacted-items"), json={
+        "part_id": locked["b"], "reason": "Customer added the mirror part B"},
+        headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == locked["cid"]))).scalars().one()
+        assert a.submitted_at is not None and a.verdict == "feasible"
+
+
+async def test_send_back_reopens_the_engine_task(
+        client, admin_auth, seed, session_factory):
+    """A3-06 on a real routing: the R row's engine task is active again and
+    the department submits again."""
+    from app.models.change import ChangeRoutingStandard
+    from app.models.workflow import (
+        Department, WfInstanceTask, WfStage, WfStep, WfStepRasic, WfTemplate)
+    from app.services import assessment_checklist as checklist
+    from tests.checklist_helpers import answered
+    from tests.conftest import advance_to_assessment
+    async with session_factory() as s:
+        dep = {}
+        for n in ("Tool Engineer", "Process Engineer"):
+            d = Department(name=n, flow_type="change", is_active=True)
+            s.add(d); await s.flush(); dep[n] = d.id
+        t = WfTemplate(name="ECR-sb", description="x", version=1, is_active=True,
+                       created_by=1)
+        s.add(t); await s.flush()
+        stage = WfStage(template_id=t.id, stage_order=1, name="S1")
+        s.add(stage); await s.flush()
+        step = WfStep(stage_id=stage.id, step_name="S1", position_in_stage=1)
+        s.add(step); await s.flush()
+        for n in dep:
+            s.add(WfStepRasic(step_id=step.id, department_id=dep[n], rasic_letter="R"))
+        s.add(ChangeRoutingStandard(change_type="tooling", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        pa = Part(project_id=seed["project_id"], part_number="ART-SB-A", name="A",
+                  part_type="internal_mfg", created_by=seed["admin_id"])
+        pb = Part(project_id=seed["project_id"], part_number="ART-SB-B", name="B",
+                  part_type="internal_mfg", created_by=seed["admin_id"])
+        s.add_all([pa, pb])
+        await s.commit()
+        pa_id, pb_id = pa.id, pb.id
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "send back",
+        "change_type": "tooling", "lead_id": seed["engineer_id"]},
+        headers=admin_auth)
+    cid = res.json()["id"]
+    await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                      json={"part_id": pa_id, "is_lead": True}, headers=admin_auth)
+    await advance_to_assessment(client, admin_auth, session_factory, cid)
+    did = dep["Tool Engineer"]
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid,
+            ChangeAssessment.department_id == did))).scalar_one()
+        assert row.wf_instance_task_id is not None
+        rid, tid = row.id, row.wf_instance_task_id
+    keys = [i["key"] for i in checklist.items_for("Tool Engineer")]
+    body = {"department_id": did, "verdict": "feasible",
+            "details": {"impacts": answered("Tool Engineer", yes=keys[:1])}}
+    res = await client.post(f"/api/v1/changes/{cid}/assessments", json=body,
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(WfInstanceTask, tid)).status == "approved"
+    res = await client.post(f"/api/v1/changes/{cid}/impacted-items", json={
+        "part_id": pb_id, "reason": "Customer added the mirror part B"},
+        headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        task = await s.get(WfInstanceTask, tid)
+        a = await s.get(ChangeAssessment, rid)
+        assert task.status == "active" and task.completed_at is None
+        assert a.submitted_at is None and a.verdict == "pending"
+        assert a.effective_status == "active"
+    res = await client.post(f"/api/v1/changes/{cid}/assessments", json=body,
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(WfInstanceTask, tid)).status == "approved"

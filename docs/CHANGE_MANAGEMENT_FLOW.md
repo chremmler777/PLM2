@@ -873,15 +873,21 @@ begin_impact_edit` / `_reopen_after_locked_edit`), in `in_assessment`,
   <reason>. If it changes your figures, correct your costing; if it changes
   your technical answer, tell Nathan (a submitted assessment is not
   reopened); your costing is open again."* In `in_assessment` a submitted
-  department reads *"If it changes your answer, record it as a risk on your
-  assessment (Nathan sees it)"*; one that has not submitted yet reads
-  *"Check your answer before you submit"*; logged `impact_edited_after_lock`.
+  department whose answer said **impact yes** is **sent back** (A3-06,
+  spec "technical impact yes reopens assessment"): its assessment row and
+  engine task are active again (due by the task rule), its answer kept for
+  the edit, logged `assessment_sent_back` with the reason; it reads *"Your
+  assessment is open again: assess the changed set and submit again"*. A
+  submitted impact-no department reads *"If it changes your answer, record
+  it as a risk on your assessment (Nathan sees it)"*; one that has not
+  submitted yet reads *"Check your answer before you submit"*; logged
+  `impact_edited_after_lock`.
 Who may edit is unchanged (lead, PM members, admin; P1-5). Intake attach and
-supersede (§1) pass their own reason. **Not built:** sending a submitted
-assessment back on its own (spec "technical impact yes reopens
-assessment"; open question for Christoph). Until then every text names an
-exit that exists (review L5 loop 2): the risk on the own assessment, the
-reopened costing, the lead by name. Reopening a closed check item after
+supersede (§1) pass their own reason. **Not built:** the send-back in
+`costing` and `quoting` (the routing engine has moved past the assessment
+stage there: it needs a step back to assessment; open question for
+Christoph). There every text names an exit that exists (review L5 loop
+2): the reopened costing, the lead by name. Reopening a closed check item after
 its department submitted is refused the same way: in assessment *"ask the
 department to record it as a risk on its assessment"*; after assessment
 *"tell <lead>, who changes the impacted set (that reopens the costing) or

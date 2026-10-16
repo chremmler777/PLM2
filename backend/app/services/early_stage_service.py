@@ -423,6 +423,57 @@ class EarlyStageService:
             notes=reason.strip())
 
     @staticmethod
+    def _impact_yes(a: ChangeAssessment) -> bool:
+        """The submitted answer said impact yes: a checklist row impacted."""
+        d = a.details_dict
+        if d.get("impacted") is False:
+            return False
+        impacts = d.get("impacts")
+        return isinstance(impacts, list) and any(
+            isinstance(i, dict) and i.get("impacted") for i in impacts)
+
+    @staticmethod
+    async def _send_back_assessments(session: AsyncSession, change: ChangeRequest,
+                                     department_ids: list[int], user_id: int,
+                                     reason: str) -> list[int]:
+        """A3-06 (ASSESSMENT_V2, in assessment only: the engine has not moved
+        past the assessment stage): each department here with a submitted
+        impact-yes answer gets its assessment row and its engine task back
+        (active, due by the task rule), its answer kept for the edit, with the
+        reason on the record. Returns the departments sent back."""
+        from app.services import cm_switches, due_rules
+        from app.models.workflow import WfInstanceTask
+        if not cm_switches.on("ASSESSMENT_V2") or change.status != "in_assessment":
+            return []
+        out: list[int] = []
+        now = datetime.utcnow()
+        for a in change.assessments:
+            if (a.department_id not in department_ids or a.submitted_at is None
+                    or a.verdict == "pending" or not EarlyStageService._impact_yes(a)):
+                continue
+            a.submitted_at = None
+            a.submitted_by = None
+            a.verdict = "pending"
+            a.status = "active"
+            if a.wf_instance_task_id is not None:
+                task = await session.get(WfInstanceTask, a.wf_instance_task_id)
+                if task is not None and task.status != "active":
+                    task.status = "active"
+                    task.completed_by = None
+                    task.completed_at = None
+                    task.decision = None
+                    task.due_date = due_rules.task_due(now, change, "assessment")
+            if a.department_id not in out:
+                out.append(a.department_id)
+        if out:
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "assessment_sent_back",
+                f"Assessment sent back: {reason}", user_id,
+                new_value={"department_ids": out}, notes=reason)
+        return out
+
+    @staticmethod
     async def _reopen_after_locked_edit(session: AsyncSession, change: ChangeRequest,
                                         user_id: int, reason: str,
                                         affected: list[int], part_ids: list[int]) -> None:
@@ -451,11 +502,18 @@ class EarlyStageService:
                     session, change, did, user_id,
                     f"Impacted items changed ({what}): {reason}"):
                 reopened.append(did)
+        # A3-06 (spec §4 minimal C16 "technical impact yes reopens
+        # assessment"): in assessment, a department whose objects moved and
+        # whose submitted answer said impact yes gets its assessment back
+        sent_back = (await EarlyStageService._send_back_assessments(
+            session, change, affected, user_id, f"Impacted items changed ({what}): {reason}")
+            if change.status == "in_assessment" else [])
         entry = await ChangeService.append_changelog(
             session, change, "impact_edited_after_lock",
             f"Impacted items changed after the lock ({what}): {reason}", user_id,
             new_value={"part_ids": sorted(part_ids), "department_ids": affected,
-                       "costing_reopened": reopened}, notes=reason)
+                       "costing_reopened": reopened,
+                       "assessment_sent_back": sent_back}, notes=reason)
         names = dict((await session.execute(
             select(Department.id, Department.name).where(
                 Department.id.in_(affected)))).all()) if affected else {}
@@ -473,7 +531,10 @@ class EarlyStageService:
             submitted = any(a.department_id == did and a.submitted_at is not None
                             for a in change.assessments)
             lead = change.lead_name or "the change lead"
-            if not submitted:
+            if did in sent_back:
+                step = ("Your assessment is open again: assess the changed set "
+                        "and submit again")
+            elif not submitted:
                 step = "Check your answer before you submit"
             elif change.status == "in_assessment":
                 step = ("If it changes your answer, record it as a risk on your "
