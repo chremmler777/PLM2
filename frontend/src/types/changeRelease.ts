@@ -31,6 +31,10 @@ export interface ReleaseCheck {
   can_answer?: boolean | null
   /** C7: 'done' needs a reference (the customer's approval). */
   needs_ref?: boolean
+  /** C7: on a customer change 'not applicable' names the customer's waiver. */
+  na_needs_ref?: boolean
+  /** C7: the owner department has no member here: PM or the lead answer. */
+  run_team_answers?: boolean
 }
 
 export type LessonCategory =

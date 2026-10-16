@@ -3619,7 +3619,18 @@ class ChangeService:
                         [i for i in mp_ids if i in approved_ids])))).all():
                 informed_depts.setdefault(cid, set()).add(did)
         release_rows: dict = {}
-        validation_ids = _ids("in_validation") if dep_ids else []
+        # C7 (RELEASE_V2): a release row whose department has no real member
+        # here (change_people.staffed_department_ids) is the lead's or PM's
+        # to answer, so it is their task (one batched lookup for the list)
+        from app.services.change_people import change_org_ids, staffed_pairs
+        release_run_ids = ([c.id for c in open_changes if c.status == "in_validation"
+                            and (is_pm_member or holds_lead(c, user))]
+                           if cm_switches.on("RELEASE_V2") else [])
+        release_orgs = await change_org_ids(db, release_run_ids)
+        release_staffed = await staffed_pairs(db, set(dept_by_name.get(
+            release_checklist.owner_for(k)) for k in release_checklist.CHECK_KEYS)
+        ) if release_run_ids else set()
+        validation_ids = _ids("in_validation") if (dep_ids or release_run_ids) else []
         if validation_ids:
             for r in (await db.execute(select(ChangeReleaseCheck).where(
                     ChangeReleaseCheck.change_id.in_(validation_ids)))).scalars().all():
@@ -3931,10 +3942,13 @@ class ChangeService:
                     })
 
             # Stage 10: open release-checklist items, per owner department.
-            if c.status == "in_validation" and dep_ids:
+            runs_release = c.id in release_orgs
+            if c.status == "in_validation" and (dep_ids or runs_release):
                 rows = release_rows.get(c.id, {})
                 by_name = dept_by_name
                 open_by_dept: dict = {}
+                fallback: set = set()
+                org = release_orgs.get(c.id)
                 for key in release_checklist.CHECK_KEYS:
                     r = rows.get(key)
                     if r is not None and r.status in ("done", "na"):
@@ -3943,12 +3957,24 @@ class ChangeService:
                            else by_name.get(release_checklist.owner_for(key)))
                     if did in dep_ids:
                         open_by_dept.setdefault(did, []).append(key)
+                    elif runs_release and did is not None and not any(
+                            d == did and (org is None or o == org)
+                            for d, o in release_staffed):
+                        open_by_dept.setdefault(did, []).append(key)
+                        fallback.add(did)
                 for did, keys in sorted(open_by_dept.items()):
-                    tasks.append({
+                    row = {
                         **await _base(c), "kind": "release_check",
                         "department_id": did, "check_keys": keys,
                         "open_count": len(keys), "target_tab": "release",
-                    })
+                    }
+                    if did in fallback:
+                        # the owner has nobody here: the run team answers
+                        name = next((n for n, i in by_name.items() if i == did), "")
+                        row["hint"] = (f"{name} has no member here: you answer "
+                                       "its release items")
+                        row["role_department_id"] = by_name.get("Project Manager")
+                    tasks.append(row)
 
             # Costing is a queue too: a department that called the change feasible
             # owes a number until it finalizes it. Per department (2026-10-14):
@@ -5206,18 +5232,28 @@ class ChangeService:
                 select(Department.id, Department.name))).all()}
             by_name = {n: i for i, n in names.items()}
             open_by_dept: dict[int, int] = defaultdict(int)
+            # C7: a department with no real member here is answered by the
+            # lead or PM, so it is their action (not an admin's to-do)
+            unstaffed: set = set()
+            if (user.effective_role != "admin"
+                    and await ReleaseService.is_pm_or_lead(session, change, user)):
+                unstaffed = await ReleaseService.unstaffed_department_ids(
+                    session, change, await ReleaseService.view_rows(session, change))
             for key in release_checklist.CHECK_KEYS:
                 row = answered.get(key)
                 if row is not None and row.status in ("done", "na"):
                     continue
                 did = (row.department_id if row is not None
                        else by_name.get(release_checklist.owner_for(key)))
-                if did is not None and did in dept_ids:
+                if did is not None and (did in dept_ids or did in unstaffed):
                     open_by_dept[did] += 1
             for did, n in sorted(open_by_dept.items()):
+                fallback = did in unstaffed and did not in dept_ids
                 out.append({"kind": "release_check",
-                            "label": f"Answer {n} release check(s) for "
-                                     f"{names.get(did, did)}",
+                            "label": (f"Answer {n} release check(s) for "
+                                      f"{names.get(did, did)}"
+                                      + (" (no member here: you answer)"
+                                         if fallback else "")),
                             "target_tab": "release", "department_id": did,
                             "count": n})
             if (change.lessons_done_at is None

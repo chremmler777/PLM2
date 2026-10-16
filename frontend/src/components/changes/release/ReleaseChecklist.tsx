@@ -2,8 +2,9 @@
  * The release checklist: what has to be true before a change is live, each
  * point owned by a department. Members of the owner department tick it done
  * or not applicable (C7, RELEASE_V2: PM, the lead or an admin only for a
- * department nobody here belongs to; the backend's can_answer decides);
- * n.a. needs a note, the customer's approval a reference.
+ * department with no member here, shown on its group; the backend's
+ * can_answer decides); n.a. needs a note, the customer's approval a
+ * reference (on a customer change its n.a. too: the customer's waiver).
  * The cycle time (Tool Engineer) is answered changed (with the new seconds)
  * or unchanged; the process-stable row (APQP) takes an optional Cm above
  * 1.67. Numbers are typed en-US ("." decimals); an unreadable number is
@@ -20,6 +21,7 @@ import { Check } from 'lucide-react'
 import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, readNumberInput } from '../../../lib/format'
+import { t } from '../../../i18n/cmLabels'
 
 const CHIP: Record<ReleaseCheckStatus, { label: string; on: string }> = {
   open: { label: 'Open', on: 'bg-slate-700 text-slate-100' },
@@ -88,9 +90,11 @@ function CheckRow({ changeId, check, canEdit }: {
   const cmLow = kind === 'cm' && read.value !== null && extra === null
   // C7: the customer's approval is a document: 'done' names it
   const refNeeded = editing === 'done' && !!check.needs_ref
+  // ... and on a customer change 'not applicable' is the customer's waiver
+  const waiverNeeded = editing === 'na' && !!check.na_needs_ref
   const refOk = note.trim().length >= 5 && !['ok', 'okay', 'done', 'checked', 'tbd', 'n/a', 'na', 'yes']
     .includes(note.trim().toLowerCase())
-  const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim()
+  const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim() && (!waiverNeeded || refOk)
     : extra !== null && (!refNeeded || refOk))
   const confirmLabel = editing === 'na' ? 'Mark not applicable'
     : kind === 'cycle_time' ? (outcome === 'changed' ? 'Save new cycle time' : 'Confirm unchanged')
@@ -173,7 +177,8 @@ function CheckRow({ changeId, check, canEdit }: {
           {cmLow && <span className="text-[11px] text-amber-300">Cm must be above {CM_MIN}</span>}
           <input autoFocus={!kind} data-testid={`release-check-${check.key}-note`} value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder={editing === 'na' ? 'Why does this not apply? (required)'
+            placeholder={waiverNeeded ? t('release.waiverRef')
+              : editing === 'na' ? 'Why does this not apply? (required)'
               : refNeeded ? 'PSW / ISIR reference or the file name of the approval (required)' : 'Note (optional)'}
             className={`${inputCls} min-w-0 flex-1`} />
           <button type="button" data-testid={`release-check-${check.key}-confirm`}
@@ -215,10 +220,16 @@ export default function ReleaseChecklist({
       {[...groups.entries()].map(([dept, rows]) => {
         const open = rows.filter((r) => r.status === 'open' && !r.retired).length
         const onlyRetired = rows.every((r) => r.retired)
+        const runTeam = rows.some((r) => r.run_team_answers)
         return (
           <div key={dept}>
             <div className="mb-1.5 flex items-center gap-2">
               <span className={sectionLabel}>{dept}</span>
+              {runTeam && (
+                <span data-testid={`release-run-team-${dept}`} className="text-[11px] text-slate-400">
+                  {t('release.runTeamAnswers')}
+                </span>
+              )}
               {onlyRetired ? (
                 <span className="text-[11px] text-slate-400">earlier answers, no longer asked</span>
               ) : (

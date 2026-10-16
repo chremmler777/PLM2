@@ -57,9 +57,11 @@ class ReleaseService:
     async def may_answer(session, change, row: ChangeReleaseCheck, user) -> bool:
         """A member of the item's owner department. With RELEASE_V2 (C7,
         spec §10 "rows answered by their department") only them: PM, the
-        lead or an admin answer a row only when its department has no
-        active member in the change's organization (no dead end). Off the
-        switch: PM, the lead and admin answer any row, as before."""
+        lead or an admin answer a row only when its department has no real
+        member in the change's organization (inactive, or only admin
+        accounts: change_people.staffed_department_ids), so no row is a
+        dead end. Off the switch: PM, the lead and admin answer any row, as
+        before."""
         from app.services import cm_switches
         from app.services.workflow_service import WorkflowService
         if row.department_id is not None and await WorkflowService.actor_in_department(
@@ -69,9 +71,29 @@ class ReleaseService:
             return False
         if not cm_switches.on("RELEASE_V2") or row.department_id is None:
             return True
-        from app.services.change_people import department_members_of_change_org
-        return not await department_members_of_change_org(
+        from app.services.change_people import staffed_department_ids
+        return row.department_id not in await staffed_department_ids(
             session, change, [row.department_id])
+
+    @staticmethod
+    def na_needs_ref(change, key: str) -> bool:
+        """C7 (RELEASE_V2): on a customer change the customer's approval is
+        not waved through as 'not applicable' with any word: the waiver is
+        the customer's, so its mail or document is named."""
+        from app.services import cm_switches
+        return (key in catalog.EVIDENCE_KEYS and bool(change.customer_relevant)
+                and cm_switches.on("RELEASE_V2"))
+
+    @staticmethod
+    async def unstaffed_department_ids(session, change, rows) -> set:
+        """Owner departments of these rows that PM or the lead answer for
+        (RELEASE_V2): no real member in the change's organization."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2"):
+            return set()
+        from app.services.change_people import staffed_department_ids
+        owners = {r.department_id for r in rows if r.department_id is not None}
+        return owners - await staffed_department_ids(session, change, owners)
 
     @staticmethod
     async def _answer_rights(session, change, rows, user) -> dict:
@@ -79,20 +101,12 @@ class ReleaseService:
         if user is None:
             return {}
         from app.services import cm_switches
-        from app.services.change_people import department_members_of_change_org
         from app.services.workflow_service import WorkflowService
         mine = set(await WorkflowService.effective_department_ids(session, user))
         runs = await ReleaseService.is_pm_or_lead(session, change, user)
         strict = cm_switches.on("RELEASE_V2")
-        staffed: set = set()
-        if runs and strict:
-            from app.models.workflow import UserDepartment
-            members = set(await department_members_of_change_org(
-                session, change, {r.department_id for r in rows if r.department_id}))
-            if members:
-                staffed = set((await session.execute(
-                    select(UserDepartment.department_id).where(
-                        UserDepartment.user_id.in_(members)))).scalars().all())
+        unstaffed = (await ReleaseService.unstaffed_department_ids(session, change, rows)
+                     if runs and strict else set())
         out = {}
         for r in rows:
             if r.department_id is not None and r.department_id in mine:
@@ -101,7 +115,7 @@ class ReleaseService:
                 out[r.check_key] = False
             else:
                 out[r.check_key] = (not strict or r.department_id is None
-                                    or r.department_id not in staffed)
+                                    or r.department_id in unstaffed)
         return out
 
     # ------------------------------------------------------------------
@@ -206,6 +220,15 @@ class ReleaseService:
                           "file name of the approval)", "PSW 886.197-D 2026-10-12")
                 if why:
                     raise ChangeError(why)
+        if status == "na" and ReleaseService.na_needs_ref(change, key):
+            # C7: on a customer change 'not applicable' is the customer's
+            # waiver of the approval, which is a document too
+            from app.services.cm_rules import reference_refusal
+            why = reference_refusal(
+                note, "Why the customer waived the approval (the customer's mail "
+                      "or document reference)", "customer mail 2026-10-12 PPAP waived")
+            if why:
+                raise ChangeError(why)
         if status == "done":
             try:
                 note = catalog.answer_note(key, outcome, value, note)
@@ -225,7 +248,12 @@ class ReleaseService:
         if key not in view:
             raise PlanConflict(f"Unknown release check '{key}'", not_found=True)
         if not await ReleaseService.may_answer(session, change, view[key], user):
+            from app.services import cm_switches
+            owner = catalog.owner_for(key) or "the owner department"
             raise PlanForbidden(
+                f"{owner} answers this item: Project Management, the change "
+                f"lead or an admin answer it only while {owner} has no member "
+                "here" if cm_switches.on("RELEASE_V2") else
                 "Only the owner department, Project Management, the change "
                 "lead or an admin may answer this item")
         row = await ReleaseService._row_for_write(session, change, key)
@@ -423,6 +451,7 @@ class ReleaseService:
                              + hints[catalog.CYCLE_TIME_KEY].split(": ", 1)[-1])
         blockers = await ReleaseService.blockers(session, change)
         answer = await ReleaseService._answer_rights(session, change, rows, user)
+        unstaffed = await ReleaseService.unstaffed_department_ids(session, change, rows)
         return {
             "checks": [{
                 "key": r.check_key,
@@ -439,6 +468,12 @@ class ReleaseService:
                 "can_answer": answer.get(r.check_key),
                 # C7: 'done' needs a reference (the customer's approval)
                 "needs_ref": r.check_key in catalog.EVIDENCE_KEYS,
+                # ... and on a customer change 'not applicable' names the
+                # customer's waiver
+                "na_needs_ref": ReleaseService.na_needs_ref(change, r.check_key),
+                # C7: the owner department has no member here; PM or the
+                # lead answer it (shown on the row, no silent dead end)
+                "run_team_answers": r.department_id in unstaffed,
             } for r in rows],
             "open_count": sum(1 for r in rows if r.status not in ANSWERED
                               and r.check_key not in retired),
