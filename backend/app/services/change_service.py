@@ -1559,11 +1559,17 @@ class ChangeService:
             blocking = await ChangeRoutingService.blocking_rows(session, change)
             open_rows = [a for a in blocking
                          if a.effective_status not in ("submitted", "waived")]
-            if not blocking or open_rows:
+            # A3-02: open check items of a department that owes no submit
+            # (consulted) go on the same line; in costing the C5 line names them
+            from app.services.meeting_service import MeetingService
+            checks = (await MeetingService.open_check_text(
+                session, change, frozenset(a.department_id for a in open_rows))
+                if to == "costing" and change.status == "in_assessment" else None)
+            if not blocking or open_rows or checks:
                 names = await ChangeRoutingService._department_names(
                     session, [a.department_id for a in open_rows])
                 add("assessments", "soft", n=len(open_rows), rule="assessments_open",
-                    who=", ".join(names) or None)
+                    who=" · ".join(x for x in (", ".join(names), checks) if x) or None)
             if any(a.verdict == "not_feasible" for a in change.assessments):
                 add("not_feasible", "soft", rule="not_feasible")
             if (change.routing is not None
@@ -1841,13 +1847,27 @@ class ChangeService:
         if to_status in ("costing", "quoting"):
             from app.services.change_routing_service import ChangeRoutingService
             waiting = await ChangeRoutingService.blocking_waiting(session, change)
+            # A3-02: a consulted department's open check items hold the move
+            # to costing on the same rule (in costing the C5 line names them)
+            checks = None
+            if to_status == "costing" and change.status == "in_assessment":
+                from app.services.meeting_service import MeetingService
+                open_ids = frozenset(
+                    a.department_id
+                    for a in await ChangeRoutingService.blocking_rows(session, change)
+                    if a.effective_status not in ("submitted", "waived"))
+                checks = await MeetingService.open_check_text(session, change, open_ids)
             if waiting is None:
                 out.append(R("assessments_open",
-                             "Not all responsible/accountable assessments are submitted"))
+                             "Not all responsible/accountable assessments are submitted"
+                             + (f" · {checks}" if checks else "")))
             elif waiting:
                 out.append(R("assessments_open",
                              "Not all responsible/accountable assessments are "
-                             f"submitted: waiting on {', '.join(waiting)}"))
+                             f"submitted: waiting on {', '.join(waiting)}"
+                             + (f" · {checks}" if checks else "")))
+            elif checks:
+                out.append(R("assessments_open", checks))
             submitted = [a for a in change.assessments if a.verdict != "pending"]
             if any(a.verdict == "not_feasible" for a in submitted):
                 out.append(R("not_feasible",
@@ -2035,6 +2055,13 @@ class ChangeService:
         if flip_open(change):
             index_lines.append("Customer notification or offer? "
                                f"({change.sales_owner_name or 'Sales'})")
+        # A3-02 (spec §5 "check items"): a check item still open after the
+        # assessment, its owning department closes it in its bucket
+        if change.status == "costing":
+            from app.services.meeting_service import MeetingService
+            checks = await MeetingService.open_check_text(session, change)
+            if checks:
+                index_lines.append(checks)
         if not pending:
             return " · ".join(index_lines) if index_lines else None
         from app.services.change_plan_service import ChangePlanService

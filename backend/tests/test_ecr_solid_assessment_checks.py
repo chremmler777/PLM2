@@ -549,3 +549,53 @@ async def test_assumed_check_item_is_confirmed_where_its_task_leads(
                             json={"ref": "MAIL-2026-1015"}, headers=a["sa"])
     assert res.status_code == 200, res.text
     assert res.json()["answer_kind"] == "confirmed"
+
+
+async def test_a_consulted_departments_open_check_item_holds_costing_and_closes_there(
+        client, assess, seed, session_factory):
+    """A3-02: a C department owes no submit, so its open check item is named
+    on the SOFT assessments_open line (in_assessment -> costing) and on the
+    C5 line in costing, where the department still closes it with evidence;
+    a free note closes it in no status (R4)."""
+    a = assess
+    shop_id, shop, shop_auth = await _user(client, session_factory, seed, "shop2", "Toolshop")
+    async with session_factory() as s:
+        s.add(ChangeAssessment(change_id=a["cid"], department_id=shop, stage_order=1,
+                               rasic_letter="C", status="active"))
+        chk = ChangeConcern(change_id=a["cid"], kind="needs_info",
+                            note="Check gate wear on tool", raised_by=a["raiser_id"],
+                            department_id=shop, flag_type="check", check_what="other")
+        s.add(chk)
+        await s.commit()
+        cid = chk.id
+    await _close(client, a["pe"], a, outcome="answered", ref="DRW-4471 rev C")
+    await _submit(client, a["pe"], a, a["proc"], ok=True)
+    await _submit(client, a["te"], a, a["tool"], ok=True)
+    ch = (await client.get(_url(a), headers=a["lead"])).json()
+    item = next(i for i in ch["next_step"]["items"] if i["key"] == "assessments")
+    assert item["rule"] == "assessments_open"
+    assert f"Check items open: Toolshop #{cid}" in item["who"]
+    res = await client.post(_url(a, "/transition"), json={"to_status": "costing"},
+                            headers=a["lead"])
+    assert res.status_code == 400 and f"Toolshop #{cid}" in res.json()["detail"], res.text
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, a["cid"])
+        change.status = "costing"
+        await s.commit()
+    ch = (await client.get(_url(a), headers=a["lead"])).json()
+    assert any(f"Check items open: Toolshop #{cid}" in (i.get("who") or "")
+               for i in ch["next_step"]["items"]), ch["next_step"]
+    # negative (R4): Project Management's free note is no close in costing
+    res = await client.post(_url(a, f"/concerns/{cid}/withdraw"),
+                            json={"resolution_note": "checked, fine"}, headers=a["lead"])
+    assert res.status_code == 400 and "what you found" in res.json()["detail"], res.text
+    served = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=shop_auth)).json()}
+    assert served[cid]["can_check"] is True
+    res = await client.post(_url(a, f"/concerns/{cid}/check"),
+                            json={"outcome": "answered", "value": "0.5", "unit": "mm"},
+                            headers=shop_auth)
+    assert res.status_code == 200, res.text
+    ch = (await client.get(_url(a), headers=a["lead"])).json()
+    assert not any("Check items open" in (i.get("who") or "")
+                   for i in ch["next_step"]["items"])

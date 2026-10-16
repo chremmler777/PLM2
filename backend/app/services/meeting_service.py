@@ -1170,7 +1170,9 @@ class MeetingService:
                  for d in concern.owner_department_ids]):
             settled_as = "department"
         allowed = settled_as is not None
-        if (concern.is_check and change.status == "in_assessment"
+        # A3-02: from the assessment on (any later status), never only in it
+        if (concern.is_check
+                and change.status not in ("draft", "captured", "scoping")
                 and cm_switches.on("ASSESSMENT_V2")
                 and (settled_as in ("department", "pm")
                      or user.effective_role == "admin"
@@ -1286,8 +1288,10 @@ class MeetingService:
             raise ChangeError("Concern not found on this change")
         if not concern.is_check or not concern.is_open:
             raise ChangeError("Only an open check item is closed this way")
-        if change.status != "in_assessment":
-            raise ChangeError("Check items are closed in the assessment")
+        if change.status not in ("in_assessment", "costing"):
+            # A3-02: an item still open in costing (a consulted department
+            # owes no submit) is closed there too, with the same evidence
+            raise ChangeError("Check items are closed in the assessment or costing")
         dept_id = await MeetingService._owner_department_of(session, concern, user)
         settled_as = "department"
         if (dept_id is None and concern.owner_department_ids
@@ -1843,6 +1847,36 @@ class MeetingService:
         if not cm_switches.on("SCOPING_V2"):
             return []
         return [c for c in MeetingService.open_concerns(change) if c.is_check]
+
+    @staticmethod
+    async def open_check_text(session: AsyncSession, change: ChangeRequest,
+                              exclude_departments: frozenset = frozenset()
+                              ) -> Optional[str]:
+        """A3-02 (spec §5, ASSESSMENT_V2): the check items still open, by
+        owning department with its due: 'Check items open: Toolshop #12, #14
+        (due Thu 22 Oct)'. A consulted department owes no submit, so its
+        items would hold nothing otherwise. Departments in
+        exclude_departments are named elsewhere (their open submit)."""
+        if not cm_switches.on("ASSESSMENT_V2"):
+            return None
+        by_dept: dict[int, list[int]] = {}
+        for c in MeetingService.open_checks(change):
+            owners = c.owner_department_ids
+            if not owners or set(owners) & set(exclude_departments):
+                continue
+            by_dept.setdefault(owners[0], []).append(c.id)
+        if not by_dept:
+            return None
+        names = dict((await session.execute(
+            select(Department.id, Department.name).where(
+                Department.id.in_(by_dept)))).all())
+        parts = []
+        for d, ids in by_dept.items():
+            due = MeetingService.check_due(change, d)
+            parts.append(f"{names.get(d, f'dept {d}')} "
+                         + ", ".join(f"#{i}" for i in sorted(ids))
+                         + (f" ({due.strftime('due %a %d %b')})" if due else ""))
+        return "Check items open: " + ", ".join(parts)
 
     @staticmethod
     def open_concerns(change: ChangeRequest) -> list[ChangeConcern]:

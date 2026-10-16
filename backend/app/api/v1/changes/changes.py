@@ -3286,7 +3286,7 @@ async def list_concerns(
     # spec §4 check items in the assessment: who closes them (an owning
     # department's member, PM, admin), from one membership lookup (R34)
     from app.services import cm_switches
-    checks_v2 = (change.status == "in_assessment"
+    checks_v2 = (change.status in ("in_assessment", "costing")
                  and cm_switches.on("ASSESSMENT_V2"))
     # the caller's departments once for every row's checks (R34, A2-10)
     viewer = await MeetingService.viewer_departments(db, current_user)
