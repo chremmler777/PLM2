@@ -72,7 +72,7 @@ def _u(cb, tail):
 async def _pos(client, cb, **body):
     res = await client.post(_u(cb, "/costing/positions"), json={
         "department_id": cb["tool"], "label": "Insert re-cut", "kind": "external",
-        **body}, headers=cb["te"])
+        "quantity": 1, "quantity_unit": "pcs", **body}, headers=cb["te"])
     assert res.status_code == 201, res.text
     return res.json()
 
@@ -188,3 +188,28 @@ async def test_switch_off_finalizes_without_a_basis(client, cb, monkeypatch):
     monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     await _pos(client, cb, est_cost=900.0)
     assert (await _finalize(client, cb)).status_code == 200
+
+
+async def test_a_money_line_says_how_many_of_what(client, cb):
+    """A3-07 (spec §4 [R3] 'Each: quantity + unit + basis pick'): a new
+    money line names its quantity and unit; an edit cannot take them away;
+    hours lines carry theirs (hours x rate)."""
+    base = {"department_id": cb["tool"], "label": "Insert re-cut", "kind": "external",
+            "est_cost": 4100.0, "basis_ref": "Tool 3343 recut 2025, FZ 4.1k"}
+    for extra in ({}, {"quantity": 2}, {"quantity_unit": "inserts"}):
+        res = await client.post(_u(cb, "/costing/positions"), json={**base, **extra},
+                                headers=cb["te"])
+        assert res.status_code == 400 and "how many of what" in res.json()["detail"], res.text
+    res = await client.post(_u(cb, "/costing/positions"),
+                            json={**base, "quantity": 2, "quantity_unit": "inserts"},
+                            headers=cb["te"])
+    assert res.status_code == 201, res.text
+    assert (res.json()["quantity"], res.json()["quantity_unit"]) == (2, "inserts")
+    pid = res.json()["id"]
+    res = await client.put(_u(cb, f"/costing/positions/{pid}"),
+                           json={"quantity_unit": " "}, headers=cb["te"])
+    assert res.status_code == 400, res.text
+    res = await client.post(_u(cb, "/costing/positions"), json={
+        "department_id": cb["tool"], "label": "Own time", "kind": "own_time",
+        "hours": 3}, headers=cb["te"])
+    assert res.status_code == 201, res.text

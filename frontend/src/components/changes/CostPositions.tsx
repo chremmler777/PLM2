@@ -718,6 +718,11 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           ) : (
             <>
               <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{p.label}</span>
+              {p.quantity != null && p.quantity_unit && (
+                <span data-testid={`costpos-qty-${p.id}`} className="ml-1.5 text-xs text-slate-400 tabular-nums">
+                  {p.quantity} {p.quantity_unit}
+                </span>
+              )}
               <RateNote p={p} />
               <CurrencyUnrecorded p={p} />
               {type === 'estimate' && p.vendor_name && (
@@ -1121,12 +1126,16 @@ const SAMPLING = '__sampling'
  * what the line is (own hours, or money as estimate or vendor quote), then the
  * description, then the amount. Enter saves and clears for the next line.
  */
-function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged, ctx }: {
+function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged, ctx, v2 = false }: {
   changeId: number; departmentId: number; categories: CostCategory[]
   onAdded: () => void; onCategoriesChanged: () => void; ctx?: CostingContext
+  /** ASSESSMENT_V2: a money line says how many of what (A3-07). */
+  v2?: boolean
 }) {
   const [tag, setTag] = useState('')
   const [label, setLabel] = useState('')
+  const [qty, setQty] = useState('')
+  const [qtyUnit, setQtyUnit] = useState('')
   const [pricing, setPricing] = useState<CostPositionPricing>('estimate')
   const [hours, setHours] = useState('')
   const [est, setEst] = useState('')
@@ -1151,8 +1160,11 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   // A machine line defaults to the change's class (own or from the tool's tonnage).
   const effectiveClass = classId ?? ctx?.effective_machine_class_id ?? null
 
+  // A3-07 (spec §4 [R3]): a money line (estimate or quote) names its quantity
+  const needsQty = v2 && !isTime && !isSheetKind
   const reset = () => {
     setLabel(''); setHours(''); setEst(''); setVendor(''); setLead(''); setTrials('')
+    setQty(''); setQtyUnit('')
   }
   const add = useMutation({
     mutationFn: async () => {
@@ -1179,6 +1191,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
         est_cost: lineType === 'estimate' ? num(est) : null,
         vendor_name: lineType === 'estimate' ? (vendor.trim() || null) : null,
         lead_time_days: num(lead), lead_time_unit: unit,
+        ...(needsQty ? { quantity: num(qty), quantity_unit: qtyUnit.trim() } : {}),
       })
     },
     onSuccess: () => { reset(); onAdded() },
@@ -1197,6 +1210,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   const [confirmCategory, setConfirmCategory] = useState(false)
 
   const ready = label.trim() !== '' && !add.isPending
+    && (!needsQty || ((num(qty) ?? 0) > 0 && qtyUnit.trim() !== ''))
   const submitOnEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && ready) add.mutate() }
   // Sampling is priced from the cost sheet (trials x the class's price), in
   // the group below. The old own-time "Sampling" category would sit next to
@@ -1264,6 +1278,19 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               className={`${fieldCls} w-full`} />
             {/* An estimated external line says who gave the number; a quoted
                 one names its vendors on the offers below it. */}
+            {needsQty && (
+              <span className="inline-flex items-center gap-1">
+                <input data-testid={`costpos-new-qty-${departmentId}`} type="number" min={0} step="1"
+                  value={qty} aria-label={t('costpos.quantity')} placeholder={t('costpos.quantity')}
+                  onChange={(e) => setQty(e.target.value)} onKeyDown={submitOnEnter}
+                  className={`${fieldCls} w-16 tabular-nums text-right`} />
+                <input data-testid={`costpos-new-qtyunit-${departmentId}`} value={qtyUnit}
+                  maxLength={20} aria-label={t('costpos.quantityUnit')}
+                  placeholder={t('costpos.quantityUnit')}
+                  onChange={(e) => setQtyUnit(e.target.value)} onKeyDown={submitOnEnter}
+                  className={`${fieldCls} w-24`} />
+              </span>
+            )}
             {lineType === 'estimate' && (
               <VendorField testId={`costpos-new-vendor-${departmentId}`} value={vendor}
                 onChange={setVendor} placeholder={t('costpos.vendorOptional')}
@@ -1506,7 +1533,7 @@ export default function CostPositions({
           <tfoot>
             {editable && (
               <AddLine changeId={changeId} departmentId={departmentId} categories={categories}
-                ctx={ctx} onAdded={invalidate}
+                ctx={ctx} onAdded={invalidate} v2={v2}
                 onCategoriesChanged={() => qc.invalidateQueries({ queryKey: ['costing-tags', departmentId] })} />
             )}
             <tr className="border-t border-slate-600">

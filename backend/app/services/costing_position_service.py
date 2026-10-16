@@ -38,7 +38,8 @@ class CostingPositionError(ValueError):
 _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
                     "hours", "lead_time_days", "lead_time_unit", "notes",
                     "labour_position", "machine_class_id", "trials", "machine_id",
-                    "basis", "basis_ref", "basis_part_id", "basis_differs")
+                    "basis", "basis_ref", "basis_part_id", "basis_differs",
+                    "quantity", "quantity_unit")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
                  "lead_time_days", "lead_time_unit", "favorite", "is_partial",
                  "quote_ref", "quoted_on", "valid_until")
@@ -258,6 +259,7 @@ class CostingPositionService:
                 "basis_part_id": p.basis_part_id,
                 "basis_part_number": part_numbers.get(p.basis_part_id),
                 "basis_differs": p.basis_differs, "estimated": p.estimated,
+                "quantity": p.quantity, "quantity_unit": p.quantity_unit,
                 "estimate_check": p.estimate_check, "estimate_over": p.estimate_over,
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,
@@ -500,7 +502,18 @@ class CostingPositionService:
             basis=spec.get("basis"), basis_ref=spec.get("basis_ref"),
             basis_part_id=spec.get("basis_part_id"),
             basis_differs=spec.get("basis_differs"),
+            quantity=spec.get("quantity"),
+            quantity_unit=((spec.get("quantity_unit") or "").strip() or None),
         )
+        from app.services import cm_switches
+        if (cm_switches.on("ASSESSMENT_V2") and position.kind == "external"
+                and not (position.quantity and position.quantity > 0
+                         and position.quantity_unit)):
+            # A3-07 (spec §4 [R3]): a money line says how many of what; hours
+            # lines carry theirs (hours x rate)
+            raise CostingPositionError(
+                "Say how many of what this line stands for: quantity and unit "
+                "(e.g. 2 inserts, 1 tool)")
         CostingPositionService._validate(position)
         await CostingPositionService._check_machine_class(session, change, position)
         # Priced now, from the cost sheet valid today: the snapshot stays on
@@ -555,6 +568,16 @@ class CostingPositionService:
                 setattr(position, field, spec[field])
         if position.label:
             position.label = position.label.strip()
+        if "quantity_unit" in spec:
+            position.quantity_unit = (position.quantity_unit or "").strip() or None
+        from app.services import cm_switches
+        if (("quantity" in spec or "quantity_unit" in spec)
+                and cm_switches.on("ASSESSMENT_V2") and position.kind == "external"
+                and not (position.quantity and position.quantity_unit)):
+            # A3-07: an edit does not take a line's quantity or unit away
+            raise CostingPositionError(
+                "Say how many of what this line stands for: quantity and unit "
+                "(e.g. 2 inserts, 1 tool)")
         CostingPositionService._validate(position)
         await CostingPositionService._check_machine_class(session, change, position)
         # Re-priced only when what the rate depends on moved, or the line has

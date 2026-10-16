@@ -76,7 +76,7 @@ def _positions_url(costing) -> str:
 
 async def _add_position(client, auth, costing, **body):
     payload = {"department_id": costing["tool"], "label": "Tool rework",
-               "kind": "external", **body}
+               "kind": "external", "quantity": 1, "quantity_unit": "pcs", **body}
     return await client.post(_positions_url(costing), json=payload, headers=auth)
 
 

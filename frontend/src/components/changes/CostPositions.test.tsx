@@ -245,6 +245,30 @@ describe('CostPositions', () => {
       })))
   })
 
+  it('a money line says how many of what under ASSESSMENT_V2 (A3-07)', async () => {
+    positions({ v2: true })
+    await screen.findByTestId('costpos-new-2')
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Insert re-cut' } })
+    fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '4100' } })
+    const add = screen.getByTestId('costpos-add-2') as HTMLButtonElement
+    expect(add.disabled).toBe(true)                      // no quantity, no unit
+    fireEvent.change(screen.getByTestId('costpos-new-qty-2'), { target: { value: '2' } })
+    expect(add.disabled).toBe(true)                      // no unit
+    fireEvent.change(screen.getByTestId('costpos-new-qtyunit-2'), { target: { value: 'inserts' } })
+    expect(add.disabled).toBe(false)
+    fireEvent.click(add)
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
+      expect.objectContaining({ kind: 'external', quantity: 2, quantity_unit: 'inserts' })))
+  })
+
+  it('shows the quantity on the line and asks none without the switch (A3-07)', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(
+      [effort, { ...external, quantity: 2, quantity_unit: 'inserts' }] as never)
+    positions()
+    expect((await screen.findByTestId(`costpos-qty-${external.id}`)).textContent).toBe('2 inserts')
+    expect(screen.queryByTestId('costpos-new-qty-2')).toBeNull()
+  })
+
   it('swaps the estimate for a vendor table when the price is quoted', async () => {
     positions()
     await screen.findByTestId('costpos-new-2')

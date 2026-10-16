@@ -74,7 +74,7 @@ async def _member(client, session_factory, seed, dept_id, email):
 
 async def _add_position(client, auth, early, dept, **body):
     # ECR-solid §4 (C25): an estimate names its basis to be finalized
-    payload = {"department_id": dept, "label": "Tool rework", "kind": "external",
+    payload = {"department_id": dept, "label": "Tool rework", "kind": "external", "quantity": 1, "quantity_unit": "pcs",
                "est_cost": 100.0, "basis_ref": "Hasco figure 12 Oct 2026", **body}
     return await client.post(
         f"/api/v1/changes/{early['change_id']}/costing/positions",

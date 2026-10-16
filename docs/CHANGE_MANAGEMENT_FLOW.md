@@ -774,6 +774,11 @@ Switch `ASSESSMENT_V2` (migration 127).
   `basis_ref`) or *same as* a part (`basis_part_id`) + what differs (size,
   cavities, material, slides; `basis_differs`). Positions of in-flight
   changes keep `basis` NULL and read it from kind and pricing.
+- **Quantity + unit** (A3-07, migration 140, `quantity`, `quantity_unit`):
+  a new external (money) line says how many of what (*"2 inserts"*), on the
+  add line and on the row; refused without it ("Say how many of what this
+  line stands for"), and an edit cannot take it away. Hours lines carry
+  theirs (hours × rate). Lines entered before migration 140 keep NULL.
 - **Finalize** refuses (one sentence per kind, naming the lines): a quoted
   line whose counted offer has no supplier quote number (`quote_ref`, 3+
   characters) or no quote file (`vendor_quote` attachment on the offer), or

@@ -1057,6 +1057,9 @@ export interface CostPosition {
   basis_part_id?: number | null;
   basis_part_number?: string | null;
   basis_differs?: string | null;
+  /** A3-07: how many of what ("2 inserts"); null on lines from before. */
+  quantity?: number | null;
+  quantity_unit?: string | null;
   estimated?: boolean;
   /** settled: the open price an 'above' caused was absorbed or accepted. */
   estimate_check?: 'pending' | 'within' | 'above' | 'settled' | null;
@@ -1207,6 +1210,9 @@ export interface CostPositionIn {
   basis_ref?: string | null;
   basis_part_id?: number | null;
   basis_differs?: string | null;
+  /** A3-07: how many of what a money line stands for (ASSESSMENT_V2). */
+  quantity?: number | null;
+  quantity_unit?: string | null;
 }
 
 export type CostBasis = 'rate' | 'quote' | 'same_as' | 'estimate'

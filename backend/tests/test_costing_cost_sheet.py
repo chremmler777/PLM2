@@ -638,7 +638,7 @@ async def test_old_line_without_currency_is_flagged(client, admin_auth, world, s
     await _version(session_factory, world["org_id"], rates=[
         dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
     line = await _add(client, admin_auth, world, kind="external", pricing="estimate",
-                      est_cost=100)
+                      est_cost=100, quantity=1, quantity_unit="tool")
     async with session_factory() as s:
         p = await s.get(CostingPosition, line["id"])
         p.currency = None

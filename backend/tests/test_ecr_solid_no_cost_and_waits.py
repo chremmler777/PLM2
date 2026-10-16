@@ -116,7 +116,7 @@ async def test_no_cost_refused_for_others_and_with_a_position(client, ec):
     assert res.status_code == 403
     # negative: a position of the department, named with its author
     pos = await client.post(_u(ec, "/costing/positions"), json={
-        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external", "quantity": 1, "quantity_unit": "pcs",
         "est_cost": 900.0}, headers=ec["dale"])
     assert pos.status_code == 201, pos.text
     res = await _no_cost(client, ec, ec["shop"], ec["dale"], reason="no_work")
@@ -133,7 +133,7 @@ async def test_wait_holds_finalize_and_no_cost_and_names_itself(client, ec):
     assert w["is_open"] and w["chip"] == "day 9 of 20"
     # negative: finalize and "no cost" wait for it
     await client.post(_u(ec, "/costing/positions"), json={
-        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external", "quantity": 1, "quantity_unit": "pcs",
         "est_cost": 900.0}, headers=ec["dale"])
     res = await client.post(_u(ec, f"/costing/departments/{ec['shop']}/finalize"),
                             headers=ec["dale"])

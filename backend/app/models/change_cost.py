@@ -210,6 +210,10 @@ class CostingPosition(Base):
     basis_part_id: Mapped[int | None] = mapped_column(
         ForeignKey("parts.id"), nullable=True)
     basis_differs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A3-07 (spec §4 [R3]): how many of what a money line stands for
+    # ("2 inserts"); NULL on lines entered before migration 140.
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quantity_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     estimate_check: Mapped[str | None] = mapped_column(String(10), nullable=True)
     estimate_over: Mapped[float | None] = mapped_column(
         Numeric(14, 2, asdecimal=False), nullable=True)

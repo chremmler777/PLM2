@@ -1068,6 +1068,9 @@ class CostingPositionCreate(BaseModel):
     basis_ref: Optional[str] = Field(default=None, max_length=255)
     basis_part_id: Optional[int] = None
     basis_differs: Optional[str] = Field(default=None, max_length=2000)
+    # A3-07: how many of what (a money line, ASSESSMENT_V2)
+    quantity: Optional[float] = Field(default=None, gt=0)
+    quantity_unit: Optional[str] = Field(default=None, max_length=20)
 
 
 class CostingPositionUpdate(BaseModel):
@@ -1095,6 +1098,9 @@ class CostingPositionUpdate(BaseModel):
     basis_ref: Optional[str] = Field(default=None, max_length=255)
     basis_part_id: Optional[int] = None
     basis_differs: Optional[str] = Field(default=None, max_length=2000)
+    # A3-07: how many of what (a money line, ASSESSMENT_V2)
+    quantity: Optional[float] = Field(default=None, gt=0)
+    quantity_unit: Optional[str] = Field(default=None, max_length=20)
 
 
 class CostingPositionResponse(BaseModel):
@@ -1135,6 +1141,8 @@ class CostingPositionResponse(BaseModel):
     basis_part_id: Optional[int] = None
     basis_part_number: Optional[str] = None
     basis_differs: Optional[str] = None
+    quantity: Optional[float] = None
+    quantity_unit: Optional[str] = None
     estimated: bool = False
     estimate_check: Optional[str] = None
     estimate_over: Optional[float] = None
