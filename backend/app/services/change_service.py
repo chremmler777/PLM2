@@ -1604,6 +1604,11 @@ class ChangeService:
             for side in ChangeService.resign_sides(change, sides, latest):
                 add(f"{side}_signoff", "todo", exits=["sign"], sides=[side],
                     detail=f"v{latest.version}" if latest is not None else None)
+        if to in ("in_implementation", "released"):
+            text = await ChangeService.index_pending_text(session, change)
+            if text:
+                add("index_pending", "soft", rule="index_pending",
+                    detail=text.removeprefix("Newer index pending: "))
         if to == "in_implementation":
             if change.bank_build_mode is None:
                 add("bank_build", "todo")
@@ -1865,6 +1870,13 @@ class ChangeService:
             text = await scope_change_service.guard_text(session, change, to_status)
             if text:
                 out.append(R("scope_change_uncovered", text))
+        # §8-9 (RELEASE_V2) SOFT index_pending: a newer customer index the
+        # change has not settled (an open recheck, the lead's question, an
+        # index of an impacted part waiting for triage)
+        if to_status in ("in_implementation", "released"):
+            text = await ChangeService.index_pending_text(session, change)
+            if text:
+                out.append(R("index_pending", text))
         # 'quoted' means the offer is out with the customer, so by then there
         # is a price. Writing it is the whole content of the 'quoting' stage.
         if to_status == "quoted":
@@ -1956,6 +1968,31 @@ class ChangeService:
                 out.append(R(f"gate:{gate.gate_key}",
                              ChangeService.gate_message(gate.gate_key, gate.decision)))
         return out
+
+    @staticmethod
+    async def index_pending_text(session: AsyncSession,
+                                 change: ChangeRequest) -> Optional[str]:
+        """§8-9 'newer index pending' (RELEASE_V2): the open rechecks and the
+        lead's new-index question (SCOPING_V2), and a newer index of an
+        impacted part still waiting for its triage."""
+        if not cm_switches.on("RELEASE_V2"):
+            return None
+        from app.services.index_followup_service import IndexFollowupService
+        lines = list(await IndexFollowupService.open_lines(session, change))
+        part_ids = [i.part_id for i in change.impacted_items if i.part_id]
+        if part_ids:
+            from app.models.part import Part, PartRevision
+            from app.models.revision_intake import RevisionIntake
+            rows = (await session.execute(
+                select(Part.part_number, PartRevision.revision_name)
+                .select_from(RevisionIntake)
+                .join(Part, Part.id == RevisionIntake.part_id)
+                .join(PartRevision, PartRevision.id == RevisionIntake.revision_id)
+                .where(RevisionIntake.part_id.in_(part_ids),
+                       RevisionIntake.status == "pending"))).all()
+            lines += [f"Index {rev} of {pn} waits for triage (Development)"
+                      for pn, rev in rows]
+        return ("Newer index pending: " + "; ".join(lines)) if lines else None
 
     @staticmethod
     async def costing_not_finalized_text(session: AsyncSession,
@@ -3862,7 +3899,13 @@ class ChangeService:
                     and c.timing_validated_at is None and c.id in planned):
                 required = {a.department_id for a in c.assessments
                             if a.rasic_letter in BLOCKING_LETTERS}
-                if mp.is_mother_plant(c):
+                if cm_switches.on("RELEASE_V2") and not mp.is_mother_plant(c):
+                    # §8-9: the departments with work to plan (one rule with
+                    # feedback_state; only approved changes with an
+                    # unvalidated plan reach here, a handful per list)
+                    from app.services.change_plan_service import ChangePlanService
+                    required = set(await ChangePlanService.required_department_ids(db, c))
+                elif mp.is_mother_plant(c):
                     # no assessments: the informed departments and Scheduling
                     required |= informed_depts.get(c.id, set())
                     required |= {dept_by_name[n] for n in ("Scheduling",)

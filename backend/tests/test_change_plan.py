@@ -376,6 +376,15 @@ async def test_rights_editors_and_department_progress(client, world, session_fac
 
 async def _approved_with_detailed(client, world, session_factory):
     cid = world["change_id"]
+    # ECR-solid §8-9 (RELEASE_V2): the departments with work on the change
+    # confirm the plan; the Tool Engineer said "impact yes" (that is work)
+    from sqlalchemy import update as _update
+    async with session_factory() as s:
+        await s.execute(_update(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid,
+            ChangeAssessment.department_id == world["depts"]["Tool Engineer"]).values(
+            details='{"impacts": [{"impacted": true, "what": "insert rework"}]}'))
+        await s.commit()
     sales = await _auth(client, "sales")
     await _seed(client, sales, cid)
     await _set(session_factory, cid, status="approved")
@@ -384,12 +393,19 @@ async def _approved_with_detailed(client, world, session_factory):
     return cid, sales
 
 
+_MEMBER = {"Tool Engineer": "tool", "Scheduling": "sched", "Sales": "sales",
+           "APQP": "apqp", "Packaging Engineer": "pack", "Project Manager": "pm"}
+
+
 async def _confirm_all(client, cid, world):
-    for key, dept in (("tool", "Tool Engineer"), ("sched", "Scheduling"),
-                      ("sales", "Sales")):
+    """Every department the plan waits on confirms (§8-9: the ones with
+    work on the change, Scheduling, Sales on a customer change)."""
+    fb = (await client.get(f"/api/v1/changes/{cid}/plan/feedback",
+                           headers=await _auth(client, "sales"))).json()
+    for row in fb["required"]:
         res = await client.post(f"/api/v1/changes/{cid}/plan/feedback", json={
-            "department_id": world["depts"][dept], "verdict": "confirmed"},
-            headers=await _auth(client, key))
+            "department_id": row["department_id"], "verdict": "confirmed"},
+            headers=await _auth(client, _MEMBER[row["department_name"]]))
         assert res.status_code == 200, res.text
     return res.json()
 

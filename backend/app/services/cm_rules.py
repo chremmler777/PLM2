@@ -104,6 +104,7 @@ RULE_LABELS = {
     "scope_change_uncovered": "Scope change not covered by an offer",
     "price_drop": "Accepted total below the last offer",
     "achieved_missing": "Achieved value not entered",
+    "index_pending": "Newer index pending",
     ABSORB_RULE: "Price open",
 }
 

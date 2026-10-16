@@ -2342,12 +2342,24 @@ class ChangePlanService:
                                        change: ChangeRequest) -> list[int]:
         """Every department with an R or A assessment on the change, plus
         Scheduling (it builds the bank) and Sales (it tells the customer).
+        RELEASE_V2 (§8-9): the departments with impact yes or work priced on
+        the change, Scheduling, and Sales on a customer change.
         A mother-plant change (spec §14) has no assessments and no customer
         here: the informed departments and Scheduling confirm."""
+        from app.services import cm_switches
         from app.services import mother_plants as mp
         ids = {a.department_id for a in change.assessments
                if a.rasic_letter in BLOCKING_LETTERS}
         names = ("Scheduling", "Sales")
+        if cm_switches.on("RELEASE_V2") and not mp.is_mother_plant(change):
+            # §8-9: the departments with work to plan (impact yes or hours /
+            # cost on the change) confirm their plan blocks; an R/A
+            # department with no impact and no cost is not waited on.
+            # Sales only where there is a customer to tell.
+            from app.services.implementation_service import ImplementationService
+            ids = set(await ImplementationService.implementing_department_ids(
+                session, change))
+            names = ("Scheduling", "Sales") if change.customer_relevant else ("Scheduling",)
         if mp.is_mother_plant(change):
             from app.services.mother_plant_service import MotherPlantService
             ids |= set(await MotherPlantService.informed_department_ids(
