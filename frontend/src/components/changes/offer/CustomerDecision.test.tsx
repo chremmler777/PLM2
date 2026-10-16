@@ -357,7 +357,7 @@ describe('InternalApproval', () => {
   it('names who may approve instead of the button for anybody else', () => {
     wrap(<InternalApproval change={change({ status: 'costing', customer_relevant: false })} canApprove={false} />)
     expect(screen.getByTestId('internal-approvers').textContent)
-      .toBe('Internal costs are approved by a Project Management member or an admin (never the raiser)')
+      .toBe('Internal costs are approved by a Project Management member (never the raiser)')
     cleanup()
     // HARD #8: the backend names the approvers (never the raiser)
     wrap(<InternalApproval change={change({ status: 'costing', customer_relevant: false })} canApprove={false}

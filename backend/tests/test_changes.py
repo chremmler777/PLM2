@@ -184,6 +184,9 @@ async def departments(session_factory, seed):
         # department-membership guard doesn't block the blocking (R/A) rows.
         for dept_id in ids.values():
             s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
+        # The second signature (Quality) is the admin's: a change sign-off
+        # needs real membership, no admin shortcut (close-out A1-07).
+        s.add(UserDepartment(user_id=seed["admin_id"], department_id=ids["Quality"]))
         await s.commit()
         return ids
 
@@ -700,7 +703,9 @@ async def _make_user(session_factory, org_id, email, password, username):
 async def test_sign_off_department_gating(
     client, eng_auth, admin_auth, seed, departments, session_factory,
 ):
-    """Task: Quality & PM sign-off are department-gated (admin bypasses)."""
+    """Task: Quality & PM sign-off are department-gated, no admin shortcut
+    (close-out A1-07): an admin signs as a member or acting as the
+    department."""
     change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
                                       session_factory)
     cid = change["id"]
@@ -720,9 +725,14 @@ async def test_sign_off_department_gating(
                             json={"role": "pm"}, headers=outsider_auth)
     assert res.status_code == 403, res.text
 
-    # admin bypasses department membership entirely
+    # the admin is no Project Manager member: refused ...
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",
                             json={"role": "pm"}, headers=admin_auth)
+    assert res.status_code == 403, res.text
+    # ... and signs acting as Project Manager
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"},
+                            headers={**admin_auth,
+                                     "X-Acts-As-Department": str(departments["Project Manager"])})
     assert res.status_code == 200, res.text
 
 

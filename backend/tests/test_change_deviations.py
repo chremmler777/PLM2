@@ -48,7 +48,7 @@ async def test_propose_and_admin_approves(client, eng_auth, admin_auth, seed):
     veto = await client.post(
         f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
         json={"decision": "approved"}, headers=eng_auth)
-    assert veto.status_code == 400
+    assert veto.status_code == 403
     assert "own" in veto.json()["detail"].lower()
 
     ok = await client.post(
@@ -100,7 +100,7 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
     denied = await client.post(
         f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
         json={"decision": "approved"}, headers=viewer_auth)
-    assert denied.status_code == 400
+    assert denied.status_code == 403
     assert "role" in denied.json()["detail"].lower()
 
 

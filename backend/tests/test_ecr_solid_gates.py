@@ -193,7 +193,7 @@ async def test_decider_is_never_a_plain_colleague_of_the_lead(
     assert "own" in (await _decide(client, lead, cid, dev["id"])).json()["detail"]
     for who in ("Development", "Sales", "Quality"):
         r = await _decide(client, people[who][1], cid, dev["id"])
-        assert r.status_code == 400, who
+        assert r.status_code == 403, who
         assert "Project Management member or an admin" in r.json()["detail"]
     rows = (await client.get(f"/api/v1/changes/{cid}/deviations",
                              headers=people["Sales"][1])).json()
@@ -222,7 +222,7 @@ async def test_quality_decides_overrides_into_implementation(
     # PM member and a plain admin are not Quality (NEGATIVE)
     for auth in (people["Project Manager"][1], admin):
         r = await _decide(client, auth, cid, dev["id"])
-        assert r.status_code == 400
+        assert r.status_code == 403
         assert "Quality member" in r.json()["detail"]
     acting_quality = {**admin, ACTS: str(depts["Quality"])}
     assert (await _decide(client, acting_quality, cid, dev["id"])).status_code == 200
@@ -545,7 +545,7 @@ async def test_price_open_blocks_close_and_absorb_clears_it(
     assert dev["guard_key"] == "price_open" and dev["deciders"]["group"] == "pm_mgmt"
     # neither the proposer, nor Quality, nor a plain admin give the OK
     for auth in (people["Sales"][1], people["Quality"][1], admin):
-        assert (await _decide(client, auth, cid, dev["id"])).status_code == 400
+        assert (await _decide(client, auth, cid, dev["id"])).status_code == 403
     r = await _decide(client, people["Management"][1], cid, dev["id"])
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "consumed"
@@ -569,7 +569,7 @@ async def test_internal_absorb_is_the_approvers_call(
         "reason_code": "our_error", "note": "estimate low by 2k"}, headers=lead)).json()
     assert dev["deciders"]["group"] == "approver"
     r = await _decide(client, people["Project Manager"][1], cid, dev["id"])
-    assert r.status_code == 400  # NEGATIVE: PM is not the approver here
+    assert r.status_code == 403  # NEGATIVE: PM is not the approver here
     assert (await _decide(client, people["Management"][1], cid, dev["id"])).status_code == 200
 
 
@@ -606,7 +606,7 @@ async def _told(session_factory, subject_key):
 async def test_approver_who_raised_the_change_falls_back_to_pm(
         client, admin, seed, depts, people, session_factory, monkeypatch):
     """HARD #8: the only configured approver raised the internal change. A
-    PM member (or an admin) approves instead, the row names who, and the
+    real PM member approves instead (no admin shortcut), the row names who, and the
     raiser still cannot (no dead end, R18)."""
     from app.core.config import get_settings
     monkeypatch.setattr(get_settings(), "internal_approvers", "u_management")
@@ -615,11 +615,11 @@ async def test_approver_who_raised_the_change_falls_back_to_pm(
                         customer=False, raised_by=mgmt_id)
     ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
     item = next(i for i in ch["next_step"]["items"] if i["key"] == "internal_approval")
-    assert item["who"] == "a Project Management member or an admin"
+    assert item["who"] == "a Project Management member"
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state",
                            headers=people["Project Manager"][1])).json()
     assert st["can_approve_internal"] is True
-    assert st["internal_approvers"] == "a Project Management member or an admin"
+    assert st["internal_approvers"] == "a Project Management member"
     assert st["internal_needs_money"] is False      # no cost: one click
     r = await client.post(f"/api/v1/changes/{cid}/internal-approval",
                           json={"release_due_date": _DUE, "rationale": "quality"}, headers=mgmt)
@@ -960,7 +960,7 @@ async def test_quality_decides_a_validation_override_into_release(
     dev = r.json()
     assert dev["deciders"]["group"] == "quality"
     r = await _decide(client, people["Project Manager"][1], cid, dev["id"])
-    assert r.status_code == 400  # NEGATIVE: PM is not Quality here
+    assert r.status_code == 403  # NEGATIVE: PM is not Quality here
     assert (await _decide(client, people["Quality"][1], cid, dev["id"])).status_code == 200
 
 

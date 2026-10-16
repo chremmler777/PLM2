@@ -363,7 +363,7 @@ async def test_a_lower_total_needs_a_reason_and_the_pm_ok(client, quoted, sessio
     # NEGATIVE: the asker never decides it
     r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
                           json={"decision": "approved"}, headers=sales)
-    assert r.status_code == 400 and "4-eyes" in r.json()["detail"]
+    assert r.status_code == 403 and "4-eyes" in r.json()["detail"]
     r = await client.post(f"/api/v1/changes/{cid}/deviations/{dev.id}/decide",
                           json={"decision": "approved"}, headers=pm)
     assert r.status_code == 200, r.text

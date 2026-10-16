@@ -1134,7 +1134,7 @@ describe('ChangeDetailPage internal-approval step gating (finding 3)', () => {
     wrap('/changes/1')
     // HARD #8: names who approves (no stage-state here: the fallback words)
     expect((await screen.findByTestId('needs-internal-approval')).textContent)
-      .toBe('Internal costs are approved by a Project Management member or an admin (never the raiser)')
+      .toBe('Internal costs are approved by a Project Management member (never the raiser)')
     cleanup()
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [5] } as never)
     wrap('/changes/1')

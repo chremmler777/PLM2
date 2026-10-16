@@ -61,9 +61,14 @@ async def auth(client):
 
 
 @pytest_asyncio.fixture
-async def lead_auth(client):
+async def lead_auth(client, session_factory, seed, depts):
     # The engineer is the change lead below (login mints an admin cookie; the
-    # lead rules are by user id).
+    # lead rules are by user id). A lead who can act has an active
+    # department (close-out A1-05): APQP, outside the routing.
+    from app.models.workflow import UserDepartment
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=depts["APQP"]))
+        await s.commit()
     return await login(client, "eng@test.io")
 
 

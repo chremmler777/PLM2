@@ -159,31 +159,59 @@ class EarlyStageService:
         a hidden button is a refused request and the other way round."""
         out = {}
         for to_status in sorted(ALLOWED_TRANSITIONS.get(change.status, set())):
-            ok = await EarlyStageService.transition_refusal(
-                session, change, user, to_status) is None
-            if ok and (change.status, to_status) in ChangeService.QUOTE_STAGE_TRANSITIONS:
-                ok = await ChangeService.user_can_run_quote_stage(
-                    session, user, change, to_status=to_status)
-            if ok and (change.status, to_status) == ChangeService.COSTING_REOPEN:
-                ok = await ChangeService.user_can_reopen_costing(session, user, change)
-            if ok and change.status == "scoping" and to_status == "approved":
-                # the mother plant's side track: the same right as the
-                # endpoint (PM, the change lead, admin)
-                from app.services.mother_plant_service import MotherPlantService
-                ok = await MotherPlantService.may_send(session, change, user)
-            if ok and change.status == "in_validation" and to_status == "in_implementation":
-                from app.services.validation_service import ValidationService
-                ok = await ValidationService.may_escalate(session, change, user)
-            if ok and to_status in ("released", "closed"):
-                from app.services.release_service import ReleaseService
-                ok = await ReleaseService.is_pm_or_lead(session, change, user)
-                if not ok and change.status == "rejected" and to_status == "closed":
-                    ok = await ChangeService._user_in_department(session, user, "Sales")
+            ok = await EarlyStageService.may_take_hop(session, change, user, to_status)
             if ok and await EarlyStageService.hard_refusal(
                     session, change, to_status) is not None:
                 ok = False
             out[to_status] = ok
         return out
+
+    @staticmethod
+    async def may_take_hop(session: AsyncSession, change: ChangeRequest,
+                           user: User, to_status: str) -> bool:
+        """The role side of a hop: the early-stage rights plus the
+        endpoint's own role gates, without the HARD rules (transition_rights
+        adds those)."""
+        ok = await EarlyStageService.transition_refusal(
+            session, change, user, to_status) is None
+        if ok and (change.status, to_status) in ChangeService.QUOTE_STAGE_TRANSITIONS:
+            ok = await ChangeService.user_can_run_quote_stage(
+                session, user, change, to_status=to_status)
+        if ok and (change.status, to_status) == ChangeService.COSTING_REOPEN:
+            ok = await ChangeService.user_can_reopen_costing(session, user, change)
+        if ok and change.status == "scoping" and to_status == "approved":
+            # the mother plant's side track: the same right as the
+            # endpoint (PM, the change lead, admin)
+            from app.services.mother_plant_service import MotherPlantService
+            ok = await MotherPlantService.may_send(session, change, user)
+        if ok and change.status == "in_validation" and to_status == "in_implementation":
+            from app.services.validation_service import ValidationService
+            ok = await ValidationService.may_escalate(session, change, user)
+        if ok and to_status in ("released", "closed"):
+            from app.services.release_service import ReleaseService
+            ok = await ReleaseService.is_pm_or_lead(session, change, user)
+            if not ok and change.status == "rejected" and to_status == "closed":
+                ok = await ChangeService._user_in_department(session, user, "Sales")
+        return ok
+
+    @staticmethod
+    async def override_ask_refusal(session: AsyncSession, change: ChangeRequest,
+                                   user: User, to_status: str) -> Optional[str]:
+        """None when the user may ask for an override of what holds this
+        hop: who may take the step, or the run team (lead, Project
+        Management, admin). Anyone else would only notify whole departments
+        (R33); the UI offers Override to the same people. 403 text."""
+        if user.effective_role == "viewer":
+            return "Read-only users cannot ask for an override"
+        if (await EarlyStageService._roles(session, change, user))["run_team"]:
+            return None
+        # a step that does not leave this status is nobody's to take
+        if (to_status in ALLOWED_TRANSITIONS.get(change.status, set())
+                and await EarlyStageService.may_take_hop(
+                    session, change, user, to_status)):
+            return None
+        return ("Only who may take this step, the change lead, Project "
+                "Management or an admin may ask for an override")
 
     @staticmethod
     async def transition_blocks(session: AsyncSession,

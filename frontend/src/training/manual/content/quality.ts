@@ -54,7 +54,7 @@ export const qualityChapter: ContentChapter = {
             ['"Start at risk: add the quality risks"', 'an urgent change starts before the PO. Write one line of what can go wrong for quality (e.g. "No PPAP before SOP; first lot 100 % checked"). Project Management approves after you. Your sign-off row follows at once.'],
             ['A new version:', 'your signature stays when only the price moved. When the plan, the parts or a part index changed, it is taken back and you are told to sign the new version.'],
             ['Four eyes:', '"PM and Quality sign-off must be different users". If you signed as PM, somebody else from Quality signs.'],
-            ['Only Quality members', '(or an admin) see the Quality sign-off button.'],
+            ['Only Quality members', 'see the Quality sign-off button (an admin acts as Quality to sign).'],
             ['A signature is for one offer version.', 'If Sales sends a newer version or a supplement whose quote plan or parts changed (a new part index counts), approval and release wait for you again. A price-only version keeps your signature. The button then reads "Sign again for v2"; the cockpit\'s "Missing before" list shows "Sign as Quality for v2" at any stage.'],
           ],
         },

@@ -259,11 +259,21 @@ async def test_deviation_bypasses_impact_confirmation_guard(
     dev = (await client.post(f"/api/v1/changes/{cid}/deviations", json={
         "to_status": "in_implementation", "reason": "kickoff before Development signs off", "reason_code": "in_parallel"},
         headers=eng_auth)).json()
-    # C6: an override into implementation is Quality's call, not a plain admin's
+    # C6: an override into implementation is Quality's call, not a PM's
+    from tests.conftest import make_department_member
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username="pmonly", email="pmonly@test.io",
+                 full_name="PM Only", hashed_password=get_password_hash("pmonly-secret-1"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u); await s.commit(); pm_only = u.id
+    await make_department_member(session_factory, pm_only, "Project Manager")
+    from tests.conftest import login
     no = await client.post(
         f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
-        json={"decision": "approved"}, headers=admin_auth)
-    assert no.status_code == 400 and "Quality" in no.json()["detail"]
+        json={"decision": "approved"}, headers=await login(client, "pmonly@test.io"))
+    assert no.status_code == 403 and "Quality" in no.json()["detail"]
     ok = await client.post(
         f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",
         json={"decision": "approved"},

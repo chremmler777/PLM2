@@ -198,3 +198,120 @@ async def test_a1_03_viewer_lead_may_not_inform_the_team(session_factory):
     change = SimpleNamespace(lead_id=7)
     async with session_factory() as s:
         assert await MotherPlantService.may_send(s, change, viewer) is False
+
+
+# ---- A1-04: who may ask for an override, and who is refused with 403 ------
+
+@pytest.mark.asyncio
+async def test_a1_04_override_ask_needs_the_step_or_the_run_team(
+        client, eng_auth, admin_auth, seed, session_factory):
+    from tests.test_change_deviations import _change
+    c = await _change(client, eng_auth, seed)          # lead = the engineer
+    cid = c["id"]
+    _, tools = await _user(client, session_factory, seed, "tools4", "Toolshop")
+    body = {"to_status": "in_assessment", "reason": "PPT only, drawing follows",
+            "reason_code": "in_parallel"}
+    url = f"/api/v1/changes/{cid}/deviations"
+    # Toolshop may not take the step and is not on the run team: 403.
+    res = await client.post(url, json=body, headers=tools)
+    assert res.status_code == 403, res.text
+    # The lead asks; a second ask by Toolshop is still 403, never
+    # 'already pending' (permission first).
+    dev = await client.post(url, json=body, headers=eng_auth)
+    assert dev.status_code == 200, dev.text
+    dev = dev.json()
+    res = await client.post(url, json={**body, "guard_key": dev["guard_key"]},
+                            headers=tools)
+    assert res.status_code == 403, res.text
+    # Deciding is the deciders' (run team here): Toolshop 403, the proposer 403.
+    res = await client.post(f"{url}/{dev['id']}/decide",
+                            json={"decision": "approved"}, headers=tools)
+    assert res.status_code == 403, res.text
+    res = await client.post(f"{url}/{dev['id']}/decide",
+                            json={"decision": "approved"}, headers=eng_auth)
+    assert res.status_code == 403, res.text
+    # A plain 400 stays a 400: a rejection without a reason.
+    res = await client.post(f"{url}/{dev['id']}/decide",
+                            json={"decision": "rejected"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+
+
+# ---- A1-05: a stored engineer without an active department writes nothing --
+
+@pytest.mark.asyncio
+async def test_a1_05_engineer_whose_departments_are_retired_is_no_acting_lead(
+        client, session_factory, seed):
+    from sqlalchemy.orm import selectinload
+    from app.models.change import ChangeRequest
+    from app.models.entities import User
+    from app.models.workflow import Department
+    from app.services.change_service import ChangeService
+    uid, _ = await _user(client, session_factory, seed, "gone", "Old Dept")
+    placed, _ = await _user(client, session_factory, seed, "placed", "Quality")
+    async with session_factory() as s:
+        d = (await s.execute(select(Department).where(
+            Department.name == "Old Dept"))).scalar_one()
+        d.is_active = False
+        for lead in (uid, placed, seed["admin_id"]):
+            s.add(ChangeRequest(change_number=f"CR-A5-{lead}", project_id=seed["project_id"],
+                                title="a5", change_type="physical_part", status="costing",
+                                raised_by=lead, lead_id=lead))
+        await s.commit()
+    async with session_factory() as s:
+        changes = (await s.execute(select(ChangeRequest).where(
+            ChangeRequest.change_number.like("CR-A5-%"))
+            .options(selectinload(ChangeRequest.lead)))).scalars().all()
+        idle = await ChangeService.leadless_ids(s, changes)
+        by_lead = {c.lead_id: c.id for c in changes}
+        assert idle == {by_lead[uid]}
+        users = [await s.get(User, i) for i in (uid, placed, seed["admin_id"])]
+        assert [u.id for u in await ChangeService._writers(s, users)] == [
+            placed, seed["admin_id"]]
+
+
+# ---- A1-06: the HARD #8 fallback is a real Project Manager member ---------
+
+@pytest.mark.asyncio
+async def test_a1_06_internal_fallback_has_no_admin_shortcut(
+        client, session_factory, seed):
+    from app.models.change import ChangeRequest
+    from app.models.entities import User
+    from app.services.change_service import ChangeService
+    pm, _ = await _user(client, session_factory, seed, "pm6", "Project Manager")
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="CR-A6", project_id=seed["project_id"],
+                          title="a6", change_type="physical_part", status="costing",
+                          customer_relevant=False, raised_by=seed["engineer_id"],
+                          lead_id=seed["engineer_id"])
+        s.add(c)
+        await s.commit()
+        assert await ChangeService.change_approvers(s, c) == []
+        admin = await s.get(User, seed["admin_id"])
+        assert await ChangeService.is_internal_approver(s, admin, c) is False
+        pm_user = await s.get(User, pm)
+        assert await ChangeService.is_internal_approver(s, pm_user, c) is True
+        # acting as Project Manager is not membership on this 4-eyes step
+        from app.models.workflow import Department
+        pm_dept = (await s.execute(select(Department).where(
+            Department.name == "Project Manager"))).scalar_one()
+        admin.acts_as_department_id = pm_dept.id
+        assert await ChangeService.is_internal_approver(s, admin, c) is False
+        # never the raiser
+        c.raised_by = pm
+        assert await ChangeService.is_internal_approver(s, pm_user, c) is False
+
+
+# ---- A1-07: change sign-offs need real membership, like the override OK ---
+
+@pytest.mark.asyncio
+async def test_a1_07_admin_outside_quality_cannot_sign_the_change(
+        client, eng_auth, admin_auth, seed, session_factory):
+    from tests.test_change_deviations import _change
+    c = await _change(client, eng_auth, seed)
+    url = f"/api/v1/changes/{c['id']}/sign-off"
+    for role in ("quality", "pm"):
+        res = await client.post(url, json={"role": role}, headers=admin_auth)
+        assert res.status_code == 403, res.text
+    _, q = await _user(client, session_factory, seed, "q7", "Quality")
+    res = await client.post(url, json={"role": "quality"}, headers=q)
+    assert res.status_code != 403, res.text     # refused later for the status, not the role

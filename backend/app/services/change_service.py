@@ -144,6 +144,10 @@ class ChangeError(ValueError):
     """Raised for invalid change operations; mapped to HTTP 400 in the router."""
 
 
+class DeviationDecideForbidden(ChangeError):
+    """The caller is not among the override's deciders (403, not 400)."""
+
+
 class DeviationRequired(ChangeError):
     """A soft guard refused the hop and no approved transition deviation
     covers it: an approved deviation WOULD let it through. Still a 400, but
@@ -550,7 +554,7 @@ class ChangeService:
             raise ChangeError(f"Override #{dev.id} is '{dev.status}', not pending")
         refusal = await ChangeService.deviation_decide_refusal(session, change, dev, actor)
         if refusal:
-            raise ChangeError(refusal)
+            raise DeviationDecideForbidden(refusal)
         from app.services import cm_switches
         from app.services.cm_rules import ABSORB_RULE, rule_label
         note = (note or "").strip() or None
@@ -887,29 +891,31 @@ class ChangeService:
 
     @staticmethod
     async def _writers(session: AsyncSession, users: list[User]) -> list[User]:
-        """The users who can write here (R24): a read-only account (role
-        viewer, no active PLM department) is never a configured approver,
-        so the fallback rule decides instead of a task nobody may do. A
-        stored viewer who was given a department since writes from the next
-        login on (auth.py _local_role), so it counts."""
-        viewers = [u.id for u in users if u.role == "viewer"]
-        if not viewers:
+        """The users who can write here (R24): an admin, or anyone with an
+        active PLM department (auth.py _local_role). A read-only account is
+        never a configured approver or an acting lead, so the fallback rule
+        decides instead of a task nobody may do. The stored role is not
+        trusted: an engineer whose departments were all removed or retired
+        keeps role 'engineer' until the next login and still writes nothing
+        then; a stored viewer given a department since writes from the next
+        login on. One query."""
+        others = [u.id for u in users if u.role != "admin"]
+        if not others:
             return users
         from app.models.workflow import UserDepartment
         placed = set((await session.execute(
             select(UserDepartment.user_id)
             .join(Department, Department.id == UserDepartment.department_id)
-            .where(UserDepartment.user_id.in_(viewers),
+            .where(UserDepartment.user_id.in_(others),
                    Department.is_active.is_(True)))).scalars().all())
-        return [u for u in users if u.role != "viewer" or u.id in placed]
+        return [u for u in users if u.role == "admin" or u.id in placed]
 
     @staticmethod
     async def internal_approver_ids(session: AsyncSession,
                                     change: ChangeRequest) -> set[int]:
         """Who to tell when the internal approver's OK is needed: the
         approvers of this change, else the Project Manager members of its
-        organisation (the fallback deciders; admins are not paged). Never
-        the raiser."""
+        organisation (the fallback deciders). Never the raiser."""
         approvers = await ChangeService.change_approvers(session, change)
         if approvers:
             ids = {u.id for u in approvers}
@@ -930,7 +936,7 @@ class ChangeService:
         approvers = await ChangeService.change_approvers(session, change)
         if approvers:
             return ", ".join(u.full_name or u.username for u in approvers)
-        return "a Project Management member or an admin"
+        return "a Project Management member"
 
     @staticmethod
     async def is_internal_approver(session: AsyncSession, user: User,
@@ -938,8 +944,10 @@ class ChangeService:
         """HARD #8 (P9): an engineering approver (settings.internal_approvers),
         never the change's raiser, never while acting as a department. With
         no configured approver for this change (none active here, or the
-        only one raised it), the earlier rule stands in: a Project Manager
-        member or an admin, still never the raiser."""
+        only one raised it), a real Project Manager member stands in: no
+        admin shortcut and not while acting (4-eyes on internal spend, the
+        same as the configured path), still never the raiser. DECIDED BY
+        CLAUDE until Christoph names the deputy (P9)."""
         from app.services.change_people import is_acting
         if user.effective_role == "viewer":
             return False      # read-only: the POST would refuse it (R24)
@@ -948,7 +956,8 @@ class ChangeService:
         approvers = await ChangeService.change_approvers(session, change)
         if approvers:
             return not is_acting(user) and any(u.id == user.id for u in approvers)
-        return await ChangeService._user_in_department(session, user, "Project Manager")
+        return (not is_acting(user)
+                and await ChangeService.member_of(session, user, "Project Manager"))
 
     @staticmethod
     async def create_change(
@@ -3172,6 +3181,16 @@ class ChangeService:
         return await ChangeService._user_in_department(session, user, dept_name)
 
     @staticmethod
+    async def user_can_sign_change(session: AsyncSession, user: User, role: str) -> bool:
+        """The change's PM and Quality sign-offs that HARD #4 and #9 count
+        (R37): real membership of the department, acting as it allowed, no
+        admin shortcut. The same member_of rule the override deciders use,
+        so the hard gate never accepts a wider signer than the soft
+        override. (SEP gates and form signatures keep user_can_sign_off.)"""
+        dept_name = "Quality" if role == "quality" else "Project Manager"
+        return await ChangeService.member_of(session, user, dept_name)
+
+    @staticmethod
     async def user_can_set_quoted_price(
         session: AsyncSession, user: User, change: ChangeRequest,
     ) -> bool:
@@ -3222,8 +3241,8 @@ class ChangeService:
     ) -> bool:
         """HARD #8 (P9): an engineering approver (settings.internal_approvers)
         who is not the change's raiser. No lead bypass. Until an approver is
-        configured and active here: a Project Manager member or an admin
-        (still never the raiser)."""
+        configured and active here: a real Project Manager member, not
+        acting, no admin shortcut (still never the raiser)."""
         return await ChangeService.is_internal_approver(session, user, change)
 
     # The department that owns tools (_DOMAIN_BY_DEPARTMENT's tool domain) and
@@ -4702,7 +4721,7 @@ class ChangeService:
                 mine = [u for u in approvers if u.id != c.raised_by]
                 # is_internal_approver's rule on the list read once
                 if not (any(u.id == user.id for u in mine) and not is_acting(user)
-                        if mine else (user.effective_role == "admin" or is_pm_member)):
+                        if mine else (is_pm_member and not is_acting(user))):
                     continue
                 if (c.status == "costing" and cm_switches.on("ASSESSMENT_V2")
                         and await ChangeService.costing_pending_department_ids(db, c)):
@@ -4802,19 +4821,19 @@ class ChangeService:
     @staticmethod
     async def leadless_ids(db: AsyncSession, changes: list) -> set:
         """Ids of the changes whose onward hop has no lead to make it: no
-        lead, or a lead who cannot act (inactive, or read-only: role viewer
-        with no active PLM department, _writers). Project Management takes
-        those (R18). One query at most, only for stored viewers."""
+        lead, or a lead who cannot act (inactive, or read-only: no admin and
+        no active PLM department, whatever the stored role, _writers).
+        Project Management takes those (R18). One query at most."""
         out = {c.id for c in changes if c.lead_id is None
                or (c.lead is not None and not c.lead.is_active)}
-        viewers = {c.lead_id: c.lead for c in changes
-                   if c.id not in out and c.lead is not None
-                   and c.lead.role == "viewer"}
-        if viewers:
+        leads = {c.lead_id: c.lead for c in changes
+                 if c.id not in out and c.lead is not None
+                 and c.lead.role != "admin"}
+        if leads:
             can = {u.id for u in await ChangeService._writers(
-                db, list(viewers.values()))}
+                db, list(leads.values()))}
             out |= {c.id for c in changes
-                    if c.lead_id in viewers and c.lead_id not in can}
+                    if c.lead_id in leads and c.lead_id not in can}
         return out
 
     #: The verb of each onward hop, the same as the cockpit's Next step

@@ -26,7 +26,8 @@ from app.models.change import (
 from app.models.workflow import UserDepartment, Department
 from app.models.part import Part
 from app.services.change_service import (
-    ALLOWED_TRANSITIONS, ChangeService, ChangeError, DeviationRequired, _org_scope,
+    ALLOWED_TRANSITIONS, ChangeService, ChangeError, DeviationDecideForbidden, DeviationRequired,
+    _org_scope,
 )
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingForbidden, MeetingService
@@ -1613,6 +1614,11 @@ async def transition_change(
                     if d.id == e.pending_deviation_id), None)
         created = dev is None
         if created:
+            from app.services.early_stage_service import EarlyStageService
+            refusal = await EarlyStageService.override_ask_refusal(
+                db, change, current_user, e.to_status)
+            if refusal:
+                raise HTTPException(status_code=403, detail=refusal)
             try:
                 dev = await ChangeService.propose_transition_deviation(
                     db, change, e.to_status, dev_reason, current_user.id,
@@ -2179,13 +2185,13 @@ async def sign_off(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if body.role in SIGN_OFF_ROLES and not await ChangeService.user_can_sign_off(
+    if body.role in SIGN_OFF_ROLES and not await ChangeService.user_can_sign_change(
             db, current_user, body.role):
         dept_name = "Quality" if body.role == "quality" else "Project Manager"
         raise HTTPException(
             status_code=403,
-            detail=f"Only a {dept_name} department member or an admin may "
-                   f"sign off as {body.role}")
+            detail=f"Only a {dept_name} department member may sign off as "
+                   f"{body.role} (an admin acts as the department)")
     try:
         await ChangeService.sign_off(db, change, body.role, current_user.id)
     except ChangeError as e:
@@ -3015,6 +3021,14 @@ async def propose_deviation(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    # R33: the ask notifies whole departments; who may not take the step
+    # and is not on the run team may not ask (checked before 'already
+    # pending', so a refusal never leaks what others asked)
+    from app.services.early_stage_service import EarlyStageService
+    refusal = await EarlyStageService.override_ask_refusal(
+        db, change, current_user, body.to_status)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     try:
         dev = await ChangeService.propose_transition_deviation(
             db, change, body.to_status, body.reason, current_user.id,
@@ -3063,6 +3077,8 @@ async def decide_deviation(
     try:
         dev = await ChangeService.decide_transition_deviation(
             db, change, dev_id, body.decision, current_user, note=body.note)
+    except DeviationDecideForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

@@ -2105,11 +2105,15 @@ mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (see
 `costing → approved`, given by an engineering approver who is not the raiser
 (`settings.internal_approvers`, env `INTERNAL_APPROVERS`, default
 `christoph.demmler`; when no configured approver other than the raiser is an
-active user, a Project Manager member or an admin, still never the raiser,
+active user, a real Project Manager member (no admin shortcut, not while
+acting as a department: the same 4-eyes as the configured path, close-out
+A1-06, until P9's deputy is named), still never the raiser,
 so a change the approver raised never stalls; the why-blocked row, the
 approval card and the "decision needed" notice name the same people; no
 switch); (9) at release the
-PM and Quality sign-offs bound to the latest offer sent
+PM and Quality sign-offs bound to the latest offer sent, signed by a real
+member of Project Manager / Quality (acting as it counts, no admin shortcut:
+the override deciders' `member_of` rule, close-out A1-07)
 (`pm_signed_offer_id`/`quality_signed_offer_id`, set by the sign-off,
 `RELEASE_V2`; the why-blocked row names the sides still owed and offers
 "Sign as PM / Quality for vN" to the viewer whose side it is, at any status;
@@ -2149,7 +2153,10 @@ proposer's: by default the lead, a Project Management member or an admin;
 overrides into `in_implementation` or `released` and validation rules: a
 Quality member; price rules (`scope_change_uncovered`, `price_drop`) and
 Absorb: a Project Management or Management member (internal Absorb: the
-internal approver). The deciders get one notification per override
+internal approver). Asking is for who may take the step or the run team
+(lead, Project Management member, admin); anyone else gets 403 before any
+"already pending" answer, and a decider refusal is 403 too (close-out
+A1-04). The deciders get one notification per override
 (`deviation_pending`, deduped; the PM department when the lead asked or there
 is no lead), naming the asker and the reason (an Absorb's note stays in
 PLM2). A deviation asked before the binding (no `guard_key`) still

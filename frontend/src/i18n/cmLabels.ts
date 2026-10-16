@@ -1582,7 +1582,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'validation.measurements': { de: 'Messungen', en: 'Measurements' },
   'validation.retestTitle': { de: 'Nachprüfung', en: 'Retest' },
   'internal.approvedBy': { de: 'Interne Kosten gibt frei: {who} (nie der Ersteller)', en: 'Internal costs are approved by {who} (never the raiser)' },
-  'internal.approverFallback': { de: 'ein PM-Mitglied oder ein Admin', en: 'a Project Management member or an admin' },
+  'internal.approverFallback': { de: 'ein PM-Mitglied', en: 'a Project Management member' },
   // The ECR process flow page (docs/ECR_PROCESS_MAP.md). The page itself is
   // English throughout — the flow is discussed in English across the team.
   'procmap.title': { de: 'ECR Process Flow', en: 'ECR Process Flow' },

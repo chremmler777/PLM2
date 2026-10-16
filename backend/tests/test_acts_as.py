@@ -181,9 +181,14 @@ async def test_acting_admin_who_leads_cannot_decide_gates(client, admin_auth, se
     assert ok.status_code == 200, ok.text
 
 
-async def test_acting_admin_who_leads_cannot_decide_a_deviation(client, admin_auth, eng_auth, seed, depts):
+async def test_acting_admin_who_leads_cannot_decide_a_deviation(
+        client, admin_auth, eng_auth, seed, depts, session_factory):
     """Same rule as the D1 gates: while acting, the admin's lead right on a
     transition deviation steps aside; as themselves they decide it."""
+    # the asker is on the run team (a Project Manager member), close-out
+    # A1-04: who may not take the step and is not on it may not ask
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Project Manager")
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "deviation while acting", "reason": "r",
         "change_type": "physical_part", "lead_id": seed["admin_id"]}, headers=admin_auth)
