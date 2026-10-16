@@ -2016,7 +2016,8 @@ class ChangeService:
             routing = change.routing
             if routing is not None and routing.deviation_status == "pending_approval":
                 out.append(R("routing_deviation_pending",
-                             "Routing deviation is pending approval"))
+                             "Routing change waits for its decision (decide "
+                             "the added department)"))
         # C5 (spec §5): closing costing - into the quote, or an internal
         # change straight to approval - waits for every department's
         # finalized costing. SOFT: the lead may override it (urgent quote).

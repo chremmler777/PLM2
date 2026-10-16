@@ -277,7 +277,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'next.decideNote': { de: 'Eine Routing-Änderung wird entschieden (Bewertungen), nicht übersteuert.', en: 'A routing change is decided (Assessments tab), not overridden.' },
   'next.item.assessments_n': { de: '{n} Bewertungen noch offen', en: '{n} assessments still open' },
   'next.item.not_feasible': { de: 'Entscheidung zu „nicht machbar“', en: "Decision on a 'not feasible' assessment" },
-  'next.item.routing_deviation': { de: 'Routing-Abweichung freigeben', en: 'Approve the routing deviation' },
+  'next.item.routing_deviation': { de: 'Routing-Änderung entscheiden', en: 'Decide the routing change' },
   'next.item.costing_input': { de: 'Kosten von {n} Abteilungen', en: 'Cost input from {n} departments' },
   'next.item.internal_approval': { de: 'Interne Kostenfreigabe', en: 'Internal cost approval' },
   'next.item.quoted_price': { de: 'Angebotspreis', en: 'Quoted price' },
@@ -1501,8 +1501,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'meeting.rasicSummary': { de: '{a} bewerten · {n} beteiligt', en: '{a} assess · {n} involved' },
   'lateAssess.takeOff': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
   'lateAssess.takeOffHint': {
-    de: 'Die Abteilung schuldet keine Bewertung mehr (Routing-Abweichung, mit Begründung)',
-    en: 'The department no longer owes an assessment (a routing deviation, with a reason)',
+    de: 'Die Abteilung schuldet keine Bewertung mehr (Routing-Änderung, mit Begründung)',
+    en: 'The department no longer owes an assessment (a routing change, with a reason)',
   },
   'lateAssess.title': { de: '{x} aus dem Routing nehmen', en: 'Take {x} off the routing' },
   'lateAssess.reason': {
@@ -1510,8 +1510,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Why does this department no longer need to assess?',
   },
   'lateAssess.effect': {
-    de: 'Beantragt als Routing-Abweichung: Bis zur Entscheidung bleiben Bewertungszeile und Aufgabe offen und die Änderung wartet weiter darauf. Erst die Freigabe entfernt sie.',
-    en: 'Requested as a routing deviation: until it is decided the assessment row and its task stay open and the change still waits on them. Only the approval removes them.',
+    de: 'Beantragt als Routing-Änderung: Bis zur Entscheidung bleiben Bewertungszeile und Aufgabe offen und die Änderung wartet weiter darauf. Erst die Freigabe entfernt sie.',
+    en: 'Requested as a routing change: until it is decided the assessment row and its task stay open and the change still waits on them. Only the approval removes them.',
   },
   'lateAssess.submit': { de: 'Aus dem Routing nehmen', en: 'Take off routing' },
   'lateAssess.done': { de: 'Entfernung beantragt, wartet auf Entscheidung', en: 'Removal requested, awaiting decision' },
@@ -2137,8 +2137,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'meeting.proceedTitle': { de: 'Freigeben und Bewertung starten', en: 'Proceed and start assessment' },
   'meeting.proceedConsequence': {
-    de: 'Die mit R oder A markierten Abteilungen erhalten jetzt ihre Bewertungsaufgabe. Der Umfang ist damit für die Bewertung festgelegt; Änderungen danach laufen über eine Routing-Abweichung.',
-    en: 'The departments marked R or A get their assessment task now. This fixes who assesses; changing it afterwards goes through a routing deviation.',
+    de: 'Die mit R oder A markierten Abteilungen erhalten jetzt ihre Bewertungsaufgabe. Der Umfang ist damit für die Bewertung festgelegt; Änderungen danach laufen über eine Routing-Änderung.',
+    en: 'The departments marked R or A get their assessment task now. This fixes who assesses; changing it afterwards goes through a routing change.',
   },
   'meeting.proceedNoAssessor': {
     de: 'Keine Abteilung ist mit R oder A markiert: niemand bewertet',

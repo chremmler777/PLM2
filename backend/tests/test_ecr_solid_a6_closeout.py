@@ -544,3 +544,24 @@ async def test_routing_named_owner_reads_handed_over_until_first_edit(
                         team["user"]["Tool Engineer"])
         EarlyStageService.note_owner_edit(a, u)
         assert EarlyStageService.owner_started(a) is True
+
+
+# ---------------------------------------------------------------------------
+# A6-12 the refusal says 'routing change', never 'deviation'
+# ---------------------------------------------------------------------------
+async def test_routing_change_refusal_uses_the_users_words(client, seed, team, session_factory):
+    from app.models.change import ChangeRouting
+    from app.services.change_service import ChangeService
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "routing words")
+    await _set(session_factory, cid, status="in_assessment")
+    async with session_factory() as s:
+        s.add(ChangeRouting(change_id=cid, has_deviation=True,
+                            deviation_status="pending_approval"))
+        await s.commit()
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        await s.refresh(c, ["routing"])
+        texts = [str(r) for r in await ChangeService._guard_reasons(s, c, "costing")]
+    assert any(t.startswith("Routing change waits for its decision") for t in texts)
+    assert not any("deviation" in t.lower() for t in texts)

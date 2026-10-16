@@ -76,7 +76,7 @@ describe('ProcessMapPage', () => {
       'all checks passed',
       'released (hard + soft rules)',
       'Close costing (PM, Sales, lead), costing finalized',
-      'capture complete (soft, deviation-overridable)',
+      'capture complete (soft, override bound to the rule)',
     ]) {
       expect(chart).toContain(guard)
     }
@@ -91,7 +91,7 @@ describe('ProcessMapPage', () => {
     // The impact lock is the gate no deviation clears: drawn red and said so.
     const hard = screen.getByTestId('procmap-gate-impact-lock')
     expect(hard.querySelector('polygon')?.getAttribute('stroke')).toBe('#f87171')
-    expect(hard.textContent).toContain('no deviation clears it')
+    expect(hard.textContent).toContain('no override clears it')
     expect(screen.getByTestId('procmap-gate-kickoff').textContent).toContain('change lead')
     expect(screen.getByTestId('procmap-gate-costing').textContent)
       .toContain('all R/A submitted, none not feasible, no routing change pending')
@@ -179,7 +179,7 @@ describe('ProcessMapPage', () => {
     const { container } = wrap()
     const rules = screen.getByTestId('procmap-rules').textContent ?? ''
     // Four eyes: transition / routing deviations and issue routes, not plan deviations.
-    expect(rules).toContain('a transition or routing deviation is decided by somebody other than its proposer')
+    expect(rules).toContain('an override or a routing change is decided by somebody other than its proposer')
     expect(rules).toContain('Plan (date) deviations have no four-eyes rule')
     expect(rules).not.toContain('whoever proposes a deviation or raises a validation issue does not decide it')
     // Dates after the baseline: Scheduling moves them too; deciding stays with PM, Sales, lead, admin.
@@ -283,22 +283,32 @@ describe('ProcessMapPage', () => {
     expect(pnl('released')).toContain('offer vs doing')
   })
 
-  it('branches a failed check into a validation issue with five routes', () => {
+  it('A6-12: a failed check runs Fix and retest; the concession is Quality\'s, beside it; 8D only without a check', () => {
     wrap()
     expect(screen.getByTestId('procmap-edge-checks-issue').getAttribute('marker-end'))
       .toBe('url(#arrow-loop)')
-    for (const key of ['raise', 'contain', 'cause', 'customer', 'accepted', 'followup']) {
+    for (const key of ['raise', 'fix', 'retest', 'concession', 'accepted', 'followup']) {
       expect(screen.getByTestId(`procmap-node-issue-${key}`)).toBeTruthy()
     }
+    expect(screen.getByTestId('procmap-node-issue-raise').textContent).toContain('a FAIL raises it by itself')
+    expect(screen.getByTestId('procmap-node-issue-fix').textContent).toContain('Fix: who + retest date')
+    expect(screen.getByTestId('procmap-node-issue-retest').textContent).toContain('PASS closes the issue')
+    const concession = screen.getByTestId('procmap-node-issue-concession').textContent ?? ''
+    expect(concession).toContain('Quality')
+    expect(concession).toContain('quantity or until a date')
+    expect(screen.getByTestId('procmap-node-issue-accepted').textContent)
+      .toContain('Accepted under concession VI-n')
     const chart = screen.getByTestId('procmap-chart').textContent ?? ''
     for (const route of ['internal rework', 'supplier rework', 'design change',
-      'route 4: concession', 'route 5: follow-up change']) {
+      '8D route 4: follow-up change', 'in parallel: Request concession']) {
       expect(chart).toContain(route)
     }
-    // Routes 1 to 3 go back to implementation with a recovery group in the plan.
+    // NEGATIVE: no concession route and no Sales customer-decision node any more
+    expect(chart).not.toContain('route 4: concession')
+    expect(screen.queryByTestId('procmap-node-issue-customer')).toBeNull()
+    expect(chart).not.toContain('end date optional')
+    // 8D routes 1 to 3 go back to implementation with a recovery group in the plan.
     expect(screen.getByTestId('procmap-node-recovery').textContent).toContain('Re-validation VI-n')
-    expect(screen.getByTestId('procmap-loop-require-fix')).toBeTruthy()
-    expect(screen.getByTestId('procmap-node-issue-customer').textContent).toContain('new_timing')
   })
 
   it('draws the escalation ladder with its triggers', () => {
@@ -306,7 +316,9 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-escalation-l1').textContent).toContain('Department')
     const l2 = screen.getByTestId('procmap-escalation-l2').textContent ?? ''
     expect(l2).toContain('severity 3')
-    expect(l2).toContain('no route decided after 2 working days')
+    expect(l2).toContain('no Fix pick by Quality after 2 wd')
+    expect(l2).toContain('(no check: no route after 2 wd)')
+    expect(screen.getByTestId('procmap-escalation-l1').textContent).toContain('Quality and the check')
     const l3 = screen.getByTestId('procmap-escalation-l3').textContent ?? ''
     expect(l3).toContain('Management + customer')
     expect(l3).toContain('recovery ends after the')
@@ -360,9 +372,9 @@ describe('ProcessMapPage', () => {
     wrap()
     fireEvent.click(screen.getByTestId('procmap-task-keys'))
     expect(screen.getByTestId('procmap-sources')).toBeTruthy()
-    expect(screen.getByTestId('procmap-node-captured').textContent).toContain('task: kickoff')
+    expect(screen.getByTestId('procmap-node-captured').textContent).toContain('kickoff · set_quote_deadline · customer_flip')
     expect(screen.getByTestId('procmap-node-scoping').textContent)
-      .toContain('scoping_wrapup · obtain_info · close_question')
+      .toContain('scoping_wrapup · pick_impacted · ppap_decision')
     expect(screen.getByTestId('procmap-node-costing').textContent).toContain('task: costing_input')
     expect(screen.getByTestId('procmap-node-quoting').textContent).toContain('task: create_quote')
     expect(screen.getByTestId('procmap-node-quoted').textContent).toContain('customer_response')

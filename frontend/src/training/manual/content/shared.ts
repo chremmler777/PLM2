@@ -258,7 +258,7 @@ export const flowChapter: ContentChapter = {
         },
         {
           p:
-            'After the meeting the routing changes only as a routing deviation, with a reason, ' +
+            'After the meeting the routing changes only as a routing change, with a reason, ' +
             'decided by somebody other than the person who asked. A department added that way sees ' +
             'its task at once. A department taken off stays on the hook until the removal is decided ' +
             '("Removal requested, awaiting decision"), and the change cannot move to costing until then.',
