@@ -213,3 +213,33 @@ async def test_a_money_line_says_how_many_of_what(client, cb):
         "department_id": cb["tool"], "label": "Own time", "kind": "own_time",
         "hours": 3}, headers=cb["te"])
     assert res.status_code == 201, res.text
+
+
+async def test_a_quote_number_that_says_nothing_does_not_finalize(client, cb):
+    """A3-10c (R4): 'tbd' is no supplier quote number at finalize."""
+    p = await _pos(client, cb, pricing="quote")
+    o = await _offer(client, cb, p["id"], quote_ref="tbd")
+    await _file(client, cb, o["id"])
+    res = await _finalize(client, cb)
+    assert res.status_code == 400 and "FZ: quote number and file" in res.text, res.text
+    await client.put(_u(cb, f"/costing/offers/{o['id']}"),
+                     json={"quote_ref": "FZ-Q-2231"}, headers=cb["te"])
+    res = await _finalize(client, cb)
+    assert res.status_code == 200, res.text
+
+
+async def test_within_is_refused_when_the_quote_in_the_same_step_is_above(
+        client, cb, session_factory):
+    """A3-10b (R4): the one-step check reads the quote it records: more
+    than 5 % above the estimate is 'above by', never 'within'."""
+    p = await _pos(client, cb, est_cost=5000.0, basis_ref="Hasco figure 12 Oct 2026")
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cb["cid"])).quoted_at = datetime.utcnow()
+        await s.commit()
+    url = _u(cb, f"/costing/positions/{p['id']}/estimate-check")
+    quote = {"vendor_name": "FZ", "quote_ref": "FZ-Q-2240", "cost": 6000.0}
+    res = await client.post(url, json={"verdict": "within", **quote}, headers=cb["te"])
+    assert res.status_code == 400 and "above by 1000.00" in res.json()["detail"], res.text
+    res = await client.post(url, json={"verdict": "within", **quote, "cost": 5200.0},
+                            headers=cb["te"])
+    assert res.status_code == 200, res.text

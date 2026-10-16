@@ -1309,10 +1309,15 @@ class MeetingService:
         unit = (unit or "").strip()
         ref = (ref or "").strip()
         if outcome == "answered":
+            # A3-10 (R4): the department's own evidence: a file filed on the
+            # item after it was raised, not by its raiser (the raise-time
+            # attachment is the question, not the answer)
             files = (await session.execute(
                 select(func.count()).select_from(ChangeAttachment).where(
                     ChangeAttachment.change_id == change.id,
-                    ChangeAttachment.concern_id == concern.id))).scalar() or 0
+                    ChangeAttachment.concern_id == concern.id,
+                    ChangeAttachment.uploaded_by != concern.raised_by,
+                    ChangeAttachment.created_at >= concern.raised_at))).scalar() or 0
             if value:
                 if not any(ch.isdigit() for ch in value):
                     raise ChangeError("Answered: the value is a number, e.g. 2.4")

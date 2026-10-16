@@ -288,7 +288,7 @@ async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
     from app.models.change import ChangeAttachment
     from app.models.change_cost import CostingPosition
     from app.services import cm_switches
-    from app.services.cm_rules import says_what
+    from app.services.cm_rules import reference_refusal, says_what
     if not cm_switches.on("ASSESSMENT_V2"):
         return
     positions = (await session.execute(
@@ -312,7 +312,8 @@ async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
             if not counted:
                 quotes.append(f"'{p.label}' (no offer, or no favourite among several)")
             for o in counted:
-                if len((o.quote_ref or "").strip()) < 3 or o.id not in filed:
+                # A3-10 (R4): the quote number is a reference id, not 'tbd'
+                if reference_refusal(o.quote_ref) is not None or o.id not in filed:
                     quotes.append(f"'{p.label}' ({o.vendor_name}: quote number and file)")
         elif p.est_cost:
             ok = (p.basis_part_id is not None and len(p.basis_differs or "") >= 5

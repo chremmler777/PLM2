@@ -599,3 +599,23 @@ async def test_a_consulted_departments_open_check_item_holds_costing_and_closes_
     ch = (await client.get(_url(a), headers=a["lead"])).json()
     assert not any("Check items open" in (i.get("who") or "")
                    for i in ch["next_step"]["items"])
+
+
+async def test_answered_by_a_file_counts_only_the_departments_own_file(
+        client, assess):
+    """A3-10a (R4): the raiser's attachment from raise time is the question,
+    not the answer: only a file filed on the item by someone else after it
+    was raised closes it as Answered."""
+    a = assess
+    up = lambda auth: client.post(_url(a, "/attachments"),
+                                  files={"file": ("sketch.pdf", b"%PDF-1.4 s", "application/pdf")},
+                                  data={"kind": "info_response", "concern_id": str(a["check"])},
+                                  headers=auth)
+    res = await up(a["raiser"])
+    assert res.status_code in (200, 201), res.text
+    res = await _close(client, a["pe"], a, outcome="answered")
+    assert res.status_code == 400 and "evidence" in res.json()["detail"], res.text
+    res = await up(a["pe"])
+    assert res.status_code in (200, 201), res.text
+    res = await _close(client, a["pe"], a, outcome="answered")
+    assert res.status_code == 200, res.text

@@ -858,8 +858,10 @@ class CostingPositionService:
         the internal approval was given on the estimate: the department
         compares it with its estimate before it finalizes (pending)."""
         from app.services import cm_switches
+        from app.services.cm_rules import reference_refusal
+        # A3-10 (R4): a quote number that names something ('tbd' is none)
         if (cm_switches.on("ASSESSMENT_V2") and position.estimate_check is None
-                and position.est_cost and (offer.quote_ref or "").strip()
+                and position.est_cost and reference_refusal(offer.quote_ref) is None
                 and (change.quoted_at is not None
                      or change.internal_approved_at is not None)):
             position.estimate_check = "pending"
@@ -908,6 +910,15 @@ class CostingPositionService:
                                     "Q-2026-4471")
             if why:
                 raise CostingPositionError(why)
+            # A3-10 (R4): the quote in this same request decides 'within':
+            # a cost above the estimate + 5 % is 'above by' the difference
+            cost = q.get("cost")
+            if (verdict == "within" and cost is not None and position.est_cost
+                    and float(cost) > float(position.est_cost) * 1.05 + 0.005):
+                raise CostingPositionError(
+                    f"The quote ({float(cost):.2f}) is more than 5 % above the "
+                    f"estimate ({float(position.est_cost):.2f}): say 'above by "
+                    f"{float(cost) - float(position.est_cost):.2f}'")
             # compared right here: no "pending" ask for the department
             position.estimate_check = verdict
             await CostingPositionService.create_offer(

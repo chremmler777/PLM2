@@ -780,8 +780,9 @@ Switch `ASSESSMENT_V2` (migration 127).
   line stands for"), and an edit cannot take it away. Hours lines carry
   theirs (hours × rate). Lines entered before migration 140 keep NULL.
 - **Finalize** refuses (one sentence per kind, naming the lines): a quoted
-  line whose counted offer has no supplier quote number (`quote_ref`, 3+
-  characters) or no quote file (`vendor_quote` attachment on the offer), or
+  line whose counted offer has no supplier quote number (`quote_ref`, a
+  reference id: 5+ characters that name something, "tbd" refused, A3-10) or
+  no quote file (`vendor_quote` attachment on the offer), or
   that has several full offers and no favourite; an estimate with money and
   no basis that names something ("ok" refused); a pending quote-vs-estimate
   check. Offers carry `quote_ref`, `quoted_on`, `valid_until` (not before
