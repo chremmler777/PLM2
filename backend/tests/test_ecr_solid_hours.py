@@ -191,3 +191,58 @@ async def test_stage8_booking_is_dated_and_in_the_dated_report(
     row = next(r for r in rep["changes"] if r["change_id"] == cid)
     dev_row = next(d for d in row["departments"] if d["department_id"] == depts["Development"])
     assert dev_row["booked_hours"] == 2.0
+
+
+# --- review loop 2 ------------------------------------------------------------
+
+async def test_delete_hours_own_booking_only_while_the_window_is_open(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    res = await _book(client, dev, cid, department_id=depts["Development"], hours=2)
+    assert res.status_code == 201, res.text
+    bid = res.json()["bookings"][0]["id"]
+    # NEGATIVE: someone else's booking is not theirs to take back
+    res = await client.delete(f"/api/v1/changes/{cid}/hours/{bid}",
+                              headers=people["Project Manager"][1])
+    assert res.status_code == 403, res.text
+    res = await client.delete(f"/api/v1/changes/{cid}/hours/{bid}", headers=dev)
+    assert res.status_code == 200, res.text
+    assert res.json()["bookings"] == []
+    res = await _book(client, dev, cid, department_id=depts["Development"], hours=2)
+    bid = res.json()["bookings"][0]["id"]
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == cid).values(
+            status="closed", closed_at=datetime.utcnow() - timedelta(days=8)))
+        await s.commit()
+    # NEGATIVE: the window closed 7 days after close
+    res = await client.delete(f"/api/v1/changes/{cid}/hours/{bid}", headers=dev)
+    assert res.status_code == 400 and "window" in res.json()["detail"], res.text
+
+
+async def test_effort_report_window_never_calls_an_earlier_booking_not_booked(
+        client, admin, seed, depts, people, session_factory):
+    """R20: with a date window a department that booked before it is not
+    'not booked', and a change with no hours in the window is not listed."""
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    quiet = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    early = (business_today() - timedelta(days=10)).isoformat()
+    for c in (cid, quiet):
+        res = await _book(client, dev, c, department_id=depts["Development"], hours=5,
+                          work_date=early)
+        assert res.status_code == 201, res.text
+    res = await _book(client, admin, cid, department_id=depts["Tool Engineer"], hours=3)
+    assert res.status_code == 201, res.text
+    since = (business_today() - timedelta(days=2)).isoformat()
+    rep = (await client.get(f"/api/v1/reports/ecr-effort?since={since}",
+                            headers=people["Project Manager"][1])).json()
+    ids = [r["change_id"] for r in rep["changes"]]
+    assert cid in ids and quiet not in ids
+    row = next(r for r in rep["changes"] if r["change_id"] == cid)
+    assert row["booked_hours"] == 3.0 and row["not_booked"] == []
+    # without a window: both changes, all their hours
+    rep = (await client.get("/api/v1/reports/ecr-effort",
+                            headers=people["Project Manager"][1])).json()
+    row = next(r for r in rep["changes"] if r["change_id"] == quiet)
+    assert row["booked_hours"] == 5.0 and row["not_booked"] == ["Tool Engineer"]

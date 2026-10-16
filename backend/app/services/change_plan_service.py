@@ -2340,7 +2340,8 @@ class ChangePlanService:
     @staticmethod
     async def required_department_ids(session: AsyncSession,
                                        change: ChangeRequest,
-                                       implementing: list | None = None) -> list[int]:
+                                       implementing: list | None = None,
+                                       dept_by_name: dict | None = None) -> list[int]:
         """Every department with an R or A assessment on the change, plus
         Scheduling (it builds the bank) and Sales (it tells the customer).
         RELEASE_V2 (§8-9): the departments with impact yes or work priced on
@@ -2372,7 +2373,9 @@ class ChangePlanService:
                 session, change))
             names = ("Scheduling",)
         for name in names:
-            did = await ChangePlanService._dept_id(session, name)
+            # `dept_by_name`: preloaded for a list (My Tasks, R34)
+            did = (dept_by_name.get(name) if dept_by_name is not None
+                   else await ChangePlanService._dept_id(session, name))
             if did is not None:
                 ids.add(did)
         return sorted(ids)

@@ -266,8 +266,10 @@ class HoursService:
                             until: Optional[date] = None) -> dict:
         """Hours per change (C15 report 'ecr-effort'): booked vs estimated,
         per department, and the departments with an estimate and no booking
-        ("not booked", never 0). Changes the viewer may see; the bookings in
-        the date window (work date). Split by origin and Sales owner: cut 2."""
+        ("not booked", never 0). Changes the viewer may see. With a date
+        window (work date): only the changes with hours booked in it, their
+        bookings in it, and "not booked" still means never booked. Split by
+        origin and Sales owner: cut 2."""
         from app.services.change_service import ChangeService, _org_scope
         if not (actor.effective_role == "admin"
                 or await ChangeService._user_in_department(session, actor, "Project Manager")
@@ -285,34 +287,54 @@ class HoursService:
             bq = bq.where(ImplementationBooking.work_date >= since)
         if until is not None:
             bq = bq.where(ImplementationBooking.work_date <= until)
+        windowed = since is not None or until is not None
+        # grouped by change once (R34), not scanned per change
         booked: dict = {}
         confirmed: dict = {}
         for cid, did, src, h in (await session.execute(bq.group_by(
                 ImplementationBooking.change_id, ImplementationBooking.department_id,
                 ImplementationBooking.source))).all():
-            booked[(cid, did)] = booked.get((cid, did), 0.0) + float(h or 0)
+            per_c = booked.setdefault(cid, {})
+            per_c[did] = per_c.get(did, 0.0) + float(h or 0)
             if src == "estimate":
                 confirmed[cid] = confirmed.get(cid, 0.0) + float(h or 0)
+        ever: set = set()
+        if windowed:
+            # "not booked" means never booked, not "nothing in this window"
+            ever = set((await session.execute(
+                select(ImplementationBooking.change_id,
+                       ImplementationBooking.department_id)
+                .where(ImplementationBooking.change_id.in_(ids or [-1]))
+                .distinct())).all())
+        est_by: dict = {}
+        for (cid, did), h in est.items():
+            est_by.setdefault(cid, {})[did] = h
         names = dict((await session.execute(select(Department.id, Department.name))).all())
         rows = []
         for c in changes:
-            depts = sorted({d for (cid, d) in est if cid == c.id}
-                           | {d for (cid, d) in booked if cid == c.id},
-                           key=lambda i: (names.get(i) or "", i))
+            b_c = booked.get(c.id, {})
+            if windowed and not b_c:
+                # a date window reports the changes with hours in it; the
+                # estimates of changes with no activity there do not count
+                continue
+            e_c = est_by.get(c.id, {})
+            depts = sorted(set(e_c) | set(b_c), key=lambda i: (names.get(i) or "", i))
             if not depts:
                 continue
             per = [{"department_id": d, "department_name": names.get(d),
-                    "estimate_hours": est.get((c.id, d)),
-                    "booked_hours": round(booked.get((c.id, d), 0.0), 2)}
+                    "estimate_hours": e_c.get(d),
+                    "booked_hours": round(b_c.get(d, 0.0), 2)}
                    for d in depts]
+            not_booked = [p["department_name"] for p in per if p["estimate_hours"]
+                          and not ((c.id, p["department_id"]) in ever if windowed
+                                   else p["booked_hours"])]
             rows.append({
                 "change_id": c.id, "change_number": c.change_number, "title": c.title,
                 "status": c.status, "customer_relevant": bool(c.customer_relevant),
                 "booked_hours": round(sum(p["booked_hours"] for p in per), 2),
                 "estimate_hours": round(sum(p["estimate_hours"] or 0 for p in per), 2),
                 "confirmed_estimate_hours": round(confirmed.get(c.id, 0.0), 2),
-                "not_booked": [p["department_name"] for p in per
-                               if p["estimate_hours"] and not p["booked_hours"]],
+                "not_booked": not_booked,
                 "departments": per,
             })
         return {"since": since, "until": until, "changes": rows,

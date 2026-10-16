@@ -3923,7 +3923,8 @@ class ChangeService:
                     # loaded once for the list (R34)
                     from app.services.change_plan_service import ChangePlanService
                     required = set(await ChangePlanService.required_department_ids(
-                        db, c, implementing=plan_work.get(c.id, [])))
+                        db, c, implementing=plan_work.get(c.id, []),
+                        dept_by_name=dept_by_name))
                 elif mp.is_mother_plant(c):
                     # no assessments: the informed departments and Scheduling
                     required |= informed_depts.get(c.id, set())
