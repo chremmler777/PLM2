@@ -7,6 +7,8 @@ from sqlalchemy import select
 from tests.conftest import lock_impact, to_scoping
 from tests.test_change_scoping import create_change, add_item_and_lead
 from tests.test_change_meetings import post_meeting
+from tests.test_change_routing import (  # noqa: F401  (fixtures)
+    departments, departments_member, ecr_template)
 
 
 async def _depts(session_factory, **specs):
@@ -91,3 +93,108 @@ async def test_a1_01_build_routing_skips_retired_and_management(
     async with session_factory() as s:
         kept = await ChangeRoutingService._drop_unroutable(s, stages)
     assert [d["department_id"] for d in kept[0]["departments"]] == [ids["dev"]]
+
+
+# ---- A1-02: when the lead cannot decide a routing change, PM decides -------
+
+async def _user(client, session_factory, seed, key, dept=None, role="engineer"):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from tests.conftest import login, make_department_member
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username=f"rc-{key}",
+                 email=f"rc-{key}@test.io", full_name=f"RC {key}",
+                 hashed_password=get_password_hash("rc-secret-12"),
+                 role=role, is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.commit()
+        uid = u.id
+    if dept:
+        await make_department_member(session_factory, uid, dept)
+    return uid, await login(client, f"rc-{key}@test.io")
+
+
+async def _pending_routing_change(client, seed, session_factory, departments):
+    """In assessment, lead = engineer; the lead files an add (so the lead
+    cannot decide it)."""
+    from tests.test_change_routing import _api_change_in_assessment, _login
+    eng = await _login(client)
+    c = await _api_change_in_assessment(client, eng, seed, session_factory)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1, "reason": "forgot MfgEng"}, headers=eng)
+    assert res.status_code == 200, res.text
+    return c["id"], eng
+
+
+@pytest.mark.asyncio
+async def test_a1_02_only_pm_or_admin_decides_when_the_lead_filed(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    cid, eng = await _pending_routing_change(client, seed, session_factory, departments)
+    _, sales = await _user(client, session_factory, seed, "sales", "Sales")
+    _, tools = await _user(client, session_factory, seed, "tools", "Toolshop")
+    _, pm = await _user(client, session_factory, seed, "pm", "Project Manager")
+    url = f"/api/v1/changes/{cid}/routing/deviation"
+    for h in (sales, tools):
+        res = await client.post(f"{url}/approve", headers=h)
+        assert res.status_code == 403, res.text
+        res = await client.post(f"{url}/reject", json={"reason": "no"}, headers=h)
+        assert res.status_code == 403, res.text
+        acts = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=h)).json()
+        assert "routing_deviation_decision" not in [a["kind"] for a in acts["actions"]]
+        st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=h)).json()
+        assert st["routing_deviation"]["can_decide"] is False
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=pm)).json()
+    assert st["routing_deviation"]["can_decide"] is True
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=pm)).json()
+    assert "routing_deviation_decision" in [a["kind"] for a in acts["actions"]]
+    # The proposing lead: 403, not 400.
+    res = await client.post(f"{url}/approve", headers=eng)
+    assert res.status_code == 403, res.text
+    res = await client.post(f"{url}/approve", headers=pm)
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.asyncio
+async def test_a1_02_idle_lead_hands_the_decision_to_pm_not_to_anyone(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """The lead is read-only: the request was filed by somebody else, but
+    Toolshop still may not decide it; a PM member may."""
+    from tests.test_change_routing import _api_change_in_assessment, _login
+    from app.models.change import ChangeRequest
+    eng = await _login(client)
+    c = await _api_change_in_assessment(client, eng, seed, session_factory)
+    cid = c["id"]
+    vid, viewer = await _user(client, session_factory, seed, "viewer", role="viewer")
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).lead_id = vid
+        await s.commit()
+    res = await client.post(f"/api/v1/changes/{cid}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1, "reason": "forgot"}, headers=eng)
+    assert res.status_code == 200, res.text
+    _, tools = await _user(client, session_factory, seed, "tools", "Toolshop")
+    _, pm = await _user(client, session_factory, seed, "pm", "Project Manager")
+    url = f"/api/v1/changes/{cid}/routing/deviation"
+    assert (await client.post(f"{url}/approve", headers=tools)).status_code == 403
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=viewer)).json()
+    assert st["routing_deviation"]["can_decide"] is False
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=viewer)).json()
+    assert acts["actions"] == []
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=pm)).json()
+    assert st["routing_deviation"]["can_decide"] is True
+    assert (await client.post(f"{url}/approve", headers=pm)).status_code == 200
+
+
+# ---- A1-03: read-only users are offered no write actions ------------------
+
+@pytest.mark.asyncio
+async def test_a1_03_viewer_lead_may_not_inform_the_team(session_factory):
+    """A read-only lead of a mother-plant change gets no Send controls
+    (MotherPlantService.may_send feeds can_send / can_inform)."""
+    from types import SimpleNamespace
+    from app.services.mother_plant_service import MotherPlantService
+    viewer = SimpleNamespace(id=7, effective_role="viewer", acts_as_department_id=None)
+    change = SimpleNamespace(lead_id=7)
+    async with session_factory() as s:
+        assert await MotherPlantService.may_send(s, change, viewer) is False

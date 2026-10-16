@@ -1870,7 +1870,11 @@ anything is submitted). It is a **routing deviation** (`op: add`):
   the assessment stage, with the standard due date. It is on the hook
   immediately; a blocking letter (R/A) gates costing like any first-stage row.
 - **4-eyes decision:** the proposer never decides. A non-lead's proposal is the
-  lead's call; the lead's proposal is anyone else's (the PM's). While pending,
+  lead's call; when the lead filed part of it, there is no lead or the lead
+  cannot act (read-only, inactive), a Project Management member (acting as PM
+  counts) or an admin decides, nobody else (close-out A1-02, 403 otherwise).
+  The cockpit takes `can_decide` and the decider from stage-state
+  (`routing_deviation`), no local mirror. While pending,
   `in_assessment → costing` is refused ("Routing deviation is pending
   approval") and no further add is offered. The lead sees it under my-actions
   (`routing_deviation_decision`) and is notified.
@@ -1934,7 +1938,11 @@ every position, and everyone else their own departments' rows. Management is
 never routed and gets no cost-sheet rate row
 (`cost_sheet_service.NON_ROUTABLE_DEPARTMENTS`): a routing deviation that adds
 Management, or a retired department, is refused (400), and the add pickers do
-not offer them.
+not offer them. The scoping meeting's RASIC grid follows the same rule
+(close-out A1-01): Management only as I (Informed), a retired department
+only shown when an older record carries it, so it can be taken off; create,
+update and proceed refuse R/A/S/C for either with the same words, and
+`build_routing` drops them from stage 1.
 Until it has members, a Project Management member gives that OK. Quality still
 signs without price.
 Migration 117 also adds the columns later lanes fill: `sales_owner_id`,

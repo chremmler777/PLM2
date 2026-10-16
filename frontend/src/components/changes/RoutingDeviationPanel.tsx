@@ -43,11 +43,14 @@ interface Props {
   stageOrder: number
   /** Lead, PM or admin while the change is in assessment. */
   canAdd: boolean
-  /** Mirrors the backend 4-eyes rule; computed by the caller. */
+  /** The backend's verdict (stage-state routing_deviation.can_decide). */
   canDecide: boolean
   /** The change lead, so the wait line names who decides: the lead, or the
    *  Project Manager when the lead proposed it. Omitted: the old wording. */
   leadId?: number | null
+  /** Who decides as the backend judges it ('lead' | 'pm'): an idle lead
+   *  hands the call to Project Management. */
+  decider?: string | null
 }
 
 function AddDepartmentDialog({ open, candidates, pending = false, onSubmit, onClose }: {
@@ -121,11 +124,11 @@ function AddDepartmentDialog({ open, candidates, pending = false, onSubmit, onCl
 }
 
 export default function RoutingDeviationPanel({
-  changeId, routing, departments, routedIds, stageOrder, canAdd, canDecide, leadId,
+  changeId, routing, departments, routedIds, stageOrder, canAdd, canDecide, leadId, decider,
 }: Props) {
   const qc = useQueryClient()
   const { userId } = useAuth()
-  const waitKey = deviationWaitKey(routing?.deviation_proposed_by, leadId, userId)
+  const waitKey = deviationWaitKey(routing?.deviation_proposed_by, leadId, userId, decider)
   // The viewer IS the lead the line waits on, only acting as a department.
   const actsAs = getActsAsDepartmentId()
   const leadActingAs = actsAs != null && waitKey === 'routingDev.waitingForLead'

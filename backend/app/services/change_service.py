@@ -4574,7 +4574,6 @@ class ChangeService:
         judged = [c for c in open_changes if c.status in ("in_assessment", "costing")]
         if judged:
             from app.models.change import ChangeRouting
-            from app.services.change_people import is_acting
             from app.services.change_routing_service import _pending_proposers
             idle = await ChangeService.leadless_ids(db, judged)
             dept_names: Optional[dict] = None
@@ -4585,7 +4584,7 @@ class ChangeService:
                     lead_free = c.lead_id is not None and c.lead_id not in who
                     if user.id not in who and (
                             (holds_lead(c, user) if lead_free and c.id not in idle
-                             else is_pm_member and not is_acting(user))):
+                             else is_pm_member)):
                         out.append({
                             **await base(c), "kind": "routing_deviation_decision",
                             "label": "Decide added department",
@@ -4880,6 +4879,8 @@ class ChangeService:
         from app.services.workflow_service import WorkflowService
 
         actions: list[dict] = []
+        if user.effective_role == "viewer":
+            return actions    # read-only: every write is refused (R24)
         dept_ids = set(await WorkflowService.effective_department_ids(session, user))
 
         # kind "assessment": active change-scoped assessment tasks in the
@@ -5046,7 +5047,9 @@ class ChangeService:
                         acting=is_acting(user),
                         proposers=await _pending_proposers(session, routing),
                         lead_idle=bool(await ChangeService.leadless_ids(
-                            session, [change])) and change.lead_id is not None)):
+                            session, [change])) and change.lead_id is not None,
+                        pm_ok=await ChangeRoutingService.deviation_pm_ok(
+                            session, user))):
                 actions.append({
                     "kind": "routing_deviation_decision",
                     "label": "Decide added department",

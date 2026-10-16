@@ -32,9 +32,11 @@ const small = btnSm.secondary
 export interface MotherPlantTabProps {
   change: ChangeRequest
   departments: { id: number; name: string; is_active?: boolean }[]
+  /** A read-only viewer or a closed record: nothing to upload (R24). */
+  readOnly?: boolean
 }
 
-export default function MotherPlantTab({ change, departments }: MotherPlantTabProps) {
+export default function MotherPlantTab({ change, departments, readOnly = false }: MotherPlantTabProps) {
   const qc = useQueryClient()
   const id = change.id
   const { data: state, isError } = useQuery({
@@ -51,14 +53,14 @@ export default function MotherPlantTab({ change, departments }: MotherPlantTabPr
 
   return (
     <div className="space-y-4" data-testid="mother-plant-tab">
-      <Source change={change} state={state} onUploaded={() => refresh()} />
+      <Source change={change} state={state} readOnly={readOnly} onUploaded={() => refresh()} />
       <InformTeam change={change} state={state} departments={departments} onDone={refresh} />
     </div>
   )
 }
 
-function Source({ change, state, onUploaded }: {
-  change: ChangeRequest; state: MotherPlantState; onUploaded: () => void
+function Source({ change, state, onUploaded, readOnly }: {
+  change: ChangeRequest; state: MotherPlantState; onUploaded: () => void; readOnly: boolean
 }) {
   const qc = useQueryClient()
   const upload = useMutation({
@@ -73,7 +75,7 @@ function Source({ change, state, onUploaded }: {
   })
   const href = (aid: number) => `${API_BASE_URL}/v1/changes/${change.id}/attachments/${aid}/download`
   // Their timing seeds the plan at approval; after that it is a record.
-  const timingOpen = ['captured', 'scoping'].includes(change.status)
+  const timingOpen = !readOnly && ['captured', 'scoping'].includes(change.status)
   return (
     <section className={card} data-testid="mother-plant-source">
       <h3 className="text-xs uppercase tracking-wide text-slate-400">{plantText('mp.from', state.mother_plant_name)}</h3>
@@ -112,11 +114,11 @@ function Source({ change, state, onUploaded }: {
               ))}
             </ul>
           )}
-          <label className="mt-2 inline-block cursor-pointer text-xs text-sky-300 hover:underline">
+          {!readOnly && <label className="mt-2 inline-block cursor-pointer text-xs text-sky-300 hover:underline">
             Add a document
             <input type="file" className="hidden" aria-label={plantText('mp.addDocument', state.mother_plant_name)}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate({ file: f, kind: 'general' }); e.target.value = '' }} />
-          </label>
+          </label>}
         </div>
         <div>
           <p className="text-xs text-slate-400">Their timing (MS Project)</p>

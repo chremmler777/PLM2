@@ -1026,3 +1026,26 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(onInformTeam).toHaveBeenCalled()
   })
 })
+
+describe('ScopingPanel for a read-only viewer (R24)', () => {
+  afterEach(cleanup)
+
+  it('offers no quick add, no meeting controls and read-only check items', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([])
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 41, change_id: 7, kind: 'needs_info', flag_type: 'check', check_what: 'drawing',
+        note: 'Rib thickness', raised_by: 9, raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z',
+        is_open: true, department_id: 2, owner_department_names: ['Quality'] },
+    ] as never)
+    render(wrap(<ScopingPanel change={change({ scoping_v2: true })} readOnly />))
+    expect(await screen.findByTestId('check-row-41')).toBeTruthy()
+    expect(screen.queryByTestId('quick-add')).toBeNull()
+    expect(screen.queryByTestId('quick-add-submit')).toBeNull()
+    expect(screen.queryByRole('button', { name: /save meeting/i })).toBeNull()
+    expect(screen.queryByTestId('meeting-form-open')).toBeNull()
+    cleanup()
+    // the same change for a writer: the quick add is there
+    render(wrap(<ScopingPanel change={change({ scoping_v2: true })} />))
+    expect(await screen.findByTestId('quick-add-submit')).toBeTruthy()
+  })
+})

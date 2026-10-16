@@ -1222,7 +1222,7 @@ export default function ChangeDetailPage() {
           canAnswerConcerns={isSalesMember} isPm={isPmMember}
           canRecordMeeting={canRecordMeeting}
           onInformTeam={motherPlant ? () => setTab('mother') : undefined}
-          myDepartmentIds={myActions?.memberships ?? []} />
+          myDepartmentIds={myActions?.memberships ?? []} readOnly={readOnly} />
         </div>
       )}
 
@@ -1251,7 +1251,7 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'mother' && motherPlant && (
-        <MotherPlantTab change={change} departments={departments} />
+        <MotherPlantTab change={change} departments={departments} readOnly={readOnly} />
       )}
 
       {effectiveTab === 'timing' && change && (
@@ -1303,7 +1303,7 @@ export default function ChangeDetailPage() {
             editable={canWrite && change.status === 'in_assessment'} isPm={isPmMember}
             canSeeAll={canSeeCosts}
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
-            userId={userId ?? null} isChangeLead={isChangeLead}
+            routingDeviation={stage?.routing_deviation ?? null}
             declinedIds={stage?.assessment?.declined_pending.map((d) => d.department_id)}
             round={assessmentState}
             onContinueCosting={() => setTab('costing')} />

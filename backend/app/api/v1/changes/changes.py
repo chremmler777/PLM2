@@ -1451,11 +1451,14 @@ async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
-    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_routing_service import ChangeRoutingService, DeviationForbidden
     try:
         await ChangeRoutingService.reject_deviation(
             db, change, current_user.id, body.reason,
-            acting=is_acting(current_user))
+            acting=is_acting(current_user),
+            pm_ok=await ChangeRoutingService.deviation_pm_ok(db, current_user))
+    except DeviationForbidden as e:
+        raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()
@@ -1468,11 +1471,14 @@ async def approve_deviation(change_id: int, db: AsyncSession = Depends(get_db),
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
-    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_routing_service import ChangeRoutingService, DeviationForbidden
     try:
         await ChangeRoutingService.approve_deviation(
             db, change, current_user.id,
-            acting=is_acting(current_user))
+            acting=is_acting(current_user),
+            pm_ok=await ChangeRoutingService.deviation_pm_ok(db, current_user))
+    except DeviationForbidden as e:
+        raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()

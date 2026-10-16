@@ -740,7 +740,12 @@ async def _third_user(session_factory, seed):
                  role="engineer", is_active=True, mfa_enabled=False)
         s.add(u)
         await s.commit()
-        return u.id
+        uid = u.id
+    # the third person who decides is Project Management (close-out A1-02:
+    # when the lead filed part of the bundle, nobody else decides)
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, uid, "Project Manager")
+    return uid
 
 
 async def test_nobody_who_filed_a_request_of_the_bundle_decides_it(
@@ -868,13 +873,7 @@ async def test_lead_in_the_bundle_hands_the_decision_to_pm_on_plate_and_endpoint
     from app.models.workflow import Department, UserDepartment
     cid = await _dev_seeded_change(session_factory, seed)
     await _dev_build_routing(session_factory, seed, cid)
-    pm = await _third_user(session_factory, seed)
-    async with session_factory() as s:
-        d = Department(name="Project Manager", flow_type="action", is_active=True,
-                       sort_order=99)
-        s.add(d); await s.flush()
-        s.add(UserDepartment(user_id=pm, department_id=d.id))
-        await s.commit()
+    pm = await _third_user(session_factory, seed)   # a Project Manager member
     lead, admin = seed["engineer_id"], seed["admin_id"]
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)

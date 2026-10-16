@@ -100,11 +100,13 @@ export function settledLine(c: ChangeConcern, scoped: boolean): string {
 export function deviationWaitKey(
   proposedBy: number | null | undefined, leadId: number | null | undefined,
   viewerId: number | null | undefined,
+  /** Who decides, as the backend judges it (stage-state routing_deviation.decider). */
+  decider?: string | null,
 ): string {
   if (proposedBy != null && viewerId != null && proposedBy === viewerId) return 'routingDev.waitingYou'
-  if (leadId === undefined) return 'routingDev.waitingForLead'
-  if (leadId === null) return 'routingDev.waitingForAnyone'
-  if (proposedBy != null && proposedBy === leadId) return 'routingDev.waitingForPm'
+  if (proposedBy != null && leadId != null && proposedBy === leadId) return 'routingDev.waitingForPm'
+  // No lead, or one who cannot act (read-only, inactive): Project Management.
+  if (decider === 'pm' || leadId === null) return 'routingDev.waitingForPmLeadless'
   return 'routingDev.waitingForLead'
 }
 

@@ -283,6 +283,10 @@ def _retarget_task(task: WfInstanceTask, rasic_letter: str,
         task.due_date = None
 
 
+class DeviationForbidden(ValueError):
+    """The caller may not decide this routing change (403, not 400)."""
+
+
 class ChangeRoutingService:
 
     @staticmethod
@@ -1116,26 +1120,30 @@ class ChangeRoutingService:
         # The decision sits with the lead (4-eyes: nobody who filed a request
         # of the pending bundle takes it). If the lead filed one, Project
         # Management decides (user_can_decide_deviation): tell its members
-        # who filed none. Once per pending deviation.
-        if change.lead_id is not None:
-            proposers = await _pending_proposers(session, routing)
-            if change.lead_id not in proposers:
-                recipients = [change.lead_id]
-            else:
-                pm_id = (await session.execute(
-                    select(Department.id).where(Department.name == "Project Manager")
-                )).scalar_one_or_none()
-                members = [] if pm_id is None else (await session.execute(
-                    select(UserDepartment.user_id).where(
-                        UserDepartment.department_id == pm_id))).scalars().all()
-                recipients = [u for u in members if u not in proposers]
-            await NotificationService.notify_once(
-                session, recipients, kind="routing_deviation_pending",
-                subject_key=f"routing-dev:{change.id}:{routing.deviation_proposed_by}:{desc}",
-                title=f"Routing change pending: {change.change_number}",
-                body=f"{desc.capitalize()}: needs your approval.",
-                link=f"/changes/{change.id}?tab=assessments",
-            )
+        # who filed none; the same when there is no lead or the lead cannot
+        # act (the wait row names Project Management). Once per pending
+        # deviation.
+        proposers = await _pending_proposers(session, routing)
+        idle = change.lead_id is not None and bool(
+            await ChangeService.leadless_ids(session, [change]))
+        if (change.lead_id is not None and change.lead_id not in proposers
+                and not idle):
+            recipients = [change.lead_id]
+        else:
+            pm_id = (await session.execute(
+                select(Department.id).where(Department.name == "Project Manager")
+            )).scalar_one_or_none()
+            members = [] if pm_id is None else (await session.execute(
+                select(UserDepartment.user_id).where(
+                    UserDepartment.department_id == pm_id))).scalars().all()
+            recipients = [u for u in members if u not in proposers]
+        await NotificationService.notify_once(
+            session, recipients, kind="routing_deviation_pending",
+            subject_key=f"routing-dev:{change.id}:{routing.deviation_proposed_by}:{desc}",
+            title=f"Routing change pending: {change.change_number}",
+            body=f"{desc.capitalize()}: needs your approval.",
+            link=f"/changes/{change.id}?tab=assessments",
+        )
         # A row the op added to a started stage without a task gets one now.
         await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
@@ -1245,7 +1253,8 @@ class ChangeRoutingService:
     def user_can_decide_deviation(change: ChangeRequest, routing: ChangeRouting,
                                   user_id: int, *, acting: bool = False,
                                   proposers: Optional[set[int]] = None,
-                                  lead_idle: bool = False) -> bool:
+                                  lead_idle: bool = False,
+                                  pm_ok: bool = False) -> bool:
         """Who may approve or reject a pending routing deviation. No
         self-decision: the decision covers the whole bundle of requests since
         the last decision, so nobody who filed ANY of them decides it
@@ -1257,7 +1266,11 @@ class ChangeRoutingService:
         acting: the caller acts as a department, which drops the personal
         lead privilege (change_people.holds_lead).
         lead_idle: the lead cannot act (read-only or inactive,
-        ChangeService.leadless_ids): decided as if there were no lead (R18)."""
+        ChangeService.leadless_ids): decided as if there were no lead (R18).
+        pm_ok: the caller may take the decision the lead cannot
+        (deviation_pm_ok: a Project Manager member or an admin). Without a
+        deciding lead nobody else does: the wait row says Project
+        Management decides, and so does the gate (R25)."""
         if routing.deviation_status != "pending_approval":
             return False
         who = set(proposers or ())
@@ -1269,25 +1282,60 @@ class ChangeRoutingService:
                 and change.lead_id not in who
                 and (acting or user_id != change.lead_id)):
             return False
-        return True
+        if (change.lead_id is not None and not lead_idle
+                and change.lead_id not in who):
+            return True        # the lead's own call
+        return pm_ok
+
+    @staticmethod
+    async def _pm_ok_of(session: AsyncSession, user_id: int,
+                        pm_ok: Optional[bool]) -> bool:
+        """The endpoint passes deviation_pm_ok for the request's user (acts-as
+        aware); a direct call judges the stored user, not acting."""
+        if pm_ok is not None:
+            return pm_ok
+        from app.models.entities import User
+        user = await session.get(User, user_id)
+        return user is not None and await ChangeRoutingService.deviation_pm_ok(
+            session, user)
+
+    @staticmethod
+    async def deviation_pm_ok(session: AsyncSession, user) -> bool:
+        """May this user decide a routing change the lead cannot (the lead
+        filed part of it, is idle, or there is none)? A member of Project
+        Manager (acts-as aware, active department) or an admin; never a
+        read-only user. One rule for the endpoints, my_actions, the plate
+        and the wait row."""
+        role = getattr(user, "effective_role", None)
+        if role == "viewer":
+            return False
+        if role == "admin":
+            return True
+        from app.services.change_service import ChangeService
+        return await ChangeService.member_of(session, user, "Project Manager")
 
     @staticmethod
     def _check_decide(change: ChangeRequest, routing: ChangeRouting, user_id: int,
                       verb: str, acting: bool = False, *,
                       proposers: Optional[set[int]] = None,
-                      lead_idle: bool = False) -> None:
+                      lead_idle: bool = False, pm_ok: bool = False) -> None:
         if routing.deviation_status != "pending_approval":
             raise ValueError("No deviation pending approval")
         if routing.deviation_proposed_by == user_id:
-            raise ValueError(f"Cannot {verb} your own routing deviation")
+            raise DeviationForbidden(f"Cannot {verb} your own routing deviation")
         if proposers and user_id in proposers:
-            raise ValueError(
+            raise DeviationForbidden(
                 f"Cannot {verb} this routing deviation: it includes a request "
                 "you filed")
         if not ChangeRoutingService.user_can_decide_deviation(
                 change, routing, user_id, acting=acting, proposers=proposers,
-                lead_idle=lead_idle):
-            raise ValueError(f"Only the change lead may {verb} this deviation")
+                lead_idle=lead_idle, pm_ok=pm_ok):
+            lead_decides = (change.lead_id is not None and not lead_idle
+                            and change.lead_id not in (proposers or set())
+                            and change.lead_id != routing.deviation_proposed_by)
+            raise DeviationForbidden(
+                f"Only the change lead may {verb} this deviation" if lead_decides
+                else f"Only Project Management may {verb} this deviation")
 
     @staticmethod
     def _settle_pending_informed(routing: ChangeRouting, *, keep: bool) -> list[int]:
@@ -1313,7 +1361,8 @@ class ChangeRoutingService:
 
     @staticmethod
     async def reject_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
-                               reason: str, *, acting: bool = False) -> ChangeRouting:
+                               reason: str, *, acting: bool = False,
+                               pm_ok: Optional[bool] = None) -> ChangeRouting:
         """Reject the pending deviation and undo what it added.
 
         Undo covers the 'add' op: the rows THIS deviation added (its
@@ -1338,7 +1387,8 @@ class ChangeRoutingService:
         proposers = await _pending_proposers(session, routing)
         ChangeRoutingService._check_decide(
             change, routing, user_id, "reject", acting, proposers=proposers,
-            lead_idle=bool(await ChangeService.leadless_ids(session, [change])))
+            lead_idle=bool(await ChangeService.leadless_ids(session, [change])),
+            pm_ok=await ChangeRoutingService._pm_ok_of(session, user_id, pm_ok))
         if not (reason and reason.strip()):
             raise ValueError("A reason is required to reject a routing deviation")
         # What the routing stands at: the snapshot, with the adds and
@@ -1478,7 +1528,8 @@ class ChangeRoutingService:
 
     @staticmethod
     async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
-                                *, acting: bool = False) -> ChangeRouting:
+                                *, acting: bool = False,
+                                pm_ok: Optional[bool] = None) -> ChangeRouting:
         from app.services.change_service import ChangeService
         # Lock order (see _lock_routing): the instance, then the routing.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
@@ -1490,7 +1541,8 @@ class ChangeRoutingService:
         proposers = await _pending_proposers(session, routing)
         ChangeRoutingService._check_decide(
             change, routing, user_id, "approve", acting, proposers=proposers,
-            lead_idle=bool(await ChangeService.leadless_ids(session, [change])))
+            lead_idle=bool(await ChangeService.leadless_ids(session, [change])),
+            pm_ok=await ChangeRoutingService._pm_ok_of(session, user_id, pm_ok))
         # A pending "not our responsibility" re-letters only now (§16 P1-3),
         # and only if the department has not answered in the meantime (then
         # its answer stands and the decline is moot).

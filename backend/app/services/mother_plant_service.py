@@ -99,6 +99,8 @@ class MotherPlantService:
         # An admin acting as a department is that department here: the
         # personal lead privilege steps aside (same as the change page).
         from app.services.change_people import holds_lead
+        if user.effective_role == "viewer":
+            return False      # read-only, even when named as lead (R24)
         if holds_lead(change, user):
             return True
         return await ChangeService._user_in_department(session, user, PM_DEPARTMENT)

@@ -983,7 +983,7 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
 
   it('proposes the add with letter, the assessment stage and a reason; routed departments are not offered', async () => {
     vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith() as never)
-    buckets({ canSeeAll: true, canAddDepartment: true, userId: 5, isChangeLead: true })
+    buckets({ canSeeAll: true, canAddDepartment: true })
     fireEvent.click(await screen.findByTestId('add-department-button'))
     const select = screen.getByTestId('add-department-select') as HTMLSelectElement
     const offered = [...select.options].map((o) => o.value).filter(Boolean)
@@ -1006,8 +1006,8 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
       has_deviation: true, deviation_status: 'pending_approval',
       deviation_note: 'Packaging changes with the new clip', deviation_proposed_by: 9,
     }) as never)
-    buckets({ canSeeAll: true, canAddDepartment: true, userId: 5, isChangeLead: true,
-      change: change({ lead_id: 5 }) })
+    buckets({ canSeeAll: true, canAddDepartment: true,
+      routingDeviation: { can_decide: true, decider: 'lead' }, change: change({ lead_id: 5 }) })
     expect((await screen.findByTestId('routing-deviation-note')).textContent)
       .toBe('Packaging changes with the new clip')
     // No stacking while one is pending: the button waits for the decision.
@@ -1021,30 +1021,31 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
     await waitFor(() => expect(changesApi.approveDeviation).toHaveBeenCalledWith(7))
   })
 
-  it('keeps the decision away from the proposer and from non-leads', async () => {
+  it('offers the decision only where the backend says can_decide', async () => {
     vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
       has_deviation: true, deviation_status: 'pending_approval',
       deviation_note: 'x', deviation_proposed_by: 5,
     }) as never)
-    // The proposer (user 5) is the lead — 4-eyes: they may not decide.
-    buckets({ canSeeAll: true, userId: 5, isChangeLead: true, change: change({ lead_id: 5 }) })
+    // The proposer (user 5) is the lead: 4-eyes, they may not decide.
+    buckets({ canSeeAll: true, change: change({ lead_id: 5 }),
+      routingDeviation: { can_decide: false, decider: 'pm' } })
     expect(await screen.findByTestId('routing-deviation-waiting')).toBeTruthy()
     expect(screen.queryByTestId('routing-deviation-approve')).toBeNull()
     cleanup()
-    // A member who is neither lead nor proposer, on a change with a lead: not theirs.
+    // The lead is read-only (a viewer): the backend hands the call to
+    // Project Management. The viewer lead gets no buttons ...
     vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
       has_deviation: true, deviation_status: 'pending_approval',
       deviation_note: 'x', deviation_proposed_by: 9,
     }) as never)
-    buckets({ canSeeAll: true, userId: 5, isChangeLead: false, change: change({ lead_id: 8 }) })
-    expect(await screen.findByTestId('routing-deviation-waiting')).toBeTruthy()
+    buckets({ canSeeAll: true, change: change({ lead_id: 5 }),
+      routingDeviation: { can_decide: false, decider: 'pm' } })
+    expect((await screen.findByTestId('routing-deviation-waiting')).textContent)
+      .toBe(t('routingDev.waitingForPmLeadless'))
     cleanup()
-    // ...but when the LEAD proposed it, anyone else (the PM) decides.
-    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
-      has_deviation: true, deviation_status: 'pending_approval',
-      deviation_note: 'x', deviation_proposed_by: 8,
-    }) as never)
-    buckets({ canSeeAll: true, userId: 5, isChangeLead: false, change: change({ lead_id: 8 }) })
+    // ... and the PM, who is not the lead, sees them.
+    buckets({ canSeeAll: true, change: change({ lead_id: 5 }),
+      routingDeviation: { can_decide: true, decider: 'pm' } })
     expect(await screen.findByTestId('routing-deviation-approve')).toBeTruthy()
   })
 })

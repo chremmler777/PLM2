@@ -2194,9 +2194,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Vom Änderungsleiter vorgeschlagen: wartet auf die Entscheidung des Projektmanagers.',
     en: 'Proposed by the change lead: waiting for the Project Manager to decide.',
   },
-  'routingDev.waitingForAnyone': {
-    de: 'Wartet auf eine Entscheidung durch jemand anderen als den Vorschlagenden.',
-    en: 'Waiting for someone other than the proposer to decide.',
+  'routingDev.waitingForPmLeadless': {
+    de: 'Kein Change Lead kann entscheiden: wartet auf die Entscheidung des Projektmanagers.',
+    en: 'No change lead can decide: waiting for the Project Manager to decide.',
   },
   'deadline.pushbackTitle': { de: 'Angebotstermin verschieben', en: 'Push back the quote deadline' },
   'deadline.pushbackWhy': {

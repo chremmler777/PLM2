@@ -32,8 +32,11 @@ describe('deviationWaitKey', () => {
   it('tells the proposer someone else decides', () => {
     expect(deviationWaitKey(5, 9, 5)).toBe('routingDev.waitingYou')
   })
-  it('names anyone but the proposer when there is no lead', () => {
-    expect(deviationWaitKey(3, null, 5)).toBe('routingDev.waitingForAnyone')
+  it('names Project Management when there is no lead', () => {
+    expect(deviationWaitKey(3, null, 5)).toBe('routingDev.waitingForPmLeadless')
+  })
+  it('names Project Management when the backend says the lead cannot act', () => {
+    expect(deviationWaitKey(3, 9, 5, 'pm')).toBe('routingDev.waitingForPmLeadless')
   })
 })
 

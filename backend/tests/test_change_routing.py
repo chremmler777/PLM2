@@ -600,7 +600,7 @@ async def test_reject_deviation_undoes_the_added_department(
     # Proposer cannot reject their own deviation either (4-eyes both ways).
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
                             json={"reason": "no"}, headers=auth)
-    assert res.status_code == 400, res.text
+    assert res.status_code == 403, res.text
     admin_auth = await _login_admin(client)
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
                             json={"reason": "MfgEng is not touched by this"}, headers=admin_auth)

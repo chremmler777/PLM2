@@ -77,8 +77,11 @@ const DECISION_LABEL: Record<string, string> = {
 
 export default function ScopingPanel(
   { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [],
-    canRecordMeeting = true, onInformTeam }: {
+    canRecordMeeting = true, onInformTeam, readOnly = false }: {
     change: ChangeRequest & { attachments?: Attachment[] }
+    /** A read-only viewer (no active department) or a closed record: the
+     *  backend refuses every write, so no control is offered (R24). */
+    readOnly?: boolean
     /** A change from KTX Weissenburg / Solingen: opens the tab where the
      *  information goes out to the team (its scoping ends there, never in
      *  an assessment). */
@@ -308,12 +311,14 @@ export default function ScopingPanel(
   const [showMeeting, setShowMeeting] = useState<number | null>(null)
 
   const open = status === 'captured' || status === 'scoping'
+  // What may be written here: open, and not by a read-only viewer (R24).
+  const writable = open && !readOnly
   // Meetings belong to scoping: the backend refuses to create one while the
   // change is still being captured, so the recording UI stays hidden there.
   const meetingOpen = status === 'scoping'
   // Recording and deciding are the lead's, PM's or an admin's (the backend
   // answers anyone else 403): others see the record, not the controls.
-  const recordOpen = meetingOpen && canRecordMeeting
+  const recordOpen = meetingOpen && canRecordMeeting && !readOnly
   // The most recent decision that leaves a ball in our court: a rejection the
   // customer has to be told about, or missing information somebody has to go
   // and get. Cleared once a later meeting reaches 'proceed'.
@@ -360,7 +365,7 @@ export default function ScopingPanel(
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name
   const questionCard = (c: ChangeConcern) => (
     <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
-      attachments={attachments} editable={open}
+      attachments={attachments} editable={writable}
       canAnswer={canAnswerQuestion(c, {
         userId, actingAs, isSales: canAnswerConcerns, isPm, myDepartmentIds,
       })}
@@ -787,11 +792,11 @@ export default function ScopingPanel(
         {/* HARD #7: Quality's ppap_decision on an internal change, and the
             Sales answer once it became a customer change. */}
         {v2 && (ppapOwed || change.ppap_decision != null) && (
-          <PpapDecisionCard change={change} editable={open} onChanged={invalidate}
+          <PpapDecisionCard change={change} editable={writable} onChanged={invalidate}
             isQuality={departments.some((d) => d.name === 'Quality' && myDepartmentIds.includes(d.id))} />
         )}
         {v2 && change.customer_flip_at && (
-          <CustomerFlipCard change={change} editable={change.status !== 'closed'}
+          <CustomerFlipCard change={change} editable={change.status !== 'closed' && !readOnly}
             isSales={canAnswerConcerns} attachments={attachments} onChanged={invalidate} />
         )}
 
@@ -801,11 +806,11 @@ export default function ScopingPanel(
             impactedItems={(change as { impacted_items?: ImpactedItem[] }).impacted_items ?? []}
             departments={departments} myDepartmentIds={myDepartmentIds}
             changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]}
-            editable={open} onChanged={invalidate} />
+            editable={writable} onChanged={invalidate} />
         )}
 
         {/* Everything else the team flagged, in one strip. */}
-        <ConcernStrip changeId={changeId} editable={open} departments={departments}
+        <ConcernStrip changeId={changeId} editable={writable} departments={departments}
           voteOnly={v2}
           isPm={isPm} hideConcernIds={concerns.filter((c) => c.kind === 'needs_info').map((c) => c.id)}
           myDepartmentIds={myDepartmentIds}
@@ -868,7 +873,7 @@ export default function ScopingPanel(
         </ul>
       </section>
 
-      {meetingOpen && !canRecordMeeting && (
+      {meetingOpen && (!canRecordMeeting || readOnly) && (
         <p className="text-xs text-slate-500" data-testid="meeting-record-rights">{t('meeting.recordRights')}</p>
       )}
       {recordOpen && !formShown && (

@@ -168,7 +168,7 @@ function ObjectList({ objects, partName }: {
 
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
-  canAddDepartment = false, userId = null, isChangeLead = false, declinedIds, round,
+  canAddDepartment = false, routingDeviation = null, declinedIds, round,
   onContinueCosting,
 }: {
   change: ChangeDetail
@@ -182,9 +182,10 @@ export default function AssessmentBuckets({
   canSeeAll?: boolean
   /** Lead, PM or admin may put a forgotten department on the hook mid-assessment. */
   canAddDepartment?: boolean
-  /** For the 4-eyes rule on a pending routing change (see canDecideDeviation). */
-  userId?: number | null
-  isChangeLead?: boolean
+  /** The pending routing change as the backend judges it for this viewer
+   *  (stage-state routing_deviation): can_decide is the lead's call, else
+   *  Project Management's, never a read-only user's (R24). */
+  routingDeviation?: { can_decide?: boolean; decider?: string } | null
   /** "Not our responsibility" declines awaiting a decision (stage-state). */
   declinedIds?: number[]
   /** The assessment round as "Blocked by" counts it (stage-state, else
@@ -288,19 +289,16 @@ export default function AssessmentBuckets({
     }
   }).sort((x, y) => x.stage - y.stage || deptName(x.id).localeCompare(deptName(y.id)))
 
-  // Mirrors ChangeRoutingService.user_can_decide_deviation: never the
-  // proposer; a non-lead's proposal is the lead's call, the lead's proposal
-  // is anyone else's (the PM's). With no lead, anyone but the proposer.
-  const proposedBy = routing?.deviation_proposed_by ?? null
-  const canDecideDeviation = routing?.deviation_status === 'pending_approval'
-    && userId != null && proposedBy !== userId
-    && (change.lead_id == null || isChangeLead || proposedBy === change.lead_id)
+  // The backend's ChangeRoutingService.user_can_decide_deviation, served:
+  // no local mirror that could offer a button the endpoint refuses.
+  const canDecide = routing?.deviation_status === 'pending_approval'
+    && !!routingDeviation?.can_decide
   const deviationPanel = (
     <RoutingDeviationPanel changeId={changeId} routing={routing}
       departments={departments} routedIds={ids}
       stageOrder={Number.isFinite(assessStage) ? assessStage : 1}
-      canAdd={canAddDepartment && editable} canDecide={!!canDecideDeviation}
-      leadId={change.lead_id ?? null} />
+      canAdd={canAddDepartment && editable} canDecide={canDecide}
+      leadId={change.lead_id ?? null} decider={routingDeviation?.decider ?? null} />
   )
 
   if (rows.length === 0) {
