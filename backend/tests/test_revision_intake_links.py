@@ -464,3 +464,20 @@ async def test_impact_tree_names_the_pending_index(client, world):
     assert node["resulting_revision_id"] == rev["id"]
     assert node["resulting_revision_label"] == f"{rev['revision_name']} · 005"
     assert node["resulting_revision_pending"] is True
+
+
+# ----------------------------------------------------------------------
+# A2-10 (R34): My Tasks reads the live changes of all pending intakes at once
+# ----------------------------------------------------------------------
+async def test_a2_10_my_intakes_reads_live_changes_in_one_query(
+        client, session_factory, world, monkeypatch):
+    from app.services.revision_intake_service import RevisionIntakeService
+    await _receive(client, world["part_id"], statement="official")
+    i = await _intake(client, world["part_id"])
+
+    async def _per_row(*a, **k):
+        raise AssertionError("live_changes_for_part per intake (N+1)")
+    monkeypatch.setattr(RevisionIntakeService, "live_changes_for_part", _per_row)
+    res = await client.get(f"{API}/intakes/my", headers=await _auth(client, "dev"))
+    assert res.status_code == 200, res.text
+    assert i["id"] in [x["id"] for x in res.json()["triage"]]

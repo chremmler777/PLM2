@@ -1169,10 +1169,12 @@ class RevisionIntakeService:
         triage = []
         can = await RevisionIntakeService.may_triage(session, user)
         if can:
-            for i in await RevisionIntakeService.list(session, user, waiting=True):
-                if i.status not in ("pending", "decided"):
-                    continue
-                row = await RevisionIntakeService.out(session, i, True)
+            rows = [i for i in await RevisionIntakeService.list(session, user, waiting=True)
+                    if i.status in ("pending", "decided")]
+            # the live changes of every listed part in one query (R34, A2-10)
+            lives = await RevisionIntakeService.live_change_rows(session, rows)
+            for i in rows:
+                row = await RevisionIntakeService.out(session, i, True, live_rows=lives)
                 if not row["needs_triage"]:
                     continue
                 # Project team (spec §18): Development's responsible on the

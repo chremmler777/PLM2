@@ -3288,8 +3288,9 @@ async def list_concerns(
     from app.services import cm_switches
     checks_v2 = (change.status == "in_assessment"
                  and cm_switches.on("ASSESSMENT_V2"))
-    my_dept_ids = (set(await WorkflowService.effective_department_ids(db, current_user))
-                   if checks_v2 else set())
+    # the caller's departments once for every row's checks (R34, A2-10)
+    viewer = await MeetingService.viewer_departments(db, current_user)
+    my_dept_ids = viewer[0] if checks_v2 else set()
     for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
         if c.kind == "needs_info":
@@ -3300,11 +3301,12 @@ async def list_concerns(
             # never answered (POST .../answer refuses it, R24)
             row.can_answer = (c.is_open and not (checks_v2 and c.is_check)
                               and await MeetingService.can_answer_question(
-                                  db, change, c, current_user))
+                                  db, change, c, current_user, viewer))
             # the confirm item of an Assumed answer: open in any live status,
             # the question open or closed (its named confirmer, or whoever
             # may answer it)
-            row.can_confirm = await MeetingService.can_confirm(db, change, c, current_user)
+            row.can_confirm = await MeetingService.can_confirm(
+                db, change, c, current_user, viewer)
             row.customer_copy = MeetingService.customer_copy(
                 change, c, part_numbers.get(c.part_id))
             row.owner_department_names = [concern_depts.get(d, f"#{d}")
@@ -3317,7 +3319,8 @@ async def list_concerns(
             row.confirm_by_name = names.get(c.confirm_by_id)
             row.can_switch = c.is_open and (
                 (c.raised_by == current_user.id and not acting) or is_pm_member)
-            row.can_add_to = await MeetingService.may_add_to(db, change, c, current_user)
+            row.can_add_to = await MeetingService.may_add_to(
+                db, change, c, current_user, viewer)
             if c.is_check and checks_v2:
                 # same rules as POST .../check and .../reopen
                 row.can_check = c.is_open and bool(c.owner_department_ids) and (

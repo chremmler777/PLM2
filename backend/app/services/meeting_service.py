@@ -805,7 +805,8 @@ class MeetingService:
 
     @staticmethod
     async def may_add_to(session: AsyncSession, change: ChangeRequest,
-                         concern: ChangeConcern, user: User) -> bool:
+                         concern: ChangeConcern, user: User,
+                         viewer: Optional[tuple[set[int], set[str]]] = None) -> bool:
         """'Add to #n' (spec §3): an open, unanswered question or check item
         in capture or scoping, by the asker, a department it is raised for,
         or whoever may answer it. Served as can_add_to (R24)."""
@@ -816,10 +817,12 @@ class MeetingService:
         acting = getattr(user, "acts_as_department_id", None) is not None
         if concern.raised_by == user.id and not acting:
             return True
-        mine = set(await WorkflowService.effective_department_ids(session, user))
-        if mine & set(concern.owner_department_ids):
+        if viewer is None:
+            viewer = await MeetingService.viewer_departments(session, user)
+        if viewer[0] & set(concern.owner_department_ids):
             return True
-        return await MeetingService.can_answer_question(session, change, concern, user)
+        return await MeetingService.can_answer_question(
+            session, change, concern, user, viewer)
 
     @staticmethod
     async def join_flag(
@@ -1020,7 +1023,8 @@ class MeetingService:
 
     @staticmethod
     async def can_confirm(session: AsyncSession, change: ChangeRequest,
-                          concern: ChangeConcern, user: User) -> bool:
+                          concern: ChangeConcern, user: User,
+                          viewer: Optional[tuple[set[int], set[str]]] = None) -> bool:
         """The confirm item of an Assumed answer is open and the caller may
         close it: the person named to confirm it, or anyone who may answer
         the question, in any live status, the question open or closed."""
@@ -1029,7 +1033,8 @@ class MeetingService:
         acting = getattr(user, "acts_as_department_id", None) is not None
         if concern.confirm_by_id == user.id and not acting:
             return True
-        return await MeetingService.can_answer_question(session, change, concern, user)
+        return await MeetingService.can_answer_question(
+            session, change, concern, user, viewer)
 
     @staticmethod
     async def _evidence_text(session: AsyncSession, ref: Optional[str],
@@ -1504,9 +1509,21 @@ class MeetingService:
         return mine[0] if len(mine) == 1 else None
 
     @staticmethod
+    async def viewer_departments(session: AsyncSession,
+                                 user: User) -> tuple[set[int], set[str]]:
+        """The caller's effective department ids and names, read once for a
+        whole list (R34, A2-10): pass as `viewer` to can_answer_question,
+        can_confirm and may_add_to."""
+        mine = set(await WorkflowService.effective_department_ids(session, user))
+        names = set((await session.execute(
+            select(Department.name).where(Department.id.in_(mine)))).scalars().all()) \
+            if mine else set()
+        return mine, names
+
+    @staticmethod
     async def can_answer_question(
         session: AsyncSession, change: ChangeRequest, concern: ChangeConcern,
-        user: User,
+        user: User, viewer: Optional[tuple[set[int], set[str]]] = None,
     ) -> bool:
         """Who may answer a scoping question (needs_info, 2026-10-14).
 
@@ -1528,7 +1545,9 @@ class MeetingService:
             from app.services.change_people import holds_lead
             if holds_lead(change, user):
                 return True
-        mine = set(await WorkflowService.effective_department_ids(session, user))
+        if viewer is None:
+            viewer = await MeetingService.viewer_departments(session, user)
+        mine, names = viewer
         acting = getattr(user, "acts_as_department_id", None) is not None
         if concern.department_id is not None:
             if concern.department_id in mine:
@@ -1537,8 +1556,6 @@ class MeetingService:
             return True
         if not mine:
             return False
-        names = set((await session.execute(
-            select(Department.name).where(Department.id.in_(mine)))).scalars().all())
         return bool(names & {"Sales", "Project Manager"})
 
     @staticmethod

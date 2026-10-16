@@ -340,3 +340,34 @@ async def test_a2_09_flip_reason_is_plain_words(client, admin_auth, seed, sessio
     res = await _ppap(client, quality, cid, answer="yes", part_ids=[pid])
     assert res.status_code == 200, res.text
     assert res.json()["customer_flip_reason"] == "Quality answered yes to the PPAP question"
+
+
+# ---- A2-10 (R34): the concern list reads the caller's departments once -----
+
+async def test_a2_10_list_concerns_reads_the_callers_departments_once(
+        client, admin_auth, seed, session_factory, monkeypatch):
+    from tests.test_ecr_solid_scoping_v2 import (
+        _scoping, _user as _sv_user, _question, _check, _raise)
+    from app.services.workflow_service import WorkflowService
+    cid, _ = await _scoping(client, admin_auth, seed, "a210")
+    _, proc, pe = await _sv_user(client, session_factory, seed, "pe210", "Process Engineer")
+    _, _, sales = await _sv_user(client, session_factory, seed, "sa210", "Sales")
+    whats = ("material", "tolerance", "weight", "tool", "volume", "schedule")
+    for i, what in enumerate(whats):
+        body = (_question(proc, note=f"Q{i}?", what=what) if i % 2
+                else _check(proc, note=f"Check {i}", what=what))
+        assert (await _raise(client, pe, cid, body)).status_code == 200
+    real = WorkflowService.effective_department_ids
+    calls = {"n": 0}
+
+    async def counting(session, user):
+        calls["n"] += 1
+        return await real(session, user)
+    monkeypatch.setattr(WorkflowService, "effective_department_ids", counting)
+    res = await client.get(f"/api/v1/changes/{cid}/concerns", headers=sales)
+    assert res.status_code == 200, res.text
+    rows = res.json()
+    assert len(rows) == len(whats)
+    assert all(r["can_answer"] for r in rows if r["flag_type"] == "question")
+    # negative: not one membership read per row (was 3 per flag)
+    assert calls["n"] <= 3, calls
