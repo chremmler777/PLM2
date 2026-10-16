@@ -309,6 +309,8 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await lock_impact(session_factory, cid)
     await validate_timing(session_factory, cid)
     await _transition(client, eng_auth, cid, "in_implementation")
+    # C21: the tool change is done before validation (SOFT tool_change_open)
+    await force_complete_check_workflows(session_factory, cid)
     res = await _transition(client, eng_auth, cid, "in_validation")
     assert res.status_code == 200, res.text
     await force_complete_check_workflows(session_factory, cid)
