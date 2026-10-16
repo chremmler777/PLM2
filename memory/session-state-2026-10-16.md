@@ -5,6 +5,6 @@ metadata:
   type: project
 ---
 - Deployed f27f9b23 (frontend): project header ← is "← Items" in the worksheet, "← Projects" on the list; part page back goes to its project (?part=).
-- Moldflow timing overview approved by Christoph (via Asss 2 request): per-tool table tool_moldflow (migration **116_tool_moldflow**, down 115), worksheet "Moldflow" group + status-nav panel, seed scripts/seed_1994_moldflow.py from mail facts (dry run to Christoph before prod). Branch feature/moldflow-overview (builder running). Full findings tree later on the same records.
+- Moldflow timing overview DEPLOYED 2026-10-16 16:05 (main a249f888, alembic 116, backup plm2-before-116-moldflow-20261016-160305.sql.gz); 1994 seeded 10 V1 rows as user 14 (199405/408/410 sent_to_customer 10-15). Approved by Christoph (via Asss 2 request): per-tool table tool_moldflow (migration **116_tool_moldflow**, down 115), worksheet "Moldflow" group + status-nav panel, seed scripts/seed_1994_moldflow.py from mail facts (dry run to Christoph before prod). Branch feature/moldflow-overview (builder running). Full findings tree later on the same records.
 - **ECR branch (feature/ecr-solid, "addi plm" session) must renumber to 117..131**, not 116..130. The heads-up could not be delivered (session unreachable 2026-10-16); tell it when it is back.
 Related: [[session-state-2026-10-15]], [[part-data-mail-2026-10-15]].
