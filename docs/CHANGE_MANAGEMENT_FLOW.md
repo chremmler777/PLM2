@@ -1145,9 +1145,16 @@ nothing preselected:
   ("Customer declined offer vN (ref)"), so `send_rejection` takes over (C4: no
   dead end).
 
-**Price diff [R4].** Accepting a revised version compares its total with
-the last version sent before it (`ChangeService.price_drop_state`). A lower
-total needs a reason pick (`volume`, `competitor`, `goodwill`, `error`) and a
+**Price diff [R4].** Accepting a revised version compares it with its
+baseline (`ChangeService.drop_against`, A4-01): the last accepted total;
+with nothing accepted yet, the highest total of any version sent since (v1
+at least), so a lower unanswered version in between never resets it (v1
+10,000, v2 8,000 unanswered, v3 8,000: v3 is below v1). A supplement
+compares with the highest supplement sent since the last accepted version,
+else with zero (negative is a drop). A lower annual effect (piece price x
+volume) against the same baseline is a drop too (DECIDED BY CLAUDE). The
+accept dialog reads the drop from the offer (`price_drop`), the same rule.
+A lower total needs a reason pick (`volume`, `competitor`, `goodwill`, `error`) and a
 sentence in the same request; it files an override of the soft rule
 `price_drop` on `quoted -> approved` (`_ask_price_drop_ok`, changelog
 `price_drop_asked`), decided by a Project Management or Management member,
@@ -1171,8 +1178,13 @@ the yes to the latest version sent: an acceptance of an older one never
 approves. Once approved the offer is closed: a supplement carries a change.
 
 **Sign-offs bound to the offer (C14).** A signature counts for the offer it
-was given on (`pm_signed_offer_id`, `quality_signed_offer_id`; L2). Sending a
-new version withdraws the ones given on an older version
+was given on (`pm_signed_offer_id`, `quality_signed_offer_id`; L2). The
+version a signature must cover is one notion (`ChangeService.signoff_target`,
+A4-02): the latest sent version the customer has not declined and no newer
+one replaced; a supplement still out after an accepted version is not it
+until the customer's yes. So a declined (absorbed) supplement owes no
+signature, and the sign button binds that version. A new offer version
+sent (a supplement: accepted) withdraws the ones given on an older version
 (`OfferService._withdraw_stale_signatures`, changelog `signoff_withdrawn`):
 PM always, Quality only when what it signed technically changed
 (`snapshot_diff`: quote plan or impacted parts, a part index included).
@@ -1214,14 +1226,21 @@ timing of its own). "Refresh from costing" re-reads the changed positions.
 Sending it keeps the change's status and its quoted price, needs a note and a
 non-zero total (a negative one is allowed), and opens the price (`price_open`,
 changelog `price_opened`, HARD #9 at close); the signatures given on an older
-version are withdrawn as for any new version (PM; Quality on a technical
-change). The Customer answer panel works on a supplement in any status:
+version are withdrawn once the customer accepts it (PM; Quality on a
+technical change; A4-02: never on the send, a declined one takes none). The Customer answer panel works on a supplement in any status:
 accepted (evidence, PO match, confirmed total) closes the open price
 (`supplement_accepted`, `price_closed`) and the signers are asked to sign it
 (My Tasks rows in approved / in implementation are re-signs only, after the
 customer's yes); still talking sets the next contact; declined leaves the
 price open and tells the lead and the Sales owner: Absorb (HARD #9's exit) or
-the run team puts the change on hold. A negative supplement lowers the
+the run team puts the change on hold. A4-03: Sales (internal: the lead) gets
+the My Tasks row "Price open: absorb or send a new version" (`price_open`,
+due 5 wd from the decline, Offer tab) until an Absorb is asked, a new version
+goes out or the price closes. A4-05: an acceptance (or a lower total's OK)
+closes the price only when no card opened after approval is still open that
+this version does not carry (`scope_change_service.card_holding_price`;
+changelog `price_kept_open`). A4-07: Absorb needs `COMMERCIAL_V2` (asking and
+deciding) and a note that names what is absorbed (`cm_rules.says_what`). A negative supplement lowers the
 accepted total: it needs the price-drop reason, and the PM / Management OK of
 that override (`price_drop`, to `closed`) closes the open price. A revised
 supplement is compared with the supplement it revised (sent after the last
@@ -1306,7 +1325,7 @@ approved` (cards opened before approval, a PO that differs included, so
 automatic approval waits), `-> in_implementation` and `-> released` while a
 card is open (`post_accept` on a card means opened after approval). With
 cards, `scope_change_state` reads the cards; a change flagged before the
-cards keeps the old rule (a newer offer or an approved override covers it).
+cards keeps the old rule (a newer offer or an approved override of `scope_change_uncovered` covers it; A4-04: never an Absorb or another rule's OK; a legacy override from before migration 118, guard_key NULL, still counts).
 Switch off: no cards.
 
 ### Start at risk (ECR-solid §7a, P8, 2026-10-15)
@@ -1318,7 +1337,10 @@ without the customer's yes may start before the PO
 migration 134; UI `StartAtRiskCard.tsx` on the Offer tab, no prices):
 
 1. Sales or the run team file the customer's go-ahead (a mail filed on the
-   change or its reference); Quality is told. A change that is not urgent
+   change or its reference); Quality is told. A filed go-ahead keeps its
+   file id (`start_at_risk_attachment_id`, migration 141, A4-06) and that
+   file is frozen (409 on delete, admin only). Quality's line writer gets no
+   "approve" row (approve() refuses them, 4-eyes). A change that is not urgent
    says who marks it urgent ("<lead> (the lead) or an admin"); the priority
    accepts only `low`, `medium`, `high`, `critical`.
 2. Quality adds one line of quality risks (My Tasks `start_at_risk_quality`,

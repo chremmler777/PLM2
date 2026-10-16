@@ -1281,7 +1281,8 @@ class OfferService:
                            "high_risks": len(listed["high_risks"])}
                           if listed is not None else {})},
         )
-        if listed is not None and offer.version >= 2:
+        if listed is not None and offer.version >= 2 and not supplement:
+            # a supplement withdraws them on the customer's yes (A4-02)
             await OfferService._withdraw_stale_signatures(session, change, offer, user.id)
         if listed is not None and listed.get("risk_reason"):
             await ChangeService.append_changelog(
@@ -1324,12 +1325,15 @@ class OfferService:
 
     @staticmethod
     async def _withdraw_stale_signatures(session: AsyncSession, change: ChangeRequest,
-                                         offer: ChangeOffer, actor_id: int) -> None:
-        """C14 (spec §7): a new version sent withdraws the signatures given
-        on an older one: PM always, Quality only when what it signed
-        technically changed (snapshot_diff, a part index included). The
-        record keeps who signed what; the signer is told once the customer
-        accepted it (ChangeService._ask_resign: the task exists from then)."""
+                                         offer: ChangeOffer, actor_id: int,
+                                         event: str = "sent") -> None:
+        """C14 (spec §7): a new version the signatures must cover withdraws
+        those given on an older one: PM always, Quality only when what it
+        signed technically changed (snapshot_diff, a part index included).
+        An offer is that version once sent; a supplement once the customer
+        accepted it (`event` 'accepted', A4-02: signoff_target), so a
+        declined supplement never takes a signature away. The record keeps
+        who signed what; the signer is told then (ChangeService._ask_resign)."""
         sides, latest = await ChangeService.signoff_sides_missing(session, change)
         stale = [(side, by) for side, by in (("pm", change.pm_signed_by),
                                               ("quality", change.quality_signed_by))
@@ -1339,7 +1343,8 @@ class OfferService:
         names = {"pm": "PM", "quality": "Quality"}
         await ChangeService.append_changelog(
             session, change, "signoff_withdrawn",
-            f"Offer v{offer.version} sent: "
+            f"{'Supplement' if offer.kind == 'supplement' else 'Offer'} "
+            f"v{offer.version} {event}: "
             + " and ".join(names[s] for s, _ in stale)
             + f" sign-off withdrawn, sign again for v{offer.version}", actor_id,
             new_value={"offer_id": offer.id, "sides": [s for s, _ in stale]})
@@ -1695,15 +1700,29 @@ class OfferService:
                     + f" (offer valid until {fmt_date(offer_until)}): ask the "
                     "supplier to extend it, or keep the price risk in mind"))
             older = [i for i in indexes if i.get("newer")]
+            if o.kind == "supplement" and older:
+                # A4-09: said once: a supplement repeats no index the customer
+                # sent before an earlier version went out (sent knowing it)
+                before = max((p.sent_at for p in all_offers
+                              if p.version < o.version and p.sent_at is not None),
+                             default=None)
+                older = [i for i in older if before is None
+                         or not i["newer"].get("received")
+                         or date.fromisoformat(i["newer"]["received"]) > before.date()]
             if commercial and o.status == "draft" and older:
+                def _older(i):
+                    when = (f" on {fmt_date(date.fromisoformat(i['newer']['received']))}"
+                            if i["newer"].get("received") else "")
+                    if not i["index"]:
+                        # R37: no "(no index)" puzzle, the situation in words
+                        return (f"{i['number']}: the change carries no customer "
+                                f"index yet; the customer already sent "
+                                f"{i['newer']['index']}{when}")
+                    return (f"{i['number']} {i['index']}, the customer sent "
+                            f"{i['newer']['index']}{when}")
                 warnings.append(_issue(
                     "index_older",
-                    "Goes out on an older index: " + "; ".join(
-                        f"{i['number']} {i['index'] or '(no index)'}, the customer "
-                        f"sent {i['newer']['index']}"
-                        + (f" on {fmt_date(date.fromisoformat(i['newer']['received']))}"
-                           if i["newer"].get("received") else "")
-                        for i in older)
+                    "Goes out on an older index: " + "; ".join(_older(i) for i in older)
                     + ": triage the new index onto the change, or send knowing it"))
             expired = OfferService.is_expired(o)
             if expired:

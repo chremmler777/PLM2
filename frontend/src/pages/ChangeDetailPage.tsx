@@ -878,9 +878,13 @@ export default function ChangeDetailPage() {
     mayOverride: (to: string) => !readOnly && (may(to) || isAdmin || isChangeLead || isPmMember),
     onAbsorb: () => setAbsorbOpen(true),
     onSign: readOnly ? undefined : (side: 'pm' | 'quality') => signOff.mutate(side),
-    maySign: (side: 'pm' | 'quality') => (side === 'pm' ? canSignPm : canSignQuality),
+    // 4-eyes (A4-08): never the other side's signer (the backend refuses it)
+    maySign: (side: 'pm' | 'quality') => (side === 'pm'
+      ? canSignPm && (userId == null || userId !== change.quality_signed_by)
+      : canSignQuality && (userId == null || userId !== change.pm_signed_by)),
     // Absorb is asked by Sales (customer change), the lead, PM or an admin.
-    canAbsorb: isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember),
+    // A4-07: Absorb belongs to COMMERCIAL_V2 (the backend refuses it off)
+    canAbsorb: change.commercial_v2 !== false && (isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember)),
     // C6: per rule (`${to}|${rule}`; `*` = a row from before the binding)
     deviationTargets: {
       approved: deviations.filter((d) => d.status === 'approved').map((d) => `${d.to_status}|${d.guard_key ?? '*'}`),
@@ -1411,7 +1415,7 @@ export default function ChangeDetailPage() {
       )}
       {effectiveTab === 'offer' && (
         <OfferTab change={change}
-          onAbsorb={!readOnly && (isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember))
+          onAbsorb={!readOnly && change.commercial_v2 !== false && (isAdmin || isChangeLead || isPmMember || (!!change.customer_relevant && isSalesMember))
             ? () => setAbsorbOpen(true) : undefined}
           canWrite={canEditQuotedPrice} canSeePrices={canSeeCosts}
           canSignPm={canSignPm} canSignQuality={canSignQuality}

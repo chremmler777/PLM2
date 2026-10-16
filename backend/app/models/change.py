@@ -285,6 +285,9 @@ class ChangeRequest(Base):
     # the change went to 'approved' without the customer's acceptance; the
     # price stays open until an offer is accepted or the money is absorbed.
     start_at_risk_evidence: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # migration 141 (A4-06): the go-ahead's file, frozen like the
+    # customer's answer (R4/R17); NULL for a reference
+    start_at_risk_attachment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     start_at_risk_requested_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     start_at_risk_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

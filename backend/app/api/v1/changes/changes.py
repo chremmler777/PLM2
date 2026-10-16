@@ -2469,6 +2469,10 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
     if any(isinstance(e, dict) and e.get("attachment_id") == att.id for e in answered):
         frozen("The customer's answer stands on this file: it is the record "
                "and cannot be removed")
+    if getattr(change, "start_at_risk_attachment_id", None) == att.id:
+        # A4-06: the approval without a PO stands on the customer's go-ahead
+        frozen("The start at risk stands on this file (the customer's "
+               "go-ahead): it is the record and cannot be removed")
     for card_att, question in (await db.execute(
             select(ChangeScopeChange.attachment_id, ChangeScopeChange.question).where(
                 ChangeScopeChange.change_id == change.id))).all():

@@ -136,7 +136,7 @@ describe('CustomerDecision', () => {
 
   it.each([
     ['pending', 'Waiting for the customer'],
-    ['negotiating', 'In negotiation'],
+    ['negotiating', 'Still talking'],
     ['accepted', 'Accepted'],
     ['declined', 'Declined'],
   ] as const)('labels the customer response %s in words', (resp, label) => {
@@ -150,6 +150,19 @@ describe('CustomerDecision', () => {
       canSignPm canSignQuality userId={42} />)
     expect((screen.getByRole('button', { name: /Quality sign-off/ }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('PM and Quality sign-off must be different users')).toBeDefined()
+  })
+
+  it('a PM re-sign stays off for the Quality signer (A4-08, 4-eyes like the backend)', () => {
+    const owed = { items: [{ key: 'pm_signoff', kind: 'todo', exits: ['sign'], sides: ['pm'], detail: 'v3' }] }
+    wrap(<CustomerDecision change={change({ pm_signed_by: 7, quality_signed_by: 42, next_step: owed } as never)}
+      canRespond canSignPm canSignQuality userId={42} />)
+    expect((screen.getByTestId('signoff-pm') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('PM and Quality sign-off must be different users')).toBeDefined()
+    cleanup()
+    // NEGATIVE control: another PM member signs again
+    wrap(<CustomerDecision change={change({ pm_signed_by: 7, quality_signed_by: 42, next_step: owed } as never)}
+      canRespond canSignPm canSignQuality userId={7} />)
+    expect((screen.getByTestId('signoff-pm') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('leaves both sign-offs enabled when nobody has signed', () => {

@@ -57,6 +57,19 @@ async def open_cards(session: AsyncSession, change: ChangeRequest) -> list[Chang
     return [c for c in await cards(session, [change.id]) if c.status in SCOPE_OPEN]
 
 
+async def card_holding_price(session: AsyncSession, change: ChangeRequest,
+                             settled_offer_id: Optional[int]) -> Optional[ChangeScopeChange]:
+    """A4-05 (spec §6 [R4]): a card opened after approval keeps the price
+    open until its own supplement is accepted or absorbed. When a version
+    is settled (accepted, its lower total OK'd), the open price closes only
+    if no such card is still open that this version does not carry (one
+    opened after it went out, or one still re-costed when it did: "subject
+    to final costing"). The same reading as _maybe_close_price."""
+    return next((c for c in await cards(session, [change.id])
+                 if c.post_accept and c.status in SCOPE_OPEN
+                 and (settled_offer_id is None or c.offer_id != settled_offer_id)), None)
+
+
 async def no_cost_ids(session: AsyncSession, rows: list[ChangeScopeChange]) -> set[int]:
     """The ready cards every routed department re-costed as 'no cost
     impact' (its latest word per department): nothing to price, Sales

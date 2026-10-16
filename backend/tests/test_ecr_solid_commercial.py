@@ -565,7 +565,8 @@ async def test_supplement_prices_only_what_changed_and_keeps_the_status(
         assert ch.quoted_price == 1000         # the quote stays what it was
         rows = (await s.execute(select(ChangeChangelog.action).where(
             ChangeChangelog.change_id == cid))).scalars().all()
-    assert "signoff_withdrawn" in rows        # PM signs the supplement again
+    # A4-02: nothing withdrawn on the send; the re-sign follows the yes
+    assert "signoff_withdrawn" not in rows
     # Sales chases the answer, in approved
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
     rows = tasks if isinstance(tasks, list) else tasks.get("tasks", [])
@@ -585,6 +586,10 @@ async def test_supplement_prices_only_what_changed_and_keeps_the_status(
     assert res.status_code == 200, res.text
     body = res.json()
     assert (body["status"], body["price_open"]) == ("approved", False)
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeChangelog.action).where(
+            ChangeChangelog.change_id == cid))).scalars().all()
+    assert "signoff_withdrawn" in rows        # PM signs the supplement again
     pm_rows = (await client.get("/api/v1/changes/my-tasks", headers=approved["pm"])).json()
     pm_rows = pm_rows if isinstance(pm_rows, list) else pm_rows.get("tasks", [])
     assert any(t["kind"] == "sign_off" and t["change_id"] == cid and t["side"] == "pm"

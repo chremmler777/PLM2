@@ -87,6 +87,9 @@ TASK_KIND = {
     # A3-05: an internal change has no supplement
     "estimate_low_internal": ("Cost above the approved estimate: re-approve or absorb",
                               "Kosten über genehmigter Schätzung: neu genehmigen oder übernehmen"),
+    # A4-03: a declined supplement (or a decline after a start at risk)
+    "price_open": ("Price open: absorb or send a new version",
+                   "Preis offen: übernehmen oder neue Version senden"),
     "estimate_check": ("Quote vs your estimate",
                        "Angebot gegen Ihre Schätzung"),
     "close_question": ("Settle the answered question", "Beantwortete Frage abschließen"),

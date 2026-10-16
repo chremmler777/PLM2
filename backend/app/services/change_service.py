@@ -126,7 +126,7 @@ STAGE_TASK_TAB = {
     # the internal approval card and the price answer live on the offer
     # (approval) tab in any status (A3-05)
     "sign_off": "overview", "internal_approval": "offer",
-    "estimate_low": "offer", "estimate_check": "costing",
+    "estimate_low": "offer", "estimate_check": "costing", "price_open": "offer",
     "validation_check": "release", "advance": "overview",
     "deviation_decision": "overview", "routing_deviation_decision": "assessments",
     "not_feasible": "overview",
@@ -447,6 +447,11 @@ class ChangeService:
         lead and approver rights (C32)."""
         from app.services import cm_switches
         if not cm_switches.on("COMMERCIAL_V2"):
+            from app.services.cm_rules import ABSORB_RULE
+            if dev.guard_key == ABSORB_RULE:
+                # A4-07: never the pre-C6 rule (any engineer) for an Absorb
+                return ("Absorb is part of the commercial flow, which is "
+                        "switched off (COMMERCIAL_V2): it is not decided now")
             return ChangeService.transition_deviation_refusal(change, dev, user)
         if dev.proposed_by == user.id:
             return "Cannot decide your own override (4-eyes rule)"
@@ -611,15 +616,16 @@ class ChangeService:
             # §7 [R4]: the OK of a lower total after approval (a supplement,
             # a start at risk) closes its open price
             dev.status = "consumed"
-            change.price_open = False
-            await ChangeService._settle_estimate_checks(session, change)
-            for d in change.transition_deviations:
-                if d.guard_key == ABSORB_RULE and d.status == "pending":
-                    d.status = "withdrawn"      # nothing left to absorb
-            await ChangeService.append_changelog(
-                session, change, "price_closed",
+            # the version settled: the newest one the customer accepted
+            from app.models.change_offer import ChangeOffer as _CO
+            settled = (await session.execute(
+                select(_CO.id).where(_CO.change_id == change.id,
+                                     _CO.status == "accepted")
+                .order_by(_CO.version.desc()).limit(1))).scalar_one_or_none()
+            await ChangeService._close_price(
+                session, change, settled,
                 f"Open price closed: the lower total was approved (#{dev.id})",
-                actor.id, field_name="price_open", old_value=True, new_value=False)
+                actor.id)
         if absorbed:
             # Absorb is not a hop: the approval itself clears the open price
             # (HARD #9's exit), so the override is used up at once.
@@ -707,8 +713,13 @@ class ChangeService:
         asked from the customer (or, internal, not re-approved). Needs a
         reason pick + note and the OK of a Project Management or Management
         member (internal: the approver); approving it clears price_open."""
+        from app.services import cm_switches
         from app.services.cm_rules import (
-            ABSORB_REASONS, ABSORB_RULE, override_note_refusal)
+            ABSORB_REASONS, ABSORB_RULE, override_note_refusal, says_what)
+        if not cm_switches.on("COMMERCIAL_V2"):
+            # A4-07: Absorb and its deciders (C6) are COMMERCIAL_V2's
+            raise ChangeError("Absorb is part of the commercial flow, which is "
+                              "switched off (COMMERCIAL_V2)")
         if not change.price_open:
             raise ChangeError("No price is open on this change: nothing to absorb")
         if change.status in ("cancelled", "rejected", "closed"):
@@ -719,6 +730,12 @@ class ChangeService:
         refusal = override_note_refusal(reason_code, note, codes=ABSORB_REASONS)
         if refusal:
             raise ChangeError(refusal.replace("covers it", "is absorbed and why"))
+        if not says_what(note):
+            # A4-07 (R8): the expensive choice is said in words that name
+            # something (the amount, the part, the mail), not 15 letters
+            raise ChangeError(
+                f"Say what is absorbed and why in words that name it (the "
+                f"amount, the part or the mail): '{note.strip()}' says nothing")
         note = note.strip()
         if any(d.guard_key == ABSORB_RULE and d.status == "pending"
                for d in change.transition_deviations):
@@ -792,11 +809,14 @@ class ChangeService:
                 return signed
         if (to_status == "closed" and change.price_open
                 and cm_switches.on("COMMERCIAL_V2")):
+            if not change.customer_relevant:
+                # A4-09 (R37): an internal Absorb is the approver's
+                who = await ChangeService.internal_approver_text(session, change)
+                return ("A cost is still open: Absorb it with a reason; the "
+                        f"internal approver ({who}) decides it, never the raiser")
             return ("A price is still open: the customer accepts the offer or "
                     "supplement, or the money is absorbed (Absorb, with the OK "
-                    "of Project Management or Management"
-                    + ("" if change.customer_relevant else "; internal: the approver")
-                    + ")")
+                    "of Project Management or Management)")
         return None
 
     @staticmethod
@@ -808,16 +828,44 @@ class ChangeService:
             .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
 
     @staticmethod
+    def signoff_target(offers):
+        """The version a signature must cover (A4-02), one notion for the
+        approval, the re-sign, release (HARD #9), the sign button and My
+        Tasks: the latest sent version the customer has not declined and no
+        newer one replaced; a supplement still out after an accepted version
+        is not it until the customer's yes (the re-sign follows the yes).
+        `offers` are the change's versions (any order); None: nothing sent."""
+        sent = sorted((o for o in offers if o.sent_at is not None),
+                      key=lambda o: -o.version)
+        for i, o in enumerate(sent):
+            if o.status in ("declined", "superseded"):
+                continue
+            if (getattr(o, "kind", None) == "supplement" and o.status == "sent"
+                    and any(ChangeService.was_accepted(p) for p in sent[i + 1:])):
+                continue
+            return o
+        return None
+
+    @staticmethod
+    async def signoff_offer(session: AsyncSession, change: ChangeRequest):
+        """signoff_target for one change (one query)."""
+        from app.models.change_offer import ChangeOffer
+        return ChangeService.signoff_target((await session.execute(
+            select(ChangeOffer).where(ChangeOffer.change_id == change.id,
+                                      ChangeOffer.sent_at.isnot(None)))).scalars().all())
+
+    @staticmethod
     async def signoff_sides_missing(session: AsyncSession, change: ChangeRequest,
                                     latest=_UNSET) -> tuple[list[str], Optional[object]]:
         """(sides 'pm'/'quality' whose sign-off is missing or given on an
-        older offer than the latest sent, that offer). One rule for approval
+        older offer than the one it must cover (signoff_target), that
+        offer). One rule for approval
         (HARD #4) and release (HARD #9): a signature counts for the offer it
         was given on; Quality's also for a later version with the same
         technical content (spec §7). Without a sent offer (internal, mother
         plant, legacy) only a missing signature counts."""
         if latest is _UNSET:      # a list may pass the offer it batched
-            latest = (await ChangeService.latest_sent_offer(session, change)
+            latest = (await ChangeService.signoff_offer(session, change)
                       if change.customer_relevant else None)
         sides = [side for side, by, oid in (
             ("pm", change.pm_signed_by, change.pm_signed_offer_id),
@@ -838,7 +886,10 @@ class ChangeService:
         """C14 after approval (approved, in_implementation): which owed sides
         are a sign-off to give now. A re-sign once the customer accepted the
         newer offer or supplement; after a start at risk (§7a) both sides at
-        once. One rule for My Tasks and the cockpit's sign button (R5)."""
+        once. `latest` is the version the signature must cover
+        (signoff_target, A4-02): a declined supplement or one still out is
+        never it, so a declined one owes nothing. One rule for My Tasks and
+        the cockpit's sign button (R5)."""
         sar = change.start_at_risk_approved_at is not None
         out = []
         for side in sides:
@@ -3786,6 +3837,27 @@ class ChangeService:
                         _CP.change_id.in_(open_price),
                         _CP.estimate_check == "above"))).scalars().all():
                     above.setdefault(p.change_id, []).append(p)
+        # A4-03 (spec §6/§7a [R4]): the customer declined the newest version
+        # past approval (a supplement, the offer after a start at risk) and
+        # no Absorb is asked yet: the price is open (one query each, R34)
+        declined_open: dict[int, object] = {}
+        if cm_switches.on("COMMERCIAL_V2"):
+            open_price = [c.id for c in open_changes if c.price_open]
+            if open_price:
+                from app.models.change_offer import ChangeOffer as _CO
+                from app.services.cm_rules import ABSORB_RULE as _AR
+                newest: dict[int, object] = {}
+                for o in (await db.execute(select(_CO).where(
+                        _CO.change_id.in_(open_price), _CO.sent_at.isnot(None))
+                        .order_by(_CO.version))).scalars().all():
+                    newest[o.change_id] = o
+                asked = set((await db.execute(
+                    select(ChangeTransitionDeviation.change_id).where(
+                        ChangeTransitionDeviation.change_id.in_(open_price),
+                        ChangeTransitionDeviation.guard_key == _AR,
+                        ChangeTransitionDeviation.status == "pending"))).scalars().all())
+                declined_open = {cid: o for cid, o in newest.items()
+                                 if o.status == "declined" and cid not in asked}
         for c in open_changes:
             # An internal change with a lead (P3: the engineering raiser) is
             # handed over by its run team (lead, PM); Sales has no part in it.
@@ -4169,6 +4241,21 @@ class ChangeService:
             # open (Sales: send a supplement or absorb; internal: the lead,
             # PM without a lead, proposes the Absorb, the approver decides
             # it through the deviation's own task). Absorb clears it.
+            if c.price_open and not above.get(c.id) and c.id in declined_open:
+                # A4-03: one owner and a due for the declined price (R5,
+                # R18): Sales (internal: the lead) absorbs it with a reason
+                # or sends a new version; 5 wd from the decline
+                if ((in_sales or c.sales_owner_id == user.id) if c.customer_relevant
+                        else (holds_lead(c, user)
+                              or (c.lead_id is None and is_pm_member))):
+                    o = declined_open[c.id]
+                    tasks.append({
+                        **await _base(c), "kind": "price_open",
+                        "hint": f"{'Supplement' if o.kind == 'supplement' else 'Offer'} "
+                                f"v{o.version} declined: absorb (reason) or send "
+                                "a new version",
+                        "since": o.answered_at, "target_tab": "offer",
+                    })
             if c.price_open:
                 from app.services import cm_labels
                 over = above.get(c.id, [])
@@ -4788,8 +4875,6 @@ class ChangeService:
             return release_rule and c.status == "in_validation"
         signable = [c for c in open_changes if _signable(c)] \
             if (is_pm_member or is_quality) else []
-        latest_by: dict = {}
-        prev_by: dict = {}
         sent_by: dict = {}
         if signable:
             from app.models.change_offer import ChangeOffer
@@ -4798,12 +4883,11 @@ class ChangeService:
                         ChangeOffer.change_id.in_([c.id for c in signable]),
                         ChangeOffer.sent_at.isnot(None))
                     .order_by(ChangeOffer.version))).scalars().all():
-                if o.change_id in latest_by:
-                    prev_by[o.change_id] = latest_by[o.change_id]
-                latest_by[o.change_id] = o      # by version: the last one wins
                 sent_by.setdefault(o.change_id, []).append(o)
         for c in signable:
-            latest = latest_by.get(c.id)
+            # A4-02: the version the signature must cover, not merely the
+            # newest sent (a declined or a still-open supplement is not it)
+            latest = ChangeService.signoff_target(sent_by.get(c.id, []))
             if bound or c.status != "quoted":
                 sides, latest = await ChangeService.signoff_sides_missing(
                     db, c, latest=latest)
@@ -4835,8 +4919,7 @@ class ChangeService:
                     # spec §7 [R3]: the PM task starts with the total, the
                     # margin delta and the unconfirmed Assumed answers
                     row.update(await ChangeService._pm_signoff_brief(
-                        db, c, latest, prev=prev_by.get(c.id), prev_known=True,
-                        sent=sent_by.get(c.id, [])))
+                        db, c, latest, sent=sent_by.get(c.id, [])))
                 out.append(row)
 
         # HARD #8: the approver list is read once for the whole list
@@ -4878,7 +4961,9 @@ class ChangeService:
                                     "target_tab": "offer", "needs_you": True,
                                     "reason": c.start_at_risk_evidence,
                                     "since": c.start_at_risk_requested_at})
-                elif is_pm_member and user.id != c.start_at_risk_requested_by:
+                elif (is_pm_member and user.id != c.start_at_risk_requested_by
+                      and user.id != c.start_at_risk_quality_by):
+                    # A4-06: approve() refuses Quality's line writer (4-eyes)
                     out.append({**await base(c), "kind": "start_at_risk_approve",
                                 "target_tab": "offer", "needs_you": True,
                                 "reason": c.start_at_risk_quality_note,
@@ -6808,18 +6893,9 @@ class ChangeService:
         change.customer_response_by = user_id
         if response == "accepted" and change.price_open:
             # HARD #9's exit: the customer accepted the offer that prices it.
-            change.price_open = False
-            await ChangeService._settle_estimate_checks(session, change)
-            from app.services.cm_rules import ABSORB_RULE
-            await ChangeService._load_deviations(session, change)
-            for d in change.transition_deviations:
-                if d.guard_key == ABSORB_RULE and d.status == "pending":
-                    # nothing left to absorb: the Decide task goes away
-                    d.status = "withdrawn"
-            await ChangeService.append_changelog(
-                session, change, "price_closed",
-                "Open price closed: the customer accepted the offer", user_id,
-                field_name="price_open", old_value=True, new_value=False)
+            await ChangeService._close_price(
+                session, change, change.accepted_offer_id,
+                "Open price closed: the customer accepted the offer", user_id)
         if release_due_date is not None:
             await ChangeService._apply_release_deadline(
                 session, change, release_due_date, release_due_reason, user_id)
@@ -7066,17 +7142,9 @@ class ChangeService:
                 session, change, f"v{drop['version']} accepted below "
                 f"v{drop['prev_version']}: the price stays open until the OK", user_id)
         elif change.price_open:
-            change.price_open = False
-            await ChangeService._settle_estimate_checks(session, change)
-            from app.services.cm_rules import ABSORB_RULE
-            await ChangeService._load_deviations(session, change)
-            for d in change.transition_deviations:
-                if d.guard_key == ABSORB_RULE and d.status == "pending":
-                    d.status = "withdrawn"
-            await ChangeService.append_changelog(
-                session, change, "price_closed",
-                "Open price closed: the customer accepted the offer", user_id,
-                field_name="price_open", old_value=True, new_value=False)
+            await ChangeService._close_price(
+                session, change, offer.id if offer is not None else None,
+                "Open price closed: the customer accepted the offer", user_id)
         if release_due_date is not None:
             await ChangeService._apply_release_deadline(
                 session, change, release_due_date, release_due_reason, user_id)
@@ -7096,6 +7164,37 @@ class ChangeService:
             await ChangeService._ask_resign(session, change, offer, user_id)
         await ChangeService.try_auto_approve(session, change, user_id)
         return change
+
+    @staticmethod
+    async def _close_price(session: AsyncSession, change: ChangeRequest,
+                           settled_offer_id: Optional[int], text: str,
+                           actor_id: int) -> bool:
+        """HARD #9's exit for one settled version (the customer's yes, a
+        lower total's OK): the open price closes, the estimate checks it
+        priced settle and a pending Absorb is withdrawn (nothing left to
+        absorb). A4-05: a card opened after approval that this version does
+        not carry keeps it open (scope_change_service.card_holding_price),
+        until its own supplement is accepted or absorbed. True: closed."""
+        from app.services.cm_rules import ABSORB_RULE
+        from app.services import scope_change_service as _scs
+        await ChangeService._settle_estimate_checks(session, change)
+        card = await _scs.card_holding_price(session, change, settled_offer_id)
+        if card is not None:
+            await ChangeService.append_changelog(
+                session, change, "price_kept_open",
+                f"{text.removeprefix('Open price closed: ')}; the price stays open "
+                f"for scope change #{card.id} (its supplement is accepted or "
+                "absorbed)", actor_id)
+            return False
+        change.price_open = False
+        await ChangeService._load_deviations(session, change)
+        for d in change.transition_deviations:
+            if d.guard_key == ABSORB_RULE and d.status == "pending":
+                d.status = "withdrawn"      # nothing left to absorb
+        await ChangeService.append_changelog(
+            session, change, "price_closed", text, actor_id,
+            field_name="price_open", old_value=True, new_value=False)
+        return True
 
     @staticmethod
     async def price_drop_state(session: AsyncSession, change: ChangeRequest,
@@ -7345,19 +7444,16 @@ class ChangeService:
                 session, change, drop, answer["price_drop_code"],
                 answer["price_drop_note"].strip(), user_id, to_status="closed")
         elif change.price_open:
-            change.price_open = False
-            await ChangeService._settle_estimate_checks(session, change)
-            from app.services.cm_rules import ABSORB_RULE
-            await ChangeService._load_deviations(session, change)
-            for d in change.transition_deviations:
-                if d.guard_key == ABSORB_RULE and d.status == "pending":
-                    d.status = "withdrawn"
-            await ChangeService.append_changelog(
-                session, change, "price_closed",
+            await ChangeService._close_price(
+                session, change, offer.id,
                 f"Open price closed: the customer accepted supplement v{offer.version}",
-                user_id, field_name="price_open", old_value=True, new_value=False)
+                user_id)
         if match == "no":
             await ChangeService._on_po_differs(session, change, offer, evidence, user_id)
+        # A4-02: the signatures follow the customer's yes, not the send
+        from app.services.offer_service import OfferService
+        await OfferService._withdraw_stale_signatures(
+            session, change, offer, user_id, event="accepted")
         await ChangeService._ask_resign(session, change, offer, user_id)
         return change
 
@@ -7525,7 +7621,7 @@ class ChangeService:
         now = datetime.utcnow()
         # HARD #9: a signature is given on an offer (the latest one sent),
         # and release checks it is still the latest (C14 binds it further).
-        latest = await ChangeService.latest_sent_offer(session, change)
+        latest = await ChangeService.signoff_offer(session, change)
         offer_id = latest.id if latest is not None else None
         if role == "pm":
             change.pm_signed_by, change.pm_signed_at = user_id, now

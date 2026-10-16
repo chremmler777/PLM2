@@ -47,6 +47,23 @@ export function overrideNoteProblem(code: string, note: string): string | null {
   return null
 }
 
+/** Evidence in words (backend cm_rules.says_what): a reference that names
+ *  something (a number, or two words not all empty) or a number with a unit. */
+export function saysWhat(text: string): boolean {
+  const v = text.trim()
+  if (!v || EMPTY_WORDS.has(v.toLowerCase())) return false
+  const words = v.match(/[A-Za-z0-9ÄÖÜäöüß]+/g) ?? []
+  const empty = words.every((w) => EMPTY_WORDS.has(w.toLowerCase()) || w.length <= 2)
+  const named = /\d/.test(v) || words.length >= 2
+  const ref = v.length >= 5 && !empty && named
+  return ref || (/\d/.test(v) && /[A-Za-zÄÖÜäöüß]/.test(v))
+}
+
+/** A4-07 (R8): an Absorb note also names what is absorbed (saysWhat). */
+export function absorbNoteProblem(code: string, note: string): string | null {
+  return overrideNoteProblem(code, note) ?? (saysWhat(note) ? null : t('absorb.noteSaysNothing'))
+}
+
 /** A rule's name for people: `rule.<key>`, a gate by its D1 question. */
 export function ruleText(rule: string | null | undefined): string {
   if (!rule) return t('override.anyRule')

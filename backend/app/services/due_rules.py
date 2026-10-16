@@ -243,7 +243,9 @@ async def annotate_tasks(session, tasks: list[dict], changes,
             due = t.get("due_date")
         else:
             start = start_of(t["kind"], start, since.get(c.id), c.created_at, now)
-            due = (add_wd(start, CUSTOMER_CONTACT_WD) if t["kind"] == "customer_response"
+            # A4-03: an open price after a decline: 5 wd from the decline
+            due = (add_wd(start, CUSTOMER_CONTACT_WD)
+                   if t["kind"] in ("customer_response", "price_open")
                    else task_due(start, c, t["kind"]))
             if t["kind"] == "customer_response" and t.get("next_contact"):
                 # §0: a customer wait is due at the next contact date (C4)

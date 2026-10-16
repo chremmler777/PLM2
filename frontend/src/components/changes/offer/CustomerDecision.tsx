@@ -34,11 +34,12 @@ const RESPONSE_CHIP: Record<string, string> = {
   declined: 'bg-rose-950/60 text-rose-200 border-rose-800',
 }
 
+// A4-09 (R37): the chip says what the answer was called ('Still talking')
 const RESPONSE_LABEL: Record<string, string> = {
-  pending: 'Waiting for the customer',
-  negotiating: 'In negotiation',
-  accepted: 'Accepted',
-  declined: 'Declined',
+  pending: 'cust.chip.pending',
+  negotiating: 'cust.talking',
+  accepted: 'cust.chip.accepted',
+  declined: 'cust.chip.declined',
 }
 
 const fill = (k: string, v: Record<string, string | number>) =>
@@ -138,10 +139,15 @@ export default function CustomerDecision({
     const row = owed(side)
     return signed && row ? t('signoff.again').replace('{v}', row.detail ?? '') : null
   }
-  const samePersonBlocksPm = !change.pm_signed_by
-    && !!change.quality_signed_by && userId != null && userId === change.quality_signed_by
-  const samePersonBlocksQuality = !change.quality_signed_by
-    && !!change.pm_signed_by && userId != null && userId === change.pm_signed_by
+  // 4-eyes (A4-08): the other side's signer never signs this side, also
+  // when a newer offer asks this side again (the backend refuses it)
+  const samePersonBlocksPm = !!change.quality_signed_by && userId != null
+    && userId === change.quality_signed_by
+  const samePersonBlocksQuality = !!change.pm_signed_by && userId != null
+    && userId === change.pm_signed_by
+  // the note only where the button would otherwise be live
+  const samePersonNote = (samePersonBlocksPm && canSignPm && (!change.pm_signed_by || !!again('pm')))
+    || (samePersonBlocksQuality && canSignQuality && (!change.quality_signed_by || !!again('quality')))
   // §6 [R4]: a supplement out with the customer is answered in any status
   const supplementOut = v2 && latestSent?.kind === 'supplement' && latestSent.status === 'sent'
   // §7a: started at risk, nothing accepted: the offer is answered after
@@ -196,7 +202,7 @@ export default function CustomerDecision({
         <span className={sectionLabel}>{t('cust.title')}</span>
         <span data-testid="customer-response"
           className={`rounded border px-1.5 py-0 text-[11px] ${RESPONSE_CHIP[change.customer_response] ?? RESPONSE_CHIP.pending}`}>
-          {RESPONSE_LABEL[change.customer_response] ?? change.customer_response}
+          {RESPONSE_LABEL[change.customer_response] ? t(RESPONSE_LABEL[change.customer_response]) : change.customer_response}
         </span>
         {latestSent && (
           <span className="text-[11px] text-slate-500">
@@ -395,7 +401,7 @@ export default function CustomerDecision({
           )}
         </div>
       )}
-      {(samePersonBlocksPm || samePersonBlocksQuality) && (
+      {samePersonNote && (
         <p className="text-xs text-amber-300">PM and Quality sign-off must be different users</p>
       )}
       <p data-testid="signers" className="text-[11px] text-slate-400">

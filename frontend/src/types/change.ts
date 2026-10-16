@@ -516,6 +516,8 @@ export type ChangeTaskKind =
   | 'routing_deviation_decision'
   /** C3: a department answered 'not feasible'; the run team decides. */
   | 'not_feasible'
+  /** A4-03: a declined supplement left the price open: absorb or a new version. */
+  | 'price_open'
   /** C33: an Assumed answer to confirm with evidence by its date. */
   | 'confirm_assumption'
   /** HARD #7: Quality's ppap_decision on an internal change ("Needs you"). */

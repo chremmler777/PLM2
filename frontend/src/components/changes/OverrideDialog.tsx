@@ -8,7 +8,7 @@ import { changesApi } from '../../api/changes'
 import { toastError } from '../../lib/apiError'
 import { t } from '../../i18n/cmLabels'
 import { STATUS_LABELS } from '../../lib/changeStatus'
-import { ABSORB_REASONS, OVERRIDE_REASONS, deciderGroup, deciderText, overrideNoteProblem, ruleText } from '../../lib/overrideRules'
+import { ABSORB_REASONS, OVERRIDE_REASONS, absorbNoteProblem, deciderGroup, deciderText, overrideNoteProblem, ruleText } from '../../lib/overrideRules'
 import type { ChangeStatus } from '../../types/change'
 
 const fieldCls =
@@ -130,7 +130,7 @@ export function AbsorbDialog({ changeId, customerRelevant, approvers, onClose, o
   const who = !customerRelevant && approvers
     ? approvers
     : deciderText(deciderGroup('price_open', 'closed', customerRelevant))
-  const problem = overrideNoteProblem(code, note)
+  const problem = absorbNoteProblem(code, note)
   const ask = useMutation({
     mutationFn: () => changesApi.absorb(changeId, { reason_code: code, note: note.trim() }),
     onSuccess: (d) => {

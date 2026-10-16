@@ -588,9 +588,14 @@ class EarlyStageService:
             .order_by(ChangeOffer.version))).scalars().all()
         at = change.scope_changed_at
         covering_offer = next((o for o in offers if at and o.sent_at >= at), None)
+        # A4-04 (C6): only an override of this rule covers it, never one that
+        # lifted another (an Absorb, Quality's timing OK); a legacy row
+        # (guard_key NULL: decided before migration 118 bound overrides to
+        # their rule, 118 binds every later decision) still counts
         covering_dev = next(
             (d for d in change.transition_deviations
              if d.status in ("approved", "consumed") and d.decided_at
+             and d.guard_key in ("scope_change_uncovered", None)
              and at and d.decided_at >= at), None)
         latest = [o for o in offers if not at or o.sent_at < at]
         version = latest[-1].version if latest else None

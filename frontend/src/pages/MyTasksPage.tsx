@@ -271,7 +271,7 @@ const TASK_TAB: Record<string, string> = {
   index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
   need_by_tell: '', set_quote_deadline: '', pick_impacted: '?tab=impacted',
   send_rejection: '?tab=scoping',
-  costing_input: '?tab=costing', estimate_low: '?tab=offer', estimate_check: '?tab=costing',
+  costing_input: '?tab=costing', estimate_low: '?tab=offer', price_open: '?tab=offer', estimate_check: '?tab=costing',
   create_quote: '?tab=commercial',
   // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
   // publishes from the same card.
@@ -344,6 +344,7 @@ const taskHint = (task: ChangeTask): string | null => {
         : null;
     case 'estimate_check':
     case 'estimate_low':
+    case 'price_open':
       // the backend's brief names the positions and the amount
       return task.hint ?? null;
     case 'kickoff':

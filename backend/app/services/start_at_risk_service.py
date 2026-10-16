@@ -46,12 +46,8 @@ def refusal(change: ChangeRequest) -> Optional[str]:
         return "Start at risk is switched off: no start before the PO"
     if not change.customer_relevant:
         return "An internal change is approved internally, not started at risk"
-    if change.priority != "critical":
-        # R5/R24: who can make it urgent (Sales cannot set the priority)
-        lead = getattr(change.__dict__.get("lead"), "full_name", None)  # no lazy load
-        return ("Start at risk is for urgent changes only (P8): "
-                + (f"{lead} (the lead)" if lead else "the change lead")
-                + " or an admin marks the change urgent first")
+    # A4-09 (R5): the status first: an approved change is past the ask,
+    # whatever its priority
     if change.status not in START_STATUSES:
         return ("Start at risk is asked once costing runs and until the "
                 f"customer's yes; this change is '{change.status}'")
@@ -62,6 +58,12 @@ def refusal(change: ChangeRequest) -> Optional[str]:
         return ("The customer accepted: approval follows on its own once "
                 + (" and ".join(missing) + " sign" if missing else
                    "nothing else holds it (Next step)"))
+    if change.priority != "critical":
+        # R5/R24: who can make it urgent (Sales cannot set the priority)
+        lead = getattr(change.__dict__.get("lead"), "full_name", None)  # no lazy load
+        return ("Start at risk is for urgent changes only (P8): "
+                + (f"{lead} (the lead)" if lead else "the change lead")
+                + " or an admin marks the change urgent first")
     return None
 
 
@@ -94,6 +96,7 @@ class StartAtRiskService:
                 actor_id=user.id,
                 what="Pick the customer's mail or file filed on this change")
             evidence = f"Mail: {att.filename}"[:255]
+            change.start_at_risk_attachment_id = att.id
         else:
             from app.services.cm_rules import reference_refusal
             why = reference_refusal(ref, "The customer's go-ahead (a filed mail or its reference)",
@@ -101,6 +104,7 @@ class StartAtRiskService:
             if why:
                 raise ChangeError(why)
             evidence = ref.strip()[:255]
+            change.start_at_risk_attachment_id = None
         change.start_at_risk_evidence = evidence
         change.start_at_risk_requested_by = user.id
         change.start_at_risk_requested_at = datetime.utcnow()
@@ -182,8 +186,8 @@ class StartAtRiskService:
         if len(note) < 10:
             raise ChangeError("Say why not (10+ characters); the asker is told")
         asker = change.start_at_risk_requested_by
-        for f in ("evidence", "requested_by", "requested_at", "quality_note",
-                  "quality_by", "quality_at"):
+        for f in ("evidence", "attachment_id", "requested_by", "requested_at",
+                  "quality_note", "quality_by", "quality_at"):
             setattr(change, f"start_at_risk_{f}", None)
         await session.flush()
         await ChangeService.append_changelog(
