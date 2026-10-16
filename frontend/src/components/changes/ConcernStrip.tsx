@@ -274,7 +274,9 @@ export default function ConcernStrip({
   const w = {
     title: scoped ? t('risk.title') : t('concern.title'),
     hint: t('risk.hint'),
-    raise: scoped ? t('risk.raise') : t('concern.raise'),
+    // A2-09 (SCOPING_V2): points are raised by the quick add; this strip
+    // only casts a cancel vote, and says so (one entry point per point)
+    raise: scoped ? t('risk.raise') : voteOnly ? t('concern.raiseVote') : t('concern.raise'),
     proposal: scoped ? t('risk.proposal') : t('concern.proposal'),
     settle: scoped ? t('risk.resolved') : t('concern.markSolved'),
     kindOf: (k: ConcernKind) => scoped

@@ -71,7 +71,7 @@ describe('PpapDecisionCard', () => {
 
 describe('CustomerFlipCard', () => {
   const flipped = change({ customer_relevant: true, origin: 'customer',
-    customer_flip_at: '2026-10-15T10:00:00Z', customer_flip_reason: 'ppap_decision yes',
+    customer_flip_at: '2026-10-15T10:00:00Z', customer_flip_reason: 'Quality answered yes to the PPAP question',
     sales_owner_name: 'Sally' })
   it('Sales answers offer needed with the quote deadline', async () => {
     render(wrap(<CustomerFlipCard change={flipped} isSales editable attachments={[]}

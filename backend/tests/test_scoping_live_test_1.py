@@ -213,7 +213,7 @@ async def test_proceed_refusal_lists_every_open_flag(
     res = await _decide(client, admin_auth, cid, mid, "proceed")
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert "2 open concern(s)" in detail
+    assert "2 open question(s) or cancel vote(s)" in detail
     assert "question by LT apqp5 (APQP): Tolerance?" in detail
     assert "cancel vote by" in detail and "Too costly" in detail
     # C33/C13 (SCOPING_V2): 'Not yet' answers nothing; a question the scope

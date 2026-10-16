@@ -141,7 +141,7 @@ async def test_needs_info_decision_raises_one_team_flag(
     mid2 = await _meeting(client, admin_auth, cid, depts)
     blocked = await _decide(client, admin_auth, cid, mid2, "proceed")
     assert blocked.status_code == 400
-    assert "open concern" in blocked.json()["detail"]
+    assert "open question(s) or cancel vote(s)" in blocked.json()["detail"]
 
     # a second needs_info from the same decider is the same question, not a new one
     res = await _decide(client, admin_auth, cid, mid2, "needs_info", "Still missing")
@@ -886,7 +886,7 @@ async def test_a_scoping_question_is_answered_by_its_asking_department(
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                             json={**ASSUMED, "note": "Class 2"}, headers=eng_auth)
     assert res.status_code == 400
-    assert "asking department" in res.json()["detail"]
+    assert res.json()["detail"].startswith("Only APQP, Sales or Project Management")
 
     from app.models.workflow import UserDepartment
     async with session_factory() as s:

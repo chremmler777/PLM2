@@ -298,3 +298,45 @@ async def test_a2_08_open_flip_holds_close_costing_soft(
         c = await ChangeService.get_change(s, cid)
         why = {r.key: str(r) for r in await ChangeService._guard_reasons(s, c, "quoting")}
     assert "Customer notification or offer? (Sales)" in why["costing_not_finalized"]
+
+
+# ---- A2-09: the four words, no raw keys, the owning department named --------
+
+async def test_a2_09_words_users_read(client, admin_auth, seed, session_factory):
+    from tests.test_ecr_solid_scoping_v2 import (
+        _scoping, _user as _sv_user, _question, _raise, _meeting, _decide)
+    cid, _ = await _scoping(client, admin_auth, seed, "a209")
+    _, proc, pe = await _sv_user(client, session_factory, seed, "pe209", "Process Engineer")
+    _, _, tool = await _sv_user(client, session_factory, seed, "te209", "Tool Engineer")
+    _, _, sales = await _sv_user(client, session_factory, seed, "sa209", "Sales")
+    mid = await _meeting(client, admin_auth, cid, {str(proc): "R"})
+    q = (await _raise(client, pe, cid, _question(proc))).json()
+    # negative: an outsider is told who answers (the owning department)
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/answer", json={
+        "answer_kind": "assumed", "assumed_value": "n/a", "assumed_risk": "rework if wrong"},
+        headers=tool)
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert detail.startswith("Only Process Engineer, Sales or Project Management")
+    assert "the person who asked" not in detail
+    res = await _decide(client, admin_auth, cid, mid, "proceed")
+    assert "1 open question(s) or cancel vote(s) block proceed" in res.json()["detail"]
+    assert "concern(s)" not in res.json()["detail"]
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q['id']}/answer", json={
+        "answer_kind": "assumed", "assumed_value": "n/a", "assumed_risk": "rework if wrong"},
+        headers=sales)
+    assert res.status_code == 200, res.text
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)).json()
+    texts = [e["action_description"] for e in log]
+    assert any(t.startswith(f"Question #{q['id']} answered") for t in texts), texts
+    assert not any(t.startswith("Concern #") for t in texts)
+
+
+async def test_a2_09_flip_reason_is_plain_words(client, admin_auth, seed, session_factory):
+    from tests.test_ecr_solid_ppap_flip import _meeting
+    cid, pid = await _internal_in_scoping(client, admin_auth, seed, "a209f")
+    _, qid, quality = await _user(client, session_factory, seed, "q209", "Quality")
+    await _meeting(client, admin_auth, cid, qid, carrier="internal")
+    res = await _ppap(client, quality, cid, answer="yes", part_ids=[pid])
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_flip_reason"] == "Quality answered yes to the PPAP question"

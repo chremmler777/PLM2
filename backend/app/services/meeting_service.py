@@ -582,10 +582,11 @@ class MeetingService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_raised",
-            f"Concern ({kind}"
-            + (f"/{concern.risk_type_label or concern.risk_type}, severity {concern.severity}"
-               if kind == "risk" else "")
-            + f"): {concern.note}", user.id,
+            (f"Concern ({kind}"
+             + (f"/{concern.risk_type_label or concern.risk_type}, severity {concern.severity}"
+                if kind == "risk" else "")
+             + f"): {concern.note}") if kind == "risk" or not cm_switches.on("SCOPING_V2")
+            else f"{MeetingService.flag_word(concern)} raised: {concern.note}", user.id,
             new_value={"concern_id": concern.id, "kind": kind,
                        "department_id": department_id,
                        "risk_type": concern.risk_type,
@@ -1216,7 +1217,8 @@ class MeetingService:
         await ChangeService.append_changelog(
             session, change,
             "concern_withdrawn",
-            f"Concern #{concern.id}: {label('settled_as', settled_as).lower()}"
+            f"{MeetingService.flag_word(concern)} #{concern.id}: "
+            f"{label('settled_as', settled_as).lower()}"
             + (f": {concern.resolution_note}" if concern.resolution_note else ""),
             user.id,
             old_value={"concern_id": concern.id},
@@ -1578,7 +1580,8 @@ class MeetingService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_raised",
-            f"Concern (needs_info): {concern.note}", user.id,
+            f"{MeetingService.flag_word(concern)} raised: {concern.note}"
+            if typed else f"Concern (needs_info): {concern.note}", user.id,
             new_value={"concern_id": concern.id, "kind": "needs_info",
                        "department_id": dept_id, "meeting_id": meeting_id},
             notes=concern.note)
@@ -1646,9 +1649,15 @@ class MeetingService:
         else:
             if not await MeetingService.can_answer_question(
                     session, change, concern, user):
+                # A2-09: name the owning department; the asker answers only a
+                # question raised for no department
+                owner = None
+                if concern.department_id is not None:
+                    dept = await session.get(Department, concern.department_id)
+                    owner = dept.name if dept else f"department {concern.department_id}"
                 raise ChangeError(
-                    "Only the asking department (or the person who asked), "
-                    "Sales or Project Management may answer this question")
+                    f"Only {owner or 'the person who asked'}, Sales or Project "
+                    "Management may answer this question")
             # C33 answer form (spec §0): Confirmed (evidence) or Assumed
             # (value + unit, risk if wrong, who confirms by when). With
             # SCOPING_V2 on, every scoping question (legacy untyped ones
@@ -1692,7 +1701,7 @@ class MeetingService:
             form = " (Confirmed" + (f": {concern.answer_ref}" if concern.answer_ref else "") + ")"
         await ChangeService.append_changelog(
             session, change, "concern_answered",
-            f"Concern #{concern.id} answered{form}"
+            f"{MeetingService.flag_word(concern)} #{concern.id} answered{form}"
             + (f": {note}" if note else "" if form else " (see attached document)"),
             user.id,
             new_value={"concern_id": concern.id, "answer_kind": concern.answer_kind},
@@ -1720,6 +1729,18 @@ class MeetingService:
                          if concern.confirm_due else "")),
                 link=f"/changes/{change.id}?tab=scoping")
         return concern
+
+    @staticmethod
+    def flag_word(concern: ChangeConcern) -> str:
+        """R37 four words: the name a flag has in what users read (SCOPING_V2:
+        Question / Check item / Cancel vote / Risk); switched off, Concern."""
+        if not cm_switches.on("SCOPING_V2"):
+            return "Concern"
+        if concern.kind == "reject_proposal":
+            return "Cancel vote"
+        if concern.kind == "risk":
+            return "Risk"
+        return "Check item" if concern.is_check else "Question"
 
     @staticmethod
     def open_department_concerns(
@@ -1841,8 +1862,8 @@ class MeetingService:
                 line += f" (answered, {asker} settles)"
             lines.append(line)
         if cm_switches.on("SCOPING_V2"):
-            return (f"{len(open_concerns)} open concern(s) block 'proceed' "
-                    "(questions and cancel votes; check items do not): "
+            return (f"{len(open_concerns)} open question(s) or cancel vote(s) "
+                    "block proceed (check items do not): "
                     + "; ".join(lines)
                     + ". Each must be withdrawn or settled first (its asker or "
                     "Project Management), or made a check item if the scope "

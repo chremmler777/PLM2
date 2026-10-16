@@ -150,7 +150,7 @@ async def test_open_concern_blocks_proceed_until_withdrawn(
                             json={"decision": "proceed"}, headers=eng_auth)
     assert res.status_code == 400, res.text
     detail = res.json()["detail"]
-    assert "open concern" in detail
+    assert "open question(s) or cancel vote(s)" in detail
     # 2026-10-14: the refusal lists each flag (kind, author, note) and how it
     # is cleared, the same list the UI's warning dialog shows.
     assert "cancel vote by" in detail and "Timing impossible" in detail

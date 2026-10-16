@@ -217,7 +217,14 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   (preselected: last used, else the viewer's own department on the change),
   **Check** (drawing / volume / cycle time / weight / tool / material /
   tolerance / schedule / other) and the part or *Whole change*. The default is
-  a **check item** ("Unsure? Leave it.").
+  a **check item** ("Unsure? Leave it."). The quick add is the one entry point
+  for a point: the strip below it only casts a *Cancel vote* (close-out
+  A2-09). Users read the four words (R37): refusals say *"n open question(s)
+  or cancel vote(s) block proceed"*, the changelog *"Question #n answered"* /
+  *"Check item #n ..."*, an outsider's answer is refused naming the owning
+  department (*"Only Process Engineer, Sales or Project Management may answer
+  this question"*), and a PPAP flip's reason reads *"Quality answered yes to
+  the PPAP question"* (migration 139 rewords the stored raw key).
 - **Make it a question** (toggle; the asker or a PM member can switch either
   way any time in scoping, `POST /concerns/{id}/type`): the UI asks *"Can we
   decide parts, assessors and go/no-go without this?"*. Only a *no* is a

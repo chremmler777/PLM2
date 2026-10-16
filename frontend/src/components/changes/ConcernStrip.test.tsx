@@ -58,6 +58,12 @@ describe('ConcernStrip', () => {
     expect(screen.getByText(/1 open, blocks proceed/)).toBeDefined()
   })
 
+  it('A2-09: with the quick add in charge (voteOnly), the strip offers a cancel vote, not a second Flag', async () => {
+    wrap(<ConcernStrip changeId={7} editable voteOnly />)
+    expect(await screen.findByText(`+ ${t('concern.raiseVote')}`)).toBeDefined()
+    expect(screen.queryByText(`+ ${t('concern.raise')}`)).toBeNull()
+  })
+
   it('offers withdraw only on your own flag', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
       concern({ id: 1, raised_by: 9, raised_by_name: 'Rita RD' }),

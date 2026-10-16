@@ -489,6 +489,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'No concerns. Anyone who sees a blocker can flag it here, even before the meeting.',
   },
   'concern.raise': { de: 'Einwand', en: 'Flag' },
+  'concern.raiseVote': { de: 'Abbruch-Votum', en: 'Cancel vote' },
   'concern.blocking': {
     de: '{n} offen, blockiert die Freigabe',
     en: '{n} open, blocks proceed',

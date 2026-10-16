@@ -202,7 +202,7 @@ class PpapDecisionService:
                 "ref": change.ppap_ref, "part_ids": change.ppap_part_ids})
         if answer == "yes":
             await PpapDecisionService.flip(
-                session, change, user.id, "ppap_decision yes: the customer must be told")
+                session, change, user.id, "Quality answered yes to the PPAP question")
         return change
 
     @staticmethod
