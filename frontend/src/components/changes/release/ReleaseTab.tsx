@@ -197,7 +197,8 @@ export default function ReleaseTab({
         <IssuesPanel changeId={change.id} changeStatus={change.status} departments={departments}
           viewer={{ id: viewerId, isAdmin, canManage, isSales, canSeeCosts: canSeeAll, myDepartmentIds }}
           canRaise={canManage || (validation?.departments ?? []).some((d) => myDepartmentIds.includes(d.department_id))}
-          releaseDueDate={change.release_due_date} focusIssueId={focusIssueId} />
+          releaseDueDate={change.release_due_date} focusIssueId={focusIssueId}
+          customerRelevant={change.customer_relevant !== false} />
         <ValidationPanel changeId={change.id} status={change.status}
           departments={departments} myDepartmentIds={myDepartmentIds}
           canSeeAll={canSeeAll} canAcknowledge={canAcknowledge} canEscalate={canSeeAll}

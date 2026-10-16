@@ -12,7 +12,9 @@ other check would be the same fact stored twice.
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.database import Base
@@ -59,9 +61,50 @@ class ValidationCheck(Base):
         ForeignKey("users.id"), nullable=True)
     checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # ECR-solid §10 computed checks (migration 136): the limits a measurement
+    # is held against, fixed by the first measurement (a retest never moves
+    # them: a different spec is a concession, not a retest), and where they
+    # come from (drawing, customer spec, process sheet + reference).
+    lower_limit: Mapped[float | None] = mapped_column(
+        Numeric(12, 3, asdecimal=False), nullable=True)
+    upper_limit: Mapped[float | None] = mapped_column(
+        Numeric(12, 3, asdecimal=False), nullable=True)
+    spec_source: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     @property
     def is_answered(self) -> bool:
         return self.status in VALIDATION_WRITE_STATUSES
+
+
+# What a retest names as changed since the failure (spec §10).
+RETEST_CHANGE_KINDS = ("parameter", "tool", "material", "method")
+
+
+class ValidationMeasurement(Base):
+    """One measurement of a computed check (weight, cycle time, dimensions):
+    sample size, the smallest and largest value, and the measuring report or
+    device. PASS only if both lie inside the check's limits. A retest adds a
+    row and keeps the failed one, with what changed since (spec §10)."""
+    __tablename__ = "validation_measurements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    check_id: Mapped[int] = mapped_column(
+        ForeignKey("validation_checks.id"), index=True)
+    change_id: Mapped[int] = mapped_column(
+        ForeignKey("change_requests.id"), index=True)
+    sample_size: Mapped[int] = mapped_column(Integer)
+    min_value: Mapped[float] = mapped_column(Numeric(12, 3, asdecimal=False))
+    max_value: Mapped[float] = mapped_column(Numeric(12, 3, asdecimal=False))
+    measuring_ref: Mapped[str] = mapped_column(String(200))
+    # cycle time: the lot the N cycles ran on
+    lot_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # a retest: what changed since the failure (RETEST_CHANGE_KINDS) + ref
+    what_changed_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    what_changed_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # passed | failed, computed against the limits at the time
+    result: Mapped[str] = mapped_column(String(10))
+    measured_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    measured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # Stage 10 — the release checklist. Validation proved the part is right; the

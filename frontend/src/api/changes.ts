@@ -11,7 +11,7 @@ import type { ScopeChangeCard,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn, CostingContext,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
-  ValidationState, ValidationCheckKey, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse, ImpactObjectsResponse,
+  ValidationState, ValidationCheckKey, ValidationMeasurementIn, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse, ImpactObjectsResponse,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -592,9 +592,11 @@ export const changesApi = {
   setValidationCheck: (id: number, body: {
     department_id: number;
     check_key: ValidationCheckKey | (string & NonNullable<unknown>);
-    status: 'passed' | 'failed';
+    status?: 'passed' | 'failed';
     value?: number;
     note?: string;
+    /** §10 computed checks: the result follows from the measurement. */
+    measurement?: ValidationMeasurementIn;
   }) => client.post(`/v1/changes/${id}/validation/checks`, body).then((r) => r.data),
 
   // Sales confirming the validated weight has been taken into the quote. The

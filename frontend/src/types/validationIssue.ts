@@ -36,6 +36,9 @@ export type IssueAct =
   | 'contain' | 'root_cause' | 'route' | 'customer' | 'cost'
   | 'add_action' | 'action_done' | 'recheck' | 'close' | 'acknowledge' | 'escalate'
   | 'edit' | 'attach'
+  /** ECR-solid §10: Quality's Fix task (who fixes, retest date) and the
+   * concession requested beside it. */
+  | 'fix' | 'concession_request'
 
 /**
  * Acts the card shows outside the step flow (backend `extra_acts`). On a
@@ -137,6 +140,18 @@ export interface IssueOut {
   customer_decided_at?: string | null
   customer_decided_by_name?: string | null
   concession_until?: string | null
+  /** §10: a concession is for a quantity of parts or until a date. */
+  concession_quantity?: number | null
+  concession_not_for_shipment?: boolean
+  concession_requested_at?: string | null
+  /** §10 Fix task: who fixes and the retest date (Quality's pick). */
+  fix_owner_kind?: FixOwner | null
+  fix_department_id?: number | null
+  fix_department_name?: string | null
+  retest_due?: string | null
+  fix_set_by_name?: string | null
+  /** The Fix task and the bounded concession apply (RELEASE_V2). */
+  fix_rule?: boolean
   /** Money; null for viewers outside the cost roles (redacted). */
   extra_cost?: number | null
   /** True when a cost is recorded, whether or not the viewer may see it. */
@@ -220,10 +235,27 @@ export interface IssueRouteIn {
   actions?: IssueActionIn[]
 }
 
+export type FixOwner = 'process_parameters' | 'tool_at_supplier' | 'other'
+
+export interface IssueFixIn {
+  owner: FixOwner
+  department_id?: number | null
+  supplier_name?: string | null
+  retest_due: string
+}
+
+export interface IssueConcessionIn {
+  note: string
+  not_for_shipment?: boolean
+  quantity?: number | null
+  concession_until?: string | null
+}
+
 export interface IssueCustomerIn {
   decision: CustomerDecision
   note: string
   concession_until?: string | null
+  quantity?: number | null
   /** new_timing: the customer's new release date (updates release_due_date). */
   new_release_due_date?: string | null
 }

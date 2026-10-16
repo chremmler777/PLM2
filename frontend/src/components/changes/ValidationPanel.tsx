@@ -39,6 +39,7 @@ import { isIssueOpen, issueCode } from '../../types/validationIssue'
 import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDialog'
 import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
 import { toastError } from '../../lib/apiError'
+import MeasurementForm, { MeasurementHistory } from './validation/MeasurementForm'
 import { Check, X } from 'lucide-react'
 import { btnSm } from '../common/buttonStyles'
 
@@ -80,7 +81,8 @@ export const departmentOpenChecks = (d: ValidationDepartmentState): number =>
  * Exported because the wait banner asks the same question of the same payload.
  */
 export const weightAckOutstanding = (state?: ValidationState | null): boolean =>
-  !!state && (state.weight_delta_g ?? 0) !== 0 && !state.weight_ack_at
+  !!state && (state.weight_quote_update_open
+    ?? ((state.weight_delta_g ?? 0) !== 0 && !state.weight_ack_at))
 
 /** The open issue raised from this failed check, if any (one per check). */
 export const openIssueForCheck = (issues: IssueOut[], deptId: number, key: string): IssueOut | undefined =>
@@ -110,8 +112,11 @@ function CheckRow({
   const [failing, setFailing] = useState(false)
   const [note, setNote] = useState('')
   const [value, setValue] = useState(numberEditText(check.value))
-  const needsValue = VALUE_CHECKS.has(key)
   const retired = !!check.retired
+  // §10 (RELEASE_V2): weight, cycle time and APQP's dimensions are computed
+  // from a measurement; the old value tick stays for the switch-off case
+  const computed = !!check.computed && !retired
+  const needsValue = VALUE_CHECKS.has(key) && !computed
 
   const post = useMutation({
     mutationFn: (vars: { status: 'passed' | 'failed' }) => changesApi.setValidationCheck(
@@ -148,6 +153,7 @@ function CheckRow({
   const mayPass = (!needsValue || valueOk) && (!retest || retestNoteOk)
   const mayFail = !valueHint
   const mayWrite = editable && mine && !retired
+  const tick = mayWrite && !computed
 
   const chip = check.status === 'passed'
     ? 'bg-emerald-900/70 text-emerald-200'
@@ -207,13 +213,13 @@ function CheckRow({
           not this viewer may write — the assumption is the point. */}
       {key === 'cycle_time' && (
         <div className="flex items-center gap-2 flex-wrap">
-          {mayWrite && (
+          {tick && (
             <input type="text" inputMode="decimal" value={value} aria-invalid={!!valueHint || undefined}
               data-testid={`validation-value-${id}`} aria-label={t('validation.cycleValue')}
               placeholder={t('validation.cycleValue')}
               onChange={(e) => setValue(e.target.value)} className={`w-32 ${fieldCls}`} />
           )}
-          {!mayWrite && check.value != null && (
+          {!tick && !computed && check.value != null && (
             <span className="text-xs text-slate-200 tabular-nums">
               {num(check.value)} s
             </span>
@@ -229,13 +235,13 @@ function CheckRow({
       )}
       {key === 'weight' && (
         <div className="flex items-center gap-2 flex-wrap">
-          {mayWrite && (
+          {tick && (
             <input type="text" inputMode="decimal" value={value} aria-invalid={!!valueHint || undefined}
               data-testid={`validation-value-${id}`} aria-label={t('validation.weightValue')}
               placeholder={t('validation.weightValue')}
               onChange={(e) => setValue(e.target.value)} className={`w-32 ${fieldCls}`} />
           )}
-          {!mayWrite && check.value != null && (
+          {!tick && !computed && check.value != null && (
             <span className="text-xs text-slate-200 tabular-nums">{num(check.value)} g</span>
           )}
           {(hasCosting || weightEstimateG != null) && (
@@ -248,20 +254,26 @@ function CheckRow({
         </div>
       )}
 
-      {mayWrite && valueHint && (
+      {computed && <MeasurementHistory check={check} id={id} />}
+      {computed && mayWrite && (
+        <MeasurementForm changeId={changeId} deptId={deptId} check={check} id={id}
+          prefillNominal={key === 'weight' ? weightEstimateG : null} />
+      )}
+
+      {tick && valueHint && (
         <p data-testid={`validation-value-hint-${id}`} className="text-[11px] text-amber-300">
           {valueHint}
         </p>
       )}
 
       {/* The note says why a check failed; once it passes the old reason is history. */}
-      {check.note && check.status === 'failed' && (
+      {check.note && check.status === 'failed' && !computed && (
         <p data-testid={`validation-note-text-${id}`} className="text-xs text-slate-300">
           {check.note}
         </p>
       )}
 
-      {mayWrite && (failing ? (
+      {tick && (failing ? (
         <div className="space-y-1">
           <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
             data-testid={`validation-note-${id}`} aria-label={t('validation.failNote')}
@@ -451,7 +463,21 @@ export default function ValidationPanel({
 
       {/* The weight moved: that is a price, not a measurement. Said once, at the
           top, to everybody who can read the panel — and answered by Sales. */}
-      {delta !== 0 && (
+      {/* §10: release line and the concessions in force, for everybody */}
+      {state.release_line && (
+        <p data-testid="validation-release-line" role="status"
+          className="rounded-lg border border-red-800/70 bg-red-950/30 px-3 py-2 text-sm text-red-100">
+          {state.release_line}
+        </p>
+      )}
+      {(state.active_concessions ?? []).map((c) => (
+        <p key={c.id} data-testid={`validation-concession-${c.id}`}
+          className="rounded-lg border border-emerald-800/60 bg-emerald-950/20 px-3 py-1.5 text-xs text-emerald-200">
+          {c.text}
+        </p>
+      ))}
+
+      {delta !== 0 && (weightAckOutstanding(state) || !!state.weight_ack_at) && (
         <div data-testid="validation-weight-strip"
           className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-3 py-2 space-y-1">
           <p className="text-sm text-amber-100">

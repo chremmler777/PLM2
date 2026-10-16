@@ -128,3 +128,23 @@ def item_for(key: str, department_name: str | None) -> dict | None:
 def label_for(key: str, department_name: str | None) -> str:
     item = item_for(key, department_name) or any_item_for(key)
     return item["label_en"] if item else key
+
+
+# ECR-solid §10 (switch RELEASE_V2): the COMPUTED checks. Their verdict is not
+# picked, it is computed from a measurement (sample size n, the smallest and
+# the largest value, the measuring report or device) held against limits:
+# PASS only if both the min and the max lie inside them. Weight and cycle
+# time on the Tool Engineer's rows; the dimensions on APQP's "Parts measured"
+# (the worst deviation from nominal, in mm). key -> (unit label, short unit)
+COMPUTED_CHECKS = {
+    ("Tool Engineer", "weight"): ("grams", "g"),
+    ("Tool Engineer", "cycle_time"): ("seconds", "s"),
+    ("APQP", "measured"): ("mm deviation from nominal", "mm"),
+}
+# The cycle time is measured over N cycles of one lot: the lot is named.
+NEEDS_LOT_REF = ("cycle_time",)
+
+
+def computed_unit(key: str, department_name: str | None) -> tuple[str, str] | None:
+    """(unit label, short unit) when this department's check is computed."""
+    return COMPUTED_CHECKS.get((department_name or "", key))

@@ -117,7 +117,25 @@ async def _state(client, auth, val):
     return res.json()
 
 
+#: ECR-solid §10 (RELEASE_V2): the Tool Engineer's weight and cycle time
+#: are computed from a measurement. Tests written for a plain value send it
+#: as a measurement of n=5 with min = max = value, inside limits wide enough
+#: never to fail (test_ecr_solid_computed_checks covers the rules).
+_COMPUTED = {"weight", "cycle_time"}
+_WIDE = {"lower_limit": 0.0, "upper_limit": 100000.0,
+         "spec_source": "test spec 0-100000"}
+
+
 async def _check(client, auth, val, dept, key, status="passed", **kw):
+    if (dept == "Tool Engineer" and key in _COMPUTED and status == "passed"
+            and kw.get("value") is not None and cm_switches.RELEASE_V2):
+        m = {"sample_size": 5, "min_value": kw["value"], "max_value": kw["value"],
+             "measuring_ref": "scale WG-0042, report MR-1", **_WIDE}
+        if key == "cycle_time":
+            m["lot_ref"] = "lot 2026-41-117"
+        return await client.post(_url(val, "/checks"), headers=auth, json={
+            "department_id": val["dept"][dept], "check_key": key,
+            "measurement": m, **({"note": kw["note"]} if kw.get("note") else {})})
     return await client.post(_url(val, "/checks"), headers=auth, json={
         "department_id": val["dept"][dept], "check_key": key,
         "status": status, **kw})
@@ -265,7 +283,9 @@ async def test_non_implementing_department_has_no_checks(client, admin_auth, val
     assert "not implementing" in res.json()["detail"]
 
 
-async def test_measurements_need_their_number_to_pass(client, val):
+async def test_measurements_need_their_number_to_pass(client, val, monkeypatch):
+    # the plain tick (RELEASE_V2 off); computed checks: test_ecr_solid_computed_checks
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     tool = await _auth(client, val, "Tool Engineer")
     res = await _check(client, tool, val, "Tool Engineer", "cycle_time")
     assert res.status_code == 400, res.text
@@ -294,37 +314,37 @@ async def test_failed_check_is_lifted_only_by_its_departments_retest(
     linked issue would auto-close and both halves of HARD #3 vanish)."""
     tool = await _auth(client, val, "Tool Engineer")
     pm = await _auth(client, val, "Project Manager")
-    assert (await _check(client, tool, val, "Tool Engineer", "weight",
-                         status="failed", value=540.0,
+    assert (await _check(client, tool, val, "Tool Engineer", "sampled",
+                         status="failed",
                          note="12 % over the estimate")).status_code == 201
     for auth in (admin_auth, pm):  # NEGATIVE: no PM or admin shortcut
-        res = await _check(client, auth, val, "Tool Engineer", "weight",
-                           value=505.0, note="looked again, fine now")
+        res = await _check(client, auth, val, "Tool Engineer", "sampled",
+                           note="looked again, fine now")
         assert res.status_code == 400, res.text
         assert "own department" in res.json()["detail"]
     # NEGATIVE: the department itself needs what changed since
     for note in (None, "ok"):
-        res = await _check(client, tool, val, "Tool Engineer", "weight",
-                           value=505.0, **({"note": note} if note else {}))
+        res = await _check(client, tool, val, "Tool Engineer", "sampled",
+                           **({"note": note} if note else {}))
         assert res.status_code == 400, res.text
         assert "What changed since the failure" in res.json()["detail"]
     # NEGATIVE: not outside validation
     await _set_status(session_factory, val["change_id"], "in_implementation")
-    res = await _check(client, admin_auth, val, "Tool Engineer", "weight",
-                       value=505.0, note="gate shortened, tool change TC-88")
+    res = await _check(client, admin_auth, val, "Tool Engineer", "sampled",
+                       note="gate shortened, tool change TC-88")
     assert res.status_code == 400, res.text
     await _set_status(session_factory, val["change_id"], "in_validation")
-    res = await _check(client, tool, val, "Tool Engineer", "weight",
-                       value=505.0, note="gate shortened, tool change TC-88")
+    res = await _check(client, tool, val, "Tool Engineer", "sampled",
+                       note="gate shortened, tool change TC-88")
     assert res.status_code == 201, res.text
     assert res.json()["status"] == "passed"
     # switch off: the old rule (PM / admin at any time)
     monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
-    assert (await _check(client, tool, val, "Tool Engineer", "weight",
-                         status="failed", value=540.0,
+    assert (await _check(client, tool, val, "Tool Engineer", "sampled",
+                         status="failed",
                          note="12 % over the estimate")).status_code == 201
-    assert (await _check(client, admin_auth, val, "Tool Engineer", "weight",
-                         value=505.0)).status_code == 201
+    assert (await _check(client, admin_auth, val, "Tool Engineer", "sampled",
+                         )).status_code == 201
 
 
 # --- the weight, and the quote it moves -------------------------------------

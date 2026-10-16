@@ -28,7 +28,9 @@ from app.models.change_cost import (
 from app.models.change_impl import (
     ImplementationBooking, ImplementationReport, ImplementationEscalation,
 )
-from app.models.change_validation import ValidationCheck, ChangeReleaseCheck
+from app.models.change_validation import (
+    ChangeReleaseCheck, ValidationCheck, ValidationMeasurement,
+)
 from app.models.change_plan import (
     ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation, ChangePlanLink,
 )
@@ -123,7 +125,7 @@ __all__ = [
     "ImplementationBooking",
     "ImplementationReport",
     "ImplementationEscalation",
-    "ValidationCheck",
+    "ValidationCheck", "ValidationMeasurement",
     "ChangeReleaseCheck",
     "ChangePlanTask", "ChangePlanLink",
     "ChangePlanFeedback",

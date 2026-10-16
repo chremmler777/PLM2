@@ -44,6 +44,9 @@ from app.models.workflow import Department
 from app.services import validation_checklist as catalog
 
 VALIDATION_STATUS = "in_validation"
+#: §10 (RELEASE_V2): a weight delta reaches Sales above this share of the
+#: estimate (or on a FAIL).
+WEIGHT_DELTA_SALES_SHARE = 0.02
 
 
 class ValidationError(ValueError):
@@ -216,7 +219,16 @@ class ValidationService:
         it. An explicit acknowledgement is one click and says what happened.
         """
         delta = ValidationService.weight_delta(change)
-        return bool(delta) and change.weight_delta_ack_at is None
+        if not delta or change.weight_delta_ack_at is not None:
+            return False
+        from app.services import cm_switches
+        if cm_switches.on("RELEASE_V2"):
+            # §10: Sales hears of the weight only on a FAIL (a notice, see
+            # ValidationIssueService.on_check_failed) or a delta > 2 % of
+            # the estimate the quote was built on
+            est = float(change.estimated_part_weight_g or 0)
+            return est <= 0 or abs(delta) > WEIGHT_DELTA_SALES_SHARE * est
+        return True
 
     # ------------------------------------------------------------------
     # The state payload
@@ -245,6 +257,10 @@ class ValidationService:
         estimate = (float(change.estimated_part_weight_g)
                     if change.estimated_part_weight_g is not None else None)
         delta = ValidationService.weight_delta(change)
+        measured = await ValidationService.measurements_by_check(session, change)
+        people.update(await ValidationService._names(
+            session, [m.measured_by for ms in measured.values() for m in ms
+                      if m.measured_by not in people]))
 
         by_dept: dict[int, list[ValidationCheck]] = {}
         for row in rows:
@@ -305,6 +321,28 @@ class ValidationService:
                 if key == catalog.WEIGHT_KEY:
                     entry["estimated_part_weight_g"] = estimate
                     entry["delta_g"] = delta
+                computed = catalog.computed_unit(key, dept_name)
+                if computed and key in current:
+                    lo = row.lower_limit if row else None
+                    hi = row.upper_limit if row else None
+                    entry.update({
+                        "computed": True, "unit_short": computed[1],
+                        "needs_lot": key in catalog.NEEDS_LOT_REF,
+                        "lower_limit": lo, "upper_limit": hi,
+                        "spec_source": row.spec_source if row else None,
+                        "measurements": [{
+                            "id": m.id, "sample_size": m.sample_size,
+                            "min_value": m.min_value, "max_value": m.max_value,
+                            "measuring_ref": m.measuring_ref, "lot_ref": m.lot_ref,
+                            "what_changed_kind": m.what_changed_kind,
+                            "what_changed_ref": m.what_changed_ref,
+                            "result": m.result, "measured_by": m.measured_by,
+                            "measured_by_name": people.get(m.measured_by),
+                            "measured_at": m.measured_at,
+                            "line": ValidationService.measurement_line(
+                                m, computed[1], lo, hi),
+                        } for m in (measured.get(row.id, []) if row else [])],
+                    })
                 checks.append(entry)
             if not checks:
                 continue
@@ -357,7 +395,18 @@ class ValidationService:
                 change),
             "release_blocker": await ValidationService.release_blocker(
                 session, change, rows=rows),
+            # §10 (RELEASE_V2): "Not releasable: <check> vs <limits>; fix:
+            # <who>, retest <day>; concession: <state>", and the concessions
+            # in force ("Accepted under concession VI-n until <date>")
+            **await ValidationService._release_words(session, change),
         }
+
+    @staticmethod
+    async def _release_words(session: AsyncSession, change: ChangeRequest) -> dict:
+        from app.services.validation_issue_service import ValidationIssueService as VIS
+        return {"release_line": await VIS.release_line(session, change),
+                "active_concessions": (await VIS.active_concessions(session, change)
+                                       if VIS.fix_rule_on() else [])}
 
     @staticmethod
     async def _names(session: AsyncSession, ids) -> dict[int, str]:
@@ -377,10 +426,6 @@ class ValidationService:
         department_id = spec["department_id"]
         check_key = spec["check_key"]
         status = spec.get("status")
-        if status not in VALIDATION_WRITE_STATUSES:
-            raise ValidationError(
-                f"Invalid validation status '{status}': "
-                f"one of {', '.join(VALIDATION_WRITE_STATUSES)}")
 
         implementing = await ValidationService.implementing_department_ids(
             session, change)
@@ -395,6 +440,18 @@ class ValidationService:
             raise ValidationError(
                 f"'{check_key}' is not a validation check for "
                 f"{dept_name or f'department {department_id}'}")
+
+        from app.services import cm_switches
+        computed = catalog.computed_unit(check_key, dept_name)
+        measurement = spec.get("measurement")
+        if computed and (measurement is not None or cm_switches.on("RELEASE_V2")):
+            return await ValidationService._record_measurement(
+                session, change, department_id, check_key, item, computed,
+                measurement, spec.get("note"), actor)
+        if status not in VALIDATION_WRITE_STATUSES:
+            raise ValidationError(
+                f"Invalid validation status '{status}': "
+                f"one of {', '.join(VALIDATION_WRITE_STATUSES)}")
 
         value = spec.get("value")
         if value is not None:
@@ -447,7 +504,15 @@ class ValidationService:
                        "status": status, "value": row.value},
             notes=row.note, for_department_id=department_id)
 
-        if check_key == catalog.WEIGHT_KEY and status == "passed":
+        return await ValidationService._after_answer(
+            session, change, row, old_status, actor)
+
+    @staticmethod
+    async def _after_answer(session: AsyncSession, change: ChangeRequest,
+                            row: ValidationCheck, old_status: str,
+                            actor: User) -> ValidationCheck:
+        """What an answer sets off, the same for a tick and a measurement."""
+        if row.check_key == catalog.WEIGHT_KEY and row.status == "passed":
             await ValidationService._stamp_validated_weight(
                 session, change, row.value, actor)
         # Validation issues (spec §12): a passed re-answer closes the issue
@@ -455,12 +520,188 @@ class ValidationService:
         # re-validation back to fixing.
         from app.services.validation_issue_service import ValidationIssueService
         await ValidationIssueService.on_check_answered(session, change, row, actor)
+        if row.status == "failed" and old_status != "failed":
+            # §10 (RELEASE_V2): a FAIL raises its issue with a Fix task for
+            # Quality, tells the Sales owner of a failed weight, and an
+            # urgent change's Management at once
+            await ValidationIssueService.on_check_failed(session, change, row, actor)
         return row
+
+    # ------------------------------------------------------------------
+    # §10 computed checks (RELEASE_V2)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def measurement_line(m, unit: str, lower, upper) -> str:
+        """'n=5, 503-516.2 g vs 495-515 g; scale WG-0042' (one line, §10)."""
+        def f(v):
+            return f"{float(v):g}"
+        spec = (f" vs {f(lower)}-{f(upper)} {unit}"
+                if lower is not None and upper is not None else "")
+        lot = f", lot {m.lot_ref}" if m.lot_ref else ""
+        return (f"n={m.sample_size}, {f(m.min_value)}-{f(m.max_value)} {unit}"
+                f"{spec}; {m.measuring_ref}{lot}")
+
+    @staticmethod
+    async def measurements_by_check(session: AsyncSession,
+                                    change: ChangeRequest) -> dict[int, list]:
+        from app.models.change_validation import ValidationMeasurement
+        out: dict[int, list] = {}
+        for m in (await session.execute(
+                select(ValidationMeasurement)
+                .where(ValidationMeasurement.change_id == change.id)
+                .order_by(ValidationMeasurement.id))).scalars().all():
+            out.setdefault(m.check_id, []).append(m)
+        return out
+
+    @staticmethod
+    async def _record_measurement(
+        session: AsyncSession, change: ChangeRequest, department_id: int,
+        check_key: str, item: dict, computed: tuple, m: dict | None,
+        note, actor: User,
+    ) -> ValidationCheck:
+        """A computed check (§10): sample size n, min and max, the measuring
+        report or device (cycle time: the lot). PASS only if both min and
+        max lie inside the limits, which the first measurement fixes; a
+        retest adds a row, keeps the failed one and names what changed."""
+        from app.models.change_validation import (
+            RETEST_CHANGE_KINDS, ValidationMeasurement,
+        )
+        from app.services.cm_rules import reference_refusal
+        unit_label, unit = computed
+        label = item["label_en"]
+        if not isinstance(m, dict):
+            raise ValidationError(
+                f"{label} is computed from a measurement: enter the sample "
+                f"size n, min and max ({unit}) and the measuring report or "
+                "device id; the result follows from the limits")
+
+        def num(key, what):
+            v = m.get(key)
+            if v is None or v == "":
+                return None
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                raise ValidationError(f"{what} must be a number")
+            if v != v or v in (float("inf"), float("-inf")):
+                raise ValidationError(f"{what} must be a number")
+            return round(v, 3)
+
+        try:
+            n = int(m.get("sample_size") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n < 1:
+            raise ValidationError("The sample size n is at least 1 part (or cycle)")
+        lo, hi = num("min_value", "Min"), num("max_value", "Max")
+        if lo is None or hi is None:
+            raise ValidationError(f"Enter both min and max ({unit})")
+        if lo > hi:
+            raise ValidationError("The min is larger than the max")
+        why = reference_refusal(m.get("measuring_ref"),
+                                "The measuring report or device id",
+                                "report MR-2026-118 or scale WG-0042")
+        if why:
+            raise ValidationError(why)
+        lot = (m.get("lot_ref") or "").strip() or None
+        if check_key in catalog.NEEDS_LOT_REF:
+            why = reference_refusal(lot, "The lot the cycles ran on",
+                                    "lot 2026-41-117")
+            if why:
+                raise ValidationError(why)
+
+        rows = await ValidationService.ensure_checks(session, change)
+        row = next((r for r in rows if r.department_id == department_id
+                    and r.check_key == check_key), None)
+        if row is None:
+            row = ValidationCheck(change_id=change.id, department_id=department_id,
+                                  check_key=check_key, status="open")
+            session.add(row)
+            await session.flush()
+
+        old_status, old_value = row.status, row.value
+        kind = (m.get("what_changed_kind") or "").strip() or None
+        changed_ref = (m.get("what_changed_ref") or "").strip() or None
+        if old_status == "failed":
+            # a retest: its own department in validation (HARD #3), and what
+            # changed since the failure
+            refusal = await ValidationService.failed_overwrite_refusal(
+                session, change, department_id, None, actor, note_rule=False)
+            if refusal:
+                raise ValidationError(refusal)
+            if kind not in RETEST_CHANGE_KINDS:
+                raise ValidationError(
+                    "What changed since the failure: pick parameter, tool, "
+                    "material or method, and give its reference")
+            why = reference_refusal(changed_ref, "What changed since the failure",
+                                    "holding pressure -5 bar, PS-114 rev C")
+            if why:
+                raise ValidationError(why)
+        else:
+            kind = changed_ref = None
+
+        new_lo, new_hi = num("lower_limit", "The lower limit"), num(
+            "upper_limit", "The upper limit")
+        source = (m.get("spec_source") or "").strip() or None
+        if row.lower_limit is None or row.upper_limit is None:
+            if new_lo is None or new_hi is None:
+                raise ValidationError(
+                    f"The first measurement sets the limits: enter the lower "
+                    f"and upper limit ({unit}) and where they come from")
+            if new_lo >= new_hi:
+                raise ValidationError("The lower limit is below the upper limit")
+            why = reference_refusal(source, "Where the limits come from",
+                                    "drawing 886.197 D or process sheet PS-114")
+            if why:
+                raise ValidationError(why)
+            row.lower_limit, row.upper_limit = new_lo, new_hi
+            row.spec_source = source[:200]
+        elif ((new_lo is not None and new_lo != float(row.lower_limit))
+              or (new_hi is not None and new_hi != float(row.upper_limit))):
+            raise ValidationError(
+                f"The limits are fixed by the first measurement "
+                f"({float(row.lower_limit):g}-{float(row.upper_limit):g} {unit}): "
+                "a different spec is a concession (Quality), not a retest")
+
+        lower, upper = float(row.lower_limit), float(row.upper_limit)
+        result = "passed" if lower <= lo and hi <= upper else "failed"
+        meas = ValidationMeasurement(
+            check_id=row.id, change_id=change.id, sample_size=n,
+            min_value=lo, max_value=hi,
+            measuring_ref=m["measuring_ref"].strip()[:200],
+            lot_ref=lot[:120] if lot else None,
+            what_changed_kind=kind,
+            what_changed_ref=changed_ref[:200] if changed_ref else None,
+            result=result, measured_by=actor.id, measured_at=datetime.utcnow())
+        session.add(meas)
+        row.status = result
+        row.value = round((lo + hi) / 2, 3)
+        row.note = (note or "").strip() or None
+        row.checked_by = actor.id
+        row.checked_at = datetime.utcnow()
+        await session.flush()
+
+        from app.services.change_service import ChangeService
+        line = ValidationService.measurement_line(meas, unit, lower, upper)
+        await ChangeService.append_changelog(
+            session, change, "validation_check",
+            f"{label} {result} for dept {department_id} ({line})", actor.id,
+            field_name=f"validation_{check_key}",
+            old_value={"status": old_status, "value": old_value},
+            new_value={"department_id": department_id, "check_key": check_key,
+                       "status": result, "value": row.value,
+                       "measurement_id": meas.id, "sample_size": n,
+                       "min": lo, "max": hi, "lower_limit": lower,
+                       "upper_limit": upper,
+                       **({"what_changed": kind} if kind else {})},
+            notes=changed_ref or row.note, for_department_id=department_id)
+        return await ValidationService._after_answer(
+            session, change, row, old_status, actor)
 
     @staticmethod
     async def failed_overwrite_refusal(
         session: AsyncSession, change: ChangeRequest, department_id: int,
-        note, actor: User,
+        note, actor: User, *, note_rule: bool = True,
     ) -> str | None:
         """HARD #3 (C7, RELEASE_V2): a FAILED check is answered again only by
         a retest, in validation, by a member of its department (acts-as
@@ -479,6 +720,8 @@ class ValidationService:
             return ("A failed check is retested by its own department: no "
                     "Project Management or admin shortcut (HARD #3; the other "
                     "exit is a concession, Quality's decision)")
+        if not note_rule:       # a measurement names it in its own fields
+            return None
         from app.services.cm_rules import reference_refusal
         return reference_refusal(
             note, "What changed since the failure (parameter, tool, material "

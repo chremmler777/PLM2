@@ -25,6 +25,8 @@ import CostForm, { CostLine } from './CostForm'
 import ActionsChecklist from './ActionsChecklist'
 import IssueDropzone from './IssueDropzone'
 import IssueEditForm from './IssueEditForm'
+import { ConcessionForm, FixForm } from './FixConcessionForms'
+import { t } from '../../../i18n/cmLabels'
 import { useIssueMutation } from './useIssueMutation'
 import { ChevronRight } from 'lucide-react'
 import { btnSm } from '../../common/buttonStyles'
@@ -98,9 +100,12 @@ const by = (name?: string | null, at?: string | null) =>
 
 export default function IssueCard({
   changeId, changeStatus, issue, viewer, departments, releaseDueDate, defaultOpen, highlight = false,
+  customerRelevant = true,
 }: {
   changeId: number
   changeStatus: string
+  /** False on an internal change: a concession is "not for shipment". */
+  customerRelevant?: boolean
   issue: IssueOut
   viewer: IssueViewer
   departments: { id: number; name: string }[]
@@ -270,6 +275,13 @@ export default function IssueCard({
               onCancel={() => setActive(null)}
               onSubmit={(t) => (active === 'contain' ? contain : active === 'root_cause' ? rootCause : close).mutate(t)} />
           ) : null}
+          {active === 'fix' && (
+            <FixForm changeId={changeId} issue={issue} departments={departments} onDone={() => setActive(null)} />
+          )}
+          {active === 'concession_request' && (
+            <ConcessionForm changeId={changeId} issue={issue} customerRelevant={customerRelevant}
+              onDone={() => setActive(null)} />
+          )}
           {active === 'customer' && (
             <CustomerDecisionForm changeId={changeId} issue={issue} releaseDueDate={releaseDueDate}
               onDone={() => setActive(null)} />
@@ -308,6 +320,14 @@ export default function IssueCard({
                   {issue.route === 'customer_concession' ? 'Open; the customer accepts the part as it is.' : 'Owner department finds it before the route.'}
                 </span>}
             </Fact>
+            {issue.fix_rule && issue.check_id != null && (
+              <Fact label={t('fix.fact')} testId={`issue-fixfact-${issue.id}`}>
+                {issue.fix_department_name
+                  ? <>{t('fix.factValue').replace('{who}', issue.fix_department_name)
+                    .replace('{d}', formatCalendarDate(issue.retest_due))}{by(issue.fix_set_by_name, null)}</>
+                  : <span className="text-slate-400">{t('fix.factNone')}</span>}
+              </Fact>
+            )}
             <Fact label="Route" testId={`issue-routefact-${issue.id}`}>
               {issue.route ? (
                 <>
@@ -333,6 +353,8 @@ export default function IssueCard({
                     {DECISION_LABEL[decision]}{issue.customer_decision_note ? `: ${issue.customer_decision_note}` : ''}
                     {by(issue.customer_decided_by_name, issue.customer_decided_at)}
                     {issue.concession_until && <div className="text-[11px] text-slate-400">Concession until {formatCalendarDate(issue.concession_until)}</div>}
+                    {issue.concession_quantity != null && <div className="text-[11px] text-slate-400">Concession for {issue.concession_quantity} parts</div>}
+                    {issue.concession_not_for_shipment && <div className="text-[11px] text-slate-400">{t('concession.notForShipment')}</div>}
                   </>
                 ) : <span className="text-slate-400">{issue.route === 'customer_concession'
                   ? "Sales files the customer's mail; a Quality member accepts the concession."

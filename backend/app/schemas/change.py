@@ -1777,13 +1777,20 @@ class ValidationCheckIn(BaseModel):
     check_key: str
     # passed | failed. 'open' is not writable: a check is un-answered only
     # before anybody touched it, and a wrong answer is corrected by posting
-    # the right one.
-    status: str
+    # the right one. Not sent for a computed check (its result follows from
+    # the measurement).
+    status: Optional[str] = None
     # Seconds for cycle_time, grams for weight. Required to PASS a check the
     # catalog marks as a measurement — refused in the service with the unit in
     # the message.
     value: Optional[float] = None
     note: Optional[str] = None
+    # ECR-solid §10 (RELEASE_V2): a computed check (weight, cycle time,
+    # APQP's dimensions) is answered with a measurement: sample_size,
+    # min_value, max_value, measuring_ref, lot_ref (cycle time), the limits
+    # lower_limit / upper_limit / spec_source (first measurement), and on a
+    # retest what_changed_kind + what_changed_ref. Validated in the service.
+    measurement: Optional[dict] = None
 
 
 class WeightDeltaAckIn(BaseModel):
@@ -1819,6 +1826,15 @@ class ValidationCheckState(BaseModel):
     delta_g: Optional[float] = None
     # An answered row an older catalog seeded; shown, never counted.
     retired: bool = False
+    # ECR-solid §10 computed checks: the verdict follows from measurements
+    # against the limits the first one fixed; every measurement is kept.
+    computed: bool = False
+    unit_short: Optional[str] = None
+    needs_lot: bool = False
+    lower_limit: Optional[float] = None
+    upper_limit: Optional[float] = None
+    spec_source: Optional[str] = None
+    measurements: List[dict] = []
 
 
 class ValidationDepartmentState(BaseModel):
@@ -1855,6 +1871,10 @@ class ValidationStateResponse(BaseModel):
     # Exactly the string the -> released guard would refuse with, or null. The
     # badge and the block read the same sentence.
     release_blocker: Optional[str] = None
+    # ECR-solid §10: the status line of the failed checks (fix, retest,
+    # concession) and the concessions in force.
+    release_line: Optional[str] = None
+    active_concessions: List[dict] = []
 
 
 class ValidationCheckResponse(BaseModel):

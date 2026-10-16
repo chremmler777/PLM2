@@ -676,7 +676,8 @@ async def test_concession_is_qualitys_decision(
     check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
     iid = await _concession(session_factory, cid, check_id, people["Sales"][0])
     url = f"/api/v1/changes/{cid}/validation/issues/{iid}/customer"
-    yes = {"decision": "accept_deviation", "note": "customer mail 14 Oct: ship as is"}
+    yes = {"decision": "accept_deviation", "note": "customer mail 14 Oct: ship as is",
+           "concession_until": (datetime.utcnow() + timedelta(days=60)).date().isoformat()}
     for auth in (people["Sales"][1], admin, people["Project Manager"][1]):
         r = await client.post(url, json=yes, headers=auth)
         assert r.status_code == 403, r.text  # NEGATIVE
@@ -978,7 +979,8 @@ async def test_admin_acting_as_quality_concession_counts_at_release(
     iid = await _concession(session_factory, cid, check_id, people["Sales"][0])
     r = await client.post(
         f"/api/v1/changes/{cid}/validation/issues/{iid}/customer",
-        json={"decision": "accept_deviation", "note": "customer mail 14 Oct: ship"},
+        json={"decision": "accept_deviation", "note": "customer mail 14 Oct: ship",
+              "quantity": 500},
         headers={**admin, ACTS: str(depts["Quality"])})
     assert r.status_code == 200, r.text
     from app.models.change_validation_issue import ValidationIssue

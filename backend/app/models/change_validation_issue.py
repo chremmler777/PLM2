@@ -35,6 +35,10 @@ CUSTOMER_DECISIONS = ("accept_deviation", "require_fix", "new_timing", "pending"
 COST_BEARERS = ("internal", "supplier", "customer")
 ISSUE_STATUSES = ("open", "contained", "route_decided", "fixing",
                   "revalidation", "closed", "accepted", "transferred")
+# §10 Fix task: who fixes a failed check (Quality's pick). Process
+# parameters -> Process Engineer, tool at supplier -> Tool Engineer (with the
+# supplier), other -> a department named in the pick.
+FIX_OWNERS = ("process_parameters", "tool_at_supplier", "other")
 # An issue in one of these no longer holds the release.
 ISSUE_DONE_STATUSES = ("closed", "accepted", "transferred")
 ACTION_STATUSES = ("open", "done")
@@ -109,6 +113,28 @@ class ValidationIssue(Base):
 
     follow_up_change_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_requests.id"), nullable=True)
+
+    # ECR-solid §10 (migration 137, RELEASE_V2). The Fix task: Quality
+    # picks who fixes (FIX_OWNERS) and a retest date; the check's own
+    # department retests. A concession runs in parallel: requested by
+    # Quality, the customer asked by the Sales owner (internal: "not for
+    # shipment"), decided by Quality for a quantity or until a date.
+    fix_owner_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    fix_department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wf_departments.id"), nullable=True)
+    retest_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fix_set_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    fix_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    concession_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
+    concession_requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    concession_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    concession_not_for_shipment: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True)
+    concession_reminded_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
 
     # Recovery group in the detailed plan (§12a). Plain ids, no FK: a plan
     # block may be deleted by a plan editor, the issue then shows no group.

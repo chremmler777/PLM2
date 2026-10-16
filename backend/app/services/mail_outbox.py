@@ -47,6 +47,8 @@ MAIL_KINDS = frozenset({
     "revision_intake", "change_review", "change_info_sent",
     "routing_late_assessment", "validation_issue_escalated", "overdue_digest",
     "change_digest",
+    # §10: an urgent change's FAIL reaches Management at once
+    "validation_urgent_fail",
 })
 #: This mail only is refused (its recipient, its content or a header):
 #: stamped and skipped. Anything else (the relay unreachable, dropped,

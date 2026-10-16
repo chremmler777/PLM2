@@ -39,10 +39,12 @@ export function useValidationIssues(changeId: number, enabled = true) {
 
 export default function IssuesPanel({
   changeId, changeStatus, departments, viewer, canRaise, releaseDueDate, focusIssueId = null,
-  title = 'Validation issues', hint,
+  title = 'Validation issues', hint, customerRelevant = true,
 }: {
   changeId: number
   changeStatus: string
+  /** False on an internal change (a concession is "not for shipment"). */
+  customerRelevant?: boolean
   departments: { id: number; name: string }[]
   viewer: IssueViewer
   /** Routed department members, PM, lead, admin. */
@@ -72,6 +74,7 @@ export default function IssuesPanel({
   const card = (i: IssueOut) => (
     <IssueCard key={i.id} changeId={changeId} changeStatus={changeStatus} issue={i} viewer={viewer}
       departments={departments} releaseDueDate={releaseDueDate} highlight={focusIssueId === i.id}
+      customerRelevant={customerRelevant}
       defaultOpen={focusIssueId === i.id || (isIssueOpen(i) && open[0]?.id === i.id)} />
   )
 
@@ -97,8 +100,8 @@ export default function IssuesPanel({
 
       {isLoading ? null : issues.length === 0 ? (
         <p data-testid="validation-issues-empty" className="rounded-lg border border-dashed border-slate-700 px-3 py-2.5 text-xs text-slate-400">
-          No issues. When a check fails, press "Raise issue" on that check: the failure gets an owner, a route to its fix
-          and, if needed, the customer's decision.
+          No issues. A failed check raises its issue by itself: Quality picks who fixes it and the retest date, and may
+          ask for a concession beside the fix.
         </p>
       ) : (
         <div className="space-y-2">

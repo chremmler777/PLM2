@@ -298,6 +298,9 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     from app.services.validation_issue_service import ValidationIssueService
     counts["validation_issue_escalated"] = \
         await ValidationIssueService.reevaluate_all(session)
+    # §10 (RELEASE_V2): a concession ending within 10 wd is told once
+    counts["concession_expiring"] = \
+        await ValidationIssueService.remind_expiring_concessions(session)
 
     # C27 / P6: the daily overdue digest for the configured managers.
     from app.services.overdue_digest import send_overdue_digest

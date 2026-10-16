@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change import ChangeAssessment, ChangeAttachment, ChangeChangelog, ChangeRequest
 from app.models.change_validation import ValidationCheck
 from app.models.change_validation_issue import (
-    COST_BEARERS, CUSTOMER_DECISIONS, FIX_ROUTES, ISSUE_CATEGORIES,
+    COST_BEARERS, CUSTOMER_DECISIONS, FIX_OWNERS, FIX_ROUTES, ISSUE_CATEGORIES,
     ISSUE_DONE_STATUSES, ISSUE_ROUTES, ISSUE_SEVERITIES, ValidationIssue,
     ValidationIssueAction, ValidationIssueEscalation,
 )
@@ -1523,6 +1523,10 @@ class ValidationIssueService:
             raise ChangeError(
                 f"New timing: {new_date.isoformat()} is in the past; give the "
                 "date the customer agreed from today on")
+        if concession and decision == "accept_deviation" and svc.fix_rule_on():
+            # §10: a concession is for a quantity of parts or until a date
+            issue.concession_quantity, until = svc._concession_bounds(spec)
+            spec = {**spec, "concession_until": until}
         issue.customer_decision = decision
         issue.customer_decision_note = note
         issue.customer_decided_at = datetime.utcnow()
@@ -1916,6 +1920,390 @@ class ValidationIssueService:
         return issue
 
     # ------------------------------------------------------------------
+    # §10 (RELEASE_V2): a FAIL raises its issue; the Fix task (Quality picks
+    # who fixes and a retest date) and the concession run in parallel
+    # ------------------------------------------------------------------
+    #: Quality's fix pick -> the department that fixes (other: named)
+    FIX_DEPARTMENTS = {"process_parameters": "Process Engineer",
+                       "tool_at_supplier": "Tool Engineer"}
+    FIX_OWNER_WORDS = {"process_parameters": "process parameters",
+                       "tool_at_supplier": "tool at supplier", "other": "other"}
+    #: a concession about to expire is told this many working days before
+    CONCESSION_REMIND_WD = 10
+
+    @staticmethod
+    def fix_rule_on() -> bool:
+        from app.services import cm_switches
+        return cm_switches.on("RELEASE_V2")
+
+    @staticmethod
+    async def check_line(session: AsyncSession, change: ChangeRequest,
+                         check: ValidationCheck) -> str:
+        """'Part weight validated 516.2 g vs 495-515' style words of a failed
+        check: the last measurement against the limits, else its value and
+        note. Used by the issue, the status line and the urgent notice."""
+        from app.models.change_validation import ValidationMeasurement
+        from app.services import validation_checklist as catalog
+        names = await ValidationIssueService._dept_names(session)
+        dept = names.get(check.department_id)
+        label = catalog.label_for(check.check_key, dept)
+        unit = catalog.computed_unit(check.check_key, dept)
+        m = (await session.execute(
+            select(ValidationMeasurement)
+            .where(ValidationMeasurement.check_id == check.id)
+            .order_by(ValidationMeasurement.id.desc()).limit(1))).scalar_one_or_none()
+        if m is not None and unit is not None:
+            def f(v):
+                return f"{float(v):g}"
+            worst = (m.max_value if check.upper_limit is not None
+                     and float(m.max_value) > float(check.upper_limit)
+                     else m.min_value)
+            limits = (f" vs {f(check.lower_limit)}-{f(check.upper_limit)}"
+                      if check.lower_limit is not None else "")
+            return f"{label} {f(worst)} {unit[1]}{limits}"
+        shown = f" {float(check.value):g}" if check.value is not None else ""
+        return f"{label}{shown}" + (f" ({check.note})" if check.note else "")
+
+    @staticmethod
+    async def on_check_failed(session: AsyncSession, change: ChangeRequest,
+                              check: ValidationCheck, user: User):
+        """A check turned FAILED (RELEASE_V2): its issue is raised at once
+        (VI-n, linked, owner = the check's department) unless one is open,
+        so Quality's Fix task exists without a manual raise; the Sales
+        owner hears of a failed weight; an urgent change's Management (no
+        Management members: Project Management) gets the status line now."""
+        svc = ValidationIssueService
+        if not svc.fix_rule_on():
+            return None
+        issue = (await session.execute(
+            select(ValidationIssue).where(
+                ValidationIssue.check_id == check.id,
+                ValidationIssue.status.not_in(ISSUE_DONE_STATUSES)).limit(1)
+        )).scalar_one_or_none()
+        line = await svc.check_line(session, change, check)
+        if issue is None and not await svc.check_retired(session, check):
+            number = ((await session.execute(
+                select(func.max(ValidationIssue.number)).where(
+                    ValidationIssue.change_id == change.id))).scalar() or 0) + 1
+            from app.services import validation_checklist as catalog
+            names = await svc._dept_names(session)
+            label = catalog.label_for(check.check_key, names.get(check.department_id))
+            issue = ValidationIssue(
+                change_id=change.id, number=number,
+                title=f"{label} failed"[:200],
+                category=svc.category_for_check(check.check_key), severity=2,
+                department_id=check.department_id, check_id=check.id,
+                description=line, status="open", escalation_level=1,
+                created_by=user.id, created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow())
+            session.add(issue)
+            await session.flush()
+            await svc._log(session, change, issue, "raised",
+                           f"raised from the failed check: {line}", user.id,
+                           notes=line, check_id=check.id, severity=2,
+                           category=issue.category, automatic=True,
+                           department_id=issue.department_id)
+            await svc._record_escalation(session, change, issue, 1, "raised",
+                                         f"Validation failed: {line}", user.id)
+            await svc.reevaluate(session, change, issue, user.id)
+        from app.services.notification_service import NotificationService
+        from app.services import validation_checklist as catalog
+        if (check.check_key == catalog.WEIGHT_KEY and change.sales_owner_id
+                and change.sales_owner_id != user.id):
+            await NotificationService.notify_once(
+                session, [change.sales_owner_id], kind="validation_weight_failed",
+                subject_key=f"vc:{check.id}:failed",
+                title=f"{change.change_number}: weight check failed"[:255],
+                body=f"{line}. Fix and retest, or a concession (Quality); "
+                     "the quote may need the new weight.",
+                link=f"/changes/{change.id}?tab=release")
+        from app.services.due_rules import is_urgent
+        if is_urgent(change):
+            org = await svc.change_org_id(session, change)
+            mgmt = await svc._dept_id(session, MANAGEMENT_DEPARTMENT)
+            users = await svc._dept_members(session, [mgmt], org) if mgmt else set()
+            if not users:     # P4 default until Management is seeded
+                users = await svc._dept_members(
+                    session, [await svc._dept_id(session, PM_DEPARTMENT)], org)
+            status_line = (await svc.release_line(session, change)) or line
+            await NotificationService.notify_once(
+                session, sorted(users - {user.id}), kind="validation_urgent_fail",
+                subject_key=f"vc:{check.id}:urgent_fail",
+                title=f"{change.change_number} (urgent): validation failed"[:255],
+                body=status_line, link=f"/changes/{change.id}?tab=release")
+        return issue
+
+    @staticmethod
+    async def set_fix(session: AsyncSession, change: ChangeRequest, iid: int,
+                      spec: dict, user: User) -> ValidationIssue:
+        """Quality's Fix task (§10): who fixes (process parameters / tool at
+        supplier / other + department) and the retest date. May be set
+        again (a new owner or date). The check's own department retests."""
+        svc = ValidationIssueService
+        if not svc.fix_rule_on():
+            raise ChangeError("The Fix task is part of the release rules "
+                              "(RELEASE_V2), switched off")
+        v = await svc.viewer(session, change, user)
+        issue = await svc.get_issue(session, change, iid, lock=True)
+        svc._require(v.quality, "Quality picks who fixes and the retest date")
+        svc._require_open(issue)
+        svc._require_work_window(change)
+        kind = spec.get("owner")
+        if kind not in FIX_OWNERS:
+            raise ChangeError("Who fixes: process parameters, tool at supplier "
+                              "or other (with the department)")
+        dept_id = spec.get("department_id")
+        if kind in svc.FIX_DEPARTMENTS and dept_id is None:
+            dept_id = await svc._dept_id(session, svc.FIX_DEPARTMENTS[kind])
+        if dept_id is None or await session.get(Department, dept_id) is None:
+            raise ChangeError("Name the department that fixes it")
+        supplier = _txt(spec.get("supplier_name"), "The supplier", required=False,
+                        limit=120)
+        if kind == "tool_at_supplier":
+            if not supplier and not issue.supplier_name:
+                raise ChangeError("Tool at supplier: name the supplier")
+            issue.supplier_name = supplier or issue.supplier_name
+        due = _d(spec.get("retest_due"))
+        if due is None:
+            raise ChangeError("Give the retest date")
+        if due < business_today():
+            raise ChangeError(f"The retest date {due.isoformat()} is in the past")
+        old = (issue.fix_owner_kind, issue.fix_department_id, issue.retest_due)
+        issue.fix_owner_kind = kind
+        issue.fix_department_id = dept_id
+        issue.retest_due = due
+        issue.fix_set_by = user.id
+        issue.fix_set_at = datetime.utcnow()
+        issue.updated_at = datetime.utcnow()
+        await session.flush()
+        names = await svc._dept_names(session)
+        await svc._log(session, change, issue, "fix_set",
+                       f"fix: {names.get(dept_id)} ({svc.FIX_OWNER_WORDS[kind]}), "
+                       f"retest {due.isoformat()}", user.id,
+                       owner=kind, department_id=dept_id,
+                       retest_due=due.isoformat(),
+                       **({"previous": {"owner": old[0], "department_id": old[1],
+                                        "retest_due": old[2].isoformat()}}
+                          if old[0] else {}))
+        return issue
+
+    @staticmethod
+    def is_concession(issue: ValidationIssue) -> bool:
+        return issue.route == "customer_concession"
+
+    @staticmethod
+    async def request_concession(session: AsyncSession, change: ChangeRequest,
+                                 iid: int, spec: dict, user: User) -> ValidationIssue:
+        """Quality asks for a concession beside the fix (§10). A customer
+        change: the issue's route becomes the concession and the Sales owner
+        asks the customer ("Waiting for customer"); Quality decides once the
+        customer's mail is filed. An internal change: the parts are "not for
+        shipment" and Quality decides now, for a quantity or until a date."""
+        svc = ValidationIssueService
+        if not svc.fix_rule_on():
+            raise ChangeError("Request concession is part of the release rules "
+                              "(RELEASE_V2), switched off")
+        v = await svc.viewer(session, change, user)
+        issue = await svc.get_issue(session, change, iid, lock=True)
+        svc._require(v.quality, "A concession is Quality's: only a Quality "
+                                "member requests and decides it")
+        svc._require_open(issue)
+        svc._require_work_window(change)
+        if issue.route not in (None, "customer_concession"):
+            raise ChangeError(
+                f"{issue.ref} is already on the route '{issue.route}': the fix "
+                "runs there; a concession is asked on an issue without a route")
+        note = _txt(spec.get("note"), "What the concession covers")
+        if not change.customer_relevant:
+            if not spec.get("not_for_shipment"):
+                raise ChangeError("Internal change: confirm the parts are not "
+                                  "for shipment")
+            qty, until = svc._concession_bounds(spec)
+            issue.route = "customer_concession"
+            issue.route_reason = f"Concession (internal, not for shipment): {note}"
+            issue.route_decided_at = datetime.utcnow()
+            issue.route_decided_by = user.id
+            issue.concession_requested_at = datetime.utcnow()
+            issue.concession_requested_by = user.id
+            issue.concession_not_for_shipment = True
+            issue.concession_quantity = qty
+            issue.concession_until = until
+            issue.customer_decision = "accept_deviation"
+            issue.customer_decision_note = note
+            issue.customer_decided_at = datetime.utcnow()
+            issue.customer_decided_by = user.id
+            issue.customer_decided_as_quality = True
+            await session.flush()
+            await svc._log(session, change, issue, "concession",
+                           "concession accepted by Quality (internal, not for "
+                           "shipment)", user.id, notes=note,
+                           quantity=qty, until=until.isoformat() if until else None)
+            await svc._close(session, change, issue, "accepted", note, user.id,
+                             "closed: accepted under concession (not for shipment)")
+            return issue
+        if issue.route == "customer_concession":
+            raise ChangeError(f"A concession on {issue.ref} is already asked")
+        issue.route = "customer_concession"
+        issue.route_reason = f"Concession requested by Quality: {note}"
+        issue.route_decided_at = datetime.utcnow()
+        issue.route_decided_by = user.id
+        issue.customer_inform = True
+        issue.concession_requested_at = datetime.utcnow()
+        issue.concession_requested_by = user.id
+        issue.status = "route_decided"
+        issue.updated_at = datetime.utcnow()
+        await session.flush()
+        await svc._log(session, change, issue, "concession_requested",
+                       "concession requested: the Sales owner asks the customer",
+                       user.id, notes=note)
+        if change.sales_owner_id:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [change.sales_owner_id], kind="task_new",
+                subject_key=f"vi:{issue.id}:concession",
+                title=(f"{change.change_number} {issue.ref}: ask the customer "
+                       "for a concession")[:255],
+                body=f"{issue.description}. {note}",
+                link=svc._link(change, issue))
+        await svc.reevaluate(session, change, issue, user.id)
+        return issue
+
+    @staticmethod
+    def _concession_bounds(spec: dict):
+        """(quantity, until): a concession is for a quantity or until a date."""
+        qty = spec.get("quantity")
+        if qty in ("", None):
+            qty = None
+        else:
+            try:
+                qty = int(qty)
+            except (TypeError, ValueError):
+                raise ChangeError("The quantity is a whole number of parts")
+            if qty < 1:
+                raise ChangeError("The quantity is at least 1 part")
+        until = _d(spec.get("concession_until") or spec.get("until"))
+        if until is not None and until < business_today():
+            raise ChangeError(f"The concession ends {until.isoformat()}, in the past")
+        if qty is None and until is None:
+            raise ChangeError("A concession is for a quantity of parts or until a date")
+        return qty, until
+
+    @staticmethod
+    async def active_concessions(session: AsyncSession,
+                                 change: ChangeRequest) -> list[dict]:
+        """Accepted concessions still in force (§10-§11 header): 'Accepted
+        under concession VI-n until <date>' or 'for n parts'."""
+        rows = (await session.execute(
+            select(ValidationIssue).where(
+                ValidationIssue.change_id == change.id,
+                ValidationIssue.status == "accepted",
+                ValidationIssue.route == "customer_concession")
+            .order_by(ValidationIssue.number))).scalars().all()
+        today = business_today()
+        out = []
+        for i in rows:
+            if i.concession_until is not None and i.concession_until < today:
+                continue
+            bound = (f" until {i.concession_until.isoformat()}" if i.concession_until
+                     else f" for {i.concession_quantity} parts"
+                     if i.concession_quantity else "")
+            out.append({"id": i.id, "ref": i.ref, "until": i.concession_until,
+                        "quantity": i.concession_quantity,
+                        "not_for_shipment": bool(i.concession_not_for_shipment),
+                        "text": f"Accepted under concession {i.ref}{bound}"
+                                + (" (not for shipment)"
+                                   if i.concession_not_for_shipment else "")})
+        return out
+
+    @staticmethod
+    async def release_line(session: AsyncSession, change: ChangeRequest) -> Optional[str]:
+        """§10 status line, one per failed check not covered: 'Not
+        releasable: weight 516.2 g vs 495-515; fix: Process Engineer, retest
+        Thu 22 Oct; concession: none'. None when nothing failed."""
+        svc = ValidationIssueService
+        if not svc.fix_rule_on():
+            return None
+        failed = (await session.execute(
+            select(ValidationCheck).where(ValidationCheck.change_id == change.id,
+                                          ValidationCheck.status == "failed")
+            .order_by(ValidationCheck.id))).scalars().all()
+        if not failed:
+            return None
+        names = await svc._dept_names(session)
+        issues = {i.check_id: i for i in (await session.execute(
+            select(ValidationIssue).where(
+                ValidationIssue.change_id == change.id,
+                ValidationIssue.check_id.in_([c.id for c in failed]))
+            .order_by(ValidationIssue.id))).scalars().all()}
+        parts = []
+        for c in failed:
+            if await svc.check_retired(session, c):
+                continue
+            i = issues.get(c.id)
+            if i is not None and i.status == "accepted" and svc.is_concession(i) \
+                    and await svc.quality_decided(session, i):
+                continue
+            line = await svc.check_line(session, change, c)
+            fix = "fix: not assigned (Quality)"
+            if i is not None and i.fix_department_id is not None:
+                fix = (f"fix: {names.get(i.fix_department_id)}"
+                       + (f", retest {i.retest_due.strftime('%a %d %b')}"
+                          if i.retest_due else ""))
+            conc = "concession: none"
+            if i is not None and svc.is_concession(i) and i.is_open:
+                if await svc.has_customer_mail(session, i):
+                    conc = "concession: Quality decides"
+                else:
+                    asked = (i.customer_decided_at if i.customer_decision == "pending"
+                             else i.concession_requested_at or i.route_decided_at)
+                    conc = ("concession: waiting for customer (Sales owner"
+                            + (f", asked {asked.date().isoformat()}" if asked else "")
+                            + ")")
+            parts.append(f"{line}; {fix}; {conc}")
+        return ("Not releasable: " + " | ".join(parts)) if parts else None
+
+    @staticmethod
+    async def remind_expiring_concessions(session: AsyncSession) -> int:
+        """Sweep: an accepted concession ending within 10 working days tells
+        Quality and the lead once (§10)."""
+        svc = ValidationIssueService
+        if not svc.fix_rule_on():
+            return 0
+        today = business_today()
+        horizon = add_workdays(today, svc.CONCESSION_REMIND_WD)
+        rows = (await session.execute(
+            select(ValidationIssue).where(
+                ValidationIssue.status == "accepted",
+                ValidationIssue.route == "customer_concession",
+                ValidationIssue.concession_until.isnot(None),
+                ValidationIssue.concession_until >= today,
+                ValidationIssue.concession_until <= horizon,
+                ValidationIssue.concession_reminded_at.is_(None)))).scalars().all()
+        from app.services.notification_service import NotificationService
+        n = 0
+        for i in rows:
+            change = await session.get(ChangeRequest, i.change_id)
+            if change is None:
+                continue
+            org = await svc.change_org_id(session, change)
+            users = await svc._dept_members(
+                session, [await svc._dept_id(session, QUALITY_DEPARTMENT)], org)
+            if change.lead_id:
+                users.add(change.lead_id)
+            await NotificationService.notify_once(
+                session, sorted(users), kind="concession_expiring",
+                subject_key=f"vi:{i.id}:expiring",
+                title=(f"{change.change_number} {i.ref}: concession ends "
+                       f"{i.concession_until.isoformat()}")[:255],
+                body="Fixed and retested by then, or a new concession",
+                link=svc._link(change, i))
+            i.concession_reminded_at = datetime.utcnow()
+            n += 1
+        if n:
+            await session.flush()
+        return n
+
+    # ------------------------------------------------------------------
     # Out
     # ------------------------------------------------------------------
     @staticmethod
@@ -1948,7 +2336,7 @@ class ValidationIssueService:
 
     # Acts that are not a step of the issue: never the primary button (the
     # frontend's QUIET list), add_action excepted when it is the only way on.
-    QUIET_ACTS = ("edit", "attach", "escalate", "add_action")
+    QUIET_ACTS = ("edit", "attach", "escalate", "add_action", "concession_request")
 
     @staticmethod
     def _needs_new_action(issue: ValidationIssue, actions: list) -> bool:
@@ -2018,16 +2406,27 @@ class ValidationIssueService:
             # before the route without the mail is recorded again with it);
             # with RELEASE_V2 Quality gives the yes once the mail is filed
             acts.append("customer")
-        if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
-            acts.append("action_done")
         chk = await session.get(ValidationCheck, issue.check_id) \
             if issue.check_id is not None else None
+        if svc.fix_rule_on() and v.quality and change.status in WORK_STATUSES:
+            # §10: Quality's Fix task (who fixes, retest date) on a failed
+            # check, and the concession beside it
+            if chk is not None and chk.status == "failed" \
+                    and issue.fix_department_id is None and issue.route is None:
+                acts.append("fix")
+            if issue.route is None:
+                acts.append("concession_request")
+        if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
+            acts.append("action_done")
         # a check no longer asked of its department can never pass again:
         # nobody re-checks it, the issue closes with a note at any open step
         retired = svc._retired_in(chk, v.dept_names)
         # the check is answered again in validation only: while the change is
         # back in implementation the re-check waits (step_note says so)
-        if issue.status == "revalidation" and issue.check_id is not None \
+        fix_retest = (svc.fix_rule_on() and issue.fix_department_id is not None
+                      and chk is not None and chk.status == "failed"
+                      and issue.route not in FIX_ROUTES)
+        if (issue.status == "revalidation" or fix_retest) and issue.check_id is not None \
                 and not retired and change.status == "in_validation":
             dept = chk.department_id if chk else issue.department_id
             # HARD #3: a failed check is retested by its own department only
@@ -2081,7 +2480,7 @@ class ValidationIssueService:
         users = await svc._user_names(session, [
             x for i in issues for x in (
                 i.created_by, i.contained_by, i.root_cause_by, i.route_decided_by,
-                i.customer_decided_by, i.closed_by, i.fix_quoted_by)]
+                i.customer_decided_by, i.closed_by, i.fix_quoted_by, i.fix_set_by)]
             + [x for lst in acts.values() for a in lst for x in (a.owner_id, a.done_by, a.created_by)]
             + [x for lst in escs.values() for e in lst for x in (e.created_by, e.acknowledged_by)]
             + [a.uploaded_by for lst in atts.values() for a in lst])
@@ -2165,6 +2564,15 @@ class ValidationIssueService:
                 "customer_decided_by": i.customer_decided_by,
                 "customer_decided_by_name": users.get(i.customer_decided_by),
                 "concession_until": i.concession_until,
+                "concession_quantity": i.concession_quantity,
+                "concession_not_for_shipment": bool(i.concession_not_for_shipment),
+                "concession_requested_at": i.concession_requested_at,
+                # §10 Fix task: who fixes and the retest date (Quality's pick)
+                "fix_owner_kind": i.fix_owner_kind,
+                "fix_department_id": i.fix_department_id,
+                "fix_department_name": names.get(i.fix_department_id),
+                "retest_due": i.retest_due,
+                "fix_set_by_name": users.get(i.fix_set_by),
                 "new_timing_date": i.new_timing_date,
                 "customer_escalation_id": i.customer_escalation_id,
                 "cost_visible": v.cost_role,
@@ -2229,6 +2637,8 @@ class ValidationIssueService:
                 "next_acts": next_acts, "primary_act": primary,
                 "extra_acts": extra_acts,
                 "customer_options": svc.customer_options(v, i),
+                # §10: the Fix task and the bounded concession apply
+                "fix_rule": svc.fix_rule_on(),
             })
         return out
 
@@ -2275,6 +2685,9 @@ class ValidationIssueService:
                     "Answer the linked validation check of {ref} again"),
         "add_action": ("validation_issue_add_action",
                        "Re-validation of {ref} failed: add a new fix action"),
+        "fix": ("validation_issue_fix",
+                "Fix {ref}: pick who fixes and the retest date"),
+        "fix_work": ("validation_issue_fix_work", "Fix {ref}: {what}, retest {when}"),
     }
 
     @staticmethod
@@ -2301,10 +2714,13 @@ class ValidationIssueService:
             if "contain" in possible and not i.containment and i.severity == 3 \
                     and i.route is None and v.in_dept(i.department_id):
                 owed.append("contain")
+            # §10 (RELEASE_V2): a failed check's issue runs on Quality's Fix
+            # task; the 8D steps stay on the card, they are not tasks
+            light = svc.fix_rule_on() and i.check_id is not None
             if "root_cause" in possible and not i.root_cause and i.route is None \
-                    and v.in_dept(i.department_id):
+                    and v.in_dept(i.department_id) and not light:
                 owed.append("root_cause")
-            if "route" in possible and not v.admin:
+            if "route" in possible and not v.admin and not light:
                 owed.append("route")
             if "action_done" in possible and any(
                     a.status == "open" and (a.owner_id == v.id or v.in_dept(a.department_id))
@@ -2321,14 +2737,37 @@ class ValidationIssueService:
                 owed.append("close")
             if "recheck" in possible and not v.admin:
                 owed.append("recheck")
+            if "fix" in possible and not v.admin:
+                owed.append("fix")
+            if (svc.fix_rule_on() and i.fix_department_id is not None
+                    and v.in_dept(i.fix_department_id) and not v.admin
+                    and i.route not in FIX_ROUTES and "recheck" not in owed
+                    and i.check_id is not None
+                    and (await session.get(ValidationCheck, i.check_id)).status == "failed"):
+                owed.append("fix_work")
             if "add_action" in possible and not v.admin and \
                     svc._needs_new_action(i, acts[i.id]) and \
                     (v.pm or v.in_dept(i.department_id)):
                 owed.append("add_action")
             for key in owed:
                 kind, label = svc.ACT_KINDS[key]
-                item = {"kind": kind, "label": label.format(ref=i.ref),
-                        "target_tab": "release", "issue_id": i.id}
+                item = {"kind": kind, "target_tab": "release", "issue_id": i.id}
+                if key == "fix_work":
+                    label = label.format(
+                        ref=i.ref, what=i.description,
+                        when=i.retest_due.strftime("%a %d %b") if i.retest_due else "-")
+                else:
+                    label = label.format(ref=i.ref)
+                if key == "recheck" and i.retest_due is not None:
+                    label = f"Retest for {i.ref} by {i.retest_due.strftime('%a %d %b')}"
+                item["label"] = label
+                if key in ("fix_work", "recheck") and i.retest_due is not None:
+                    item["due_date"] = datetime.combine(i.retest_due, datetime.max.time().replace(microsecond=0))
+                elif key == "fix":
+                    from app.services.due_rules import task_due
+                    item["due_date"] = task_due(i.created_at, change, "validation_issue_fix")
+                if key == "fix_work":
+                    item["role_department_id"] = i.fix_department_id
                 if key == "customer" and i.route == "customer_concession" and (
                         (v.quality and svc.quality_decides_concessions()
                          and await svc.has_customer_mail(session, i))

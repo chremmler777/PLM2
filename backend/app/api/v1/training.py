@@ -1060,6 +1060,9 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes/{change_id}/validation/issues/{iid}/root-cause"),
     ("POST", "/changes/{change_id}/validation/issues/{iid}/route"),
     ("POST", "/changes/{change_id}/validation/issues/{iid}/customer"),
+    # ECR-solid §10: Quality's Fix task and the parallel concession
+    ("POST", "/changes/{change_id}/validation/issues/{iid}/fix"),
+    ("POST", "/changes/{change_id}/validation/issues/{iid}/concession"),
     ("POST", "/changes/{change_id}/validation/issues/{iid}/cost"),
     ("POST", "/changes/{change_id}/validation/issues/{iid}/fix-quoted"),
     ("POST", "/changes/{change_id}/validation/issues/{iid}/actions"),

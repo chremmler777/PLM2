@@ -1,7 +1,7 @@
 import client from './client'
 import type {
-  EscalationLevel, IssueActionIn, IssueCostIn, IssueCreate, IssueCustomerIn, IssueOut,
-  IssuePatch, IssueRouteIn,
+  EscalationLevel, IssueActionIn, IssueConcessionIn, IssueCostIn, IssueCreate,
+  IssueCustomerIn, IssueFixIn, IssueOut, IssuePatch, IssueRouteIn,
 } from '../types/validationIssue'
 
 /** Validation issues of a change (spec 2026-09-25 §12). */
@@ -30,6 +30,14 @@ export const validationIssuesApi = {
 
   customer: (changeId: number, iid: number, body: IssueCustomerIn) =>
     client.post<IssueOut>(`${base(changeId)}/${iid}/customer`, body).then((r) => r.data),
+
+  /** §10 Fix task: Quality picks who fixes and the retest date. */
+  fix: (changeId: number, iid: number, body: IssueFixIn) =>
+    client.post<IssueOut>(`${base(changeId)}/${iid}/fix`, body).then((r) => r.data),
+
+  /** §10 Request concession (Quality), beside the fix. */
+  requestConcession: (changeId: number, iid: number, body: IssueConcessionIn) =>
+    client.post<IssueOut>(`${base(changeId)}/${iid}/concession`, body).then((r) => r.data),
 
   cost: (changeId: number, iid: number, body: IssueCostIn) =>
     client.post<IssueOut>(`${base(changeId)}/${iid}/cost`, body).then((r) => r.data),

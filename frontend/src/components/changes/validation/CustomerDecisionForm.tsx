@@ -14,6 +14,7 @@ import { DECISION_LABEL } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
 import { btnSm } from '../../common/buttonStyles'
 import { t } from '../../../i18n/cmLabels'
+import { ConcessionBounds } from './FixConcessionForms'
 
 const OPTIONS: CustomerDecision[] = ['accept_deviation', 'require_fix', 'new_timing', 'pending']
 
@@ -21,11 +22,15 @@ export const hasCustomerMail = (i: IssueOut) => (i.attachments ?? []).some((a) =
 
 /** Why this decision cannot be saved yet, or null. */
 export function customerDecisionBlocked(i: IssueOut, d: CustomerDecision | null, note: string, newDate: string,
-  today: string = todayIso()): string | null {
+  today: string = todayIso(), qty = '', until = ''): string | null {
   if (!d) return 'Pick what the customer decided'
   if (!note.trim()) return 'Add a note (what was agreed, with whom)'
   if (d === 'accept_deviation' && i.route === 'customer_concession' && !hasCustomerMail(i)) {
     return 'File the customer mail into this issue first'
+  }
+  // §10: a concession is for a quantity of parts or until a date
+  if (d === 'accept_deviation' && i.route === 'customer_concession' && i.fix_rule && !qty.trim() && !until) {
+    return t('concession.boundNeeded')
   }
   if (d === 'new_timing' && !newDate) return 'Enter the new release date'
   if (d === 'new_timing' && newDate < today) return 'The new release date cannot be in the past'
@@ -43,16 +48,19 @@ export default function CustomerDecisionForm({ changeId, issue, releaseDueDate, 
   const [note, setNote] = useState('')
   const [until, setUntil] = useState('')
   const [newDate, setNewDate] = useState('')
+  const [qty, setQty] = useState('')
+  const bounded = issue.route === 'customer_concession' && !!issue.fix_rule
   const save = useIssueMutation(changeId, () => validationIssuesApi.customer(changeId, issue.id, {
     decision: decision!, note: note.trim(),
     ...(decision === 'accept_deviation' && until ? { concession_until: until } : {}),
+    ...(decision === 'accept_deviation' && bounded && qty.trim() ? { quantity: Number(qty) } : {}),
     ...(decision === 'new_timing' ? { new_release_due_date: newDate } : {}),
   }), { error: 'Could not record the customer decision', onDone })
 
   const options = OPTIONS.filter((d) => !issue.customer_options || issue.customer_options.includes(d))
   // HARD #3: Sales files the mail, Quality gives the concession's yes
   const qualityDecides = issue.route === 'customer_concession' && !options.includes('accept_deviation')
-  const blocked = customerDecisionBlocked(issue, decision, note, newDate)
+  const blocked = customerDecisionBlocked(issue, decision, note, newDate, todayIso(), qty, until)
   const deadline = releaseDueDate ?? issue.recovery?.release_due_date ?? null
 
   return (
@@ -77,7 +85,10 @@ export default function CustomerDecisionForm({ changeId, issue, releaseDueDate, 
           The concession is off: the route is decided again and the issue goes to level 3.
         </p>
       )}
-      {decision === 'accept_deviation' && (
+      {decision === 'accept_deviation' && bounded && (
+        <ConcessionBounds qty={qty} setQty={setQty} until={until} setUntil={setUntil} />
+      )}
+      {decision === 'accept_deviation' && !bounded && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           <span>Concession until (empty = permanent)</span>
           <span data-testid="customer-concession-until" className="inline-block w-36">

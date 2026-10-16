@@ -1522,6 +1522,55 @@ export interface ValidationCheck {
   /** No longer in the catalog: kept for the record when it was answered,
    *  never owed. Every count and gate skips it (the backend does too). */
   retired?: boolean;
+  /** ECR-solid §10: computed from measurements against fixed limits. */
+  computed?: boolean;
+  unit_short?: string | null;
+  needs_lot?: boolean;
+  lower_limit?: number | null;
+  upper_limit?: number | null;
+  spec_source?: string | null;
+  measurements?: ValidationMeasurement[];
+}
+
+export type RetestChangeKind = 'parameter' | 'tool' | 'material' | 'method';
+
+export interface ValidationMeasurement {
+  id: number;
+  sample_size: number;
+  min_value: number;
+  max_value: number;
+  measuring_ref: string;
+  lot_ref?: string | null;
+  what_changed_kind?: RetestChangeKind | null;
+  what_changed_ref?: string | null;
+  result: 'passed' | 'failed';
+  measured_by_name?: string | null;
+  measured_at?: string | null;
+  /** "n=5, 503-516.2 g vs 495-515 g; scale WG-0042" */
+  line: string;
+}
+
+export interface ValidationMeasurementIn {
+  sample_size: number;
+  min_value: number;
+  max_value: number;
+  measuring_ref: string;
+  lot_ref?: string;
+  lower_limit?: number;
+  upper_limit?: number;
+  spec_source?: string;
+  what_changed_kind?: RetestChangeKind;
+  what_changed_ref?: string;
+}
+
+export interface ActiveConcession {
+  id: number;
+  ref: string;
+  until?: string | null;
+  quantity?: number | null;
+  not_for_shipment?: boolean;
+  /** "Accepted under concession VI-1 until 2026-12-15" */
+  text: string;
 }
 
 export interface ValidationDepartmentState {
@@ -1549,6 +1598,14 @@ export interface ValidationState {
   weight_ack_at?: string | null;
   weight_ack_by_name?: string | null;
   weight_ack_note?: string | null;
+  /** The backend's verdict on whether Sales owes the quote update (§10:
+   *  a delta above 2 % of the estimate, or the switch's older rule). */
+  weight_quote_update_open?: boolean;
+  /** §10: "Not releasable: <check> vs <limits>; fix: <who>, retest <day>;
+   *  concession: <state>", or null. */
+  release_line?: string | null;
+  /** §10-§11: the concessions in force. */
+  active_concessions?: ActiveConcession[];
 }
 
 // --- GET /changes/{id}/stage-state (spec §16) ---------------------------------

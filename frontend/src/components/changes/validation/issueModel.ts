@@ -4,7 +4,7 @@
  * Kept free of React so the rules are tested on their own.
  */
 import type {
-  CostBearer, CustomerDecision, EscalationLevel, IssueAct, IssueCategory, IssueEscalationOut,
+  CostBearer, CustomerDecision, EscalationLevel, FixOwner, IssueAct, IssueCategory, IssueEscalationOut,
   IssueOut, IssueRoute, IssueSeverity,
 } from '../../../types/validationIssue'
 import { isIssueOpen } from '../../../types/validationIssue'
@@ -179,10 +179,19 @@ export const ACT_LABEL: Record<IssueAct, string> = {
   escalate: 'Escalate',
   edit: 'Edit',
   attach: 'Attach',
+  fix: 'Pick who fixes',
+  concession_request: 'Request concession',
+}
+
+/** §10 Quality's pick: who fixes a failed check. */
+export const FIX_OWNER_LABEL: Record<FixOwner, string> = {
+  process_parameters: 'Process parameters (Process Engineer)',
+  tool_at_supplier: 'Tool at supplier (Tool Engineer)',
+  other: 'Other department',
 }
 
 /** Acts that are not a step of the issue: never the primary button. */
-const QUIET: IssueAct[] = ['edit', 'attach', 'escalate', 'add_action']
+const QUIET: IssueAct[] = ['edit', 'attach', 'escalate', 'add_action', 'concession_request']
 
 /** The 4-eyes rule: the raiser does not decide the route alone (admins may). */
 export const raiserBlocked = (i: IssueOut, v: IssueViewer) =>

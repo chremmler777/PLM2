@@ -78,9 +78,27 @@ class CustomerIn(BaseModel):
     decision: str
     note: str
     concession_until: Optional[date] = None
+    # §10: a concession is for a quantity of parts or until a date
+    quantity: Optional[int] = None
     # new_timing: the customer's new release date (updates release_due_date)
     new_release_due_date: Optional[date] = None
     new_date: Optional[date] = None          # alias
+
+
+class FixIn(BaseModel):
+    # §10 Fix task: process_parameters | tool_at_supplier | other
+    owner: str
+    department_id: Optional[int] = None
+    supplier_name: Optional[str] = Field(default=None, max_length=120)
+    retest_due: date
+
+
+class ConcessionIn(BaseModel):
+    note: str
+    # internal change: parts not for shipment, Quality decides at once
+    not_for_shipment: Optional[bool] = None
+    quantity: Optional[int] = None
+    concession_until: Optional[date] = None
 
 
 class CostIn(BaseModel):
@@ -245,6 +263,28 @@ async def customer_issue(
 ):
     change = await _change(db, change_id, current_user)
     return await _run(db, change, current_user, Svc.customer_decision(
+        db, change, iid, body.model_dump(), current_user))
+
+
+@router.post(BASE + "/{iid}/fix")
+async def fix_issue(
+    change_id: int, iid: int, body: FixIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§10 Fix task: Quality picks who fixes and the retest date."""
+    change = await _change(db, change_id, current_user)
+    return await _run(db, change, current_user, Svc.set_fix(
+        db, change, iid, body.model_dump(), current_user))
+
+
+@router.post(BASE + "/{iid}/concession")
+async def request_concession(
+    change_id: int, iid: int, body: ConcessionIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """§10 Request concession (Quality), in parallel to the fix."""
+    change = await _change(db, change_id, current_user)
+    return await _run(db, change, current_user, Svc.request_concession(
         db, change, iid, body.model_dump(), current_user))
 
 
