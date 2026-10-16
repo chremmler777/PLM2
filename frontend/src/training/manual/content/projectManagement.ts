@@ -31,7 +31,7 @@ export const pmChapter: ContentChapter = {
               ['Quoted', 'Give the "PM sign-off". The cockpit asks for it once the customer accepted.'],
               ['Timing', 'Create the detailed plan, get every team to confirm, "Validate timing".'],
               ['Implementing', 'Lock or escalate each deviation. The change cannot be released while one is open.'],
-              ['Validation', 'Decide the route of each validation issue, complete the lessons step, release and close.'],
+              ['Validation', 'Read the "Not releasable" line (fix, retest, concession), retest for a department with no member here, complete the lessons step, release and close.'],
             ],
           },
         },
@@ -264,13 +264,20 @@ export const pmChapter: ContentChapter = {
     },
     {
       id: 'pm-issues',
-      title: 'Validation issues: deciding the route',
+      title: 'Validation issues: what is yours',
       blocks: [
         {
           p:
-            'When a check fails, a member of a department working on the change, you or the lead ' +
-            'presses "Raise issue" on it. The issue names an owner department, which contains it ' +
-            'and finds the cause. You, or the lead, decide the route with "Decide the route".',
+            'A failed check raises its issue by itself (VI-n). Quality picks who fixes it and the ' +
+            'retest date, the check\'s department retests, and a concession is Quality\'s ' +
+            '("Request concession"). The "Not releasable" line on the Release tab says what is ' +
+            'missing and who owes it. You act when a department has no member here: you or the ' +
+            'lead record its measurement and its retest (the lead gets "Retest for VI-n").',
+        },
+        {
+          p:
+            'The route is the exception: when the fix needs the change back in implementation, ' +
+            'or for an issue without a check, you or the lead press "Decide the route".',
         },
         {
           points: [

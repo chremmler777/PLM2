@@ -364,16 +364,22 @@ export const flowChapter: ContentChapter = {
       title: 'Side track: a validation issue',
       blocks: [
         {
-          lede: 'A failed check does not just bounce the change back. It becomes an issue with an owner and a route.',
+          lede: 'A failed check does not just bounce the change back. It becomes an issue with a fix, an owner and a retest date.',
         },
         {
           steps: [
-            { title: 'Raise', body: 'On the failed check, "Raise issue": a member of a department working on the change, PM or the lead. It gets a number (VI-1), a category, a severity and an owner department.' },
-            { title: 'Contain', body: 'The owner department records the immediate action. Required first when the severity is "Blocks production".' },
-            { title: 'Root cause', body: 'The owner department records why it failed.' },
-            { title: 'Route', body: 'PM or the lead decides the route, with a reason. Four eyes: not the person who raised it.' },
-            { title: 'Fix and re-check', body: 'The fix actions are ticked, the check is answered again. A pass closes the issue.' },
+            { title: 'Raised by itself', body: 'A FAIL raises its issue at once (VI-1), owned by the check\'s department. Quality and that department are told. Any other problem in validation: "Raise issue" (a member of a department working on the change, PM or the lead).' },
+            { title: 'Fix', body: 'Quality\'s Fix task: who fixes (process parameters, tool at supplier, or another department) and the retest date. The fixing and the retesting department are told.' },
+            { title: 'Retest', body: 'The check\'s own department retests in validation and says what changed since the failure. A pass closes the issue. A department with no member here: PM or the lead retest it, the lead gets the task.' },
+            { title: 'Concession, beside it', body: 'Quality only: "Request concession". A customer change: the Sales owner asks and files the customer\'s mail, then Quality decides for a quantity or until a date. An internal change: "not for shipment", Quality decides at once. After its end date it no longer covers the check.' },
           ],
+        },
+        {
+          p:
+            'The exception: when the fix needs the change back in implementation, or for an issue ' +
+            'without a check, PM or the lead decide a route with a reason (four eyes: not the ' +
+            'person who raised it). The owner department records the containment first at ' +
+            '"Blocks production", then the root cause.',
         },
         {
           table: {
@@ -382,8 +388,7 @@ export const flowChapter: ContentChapter = {
               ['"Internal rework"', 'Our own shop fixes it. The change goes back to implementation with a recovery group in the plan.'],
               ['"Supplier rework"', 'The supplier fixes it, optionally at their cost. Same loop back.'],
               ['"Design change"', 'The design itself changes. The customer is told by default.'],
-              ['"Customer concession"', 'The customer accepts the part as it is. Sales files the customer\'s mail into the issue; a Quality member then decides the concession (no admin, PM or Sales can).'],
-              ['"Follow-up change"', 'A new change carries the fix. This one can release without it.'],
+              ['"Follow-up change"', 'A new change carries the fix of an issue without a failed check. A failed check still holds this change.'],
             ],
           },
         },
@@ -392,13 +397,13 @@ export const flowChapter: ContentChapter = {
           table: {
             head: ['Level', 'Who knows'],
             rows: [
-              ['"L1 Department"', 'The owner department and PM. Every issue starts here.'],
-              ['"L2 Project"', 'PM, the lead and Sales. Automatic on "Blocks production", an overdue fix action, a recovery past the baseline, or no route after two working days.'],
+              ['"L1 Department"', 'The owner department and PM (a failed check: Quality and the check\'s department). Every issue starts here.'],
+              ['"L2 Project"', 'PM, the lead and Sales. Automatic on "Blocks production", an overdue fix action, a recovery past the baseline, or no route after two working days (a failed check: no Fix pick by Quality after two working days).'],
               ['"L3 Management and customer"', 'Management is notified and Sales informs the customer. Automatic when the recovery ends after the release deadline, an L2 is not acknowledged in two working days, or the customer requires a fix instead of a concession.'],
             ],
           },
         },
-        { callout: 'No change is released while a check failed or a validation issue is open. No override lifts this, not even an admin: fix and retest (the department that measured it, saying what changed), or a concession the customer accepts and Quality decides.', tone: 'rule' },
+        { callout: 'No change is released while a check failed or a validation issue is open. No override lifts this, not even an admin: fix and retest (the check\'s department, saying what changed), or a concession Quality decides.', tone: 'rule' },
         { shot: 'flow-issue-card', alt: 'A validation issue card VI-1 with its stepper, severity chip, "L2" badge and one primary button.' },
       ],
     },

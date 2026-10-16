@@ -142,14 +142,14 @@ export const qualityChapter: ContentChapter = {
             'get its Fix task: "Pick who fixes" (process parameters, tool at supplier with the ' +
             'supplier, or another department) and the retest date. The check\'s own department ' +
             'retests; a pass closes the issue. The status line reads "Not releasable: weight 12.4 g ' +
-            'vs 11.8-12.2; fix: Process Engineer, retest Thu; concession: none". An urgent change\'s ' +
+            'vs 11.8-12.2; fix: Process Engineer (Payne), retest Thu; concession: none". An urgent change\'s ' +
             'FAIL reaches Management at once. Release is refused while any issue is open.',
         },
         {
           points: [
             ['Watch the severity.', '"Blocks production" needs containment before anything else, and starts at level 2.'],
             ['Decide the concessions.', 'A concession is the only way past a failed check besides a passed retest, and it is yours: "Request concession" (it runs beside the fix), the Sales owner asks the customer ("Waiting for customer"), Sales files the mail, then you record "Accepts the deviation" for a quantity of parts or until a date. Internal change: "Parts not for shipment", you decide at once. "Accepted under concession VI-n until <date>" shows in the header; you and the lead are reminded 10 working days before it ends. Sales, PM and admins cannot accept it. A concession Sales accepted before this rule waits for your confirmation on its card.'],
-            ['Retests and issues raised in error.', 'A failed check is answered again only by its own department, with what changed since (parameter, tool, material or method + reference); PM and admins cannot flip it. An issue raised in error is closed by you, with the evidence.'],
+            ['Retests and issues raised in error.', 'A failed check is answered again only by its own department, with what changed since (parameter, tool, material or method + reference); PM and admins cannot flip it (only a department with no member here is retested by PM or the lead). An admin decides for Quality only by acting as Quality. An issue raised in error is closed by you, with the evidence.'],
             ['Watch the cause.', 'A fix route is decided only after the root cause is recorded. A cause without evidence is a guess.'],
           ],
         },

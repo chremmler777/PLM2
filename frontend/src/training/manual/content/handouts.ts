@@ -53,7 +53,7 @@ export const HANDOUTS: Handout[] = [
             ['Quoted', '"PM sign-off" (the cockpit asks once "Customer accepted" is recorded)', '"Offer"'],
             ['Timing', '"Create detailed plan from quote plan", teams confirm, "Validate timing"', '"Timing"'],
             ['Implementing', 'One decision per group (the moved block and what it pushed): "Lock all N" (N open rows) or "Escalate to customer"', '"Deviations from the baseline"'],
-            ['Validation', '"Decide the route" of each validation issue, "Complete lessons step", "Release change", "Close change"', '"Release"'],
+            ['Validation', 'Read the "Not releasable" line (fix, retest, concession: Quality\'s); retest for a department with no member here; "Complete lessons step", "Release change", "Close change"', '"Release"'],
           ],
         },
       },
@@ -74,7 +74,7 @@ export const HANDOUTS: Handout[] = [
         h2: 'Side tracks',
         points: [
           ['KTX Weissenburg / Solingen change:', 'only you start it (PM and admins see "Change from" followed by the plant on the start form). You write the description; scoping records the "Departments to inform", no assessment and no cost carrier; "Send information to the team"; approval waits until it is sent; then straight to timing with their SOP as the release deadline. After "Validate timing" press "Inform" followed by the plant.'],
-          ['Validation issue:', 'containment first at "Blocks production", root cause before a fix route, at least one fix action.'],
+          ['Validation issue:', 'a FAIL raises it by itself; Quality picks who fixes and the retest date, the check\'s department retests, a concession is Quality\'s. A route is the exception: containment first at "Blocks production", root cause, at least one fix action.'],
         ],
       },
     ],

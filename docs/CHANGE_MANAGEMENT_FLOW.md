@@ -1513,13 +1513,21 @@ migration `090`), not just a bounce back. Shape, in order:
   switch off: Sales records it), `require_fix` (Sales) reopens the route; 5
   `follow_up_change` spawns a new change at `captured` and marks the issue
   `transferred` (an allowed exit: the defect stays visible in the follow-up,
-  decided by PM or the lead with 4-eyes).
+  decided by PM or the lead with 4-eyes). With `RELEASE_V2` the route is the
+  exception beside Quality's Fix task: `customer_concession` is not a route
+  (one entry point, Quality's Request concession below; the RouteDialog
+  does not offer it and an `accept_deviation` outside a concession is
+  refused), and `follow_up_change` is refused on a failed check (it would
+  not lift HARD #3 on this change).
 - **Re-validation**: all fix actions done → `revalidation`; the linked check
   answered `passed` closes the issue, a new `failed` reopens `fixing`. With
   `RELEASE_V2` a FAILED check is answered again only by a retest in
-  validation, by its own department (acts-as aware; no PM or admin
-  shortcut), with "what changed since" (parameter, tool, material or method
-  + a reference, `cm_rules.reference_refusal`).
+  validation, by whoever records its first measurement
+  (`ValidationService.write_rights`): its own department (acts-as aware);
+  PM or the lead only when it has no real member here; never a real admin
+  (its own department rows do not count, `change_people.hard3_blind`: it
+  acts as the department), with "what changed since" (parameter, tool,
+  material or method + a reference, `cm_rules.reference_refusal`).
 - **Raised in error**: an issue still `open` or `contained` (no route) is
   closed with a note; with `RELEASE_V2` only by a Quality member, the note
   naming the evidence (a reference of at least 5 characters).
@@ -1543,10 +1551,15 @@ shortens the recovery); the recovery deviations are escalated together.
 
 Every issue has an **escalation level** with history
 (`change_validation_issue_escalations`):
-- **L1 department**: on raise; owner department + PM informed.
+- **L1 department**: on raise; owner department + PM informed (with
+  `RELEASE_V2` a failed check's issue: Quality, which owns the Fix pick, and
+  the check's department; PM has no task on it).
 - **L2 project**: automatic on severity 3, an overdue fix action, a recovery
-  past the baseline finish, or no route after 2 working days; PM + change
-  lead + Sales, Sales decides whether the customer is told.
+  past the baseline finish, or no route after 2 working days (with
+  `RELEASE_V2` a failed check's issue has no route: `no_fix`, no Fix pick by
+  Quality after 2 working days; once Quality named who fixes and when,
+  nothing escalates); PM + change lead + Sales, Sales decides whether the
+  customer is told.
 - **L3 management + customer**: automatic when the recovery ends after the
   release deadline, an L2 is not acknowledged in 2 working days, or the
   customer requires a fix on a concession; Sales informs the customer (mail
@@ -1573,10 +1586,11 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   department's, in validation (HARD #3), and names what changed since:
   parameter / tool / material / method + a reference. Every measurement or
   tick is recorded by a member of the check's department while the change
-  is in validation; PM, the lead or an admin only for a department with no
-  real member here (`ValidationService.may_write`, the state's `can_write`
-  per department). A check failed outside implementation and validation
-  raises no issue.
+  is in validation; PM or the lead only for a department with no real
+  member here, never a real admin (it acts as the department)
+  (`ValidationService.may_write`, the state's `can_write` per department);
+  the retest follows the same rule. A check failed outside implementation
+  and validation raises no issue.
 - **Fix task** (migration 137): a check that turns FAILED raises its issue
   (VI-n) at once. Quality's task "Fix VI-n: pick who fixes and the retest
   date": process parameters (Process Engineer), tool at supplier (Tool
@@ -1584,10 +1598,14 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   or later; an inactive department is refused. The fixing department gets
   "Fix VI-n: ..., retest <day>" (a department with no member here: the
   lead, no lead: PM, "you coordinate"; the status line says so), the
-  check's department "Retest for VI-n by <day>" (due that day). A passed
-  retest closes the issue. Quality may change the pick or the date later
-  (the quiet "Change who fixes or the retest date"). `POST
-  .../validation/issues/{iid}/fix` (Quality only).
+  check's department "Retest for VI-n by <day>" (due that day; a check
+  department with no member here: the lead, no lead: PM, "you
+  coordinate"). Each pick tells the fixing and the retesting department
+  once (`task_new`, `vi:<id>:fix:<dept>:<date>`). A passed retest closes
+  the issue. Quality may change the pick or the date later (the quiet
+  "Change who fixes or the retest date"). `POST
+  .../validation/issues/{iid}/fix` (Quality only; a real admin's own
+  Quality row does not count, it acts as Quality).
 - **Concession, in parallel** (`POST .../issues/{iid}/concession`, Quality
   only): a customer change: the issue's route becomes the concession and
   the Sales owner is told to ask the customer ("Waiting for customer (Sales
@@ -1602,11 +1620,16 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   (or "for n parts") in the validation panel and the change header; the
   Quality member who decided it (gone: the change's Quality members) and
   the lead are reminded once 10 working days before the end date
-  (notification sweep, `concession_expiring`).
+  (notification sweep, `concession_expiring`). After its end date a
+  concession no longer covers the failed check: HARD #3 holds again
+  (`concession_in_force`), the header drops it and the status line says
+  "concession VI-n expired <date>"; the exits are a retest, or a new issue
+  on the check for a new concession.
 - **Status line** (validation state `release_line`): "Not releasable:
-  <check> <worst value> vs <limits>; fix: <department>, retest <day>;
+  <check> <worst value> vs <limits>; fix: <department> (<the person, when
+  the department has exactly one member here>), retest <day>;
   concession: none / waiting for customer (Sales owner, asked <date>) /
-  Quality decides". An urgent change's FAIL sends that line at once to
+  Quality decides / VI-n expired <date>". An urgent change's FAIL sends that line at once to
   Management (no Management member: Project Management), mailed
   (`validation_urgent_fail`).
 - **Weight to Sales**: the Sales owner hears of a FAILED weight check (one
@@ -1654,7 +1677,10 @@ The P&L effort column reads the internal_effort positions (the assessment's
 own effort hours only for a department without one). `GET
 /reports/ecr-effort` (Project Management, Management, admins): booked vs
 estimated hours per change and department, the confirmed-estimate share,
-and the departments not booked; one card on the ECR KPI board. Its split by
+and the departments not booked; one card on the ECR KPI board. With a date
+window (`since`, `until`, the day worked) it lists the changes with hours
+in the window, their hours in it, and "not booked" still means never
+booked. Its split by
 origin and Sales owner is cut 2.
 
 ### P&L: offer vs doing (spec §13)
@@ -2054,8 +2080,10 @@ whether the yes was Quality's is stored with it,
 `customer_decided_as_quality`, migration 119, acts-as aware like a Quality
 override; an accepted concession nobody in Quality decided does not count
 until a Quality member confirms it on the issue card), not even an admin
-lifts it: a failed check is answered again only by its own department's
-retest with "what changed since", and an open issue closes as raised in
+lifts it (a real admin's own department rows do not count for it: it acts
+as the department): a failed check is answered again only by its own
+department's retest with "what changed since" (PM or the lead only for a
+department with no member here), an expired concession no longer covers it, and an open issue closes as raised in
 error only by Quality (C7, `RELEASE_V2`; off: Sales closes it as before);
 (4) acceptance of the current offer and both sign-offs for approval, each
 given on the latest offer sent (the same binding as at release,
