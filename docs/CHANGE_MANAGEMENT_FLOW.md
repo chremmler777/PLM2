@@ -69,7 +69,7 @@ flowchart TD
 
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces). Internal changes (P3): Development, Process Engineer and Tool Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management picks one first and Sales hands over once it is set (A6-04) |
 | `scoping` | Team decides: proceed / needs info / reject. Impacted set picked and locked (first action there: Development picks and confirms; the lead and PM may pick too), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
@@ -1877,9 +1877,13 @@ moved, the BOM tree and the viewer fall back past it. Import scripts
   (required for `administrative` and for any route other than the suggested
   one). Suggested: first data on an RFQ part `administrative`; official data
   or a series part `full_ecr`; else `engineering_review`.
-  - `full_ecr`: a new customer change in `captured`, lead item = the part,
-    the pending index as the item's `resulting_revision_id` (the ECN spawn
-    skips it).
+  - `full_ecr`: a new customer change, lead item = the part, the pending
+    index as the item's `resulting_revision_id` (the ECN spawn skips it).
+    With `SCOPING_V2` (C9) it is handed over to `scoping` at once: the
+    customer's files linked, the Sales owner set, the lead told "schedule
+    scoping" and Sales "Set quote deadline" (an incomplete capture is logged
+    as `capture_incomplete`, not overridden; the deadline is owed before
+    assessment). Switch off: it stays in `captured`.
   - `attach_ecr`: the same link on an open change of the project; refused
     from `in_validation` on.
   - `engineering_review`: origin `engineering_review`, starts at `scoping`,
@@ -2092,8 +2096,11 @@ the accepted offer, else the latest sent one), and on
 `implementation_bookings` `work_date` (backfilled from `booked_at`) and
 `source` (`estimate` | `typed`, old rows `typed`).
 
-Stage responsibilities so far: `captured` = Sales (`can_start_change`, Sales
-only), `scoping` = Project Manager, impact lock = **Development only — no
+Stage responsibilities so far: `captured` = Sales (`can_start_change`;
+Project Management may act too), internal changes their engineering raiser
+(P3: Development, Process Engineer, Tool Engineer; the raiser leads and hands
+over), a change with no lead Project Management (it picks the lead first),
+`scoping` = the lead, Project Management backing up, impact lock = **Development only — no
 admin shortcut**; an admin who needs to lock a set does it through acts-as
 (`X-Acts-As-Department: <Development>`), so the department is on the record
 rather than the admin bypass (`ChangeService.user_can_confirm_impact`),
@@ -2589,3 +2596,37 @@ Costing-to-close (2026-09-25) adds: `plan_seeded`, `plan_task_added`,
 An auditor asking "who objected, and what was done about it" is answered by the
 concern rows plus the meeting decision that resolved them — not by inference
 from who pressed a button.
+
+## Process map P-ENG-0001: impact of ECR-solid (R32)
+
+Process map: **update** P-ENG-0001 (the controlled process document, owned
+outside PLM2; this lists what its next revision must say, nothing was
+changed in it from here):
+
+1. **Intake:** the triage records what changed (areas + compare reference,
+   or no visible change with a reason); a live change on the part suggests
+   attach; a newer index never refused (supersede); rechecks per routed
+   department and the lead's "Index D adds parts or departments?".
+2. **Capture:** Development, Process Engineer and Tool Engineer start
+   internal changes and lead them (P3); a customer change is complete with
+   the customer's typed file and the quote deadline; urgent needs the
+   need-by with reason and evidence; no lead: Project Management picks one
+   before the hand-over.
+3. **Scoping:** triage, not analysis: check items (default, carried into
+   the owning department's assessment) vs questions (block proceed, HARD);
+   Quality's PPAP decision on internal changes (HARD, yes flips to customer);
+   proceed locks the impacted set.
+4. **Assessment and costing:** check items first, HARD at the department's
+   own submit; per-department costing with a basis per position; "<Dept>
+   has no cost"; supplier waits.
+5. **Approval and release deciders:** overrides need a named decider
+   (Quality for implementation/release and validation rules; PM member or
+   Management for price drops, Absorb and scope changes); HARD #3 (a failed
+   check or open issue: the only exit a concession Quality accepts on the
+   customer's mail, for a quantity or until a date), HARD #8 (internal
+   approval by an engineering approver, never the raiser), HARD #9 (PM and
+   Quality sign the latest offer or supplement); start at risk (urgent
+   only, a PM member with price view approves).
+6. **Close:** blocked while a price is open (customer acceptance, or Absorb
+   with a reason and the OK of a PM member or Management).
+
