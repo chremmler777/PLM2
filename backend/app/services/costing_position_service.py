@@ -940,7 +940,21 @@ class CostingPositionService:
                         Department.name == "Project Manager"))).scalars().all()
                     ids = await department_members_of_change_org(session, change, pm)
                 title = (f"Cost {float(over):.2f} above the approved estimate: "
-                         f"ask to absorb with a reason: {change.change_number}")
+                         + ("re-approve or absorb (reason)" if change.status == "costing"
+                            else "ask to absorb with a reason")
+                         + f": {change.change_number}")
+                if change.status == "costing":
+                    # A3-05 (spec §4 [R4]): in costing the approver
+                    # re-approves the new total; no amount (R23)
+                    approvers = await ChangeService.internal_approver_ids(session, change)
+                    await NotificationService.notify_once(
+                        session, [i for i in approvers
+                                  if i and i != actor.id and i not in ids],
+                        kind="task_new", subject_key=f"{key}:approver",
+                        title=("Cost above the approved estimate: re-approve or "
+                               f"absorb (reason): {change.change_number}")[:255],
+                        body=f"A quote on '{position.label}' came in above its estimate.",
+                        link=link)
             await NotificationService.notify_once(
                 session, [i for i in ids if i and i != actor.id], kind="task_new",
                 subject_key=key, title=title[:255], body=body, link=link)

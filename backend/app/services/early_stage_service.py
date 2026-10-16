@@ -1090,7 +1090,7 @@ class EarlyStageService:
         can_approve_internal = (
             not change.customer_relevant and change.status in ("costing", "quoted")
             and (change.internal_approved_at is None
-                 or await ChangeService.internal_approval_outgrown(session, change))
+                 or await ChangeService.internal_reapproval_owed(session, change))
             and await ChangeService.user_can_approve_internal_costs(
                 session, user, change))
         # §5 card: whether volume, saving and basis are asked (any cost at

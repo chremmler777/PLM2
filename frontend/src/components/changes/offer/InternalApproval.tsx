@@ -42,7 +42,8 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
   const qc = useQueryClient()
   const v2 = !!change.assessment_v2
   const [open, setOpen] = useState(false)
-  const [due, setDue] = useState('')
+  // a re-approval keeps the release deadline set at the first one
+  const [due, setDue] = useState(change.release_due_date?.slice(0, 10) ?? '')
   const [rationale, setRationale] = useState('')
   const [volume, setVolume] = useState('')
   const [saving, setSaving] = useState('')
@@ -78,8 +79,7 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
     onError: (e: unknown) => toastError(e, 'Could not approve the internal costs'),
   })
 
-  if (change.internal_approved_at) {
-    return (
+  const approvedBlock = change.internal_approved_at ? (
       <div data-testid="internal-approved" className="rounded-lg border border-emerald-800 bg-emerald-950/40 p-3">
         <p className="flex items-center gap-1.5 font-medium text-emerald-300">
           <CircleCheck aria-hidden="true" size={16} />{t('internal.approved')}
@@ -100,8 +100,10 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
           <p className="text-xs text-slate-400">{change.internal_approval_note}</p>
         )}
       </div>
-    )
-  }
+  ) : null
+  // A3-05: approved, and the approver owes it again (a quote above the
+  // approved estimate): the approval stays on record, the card asks again
+  if (approvedBlock && !canApprove) return approvedBlock
   if (!canApprove) {
     return (
       <p data-testid="internal-approvers" className="text-xs text-slate-400">
@@ -113,6 +115,10 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
     || (Number(volume) > 0 && saving !== '' && Number(saving) >= 0 && basis !== '')))
   return (
     <div className="space-y-2">
+      {approvedBlock}
+      {approvedBlock && (
+        <p className="text-xs text-amber-200" data-testid="internal-reapprove">{t('internal.reapprove')}</p>
+      )}
       <button type="button"
         className={buttonClass(open ? 'secondary' : 'primary')} aria-expanded={open}
         disabled={change.status !== 'costing' || approve.isPending}

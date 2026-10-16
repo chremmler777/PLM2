@@ -271,7 +271,7 @@ const TASK_TAB: Record<string, string> = {
   index_deadline: '?tab=assessments', index_deadline_confirm: '?tab=assessments',
   need_by_tell: '', set_quote_deadline: '', pick_impacted: '?tab=impacted',
   send_rejection: '?tab=scoping',
-  costing_input: '?tab=costing', estimate_low: '?tab=commercial', estimate_check: '?tab=costing',
+  costing_input: '?tab=costing', estimate_low: '?tab=offer', estimate_check: '?tab=costing',
   create_quote: '?tab=commercial',
   // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
   // publishes from the same card.
@@ -289,7 +289,7 @@ const TASK_TAB: Record<string, string> = {
   // C3: decisions and the run team's onward hop, on the overview's
   // why-blocked panel; the internal approval on the commercial tab.
   deviation_decision: '?tab=overview', sign_off: '?tab=overview',
-  advance: '?tab=overview', internal_approval: '?tab=commercial',
+  advance: '?tab=overview', internal_approval: '?tab=offer',
   // the routing change is decided on the assessments tab; a 'not feasible'
   // answer on the overview's why-blocked panel (override, reroute, reject)
   routing_deviation_decision: '?tab=assessments', not_feasible: '?tab=overview',

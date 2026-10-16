@@ -655,6 +655,27 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=costing&task=costing_input&dept=5')
   })
 
+  it('sends the price answer and the internal approval to the offer tab (A3-05)', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'estimate_low', kind_label: 'Cost above the approved estimate: re-approve or absorb' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    expect(screen.getByText('Cost above the approved estimate: re-approve or absorb')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=offer&task=estimate_low')
+  })
+
+  it('confirms a check item where its task leads (A3-01)', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'confirm_assumption', target_tab: 'assessments' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=assessments&task=confirm_assumption')
+  })
+
   it('sends the run team\'s ready row to the overview, naming the next stage', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'advance', to_status: 'closed', kind_label: 'Ready: move it on' }),

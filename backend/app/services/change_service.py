@@ -123,8 +123,10 @@ STAGE_TASK_TAB = {
     "create_quote": "commercial", "bank_build": "implementation",
     "publish_plan": "implementation", "progress_report": "implementation",
     "escalate_risk": "implementation", "update_quote": "implementation",
-    "sign_off": "overview", "internal_approval": "commercial",
-    "estimate_low": "commercial", "estimate_check": "costing",
+    # the internal approval card and the price answer live on the offer
+    # (approval) tab in any status (A3-05)
+    "sign_off": "overview", "internal_approval": "offer",
+    "estimate_low": "offer", "estimate_check": "costing",
     "validation_check": "release", "advance": "overview",
     "deviation_decision": "overview", "routing_deviation_decision": "assessments",
     "not_feasible": "overview",
@@ -4131,18 +4133,47 @@ class ChangeService:
             # PM without a lead, proposes the Absorb, the approver decides
             # it through the deviation's own task). Absorb clears it.
             if c.price_open:
+                from app.services import cm_labels
                 over = above.get(c.id, [])
                 if over:
                     mine = ((in_sales or c.sales_owner_id == user.id)
                             if c.customer_relevant else
                             (holds_lead(c, user)
                              or (c.lead_id is None and is_pm_member)))
+                    # A3-05 (spec §4 [R4]): internal, in costing, the
+                    # approver re-approves the new total: the row is theirs
+                    # too (no amount in it, R23: an approver may lack price
+                    # view; the approval card shows the cost)
+                    # (withdrawn already: their internal_approval row)
+                    approver = (not mine and not c.customer_relevant
+                                and c.status == "costing"
+                                and c.internal_approved_at is not None
+                                and await ChangeService.is_internal_approver(
+                                    db, user, c))
+                    if approver:
+                        tasks.append({
+                            **await _base(c), "kind": "estimate_low",
+                            "kind_label": cm_labels.TASK_KIND["estimate_low_internal"][0],
+                            "hint": "Cost above the approved estimate: re-approve "
+                                    "the new total or absorb (reason)",
+                            "since": max((p.updated_at for p in over), default=None),
+                            "target_tab": "offer", "needs_you": True,
+                        })
                     if mine:
                         total = sum(p.estimate_over or 0 for p in over)
                         tasks.append({
+                            **({} if c.customer_relevant else {
+                                "kind_label": cm_labels.TASK_KIND[
+                                    "estimate_low_internal"][0]}),
                             **await _base(c), "kind": "estimate_low",
+                            # A3-05: internal, in costing the approver
+                            # re-approves the new total; after approval only
+                            # the Absorb is left (the approver decides it)
                             "hint": (f"Estimate low by {total:.2f}: send a "
                                      "supplement or absorb" if c.customer_relevant
+                                     else f"Cost {total:.2f} above the approved "
+                                     "estimate: re-approve or absorb (reason)"
+                                     if c.status == "costing"
                                      else f"Cost {total:.2f} above the approved "
                                      "estimate: ask to absorb with a reason (the "
                                      "approver decides)"),
@@ -4776,7 +4807,7 @@ class ChangeService:
                         and await ChangeService.costing_pending_department_ids(db, c)):
                     continue      # C5: approval waits on the departments' costing
                 out.append({**await base(c), "kind": "internal_approval",
-                            "target_tab": "commercial", "needs_you": True,
+                            "target_tab": "offer", "needs_you": True,
                             # owed since the last department finalized
                             "since": ChangeService._last_costing_finalized(c)})
 
@@ -7432,6 +7463,38 @@ class ChangeService:
         return float(total or 0) > float(change.internal_approved_amount) + 0.005
 
     @staticmethod
+    async def internal_above_over(session: AsyncSession,
+                                  change: ChangeRequest) -> Optional[float]:
+        """A3-05 (spec §4 [R4]): an internal change in costing whose open
+        price comes from quotes above the approved estimate: the amount
+        over it (the approver re-approves the new total, or it is
+        absorbed). None when there is nothing to re-approve."""
+        from app.services import cm_switches
+        if (change.customer_relevant or change.status != "costing"
+                or not change.price_open or not cm_switches.on("ASSESSMENT_V2")):
+            return None
+        from app.models.change_cost import CostingPosition
+        above = (await session.execute(
+            select(CostingPosition).where(
+                CostingPosition.change_id == change.id,
+                CostingPosition.estimate_check == "above"))).scalars().all()
+        if not above:
+            return None
+        # the amount over counts where the line still reads its estimate; a
+        # line moved to its quote carries it in the total already
+        return float(sum(p.estimate_over or 0 for p in above if p.estimated))
+
+    @staticmethod
+    async def internal_reapproval_owed(session: AsyncSession,
+                                       change: ChangeRequest) -> bool:
+        """The internal approval given is owed again: the total outgrew it,
+        or a quote came in above its estimate (A3-05)."""
+        return (await ChangeService.internal_approval_outgrown(session, change)
+                or (change.internal_approved_at is not None
+                    and await ChangeService.internal_above_over(session, change)
+                    is not None))
+
+    @staticmethod
     async def withdraw_outgrown_internal_approval(
             session: AsyncSession, change: ChangeRequest, actor_id: Optional[int]) -> bool:
         """A costing finalized above the approved total withdraws the
@@ -7484,8 +7547,11 @@ class ChangeService:
         if change.status not in ("costing", "quoted"):
             raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
         if (change.internal_approved_at is not None
-                and not await ChangeService.internal_approval_outgrown(session, change)):
+                and not await ChangeService.internal_reapproval_owed(session, change)):
             raise ChangeError("Internal costs are already approved")
+        # A3-05: re-approving a quote above the estimate approves the total
+        # with the amount over it (the position still reads its estimate)
+        over = await ChangeService.internal_above_over(session, change)
         # HARD #8: never the raiser, whoever calls this.
         if change.raised_by == actor.id:
             raise ChangeError(
@@ -7536,7 +7602,7 @@ class ChangeService:
             change.internal_saving_basis = saving_basis if saving is not None else None
         change.internal_approved_by = actor.id
         change.internal_approved_at = datetime.utcnow()
-        change.internal_approved_amount = summ["totals"]["grand_total"]
+        change.internal_approved_amount = (summ["totals"]["grand_total"] or 0) + (over or 0)
         change.internal_approval_note = note
         if release_due_date is not None:
             await ChangeService._apply_release_deadline(
@@ -7544,9 +7610,30 @@ class ChangeService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "internal_costs_approved",
-            f"Internal costs approved ({summ['totals']['grand_total']:.2f})",
+            f"Internal costs approved ({change.internal_approved_amount:.2f}"
+            + (f", incl. {over:.2f} above the estimate" if over else "") + ")",
             actor.id, field_name="internal_approved_amount",
-            new_value=summ["totals"]["grand_total"], notes=note)
+            new_value=change.internal_approved_amount, notes=note)
+        # A3-05 (spec §4 [R4]): a quote above the approved estimate is
+        # answered by re-approving (or absorbing); the re-approval of the
+        # new total clears the open price the 'above' checks caused. A price
+        # open for another cause (start at risk, an open scope change card)
+        # stays open.
+        if over is not None:
+            from app.services.cm_rules import ABSORB_RULE
+            from app.services import scope_change_service as _scs
+            if (change.start_at_risk_approved_at is None
+                    and not await _scs.open_cards(session, change)):
+                change.price_open = False
+                await ChangeService._settle_estimate_checks(session, change)
+                for d in change.transition_deviations:
+                    if d.guard_key == ABSORB_RULE and d.status == "pending":
+                        d.status = "withdrawn"      # nothing left to absorb
+                await session.flush()
+                await ChangeService.append_changelog(
+                    session, change, "price_closed",
+                    "Price no longer open: the approver re-approved the new total",
+                    actor.id, field_name="price_open", old_value=True, new_value=False)
         # The internal branch has no offer to freeze the plan into: the
         # planned P&L is frozen here, append-only, as its own changelog row
         # (price-redacted via the "pnl" key); PnlService reads it as the

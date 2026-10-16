@@ -1002,6 +1002,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'summation.grams': { de: 'g', en: 'g' },
   'tasks.kind.costing_input': { de: 'Kosten erfassen', en: 'Enter costs' },
   'tasks.kind.estimate_low': { de: 'Angebot über Schätzung: Nachtrag oder übernehmen', en: 'Quote above the estimate: supplement or absorb' },
+  'tasks.kind.estimate_low_internal': { de: 'Kosten über genehmigter Schätzung: neu genehmigen oder übernehmen', en: 'Cost above the approved estimate: re-approve or absorb' },
   'tasks.kind.estimate_check': { de: 'Angebot gegen Ihre Schätzung', en: 'Quote vs your estimate' },
   'tasks.kind.create_quote': { de: 'Angebot erstellen', en: 'Create quote' },
   'tasks.hint.create_quote': {
@@ -1519,6 +1520,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   conditions: { de: 'Bedingungen', en: 'Conditions' },
   'internal.approve': { de: 'Interne Kosten freigeben', en: 'Approve internal costs' },
   'internal.approved': { de: 'Interne Kosten freigegeben', en: 'Internal costs approved' },
+  'internal.reapprove': { de: 'Kosten über der genehmigten Schätzung: neuen Betrag genehmigen oder übernehmen (Grund)', en: 'Cost above the approved estimate: re-approve the new total or absorb (reason)' },
   'internal.note': { de: 'Anmerkung', en: 'Note' },
   'internal.amount': { de: 'Freigegebener Betrag', en: 'Approved amount' },
   'concession.qualityDecides': { de: 'Die Kundenmail ist abgelegt: ein Qualitäts-Mitglied entscheidet die Sonderfreigabe.', en: "The customer's mail is filed: a Quality member decides the concession." },

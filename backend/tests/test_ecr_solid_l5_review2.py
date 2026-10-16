@@ -220,3 +220,69 @@ async def test_a_pm_edit_above_the_approved_total_owes_the_approval_again(
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=cc["lead"])).json()
     assert [t for t in tasks if t["kind"] == "internal_approval"
             and t["change_id"] == cc["cid"]]
+
+
+async def _above_after_approval(client, cc, seed, session_factory, key):
+    pm2_id, _, pm2 = await _user(client, session_factory, seed, key, "Project Manager")
+    await _set(session_factory, cc["cid"], customer_relevant=False)
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                          basis_ref=REF, estimate_check="pending")
+    await _finalized(session_factory, cc["cid"], cc["shop"])
+    assert (await _approve(client, cc["cid"], cc["lead"])).status_code == 200
+    res = await client.post(_u(cc["cid"], f"/costing/positions/{pid}/estimate-check"),
+                            json={"verdict": "above", "over": 800}, headers=cc["dale"])
+    assert res.status_code == 200, res.text
+    return pid, pm2_id, pm2
+
+
+async def test_internal_quote_above_is_re_approved_and_clears_the_price(
+        client, cc, seed, session_factory):
+    """A3-05 (spec §4 [R4]): internal, in costing: 're-approve or absorb
+    (reason)' for the lead and the approver; the re-approval of the new
+    total clears price_open and the row."""
+    pid, pm2_id, pm2 = await _above_after_approval(client, cc, seed, session_factory,
+                                                   "pm-a305")
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cc["cid"])).price_open is True
+        told = (await s.execute(select(Notification).where(
+            Notification.subject_key == f"estimate_low:{pid}:approver"))).scalars().all()
+    assert [n.user_id for n in told] == [pm2_id]
+    assert not any(ch.isdigit() for ch in told[0].body)       # no amount (R23)
+    lead_rows = [t for t in (await client.get("/api/v1/changes/my-tasks",
+                                              headers=cc["lead"])).json()
+                 if t["kind"] == "estimate_low"]
+    assert lead_rows and "re-approve or absorb" in lead_rows[0]["hint"]
+    assert lead_rows[0]["kind_label"] == "Cost above the approved estimate: re-approve or absorb"
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=pm2)).json()
+            if t["kind"] == "estimate_low"]
+    assert rows and rows[0]["target_tab"] == "offer"
+    assert not any(ch.isdigit() for ch in rows[0]["hint"])
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=pm2)).json()
+    assert st["can_approve_internal"] is True
+    res = await _approve(client, cc["cid"], pm2)
+    assert res.status_code == 200, res.text
+    assert res.json()["internal_approved_amount"] == 5800.0
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cc["cid"])
+        assert c.price_open is False
+    for auth in (cc["lead"], pm2):
+        assert not [t for t in (await client.get("/api/v1/changes/my-tasks",
+                                                 headers=auth)).json()
+                    if t["kind"] in ("estimate_low", "internal_approval")
+                    and t["change_id"] == cc["cid"]]
+    # negative: nothing owed any more: a third approval is refused
+    res = await _approve(client, cc["cid"], pm2)
+    assert res.status_code == 400 and "already approved" in res.text
+
+
+async def test_internal_re_approval_keeps_a_price_open_for_another_cause(
+        client, cc, seed, session_factory):
+    """A3-05 negative: start at risk also holds the price: the re-approval
+    of the quote above leaves price_open set."""
+    pid, pm2_id, pm2 = await _above_after_approval(client, cc, seed, session_factory,
+                                                   "pm-a305b")
+    await _set(session_factory, cc["cid"], start_at_risk_approved_at=datetime.utcnow())
+    res = await _approve(client, cc["cid"], pm2)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cc["cid"])).price_open is True

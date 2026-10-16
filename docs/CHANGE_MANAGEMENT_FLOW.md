@@ -798,14 +798,21 @@ Switch `ASSESSMENT_V2` (migration 127).
   position). The positions list serves `can_check_estimate` with the same
   rule. Above sets `price_open` (HARD #9 at close) and one
   task: customer change, the Sales owner (no Sales owner: all of Sales; Sales
-  sees it) *"Estimate low by x: send a supplement or absorb"*; internal, the
-  lead (no lead: Project Management), who may propose the Absorb and reads
-  prices, *"Cost x above the approved estimate: ask to absorb with a
-  reason"*; the approver decides the Absorb on the deviation's own task.
-  The spec's "re-approve or absorb" reads as this Absorb, decided by the
-  approver: there is no separate re-approval step after `approved`
-  (DECIDED BY CLAUDE, open to Christoph)
-  (task `estimate_low`, told once `estimate_low:<position>`). Absorb (or the
+  sees it) *"Estimate low by x: send a supplement or absorb"*; internal
+  (row *"Cost above the approved estimate: re-approve or absorb"*), the
+  lead (no lead: Project Management), who reads prices, *"Cost x above the
+  approved estimate: re-approve or absorb (reason)"*, and while in costing
+  the approvers too (no amount: an approver may lack price view; told once
+  `estimate_low:<position>:approver`). In costing the approver re-approves
+  on the approval card (offer tab): the approved amount is the total plus
+  the amount over on lines still read at their estimate; the re-approval
+  clears `price_open` and settles the positions unless the price is open
+  for another cause (start at risk, an open scope change card); a pending
+  Absorb is withdrawn. After `approved` only the Absorb is left, decided by
+  the approver on the deviation's own task (A3-05)
+  (task `estimate_low`, offer tab, told once `estimate_low:<position>`). A
+  PM or admin cost write in costing that lifts the total above the approved
+  amount withdraws the approval as a finalize does (A3-04). Absorb (or the
   customer's acceptance) clears `price_open` and marks those positions
   `settled`, so a later open price for another cause does not bring their
   task back. The automatic comparison is cut 2.

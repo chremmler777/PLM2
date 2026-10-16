@@ -27,6 +27,22 @@ const change = { id: 7, status: 'costing', assessment_v2: true } as unknown as C
 afterEach(() => { cleanup(); vi.clearAllMocks(); total = 4800 })
 
 describe('InternalApproval card (spec §5)', () => {
+  it('approved and owed again: the record stays, the card asks to re-approve (A3-05)', () => {
+    const approved = { ...change, internal_approved_at: '2026-10-14T10:00:00Z',
+      internal_approved_amount: 5000 } as unknown as ChangeDetail
+    render(wrap(<InternalApproval change={approved} canApprove />))
+    expect(screen.getByTestId('internal-approved')).toBeTruthy()
+    expect(screen.getByTestId('internal-reapprove')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /approve internal costs/i })).toBeTruthy()
+  })
+
+  it('approved and nothing owed: no button (A3-05 negative)', () => {
+    const approved = { ...change, internal_approved_at: '2026-10-14T10:00:00Z' } as unknown as ChangeDetail
+    render(wrap(<InternalApproval change={approved} canApprove={false} />))
+    expect(screen.getByTestId('internal-approved')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /approve internal costs/i })).toBeNull()
+  })
+
   it('payback in months', () => {
     expect(paybackMonths(4800, 2400)).toBe(24)
     expect(paybackMonths(4800, 0)).toBeNull()
