@@ -1520,6 +1520,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   conditions: { de: 'Bedingungen', en: 'Conditions' },
   'internal.approve': { de: 'Interne Kosten freigeben', en: 'Approve internal costs' },
   'internal.approved': { de: 'Interne Kosten freigegeben', en: 'Internal costs approved' },
+  'internal.overrideHold': { de: 'Override: Kalkulation nicht abgeschlossen', en: "Override 'Costing not finalized'" },
   'costpos.quantity': { de: 'Menge', en: 'Quantity' },
   'costpos.quantityUnit': { de: 'Einheit (z. B. Einsätze)', en: 'Unit (e.g. inserts)' },
   'internal.reapprove': { de: 'Kosten über der genehmigten Schätzung: neuen Betrag genehmigen oder übernehmen (Grund)', en: 'Cost above the approved estimate: re-approve the new total or absorb (reason)' },

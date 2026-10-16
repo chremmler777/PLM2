@@ -286,3 +286,32 @@ async def test_internal_re_approval_keeps_a_price_open_for_another_cause(
     assert res.status_code == 200, res.text
     async with session_factory() as s:
         assert (await s.get(ChangeRequest, cc["cid"])).price_open is True
+
+
+async def test_the_approval_card_holds_while_costing_is_not_finalized(
+        client, cc, seed, session_factory):
+    """A3-09 (R24): C5 holds the internal approval: no approve button (the
+    POST would 400), the card names why and offers the override; an
+    approved override of 'Costing not finalized' gives the button back."""
+    pm2_id, _, pm2 = await _user(client, session_factory, seed, "pm-a309", "Project Manager")
+    await _set(session_factory, cc["cid"], customer_relevant=False)
+    await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"], basis_ref=REF)
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["lead"])).json()
+    assert st["can_approve_internal"] is False
+    assert "Costing not finalized" in st["internal_approval_hold"]
+    assert st["internal_hold_can_override"] is True
+    res = await _approve(client, cc["cid"], cc["lead"])
+    assert res.status_code == 400 and "Costing not finalized" in res.text
+    # negative: a Toolshop member is no approver: no hold served either
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["dale"])).json()
+    assert st["can_approve_internal"] is False and st["internal_approval_hold"] is None
+    res = await client.post(_u(cc["cid"], "/deviations"), json={
+        "to_status": "approved", "guard_key": "costing_not_finalized",
+        "reason": "customer SOP 24 Oct, mail 2026-10-12", "reason_code": "in_parallel"},
+        headers=cc["lead"])
+    assert res.status_code == 200, res.text
+    res = await client.post(_u(cc["cid"], f"/deviations/{res.json()['id']}/decide"),
+                            json={"decision": "approved"}, headers=pm2)
+    assert res.status_code == 200, res.text
+    st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["lead"])).json()
+    assert st["can_approve_internal"] is True and st["internal_approval_hold"] is None

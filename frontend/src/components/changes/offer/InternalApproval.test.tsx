@@ -43,6 +43,21 @@ describe('InternalApproval card (spec §5)', () => {
     expect(screen.queryByRole('button', { name: /approve internal costs/i })).toBeNull()
   })
 
+  it('held by C5: says why and offers the override, no approve button (A3-09)', () => {
+    const onOverride = vi.fn()
+    render(wrap(<InternalApproval change={change} canApprove={false}
+      hold="Costing not finalized: Toolshop. Approve once they are finalized" onOverride={onOverride} />))
+    expect(screen.getByTestId('internal-hold').textContent).toContain('Costing not finalized: Toolshop')
+    expect(screen.queryByRole('button', { name: /approve internal costs/i })).toBeNull()
+    fireEvent.click(screen.getByTestId('internal-hold-override'))
+    expect(onOverride).toHaveBeenCalled()
+  })
+
+  it('held without the right to ask: no override button (A3-09 negative)', () => {
+    render(wrap(<InternalApproval change={change} canApprove={false} hold="Costing not finalized: Toolshop" />))
+    expect(screen.queryByTestId('internal-hold-override')).toBeNull()
+  })
+
   it('payback in months', () => {
     expect(paybackMonths(4800, 2400)).toBe(24)
     expect(paybackMonths(4800, 0)).toBeNull()

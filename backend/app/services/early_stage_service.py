@@ -1148,12 +1148,20 @@ class EarlyStageService:
 
         from app.services.price_redaction import PriceViewer
         # HARD #8 (P9): the internal approval's button follows the rule
-        can_approve_internal = (
+        approver_owes = (
             not change.customer_relevant and change.status in ("costing", "quoted")
             and (change.internal_approved_at is None
                  or await ChangeService.internal_reapproval_owed(session, change))
             and await ChangeService.user_can_approve_internal_costs(
                 session, user, change))
+        # A3-09 (R24): C5 holds the approval: the card shows why and the
+        # override action instead of a button the backend refuses
+        internal_hold = (await ChangeService.internal_approval_hold(session, change)
+                         if approver_owes else None)
+        can_approve_internal = approver_owes and internal_hold is None
+        internal_hold_override = bool(internal_hold) and (
+            await EarlyStageService.override_ask_refusal(
+                session, change, user, "approved") is None)
         # §5 card: whether volume, saving and basis are asked (any cost at
         # all), served so an approver without price view (P9 deputy) gets
         # the fields the backend requires, without the money (R24)
@@ -1182,6 +1190,8 @@ class EarlyStageService:
             # One price rule (PriceViewer) for the API and the cost cards.
             "can_see_prices": await PriceViewer(session, user).may_read(change),
             "can_approve_internal": can_approve_internal,
+            "internal_approval_hold": internal_hold,
+            "internal_hold_can_override": internal_hold_override,
             "internal_needs_money": internal_needs_money,
             # ... and names who approves (never the raiser), for the card
             "internal_approvers": (

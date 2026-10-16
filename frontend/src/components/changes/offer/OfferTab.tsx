@@ -86,6 +86,10 @@ export interface OfferTabProps {
   internalApprovers?: string | null
   /** stage-state internal_needs_money */
   internalNeedsMoney?: boolean | null
+  /** A3-09: stage-state internal_approval_hold (C5), and the override ask
+   *  when the viewer may ask it. */
+  internalHold?: string | null
+  onInternalOverride?: () => void
   userId: number | null
   /** Internal changes: the cost summary (SummationView) the page renders. */
   costSummary?: ReactNode
@@ -588,7 +592,8 @@ export default function OfferTab(props: OfferTabProps) {
         </StepSection>
         <StepSection id="offer-approval" n={2} title="Approval" done={!!change.internal_approved_at}>
           <InternalApproval change={change} canApprove={props.canApproveInternalCosts}
-            approvers={props.internalApprovers} needsMoney={props.internalNeedsMoney} />
+            approvers={props.internalApprovers} needsMoney={props.internalNeedsMoney}
+            hold={props.internalHold} onOverride={props.onInternalOverride} />
         </StepSection>
       </div>
     )

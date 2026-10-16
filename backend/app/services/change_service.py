@@ -7500,6 +7500,27 @@ class ChangeService:
         return float(total or 0) > float(change.internal_approved_amount) + 0.005
 
     @staticmethod
+    async def internal_approval_hold(session: AsyncSession,
+                                     change: ChangeRequest) -> Optional[str]:
+        """C5 (spec §5) on the internal approval: why the approver cannot
+        approve yet (costing not finalized, no approved override of that
+        rule), or None. One rule for POST .../internal-approval and the
+        card's served hold (A3-09, R24)."""
+        from app.services import cm_switches
+        if change.status != "costing" or not cm_switches.on("ASSESSMENT_V2"):
+            return None
+        text = await ChangeService.costing_not_finalized_text(session, change)
+        if not text:
+            return None
+        await ChangeService._load_deviations(session, change)
+        if any(d.to_status == "approved" and d.status == "approved"
+               and d.guard_key in ("costing_not_finalized", None)
+               for d in change.transition_deviations):
+            return None
+        return (f"{text}. Approve once they are finalized, or with an "
+                "approved override of 'Costing not finalized'")
+
+    @staticmethod
     async def internal_above_over(session: AsyncSession,
                                   change: ChangeRequest) -> Optional[float]:
         """A3-05 (spec §4 [R4]): an internal change in costing whose open
@@ -7597,15 +7618,9 @@ class ChangeService:
         # C5 (spec §5): approval waits for every department's finalized
         # costing; an approved override of that rule lets it go ahead.
         from app.services import cm_switches
-        if change.status == "costing" and cm_switches.on("ASSESSMENT_V2"):
-            text = await ChangeService.costing_not_finalized_text(session, change)
-            if text and not any(
-                    d.to_status == "approved" and d.status == "approved"
-                    and d.guard_key in ("costing_not_finalized", None)
-                    for d in change.transition_deviations):
-                raise ChangeError(
-                    f"{text}. Approve once they are finalized, or with an "
-                    "approved override of 'Costing not finalized'")
+        hold = await ChangeService.internal_approval_hold(session, change)
+        if hold:
+            raise ChangeError(hold)
         # Internal path has no quote step, so approval is where deadline #2
         # is born — mirror of the acceptance rule for customer changes.
         if release_due_date is None and change.release_due_date is None:

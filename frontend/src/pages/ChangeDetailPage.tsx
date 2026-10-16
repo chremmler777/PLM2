@@ -1418,6 +1418,9 @@ export default function ChangeDetailPage() {
           canApproveInternalCosts={canApproveInternalCosts}
           internalApprovers={stage?.internal_approvers}
           internalNeedsMoney={stage?.internal_needs_money}
+          internalHold={stage?.internal_approval_hold}
+          onInternalOverride={stage?.internal_hold_can_override && !readOnly
+            ? () => setOverrideFor({ to: 'approved', rule: 'costing_not_finalized' }) : undefined}
           userId={userId ?? null}
           costSummary={canSeeCosts ? <SummationView changeId={changeId}
                 status={change.status} canQuote={canEditQuotedPrice}

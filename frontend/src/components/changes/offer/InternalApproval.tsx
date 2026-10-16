@@ -30,9 +30,13 @@ export function paybackMonths(cost: number, savingPerYear: number): number | nul
   return Math.round((cost / savingPerYear) * 12 * 10) / 10
 }
 
-export default function InternalApproval({ change, canApprove, approvers, needsMoney }: {
+export default function InternalApproval({ change, canApprove, approvers, needsMoney, hold, onOverride }: {
   change: ChangeDetail
   canApprove: boolean
+  /** A3-09 (C5, stage-state internal_approval_hold): the approver owes it
+   *  but costing is not finalized: say why, offer the override. */
+  hold?: string | null
+  onOverride?: () => void
   /** Who approves, in words (stage-state internal_approvers). */
   approvers?: string | null
   /** stage-state internal_needs_money: the fields an approver without price
@@ -103,6 +107,20 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
   ) : null
   // A3-05: approved, and the approver owes it again (a quote above the
   // approved estimate): the approval stays on record, the card asks again
+  if (hold) {
+    return (
+      <div className="space-y-2" data-testid="internal-hold">
+        {approvedBlock}
+        <p className="text-xs text-amber-200">{hold}</p>
+        {onOverride && (
+          <button type="button" className={buttonClass('secondary', 'sm')}
+            data-testid="internal-hold-override" onClick={onOverride}>
+            {t('internal.overrideHold')}
+          </button>
+        )}
+      </div>
+    )
+  }
   if (approvedBlock && !canApprove) return approvedBlock
   if (!canApprove) {
     return (

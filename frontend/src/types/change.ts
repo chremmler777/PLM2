@@ -1713,6 +1713,10 @@ export interface StageStateResponse {
   /** §5 card: any cost at all, so volume, saving and basis are asked (served
    *  for an approver without price view, R24). */
   internal_needs_money?: boolean | null;
+  /** A3-09 (C5): why the approver cannot approve yet, and whether the
+   *  viewer may ask the override of 'Costing not finalized'. */
+  internal_approval_hold?: string | null;
+  internal_hold_can_override?: boolean;
   title_auto: boolean;
   assessment: StageAssessment | null;
   routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;
