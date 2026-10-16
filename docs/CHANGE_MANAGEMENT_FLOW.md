@@ -1715,7 +1715,11 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   only): a customer change: the issue's route becomes the concession and
   the Sales owner is told to ask the customer ("Waiting for customer (Sales
   owner, asked <date>)"); once Sales filed the customer's mail, Quality
-  decides, for a quantity of parts or until a date (required). The Fix pick
+  decides, for a quantity of parts or until a date (required). The yes
+  never rests only on a mail the deciding member filed (A5-07): with every
+  customer mail on the issue filed by them, the card offers no decision and
+  the yes is refused; the Sales owner files it, or another Quality member
+  decides. The Fix pick
   stays open beside it, whichever comes first. Tasks: Sales "Ask the
   customer about the concession for VI-n and file the mail" until the mail
   is filed, then Quality "Decide concession VI-n: for a quantity or until a

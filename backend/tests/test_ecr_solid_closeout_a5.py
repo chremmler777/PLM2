@@ -366,3 +366,40 @@ async def test_a5_06_negative_a_real_quality_member_tells_nobody(client, fix, se
     async with session_factory() as s:
         assert not (await s.execute(select(Notification).where(
             Notification.kind == "concession_acting_admin"))).scalars().all()
+
+
+# --- A5-07 the concession yes never rests only on the decider's own mail ----
+
+async def test_a5_07_negative_quality_cannot_decide_on_a_mail_it_filed(
+        client, fix, session_factory):
+    async with session_factory() as s:
+        # the Quality member is also in the owner department: it may file mail
+        s.add(UserDepartment(user_id=fix["user"]["Quality"]["id"],
+                             department_id=fix["dept"]["Tool Engineer"]))
+        await s.commit()
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    quality = await _who(client, fix, "Quality")
+    res = await client.post(_iurl(fix, f"/{iid}/concession"), headers=quality,
+                            json={"note": "ask for 518 g max, 500 parts"})
+    assert res.status_code == 200, res.text
+    up = await client.post(
+        f"/api/v1/changes/{fix['change_id']}/attachments", headers=quality,
+        files={"file": ("mail.eml", b"From: customer", "message/rfc822")},
+        data={"kind": "customer_email", "validation_issue_id": str(iid)})
+    assert up.status_code in (200, 201), up.text
+    out = (await client.get(_iurl(fix, f"/{iid}"), headers=quality)).json()
+    assert "customer" not in out["next_acts"]                    # no dead button
+    yes = {"decision": "accept_deviation", "note": "customer mail 2026-10-15",
+           "quantity": 500}
+    res = await client.post(_iurl(fix, f"/{iid}/customer"), headers=quality, json=yes)
+    assert res.status_code == 400 and "filed the customer's mail yourself" in res.json()["detail"]
+    # the Sales owner files it: now Quality decides
+    up = await client.post(
+        f"/api/v1/changes/{fix['change_id']}/attachments",
+        headers=await _auth(client, fix, "Sales"),
+        files={"file": ("mail2.eml", b"From: customer", "message/rfc822")},
+        data={"kind": "customer_email", "validation_issue_id": str(iid)})
+    assert up.status_code in (200, 201), up.text
+    res = await client.post(_iurl(fix, f"/{iid}/customer"), headers=quality, json=yes)
+    assert res.status_code == 200 and res.json()["status"] == "accepted", res.text

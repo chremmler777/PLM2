@@ -1487,11 +1487,26 @@ class ValidationIssueService:
     # Customer
     # ------------------------------------------------------------------
     @staticmethod
-    async def has_customer_mail(session: AsyncSession, issue: ValidationIssue) -> bool:
-        return bool((await session.execute(
-            select(func.count()).select_from(ChangeAttachment).where(
-                ChangeAttachment.validation_issue_id == issue.id,
-                ChangeAttachment.kind == "customer_email"))).scalar())
+    @staticmethod
+    async def has_customer_mail(session: AsyncSession, issue: ValidationIssue,
+                                not_by: Optional[int] = None) -> bool:
+        """A filed customer mail on the issue; with `not_by`, one filed by
+        someone else (A5-07: Quality's concession yes never rests only on
+        evidence the decider filed)."""
+        q = select(func.count()).select_from(ChangeAttachment).where(
+            ChangeAttachment.validation_issue_id == issue.id,
+            ChangeAttachment.kind == "customer_email")
+        if not_by is not None:
+            q = q.where(ChangeAttachment.uploaded_by != not_by)
+        return bool((await session.execute(q)).scalar())
+
+    @staticmethod
+    async def mail_only_by(session: AsyncSession, issue: ValidationIssue,
+                           user_id: int) -> bool:
+        """Every customer mail on the issue was filed by this user (A5-07)."""
+        return (await ValidationIssueService.has_customer_mail(session, issue)
+                and not await ValidationIssueService.has_customer_mail(
+                    session, issue, not_by=user_id))
 
     @staticmethod
     async def customer_mail_at(session: AsyncSession,
@@ -1589,6 +1604,13 @@ class ValidationIssueService:
         else:
             svc._require(v.admin or v.sales,
                          "Only Sales records the customer's decision")
+        if concession and decision == "accept_deviation" and svc.fix_rule_on() \
+                and await svc.mail_only_by(session, issue, user.id):
+            # A5-07: the yes does not rest on evidence the decider filed
+            raise ChangeError(
+                "You filed the customer's mail yourself: the Sales owner files "
+                "it, or another Quality member decides (four eyes on the "
+                "concession's evidence)")
         if (concession and decision == "accept_deviation"
                 and issue.status == "accepted"
                 and not await svc.quality_decided(session, issue)):
@@ -2612,7 +2634,8 @@ class ValidationIssueService:
         if not issue.is_open:
             if (v.quality and issue.status == "accepted"
                     and issue.route == "customer_concession"
-                    and not await svc.quality_decided(session, issue)):
+                    and not await svc.quality_decided(session, issue)
+                    and not await svc.mail_only_by(session, issue, v.id)):
                 # HARD #3: a concession accepted without Quality's yes waits
                 # for Quality to confirm it before it counts at release
                 return ["customer"], "customer", []
@@ -2649,7 +2672,9 @@ class ValidationIssueService:
         # mail; before that the card waits on Sales (spec §10)
         quality_concession = (v.quality and issue.route == "customer_concession"
                               and svc.quality_decides_concessions()
-                              and await svc.has_customer_mail(session, issue))
+                              and await svc.has_customer_mail(session, issue)
+                              # A5-07: not on a mail only this member filed
+                              and not await svc.mail_only_by(session, issue, v.id))
         if ((v.admin or v.sales) and issue.customer_inform and (
                 issue.customer_decision in (None, "pending")
                 or issue.route == "customer_concession")) or quality_concession:
