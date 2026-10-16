@@ -204,3 +204,26 @@ async def test_a2_04_answered_question_is_the_askers_to_settle(
     assert "Gauge class? (answered, Quality settles)" in detail
     assert "Which resin lot? (answered" not in detail
     assert q2["id"]
+
+
+# ---- A2-05: 'Not yet' with a reason raises a typed question ---------------
+
+async def test_a2_05_not_yet_with_a_reason_raises_a_typed_question(
+        client, admin_auth, seed, session_factory):
+    from tests.test_ecr_solid_scoping_v2 import _scoping, _meeting, _decide
+    from app.models.change import ChangeConcern
+    cid, _ = await _scoping(client, admin_auth, seed, "a205")
+    _, proc, _pe = await _user(client, session_factory, seed, "pe205", "Process Engineer")
+    mid = await _meeting(client, admin_auth, cid, {str(proc): "R"})
+    res = await _decide(client, admin_auth, cid, mid, "needs_info",
+                        reason="Customer drawing rev D is missing")
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeConcern).where(
+            ChangeConcern.change_id == cid))).scalars().all()
+    assert len(rows) == 1
+    q = rows[0]
+    # negative: never untyped under SCOPING_V2
+    assert q.flag_type == "question" and q.answer_from == "our_team"
+    assert q.check_what == "other"
+    assert q.scope_effect and "Customer drawing rev D is missing" in q.scope_effect

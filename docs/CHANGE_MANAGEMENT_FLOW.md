@@ -279,7 +279,10 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   *"Not yet: waiting for 2 answers (Process Engineer Thu, Tool Engineer Fri)"*
   (each side with the due weekday of its earliest question, the task rule)
   and raises nothing new. Without open questions it asks what is missing, which
-  becomes the decider department's question as before. **Reject** still closes
+  becomes the decider department's question as before, typed like every
+  scoping raise (close-out A2-05): `flag_type` question, answered by *our
+  team*, check-what *other*, and what it changes = "Decides whether the change
+  can start: <reason>". **Reject** still closes
   every flag [KEEP]. The PM's *Wrap up scoping* row reads *"Not yet: waiting
   for n answer(s) (...)"*, then *"Proceed waits for: PPAP decision (Quality,
   due Thu), notification or offer? (Sales), impacted parts (lead)"*, and

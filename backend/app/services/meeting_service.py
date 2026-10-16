@@ -1559,10 +1559,19 @@ class MeetingService:
         if any(c.is_open and c.kind == "needs_info" and c.department_id == dept_id
                and c.raised_by == user.id for c in change.concerns):
             return None
+        # A2-05 (SCOPING_V2): every scoping raise names its type, who answers
+        # and what the answer changes: the decider's team answers it (Sales
+        # or PM may too), the reason is what it changes (the start)
+        from app.services import mother_plants as mp
+        typed = cm_switches.on("SCOPING_V2") and not mp.is_mother_plant(change)
         concern = ChangeConcern(
             change_id=change.id, kind="needs_info", note=reason.strip(),
             raised_by=user.id, department_id=dept_id,
-            raised_by_meeting_id=meeting_id)
+            raised_by_meeting_id=meeting_id,
+            **({"flag_type": "question", "check_what": "other",
+                "answer_from": "our_team",
+                "scope_effect": f"Decides whether the change can start: {reason.strip()}"}
+               if typed else {}))
         session.add(concern)
         await session.flush()
         await ChangeService.append_changelog(
