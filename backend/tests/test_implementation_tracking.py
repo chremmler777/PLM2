@@ -150,8 +150,9 @@ async def test_department_books_its_own_hours(client, impl):
     assert body["created_by"] == body["booked_by"]
     assert body["created_at"] == body["booked_at"]
     assert body["created_by_name"] == "Tool Engineer"
-    assert "implementation_time_booked" in await _actions(
-        client, tool, impl["change_id"])
+    # C15: one Book hours rule, dated and sourced like POST /hours
+    assert body["work_date"] is not None and body["source"] == "typed"
+    assert "hours_booked" in await _actions(client, tool, impl["change_id"])
 
 
 async def test_department_cannot_book_on_another_department(client, impl):
@@ -160,18 +161,31 @@ async def test_department_cannot_book_on_another_department(client, impl):
     assert res.status_code == 403, res.text
 
 
-async def test_pm_books_for_anyone(client, impl):
+async def test_negative_pm_does_not_book_for_another_department(client, impl):
+    """C15: no side door. The stage-8 booking follows the Book hours rule:
+    your own department (an admin for any), at most 24 h a booking."""
     pm = await _auth(client, impl, "Project Manager")
     res = await _book(client, pm, impl, "Development", hours=1.0)
-    assert res.status_code == 201, res.text
+    assert res.status_code == 403, res.text
+    tool = await _auth(client, impl, "Tool Engineer")
+    res = await _book(client, tool, impl, "Tool Engineer", hours=30.0)
+    assert res.status_code == 400 and "24" in res.json()["detail"]
 
 
-async def test_booking_refused_outside_the_implementation_status(
-        client, impl, session_factory):
+async def test_booking_follows_the_book_hours_window(client, impl, session_factory):
+    """Any open change (C15), not only in implementation; closed: 7 days."""
+    from datetime import datetime, timedelta
     await _set_status(session_factory, impl["change_id"], "approved")
     tool = await _auth(client, impl, "Tool Engineer")
     res = await _book(client, tool, impl, "Tool Engineer")
-    assert res.status_code == 403, res.text
+    assert res.status_code == 201, res.text
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, impl["change_id"])
+        c.status = "closed"
+        c.closed_at = datetime.utcnow() - timedelta(days=8)
+        await s.commit()
+    res = await _book(client, tool, impl, "Tool Engineer")
+    assert res.status_code == 400, res.text
 
 
 async def test_non_implementing_department_cannot_book(client, admin_auth, impl):
@@ -197,12 +211,12 @@ async def test_bookings_are_department_scoped_for_readers(client, impl):
         impl["dept"]["Tool Engineer"], impl["dept"]["Development"]}
 
 
-async def test_booker_deletes_own_booking_but_not_a_colleagues(client, impl,
+async def test_booker_deletes_own_booking_but_not_a_colleagues(client, impl, admin_auth,
                                                                session_factory):
     tool = await _auth(client, impl, "Tool Engineer")
     pm = await _auth(client, impl, "Project Manager")
     mine = (await _book(client, tool, impl, "Tool Engineer")).json()["id"]
-    theirs = (await _book(client, pm, impl, "Tool Engineer")).json()["id"]
+    theirs = (await _book(client, admin_auth, impl, "Tool Engineer")).json()["id"]
 
     res = await client.delete(_url(impl, f"/bookings/{theirs}"), headers=tool)
     assert res.status_code == 403, res.text
@@ -211,9 +225,9 @@ async def test_booker_deletes_own_booking_but_not_a_colleagues(client, impl,
     assert "implementation_time_removed" in await _actions(
         client, tool, impl["change_id"])
 
-    # And not once the stage is over.
-    await _set_status(session_factory, impl["change_id"], "in_validation")
-    res = await client.delete(_url(impl, f"/bookings/{theirs}"), headers=tool)
+    # C15, the DELETE /hours rule: not even Project Management takes back
+    # somebody else's hours
+    res = await client.delete(_url(impl, f"/bookings/{theirs}"), headers=pm)
     assert res.status_code == 403, res.text
 
 
@@ -445,7 +459,8 @@ async def test_state_payload_shape_and_totals(client, impl):
     pm = await _auth(client, impl, "Project Manager")
     await _book(client, tool, impl, "Tool Engineer", hours=3.0)
     await _book(client, tool, impl, "Tool Engineer", hours=1.5)
-    await _book(client, pm, impl, "Development", hours=2.0)
+    await _book(client, await _auth(client, impl, "Development"), impl,
+                "Development", hours=2.0)
 
     res = await client.get(_url(impl, "/state"), headers=pm)
     assert res.status_code == 200, res.text

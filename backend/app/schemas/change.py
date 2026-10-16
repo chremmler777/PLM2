@@ -1679,6 +1679,10 @@ class ImplementationBookingResponse(BaseModel):
     labour_position: Optional[str] = None
     machine_class_id: Optional[int] = None
     machine_hours: Optional[float] = None
+    # C15: the day worked and the source ('estimate' | 'typed'); NULL on
+    # rows booked before C15
+    work_date: Optional[date] = None
+    source: Optional[str] = None
     # The stored columns. Kept in the payload because "booked" is what the
     # act is called on the shop floor.
     booked_by: int

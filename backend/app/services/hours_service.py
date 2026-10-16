@@ -118,8 +118,10 @@ class HoursService:
                 f"Hours are booked until {AFTER_CLOSE_DAYS} days after the change "
                 "closed or was cancelled")
         dept_id = spec.get("department_id")
-        if dept_id is None or await session.get(Department, dept_id) is None:
-            raise HoursError("Pick the department the hours are for")
+        from app.services.change_people import department_is_active
+        if dept_id is None or not await department_is_active(session, dept_id):
+            raise HoursError("Pick the department the hours are for (an active "
+                             "department)")
         admin = actor.effective_role == "admin"
         if not admin and not await WorkflowService.actor_in_department(
                 session, actor, dept_id):
@@ -155,6 +157,16 @@ class HoursService:
         source = spec.get("source") or "typed"
         if source not in SOURCES:
             raise HoursError("Source: 'estimate' (confirmed) or 'typed'")
+        if source == "estimate" and not coordination:
+            # 'a confirmed estimate' is the server's word, not the client's:
+            # only the prefill itself (estimate less booked) counts as one
+            e = (await estimate_by_department(session, [change.id])).get(
+                (change.id, dept_id))
+            b = (await booked_by_department(session, [change.id])).get(
+                (change.id, dept_id), 0.0)
+            left = round(max((e or 0) - b, 0), 2)
+            if not e or round(hours, 2) != left:
+                source = "typed"
         booked_for = (spec.get("booked_for") or "").strip() or None
         if booked_for and len(booked_for) > 120:
             raise HoursError("The colleague's name has at most 120 characters")

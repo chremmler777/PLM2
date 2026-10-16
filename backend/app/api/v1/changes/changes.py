@@ -3789,16 +3789,20 @@ async def create_implementation_booking(
     change_id: int, body: ImplementationBookingCreate,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    """The stage-8 booking (labour position, machine hours) under the one
+    Book hours rule (C15): your own department, at most 24 h per booking,
+    dated and sourced like POST /hours."""
+    from app.services.hours_service import HoursError, HoursForbidden
     from app.services.implementation_service import (
         ImplementationError, ImplementationService,
     )
     change = await _implementation_change(db, change_id, current_user)
-    await _require_implementation_write(
-        db, change, body.department_id, current_user)
     try:
         booking = await ImplementationService.create_booking(
             db, change, body.model_dump(), current_user)
-    except ImplementationError as e:
+    except HoursForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except (HoursError, ImplementationError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(booking)
@@ -3811,7 +3815,11 @@ async def delete_implementation_booking(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Remove a booking you entered. Corrections are delete-and-rebook rather
-    than an edit, so the changelog carries both halves of the fix."""
+    than an edit, so the changelog carries both halves of the fix. The one
+    rule of DELETE /hours (C15): your own booking (an admin any) while the
+    booking window is open; somebody else's hours are their statement about
+    their day."""
+    from app.services.hours_service import window_open
     from app.services.implementation_service import (
         ImplementationError, ImplementationService,
     )
@@ -3820,18 +3828,12 @@ async def delete_implementation_booking(
         booking = await ImplementationService.get_booking(db, change, bid)
     except ImplementationError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    await _require_implementation_write(
-        db, change, booking.department_id, current_user)
-    # Membership is not enough: somebody else's hours are their statement
-    # about their day. PM and admins clean up regardless.
-    from app.services.meeting_service import MeetingService
-    if (booking.booked_by != current_user.id
-            and current_user.effective_role != "admin"
-            and not await MeetingService.user_is_pm_member(db, current_user)):
-        raise HTTPException(
-            status_code=403,
-            detail="Only the person who booked that time (or Project "
-                   "Management) may remove it")
+    if booking.booked_by != current_user.id and current_user.effective_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="Only your own booking is yours to take back")
+    if not window_open(change):
+        raise HTTPException(status_code=400,
+                            detail="The booking window of this change has ended")
     await ImplementationService.delete_booking(db, change, booking, current_user)
     await db.commit()
 

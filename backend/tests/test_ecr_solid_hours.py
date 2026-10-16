@@ -144,3 +144,50 @@ async def test_pnl_effort_reads_the_internal_effort_positions(
         rows = await PnlService.changes_pnl(s, await s.get(User, seed["admin_id"]))
     row = next(r for r in rows if r["change_id"] == cid)
     assert row["effort_hours"] == 6.0
+
+
+# --- review loop 1 ------------------------------------------------------------
+
+async def test_estimate_source_only_for_the_prefill_itself(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    res = await _book(client, dev, cid, department_id=depts["Development"], hours=4,
+                      source="estimate")
+    assert res.status_code == 201, res.text
+    assert res.json()["bookings"][0]["source"] == "typed"     # 4 h is not the 6 h estimate
+
+
+async def test_negative_an_inactive_department_takes_no_hours(
+        client, admin, seed, depts, session_factory):
+    from app.models.workflow import Department
+    cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    async with session_factory() as s:
+        (await s.get(Department, depts["Tool Engineer"])).is_active = False
+        await s.commit()
+    res = await _book(client, admin, cid, department_id=depts["Tool Engineer"], hours=2)
+    assert res.status_code == 400 and "active" in res.json()["detail"]
+
+
+async def test_stage8_booking_is_dated_and_in_the_dated_report(
+        client, admin, seed, depts, people, session_factory):
+    """No side door: the stage-8 booking is dated, so the date-filtered
+    effort report counts it; PM books nobody else's hours there."""
+    cid = await _with_estimate(client, admin, seed, session_factory, depts,
+                               status="in_implementation")
+    url = f"/api/v1/changes/{cid}/implementation/bookings"
+    pm = people["Project Manager"][1]
+    res = await client.post(url, headers=pm, json={
+        "department_id": depts["Development"], "hours": 2})
+    assert res.status_code == 403, res.text
+    dev = people["Development"][1]
+    res = await client.post(url, headers=dev, json={
+        "department_id": depts["Development"], "hours": 2})
+    assert res.status_code == 201, res.text
+    assert res.json()["work_date"] == business_today().isoformat()
+    today = business_today().isoformat()
+    rep = (await client.get(f"/api/v1/reports/ecr-effort?since={today}&until={today}",
+                            headers=pm)).json()
+    row = next(r for r in rep["changes"] if r["change_id"] == cid)
+    dev_row = next(d for d in row["departments"] if d["department_id"] == depts["Development"])
+    assert dev_row["booked_hours"] == 2.0

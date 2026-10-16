@@ -371,13 +371,13 @@ class ImplementationService:
     async def create_booking(
         session: AsyncSession, change: ChangeRequest, spec: dict, actor: User,
     ) -> ImplementationBooking:
+        """The stage-8 booking (with its labour position and machine hours)
+        follows the one Book hours rule (C15, HoursService.book): your own
+        department (an admin for any), at most 24 h, the day worked and the
+        source stored. Raises HoursForbidden / HoursError from there."""
         department_id = spec["department_id"]
         await ImplementationService._require_implementing(
             session, change, department_id)
-        hours = spec.get("hours")
-        if hours is None or float(hours) <= 0:
-            raise ImplementationError(
-                "A time booking needs hours greater than zero")
         machine_hours = spec.get("machine_hours")
         machine_class_id = spec.get("machine_class_id")
         if machine_hours and machine_class_id is None:
@@ -397,24 +397,15 @@ class ImplementationService:
             if cls is None or cls.organization_id != await costing_rates.change_org_id(
                     session, change):
                 raise ImplementationError(f"Unknown machine class {machine_class_id}")
-        booking = ImplementationBooking(
-            change_id=change.id, department_id=department_id,
-            hours=round(float(hours), 2),
-            note=(spec.get("note") or None), booked_by=actor.id,
-            booked_at=datetime.utcnow(),
-            labour_position=((spec.get("labour_position") or "").strip() or None),
-            machine_class_id=machine_class_id if machine_hours else None,
-            machine_hours=(round(float(machine_hours), 2) if machine_hours else None),
-        )
-        session.add(booking)
+        from app.services.hours_service import HoursService
+        booking = await HoursService.book(session, change, {
+            "department_id": department_id, "hours": spec.get("hours"),
+            "note": spec.get("note"), "source": "typed"}, actor)
+        booking.labour_position = (spec.get("labour_position") or "").strip() or None
+        booking.machine_class_id = machine_class_id if machine_hours else None
+        booking.machine_hours = (round(float(machine_hours), 2)
+                                 if machine_hours else None)
         await session.flush()
-        from app.services.change_service import ChangeService
-        await ChangeService.append_changelog(
-            session, change, "implementation_time_booked",
-            f"{booking.hours} h booked for dept {department_id}", actor.id,
-            new_value={"booking_id": booking.id,
-                       "department_id": department_id,
-                       "hours": booking.hours})
         return booking
 
     @staticmethod
@@ -570,6 +561,8 @@ class ImplementationService:
             "labour_position": b.labour_position,
             "machine_class_id": b.machine_class_id,
             "machine_hours": b.machine_hours,
+            # C15: the day worked and where the number came from
+            "work_date": b.work_date, "source": b.source,
             "booked_by": b.booked_by, "booked_at": b.booked_at,
             "created_by": b.booked_by, "created_at": b.booked_at,
             "created_by_name": names.get(b.booked_by),
