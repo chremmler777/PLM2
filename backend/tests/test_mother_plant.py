@@ -409,6 +409,8 @@ async def test_my_tasks_and_cockpit_items(client, session_factory, mp):
     kinds = [t["kind"] for t in (await client.get(f"{URL}/my-tasks", headers=pm)).json()
              if t["change_id"] == cid]
     assert "info_send" in kinds
+    # A6-05: one row while nobody is informed, not a parallel wrap-up
+    assert "scoping_wrapup" not in kinds
     acts = (await client.get(f"{URL}/{cid}/my-actions", headers=pm)).json()["actions"]
     assert any(a["kind"] == "info_send" and a["target_tab"] == "mother" for a in acts)
 

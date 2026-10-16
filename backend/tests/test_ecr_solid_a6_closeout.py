@@ -327,3 +327,37 @@ async def test_sales_member_flipping_to_customer_owns_the_customer_side(
     assert res.status_code == 200, res.text
     async with session_factory() as s:
         assert (await s.get(ChangeRequest, cid)).sales_owner_id == team["user"]["Sales"]
+
+
+# ---------------------------------------------------------------------------
+# A6-05 the lead has a row at its own step
+# ---------------------------------------------------------------------------
+async def test_scoping_wrapup_is_the_leads_pm_backs_it_up(client, seed, team, session_factory):
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "scoping lead")
+    dev_id = team["user"]["Development"]
+    await _set(session_factory, cid, status="scoping", lead_id=dev_id)
+    dev, pm = await _as(client, "Development"), await _as(client, "Project Manager")
+    row = (await _tasks(client, dev, cid, "scoping_wrapup"))[0]
+    assert row["role"] == "main"
+    pm_row = (await _tasks(client, pm, cid, "scoping_wrapup"))[0]
+    assert (pm_row["role"], pm_row["main_name"]) == ("backup", "Development person")
+    # NEGATIVE: another department's member gets no wrap-up row
+    assert not await _tasks(client, await _as(client, "Quality"), cid, "scoping_wrapup")
+
+
+async def test_approved_lead_watches_who_owes_the_next_step(client, seed, team, session_factory):
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "approved lead")
+    pm_id = team["user"]["Project Manager"]
+    await _set(session_factory, cid, status="approved", lead_id=pm_id,
+               customer_response="accepted")
+    pm = await _as(client, "Project Manager")
+    row = (await _tasks(client, pm, cid, "plan_watch"))[0]
+    assert row["hint"] == "Waiting for Scheduling: decide the bank build"
+    assert row["role"] == "main"
+    await _set(session_factory, cid, bank_build_mode="running_change")
+    row = (await _tasks(client, pm, cid, "plan_watch"))[0]
+    assert row["hint"] == "Waiting for Sales: publish the plan"
+    # NEGATIVE: Sales (not the lead) gets no watch row
+    assert not await _tasks(client, sales, cid, "plan_watch")

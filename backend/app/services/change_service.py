@@ -3819,7 +3819,8 @@ class ChangeService:
 
         # a lead who cannot act is no main owner: Project Management's (R18)
         idle_lead = (await ChangeService.leadless_ids(
-            db, [c for c in open_changes if c.status in ("captured", "on_hold")])
+            db, [c for c in open_changes
+                 if c.status in ("captured", "on_hold", "scoping")])
             if is_pm else set())
         scoping_entered: Optional[dict] = None
         # spec §4: open supplier waits pause a department's costing task
@@ -3928,7 +3929,13 @@ class ChangeService:
                                  and c.id not in idle_lead else {}),
                               "role_department_id": dept_by_name.get("Project Manager")})
             elif c.status == "scoping":
-                if is_pm:
+                # A6-05 (spec §3 "Lead/PM"): the lead owns the wrap-up,
+                # Project Management backs it up (no lead who can act: PM's);
+                # a mother-plant change's next step is "Send information",
+                # one row, the wrap-up only after it
+                lead_here = holds_lead(c, user)
+                if ((is_pm or lead_here)
+                        and not (mp.is_mother_plant(c) and c.id not in informed_ids)):
                     # C33 "Not yet: waiting for 3 answers (Sales, Process)",
                     # flipping to "Ready: proceed" once nothing holds it.
                     from app.services.meeting_service import MeetingService
@@ -3953,6 +3960,9 @@ class ChangeService:
                         entered=scoping_entered.get(c.id) or c.created_at)
                     tasks.append({
                         **await _base(c), "kind": "scoping_wrapup",
+                        **({"main_user": (c.lead_id, c.lead_name or "")}
+                           if not lead_here and c.lead_id is not None
+                           and c.id not in idle_lead else {}),
                         # None: no manual confirm (switch off), nothing owed.
                         "impact_confirmed": (c.impact_confirmed_at is not None
                                              if c.impact_confirm_step else None),
@@ -5116,7 +5126,7 @@ class ChangeService:
             is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
         cand = [c for c in changes
                 if c.status in ChangeService.ADVANCE_STATUSES
-                and not ChangeService._advance_held(c)]
+                and (not ChangeService._advance_held(c) or c.status == "approved")]
         orphaned: set = set()
         if is_pm_member:
             orphaned = await ChangeService.leadless_ids(
@@ -5124,6 +5134,20 @@ class ChangeService:
         mine = [c for c in cand if holds_lead(c, user) or c.id in orphaned]
         if not mine:
             return []
+        # A6-05 (R5, R18): an approved change waits on the bank build, the
+        # plan and the teams' confirmation; its lead watches who owes the
+        # next step instead of having no row at all
+        out = []
+        for c in [c for c in mine if c.status == "approved"]:
+            waiting = ChangeService._approved_waiting(c)
+            if waiting is not None:
+                out.append({**await base(c), "kind": "plan_watch", "hint": waiting,
+                            "target_tab": "timing"})
+        mine = [c for c in mine if c.status != "approved"
+                or (not ChangeService._advance_held(c)
+                    and ChangeService._approved_waiting(c) is None)]
+        if not mine:
+            return out
         # owed since the change last moved (the last blocker cleared): its
         # newest changelog entry, once for the list
         from app.models.change import ChangeChangelog
@@ -5131,7 +5155,6 @@ class ChangeService:
             select(ChangeChangelog.change_id, func.max(ChangeChangelog.performed_at))
             .where(ChangeChangelog.change_id.in_([c.id for c in mine]))
             .group_by(ChangeChangelog.change_id))).all())
-        out = []
         for c in mine:
             nxt = await ChangeService.next_step_missing(db, c)
             if nxt is None or nxt["items"]:
@@ -5191,6 +5214,27 @@ class ChangeService:
         "in_validation": "Finish implementation", "released": "Release change",
         "closed": "Close change",
     }
+
+    @staticmethod
+    def _approved_waiting(c) -> Optional[str]:
+        """Who owes the next step of an approved change, in words, from the
+        loaded change (A6-05); None when only the lead's own step is left
+        (the release gate, or "Ready: move it on")."""
+        from app.services import mother_plants as mp
+        if c.bank_build_mode is None:
+            return "Waiting for Scheduling: decide the bank build"
+        if mp.is_mother_plant(c):
+            if c.timing_validated_at is None:
+                return "Waiting for the teams to confirm the plan; then validate the timing"
+            return None
+        if c.customer_relevant and c.plan_published_at is None:
+            return "Waiting for Sales: publish the plan"
+        if c.timing_validated_at is None:
+            return "Waiting for the teams to confirm the plan; then validate the timing"
+        if any(GATE_TARGET_STATUS.get(g.gate_key) == "in_implementation"
+               and g.decision != "yes" for g in c.gates):
+            return "Decide the release gate (or override it), then start implementation"
+        return None
 
     @staticmethod
     def _advance_held(c) -> bool:

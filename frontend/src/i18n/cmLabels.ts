@@ -2574,6 +2574,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.sign_off': { de: 'Freigabe unterschreiben', en: 'Sign off' },
   'tasks.kind.internal_approval': { de: 'Interne Kosten freigeben', en: 'Approve the internal costs' },
   'tasks.kind.advance': { de: 'Bereit: weiterschalten', en: 'Ready: move it on' },
+  'tasks.kind.plan_watch': { de: 'Freigegeben: nächster Schritt', en: 'Approved: next step' },
   'tasks.kind.routing_deviation_decision': { de: 'Hinzugefügte Abteilung entscheiden', en: 'Decide added department' },
   'tasks.kind.not_feasible': { de: 'Nicht machbar: entscheiden', en: 'Not feasible: decide' },
   'tasks.hint.routing_deviation_decision': {

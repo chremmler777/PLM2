@@ -290,7 +290,9 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   scoping raise (close-out A2-05): `flag_type` question, answered by *our
   team*, check-what *other*, and what it changes = "Decides whether the change
   can start: <reason>". **Reject** still closes
-  every flag [KEEP]. The PM's *Wrap up scoping* row reads *"Not yet: waiting
+  every flag [KEEP]. The *Wrap up scoping* row is the lead's, Project
+  Management backs it up (no lead who can act: Project Management's; a
+  mother-plant change shows it only after *Send information*, A6-05). It reads *"Not yet: waiting
   for n answer(s) (...)"*, then *"Proceed waits for: PPAP decision (Quality,
   due Thu), notification or offer? (Sales), impacted parts (lead)"*, and
   *"Ready: proceed"* only when nothing holds proceed. An answered question
@@ -2376,7 +2378,13 @@ one, and "Absorb" on an open price for who may ask it.
   and `advance` ("Ready: move it on": the lead, else Project Management, once
   `next_step_missing` lists nothing; a released change's close too; its
   button is the hop's own verb, "Close assessment", and makes the move from
-  the task card and "Your actions" alike). The cockpit lists the same rows.
+  the task card and "Your actions" alike). At approved, while the hop waits
+  on someone else, the lead (else Project Management) has `plan_watch`
+  ("Approved: next step", A6-05) naming who owes it: "Waiting for
+  Scheduling: decide the bank build", "Waiting for Sales: publish the plan",
+  "Waiting for the teams to confirm the plan; then validate the timing", or
+  the lead's own "Decide the release gate (or override it)". The cockpit
+  lists the same rows.
   A read-only account (viewer, no active PLM department) gets no My Tasks
   row at all, not even as a change's lead (every write would be refused);
   a lead who cannot act (read-only or inactive, `ChangeService.leadless_ids`)

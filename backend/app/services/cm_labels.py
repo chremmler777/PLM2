@@ -129,6 +129,7 @@ TASK_KIND = {
     "internal_approval": ("Approve the internal costs", "Interne Kosten freigeben"),
     "validation_check": ("Confirm validation", "Validierung bestätigen"),
     "advance": ("Ready: move it on", "Bereit: weiterschalten"),
+    "plan_watch": ("Approved: next step", "Freigegeben: nächster Schritt"),
     "routing_deviation_decision": ("Decide added department",
                                    "Hinzugefügte Abteilung entscheiden"),
     "not_feasible": ("Not feasible: decide", "Nicht machbar: entscheiden"),

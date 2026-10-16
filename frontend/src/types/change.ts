@@ -512,6 +512,7 @@ export type ChangeTaskKind =
   | 'internal_approval'
   /** C3: nothing holds the onward hop; the run team moves it on. */
   | 'advance'
+  | 'plan_watch'
   /** C3 "Needs you": a pending routing change (added department) to decide. */
   | 'routing_deviation_decision'
   /** C3: a department answered 'not feasible'; the run team decides. */

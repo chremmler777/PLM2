@@ -262,7 +262,7 @@ const OWN_TAB_KINDS = new Set(['obtain_info', 'confirm_assumption'])
 
 // Where each kind of change task is actually done, and how it reads in a list.
 const TASK_TAB: Record<string, string> = {
-  kickoff: '', hold_resume: '', scoping_wrapup: '?tab=scoping',
+  kickoff: '', hold_resume: '', scoping_wrapup: '?tab=scoping', plan_watch: '?tab=timing',
   impact_confirm: '?tab=impacted', customer_response: '',
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
   confirm_assumption: '?tab=scoping', ppap_decision: '?tab=scoping',
@@ -350,6 +350,8 @@ const taskHint = (task: ChangeTask): string | null => {
     case 'estimate_check':
     case 'estimate_low':
     case 'price_open':
+    // A6-05: who owes the approved change's next step, named by the backend
+    case 'plan_watch':
       // the backend's brief names the positions and the amount
       return task.hint ?? null;
     case 'kickoff':
