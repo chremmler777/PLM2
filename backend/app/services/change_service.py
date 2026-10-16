@@ -1570,8 +1570,14 @@ class ChangeService:
         items: list[dict] = []
         overrides: dict = {}
 
+        from app.services.cm_rules import DECIDE_ONLY_RULES as _DECIDE
+
         def add(key: str, kind: str, **extra) -> None:
             rule = extra.get("rule")
+            if kind == "soft" and rule in _DECIDE:
+                # A6-07: decided on its own card, never overridden (the
+                # stage-state's 'decide'); the UI reads the kind
+                kind = "decide"
             if rule is not None and kind == "soft":
                 if not overrides:  # read only when a soft rule is listed
                     overrides.update({(d.to_status, d.guard_key): d
@@ -1621,6 +1627,14 @@ class ChangeService:
             elif change.impact_confirmed_at is None and impact_confirm_step(change):
                 # Switch off: the set locks itself at the 'proceed' decision.
                 add("impact_confirmed", "hard")
+            elif (change.impact_confirmed_at is None and latest is not None
+                    and latest.decision is None):
+                # A6-07 (R5): the set locks only when the meeting decides
+                # 'proceed' (confirm step off); with the meeting open that
+                # decision is the next action, owned by the lead / PM
+                add("meeting_decision", "hard", exits=["decide_proceed"],
+                    who=(f"Lead: {change.lead_name}" if change.lead_name
+                         else "Project Management"))
             if change.lead_id is None:
                 add("lead", "soft", rule="no_lead")
             if (change.customer_relevant and change.required_by_date is None
@@ -1842,7 +1856,26 @@ class ChangeService:
                 add("gate", "soft", detail=gate.gate_key, rule=f"gate:{gate.gate_key}")
         if any("who" not in i for i in items):
             await ChangeService._default_owners(session, change, items)
+        ChangeService._item_dues(change, items)
         return {"to": to, "items": items}
+
+    @staticmethod
+    def _item_dues(change: ChangeRequest, items: list[dict]) -> None:
+        """A6-07 (spec §0 Why blocked: rule, owner, due): every row gets a
+        `due` (ISO) when one is known: the open assessments' earliest due
+        for the assessment row, else the change's deadline (the quote
+        deadline or need-by, due_rules.deadline_of)."""
+        from app.services import due_rules
+        deadline, _kind = due_rules.deadline_of(change)
+        open_dues = [a.due_date for a in change.assessments
+                     if a.status == "active" and a.due_date is not None]
+        for i in items:
+            if i.get("due"):
+                continue
+            due = (min(open_dues) if i["key"] == "assessments" and open_dues
+                   else deadline)
+            if due is not None:
+                i["due"] = due.isoformat()
 
     #: Whose a why-blocked row is when the rule names nobody itself (R5): a
     #: department in words, "sales" = the Sales owner, "capture" = the Sales
@@ -1856,6 +1889,8 @@ class ChangeService:
         "validation_failed": "Quality",
         "ppap_decision": "Quality", "customer_flip": "sales",
         "scope_change": "Project Management",
+        # A6-07: the bank build is Scheduling's (else PM, spec §8-9)
+        "bank_build": "Scheduling",
     }
 
     @staticmethod

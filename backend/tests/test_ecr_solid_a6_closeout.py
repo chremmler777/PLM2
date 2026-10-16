@@ -361,3 +361,57 @@ async def test_approved_lead_watches_who_owes_the_next_step(client, seed, team, 
     assert row["hint"] == "Waiting for Sales: publish the plan"
     # NEGATIVE: Sales (not the lead) gets no watch row
     assert not await _tasks(client, sales, cid, "plan_watch")
+
+
+# ---------------------------------------------------------------------------
+# A6-07 why-blocked agrees with the gates; decide-only rules; dues
+# ---------------------------------------------------------------------------
+async def test_open_meeting_names_the_proceed_decision_as_the_next_action(
+        client, seed, team, session_factory):
+    from app.models.change import ChangeImpactedItem, ChangeMeeting
+    from app.models.part import Part
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "meeting open")
+    await _set(session_factory, cid, status="scoping", lead_id=team["user"]["Project Manager"])
+    async with session_factory() as s:
+        part = Part(project_id=seed["project_id"], part_number="886.200", name="Cap",
+                    part_type="internal_mfg", item_category="article",
+                    created_by=seed["admin_id"])
+        s.add(part); await s.flush()
+        s.add(ChangeImpactedItem(change_id=cid, part_id=part.id, created_by=seed["admin_id"]))
+        await s.commit()
+    pm = await _as(client, "Project Manager")
+    keys = lambda ch: {i["key"]: i for i in (ch.get("next_step") or {}).get("items", [])}  # noqa: E731
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    # NEGATIVE: no meeting yet: the meeting row, not the decision row
+    assert "meeting" in keys(ch) and "meeting_decision" not in keys(ch)
+    async with session_factory() as s:
+        s.add(ChangeMeeting(change_id=cid, meeting_date=datetime.utcnow(),
+                            participants=[{"name": "PM"}], notes="open",
+                            created_by=team["user"]["Project Manager"]))
+        await s.commit()
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    row = keys(ch)["meeting_decision"]
+    assert row["kind"] == "hard" and row["exits"] == ["decide_proceed"]
+    assert row["who"] == "Lead: Project Manager person"
+
+
+async def test_routing_change_row_is_decide_not_soft_and_rows_carry_a_due(
+        client, seed, team, session_factory):
+    from app.models.change import ChangeRouting
+    sales = await _as(client, "Sales")
+    due = datetime.utcnow() + timedelta(days=20)
+    cid = await _create(client, sales, seed, "routing pending")
+    await _set(session_factory, cid, status="in_assessment", required_by_date=due)
+    async with session_factory() as s:
+        s.add(ChangeRouting(change_id=cid, has_deviation=True,
+                            deviation_status="pending_approval"))
+        await s.commit()
+    pm = await _as(client, "Project Manager")
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=pm)).json()
+    items = {i["key"]: i for i in ch["next_step"]["items"]}
+    # decided on its card, never overridden: not 'soft' (no Override offered)
+    assert items["routing_deviation"]["kind"] == "decide"
+    # every row names its owner and, with a deadline, its due
+    assert all(i.get("who") for i in items.values())
+    assert all(i.get("due") for i in items.values())

@@ -17,7 +17,7 @@ import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
 import type { WaitState } from '../../lib/waitStates'
-import { formatCalendarDate, formatDate, formatDayMonth } from '../../lib/format'
+import { formatCalendarDate, formatDate, formatDayMonth, formatDueDay } from '../../lib/format'
 import { isIssueActionKind, issueTabFor } from '../../lib/issueTabs'
 import { plantText } from '../../lib/plantName'
 import PendingRemovalChip from './PendingRemovalChip'
@@ -480,8 +480,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     )
   }
   const nextTo = nextStep ? STATUS_LABELS[nextStep.to] : ''
-  const softDecideOnly = nextItems.some((i) => i.kind === 'soft' && DECIDE_ONLY_RULES.has(i.rule ?? ''))
-  const softOverridable = nextItems.some((i) => i.kind === 'soft' && !DECIDE_ONLY_RULES.has(i.rule ?? ''))
+  // A6-07: the backend serves a decided rule as kind 'decide' (the set is
+  // the fallback for an older server)
+  const isDecide = (i: NextStepItem) => i.kind === 'decide'
+    || (i.kind === 'soft' && DECIDE_ONLY_RULES.has(i.rule ?? ''))
+  const softDecideOnly = nextItems.some(isDecide)
+  const softOverridable = nextItems.some((i) => i.kind === 'soft' && !isDecide(i))
   // The scoping meeting decides; a mother-plant change leaves scoping
   // straight to approved and reads like any other stage.
   const isScoping = change.status === 'scoping' && nextStep?.to === 'in_assessment'
@@ -960,6 +964,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                   className={i.kind === 'hard' && !isScoping ? 'text-red-300' : undefined}>
                   {itemLabel(i)}
                   {i.who && <span className="text-slate-400"> · {i.who}</span>}
+                  {i.due && <span data-testid={`why-due-${i.key}`} className="text-slate-400">
+                    {' · '}{t('why.due').replace('{d}', formatDueDay(i.due))}</span>}
                   {whyExit(i, idx)}
                 </li>
               ))}

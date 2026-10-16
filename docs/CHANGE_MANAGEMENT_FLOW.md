@@ -2352,9 +2352,17 @@ rule (`rule`), the owner and due in words (`who`; every row has one, R5:
 the rule's own owner, else its default, e.g. the Sales owner for the quote
 rows, Quality for the Quality sign-off, else the lead, else Project
 Management; task dues follow the due rules above, lane L5 adds supplier waits), a hard rule's only exits
-(`exits`: concession, absorb, customer_accepts, sign, record_answer) and the
-rule's override state (`override`). The footer follows the row kinds (a
-routing change is "decided, not overridden"); overdue assessments count as a
+(`exits`: concession, absorb, customer_accepts, sign, record_answer,
+decide_proceed) and the rule's override state (`override`). Every row also
+carries `due` when one is known (A6-07): the open assessments' earliest due
+on the assessment row, else the change's deadline. A rule decided on its own
+card (`cm_rules.DECIDE_ONLY_RULES`: the routing change) is served as kind
+`decide`, never `soft`, so no Override is offered for it. A scoping change
+whose meeting is open and whose impacted set is unlocked (confirm step off)
+lists `meeting_decision` (hard, the lead or Project Management, exit
+"decide 'proceed'"), the same thing stage-state's "Impacted set is not
+locked" refuses; the bank build row names Scheduling. The footer follows
+the row kinds (a routing change is "decided, not overridden"); overdue assessments count as a
 blocker only while the change is in assessment. The cockpit shows one "Override" link per soft rule (only
 to a viewer who may take the step), "No override" plus the exits for a hard
 one, and "Absorb" on an open price for who may ask it.

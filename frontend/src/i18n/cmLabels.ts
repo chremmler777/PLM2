@@ -259,6 +259,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'next.item.need_by': { de: 'Bedarfstermin (dringend)', en: 'Need-by date (urgent)' },
   'next.item.urgent_reason': { de: 'Dringlichkeit: Grund und Beleg', en: 'Urgent: reason and evidence' },
   'next.item.meeting': { de: 'Scoping-Termin', en: 'Scoping meeting' },
+  'next.item.meeting_decision': { de: 'Scoping-Termin entscheiden: „Weiter“ sperrt die betroffenen Teile', en: "Decide the scoping meeting: 'proceed' locks the impacted set" },
   'next.item.follow_up_meeting': {
     de: 'Folgetermin, sobald die fehlenden Infos da sind',
     en: 'Follow-up meeting once the missing info is in',
@@ -2421,6 +2422,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'why.exit.absorb_internal': { de: 'Ausweg: Absorbieren (OK des internen Freigebers, nie der Ersteller).', en: 'Way out: Absorb (OK of the internal approver, never the raiser).' },
   'why.exit.record_answer': { de: 'Ausweg: Vertrieb erfasst die Kundenantwort (Kundenantwort).', en: "Way out: Sales records the customer's answer (Customer answer)." },
   'why.exit.sign': { de: 'Ausweg: unterschreiben', en: 'Way out: sign it' },
+  'why.exit.decide_proceed': { de: 'Ausweg: im Termin „Weiter“ entscheiden.', en: "Way out: decide 'proceed' in the meeting." },
+  'why.due': { de: 'fällig {d}', en: 'due {d}' },
   'why.sign.pm': { de: 'Als PM unterschreiben für {v}', en: 'Sign as PM for {v}' },
   'why.sign.quality': { de: 'Als Qualität unterschreiben für {v}', en: 'Sign as Quality for {v}' },
   'why.signPlain.pm': { de: 'Als PM unterschreiben', en: 'Sign as PM' },

@@ -451,7 +451,8 @@ export interface ChangeNegotiation {
  */
 export interface NextStepItem {
   key: string;
-  kind: 'hard' | 'soft' | 'todo';
+  /** 'decide': a rule decided on its own card, never overridden (A6-07). */
+  kind: 'hard' | 'soft' | 'todo' | 'decide';
   n?: number;
   detail?: string;
   /** C6: the soft rule an Override is bound to (cm_rules key). */
@@ -459,7 +460,10 @@ export interface NextStepItem {
   /** Who owns it (and by when), in words. */
   who?: string;
   /** A hard rule's only ways out: concession, absorb, customer_accepts, sign. */
-  exits?: ('concession' | 'absorb' | 'absorb_internal' | 'customer_accepts' | 'sign' | 'record_answer')[];
+  exits?: ('concession' | 'absorb' | 'absorb_internal' | 'customer_accepts' | 'sign' | 'record_answer'
+    | 'decide_proceed')[];
+  /** When it is due (ISO): the open assessments' earliest, else the change's deadline. */
+  due?: string;
   /** The rule's override, when one is asked or approved. */
   override?: { id: number; status: 'pending' | 'approved' };
   /** Exit 'sign': the sign-offs still owed (missing, or given on an older

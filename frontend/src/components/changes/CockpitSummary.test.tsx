@@ -43,6 +43,17 @@ describe('CockpitSummary', () => {
     expect(screen.queryByTestId('why-override-routing_deviation_pending')).toBeNull()
   })
 
+  it('A6-07: the backend kind "decide" is decided, never overridden, and each row says its due', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'in_assessment', next_step: { to: 'costing', items: [
+      { key: 'routing_deviation', kind: 'decide', rule: 'some_new_decided_rule', who: 'Project Management',
+        due: '2026-10-20T00:00:00' },
+    ] } })} gates={[]} pendingDeviations={0} onAdvance={vi.fn()} advancing={false}
+      onOverride={vi.fn()} />))
+    expect(document.body.textContent).toContain('A routing change is decided (Assessments tab), not overridden.')
+    expect(screen.queryByTestId('why-override-some_new_decided_rule')).toBeNull()
+    expect(screen.getByTestId('why-due-routing_deviation').textContent).toContain('due')
+  })
+
   it('shows lead, blockers, and one primary next action', () => {
     const onAdvance = vi.fn()
     render(wrap(<CockpitSummary
