@@ -64,10 +64,12 @@ class ValidationService:
         """A member of that department while the change is in validation.
 
         With RELEASE_V2 (C7, spec §10 "rows answered by their department")
-        that is the whole rule, the same as the release rows: PM, the lead
-        or an admin record a department's check only when that department
-        has no real member here (change_people.staffed_department_ids), and
-        only in validation. Otherwise the run team could fix the limits and
+        that is the whole rule: PM or the lead record a department's check
+        only when that department has no real member here
+        (change_people.staffed_department_ids), and only in validation; a
+        real admin's own department rows do not count (HARD #3, it acts as
+        the department). The same rule decides the retest of a failed
+        check (failed_overwrite_refusal). Otherwise the run team could fix the limits and
         PASS another department's measurement with no evidence of its own,
         or fail a check on a released change. Off the switch: PM and admin
         at any time, as before."""
@@ -90,15 +92,23 @@ class ValidationService:
                 return {d: False for d in ids}
             mine = set(await WorkflowService.effective_department_ids(session, actor))
             return {d: d in mine for d in ids}
-        if change.status != VALIDATION_STATUS:
+        from app.services.change_people import (
+            hard3_blind, holds_lead, staffed_department_ids,
+        )
+        if change.status != VALIDATION_STATUS or hard3_blind(actor):
+            # HARD #3: a real admin's own department rows do not count (it
+            # acts as the department to record for it)
             return {d: False for d in ids}
         mine = set(await WorkflowService.effective_department_ids(session, actor))
         out = {d: d in mine for d in ids}
         rest = [d for d in ids if not out[d]]
         if rest:
-            from app.services.release_service import ReleaseService
-            if await ReleaseService.is_pm_or_lead(session, change, actor):
-                from app.services.change_people import staffed_department_ids
+            pm = (await session.execute(
+                select(Department.id).where(Department.name == "Project Manager")
+                .limit(1))).scalar_one_or_none()
+            if holds_lead(change, actor) or (pm is not None and pm in mine):
+                # one rule for the first measurement and the retest: PM or
+                # the lead for a department with no real member here
                 staffed = await staffed_department_ids(session, change, rest)
                 out.update({d: d not in staffed for d in rest})
         return out
@@ -728,22 +738,24 @@ class ValidationService:
         note, actor: User, *, note_rule: bool = True,
     ) -> str | None:
         """HARD #3 (C7, RELEASE_V2): a FAILED check is answered again only by
-        a retest, in validation, by a member of its department (acts-as
-        aware, no PM or admin shortcut), with what changed since the
-        failure (spec §10). Otherwise the failure, and the issue linked to
-        it, could be lifted without a fix or a concession. None = allowed."""
+        a retest, in validation, by whoever records the first measurement
+        (write_rights: a member of its department, acts-as aware; PM or the
+        lead only for a department with no real member here; never a real
+        admin), with what changed since the failure (spec §10). Otherwise
+        the failure, and the issue linked to it, could be lifted without a
+        fix or a concession. None = allowed."""
         from app.services import cm_switches
         if not cm_switches.on("RELEASE_V2"):
             return None
         if change.status != VALIDATION_STATUS:
             return ("A failed check is answered again only by a retest while "
                     "the change is in validation")
-        from app.services.workflow_service import WorkflowService
-        if not await WorkflowService.actor_in_department(
-                session, actor, department_id):
-            return ("A failed check is retested by its own department: no "
-                    "Project Management or admin shortcut (HARD #3; the other "
-                    "exit is a concession, Quality's decision)")
+        if not (await ValidationService.write_rights(
+                session, change, [department_id], actor)).get(department_id):
+            return ("A failed check is retested by its own department (Project "
+                    "Management or the lead only when it has no member here): "
+                    "no admin shortcut (HARD #3; the other exit is a "
+                    "concession, Quality's decision)")
         if not note_rule:       # a measurement names it in its own fields
             return None
         from app.services.cm_rules import reference_refusal
@@ -852,7 +864,10 @@ class ValidationService:
                     ValidationIssue.status == "accepted",
                     ValidationIssue.route == "customer_concession"))).scalars().all()
             ok = await ValidationIssueService.quality_decided_ids(session, accepted)
-            conceded = {i.check_id for i in accepted if i.id in ok}
+            # a concession is for a quantity or until a date (§10): an
+            # expired one no longer covers the failed check
+            conceded = {i.check_id for i in accepted if i.id in ok
+                        and ValidationIssueService.concession_in_force(i)}
             failed = [r for r in failed if r.id not in conceded]
         outstanding = [r for r in rows if r.status not in ("passed", "failed")]
         return (

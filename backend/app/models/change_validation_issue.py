@@ -199,7 +199,7 @@ class ValidationIssueEscalation(Base):
         ForeignKey("change_validation_issues.id"), index=True)
     level: Mapped[int] = mapped_column(Integer)
     # machine code of the trigger: raised, severity, action_overdue,
-    # plan_slip, no_route, release_deadline, unacknowledged, require_fix,
+    # plan_slip, no_route, no_fix (§10), release_deadline, unacknowledged, require_fix,
     # manual, deescalate
     trigger: Mapped[str] = mapped_column(String(30))
     reason: Mapped[str] = mapped_column(Text)

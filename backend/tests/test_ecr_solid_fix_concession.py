@@ -155,7 +155,8 @@ async def test_fix_owner_works_the_check_department_retests_and_it_closes(client
     assert retest["label"].startswith("Retest for VI-1 by")
     st = await _state(client, tool, fix)
     assert st["release_line"].startswith("Not releasable: Part weight validated 518 g vs 495-515")
-    assert "fix: Process Engineer, retest" in st["release_line"]
+    # the person when the department has one (fixture: named like it)
+    assert "fix: Process Engineer (Process Engineer), retest" in st["release_line"]
     assert st["release_line"].endswith("concession: none")
     res = await client.post(_url(fix, "/checks"), headers=tool, json={
         "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
@@ -385,7 +386,7 @@ async def test_concession_first_keeps_the_fix_task_and_the_fix_closes_it(client,
     tool = await _auth(client, fix, "Tool Engineer")
     assert "validation_issue_recheck" in await _kinds(client, tool, fix["change_id"])
     st = await _state(client, tool, fix)
-    assert "fix: Process Engineer, retest" in st["release_line"]
+    assert "fix: Process Engineer (Process Engineer), retest" in st["release_line"]
     assert "concession: waiting for customer" in st["release_line"]
     # a new retest date: the re-pick
     later = due + timedelta(days=2)

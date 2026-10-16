@@ -4005,8 +4005,8 @@ async def record_validation_check(
             status_code=403,
             detail=("A department's validation checks are recorded by its own "
                     "members while the change is in validation; Project "
-                    "Management, the lead or an admin only for a department "
-                    "with no member here"
+                    "Management or the lead only for a department with no "
+                    "member here (an admin acts as the department)"
                     if cm_switches.on("RELEASE_V2") else
                     "Only a member of that department while the change is in "
                     "validation, Project Management or an admin may sign off "

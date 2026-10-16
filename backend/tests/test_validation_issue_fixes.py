@@ -106,7 +106,10 @@ async def test_new_timing_end_of_day_keeps_reason_refuses_past(client, session_f
 # --- B2 extra cost after close --------------------------------------------------
 
 async def test_extra_cost_editable_after_close_audited(client, vi, session_factory):
-    issue = await _raised(client, vi)
+    # a check-free issue: a follow-up never takes a failed check off the
+    # change (HARD #3, RELEASE_V2)
+    issue = await _raised(client, vi, check_id=None, category="cosmetic",
+                          department_id=vi["dept"]["Tool Engineer"])
     iid = issue["id"]
     await _ready(client, vi, iid)
     r = await _route(client, vi, iid, route="follow_up_change", actions=[])

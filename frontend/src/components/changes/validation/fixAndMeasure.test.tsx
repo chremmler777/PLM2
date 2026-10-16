@@ -11,6 +11,7 @@ import MeasurementForm, { measurementBody, type MeasureDraft } from './Measureme
 import { ConcessionForm, FixForm, concessionBlocked, fixBlocked } from './FixConcessionForms'
 import IssueCard from './IssueCard'
 import CustomerDecisionForm, { customerDecisionBlocked } from './CustomerDecisionForm'
+import { routeOptions } from './RouteDialog'
 
 vi.mock('../../../api/validationIssues', () => ({
   validationIssuesKey: (id: number) => ['change', id, 'validation-issues'],
@@ -159,5 +160,14 @@ describe('concession', () => {
       customer_options: ['accept_deviation'] })} />)
     fireEvent.click(screen.getByTestId('customer-decision-accept_deviation'))
     expect(screen.getByTestId('concession-qty')).toBeTruthy()
+  })
+})
+
+describe('Route options (review loop 2)', () => {
+  it('NEGATIVE: with the release rules no concession and no follow-up on a failed check', () => {
+    expect(routeOptions(issue())).toEqual(['internal_rework', 'supplier_rework', 'design_change'])
+    expect(routeOptions(issue({ check_id: null }))).toEqual(
+      ['internal_rework', 'supplier_rework', 'design_change', 'follow_up_change'])
+    expect(routeOptions(issue({ fix_rule: false }))).toContain('customer_concession')
   })
 })

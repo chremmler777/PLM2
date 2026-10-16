@@ -706,8 +706,10 @@ async def test_cycle_time_measured_by_other_departments_stays_readable(
     tool = next(c for c in by_name["Tool Engineer"]["checks"]
                 if c["check_key"] == "cycle_time")
     assert tool["retired"] is False and tool["expects_value"] is True
-    # the retired answer cannot be written any more
-    res = await client.post(_url(val, "/checks"), headers=admin_auth, json={
+    # the retired answer cannot be written any more (not even by its own
+    # department: the admin acting as it; a bare admin records nothing, C7)
+    acting = {**admin_auth, "X-Acts-As-Department": str(depts["Process Engineer"])}
+    res = await client.post(_url(val, "/checks"), headers=acting, json={
         "department_id": depts["Process Engineer"], "check_key": "cycle_time",
         "status": "passed", "value": 40.0})
     assert res.status_code == 400, res.text

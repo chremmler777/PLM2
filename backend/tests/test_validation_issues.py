@@ -467,7 +467,13 @@ async def test_design_change_informs_customer_and_supplier_rework_needs_supplier
     assert r.json()["customer_inform"] is True
 
 
-async def test_follow_up_change_transfers_the_issue(client, vi, session_factory):
+async def test_follow_up_change_transfers_the_issue(client, vi, session_factory,
+                                                   monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): with the switch on a failed
+    # check is not taken off the change by a follow-up
+    # (test_ecr_solid_l7_review2)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     issue = await _raised(client, vi)
     await _ready(client, vi, issue["id"])
     r = await _route(client, vi, issue["id"], who="lead", route="follow_up_change",
@@ -748,7 +754,13 @@ async def _backdate_issue(session_factory, iid, days):
         await s.commit()
 
 
-async def test_no_route_after_two_working_days_goes_level_2(client, vi, session_factory):
+async def test_no_route_after_two_working_days_goes_level_2(client, vi, session_factory,
+                                                           monkeypatch):
+    # the rule before §10 (RELEASE_V2 off): with the switch on a failed
+    # check's issue escalates a missing Fix pick, never a route
+    # (test_ecr_solid_l7_review2)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     issue = await _raised(client, vi)
     async with session_factory() as s:
         assert await ValidationIssueService.reevaluate_all(s) == 0
@@ -995,7 +1007,12 @@ async def test_upload_into_an_issue_with_rights(client, vi, monkeypatch):
     assert any(a.get("validation_issue_id") == iid for a in atts)
 
 
-async def test_my_actions_and_my_tasks_carry_issue_rows(client, vi):
+async def test_my_actions_and_my_tasks_carry_issue_rows(client, vi, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off): PM routes the concession;
+    # with the switch on it is Quality's Request concession
+    # (test_ecr_solid_fix_concession)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     issue = await _raised(client, vi, check_id=None, category="cosmetic",
                           department_id=vi["dept"]["Tool Engineer"])
     await _route(client, vi, issue["id"], who="pm", route="customer_concession",

@@ -21,6 +21,16 @@ import { departmentLabel } from '../../../lib/departments'
 
 const ORDER: IssueRoute[] = ['internal_rework', 'supplier_rework', 'design_change', 'customer_concession', 'follow_up_change']
 
+/** The routes this issue offers. With the release rules (RELEASE_V2, §10)
+ * a concession is Quality's 'Request concession' only, and a failed check
+ * is not taken off the change by a follow-up (HARD #3): the backend refuses
+ * both, so they are not offered. */
+export function routeOptions(issue: IssueOut): IssueRoute[] {
+  if (!issue.fix_rule) return ORDER
+  return ORDER.filter((r) => r !== 'customer_concession'
+    && !(r === 'follow_up_change' && issue.check_id != null))
+}
+
 /** Why a route cannot be decided yet, or null. */
 export function routeBlockedReason(issue: IssueOut, route: IssueRoute): string | null {
   if (issue.severity === 3 && !issue.contained_at) return 'Record the containment first (blocks production).'
@@ -128,7 +138,7 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
       )}>
         <div className="space-y-4">
           <div role="radiogroup" aria-label="Route" className="space-y-1.5">
-            {ORDER.map((r) => {
+            {routeOptions(issue).map((r) => {
               const blocked = routeBlockedReason(issue, r)
               const on = route === r
               return (

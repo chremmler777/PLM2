@@ -24,6 +24,16 @@ def holds_lead(change, user) -> bool:
             and change.lead_id == user.id)
 
 
+def hard3_blind(user) -> bool:
+    """A real admin account not acting as a department. For HARD #3 (C7)
+    decisions (recording or retesting a validation check, Quality's Fix pick
+    and concession) its own department rows do not count, the same rule as
+    staffed_department_ids: an admin belongs to every department in a small
+    plant's set-up and would otherwise lift HARD #3 alone. An admin who
+    stands in for a department acts as it (acts-as puts it on the record)."""
+    return getattr(user, "effective_role", None) == "admin"
+
+
 async def change_org_id(session: AsyncSession, change) -> Optional[int]:
     """The organization of the change's project; None without a project."""
     if getattr(change, "project_id", None) is None:
@@ -35,9 +45,11 @@ async def change_org_id(session: AsyncSession, change) -> Optional[int]:
 
 
 async def department_members_of_change_org(
-        session: AsyncSession, change, department_ids: Iterable[int]) -> list[int]:
+        session: AsyncSession, change, department_ids: Iterable[int],
+        *, real_only: bool = False) -> list[int]:
     """Active members of these departments in the change's organization (every
-    member when the change has no organization)."""
+    member when the change has no organization). real_only: without admin
+    accounts (the rule of staffed_department_ids)."""
     from app.models.entities import User
     from app.models.workflow import UserDepartment
     ids = sorted({int(d) for d in department_ids or []})
@@ -46,6 +58,8 @@ async def department_members_of_change_org(
     q = (select(UserDepartment.user_id)
          .join(User, User.id == UserDepartment.user_id)
          .where(UserDepartment.department_id.in_(ids), User.is_active.is_(True)))
+    if real_only:
+        q = q.where(User.role != "admin")
     org_id = await change_org_id(session, change)
     if org_id is not None:
         q = q.where(User.organization_id == org_id)
@@ -74,6 +88,30 @@ async def staffed_department_ids(
     if org_id is not None:
         q = q.where(User.organization_id == org_id)
     return set((await session.execute(q.distinct())).scalars().all())
+
+
+async def real_member_names(session: AsyncSession, change,
+                            department_ids: Iterable[int]) -> dict[int, list[str]]:
+    """department id -> full names of its real members on this change (the
+    rule of staffed_department_ids); a department missing from the result
+    has nobody here."""
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    ids = sorted({int(d) for d in department_ids or [] if d is not None})
+    if not ids:
+        return {}
+    q = (select(UserDepartment.department_id, User.full_name, User.username)
+         .join(User, User.id == UserDepartment.user_id)
+         .join(Department, Department.id == UserDepartment.department_id)
+         .where(UserDepartment.department_id.in_(ids), User.is_active.is_(True),
+                User.role != "admin", Department.is_active.is_(True)))
+    org_id = await change_org_id(session, change)
+    if org_id is not None:
+        q = q.where(User.organization_id == org_id)
+    out: dict[int, list[str]] = {}
+    for did, full, user in (await session.execute(q.distinct())).all():
+        out.setdefault(did, []).append(full or user)
+    return out
 
 
 async def department_is_active(session: AsyncSession, department_id) -> bool:
