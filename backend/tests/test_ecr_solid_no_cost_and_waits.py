@@ -202,3 +202,46 @@ async def test_switch_off(client, ec, monkeypatch):
     assert (await _wait(client, ec, ec["dale"], ec["shop"])).status_code == 400
     res = await _no_cost(client, ec, ec["shop"], ec["dale"], reason="no_work")
     assert res.status_code == 400
+
+
+async def test_price_on_estimate_only_while_costing_is_open(client, ec, session_factory):
+    """A3-11 (R5): after costing the lead cannot 'price on estimate' a wait
+    still open (no costing to finalize); received / not needed still end it.
+    With the switch off nothing closes."""
+    wid = (await _wait(client, ec, ec["dale"], ec["shop"])).json()[0]["id"]
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, ec["cid"])).status = "quoting"
+        await s.commit()
+    url = _u(ec, f"/supplier-waits/{wid}/close")
+    res = await client.post(url, json={"reason": "price_on_estimate"}, headers=ec["lead"])
+    assert res.status_code == 400 and "past costing" in res.json()["detail"], res.text
+    res = await client.post(url, json={"reason": "not_needed"}, headers=ec["dale"])
+    assert res.status_code == 200, res.text
+
+
+async def test_switch_off_closes_nothing(client, ec, monkeypatch):
+    wid = (await _wait(client, ec, ec["dale"], ec["shop"])).json()[0]["id"]
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+    res = await client.post(_u(ec, f"/supplier-waits/{wid}/close"),
+                            json={"reason": "received"}, headers=ec["dale"])
+    assert res.status_code == 400 and "switched off" in res.json()["detail"]
+
+
+async def test_no_costing_wait_for_a_department_that_owes_none(
+        client, ec, seed, session_factory):
+    """A3-11: a costing wait for a finalized department or one that owes no
+    costing (consulted, or nothing impacted) would pause nothing: refused
+    with the reason."""
+    res = await _no_cost(client, ec, ec["proc"], ec["pe"], reason="no_work")
+    assert res.status_code == 200, res.text
+    res = await _wait(client, ec, ec["pe"], ec["proc"])
+    assert res.status_code == 400 and "finalized" in res.json()["detail"], res.text
+    _, qual, qa = await _user(client, session_factory, seed, "qa", "Quality")
+    async with session_factory() as s:
+        s.add(ChangeAssessment(change_id=ec["cid"], department_id=qual, stage_order=1,
+                               rasic_letter="C", status="active"))
+        await s.commit()
+    res = await _wait(client, ec, qa, qual)
+    assert res.status_code == 400 and "owes no costing input" in res.json()["detail"], res.text
+    # still fine for a department that owes its costing
+    assert (await _wait(client, ec, ec["dale"], ec["shop"])).status_code == 200

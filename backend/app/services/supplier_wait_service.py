@@ -143,6 +143,24 @@ async def create(session: AsyncSession, change: ChangeRequest, actor: User, *,
             f"{dept.name} has no part in this change's "
             + ("assessment and costing" if phase == "costing" else "implementation")
             + ": its supplier wait would hold nothing")
+    if phase == "costing":
+        # A3-11: a costing wait holds the department's costing: one that is
+        # finalized, or that owes none (consulted, or its answer marked
+        # nothing impacted), would pause nothing
+        from app.models.change import BLOCKING_LETTERS
+        from app.services import early_costing
+        rows = [a for a in change.assessments if a.department_id == department_id
+                and a.effective_status != "waived"]
+        if early_costing.is_finalized(change, department_id):
+            raise SupplierWaitError(
+                f"{dept.name}'s costing is finalized: reopen it first if the "
+                "supplier's figure changes it")
+        if not early_costing.owes(change, department_id) and (
+                any(a.verdict != "pending" for a in rows)
+                or all(a.rasic_letter not in BLOCKING_LETTERS for a in rows)):
+            raise SupplierWaitError(
+                f"{dept.name} owes no costing input on this change: its "
+                "supplier wait would hold nothing")
     vendor = (vendor_name or "").strip()
     if len(vendor) < 2:
         raise SupplierWaitError("Name the supplier you wait on")
@@ -185,6 +203,8 @@ async def close(session: AsyncSession, change: ChangeRequest, wait_id: int,
     'price_on_estimate': the run team at close costing, and the department
     is told to finalize on its estimate."""
     from app.services.change_service import ChangeService
+    if not cm_switches.on("ASSESSMENT_V2"):
+        raise SupplierWaitError("Supplier waits are switched off (ASSESSMENT_V2)")
     w = await session.get(SupplierWait, wait_id)
     if w is None or w.change_id != change.id:
         raise SupplierWaitError("Supplier wait not found on this change")
@@ -193,8 +213,12 @@ async def close(session: AsyncSession, change: ChangeRequest, wait_id: int,
     if reason not in SUPPLIER_WAIT_ENDS:
         raise SupplierWaitError("Say how it ended: received, price_on_estimate or not_needed")
     if reason == "price_on_estimate":
-        if w.phase != "costing":
-            raise SupplierWaitError("Price on estimate is a costing decision")
+        # A3-11 (R5): only while costing is open; later 'received' or
+        # 'not needed' ends it
+        if w.phase != "costing" or phase_of(change) != "costing":
+            raise SupplierWaitError(
+                "Price on estimate is a costing decision: the change is past "
+                "costing, close the wait as received or not needed")
         if not await _may_decide(session, change, actor):
             raise SupplierWaitForbidden(
                 "Only the lead, Project Management or an admin decides to "
