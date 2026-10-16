@@ -1776,6 +1776,7 @@ async def apply_impact_selection(
 @router.post("/{change_id}/impacted-items/seed")
 async def seed_impacted_items(
     change_id: int, background: BackgroundTasks,
+    reason: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
@@ -1785,7 +1786,20 @@ async def seed_impacted_items(
     refusal = await EarlyStageService.impact_edit_refusal(db, change, current_user)
     if refusal:
         raise HTTPException(status_code=403, detail=refusal)
-    added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
+    # A3-03: an impact edit like add/remove/PUT (C16): past the lock it says
+    # why, reopens the affected costing and tells the departments
+    try:
+        prior = {i.part_id for i in change.impacted_items}
+        before = await EarlyStageService.begin_impact_edit(db, change, reason)
+        added = await ChangeService.seed_impacted_from_relations(
+            db, change, current_user.id)
+        if added:
+            await db.refresh(change, ["impacted_items"])
+            await EarlyStageService.finish_impact_edit(
+                db, change, current_user.id, reason, before,
+                sorted({i.part_id for i in change.impacted_items} - prior))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     if added:
         _refresh_tool_tonnage(background, change_id)

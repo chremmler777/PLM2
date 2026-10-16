@@ -142,3 +142,28 @@ async def test_in_assessment_the_notice_names_the_risk_and_it_works(
         "note": "Mirror part B needs its own insert", "department_id": locked["dev"]},
         headers=locked["dev_auth"])
     assert res.status_code == 200, res.text
+
+
+async def test_the_relation_seed_is_an_impact_edit_too(
+        client, admin_auth, locked, session_factory, seed):
+    """A3-03: seeding related parts past the lock is no second road around
+    C16: no reason, 400; with a reason the costing reopens as for any edit."""
+    from app.models.part import PartRelation
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, locked["cid"])
+        c.status = "in_assessment"
+        s.add(PartRelation(from_part_id=locked["b"], to_part_id=locked["a"],
+                           relation_type="produces", created_by=seed["admin_id"]))
+        await s.commit()
+    res = await client.post(_u(locked, "/impacted-items/seed"), headers=admin_auth)
+    assert res.status_code == 400 and "say why it changes" in res.json()["detail"]
+    async with session_factory() as s:
+        n = (await s.execute(select(ChangeImpactedItem).where(
+            ChangeImpactedItem.change_id == locked["cid"]))).scalars().all()
+        assert len(n) == 1                                   # nothing added
+    res = await client.post(_u(locked, "/impacted-items/seed"),
+                            params={"reason": "Tool B produces A, it is affected"},
+                            headers=admin_auth)
+    assert res.status_code == 200 and res.json()["added"] == 1, res.text
+    detail = (await client.get(_u(locked), headers=admin_auth)).json()
+    assert detail["costing_finalized_department_ids"] == []
