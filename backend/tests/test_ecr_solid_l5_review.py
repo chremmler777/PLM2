@@ -307,6 +307,15 @@ async def test_the_approval_card_is_told_money_is_needed(client, cc, session_fac
     /summation, which an approver without price view cannot read."""
     await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"])
     await _set(session_factory, cc["cid"], customer_relevant=False)
+    # C5 first (A3-09): the card asks once the costing is finalized
+    from app.models.change import ChangeAssessment
+    from sqlalchemy import select as _select
+    async with session_factory() as s:
+        a = (await s.execute(_select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cc["cid"]))).scalars().first()
+        a.details = json.dumps({**json.loads(a.details or "{}"),
+                                "costing_finalized_at": datetime.utcnow().isoformat()})
+        await s.commit()
     st = (await client.get(_u(cc["cid"], "/stage-state"), headers=cc["lead"])).json()
     assert st["can_approve_internal"] is True and st["internal_needs_money"] is True
     # negative: not an approver, nothing served
