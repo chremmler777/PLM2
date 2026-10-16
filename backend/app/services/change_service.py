@@ -6339,6 +6339,61 @@ class ChangeService:
         return a
 
     @staticmethod
+    async def carrier_people(
+        session: AsyncSession, change: ChangeRequest, to_customer: bool,
+        user_id: Optional[int], *, set_owner: bool = True, move_lead: bool = True,
+    ) -> None:
+        """Who carries the change once its cost carrier moves (PATCH and the
+        scoping room's carrier alike). C10: an internal change has no Sales
+        owner; a customer change gets the project's Sales contact. Spec §0
+        [R4]: a customer change is led by the project PM, the same as the
+        PPAP flip; with no PM on the project the lead stays."""
+        if not to_customer:
+            change.sales_owner_id = None
+            return
+        if change.sales_owner_id is None and set_owner:
+            change.sales_owner_id = await ChangeService.default_sales_owner_id(
+                session, change.project_id, True, change.origin)
+        if not move_lead:
+            return
+        from app.services.project_team_service import ProjectTeamService
+        pm = await ProjectTeamService.responsible_user_id(
+            session, change.project_id, "Project Manager")
+        if pm is not None and pm != change.lead_id:
+            await ChangeService.append_changelog(
+                session, change, "lead_changed",
+                f"Change lead {change.lead_id} -> {pm} (customer change: "
+                "the project PM leads)", user_id,
+                field_name="lead_id", old_value=change.lead_id, new_value=pm)
+            change.lead_id = pm
+
+    @staticmethod
+    async def carrier_move_refusal(
+        session: AsyncSession, change: ChangeRequest, user: User,
+        to_customer: bool,
+    ) -> Optional[str]:
+        """P3 / [R4]: who may move the cost carrier (PATCH customer_relevant
+        and the scoping room's carrier). To customer: a starter (Sales,
+        Project Management, admin), lead or not, never an engineering lead.
+        Back to internal drops the Sales owner: an admin, a starter or a
+        Project Management member. None = allowed."""
+        if bool(change.customer_relevant) == to_customer:
+            return None
+        if to_customer:
+            if await ChangeService.user_can_start_change(session, user):
+                return None
+            return ("Only Sales, Project Management or an admin may make this "
+                    "a customer change")
+        if user.effective_role == "admin" \
+                or await ChangeService.user_can_start_change(session, user):
+            return None
+        from app.services.meeting_service import MeetingService
+        if await MeetingService.user_is_pm_member(session, user):
+            return None
+        return ("Only the change lead in Sales or Project Management, or an "
+                "admin, may make this an internal change")
+
+    @staticmethod
     async def update_change(
         session: AsyncSession, change: ChangeRequest, user_id: int, **fields,
     ) -> ChangeRequest:
@@ -6399,27 +6454,11 @@ class ChangeService:
                 raise ChangeError(why)
         if cust_rel is not None and not mp.is_mother_plant(change):
             change.origin = "customer" if cust_rel else "internal"
-            # C10: an internal change has no Sales owner; one that becomes a
-            # customer change gets the project's Sales contact.
-            if not cust_rel:
-                change.sales_owner_id = None
-            elif change.sales_owner_id is None and "sales_owner_id" not in fields:
-                change.sales_owner_id = await ChangeService.default_sales_owner_id(
-                    session, change.project_id, True, change.origin)
-            # spec §0 [R4]: a customer change is led by the project PM, the
-            # same as the PPAP flip; with no PM on the project the lead stays
-            if (cust_rel and not change.customer_relevant
-                    and fields.get("lead_id") is None):
-                from app.services.project_team_service import ProjectTeamService
-                pm = await ProjectTeamService.responsible_user_id(
-                    session, change.project_id, "Project Manager")
-                if pm is not None and pm != change.lead_id:
-                    await ChangeService.append_changelog(
-                        session, change, "lead_changed",
-                        f"Change lead {change.lead_id} -> {pm} (customer change: "
-                        "the project PM leads)", user_id,
-                        field_name="lead_id", old_value=change.lead_id, new_value=pm)
-                    change.lead_id = pm
+            await ChangeService.carrier_people(
+                session, change, bool(cust_rel), user_id,
+                set_owner="sales_owner_id" not in fields,
+                move_lead=(bool(cust_rel) and not change.customer_relevant
+                           and fields.get("lead_id") is None))
 
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null

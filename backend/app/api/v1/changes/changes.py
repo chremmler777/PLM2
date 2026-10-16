@@ -2068,27 +2068,17 @@ async def update_change(
                 status_code=400,
                 detail=f"The change is {change.status}: its D1 data "
                        f"({', '.join(moving_d1)}) is read only")
-    # P3: an engineering lead starts internal changes only; making one a
-    # customer change is Sales', Project Management's or an admin's call
-    # (the same people who start customer changes), lead or not. Asked
-    # first, so the engineering lead hears who can do it.
-    if (fields.get("customer_relevant") is True and not change.customer_relevant
-            and not await ChangeService.user_can_start_change(db, current_user)):
-        raise HTTPException(
-            status_code=403,
-            detail="Only Sales, Project Management or an admin may make this "
-                   "a customer change")
-    # [R4] the way back (customer -> internal) drops the Sales owner: the
-    # lead decides it only with a starter's or Project Management's rights,
-    # so an engineering raiser cannot quietly take the customer off
-    if (fields.get("customer_relevant") is False and change.customer_relevant
-            and current_user.effective_role != "admin"
-            and not await ChangeService.user_can_start_change(db, current_user)
-            and not await MeetingService.user_is_pm_member(db, current_user)):
-        raise HTTPException(
-            status_code=403,
-            detail="Only the change lead in Sales or Project Management, or an "
-                   "admin, may make this an internal change")
+    # P3 / [R4]: an engineering lead starts internal changes only; making
+    # one a customer change is a starter's call (Sales, Project Management,
+    # admin), lead or not; the way back drops the Sales owner, so it needs a
+    # starter's or Project Management's rights too. Asked first, so the
+    # engineering lead hears who can do it. The scoping room's cost carrier
+    # follows the same rule (MeetingService).
+    if fields.get("customer_relevant") is not None:
+        why = await ChangeService.carrier_move_refusal(
+            db, change, current_user, bool(fields["customer_relevant"]))
+        if why:
+            raise HTTPException(status_code=403, detail=why)
     await _require_patch_rights(db, change, fields, current_user)
     if "lead_id" in fields and fields["lead_id"] is not None \
             and fields["lead_id"] != change.lead_id:

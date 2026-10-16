@@ -788,6 +788,16 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].cost_carrier).toBe('internal')
   })
 
+  it('A2-01: an engineering lead is not offered the customer carrier on an internal change', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: false })} canMoveCarrier={false} />))
+    const customer = await screen.findByTestId('meeting-carrier-customer') as HTMLInputElement
+    expect(customer.disabled).toBe(true)
+    expect((screen.getByTestId('meeting-carrier-internal') as HTMLInputElement).disabled).toBe(false)
+    expect(screen.getByTestId('meeting-carrier-not-yours').textContent)
+      .toBe(t('meeting.costCarrierNotYours.customer'))
+  })
+
   it('takes the meeting date as dd.mm.yyyy and sends it as ISO', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)

@@ -2059,6 +2059,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Wurde zur Kundenänderung: nur die Antwort des Vertriebs „nur Information“ macht sie wieder intern.',
     en: "Became a customer change: only Sales' answer 'notification only' takes it back to internal.",
   },
+  'meeting.costCarrierNotYours.customer': {
+    de: 'Nur Vertrieb, Projektmanagement oder ein Admin machen daraus eine Kundenänderung.',
+    en: 'Only Sales, Project Management or an admin may make this a customer change.',
+  },
+  'meeting.costCarrierNotYours.internal': {
+    de: 'Nur der Lead aus Vertrieb oder Projektmanagement oder ein Admin machen daraus eine interne Änderung.',
+    en: 'Only the change lead in Sales or Project Management, or an admin, may make this an internal change.',
+  },
   'meeting.costCarrierFlip': {
     de: 'Das ändert den Kostenträger von {from} auf {to}. Die Änderung wird protokolliert und der Vertrieb benachrichtigt.',
     en: 'This changes the cost carrier from {from} to {to}. The change is audited and Sales is notified.',

@@ -183,6 +183,8 @@ class MeetingService:
         if channel not in MEETING_CHANNELS:
             raise ChangeError(f"Invalid channel '{channel}'")
         MeetingService._refuse_internal_after_flip(change, cost_carrier)
+        await MeetingService._refuse_carrier_move(
+            session, change, user, MeetingService._validate_cost_carrier(cost_carrier))
         rasic, rasic_ids = await MeetingService._validate_rasic(session, department_rasic)
         # The letter map is authoritative when given: the id list follows it.
         dept_ids = rasic_ids if rasic is not None else \
@@ -282,6 +284,20 @@ class MeetingService:
             raise ChangeError(why)
 
     @staticmethod
+    async def _refuse_carrier_move(session: AsyncSession, change: ChangeRequest,
+                                   user: User, carrier: Optional[str]) -> None:
+        """P3 / [R4]: the room moves the cost carrier only with the rights
+        PATCH customer_relevant asks (ChangeService.carrier_move_refusal):
+        an engineering lead may not make an internal change a customer one,
+        nor take the customer off one. 403."""
+        if carrier is None:
+            return
+        why = await ChangeService.carrier_move_refusal(
+            session, change, user, carrier == "customer")
+        if why:
+            raise MeetingForbidden(why)
+
+    @staticmethod
     def _validate_cost_carrier(value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
@@ -304,6 +320,9 @@ class MeetingService:
         from app.services import mother_plants as mp
         if not mp.is_mother_plant(change):
             change.origin = meeting.cost_carrier
+            # C10 + spec §0 [R4], as PATCH: internal = no Sales owner;
+            # customer = the project's Sales contact, led by the project PM
+            await ChangeService.carrier_people(session, change, wanted, user.id)
         await session.flush()
         from app.services.cm_labels import label
         await ChangeService.append_changelog(
@@ -371,6 +390,8 @@ class MeetingService:
             fields["cost_carrier"] = MeetingService._validate_cost_carrier(
                 fields["cost_carrier"])
             MeetingService._refuse_internal_after_flip(change, fields["cost_carrier"])
+            await MeetingService._refuse_carrier_move(
+                session, change, user, fields["cost_carrier"])
         if (fields.get("department_rasic") is not None
                 or fields.get("selected_department_ids") is not None):
             after = fields.get("department_rasic") or {
@@ -1904,6 +1925,10 @@ class MeetingService:
         open_concerns = MeetingService.open_concerns(change)
         blocking = MeetingService.open_blocking(change)
         if decision == "proceed":
+            # P3 / [R4]: proceed applies the room's carrier, on the decider's
+            # rights (a room saved before the rule, or by somebody else)
+            await MeetingService._refuse_carrier_move(
+                session, change, user, meeting.cost_carrier)
             problems: list[str] = []
             if not meeting.selected_department_ids:
                 problems.append(

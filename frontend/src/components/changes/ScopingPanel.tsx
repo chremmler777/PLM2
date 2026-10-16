@@ -77,7 +77,7 @@ const DECISION_LABEL: Record<string, string> = {
 
 export default function ScopingPanel(
   { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [],
-    canRecordMeeting = true, onInformTeam, readOnly = false }: {
+    canRecordMeeting = true, onInformTeam, readOnly = false, canMoveCarrier = true }: {
     change: ChangeRequest & { attachments?: Attachment[] }
     /** A read-only viewer (no active department) or a closed record: the
      *  backend refuses every write, so no control is offered (R24). */
@@ -86,6 +86,11 @@ export default function ScopingPanel(
      *  information goes out to the team (its scoping ends there, never in
      *  an assessment). */
     onInformTeam?: () => void
+    /** May the viewer move the cost carrier away from what was captured
+     *  (lib/transitionRights mayMoveCarrier, the backend's PATCH and room
+     *  rule): an engineering lead may not make an internal change a
+     *  customer one, nor take the customer off one. */
+    canMoveCarrier?: boolean
     /** Lead, Project Management or admin (stage-state `can_record_meeting`):
      *  records the meeting and decides it. Everyone else reads the record. */
     canRecordMeeting?: boolean
@@ -109,6 +114,11 @@ export default function ScopingPanel(
   const motherPlant = change.origin === 'mother_plant'
   // HARD #7: a held flip goes back to internal only by Sales' answer
   const flipLocked = flipHolds(change)
+  // P3 / [R4]: a carrier the viewer may not move to is not offered
+  const capturedCarrier = carrierOf(change.customer_relevant)
+  const carrierBarred = (c: CostCarrier) => (c === 'internal' && flipLocked)
+    || (!canMoveCarrier && capturedCarrier !== '' && c !== capturedCarrier)
+  const carrierNotYours = !canMoveCarrier && capturedCarrier !== '' && !flipLocked
   // R37 same words everywhere: with SCOPING_V2 the meeting's needs_info is
   // "Not yet" on the button, its dialog and the record
   const decisionLabel = (d: string) =>
@@ -506,8 +516,8 @@ export default function ScopingPanel(
                   && setMeetingCarrier.mutate({ meetingId: m.id, carrier: e.target.value as CostCarrier })}
                 className="h-7 bg-slate-800 border border-amber-600 rounded-lg px-2 text-xs text-slate-100">
                 <option value="">{t('meeting.costCarrierPick')}</option>
-                <option value="customer">{t('meeting.costCarrier.customer')}</option>
-                <option value="internal" disabled={flipLocked}>{t('meeting.costCarrier.internal')}</option>
+                <option value="customer" disabled={carrierBarred('customer')}>{t('meeting.costCarrier.customer')}</option>
+                <option value="internal" disabled={carrierBarred('internal')}>{t('meeting.costCarrier.internal')}</option>
               </select>
             )}
             <button type="button" className={btnSm.primary}
@@ -1089,7 +1099,7 @@ export default function ScopingPanel(
               {(['customer', 'internal'] as CostCarrier[]).map((c) => (
                 <label key={c} className="flex items-center gap-1.5 cursor-pointer">
                   <input type="radio" name="meeting-carrier" data-testid={`meeting-carrier-${c}`}
-                    disabled={c === 'internal' && flipLocked}
+                    disabled={carrierBarred(c)}
                     checked={carrier === c} onChange={() => setCarrier(c)} />
                   <span className="text-slate-200">{t(`meeting.costCarrier.${c}`)}</span>
                 </label>
@@ -1098,6 +1108,12 @@ export default function ScopingPanel(
             {flipLocked && (
               <p data-testid="meeting-carrier-flip-lock" className="mt-1 text-xs text-slate-400">
                 {t('flip.holdsCustomer')}
+              </p>
+            )}
+            {carrierNotYours && (
+              <p data-testid="meeting-carrier-not-yours" className="mt-1 text-xs text-slate-400">
+                {t(capturedCarrier === 'internal' ? 'meeting.costCarrierNotYours.customer'
+                  : 'meeting.costCarrierNotYours.internal')}
               </p>
             )}
             {carrier && carrierOf(change.customer_relevant) && carrier !== carrierOf(change.customer_relevant) && (

@@ -2000,7 +2000,14 @@ D1 panel offers it (`lib/transitionRights.mayMoveCarrier`, from
 the Sales owner: the lead decides it only with a starter's or Project
 Management's rights, or an admin (close-out A1-09), so an engineering raiser
 cannot take the customer off. A manual flip moves the lead to the project PM
-like the PPAP flip (spec §0 [R4]); with no PM on the project the lead stays. An internal change with a lead is its run
+like the PPAP flip (spec §0 [R4]); with no PM on the project the lead stays.
+The scoping meeting's cost carrier follows the same rule (close-out A2-01,
+`ChangeService.carrier_move_refusal`): recording, editing or proceeding a room
+whose carrier moves the change to customer (or back) is 403 for anyone the
+PATCH would refuse, and the carrier option is not offered. Proceed applies the
+same people as the PATCH (`ChangeService.carrier_people`): to customer, the
+project's Sales contact as Sales owner and the project PM as lead; to internal,
+no Sales owner (C10). An internal change with a lead is its run
 team's to hand over: the kickoff task goes to the lead and Project Management
 only, and Sales has no capture hop (scoping, reject) on it; the stage badge
 at capture reads "Lead", not "Sales" ("PM" while nobody leads it). A change with no lead shows "No lead

@@ -1222,7 +1222,7 @@ export default function ChangeDetailPage() {
         <ScopingPanel change={change}
           canSendRejection={!myActions ? true : isSalesMember}
           canAnswerConcerns={isSalesMember} isPm={isPmMember}
-          canRecordMeeting={canRecordMeeting}
+          canRecordMeeting={canRecordMeeting} canMoveCarrier={canMoveCarrier}
           onInformTeam={motherPlant ? () => setTab('mother') : undefined}
           myDepartmentIds={myActions?.memberships ?? []} readOnly={readOnly} />
         </div>
