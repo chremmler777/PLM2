@@ -19,7 +19,7 @@ For Quality. One page for the session and the desk; the full chapter is in PLM2 
 - **"PM and Quality sign-off must be different users".**
 - **Approval needs three things:** the customer's acceptance, the PM sign-off, the Quality sign-off.
 - **The audit trail cannot be edited.** It is the answer to "who decided, and why".
-- **No release with an open validation issue.** You decide a concession once Sales filed the customer's mail; no admin can.
+- **No release with an open validation issue.** A FAIL gives you "Fix VI-n": who fixes, the retest date. You request and decide a concession (customer: once Sales filed the mail; internal: not for shipment), for a quantity or until a date; no admin can.
 - **A signature is for one offer version.** After a newer version or a supplement, "Sign again for vN".
 - **Overrides into implementation or release are yours to OK.** Reject with a note: the asker reads it.
 - **"N.a." on a release checklist row needs a note that holds up.** Check it on APQP's rows too.

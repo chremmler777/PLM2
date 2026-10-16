@@ -404,7 +404,7 @@ describe('ProcessMapPage', () => {
     expect(costing).toContain('Built')
     expect(costing).toContain('compared with the weighed part at validation')
     expect(screen.getByTestId('procmap-detail-in_validation').textContent)
-      .toContain('A failed check offers to raise a validation issue, and a person raises it')
+      .toContain('A FAIL raises its validation issue by itself and gives Quality the Fix task')
   })
 
   it('keeps the responsibles and the build order in their own blocks', () => {
@@ -417,7 +417,7 @@ describe('ProcessMapPage', () => {
     expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
     expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(14)
-    expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
+    expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(8)
   })
 
   it('reads professionally, no casual phrasing anywhere on the page', () => {

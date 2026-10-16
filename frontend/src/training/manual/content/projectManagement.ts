@@ -296,9 +296,9 @@ export const pmChapter: ContentChapter = {
         {
           steps: [
             { title: 'Lessons learned', body: 'Make sure the team adds its lessons. Then "Complete lessons step", or give the reason there are none.' },
-            { title: 'Release', body: '"Release change" once the release step shows no blocker: every validation check passed, no open validation issue, PM and Quality signed the latest offer, every impacted revision through its check workflow, every checklist row answered, the lessons step completed and no open plan deviation. A failed check or an open issue has no override.' },
+            { title: 'Release', body: '"Release change" once the release step shows no blocker: every validation check passed, no open validation issue, PM and Quality signed the latest offer, every impacted revision through its check workflow, every checklist row answered (by its department), the lessons step completed, no open plan deviation and no newer index pending. A failed check or an open issue has no override: the exits are a passed retest or Quality\'s concession.' },
             { title: 'Read the summary', body: 'Plan against actual timing, offer against actual cost. The difference is the lesson for the next quote.' },
-            { title: 'Close', body: '"Close change". While a price is open it waits: the customer accepts, or "Absorb" with a reason and the OK of Project Management or Management.' },
+            { title: 'Close', body: '"Close change". While a price is open it waits: the customer accepts, or "Absorb" with a reason and the OK of Project Management or Management. An internal change asks first what it achieved beside its target ("Achieved" on the Release tab, with where the number comes from). Closing tells the Sales owner (internal: the lead) and Process.' },
           ],
         },
       ],

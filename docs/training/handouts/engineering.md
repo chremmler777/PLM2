@@ -11,14 +11,14 @@ For Development, Tool Engineer, Manufacturing Engineer, Process Engineer, APQP a
 | In Assessment | Every row "Yes" or "No", a Yes with its "Remark"; "⚑ Flag risk" on a Yes row; verdict; "Submit assessment" | "Assessments" |
 | Costing | "Cost positions": own time, "External · estimate" or "External · vendor quote" ("+ offer" per vendor, star your favorite); machine time on a class or a named press; a lead time on every line | "Costing" |
 | Timing | "Confirm timing", or "Raise concern" with what does not work and what would | "Timing" |
-| Implementing | "Progress", "Actual start", "Actual finish" on your blocks; "Book time"; progress reports | "Timing", "Reports and time booking" |
-| Validation | "Pass" or "Fail" your checks; "Raise issue" on a fail; as owner "Record containment", "Record root cause", "Tick my fix action" | "Release" |
+| Implementing | "Progress", "Actual start", "Actual finish" on your blocks; "Book hours" (any open change, the day worked back 21 days); progress reports | "Timing", "Reports and time booking" |
+| Validation | "Pass" or "Fail" your checks; weight, cycle time and dimensions by "Record measurement" (n, min, max, report); a fail raises its issue; "Fix VI-n" / "Retest for VI-n" when Quality names you | "Release" |
 | Release | Your checklist rows "Done", or "N.a." with a note | "Release" |
 
 ## Department specifics
 
 - **Development:** Pick the impacted set and "Confirm impact (Development)" at scoping; extra row "Article design update"; triage every new index ("Full ECR", "Attach to an open change", "Engineering review", "Administrative"). Release: index, drawing and 3D data, spare parts.
-- **Tool Engineer:** tools and molds; "Part weight" estimate at costing. Validation: measures the cycle time ("Measured cycle time", seconds) and the part weight. Release: tool and equipment data, part weight, "Cycle time: changed (new value entered) or confirmed unchanged" ("Changed" needs the new seconds; the row shows your validation measurement).
+- **Tool Engineer:** tools and molds; "Part weight" estimate at costing. Validation: measures the cycle time ("Measured cycle time", seconds, over N cycles of a named lot) and the part weight, n, min and max against the limits the first measurement fixed. Release: tool and equipment data, part weight, "Cycle time: changed (new value entered) or confirmed unchanged" ("Changed" needs the new seconds; the row shows your validation measurement).
 - **Manufacturing Engineer:** equipment. No release row, no cycle time (the cycle time is the Tool Engineer's).
 - **APQP:** gauges; extra rows "PFMEA update", "Control plan update". Release: "Process stable: SPC Cm > 1.67" (APQP alone; Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".
 - **Process Engineer:** assesses when the scoping meeting gives it a letter. Keeps the process details (parameters, PFMEA, work instructions) in the process database (PDB) and confirms them there. No release row and no cycle time measurement.

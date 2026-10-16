@@ -61,8 +61,8 @@ flowchart TD
     H -->|soft: timing validated on first start, impact confirmed,<br/>check workflow per item category, D1 Technical release = Yes| I[in_implementation]
     I -->|soft: every impacted item has its revision,<br/>open plan deviations do not hold this step| J[in_validation: Release]
     J -->|check failed: validation issue,<br/>routes 1 to 3 with a recovery group,<br/>or by hand with a reason| I
-    J -->|HARD #3: no failed check, no open validation issue<br/>exit: concession; HARD #9: PM + Quality signed the latest offer<br/>soft: checks answered, revisions through their check workflow,<br/>checklist, lessons done, no open plan deviation| K[released]
-    K -->|PM closes; HARD #9: no open price<br/>exits: customer accepts or Absorb| M[closed]
+    J -->|HARD #3: no failed check, no open validation issue<br/>exits: Fix task + retest, or a concession (Quality); HARD #9: PM + Quality signed the latest offer<br/>soft: checks answered, revisions through their check workflow,<br/>checklist, lessons done, no open plan deviation, newer index pending| K[released]
+    K -->|PM closes; HARD #9: no open price<br/>exits: customer accepts or Absorb<br/>soft (internal): achieved value beside the target| M[closed]
     MA[captured, origin mother_plant] --> MB[scoping-lite:<br/>impact lock + team informed]
     MB -->|HARD: impact locked, team informed, SOP date set| H
 ```
@@ -77,8 +77,8 @@ flowchart TD
 | `quoted` | Offer sent, valid 30 days from receipt; negotiation rounds against an offer version, new versions with "what changed". Acceptance of a sent, unexpired version freezes the planned P&L | Sales |
 | `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
 | `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
-| `in_validation` | Release tab: validation checks plus the release checklist (16 items; 13 on a change that ended before the rework) and the lessons learned step; a failed check raises a validation issue (§3 "Validation issues") | departments, PM |
-| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation. Close is HARD-blocked while a price is open (`price_open`). Summary with the P&L offer vs doing; then PM wraps it up | PM |
+| `in_validation` | Release tab: validation checks (weight, cycle time, dimensions computed from a measurement against fixed limits) plus the release checklist (16 items; 13 on a change that ended before the rework; each row answered by its department) and the lessons learned step; a FAIL raises its validation issue with Quality's Fix task (who fixes, retest date) and a concession beside it (§3 "Computed checks, the Fix task, the concession") | departments, Quality, PM |
+| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation, no newer index pending. Close is HARD-blocked while a price is open (`price_open`); an internal change closes with its achieved value beside the target (SOFT). Closing tells the Sales owner (internal: the lead) and Process. Summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -1314,7 +1314,11 @@ moment the plan changes under it.
 
 - **Team confirmation**: every required department (every department with
   an R/A assessment row, plus Scheduling and Sales when they exist,
-  `ChangePlanService.required_department_ids`) posts `confirmed` or
+  `ChangePlanService.required_department_ids`; with `RELEASE_V2`, ECR-solid
+  §8-9: the departments with work on the change, i.e. impact yes or hours /
+  cost priced on it (`ImplementationService.implementing_department_ids`),
+  plus Scheduling, plus Sales only on a customer change; a change nobody
+  priced falls back to its R/A departments) posts `confirmed` or
   `concern` (with a note) against the current revision
   (`ChangePlanService.post_feedback`, panel `TeamFeedbackPanel.tsx`). Only
   the latest row per department counts; a row whose `plan_revision` is
@@ -1339,6 +1343,12 @@ moment the plan changes under it.
   produces MSPDI XML that MS Project opens directly, with a baseline block
   once timing is validated; `GET /plan/export.csv`
   (`ChangePlanService.csv_export`) gives a plain CSV.
+
+`approved -> in_implementation` and `in_validation -> released` carry the
+**soft** rule `index_pending` with `RELEASE_V2` (ECR-solid §8-9): "Newer
+index pending: ..." while a newer customer index is not settled (an open
+recheck, the lead's new-index question, or an index of an impacted part
+still waiting for triage; `ChangeService.index_pending_text`).
 
 `approved -> in_implementation` carries a **soft guard**
 (`ChangeService._guard`, `to_status == "in_implementation"`): "Timing not
@@ -1380,9 +1390,9 @@ plan only, status `in_implementation` only
 (`ChangePlanService._may_progress`): a plan editor writes any task, any
 other member of the task's own department writes only that task. A `PATCH`
 that mixes progress fields with anything else needs a plan editor, not just
-the department. Twice-weekly progress reports and time booking predate this
-spec and are unchanged; the deviation record (above) is what carries the
-at-risk signal, there is no separate flag.
+the department. Twice-weekly progress reports predate this spec; hours are
+booked with the one "Book hours" dialog (C15, below); the deviation record
+(above) is what carries the at-risk signal, there is no separate flag.
 
 ### Release checklist and lessons learned (`in_validation`, 2026-09-25)
 
@@ -1429,7 +1439,13 @@ existing per-department validation checks.
   instead of saving without it. Rows are written on first answer and
   answered with `done`, `na` (note required) or reset to `open`
   (`ReleaseService.set_check`, `ReleaseChecklist.tsx`) by a member of the
-  owner department, PM, lead or admin (`ReleaseService.may_answer`).
+  owner department, PM, lead or admin (`ReleaseService.may_answer`). With
+  `RELEASE_V2` (C7): by the owner department only; PM, the lead or an admin
+  only for a department nobody in the change's organization belongs to (no
+  dead end; the state serves `can_answer` per row). `customer_approval`
+  "done" needs a reference (PSW / ISIR number or the approval's file name,
+  `cm_rules.reference_refusal`; `EVIDENCE_KEYS`). `erp_updated` reads the
+  routing time from the Tool Engineer's measured cycle time.
   Future, not built: process engineering tasks will later be forwarded
   from the PDB to PLM.
 - **Validation cycle time**: "Measured cycle time" (`cycle_time`, seconds)
@@ -1475,7 +1491,11 @@ A failed validation check becomes an issue `VI-n` (`change_validation_issues`,
 migration `090`), not just a bounce back. Shape, in order:
 - **Raise**: routed department member, PM, lead or admin, in `in_validation`
   (or `in_implementation` after a loop back); a failed check offers "Raise
-  issue" prefilled, one open issue per failed check.
+  issue" prefilled, one open issue per failed check. With `RELEASE_V2` a
+  check that turns FAILED raises its issue by itself
+  (`ValidationIssueService.on_check_failed`) and the light path of §10
+  below applies: the 8D steps (containment, root cause, route) stay on the
+  card for a bigger failure but are no tasks.
 - **Containment** (owner department, PM, lead): required before a route when
   severity is 3.
 - **Root cause**: required before any route, except a concession the
@@ -1531,6 +1551,88 @@ Every issue has an **escalation level** with history
 Each level change writes a row, changelog `validation_issue_escalated`, a
 notification and an "Acknowledge escalation" action; manual escalation needs
 a reason; de-escalation only by closing or by the PM with a reason.
+
+### Computed checks, the Fix task, the concession (ECR-solid §10, C7, 2026-10-16)
+
+Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
+
+- **Computed checks** (`validation_checklist.COMPUTED_CHECKS`): the Tool
+  Engineer's weight (g) and cycle time (s, over N cycles of a named lot) and
+  APQP's "Parts measured" (the worst deviation from nominal, mm) are not
+  ticked: a measurement is entered (`validation_measurements`, migration
+  136): sample size n, min, max, the measuring report or device id. The
+  first measurement fixes the limits (lower, upper, where they come from:
+  drawing, customer spec, process sheet + reference); a retest never moves
+  them ("a different spec is a concession, not a retest"). PASS only if both
+  min and max lie inside; the verdict is computed, a posted status is
+  ignored. A retest adds a row and keeps the failed one; it is its own
+  department's, in validation (HARD #3), and names what changed since:
+  parameter / tool / material / method + a reference.
+- **Fix task** (migration 137): a check that turns FAILED raises its issue
+  (VI-n) at once. Quality's task "Fix VI-n: pick who fixes and the retest
+  date": process parameters (Process Engineer), tool at supplier (Tool
+  Engineer + the supplier), or another department; the retest date is today
+  or later. The fixing department gets "Fix VI-n: ..., retest <day>", the
+  check's department "Retest for VI-n by <day>" (due that day). A passed
+  retest closes the issue. `POST .../validation/issues/{iid}/fix` (Quality
+  only).
+- **Concession, in parallel** (`POST .../issues/{iid}/concession`, Quality
+  only): a customer change: the issue's route becomes the concession and
+  the Sales owner is told to ask the customer ("Waiting for customer (Sales
+  owner, asked <date>)"); once Sales filed the customer's mail, Quality
+  decides, for a quantity of parts or until a date (required). An internal
+  change: "not for shipment", Quality decides at once, for a quantity or
+  until a date. Accepted reads "Accepted under concession VI-n until <date>"
+  (or "for n parts") in the validation panel and the change header; Quality
+  and the lead are reminded once 10 working days before the end date
+  (notification sweep, `concession_expiring`).
+- **Status line** (validation state `release_line`): "Not releasable:
+  <check> <worst value> vs <limits>; fix: <department>, retest <day>;
+  concession: none / waiting for customer (Sales owner, asked <date>) /
+  Quality decides". An urgent change's FAIL sends that line at once to
+  Management (no Management member: Project Management), mailed
+  (`validation_urgent_fail`).
+- **Weight to Sales**: the Sales owner hears of a FAILED weight check (one
+  notice), and the "update quote" task opens only when the validated weight
+  differs from the estimate by more than 2 % (`WEIGHT_DELTA_SALES_SHARE`).
+
+### Release and close (ECR-solid §11, 2026-10-16)
+
+- **Achieved value** (migration 138): an internal change with a target
+  (§2 "what is wrong today" -> target) closes with what it achieved beside
+  it and where the number comes from (`POST /changes/{id}/achieved`, the
+  lead, Project Management or an admin, in validation or released; the
+  Release tab's "Achieved" card). Closing without it is the SOFT rule
+  `achieved_missing` (the run team may override).
+- **Closing notice**: the Sales owner (internal: the lead) and Process
+  Engineer members are told once (`change_closed`), never the closer; an
+  internal change's notice carries achieved vs target.
+- **Header**: any concession in force ("Accepted under concession VI-n
+  until <date>") shows beside the need-by line.
+
+### Book hours (ECR-solid C15, 2026-10-16; no switch)
+
+One "Book hours" dialog (header button, the Overview's Hours card, the
+department's block on the Implementation tab): your department, hours (above
+0, at most 24 per booking: a day not worked is simply not booked), the day
+worked (today back 21 days), optionally for a colleague (Belk books for the
+toolmakers, who have no account), and the lead's "Coordination" row; on any
+change that is open, until 7 days after it closed or was cancelled
+(`hours_service.py`, `POST/GET /changes/{id}/hours`, `DELETE
+/changes/{id}/hours/{booking_id}` for your own). Bookings are the
+implementation bookings (one table) and store the day worked, the source
+(`estimate` = a confirmed estimate, `typed`) and the change's status then
+(migration 138). The department's last action ("our part done" on the
+Implementation tab, its last validation check passed) opens the one
+prefilled confirm, naming its source ("your estimate: 6 h", the department's
+own-labour positions plus its cost lines' hours, minus what is booked);
+skipped reads "not booked" on the Hours card and in the report, never 0.
+The P&L effort column reads the internal_effort positions (the assessment's
+own effort hours only for a department without one). `GET
+/reports/ecr-effort` (Project Management, Management, admins): booked vs
+estimated hours per change and department, the confirmed-estimate share,
+and the departments not booked; one card on the ECR KPI board. Its split by
+origin and Sales owner is cut 2.
 
 ### P&L: offer vs doing (spec §13)
 

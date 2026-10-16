@@ -25,7 +25,7 @@ For Sales. One page for the session and the desk; the full chapter is in PLM2 un
 - **Your vendor choice is binding.** Against the department's star you give a reason.
 - **Every risk starts hidden on the offer.** Switch on what the customer reads. The page warns while a severity-3 risk is hidden: state it or price it, knowingly.
 - **You answer questions; the asker marks them solved.**
-- **On a concession you file the customer's mail into the issue;** Quality decides it.
+- **On a concession you ask the customer and file their mail into the issue;** Quality decides it, for a quantity or until a date.
 
 ## The offer PDF
 

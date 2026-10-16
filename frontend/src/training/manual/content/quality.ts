@@ -26,7 +26,7 @@ export const qualityChapter: ContentChapter = {
               ['Scoping (internal changes)', 'You are told when a change that goes on as internal reaches scoping (also a customer change the scoping meeting set to internal). Answer the "PPAP decision (Quality)" card, due the next working day: "Parameters / tool / material / cycle time changed on any part?" "No" names the control plan, process sheet or customer spec and its reference. "Yes: pick the parts" makes it a customer change and gives Sales a task. The change cannot proceed before you answer; the header says "Answer the PPAP decision".'],
               ['Quoted', 'Give the "Quality sign-off". The cockpit asks for it once the customer accepted.'],
               ['Any stage', 'Give the OK on overrides into implementation or release, and on validation rules. Never on your own request.'],
-              ['Validation', 'Decide a customer concession once Sales filed the customer\'s mail. It is the only way past a failed check.'],
+              ['Validation', 'A failed check gives you "Fix VI-n: pick who fixes and the retest date". "Request concession" beside it: Sales asks the customer, you decide once the mail is filed, for a quantity or until a date (internal: "not for shipment", you decide at once). Passed retest or concession: the only ways past a failed check.'],
               ['Any stage', 'Read the change on "D1" and "Audit" in the Governance group.'],
               ['Assessment', 'Only if the scoping meeting routed Quality. Then you answer the checklist like every department.'],
               ['Validation', 'Watch the validation issues. Read the release checklist (Quality owns no row). Add lessons learned.'],
@@ -138,15 +138,17 @@ export const qualityChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'When a check fails, a member of a department working on the change, PM or the lead ' +
-            'presses "Raise issue" and it becomes a validation issue (VI-1, VI-2 and on). The owner ' +
-            'department contains it and finds the cause, PM or the lead decides the route, the ' +
-            'check is answered again. Release is refused while any issue is open.',
+            'When a check fails it becomes a validation issue by itself (VI-1, VI-2 and on) and you ' +
+            'get its Fix task: "Pick who fixes" (process parameters, tool at supplier with the ' +
+            'supplier, or another department) and the retest date. The check\'s own department ' +
+            'retests; a pass closes the issue. The status line reads "Not releasable: weight 12.4 g ' +
+            'vs 11.8-12.2; fix: Process Engineer, retest Thu; concession: none". An urgent change\'s ' +
+            'FAIL reaches Management at once. Release is refused while any issue is open.',
         },
         {
           points: [
             ['Watch the severity.', '"Blocks production" needs containment before anything else, and starts at level 2.'],
-            ['Decide the concessions.', 'A "Customer concession" is the only way past a failed check besides a passed retest, and it is your decision: Sales files the customer\'s mail into the issue, then a Quality member records "Accepts the deviation". Sales, PM and admins cannot accept it. A concession Sales accepted before this rule waits for your confirmation on its card.'],
+            ['Decide the concessions.', 'A concession is the only way past a failed check besides a passed retest, and it is yours: "Request concession" (it runs beside the fix), the Sales owner asks the customer ("Waiting for customer"), Sales files the mail, then you record "Accepts the deviation" for a quantity of parts or until a date. Internal change: "Parts not for shipment", you decide at once. "Accepted under concession VI-n until <date>" shows in the header; you and the lead are reminded 10 working days before it ends. Sales, PM and admins cannot accept it. A concession Sales accepted before this rule waits for your confirmation on its card.'],
             ['Retests and issues raised in error.', 'A failed check is answered again only by its own department, with what changed since (parameter, tool, material or method + reference); PM and admins cannot flip it. An issue raised in error is closed by you, with the evidence.'],
             ['Watch the cause.', 'A fix route is decided only after the root cause is recorded. A cause without evidence is a guess.'],
           ],

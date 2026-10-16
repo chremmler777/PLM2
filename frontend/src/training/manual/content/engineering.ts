@@ -222,7 +222,7 @@ export const engineeringChapter: ContentChapter = {
         {
           points: [
             ['Progress on your blocks:', 'open a block in the plan and set "Progress", "Actual start", "Actual finish". Members of the block\'s owner department may; everything else is read only.'],
-            ['Booked time:', 'under "Reports and time booking", "Hours" and "What for?", then "Book time". Actual cost is booked hours times the rate.'],
+            ['Booked time:', '"Book hours" (header, the "Hours" card on Overview, or your block here): your department, hours, the day worked (back 21 days), for a colleague if you book for one (the toolmakers), on any open change until 7 days after it closed. Your last action ("Our part is done", your last check passed) asks once, prefilled with your estimate ("your estimate: 6 h"); skipped reads "not booked", never 0. Actual cost is booked hours times the rate.'],
             ['Progress reports:', '"What happened?", and "This is at risk" with what is at risk. The chip says when a report is due. Only departments with real work (priced, or "impact yes") are asked.'],
             ['Waiting on a supplier or done:', '"Waiting on a supplier" (supplier, asked on, expected by) pauses your reports until that date. "Our part is done" on your last report ends them; a later report starts them again.'],
             ['The tool change and the trial are the Tool Engineer\'s', '(the Toolshop supports, Quality is accountable for the trial); Process owns the process and parameter sheets. While a tool\'s "Implement tool change" is open, moving to validation warns "Tool change not done (Tool Engineer): <tool>".'],
@@ -241,15 +241,23 @@ export const engineeringChapter: ContentChapter = {
             'In validation your department answers its own checks on the "Release" tab, for ' +
             'example "Tool sampled", "Part measured", "Measured cycle time", "Part weight ' +
             'validated", "Packaging validated with the changed part". "Pass", or "Fail" with what ' +
-            'is not in order. A fail without a reason is not a check. "Measured cycle time" and ' +
-            '"Part weight validated" pass only with the measured value entered; both are the ' +
-            'Tool Engineer\'s, and so is "Tool sampled". A cycle time another department measured earlier stays readable, ' +
-            'marked "No longer asked". Type numbers with a dot for decimals (41.5, not 41,5).',
+            'is not in order. A fail without a reason is not a check. "Measured cycle time", ' +
+            '"Part weight validated" (Tool Engineer) and APQP\'s "Parts measured" are computed: ' +
+            '"Record measurement" with the sample size n, the smallest and the largest value and ' +
+            'the measuring report or device (cycle time: the lot). The first measurement sets the ' +
+            'limits and where they come from; PASS only if both values lie inside. A retest adds a ' +
+            'row, keeps the failed one, and names what changed (parameter, tool, material or ' +
+            'method + reference). "Tool sampled" is the Tool Engineer\'s too. A cycle time another ' +
+            'department measured earlier stays readable, marked "No longer asked". Type numbers ' +
+            'with a dot for decimals (41.5, not 41,5).',
         },
         {
           p:
-            'On a failed check press "Raise issue". The issue gets an owner department: the one ' +
-            'that fixes it. As the owner you act in this order.',
+            'A failed check raises its issue (VI-n) by itself. Quality picks who fixes it and the ' +
+            'retest date: you then see "Fix VI-n: ..., retest <day>" (the fixing department) or ' +
+            '"Retest for VI-n by <day>" (the check\'s department). A passed retest closes it. For a ' +
+            'bigger failure PM or the lead may still run the full route; as the owner you then act ' +
+            'in this order.',
         },
         {
           steps: [
@@ -274,7 +282,8 @@ export const engineeringChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'Each row of the release checklist is owned by one department. Mark it "Done", or ' +
+            'Each row of the release checklist is owned by one department and answered by it ' +
+            '(PM or the lead only where nobody here belongs to that department). Mark it "Done", or ' +
             '"N.a." with a note that says why it does not apply. The Process Engineer keeps the ' +
             'process details (parameters, PFMEA, work instructions) in the process database (PDB) ' +
             'and confirms them there, so the Process Engineer owns no release row.',
@@ -285,7 +294,7 @@ export const engineeringChapter: ContentChapter = {
             rows: [
               ['Development', '"Part index / revision level updated in drawing and PLM", "Drawing and 3D data released and distributed", "Spare and service parts considered".'],
               ['Tool Engineer', '"Tool and equipment data updated (tool card, equipment list)", "Part weight measured and recorded", "Cycle time: changed (new value entered) or confirmed unchanged": pick "Changed" and enter the new seconds, or "Unchanged". The row shows the cycle time you measured in validation.'],
-              ['APQP', '"Process stable: SPC Cm > 1.67" (Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)", "Control plan / inspection plan updated".'],
+              ['APQP', '"Process stable: SPC Cm > 1.67" (Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)" ("Done" names the PSW / ISIR reference or the approval file), "Control plan / inspection plan updated".'],
               ['Packaging Engineer', '"Packaging instruction updated".'],
             ],
           },
