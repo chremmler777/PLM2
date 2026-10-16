@@ -85,3 +85,13 @@ async def test_newer_index_waiting_for_triage_holds_implementation(
     res = await client.post(f"{API}/changes/{cid}/transition",
                             json={"to_status": "in_implementation"}, headers=admin)
     assert "Newer index pending" not in res.text
+
+
+async def test_no_department_with_work_falls_back_to_the_r_departments(session_factory, world):
+    """NEGATIVE (no dead end): a change nobody priced and nobody said 'impact
+    yes' on still has someone to confirm its plan: the R/A departments."""
+    d = world["depts"]
+    cid = await _change_carrying(session_factory, world, "approved",
+                                 submitted=("Tool Engineer",))
+    req = await _required(session_factory, cid)
+    assert {d["Tool Engineer"], d["Packaging Engineer"]} <= req

@@ -2357,8 +2357,11 @@ class ChangePlanService:
             # department with no impact and no cost is not waited on.
             # Sales only where there is a customer to tell.
             from app.services.implementation_service import ImplementationService
-            ids = set(await ImplementationService.implementing_department_ids(
+            work = set(await ImplementationService.implementing_department_ids(
                 session, change))
+            # nobody priced or said "impact yes" (a paperwork change): the
+            # R/A departments still confirm, so the plan never waits on nobody
+            ids = work or ids
             names = ("Scheduling", "Sales") if change.customer_relevant else ("Scheduling",)
         if mp.is_mother_plant(change):
             from app.services.mother_plant_service import MotherPlantService
