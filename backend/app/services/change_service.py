@@ -3586,6 +3586,7 @@ class ChangeService:
                 (drafts if o.status == "draft" else latest_sent)[o.change_id] = o
         planned: set = set()
         feedback: dict = {}
+        plan_work: dict = {}
         approved_ids = [c.id for c in open_changes
                         if c.status == "approved" and c.timing_validated_at is None]
         if dep_ids and approved_ids:
@@ -3599,6 +3600,12 @@ class ChangeService:
                             ChangePlanFeedback.change_id.in_(planned))
                         .order_by(ChangePlanFeedback.id))).scalars().all():
                     feedback.setdefault(r.change_id, {})[r.department_id] = r
+                if cm_switches.on("RELEASE_V2"):
+                    from app.services import mother_plants as _mp
+                    from app.services.implementation_service import ImplementationService
+                    plan_work = await ImplementationService.implementing_department_ids_many(
+                        db, [c for c in open_changes if c.id in planned
+                             and not _mp.is_mother_plant(c)])
         # Mother-plant side track (spec §14): open "Read and understood"
         # receipts of the caller's departments, and which changes have informed
         # anybody yet (the PM's "Send information" errand).
@@ -3912,10 +3919,11 @@ class ChangeService:
                             if a.rasic_letter in BLOCKING_LETTERS}
                 if cm_switches.on("RELEASE_V2") and not mp.is_mother_plant(c):
                     # §8-9: the departments with work to plan (one rule with
-                    # feedback_state; only approved changes with an
-                    # unvalidated plan reach here, a handful per list)
+                    # feedback_state), on the implementing departments
+                    # loaded once for the list (R34)
                     from app.services.change_plan_service import ChangePlanService
-                    required = set(await ChangePlanService.required_department_ids(db, c))
+                    required = set(await ChangePlanService.required_department_ids(
+                        db, c, implementing=plan_work.get(c.id, [])))
                 elif mp.is_mother_plant(c):
                     # no assessments: the informed departments and Scheduling
                     required |= informed_depts.get(c.id, set())

@@ -2339,7 +2339,8 @@ class ChangePlanService:
     # ------------------------------------------------------------------
     @staticmethod
     async def required_department_ids(session: AsyncSession,
-                                       change: ChangeRequest) -> list[int]:
+                                       change: ChangeRequest,
+                                       implementing: list | None = None) -> list[int]:
         """Every department with an R or A assessment on the change, plus
         Scheduling (it builds the bank) and Sales (it tells the customer).
         RELEASE_V2 (§8-9): the departments with impact yes or work priced on
@@ -2357,8 +2358,10 @@ class ChangePlanService:
             # department with no impact and no cost is not waited on.
             # Sales only where there is a customer to tell.
             from app.services.implementation_service import ImplementationService
-            work = set(await ImplementationService.implementing_department_ids(
-                session, change))
+            # `implementing`: preloaded for a list (My Tasks, R34)
+            work = set(implementing if implementing is not None else
+                       await ImplementationService.implementing_department_ids(
+                           session, change))
             # nobody priced or said "impact yes" (a paperwork change): the
             # R/A departments still confirm, so the plan never waits on nobody
             ids = work or ids

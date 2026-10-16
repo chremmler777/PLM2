@@ -113,12 +113,24 @@ class ImplementationService:
         position is a commitment to work exactly as much as an hours line is.
         Sorted so every payload built off this list has a stable order.
         """
+        return (await ImplementationService.implementing_department_ids_many(
+            session, [change]))[change.id]
+
+    @staticmethod
+    async def implementing_department_ids_many(
+        session: AsyncSession, changes: list,
+    ) -> dict[int, list[int]]:
+        """implementing_department_ids for many changes in the same three
+        queries (R34: a list endpoint never asks per change)."""
         from sqlalchemy import or_
         from app.services import cm_switches
+        ids = [c.id for c in changes]
+        out: dict[int, set] = {i: set() for i in ids}
+        if not ids:
+            return {}
         v2 = cm_switches.on("ASSESSMENT_V2")
-        dept_ids: set[int] = set()
-        q = select(CostingPosition.department_id).where(
-            CostingPosition.change_id == change.id)
+        q = select(CostingPosition.change_id, CostingPosition.department_id).where(
+            CostingPosition.change_id.in_(ids))
         if v2:
             # C23: a zero line is no work. A position with money, hours or
             # trials, or with a supplier offer, is.
@@ -128,37 +140,40 @@ class ImplementationService:
                 func.coalesce(CostingPosition.hours, 0) != 0,
                 func.coalesce(CostingPosition.trials, 0) != 0,
                 CostingPosition.id.in_(select(CostingOffer.position_id))))
-        dept_ids.update((await session.execute(q.distinct())).scalars().all())
+        for cid, did in (await session.execute(q.distinct())).all():
+            out[cid].add(did)
         L = AssessmentCostLine
-        q = (select(ChangeAssessment.department_id)
+        q = (select(ChangeAssessment.change_id, ChangeAssessment.department_id)
              .join(L, L.assessment_id == ChangeAssessment.id)
-             .where(ChangeAssessment.change_id == change.id))
+             .where(ChangeAssessment.change_id.in_(ids)))
         if v2:
             q = q.where(or_(func.coalesce(L.demand_hours, 0) != 0,
                             func.coalesce(L.internal_cost, 0) != 0,
                             func.coalesce(L.external_cost, 0) != 0,
                             func.coalesce(L.minutes_per_part, 0) != 0))
-        dept_ids.update((await session.execute(q.distinct())).scalars().all())
+        for cid, did in (await session.execute(q.distinct())).all():
+            out[cid].add(did)
         if v2:
             # spec §8-9: a department whose assessment said "impact yes"
             # does work too, priced or not (Process' parameter sheets)
             rows = (await session.execute(
                 select(ChangeAssessment).where(
-                    ChangeAssessment.change_id == change.id,
+                    ChangeAssessment.change_id.in_(ids),
                     ChangeAssessment.verdict.in_(
                         ("feasible", "feasible_with_conditions"))))).scalars().all()
             for a in rows:
                 if any(isinstance(i, dict) and i.get("impacted")
                        for i in a.details_dict.get("impacts") or []):
-                    dept_ids.add(a.department_id)
+                    out[a.change_id].add(a.department_id)
         # A mother-plant change (spec §14) prices nothing here: the informed
         # departments are the ones doing the local work.
         from app.services import mother_plants as mp
-        if mp.is_mother_plant(change):
-            from app.services.mother_plant_service import MotherPlantService
-            dept_ids.update(await MotherPlantService.informed_department_ids(
-                session, change))
-        return sorted(dept_ids)
+        for c in changes:
+            if mp.is_mother_plant(c):
+                from app.services.mother_plant_service import MotherPlantService
+                out[c.id].update(await MotherPlantService.informed_department_ids(
+                    session, c))
+        return {cid: sorted(d) for cid, d in out.items()}
 
     # ------------------------------------------------------------------
     # Reads

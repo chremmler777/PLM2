@@ -491,3 +491,16 @@ async def test_state_is_scoped_to_the_callers_department(client, impl):
     # The total follows the scope: a department must not be able to read the
     # programme's hours out of a number it is allowed to see.
     assert body["total_booked_hours"] == 0.0
+
+
+async def test_implementing_departments_for_many_changes_match_one(impl, session_factory):
+    """R34: My Tasks reads the implementing departments of all its changes
+    at once; the batch says exactly what the one-change rule says."""
+    from app.services.implementation_service import ImplementationService
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, impl["change_id"])
+        one = await ImplementationService.implementing_department_ids(s, change)
+        many = await ImplementationService.implementing_department_ids_many(s, [change])
+        assert many == {change.id: one}
+        assert sorted(one) == sorted([impl["dept"]["Tool Engineer"], impl["dept"]["Development"]])
+        assert await ImplementationService.implementing_department_ids_many(s, []) == {}
