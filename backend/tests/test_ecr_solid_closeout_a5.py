@@ -323,3 +323,46 @@ async def test_a5_05_urgent_pm_fallback_fires_when_management_has_only_an_admin(
         urgent = [r.user_id for r in (await s.execute(select(Notification).where(
             Notification.kind == "validation_urgent_fail"))).scalars().all()]
     assert urgent == [fix["user"]["Project Manager"]["id"]] and admin_id not in urgent
+
+
+# --- A5-06 an admin acting as Quality: Quality told, the record says so -----
+
+async def test_a5_06_admin_acting_as_quality_tells_quality_and_says_so(
+        client, fix, admin_auth, session_factory):
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, fix["change_id"])).customer_relevant = False
+        await s.commit()
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    body = {"note": "trial parts for the line test", "not_for_shipment": True,
+            "quantity": 200}
+    # NEGATIVE: a real admin not acting is not Quality
+    res = await client.post(_iurl(fix, f"/{iid}/concession"), headers=admin_auth, json=body)
+    assert res.status_code == 403, res.text
+    acting = {**admin_auth, "X-Acts-As-Department": str(fix["dept"]["Quality"])}
+    res = await client.post(_iurl(fix, f"/{iid}/concession"), headers=acting, json=body)
+    assert res.status_code == 200 and res.json()["status"] == "accepted", res.text
+    async with session_factory() as s:
+        told = [r.user_id for r in (await s.execute(select(Notification).where(
+            Notification.kind == "concession_acting_admin"))).scalars().all()]
+    assert told == [fix["user"]["Quality"]["id"]]
+    st = (await client.get(_url(fix, "/state"),
+                           headers=await _who(client, fix, "Quality"))).json()
+    assert st["active_concessions"][0]["text"].endswith("acting as Quality)")
+    assert "decided by" in st["active_concessions"][0]["text"]
+
+
+async def test_a5_06_negative_a_real_quality_member_tells_nobody(client, fix, session_factory):
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, fix["change_id"])).customer_relevant = False
+        await s.commit()
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    res = await client.post(_iurl(fix, f"/{iid}/concession"),
+                            headers=await _who(client, fix, "Quality"),
+                            json={"note": "trial parts for the line test",
+                                  "not_for_shipment": True, "quantity": 200})
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert not (await s.execute(select(Notification).where(
+            Notification.kind == "concession_acting_admin"))).scalars().all()

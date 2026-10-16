@@ -1605,6 +1605,7 @@ class ValidationIssueService:
             await svc._log(session, change, issue, "customer_decision",
                            "concession confirmed by Quality", user.id,
                            notes=note, decision=decision)
+            await svc._tell_quality_of_acting_admin(session, change, issue, user)
             return issue
         svc._require_open(issue)
         if decision not in CUSTOMER_DECISIONS:
@@ -1647,6 +1648,8 @@ class ValidationIssueService:
         if decision == "accept_deviation" and issue.route == "customer_concession":
             await svc._close(session, change, issue, "accepted", note, user.id,
                              "closed: accepted by the customer as a concession")
+            if concession:
+                await svc._tell_quality_of_acting_admin(session, change, issue, user)
         elif decision == "require_fix" and issue.route == "customer_concession":
             # the concession is off: the route is decided again
             await svc._log(session, change, issue, "reopened",
@@ -2302,6 +2305,7 @@ class ValidationIssueService:
                            quantity=qty, until=until.isoformat() if until else None)
             await svc._close(session, change, issue, "accepted", note, user.id,
                              "closed: accepted under concession (not for shipment)")
+            await svc._tell_quality_of_acting_admin(session, change, issue, user)
             return issue
         if issue.route == "customer_concession":
             raise ChangeError(f"A concession on {issue.ref} is already asked")
@@ -2370,6 +2374,7 @@ class ValidationIssueService:
                 ValidationIssue.route == "customer_concession")
             .order_by(ValidationIssue.number))).scalars().all()
         today = business_today()
+        acting = await ValidationIssueService.acting_deciders(session, rows)
         out = []
         for i in rows:
             if not ValidationIssueService.concession_in_force(i, today):
@@ -2380,10 +2385,54 @@ class ValidationIssueService:
             out.append({"id": i.id, "ref": i.ref, "until": i.concession_until,
                         "quantity": i.concession_quantity,
                         "not_for_shipment": bool(i.concession_not_for_shipment),
+                        "decided_by_acting_admin": acting.get(i.id),
                         "text": f"Accepted under concession {i.ref}{bound}"
                                 + (" (not for shipment)"
-                                   if i.concession_not_for_shipment else "")})
+                                   if i.concession_not_for_shipment else "")
+                                + (f" (decided by {acting[i.id]} acting as Quality)"
+                                   if acting.get(i.id) else "")})
         return out
+
+    @staticmethod
+    async def acting_deciders(session: AsyncSession, issues: list) -> dict[int, str]:
+        """A5-06: issue id -> the admin's name when a real admin account,
+        acting as Quality, gave the concession's yes (acts-as is kept; the
+        record says so)."""
+        ids = {i.customer_decided_by for i in issues
+               if i.customer_decided_by is not None and i.customer_decided_as_quality}
+        if not ids:
+            return {}
+        admins = dict((await session.execute(
+            select(User.id, func.coalesce(User.full_name, User.username))
+            .where(User.id.in_(ids), User.role == "admin"))).all())
+        return {i.id: admins[i.customer_decided_by] for i in issues
+                if i.customer_decided_as_quality and i.customer_decided_by in admins}
+
+    @staticmethod
+    async def _tell_quality_of_acting_admin(session: AsyncSession, change: ChangeRequest,
+                                            issue: ValidationIssue, user: User) -> None:
+        """A5-06 (DECIDED BY CLAUDE): an admin acting as Quality accepted a
+        concession, the one exit from HARD #3: the real Quality members are
+        told once, so no admin lifts it unseen."""
+        from app.services.change_people import (
+            department_members_of_change_org, is_acting,
+        )
+        if not (is_acting(user) and user.role == "admin"):
+            return
+        quality = await ValidationIssueService._dept_id(session, QUALITY_DEPARTMENT)
+        members = await department_members_of_change_org(
+            session, change, [quality] if quality else [], real_only=True)
+        if not members:
+            return
+        from app.services.notification_service import NotificationService
+        who = user.full_name or user.username
+        await NotificationService.notify_once(
+            session, sorted(set(members) - {user.id}), kind="concession_acting_admin",
+            subject_key=f"vi:{issue.id}:acting_quality",
+            title=(f"{change.change_number} {issue.ref}: concession accepted by "
+                   f"{who} acting as Quality")[:255],
+            body="An admin decided Quality's concession for you: check it on the issue.",
+            link=ValidationIssueService._link(change, issue))
 
     @staticmethod
     def day(d) -> str:
@@ -2437,8 +2486,10 @@ class ValidationIssueService:
                           if i.retest_due else ""))
             conc = "concession: none"
             if accepted:
+                acting = (await svc.acting_deciders(session, [i])).get(i.id)
                 conc = (f"concession {i.ref} expired "
-                        f"{svc.day(i.concession_until)}")
+                        f"{svc.day(i.concession_until)}"
+                        + (f" (decided by {acting} acting as Quality)" if acting else ""))
             elif i is not None and svc.is_concession(i) and i.is_open:
                 if await svc.has_customer_mail(session, i):
                     conc = "concession: Quality decides"

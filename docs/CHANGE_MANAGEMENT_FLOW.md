@@ -1722,7 +1722,12 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   date" (Needs you); both due 2 working days from the ask or the mail. An internal
   change: "not for shipment", Quality decides at once, for a quantity or
   until a date. Accepted reads "Accepted under concession VI-n until <date>"
-  (or "for n parts") in the validation panel and the change header; the
+  (or "for n parts") in the validation panel and the change header. An
+  admin who decides it acting as Quality (acts-as kept, A5-06, decided by
+  Claude: reversible) is named there, "(decided by <admin> acting as
+  Quality)", also on the status line of an expired one, and the real
+  Quality members get one notice (`concession_acting_admin`, a badge); a
+  real admin not acting is refused. The
   Quality member who decided it (gone: the change's Quality members) and
   the lead are reminded once 10 working days before the end date
   (notification sweep, `concession_expiring`). After its end date a
