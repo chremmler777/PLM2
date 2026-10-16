@@ -896,6 +896,15 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(screen.getByTestId('proceed-route-4-R')).toBeTruthy()
   })
 
+  it('A2-07: a rejected change shows the open flip without an answer control', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    render(wrap(<ScopingPanel canAnswerConcerns change={change({
+      status: 'rejected', scoping_v2: true, customer_flip_at: '2026-10-15T09:00:00Z',
+      flip_answer: null, customer_relevant: true })} />))
+    expect(await screen.findByTestId('flip-card')).toBeTruthy()
+    expect(screen.getByTestId('flip-owner')).toBeTruthy()
+  })
+
   it("C33: 'Not yet' with open questions decides without asking for a new reason", async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
     vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)

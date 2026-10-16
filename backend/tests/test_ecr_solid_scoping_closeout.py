@@ -227,3 +227,29 @@ async def test_a2_05_not_yet_with_a_reason_raises_a_typed_question(
     assert q.flag_type == "question" and q.answer_from == "our_team"
     assert q.check_what == "other"
     assert q.scope_effect and "Customer drawing rev D is missing" in q.scope_effect
+
+
+# ---- A2-07: an ended change takes no answer ---------------------------------
+
+@pytest.mark.parametrize("status", ["closed", "cancelled", "rejected"])
+async def test_a2_07_answers_refused_on_an_ended_change(session_factory, status):
+    from datetime import datetime
+    from app.models.change import ChangeRequest
+    from app.models.entities import User
+    from app.services.change_service import ChangeError
+    from app.services.ppap_decision_service import PpapDecisionService
+    from app.services.index_followup_service import IndexFollowupService
+    change = ChangeRequest(id=1, change_number="CR-A207", status=status,
+                           customer_flip_at=datetime.utcnow(), flip_answer=None)
+    user = User(id=1, role="admin")
+    calls = [
+        lambda s: PpapDecisionService.answer_flip(s, change, user, "offer"),
+        lambda s: IndexFollowupService.answer_recheck(s, change, None, user, []),
+        lambda s: IndexFollowupService.answer_scope(s, change, None, user, "no"),
+        lambda s: IndexFollowupService.answer_deadline(s, change, None, user, "holds"),
+    ]
+    async with session_factory() as s:
+        for call in calls:
+            with pytest.raises(ChangeError) as e:
+                await call(s)
+            assert f"The change is {status}: its record stays as it is" in str(e.value)

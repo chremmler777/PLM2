@@ -73,6 +73,14 @@ def deadline_open(intake: RevisionIntake) -> bool:
             and intake.deadline_answer in (None, "not_asked"))
 
 
+def _refuse_ended(change: ChangeRequest) -> None:
+    """A2-07: a closed, cancelled or rejected change takes no answer."""
+    from app.services.cm_rules import ended_refusal
+    why = ended_refusal(change)
+    if why:
+        raise ChangeError(why)
+
+
 class IndexFollowupService:
 
     # ------------------------------------------------------------------
@@ -180,6 +188,7 @@ class IndexFollowupService:
         true, what, evidence}. something_else: {what, evidence} (an effect)."""
         from app.services.cm_rules import reference_refusal
         from app.services.workflow_service import WorkflowService
+        _refuse_ended(change)
         if recheck.change_id != change.id:
             raise ChangeError("Recheck not found")
         if recheck.status != "open":
@@ -360,6 +369,7 @@ class IndexFollowupService:
                            note: Optional[str] = None) -> RevisionIntake:
         """The lead (or Project Management, an admin): does index D add parts
         or departments? 'yes' says which, then the run team adds them."""
+        _refuse_ended(change)
         if intake.change_id != change.id or intake.replaced_revision is None:
             raise ChangeError("No new-index question on this change")
         if intake.scope_answer is not None:
@@ -394,6 +404,7 @@ class IndexFollowupService:
         by default; the task stays until it is confirmed)."""
         from app.services import due_rules
         from app.services.cm_rules import reference_refusal
+        _refuse_ended(change)
         if intake.change_id != change.id or not deadline_open(intake):
             raise ChangeError("No deadline question waits on this change")
         if not await ChangeService.member_of(session, user, "Sales"):

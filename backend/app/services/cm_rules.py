@@ -109,6 +109,17 @@ RULE_LABELS = {
 }
 
 
+#: An ended change: its record stays as it is (no answer, confirm or add).
+ENDED_STATUSES = ("closed", "cancelled", "rejected")
+
+
+def ended_refusal(change) -> Optional[str]:
+    """Why an ended change takes no answer, or None (A2-07)."""
+    if getattr(change, "status", None) in ENDED_STATUSES:
+        return f"The change is {change.status}: its record stays as it is"
+    return None
+
+
 def rule_label(key: Optional[str]) -> str:
     if not key:
         return "any open rule (before rule binding)"

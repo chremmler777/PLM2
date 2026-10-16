@@ -808,7 +808,8 @@ export default function ScopingPanel(
             isQuality={departments.some((d) => d.name === 'Quality' && myDepartmentIds.includes(d.id))} />
         )}
         {v2 && change.customer_flip_at && (
-          <CustomerFlipCard change={change} editable={change.status !== 'closed' && !readOnly}
+          <CustomerFlipCard change={change}
+            editable={!['closed', 'cancelled', 'rejected'].includes(change.status) && !readOnly}
             isSales={canAnswerConcerns} attachments={attachments} onChanged={invalidate} />
         )}
 

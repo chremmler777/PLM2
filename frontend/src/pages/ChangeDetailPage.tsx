@@ -1295,7 +1295,9 @@ export default function ChangeDetailPage() {
               departments={departments} myDepartmentIds={myActions?.memberships ?? []}
               mayLead={isAdmin || isChangeLead || isPmMember} isSales={isSalesMember}
               leadName={change.lead_name} salesOwnerName={change.sales_owner_name}
-              attachments={change.attachments ?? []} readOnly={readOnly} />
+              attachments={change.attachments ?? []}
+              // A2-07: an ended change (rejected too) takes no answer
+              readOnly={readOnly || change.status === 'rejected'} />
           )}
           {/* One bucket per routed department: status board collapsed, that
               department's workplace expanded. Everything that used to be a

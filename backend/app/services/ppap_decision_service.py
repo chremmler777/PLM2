@@ -311,6 +311,10 @@ class PpapDecisionService:
         """The Sales owner's answer to the flip (any Sales member may act):
         notification only (a filed customer mail or a reference) or offer
         needed (the quote deadline)."""
+        from app.services.cm_rules import ended_refusal
+        why = ended_refusal(change)
+        if why:
+            raise ChangeError(why)
         if not flip_open(change):
             raise ChangeError("No customer flip waits for an answer")
         if not await ChangeService.member_of(session, user, "Sales"):
