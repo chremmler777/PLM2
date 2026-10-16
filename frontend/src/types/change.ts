@@ -1609,6 +1609,8 @@ export interface ValidationDepartmentState {
   checks: ValidationCheck[];
   /** C7: may this viewer record the department's checks (backend rule). */
   can_write?: boolean;
+  /** A5-04 d: '<X> has no member here: <lead|Project Management> coordinates'. */
+  no_member_hint?: string | null;
 }
 
 /**

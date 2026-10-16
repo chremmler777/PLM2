@@ -4113,8 +4113,8 @@ class ChangeService:
                 # A5-03 (R37): a required department with no real member
                 # here is the lead's to confirm (no lead: Project Management)
                 fallback: set = set()
-                if cm_switches.on("RELEASE_V2") and (
-                        holds_lead(c, user) or (c.lead_id is None and is_pm_member)):
+                from app.services.change_people import coordinates as _coord
+                if cm_switches.on("RELEASE_V2") and await _coord(db, c, user, is_pm_member):
                     from app.services.change_plan_service import ChangePlanService
                     fallback = await ChangePlanService.unstaffed_feedback_ids(
                         db, c, required - dep_ids)
@@ -4174,8 +4174,11 @@ class ChangeService:
                     if did in fallback:
                         # the owner has nobody here: the run team answers
                         name = next((n for n, i in by_name.items() if i == did), "")
-                        row["hint"] = (f"{name} has no member here: you answer "
-                                       "its release items")
+                        from app.services.change_people import (
+                            coordinator_name, no_member_words,
+                        )
+                        row["hint"] = (no_member_words(name, await coordinator_name(db, c))
+                                       + ": answer its release items")
                         row["role_department_id"] = by_name.get("Project Manager")
                     tasks.append(row)
 
@@ -5001,15 +5004,33 @@ class ChangeService:
                         ValidationCheck.status.in_(("passed", "failed"))))).all():
                 answered.setdefault((cid, did), set()).add(key)
             names = dict((await db.execute(select(Department.id, Department.name))).all())
+            from app.services.change_people import (
+                coordinates, coordinator_name, no_member_words, staffed_department_ids,
+            )
             for c in validating:
-                for did in sorted(set(await ValidationService.implementing_department_ids(
-                        db, c)) & dep_ids):
+                implementing = set(await ValidationService.implementing_department_ids(db, c))
+                # A5-04 a (R37): a department with no real member here is
+                # the lead's to answer (no lead: Project Management), with
+                # its own row
+                fallback: set = set()
+                if cm_switches.on("RELEASE_V2") and implementing - dep_ids \
+                        and await coordinates(db, c, user, is_pm_member):
+                    rest = implementing - dep_ids
+                    fallback = rest - await staffed_department_ids(db, c, rest)
+                for did in sorted((implementing & dep_ids) | fallback):
                     open_keys = [k for k in catalog.keys_for(names.get(did))
                                  if k not in answered.get((c.id, did), set())]
                     if open_keys:
-                        out.append({**await base(c), "kind": "validation_check",
-                                    "department_id": did, "open_count": len(open_keys),
-                                    "target_tab": "release"})
+                        row = {**await base(c), "kind": "validation_check",
+                               "department_id": did, "open_count": len(open_keys),
+                               "target_tab": "release"}
+                        if did in fallback:
+                            row["reason"] = (no_member_words(
+                                names.get(did), await coordinator_name(db, c))
+                                + ": answer its checks")
+                            row["role_department_id"] = next(
+                                (i for i, n in names.items() if n == "Project Manager"), None)
+                        out.append(row)
         if validating and cm_switches.on("RELEASE_V2") \
                 and user.effective_role != "admin":
             # A5-02: a PASS against the measurer's own limits waits on
@@ -5017,6 +5038,7 @@ class ChangeService:
             from app.models.change_validation import ValidationCheck
             from app.services import validation_checklist as catalog
             from app.services.validation_service import ValidationService
+            from app.services.change_people import coordinator_name, no_member_words
             pend = (await db.execute(select(ValidationCheck).where(
                 ValidationCheck.change_id.in_([c.id for c in validating]),
                 ValidationCheck.status == "passed",
@@ -5043,7 +5065,8 @@ class ChangeService:
                                 f"Confirm the limits of {catalog.label_for(r.check_key, dept)} "
                                 f"({dept}): {float(r.lower_limit):g}-{float(r.upper_limit):g}"
                                 f" set by {setters.get(r.limits_set_by) or 'the measurer'}"
-                                + ("" if staffed else "; Quality has no member here: you confirm")),
+                                + ("" if staffed else "; " + no_member_words(
+                                    "Quality", await coordinator_name(db, c)))),
                             "since": r.checked_at})
 
         out += await ChangeService.advance_tasks(db, user, open_changes, base,
@@ -5515,11 +5538,9 @@ class ChangeService:
             if await ChangePlanService.tasks(session, change, "detailed"):
                 state = await ChangePlanService.feedback_state(session, change, user)
                 for row in state["required"]:
-                    from app.services.change_people import holds_lead as _hl
+                    from app.services.change_people import coordinates as _coord
                     if row["department_id"] not in dept_ids and not (
-                            row.get("no_member") and row.get("can_answer")
-                            and user.effective_role != "admin"
-                            and (_hl(change, user) or change.lead_id is None)):
+                            row.get("no_member") and await _coord(session, change, user)):
                         continue
                     if row["verdict"] == "confirmed" and not row["stale"]:
                         continue

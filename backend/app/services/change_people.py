@@ -159,15 +159,42 @@ async def change_org_ids(session: AsyncSession, change_ids: Iterable[int]
     return out
 
 
-async def coordinator_name(session: AsyncSession, change) -> str:
+
+def _lead_acts(lead) -> bool:
+    """A lead who can coordinate: active and not an admin account (an admin
+    does not decide HARD #3 alone, hard3_blind)."""
+    return lead is not None and bool(lead.is_active) and lead.role != "admin"
+
+
+async def coordinator(session: AsyncSession, change) -> tuple[Optional[int], str]:
     """Who coordinates a department with no real member here (R37): the
-    change lead by name, else Project Management."""
+    change lead (id, name), else Project Management (None, its name)."""
     if getattr(change, "lead_id", None) is not None:
         from app.models.entities import User
         lead = await session.get(User, change.lead_id)
-        if lead is not None:
-            return lead.full_name or lead.username
-    return "Project Management"
+        if _lead_acts(lead):
+            return lead.id, lead.full_name or lead.username
+    return None, "Project Management"
+
+
+async def coordinator_name(session: AsyncSession, change) -> str:
+    return (await coordinator(session, change))[1]
+
+
+async def coordinates(session: AsyncSession, change, user,
+                      is_pm_member: Optional[bool] = None) -> bool:
+    """Is `user` the one who coordinates member-less departments on this
+    change: the lead, or with no lead who can act a Project Management
+    member (never an admin account, never acting as a department)."""
+    if is_acting(user) or getattr(user, "effective_role", None) == "admin":
+        return False
+    lead_id, _ = await coordinator(session, change)
+    if lead_id is not None:
+        return lead_id == user.id
+    if is_pm_member is None:
+        from app.services.meeting_service import MeetingService
+        is_pm_member = await MeetingService.user_is_pm_member(session, user)
+    return bool(is_pm_member)
 
 
 def no_member_words(department_name: Optional[str], coordinator: str) -> str:

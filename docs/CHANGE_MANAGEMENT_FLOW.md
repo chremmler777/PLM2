@@ -1519,8 +1519,10 @@ existing per-department validation checks.
   only for a department with no real member in the change's organization
   (inactive, or only admin accounts: `change_people.staffed_department_ids`;
   no dead end). The state serves `can_answer` and `run_team_answers` per
-  row; the group reads "no member here: PM or the lead answers", and PM and
-  the lead get the `release_check` task for those rows. `customer_approval`
+  row; the group reads "<X> has no member here: <lead name|Project
+  Management> coordinates" (`no_member_hint`, the one phrase of
+  `change_people.no_member_words`, A5-04), and PM and the lead get the
+  `release_check` task for those rows. `customer_approval`
   "done" needs a reference (PSW / ISIR number or the approval's file name,
   `cm_rules.reference_refusal`; `EVIDENCE_KEYS`); on a customer change its
   "not applicable" too: the customer's waiver (mail or document reference). `erp_updated` reads the
@@ -1691,10 +1693,19 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   Engineer + the supplier), or another department; the retest date is today
   or later; an inactive department is refused. The fixing department gets
   "Fix VI-n: ..., retest <day>" (a department with no member here: the
-  lead, no lead: PM, "you coordinate"; the status line says so), the
+  lead, no lead or an admin lead: PM, "<X> has no member here: <lead
+  name|Project Management> coordinates"; the status line says so), the
   check's department "Retest for VI-n by <day>" (due that day; a check
-  department with no member here: the lead, no lead: PM, "you
-  coordinate"). Each pick tells the fixing and the retesting department
+  department with no member here: the same coordinator and phrase). When
+  one person owes both the fix and the retest the fix row folds into the
+  retest row, the fix first: "Fix VI-n, then retest by <day>" or, as the
+  coordinator, "Get <fixer> to fix VI-n, then retest by <day>" (A5-04).
+  Every date on the status line, the tasks and the concession texts reads
+  "Thu 22 Oct". An implementing department with no member here gives the
+  coordinator its `validation_check` row ("...coordinates: answer its
+  checks"), and the lead or a PM member books its hours (the booker's name
+  stays on the row; `HoursService.books_for_memberless`), so its estimate
+  does not stay "not booked". Each pick tells the fixing and the retesting department
   once (`task_new`, `vi:<id>:fix:<dept>:<date>`). A passed retest closes
   the issue. Quality may change the pick or the date later (the quiet
   "Change who fixes or the retest date"). `POST

@@ -2368,7 +2368,7 @@ class ValidationIssueService:
         for i in rows:
             if not ValidationIssueService.concession_in_force(i, today):
                 continue
-            bound = (f" until {i.concession_until.isoformat()}" if i.concession_until
+            bound = (f" until {ValidationIssueService.day(i.concession_until)}" if i.concession_until
                      else f" for {i.concession_quantity} parts"
                      if i.concession_quantity else "")
             out.append({"id": i.id, "ref": i.ref, "until": i.concession_until,
@@ -2378,6 +2378,11 @@ class ValidationIssueService:
                                 + (" (not for shipment)"
                                    if i.concession_not_for_shipment else "")})
         return out
+
+    @staticmethod
+    def day(d) -> str:
+        """The one date format of the status line and the tasks: 'Thu 22 Oct'."""
+        return _d(d).strftime("%a %d %b")
 
     @staticmethod
     async def release_line(session: AsyncSession, change: ChangeRequest) -> Optional[str]:
@@ -2399,9 +2404,10 @@ class ValidationIssueService:
                 ValidationIssue.change_id == change.id,
                 ValidationIssue.check_id.in_([c.id for c in failed]))
             .order_by(ValidationIssue.id))).scalars().all()}
-        from app.services.change_people import real_member_names
+        from app.services.change_people import coordinator_name, real_member_names
         fix_depts = {i.fix_department_id for i in issues.values() if i.fix_department_id}
         people = await real_member_names(session, change, fix_depts)
+        coordinator = await coordinator_name(session, change)
         today = business_today()
         parts = []
         for c in failed:
@@ -2420,13 +2426,13 @@ class ValidationIssueService:
                 fix = (f"fix: {names.get(i.fix_department_id)}"
                        # §10 'Process (Payne)': the person when there is one
                        + (f" ({who[0]})" if len(who) == 1 else
-                          " (no member here: the lead coordinates)" if not who else "")
-                       + (f", retest {i.retest_due.strftime('%a %d %b')}"
+                          f" (no member here: {coordinator} coordinates)" if not who else "")
+                       + (f", retest {svc.day(i.retest_due)}"
                           if i.retest_due else ""))
             conc = "concession: none"
             if accepted:
                 conc = (f"concession {i.ref} expired "
-                        f"{i.concession_until.isoformat()}")
+                        f"{svc.day(i.concession_until)}")
             elif i is not None and svc.is_concession(i) and i.is_open:
                 if await svc.has_customer_mail(session, i):
                     conc = "concession: Quality decides"
@@ -2434,7 +2440,7 @@ class ValidationIssueService:
                     asked = (i.customer_decided_at if i.customer_decision == "pending"
                              else i.concession_requested_at or i.route_decided_at)
                     conc = ("concession: waiting for customer (Sales owner"
-                            + (f", asked {asked.date().isoformat()}" if asked else "")
+                            + (f", asked {svc.day(asked.date())}" if asked else "")
                             + ")")
             parts.append(f"{line}; {fix}; {conc}")
         return ("Not releasable: " + " | ".join(parts)) if parts else None
@@ -2476,7 +2482,7 @@ class ValidationIssueService:
                 session, sorted(users), kind="concession_expiring",
                 subject_key=f"vi:{i.id}:expiring",
                 title=(f"{change.change_number} {i.ref}: concession ends "
-                       f"{i.concession_until.isoformat()}")[:255],
+                       f"{svc.day(i.concession_until)}")[:255],
                 body="Fixed and retested by then, or a new concession",
                 link=svc._link(change, i))
             i.concession_reminded_at = datetime.utcnow()
@@ -2936,10 +2942,15 @@ class ValidationIssueService:
         # to the lead (no lead: PM), never to nobody
         unstaffed_fix = (fix_depts - await staffed_department_ids(
             session, change, fix_depts)) if fix_depts and svc.fix_rule_on() else set()
-        coordinates = v.lead or (change.lead_id is None and v.pm)
+        from app.services.change_people import (
+            coordinates as _coordinates, coordinator_name, no_member_words,
+        )
+        coordinates = await _coordinates(session, change, user, v.pm)
+        coordinator = await coordinator_name(session, change)
         pm_dept = await svc._dept_id(session, PM_DEPARTMENT)
         quality_dept = await svc._dept_id(session, QUALITY_DEPARTMENT)
         out = []
+        fix_first: dict = {}
         for i in issues:
             possible, _primary, extra = await svc.next_acts(
                 session, change, i, v, acts[i.id], escs[i.id])
@@ -2991,11 +3002,17 @@ class ValidationIssueService:
             if (svc.fix_rule_on() and i.fix_department_id is not None
                     and (v.in_dept(i.fix_department_id) or fix_fallback)
                     and not v.admin
-                    and i.route not in FIX_ROUTES and "recheck" not in owed
+                    and i.route not in FIX_ROUTES
                     and i.check_id is not None
                     and getattr(await session.get(ValidationCheck, i.check_id),
                                 "status", None) == "failed"):
-                owed.append("fix_work")
+                if "recheck" in owed:
+                    # the fix comes first: named on the retest row (A5-04 c)
+                    fix_first[i.id] = (True if v.in_dept(i.fix_department_id) else
+                                       (await svc._dept_names(session)).get(
+                                           i.fix_department_id) or "the fixer")
+                else:
+                    owed.append("fix_work")
             if "add_action" in possible and not v.admin and \
                     svc._needs_new_action(i, acts[i.id]) and \
                     (v.pm or v.in_dept(i.department_id)):
@@ -3006,10 +3023,10 @@ class ValidationIssueService:
                 if key == "fix_work":
                     label = label.format(
                         ref=i.ref, what=i.description,
-                        when=i.retest_due.strftime("%a %d %b") if i.retest_due else "-")
+                        when=svc.day(i.retest_due) if i.retest_due else "-")
                     if not v.in_dept(i.fix_department_id):
                         name = (await svc._dept_names(session)).get(i.fix_department_id)
-                        label += f" ({name} has no member here: you coordinate)"
+                        label += f" ({no_member_words(name, coordinator)})"
                 elif key == "customer" and concession:
                     label = (svc.CONCESSION_DECIDE if v.quality and mail
                              else svc.CONCESSION_ASK).format(ref=i.ref)
@@ -3019,10 +3036,18 @@ class ValidationIssueService:
                     item["role_department_id"] = (
                         quality_dept if v.quality else i.department_id)
                 if key == "recheck" and i.retest_due is not None:
-                    label = f"Retest for {i.ref} by {i.retest_due.strftime('%a %d %b')}"
+                    label = f"Retest for {i.ref} by {svc.day(i.retest_due)}"
+                    if fix_first.get(i.id):
+                        # A5-04 c: the same person owes the fix and the
+                        # retest: one row, the fix first
+                        fixer = fix_first[i.id]
+                        label = (f"Fix {i.ref}, then retest by {svc.day(i.retest_due)}"
+                                 if fixer is True else
+                                 f"Get {fixer} to fix {i.ref}, then retest by "
+                                 f"{svc.day(i.retest_due)}")
                 if key == "recheck" and not v.in_dept(chk_dept):
                     name = (await svc._dept_names(session)).get(chk_dept)
-                    label += f" ({name} has no member here: you coordinate)"
+                    label += f" ({no_member_words(name, coordinator)})"
                     item["role_department_id"] = pm_dept
                 item["label"] = label
                 if key in ("fix_work", "recheck") and i.retest_due is not None:

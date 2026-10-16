@@ -35,6 +35,8 @@ export interface ReleaseCheck {
   na_needs_ref?: boolean
   /** C7: the owner department has no member here: PM or the lead answer. */
   run_team_answers?: boolean
+  /** A5-04 d: '<X> has no member here: <lead|Project Management> coordinates'. */
+  no_member_hint?: string | null
 }
 
 export type LessonCategory =

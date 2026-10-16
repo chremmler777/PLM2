@@ -34,6 +34,8 @@ export interface HoursMine {
   prefill_hours?: number | null
   /** "your estimate: 6 h" */
   source_label?: string | null
+  /** A5-04 b: a department with no member here the lead or PM books for. */
+  no_member?: boolean
 }
 
 export interface HoursState {

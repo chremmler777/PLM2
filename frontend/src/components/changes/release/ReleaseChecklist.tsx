@@ -221,13 +221,14 @@ export default function ReleaseChecklist({
         const open = rows.filter((r) => r.status === 'open' && !r.retired).length
         const onlyRetired = rows.every((r) => r.retired)
         const runTeam = rows.some((r) => r.run_team_answers)
+        const runTeamHint = rows.find((r) => r.no_member_hint)?.no_member_hint
         return (
           <div key={dept}>
             <div className="mb-1.5 flex items-center gap-2">
               <span className={sectionLabel}>{dept}</span>
               {runTeam && (
                 <span data-testid={`release-run-team-${dept}`} className="text-[11px] text-slate-400">
-                  {t('release.runTeamAnswers')}
+                  {runTeamHint ?? t('release.runTeamAnswers')}
                 </span>
               )}
               {onlyRetired ? (

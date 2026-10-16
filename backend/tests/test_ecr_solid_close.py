@@ -119,7 +119,7 @@ async def test_header_shows_the_concession_in_force(
         await s.commit()
     ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin)).json()
     assert [c["text"] for c in ch["active_concessions"]] == [
-        f"Accepted under concession VI-3 until {until.isoformat()}"]
+        f"Accepted under concession VI-3 until {until.strftime('%a %d %b')}"]
 
 
 async def test_switch_off_closes_without_achieved_value(

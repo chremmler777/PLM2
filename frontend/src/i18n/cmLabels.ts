@@ -1546,7 +1546,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'fix.fact': { de: 'Korrektur', en: 'Fix' },
   'fix.factValue': { de: '{who}, Nachprüfung {d}', en: '{who}, retest {d}' },
   'fix.change': { de: 'Wer korrigiert oder Nachprüfdatum ändern', en: 'Change who fixes or the retest date' },
-  'release.runTeamAnswers': { de: 'kein Mitglied hier: PM oder der Leiter beantwortet', en: 'no member here: PM or the lead answers' },
+  'release.runTeamAnswers': { de: 'kein Mitglied hier: der Leiter koordiniert', en: 'no member here: the lead coordinates' },
   'release.waiverRef': { de: 'Kundenmail oder Dokument, mit dem der Kunde verzichtet (Pflicht)', en: "The customer's mail or document waiving the approval (required)" },
   'fix.factNone': { de: 'Qualität legt fest, wer korrigiert und wann nachgeprüft wird.', en: 'Quality picks who fixes it and the retest date.' },
   'concession.requestTitle': { de: 'Sonderfreigabe für {ref} anfragen', en: 'Request a concession for {ref}' },

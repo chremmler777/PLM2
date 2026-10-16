@@ -84,7 +84,8 @@ async def test_pm_retests_a_member_less_departments_failed_check(
     tasks = await _kinds(client, pm, fix["change_id"])
     retest = tasks["validation_issue_recheck"]
     assert retest["label"].startswith("Retest for VI-1 by")
-    assert "Tool Engineer has no member here: you coordinate" in retest["label"]
+    # A5-04 d: one phrase, the lead by name
+    assert "Tool Engineer has no member here: Project Manager coordinates" in retest["label"]
     issue = (await client.get(_iurl(fix, f"/{iid}"), headers=pm)).json()
     assert "recheck" in issue["next_acts"]
     st = await _state(client, pm, fix)
@@ -213,7 +214,7 @@ async def test_an_expired_concession_holds_the_release_again(
         assert failed is not None and failed.startswith("Validation failed")
     st = await _state(client, quality, fix)
     assert st["active_concessions"] == []
-    expired = (business_today() - timedelta(days=5)).isoformat()
+    expired = (business_today() - timedelta(days=5)).strftime("%a %d %b")
     assert f"concession VI-1 expired {expired}" in st["release_line"]
     pm = await _auth(client, fix, "Project Manager")
     res = await client.post(f"/api/v1/changes/{fix['change_id']}/transition",

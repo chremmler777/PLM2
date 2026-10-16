@@ -49,7 +49,13 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
 }) {
   const qc = useQueryClient()
   const { data: state } = useQuery({ queryKey: hoursKey(changeId), queryFn: () => hoursApi.get(changeId), enabled: open })
-  const mine = departments.filter((d) => myDepartmentIds.includes(d.id))
+  // yours, plus (A5-04 b) a department with no member here the lead or PM
+  // books for (the backend lists it in `mine` with no_member)
+  const mine = [
+    ...departments.filter((d) => myDepartmentIds.includes(d.id)),
+    ...(state?.mine ?? []).filter((m) => m.no_member && !myDepartmentIds.includes(m.department_id))
+      .map((m) => ({ id: m.department_id, name: m.department_name ?? String(m.department_id) })),
+  ]
   const [deptId, setDeptId] = useState<number | null>(null)
   const [hours, setHours] = useState('')
   const [workDate, setWorkDate] = useState(todayIso())

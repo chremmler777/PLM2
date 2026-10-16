@@ -452,6 +452,8 @@ class ReleaseService:
         blockers = await ReleaseService.blockers(session, change)
         answer = await ReleaseService._answer_rights(session, change, rows, user)
         unstaffed = await ReleaseService.unstaffed_department_ids(session, change, rows)
+        from app.services.change_people import coordinator_name, no_member_words
+        coordinator = await coordinator_name(session, change) if unstaffed else None
         return {
             "checks": [{
                 "key": r.check_key,
@@ -474,6 +476,10 @@ class ReleaseService:
                 # C7: the owner department has no member here; PM or the
                 # lead answer it (shown on the row, no silent dead end)
                 "run_team_answers": r.department_id in unstaffed,
+                # A5-04 d: the one phrase ('<X> has no member here: <lead
+                # name|Project Management> coordinates')
+                "no_member_hint": (no_member_words(names.get(r.department_id), coordinator)
+                                   if r.department_id in unstaffed else None),
             } for r in rows],
             "open_count": sum(1 for r in rows if r.status not in ANSWERED
                               and r.check_key not in retired),

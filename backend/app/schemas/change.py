@@ -1887,6 +1887,8 @@ class ValidationDepartmentState(BaseModel):
     all_passed: bool
     # C7: may this viewer record the department's checks (the backend rule)
     can_write: bool = False
+    # A5-04 d: '<X> has no member here: <lead|Project Management> coordinates'
+    no_member_hint: Optional[str] = None
 
 
 class ValidationStateResponse(BaseModel):

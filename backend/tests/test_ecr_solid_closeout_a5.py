@@ -180,3 +180,101 @@ async def test_a5_02_quality_corrects_wide_limits_and_the_fail_counts(client, fi
     issue = await _issue(client, fix)                              # HARD #3 holds
     assert issue["check_key"] == "weight"
 
+
+
+# --- A5-04 the member-less department fallback, complete and worded once ----
+
+from app.models.entities import User  # noqa: E402
+from app.models.workflow import UserDepartment  # noqa: E402
+
+
+async def _memberless(session_factory, fix, *names, lead="Project Manager"):
+    async with session_factory() as s:
+        for n in names:
+            (await s.get(User, fix["user"][n]["id"])).is_active = False
+        (await s.get(ChangeRequest, fix["change_id"])).lead_id = fix["user"][lead]["id"]
+        await s.commit()
+
+
+async def test_a5_04a_negative_the_lead_gets_the_checks_of_a_memberless_department(
+        client, fix, session_factory):
+    await _memberless(session_factory, fix, "Tool Engineer")
+    pm = await _auth(client, fix, "Project Manager")
+    tasks = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
+             if t["change_id"] == fix["change_id"] and t["kind"] == "validation_check"]
+    by_dept = {t["department_id"]: t for t in tasks}
+    tool = by_dept[fix["dept"]["Tool Engineer"]]
+    assert tool["reason"] == ("Tool Engineer has no member here: Project Manager "
+                              "coordinates: answer its checks")
+    assert tool["due_date"] is not None
+    # NEGATIVE: a staffed department's checks stay its own
+    assert fix["dept"]["Development"] not in by_dept
+    state = (await client.get(_url(fix, "/state"), headers=pm)).json()
+    hint = {d["department_name"]: d.get("no_member_hint") for d in state["departments"]}
+    assert hint["Tool Engineer"] == "Tool Engineer has no member here: Project Manager coordinates"
+    assert hint["Development"] is None
+
+
+async def test_a5_04b_negative_the_lead_books_hours_for_a_memberless_department(
+        client, fix, session_factory):
+    await _memberless(session_factory, fix, "Tool Engineer")
+    pm = await _auth(client, fix, "Project Manager")
+    url = f"/api/v1/changes/{fix['change_id']}/hours"
+    res = await client.post(url, headers=pm, json={
+        "department_id": fix["dept"]["Development"], "hours": 2})
+    assert res.status_code == 403, res.text                       # NEGATIVE
+    res = await client.post(url, headers=pm, json={
+        "department_id": fix["dept"]["Tool Engineer"], "hours": 3})
+    assert res.status_code in (200, 201), res.text
+    state = (await client.get(url, headers=pm)).json()
+    mine = {m["department_id"]: m for m in state["mine"]}
+    assert mine[fix["dept"]["Tool Engineer"]]["no_member"] is True
+    assert "no member here: Project Manager coordinates" in \
+        mine[fix["dept"]["Tool Engineer"]]["source_label"]
+    row = next(b for b in state["bookings"] if b["department_id"] == fix["dept"]["Tool Engineer"])
+    assert row["booked_by_name"] == "Project Manager"
+
+
+async def test_a5_04c_one_person_owes_fix_and_retest_one_row_fix_first(
+        client, fix, session_factory):
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=fix["user"]["Tool Engineer"]["id"],
+                             department_id=fix["dept"]["Process Engineer"]))
+        await s.commit()
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    due = date.today() + timedelta(days=3)
+    res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=await _who(client, fix, "Quality"),
+                            json={"owner": "process_parameters", "retest_due": due.isoformat()})
+    assert res.status_code == 200, res.text
+    tool = await _auth(client, fix, "Tool Engineer")
+    tasks = await _kinds(client, tool, fix["change_id"])
+    assert "validation_issue_fix_work" not in tasks
+    assert tasks["validation_issue_recheck"]["label"] == (
+        f"Fix VI-1, then retest by {due.strftime('%a %d %b')}")
+
+
+async def test_a5_04c_the_coordinator_reads_get_the_fixer_then_retest(
+        client, fix, session_factory):
+    await _memberless(session_factory, fix, "Tool Engineer", "Process Engineer")
+    # PM measures for the member-less Tool Engineer (it coordinates)
+    pm = await _auth(client, fix, "Project Manager")
+    res = await client.post(_url(fix, "/checks"), headers=pm, json={
+        "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
+        "measurement": {"sample_size": 5, "min_value": 509.0, "max_value": 518.0,
+                        "measuring_ref": "scale WG-0042, report MR-2026-118",
+                        "lower_limit": 495.0, "upper_limit": 515.0,
+                        "spec_source": "drawing 886.197 D, weight 505 g +/-10"}})
+    assert res.status_code == 201 and res.json()["status"] == "failed", res.text
+    iid = (await _issue(client, fix))["id"]
+    due = date.today() + timedelta(days=3)
+    await client.post(_iurl(fix, f"/{iid}/fix"), headers=await _who(client, fix, "Quality"),
+                      json={"owner": "process_parameters", "retest_due": due.isoformat()})
+    tasks = await _kinds(client, pm, fix["change_id"])
+    assert "validation_issue_fix_work" not in tasks
+    label = tasks["validation_issue_recheck"]["label"]
+    assert label.startswith(f"Get Process Engineer to fix VI-1, then retest by {due.strftime('%a %d %b')}")
+    assert label.endswith("(Tool Engineer has no member here: Project Manager coordinates)")
+    st = (await client.get(_url(fix, "/state"), headers=pm)).json()
+    assert "fix: Process Engineer (no member here: Project Manager coordinates), retest " \
+        f"{due.strftime('%a %d %b')}" in st["release_line"]

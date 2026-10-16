@@ -220,7 +220,7 @@ async def test_customer_concession_sales_asks_quality_decides(client, fix, sessi
     st = await _state(client, quality, fix)
     assert st["release_line"] is None
     assert st["active_concessions"][0]["text"] == (
-        f"Accepted under concession VI-1 until {until.isoformat()}")
+        f"Accepted under concession VI-1 until {until.strftime('%a %d %b')}")
 
 
 async def test_internal_concession_is_not_for_shipment_and_quality_decides(
@@ -465,6 +465,8 @@ async def test_fix_department_without_members_hands_the_work_to_the_lead(
     assert res.status_code == 200, res.text
     pm = await _auth(client, fix, "Project Manager")
     work = (await _kinds(client, pm, fix["change_id"]))["validation_issue_fix_work"]
-    assert "Process Engineer has no member here: you coordinate" in work["label"]
+    # A5-04 d: one phrase, naming who coordinates
+    assert "Process Engineer has no member here:" in work["label"]
+    assert work["label"].endswith("coordinates)")
     st = await _state(client, pm, fix)
-    assert "fix: Process Engineer (no member here: the lead coordinates)" in st["release_line"]
+    assert "fix: Process Engineer (no member here: Project Manager coordinates)" in st["release_line"]

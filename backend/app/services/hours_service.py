@@ -106,6 +106,19 @@ async def booked_by_department(session: AsyncSession, change_ids: list[int]
 class HoursService:
 
     @staticmethod
+    async def books_for_memberless(session: AsyncSession, change: ChangeRequest,
+                                   actor: User, dept_id: int) -> bool:
+        """A5-04 b (R20, R37): the lead or a Project Management member books
+        for a department with no real member here, so its estimate does not
+        stay 'not booked'; the booker's name stays on the row."""
+        from app.services.change_people import holds_lead, staffed_department_ids
+        from app.services.meeting_service import MeetingService
+        if not (holds_lead(change, actor)
+                or await MeetingService.user_is_pm_member(session, actor)):
+            return False
+        return dept_id not in await staffed_department_ids(session, change, [dept_id])
+
+    @staticmethod
     async def book(session: AsyncSession, change: ChangeRequest, spec: dict,
                    actor: User) -> ImplementationBooking:
         """Book hours (C15). The actor books for a department they are a
@@ -124,8 +137,11 @@ class HoursService:
                              "department)")
         admin = actor.effective_role == "admin"
         if not admin and not await WorkflowService.actor_in_department(
-                session, actor, dept_id):
-            raise HoursForbidden("You book hours for a department you belong to")
+                session, actor, dept_id) and not await HoursService.books_for_memberless(
+                    session, change, actor, dept_id):
+            raise HoursForbidden(
+                "You book hours for a department you belong to (the lead or "
+                "Project Management also for a department with no member here)")
         coordination = bool(spec.get("coordination"))
         if coordination and not (holds_lead(change, actor) or admin):
             raise HoursForbidden("Coordination is the change lead's row")
@@ -239,6 +255,32 @@ class HoursService:
                 "prefill_hours": left or None,
                 "source_label": (f"your estimate: {e:g} h"
                                  + (f", {b:g} h booked" if b else "")) if e else None})
+        # A5-04 b: the departments with no member here this viewer books for
+        coordinated = []
+        if actor.effective_role != "admin":
+            from app.services.change_people import (
+                coordinator_name, no_member_words, staffed_department_ids,
+            )
+            from app.services.meeting_service import MeetingService
+            rest = {d for d in dept_ids if d not in mine}
+            if rest and (holds_lead(change, actor)
+                         or await MeetingService.user_is_pm_member(session, actor)):
+                coordinated = sorted(rest - await staffed_department_ids(
+                    session, change, rest), key=lambda i: (names.get(i) or "", i))
+            if coordinated:
+                who = await coordinator_name(session, change)
+            for did in coordinated:
+                e = est.get((change.id, did))
+                b = booked.get((change.id, did), 0.0)
+                left = round(max((e or 0) - b, 0), 2)
+                prefill.append({
+                    "department_id": did, "department_name": names.get(did),
+                    "estimate_hours": e, "booked_hours": b,
+                    "prefill_hours": left or None, "no_member": True,
+                    "source_label": (
+                        no_member_words(names.get(did), who)
+                        + (f"; its estimate: {e:g} h" if e else "")
+                        + (f", {b:g} h booked" if b else ""))})
         until = window_until(change)
         return {
             "change_id": change.id, "window_open": window_open(change),

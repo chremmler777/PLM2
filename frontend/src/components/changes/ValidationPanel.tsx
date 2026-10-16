@@ -357,6 +357,11 @@ function DepartmentBlock({
             {t('costing.yourBucket')}
           </span>
         )}
+        {dept.no_member_hint && (
+          <span data-testid={`validation-no-member-${dept.department_id}`} className="text-[11px] text-amber-300">
+            {dept.no_member_hint}
+          </span>
+        )}
         <span data-testid={`validation-open-${dept.department_id}`}
           title={`${liveChecks(dept).length - open} of ${liveChecks(dept).length} checks passed`}
           className={`ml-auto rounded px-1.5 py-0 text-[11px] leading-tight font-medium tabular-nums ${

@@ -4059,6 +4059,19 @@ async def validation_state(
         db, change, [d["department_id"] for d in state["departments"]], current_user)
     for d in state["departments"]:
         d["can_write"] = rights.get(d["department_id"], False)
+    from app.services import cm_switches
+    if cm_switches.on("RELEASE_V2") and state["departments"]:
+        # A5-04 d: a department with no real member here says who answers
+        from app.services.change_people import (
+            coordinator_name, no_member_words, staffed_department_ids,
+        )
+        ids = [d["department_id"] for d in state["departments"]]
+        staffed = await staffed_department_ids(db, change, ids)
+        if set(ids) - staffed:
+            who = await coordinator_name(db, change)
+            for d in state["departments"]:
+                if d["department_id"] not in staffed:
+                    d["no_member_hint"] = no_member_words(d["department_name"], who)
     # A5-02: the confirm button follows the backend rule
     pending = [c for d in state["departments"] for c in d["checks"]
                if c.get("limits_pending") and c.get("check_id")]

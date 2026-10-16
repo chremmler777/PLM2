@@ -71,6 +71,19 @@ describe('BookHoursDialog', () => {
     expect(opts).not.toContain('Tool Engineer')
     expect(screen.queryByTestId('book-hours-coordination')).toBeNull()
   })
+  it('A5-04: the lead books for a department with no member here, worded', async () => {
+    vi.mocked(hoursApi.get).mockResolvedValue(state({
+      mine: [{ department_id: 4, department_name: 'Tool Engineer', estimate_hours: 10, booked_hours: 4,
+        prefill_hours: 6, no_member: true,
+        source_label: 'Tool Engineer has no member here: Holmes coordinates; its estimate: 10 h, 4 h booked' }],
+    }))
+    wrap(<BookHoursDialog changeId={7} open onClose={() => {}}
+      departments={[{ id: 2, name: 'Development' }, { id: 4, name: 'Tool Engineer' }]} myDepartmentIds={[2]} />)
+    await waitFor(() => expect([...(screen.getByTestId('book-hours-dept') as HTMLSelectElement).options]
+      .map((o) => o.text)).toContain('Tool Engineer'))
+    fireEvent.change(screen.getByTestId('book-hours-dept'), { target: { value: '4' } })
+    expect(screen.getByTestId('book-hours-source').textContent).toContain('Holmes coordinates')
+  })
 })
 
 describe('HoursCard', () => {

@@ -96,8 +96,11 @@ describe('ReleaseChecklist', () => {
 
   it('C7: a department with no member here says who answers', () => {
     wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[]} canManage editable
-      checks={[check({ department_name: 'Scheduling', run_team_answers: true, can_answer: true })]} />)
-    expect(screen.getByTestId('release-run-team-Scheduling').textContent).toMatch(/PM or the lead answers/)
+      checks={[check({ department_name: 'Scheduling', run_team_answers: true, can_answer: true,
+        no_member_hint: 'Scheduling has no member here: Holmes coordinates' })]} />)
+    // A5-04 d: the backend's one phrase, naming who coordinates
+    expect(screen.getByTestId('release-run-team-Scheduling').textContent)
+      .toBe('Scheduling has no member here: Holmes coordinates')
   })
 
   it('done saves without a note', async () => {
