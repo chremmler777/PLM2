@@ -2078,6 +2078,17 @@ async def update_change(
             status_code=403,
             detail="Only Sales, Project Management or an admin may make this "
                    "a customer change")
+    # [R4] the way back (customer -> internal) drops the Sales owner: the
+    # lead decides it only with a starter's or Project Management's rights,
+    # so an engineering raiser cannot quietly take the customer off
+    if (fields.get("customer_relevant") is False and change.customer_relevant
+            and current_user.effective_role != "admin"
+            and not await ChangeService.user_can_start_change(db, current_user)
+            and not await MeetingService.user_is_pm_member(db, current_user)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the change lead in Sales or Project Management, or an "
+                   "admin, may make this an internal change")
     await _require_patch_rights(db, change, fields, current_user)
     if "lead_id" in fields and fields["lead_id"] is not None \
             and fields["lead_id"] != change.lead_id:

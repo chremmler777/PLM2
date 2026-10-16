@@ -159,8 +159,15 @@ class Viewer:
 
     @property
     def cost_role(self) -> bool:
-        # the price rule (price_redaction.PriceViewer): admin, lead, PM, Sales
+        # who RECORDS the extra cost: admin, lead, PM, Sales
         return self.admin or self.lead or self.pm or self.sales
+
+    @property
+    def cost_read(self) -> bool:
+        # who READS it: the price rule (price_redaction.PriceViewer), which
+        # adds Management (P4): it gives the OK on Absorb and concession
+        # money, so it sees the amounts it is asked about
+        return self.cost_role or self.management
 
     def in_dept(self, dept_id: Optional[int]) -> bool:
         return dept_id is not None and dept_id in self.dept_ids
@@ -2713,8 +2720,8 @@ class ValidationIssueService:
                 "fix_set_by_name": users.get(i.fix_set_by),
                 "new_timing_date": i.new_timing_date,
                 "customer_escalation_id": i.customer_escalation_id,
-                "cost_visible": v.cost_role,
-                "extra_cost": i.extra_cost if v.cost_role else None,
+                "cost_visible": v.cost_read,
+                "extra_cost": i.extra_cost if v.cost_read else None,
                 "cost_set": i.extra_cost is not None,
                 "currency": currency,
                 "cost_bearer": i.cost_bearer,

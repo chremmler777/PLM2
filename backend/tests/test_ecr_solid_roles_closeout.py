@@ -315,3 +315,70 @@ async def test_a1_07_admin_outside_quality_cannot_sign_the_change(
     _, q = await _user(client, session_factory, seed, "q7", "Quality")
     res = await client.post(url, json={"role": "quality"}, headers=q)
     assert res.status_code != 403, res.text     # refused later for the status, not the role
+
+
+# ---- A1-08: Management reads the extra cost of validation issues ----------
+
+@pytest.mark.asyncio
+async def test_a1_08_management_sees_extra_cost_toolshop_does_not(
+        client, session_factory, seed):
+    from tests.test_validation_issues import _make, _raised, _auth, _url
+    vi = await _make(session_factory, seed, management=True)
+    iid = (await _raised(client, vi))["id"]
+    pm = await _auth(client, vi, "pm")
+    r = await client.post(_url(vi, f"/{iid}/cost"), headers=pm,
+                          json={"extra_cost": 5000, "cost_bearer": "internal"})
+    assert r.status_code == 200, r.text
+    boss = await _auth(client, vi, "boss")
+    seen = (await client.get(_url(vi), headers=boss)).json()[0]
+    assert seen["extra_cost"] == 5000 and seen["cost_visible"] is True
+    # reading is not recording: Management gets no "cost" action
+    assert "cost" not in seen["next_acts"]
+    tool = await _auth(client, vi, "tool")
+    seen = (await client.get(_url(vi), headers=tool)).json()[0]
+    assert seen["extra_cost"] is None and seen["cost_visible"] is False
+
+
+# ---- A1-09: a manual flip moves the lead; the way back is not the raiser's -
+
+@pytest.mark.asyncio
+async def test_a1_09_manual_flip_moves_lead_and_raiser_cannot_flip_back(
+        client, admin_auth, seed, session_factory):
+    from app.models.change import ChangeRequest
+    from app.models.workflow import Department, ProjectResponsible
+    eng_id, eng = await _user(client, session_factory, seed, "eng9", "Development")
+    sales_id, sales = await _user(client, session_factory, seed, "sales9", "Sales")
+    pm_id, _ = await _user(client, session_factory, seed, "pm9", "Project Manager")
+    async with session_factory() as s:
+        sales_dept = (await s.execute(select(Department).where(
+            Department.name == "Sales"))).scalar_one()
+        sales_dept.can_start_change = True
+        pm_dept = (await s.execute(select(Department).where(
+            Department.name == "Project Manager"))).scalar_one()
+        s.add(ProjectResponsible(project_id=seed["project_id"],
+                                 department_id=pm_dept.id, user_id=pm_id))
+        c = ChangeRequest(change_number="CR-A9", project_id=seed["project_id"],
+                          title="a9", change_type="physical_part", status="scoping",
+                          customer_relevant=False, origin="internal",
+                          raised_by=eng_id, lead_id=eng_id)
+        s.add(c)
+        await s.commit()
+        cid = c.id
+    url = f"/api/v1/changes/{cid}"
+    # Sales makes it a customer change: the project PM leads it now.
+    res = await client.patch(url, json={"customer_relevant": True}, headers=sales)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        assert c.customer_relevant is True and c.lead_id == pm_id
+        # the engineering raiser leads it again (e.g. no PM picked it up) ...
+        c.lead_id = eng_id
+        await s.commit()
+    # ... and still may not take the customer off by PATCH (403).
+    res = await client.patch(url, json={"customer_relevant": False}, headers=eng)
+    assert res.status_code == 403, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).customer_relevant is True
+    # An admin may.
+    res = await client.patch(url, json={"customer_relevant": False}, headers=admin_auth)
+    assert res.status_code == 200, res.text

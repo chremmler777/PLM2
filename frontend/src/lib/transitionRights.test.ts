@@ -69,8 +69,11 @@ describe('mayMoveCarrier (P3 / C10)', () => {
     expect(mayMoveCarrier(false, { ...engineer, isChangeLead: true })).toBe(false)
     expect(mayMoveCarrier(false, engineer)).toBe(false)
   })
-  it('keeps the way back for the lead and the admin', () => {
-    expect(mayMoveCarrier(true, { ...engineer, isChangeLead: true })).toBe(true)
+  it('keeps the way back for a starter or PM lead and the admin, not the engineering raiser', () => {
+    expect(mayMoveCarrier(true, { ...engineer, isChangeLead: true })).toBe(false)
+    expect(mayMoveCarrier(true, { ...starter, isChangeLead: true })).toBe(true)
+    expect(mayMoveCarrier(true, { ...engineer, isChangeLead: true, isPm: true })).toBe(true)
+    expect(mayMoveCarrier(true, { ...none, canStartChange: false, isAdmin: true })).toBe(true)
     expect(mayMoveCarrier(true, { ...starter, isSales: true })).toBe(false)
     expect(mayMoveCarrier(true, { ...starter, isPm: true })).toBe(false)
   })

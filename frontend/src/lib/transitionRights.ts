@@ -65,14 +65,15 @@ export function mayTransition(
  * mirrors PATCH customer_relevant)? Internal to customer is a starter's call:
  * Sales, Project Management or an admin (`canStartChange`, the backend's
  * permissions answer), whether or not they lead the change; an engineering
- * lead may not. Customer to internal stays the lead's (or an admin's).
+ * lead may not. Customer to internal drops the Sales owner [R4]: the lead
+ * with a starter's or Project Management's rights, or an admin.
  */
 export function mayMoveCarrier(
   customerRelevant: boolean,
   v: Viewer & { canStartChange: boolean },
 ): boolean {
   if (v.isAdmin) return true
-  if (customerRelevant) return v.isChangeLead
+  if (customerRelevant) return v.isChangeLead && (v.canStartChange || v.isPm)
   return v.canStartChange && (v.isChangeLead || v.isPm || v.isSales)
 }
 

@@ -1996,9 +1996,11 @@ The engineering lead (or a lead from any department that does not start
 changes, e.g. Quality) gets 403 "Only Sales, Project Management or an admin
 may make this a customer change", and neither the Cost carrier editor nor the
 D1 panel offers it (`lib/transitionRights.mayMoveCarrier`, from
-`permissions.can_start_change`). The way back (customer to internal) stays
-the lead's or an admin's. Moving the lead to the project PM on the flip
-comes with the customer flip of lane L4 (spec §0 [R4]). An internal change with a lead is its run
+`permissions.can_start_change`). The way back (customer to internal) drops
+the Sales owner: the lead decides it only with a starter's or Project
+Management's rights, or an admin (close-out A1-09), so an engineering raiser
+cannot take the customer off. A manual flip moves the lead to the project PM
+like the PPAP flip (spec §0 [R4]); with no PM on the project the lead stays. An internal change with a lead is its run
 team's to hand over: the kickoff task goes to the lead and Project Management
 only, and Sales has no capture hop (scoping, reject) on it; the stage badge
 at capture reads "Lead", not "Sales" ("PM" while nobody leads it). A change with no lead shows "No lead

@@ -6406,6 +6406,20 @@ class ChangeService:
             elif change.sales_owner_id is None and "sales_owner_id" not in fields:
                 change.sales_owner_id = await ChangeService.default_sales_owner_id(
                     session, change.project_id, True, change.origin)
+            # spec §0 [R4]: a customer change is led by the project PM, the
+            # same as the PPAP flip; with no PM on the project the lead stays
+            if (cust_rel and not change.customer_relevant
+                    and fields.get("lead_id") is None):
+                from app.services.project_team_service import ProjectTeamService
+                pm = await ProjectTeamService.responsible_user_id(
+                    session, change.project_id, "Project Manager")
+                if pm is not None and pm != change.lead_id:
+                    await ChangeService.append_changelog(
+                        session, change, "lead_changed",
+                        f"Change lead {change.lead_id} -> {pm} (customer change: "
+                        "the project PM leads)", user_id,
+                        field_name="lead_id", old_value=change.lead_id, new_value=pm)
+                    change.lead_id = pm
 
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null
