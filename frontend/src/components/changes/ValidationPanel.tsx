@@ -40,7 +40,7 @@ import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDial
 import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
 import { toastError } from '../../lib/apiError'
 import MeasurementForm, { MeasurementHistory } from './validation/MeasurementForm'
-import { requestBookHours } from '../../api/hours'
+import { hoursApi, hoursKey, requestBookHours } from '../../api/hours'
 import { Check, X } from 'lucide-react'
 import { btnSm } from '../common/buttonStyles'
 
@@ -339,6 +339,13 @@ function DepartmentBlock({
   hasCosting?: boolean
 }) {
   const open = departmentOpenChecks(dept)
+  // C15: the confirm is offered once the department's checks all passed,
+  // and only until its hours are booked (the one confirm, not a nag)
+  const partDone = mine && editable && open === 0 && liveChecks(dept).length > 0
+  const { data: hours } = useQuery({
+    queryKey: hoursKey(changeId), queryFn: () => hoursApi.get(changeId), enabled: partDone,
+  })
+  const booked = (hours?.mine ?? []).some((m) => m.department_id === dept.department_id && (m.booked_hours ?? 0) > 0)
   return (
     <section data-testid={`validation-block-${dept.department_id}`}
       className="rounded-lg border border-slate-700 bg-slate-800 p-3 space-y-2 text-sm">
@@ -358,7 +365,7 @@ function DepartmentBlock({
       </div>
       {/* C15: the department's last check passed: its last action, the one
           prefilled confirm of its hours */}
-      {mine && editable && open === 0 && liveChecks(dept).length > 0 && (
+      {partDone && !booked && (
         <button type="button" data-testid={`validation-book-hours-${dept.department_id}`}
           onClick={() => requestBookHours({ departmentId: dept.department_id, confirm: true })}
           className="text-xs text-sky-300 underline decoration-dotted hover:text-sky-200">

@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ValidationPanel, { departmentOpenChecks, weightAckOutstanding } from './ValidationPanel'
 import { changesApi } from '../../api/changes'
+import { hoursApi } from '../../api/hours'
 import { t } from '../../i18n/cmLabels'
 import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID } from '../../lib/format'
 
@@ -15,6 +16,11 @@ vi.mock('../../api/changes', () => ({
   },
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+vi.mock('../../api/hours', () => ({
+  hoursKey: (id: number) => ['change', id, 'hours'],
+  hoursApi: { get: vi.fn() },
+  requestBookHours: vi.fn(),
+}))
 
 const departments = [{ id: 2, name: 'Development' }, { id: 4, name: 'Tool Engineer' }]
 
@@ -235,6 +241,21 @@ describe('ValidationPanel', () => {
     render_({ canSeeAll: true, myDepartmentIds: [] })
     expect(await screen.findByTestId('validation-pass-4-sampled')).toBeDefined()
     expect(screen.queryByTestId('validation-pass-2-revision_bump')).toBeNull()
+  })
+
+  it('C15: "your part is done: confirm your hours" until the hours are booked', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({ status: 'passed' })], can_write: true }],
+    }) as never)
+    vi.mocked(hoursApi.get).mockResolvedValue({ mine: [{ department_id: 4, booked_hours: 0 }] } as never)
+    render_()
+    expect(await screen.findByTestId('validation-book-hours-4')).toBeDefined()
+    cleanup()
+    vi.mocked(hoursApi.get).mockResolvedValue({ mine: [{ department_id: 4, booked_hours: 6 }] } as never)
+    render_()
+    await screen.findByTestId('validation-block-4')
+    await waitFor(() => expect(hoursApi.get).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByTestId('validation-book-hours-4')).toBeNull())
   })
 
   it('escalates back to implementation with a written reason', async () => {
