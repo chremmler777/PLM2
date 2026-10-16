@@ -90,8 +90,12 @@ async def _obtain_rows(client, auth, cid):
 
 
 async def _answer(client, auth, cid, concern_id, note="An answer"):
+    # SCOPING_V2 (A2-02): a scoping question takes the answer form
     return await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                             json={"note": note}, headers=auth)
+                             json={"note": note, "answer_kind": "assumed",
+                                   "assumed_value": "n/a",
+                                   "assumed_risk": "rework if it is wrong"},
+                             headers=auth)
 
 
 # --- 1. questions stay the asking department's -----------------------------

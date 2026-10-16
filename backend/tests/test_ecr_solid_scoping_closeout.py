@@ -118,3 +118,54 @@ async def test_a2_01_room_carrier_internal_drops_the_sales_owner(
     assert res.status_code == 200, res.text
     c = await _get(session_factory, cid)
     assert c.customer_relevant is False and c.sales_owner_id is None
+
+
+# ---- A2-02: a scoping question is answered Confirmed or Assumed -----------
+
+async def test_a2_02_scoping_question_refuses_a_bare_ok(
+        client, admin_auth, seed, session_factory):
+    from tests.test_ecr_solid_scoping_v2 import (
+        _scoping, _user as _sv_user, _question, _raise)
+    cid, _ = await _scoping(client, admin_auth, seed, "a202")
+    _, proc, pe = await _sv_user(client, session_factory, seed, "pe202", "Process Engineer")
+    _, _, sales = await _sv_user(client, session_factory, seed, "sa202", "Sales")
+    q = (await _raise(client, pe, cid, _question(proc))).json()
+    url = f"/api/v1/changes/{cid}/concerns/{q['id']}/answer"
+    # negative: a typed scoping question takes no free 'ok'
+    res = await client.post(url, json={"note": "ok"}, headers=sales)
+    assert res.status_code == 400, res.text
+    assert "Confirmed" in res.json()["detail"]
+    # a legacy (untyped) needs_info question in scoping neither
+    from app.models.change import ChangeConcern
+    async with session_factory() as s:
+        legacy = ChangeConcern(change_id=cid, raised_by=seed["admin_id"],
+                               kind="needs_info", note="Legacy: which grain?")
+        s.add(legacy)
+        await s.commit()
+        lid = legacy.id
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{lid}/answer",
+                            json={"note": "ok"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    # the answer form passes
+    res = await client.post(url, json={
+        "answer_kind": "assumed", "assumed_value": "90000", "assumed_unit": "pcs/yr",
+        "assumed_risk": "tool too small"}, headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_a2_02_switch_off_keeps_the_free_answer(
+        client, admin_auth, seed, session_factory, monkeypatch):
+    from tests.test_ecr_solid_scoping_v2 import _scoping
+    from app.services import cm_switches
+    from app.models.change import ChangeConcern
+    cid, _ = await _scoping(client, admin_auth, seed, "a202off")
+    async with session_factory() as s:
+        legacy = ChangeConcern(change_id=cid, raised_by=seed["admin_id"],
+                               kind="needs_info", note="Which grain?")
+        s.add(legacy)
+        await s.commit()
+        lid = legacy.id
+    monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{lid}/answer",
+                            json={"note": "Grain K31 per mail 12 Oct"}, headers=admin_auth)
+    assert res.status_code == 200, res.text

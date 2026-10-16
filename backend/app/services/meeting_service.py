@@ -1639,12 +1639,16 @@ class MeetingService:
                     "Only the asking department (or the person who asked), "
                     "Sales or Project Management may answer this question")
             # C33 answer form (spec §0): Confirmed (evidence) or Assumed
-            # (value + unit, risk if wrong, who confirms by when). Without
-            # answer_kind the legacy free answer stands, except for a C8
-            # question from an assessment: it holds a submit, so "ok" is no
-            # answer (R4)
-            if (answer_kind is None and v2 and concern.flag_type == "question"
-                    and cm_switches.on("SCOPING_V2")):
+            # (value + unit, risk if wrong, who confirms by when). With
+            # SCOPING_V2 on, every scoping question (legacy untyped ones
+            # included, A2-02) and a C8 question from an assessment take the
+            # form: "ok" is no answer (R4). Switched off, the free answer
+            # stands.
+            from app.services import mother_plants as mp
+            scoping_q = (change.status in SCOPING_STATUSES and concern.is_question
+                         and not mp.is_mother_plant(change))
+            if (answer_kind is None and cm_switches.on("SCOPING_V2")
+                    and (scoping_q or (v2 and concern.flag_type == "question"))):
                 raise ChangeError(
                     "Answer it Confirmed (with its evidence: a filed mail, a "
                     "document or a reference) or Assumed (value with its unit, "

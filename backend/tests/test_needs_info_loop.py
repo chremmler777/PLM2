@@ -28,6 +28,13 @@ async def _change_in_scoping(client, auth, seed, suffix):
     return cid
 
 
+#: SCOPING_V2 (A2-02): a scoping question is answered Confirmed or Assumed;
+#: these tests are about who answers and where the task goes, so they give
+#: an Assumed answer. The free-answer content rules run with the switch off.
+ASSUMED = {"answer_kind": "assumed", "assumed_value": "n/a",
+           "assumed_risk": "rework if it is wrong"}
+
+
 async def _upload(client, auth, cid, name, **form):
     return await client.post(
         f"/api/v1/changes/{cid}/attachments",
@@ -249,14 +256,14 @@ async def test_sales_answers_but_does_not_settle(
         client, admin_auth, seed, session_factory, "7")
     sales = await _sales_member(client, session_factory, seed)
 
-    # substance is required
+    # substance is required: the answer form (SCOPING_V2, A2-02)
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                             json={"note": "   "}, headers=sales)
     assert res.status_code == 400
-    assert "needs content" in res.json()["detail"]
+    assert "Confirmed" in res.json()["detail"]
 
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "Customer sent rev C"}, headers=sales)
+                            json={**ASSUMED, "note": "Customer sent rev C"}, headers=sales)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["answer_note"] == "Customer sent rev C"
@@ -300,7 +307,7 @@ async def test_attribution_to_sales_gives_sales_no_settle_right(
     # Sales answers — that is their part, and it changes nothing about who
     # decides the answer was good enough.
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "Customer confirmed rev D"}, headers=sales)
+                            json={**ASSUMED, "note": "Customer confirmed rev D"}, headers=sales)
     assert res.status_code == 200, res.text
 
     # the close-question errand goes to the asker, not to Sales
@@ -330,7 +337,7 @@ async def test_re_answering_overwrites_and_keeps_every_round_in_the_chain(
     sales = await _sales_member(client, session_factory, seed)
     for note in ("Asked the customer", "Customer sent rev C"):
         res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                                json={"note": note}, headers=sales)
+                                json={**ASSUMED, "note": note}, headers=sales)
         assert res.status_code == 200, res.text
     assert res.json()["answer_note"] == "Customer sent rev C"
 
@@ -342,7 +349,10 @@ async def test_re_answering_overwrites_and_keeps_every_round_in_the_chain(
 
 
 async def test_a_document_in_the_container_is_content_enough(
-        client, admin_auth, seed, session_factory):
+        client, admin_auth, seed, session_factory, monkeypatch):
+    # the legacy free answer: SCOPING_V2 off (A2-02)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "9")
     sales = await _sales_member(client, session_factory, seed)
@@ -430,7 +440,7 @@ async def test_obtain_info_task_clears_on_the_answer_not_the_settlement(
 
     assert len(await rows()) == 1
     await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                      json={"note": "Answered by phone"}, headers=sales)
+                      json={**ASSUMED, "note": "Answered by phone"}, headers=sales)
     assert await rows() == []          # Sales is done; the flag is still open
 
     concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
@@ -488,7 +498,10 @@ async def test_container_validations(
 
 
 async def test_substance_is_counted_per_container(
-        client, admin_auth, seed, session_factory):
+        client, admin_auth, seed, session_factory, monkeypatch):
+    # the legacy free answer: SCOPING_V2 off (A2-02)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_V2", False)
     """A document filed into ANOTHER question does not answer this one."""
     cid, first, depts = await _open_team_flag(
         client, admin_auth, seed, session_factory, "15")
@@ -576,7 +589,7 @@ async def test_department_raised_question_reaches_sales(
     assert got[0]["department_id"] == apqp_id
 
     await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                      json={"note": "Class 2"}, headers=sales)
+                      json={**ASSUMED, "note": "Class 2"}, headers=sales)
     assert await rows() == []
 
 
@@ -685,7 +698,7 @@ async def test_answered_department_question_reaches_that_department_and_pm(
     assert await _close_rows(client, pm["auth"], cid) == []
 
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "Class 2 per the drawing"}, headers=sales)
+                            json={**ASSUMED, "note": "Class 2 per the drawing"}, headers=sales)
     assert res.status_code == 200, res.text
 
     for who in (apqp, pm):
@@ -720,7 +733,7 @@ async def test_answered_team_flag_goes_to_project_management(
         session_factory, cid, kind="needs_info", note="Customer drawing?",
         raised_by=seed["admin_id"])
     await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                      json={"note": "Rev C received"}, headers=sales)
+                      json={**ASSUMED, "note": "Rev C received"}, headers=sales)
 
     rows = await _close_rows(client, pm["auth"], cid)
     assert len(rows) == 1
@@ -752,7 +765,7 @@ async def test_pm_sees_both_kinds_and_counts_them_once_per_change(
         raised_by=tool["user_id"], department_id=tool["dept_id"])
     for concern_id, note in ((team, "Team answer"), (dept, "Tool answer")):
         await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                          json={"note": note}, headers=sales)
+                          json={**ASSUMED, "note": note}, headers=sales)
 
     rows = await _close_rows(client, pm["auth"], cid)
     assert len(rows) == 1                      # one errand per change
@@ -845,13 +858,13 @@ async def test_sales_still_answers_a_team_flag_an_outsider_does_not(
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "26")
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "I asked the customer"}, headers=eng_auth)
+                            json={**ASSUMED, "note": "I asked the customer"}, headers=eng_auth)
     assert res.status_code == 400
     assert "Sales" in res.json()["detail"]
 
     sales = await _sales_member(client, session_factory, seed)
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "Customer sent rev C"}, headers=sales)
+                            json={**ASSUMED, "note": "Customer sent rev C"}, headers=sales)
     assert res.status_code == 200, res.text
 
 
@@ -871,7 +884,7 @@ async def test_a_scoping_question_is_answered_by_its_asking_department(
         raised_by=seed["admin_id"], department_id=dept_id)
 
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "Class 2"}, headers=eng_auth)
+                            json={**ASSUMED, "note": "Class 2"}, headers=eng_auth)
     assert res.status_code == 400
     assert "asking department" in res.json()["detail"]
 
@@ -880,5 +893,5 @@ async def test_a_scoping_question_is_answered_by_its_asking_department(
         s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
         await s.commit()
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
-                            json={"note": "Class 2"}, headers=eng_auth)
+                            json={**ASSUMED, "note": "Class 2"}, headers=eng_auth)
     assert res.status_code == 200, res.text

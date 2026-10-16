@@ -246,6 +246,10 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   answer it confirms it with evidence (`POST /concerns/{id}/confirm`). When
   the person named is the Sales owner, the row shows to all of Sales with the
   owner's name ([R3]); closed, cancelled or rejected changes take no confirm.
+  The form is required for every question in captured/scoping (legacy untyped
+  `needs_info` questions included) and for a C8 question from an assessment:
+  a bare note ("ok") is 400 (close-out A2-02, R4). The free note stays for
+  SCOPING_V2 off, mother-plant changes and assessment proposals.
   Answering still does not close: the asker or PM closes [KEEP].
 - **Proceed dialog**: open questions as a fix list (*Answer now* with the
   answer form, *Make it a check item*), check items collapsed by owner with
