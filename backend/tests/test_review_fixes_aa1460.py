@@ -102,7 +102,8 @@ async def test_recheck_waits_for_validation():
         is_open=True, status="revalidation", check_id=1, department_id=5,
         route="rework", containment="c", root_cause="rc", created_by=1,
         severity=2, customer_inform=False, customer_decision=None,
-        extra_cost=0, escalation_level=1, cost_bearer=None, fix_quoted_at=None)
+        extra_cost=0, escalation_level=1, cost_bearer=None, fix_quoted_at=None,
+        fix_department_id=None)
     for status, offered in (("in_implementation", False), ("in_validation", True)):
         change = SimpleNamespace(lead_id=None, status=status)
         v = Viewer(user, change, {5}, {5: "Tool Engineer"})

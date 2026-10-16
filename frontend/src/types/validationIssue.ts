@@ -39,6 +39,8 @@ export type IssueAct =
   /** ECR-solid §10: Quality's Fix task (who fixes, retest date) and the
    * concession requested beside it. */
   | 'fix' | 'concession_request'
+  /** Quality changes who fixes or the retest date (quiet, once picked). */
+  | 'refix'
 
 /**
  * Acts the card shows outside the step flow (backend `extra_acts`). On a

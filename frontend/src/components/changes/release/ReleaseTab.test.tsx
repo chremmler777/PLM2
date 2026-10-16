@@ -81,6 +81,25 @@ describe('ReleaseChecklist', () => {
       { status: 'na', note: 'Weight unchanged' }))
   })
 
+  it("C7: on a customer change n.a. of the customer's approval names the waiver", () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[4]} canManage={false} editable
+      checks={[check({ key: 'customer_approval', label: "Customer's approval", needs_ref: true, na_needs_ref: true })]} />)
+    fireEvent.click(screen.getByTestId('release-check-customer_approval-na'))
+    const confirm = screen.getByTestId('release-check-customer_approval-confirm') as HTMLButtonElement
+    const note = screen.getByTestId('release-check-customer_approval-note') as HTMLInputElement
+    expect(note.placeholder).toMatch(/waiving the approval/)
+    fireEvent.change(note, { target: { value: 'x' } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(note, { target: { value: 'customer mail 2026-10-12' } })
+    expect(confirm.disabled).toBe(false)
+  })
+
+  it('C7: a department with no member here says who answers', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[]} canManage editable
+      checks={[check({ department_name: 'Scheduling', run_team_answers: true, can_answer: true })]} />)
+    expect(screen.getByTestId('release-run-team-Scheduling').textContent).toMatch(/PM or the lead answers/)
+  })
+
   it('done saves without a note', async () => {
     wrap(<ReleaseChecklist changeId={7} checks={[check()]} myDepartmentIds={[4]} canManage={false} editable />)
     fireEvent.click(screen.getByTestId('release-check-weight_measured-done'))

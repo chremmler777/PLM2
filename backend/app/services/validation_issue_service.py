@@ -1411,6 +1411,15 @@ class ValidationIssueService:
                 ChangeAttachment.validation_issue_id == issue.id,
                 ChangeAttachment.kind == "customer_email"))).scalar())
 
+    @staticmethod
+    async def customer_mail_at(session: AsyncSession,
+                               issue: ValidationIssue) -> Optional[datetime]:
+        """When the (last) customer mail was filed into the issue."""
+        return (await session.execute(
+            select(func.max(ChangeAttachment.created_at)).where(
+                ChangeAttachment.validation_issue_id == issue.id,
+                ChangeAttachment.kind == "customer_email"))).scalar()
+
     ATTACH_KINDS = ("general", "customer_email")
 
     @staticmethod
@@ -1975,6 +1984,10 @@ class ValidationIssueService:
         svc = ValidationIssueService
         if not svc.fix_rule_on():
             return None
+        if change.status not in ("in_implementation", "in_validation"):
+            # nobody could work an issue raised on a released or closed
+            # change (the work window): no issue, no notices
+            return None
         issue = (await session.execute(
             select(ValidationIssue).where(
                 ValidationIssue.check_id == check.id,
@@ -2055,8 +2068,10 @@ class ValidationIssueService:
         dept_id = spec.get("department_id")
         if kind in svc.FIX_DEPARTMENTS and dept_id is None:
             dept_id = await svc._dept_id(session, svc.FIX_DEPARTMENTS[kind])
-        if dept_id is None or await session.get(Department, dept_id) is None:
-            raise ChangeError("Name the department that fixes it")
+        from app.services.change_people import department_is_active
+        if dept_id is None or not await department_is_active(session, dept_id):
+            raise ChangeError("Name the department that fixes it (an active "
+                              "department)")
         supplier = _txt(spec.get("supplier_name"), "The supplier", required=False,
                         limit=120)
         if kind == "tool_at_supplier":
@@ -2235,6 +2250,9 @@ class ValidationIssueService:
                 ValidationIssue.change_id == change.id,
                 ValidationIssue.check_id.in_([c.id for c in failed]))
             .order_by(ValidationIssue.id))).scalars().all()}
+        from app.services.change_people import staffed_department_ids
+        fix_depts = {i.fix_department_id for i in issues.values() if i.fix_department_id}
+        unstaffed = fix_depts - await staffed_department_ids(session, change, fix_depts)
         parts = []
         for c in failed:
             if await svc.check_retired(session, c):
@@ -2247,6 +2265,8 @@ class ValidationIssueService:
             fix = "fix: not assigned (Quality)"
             if i is not None and i.fix_department_id is not None:
                 fix = (f"fix: {names.get(i.fix_department_id)}"
+                       + (" (no member here: the lead coordinates)"
+                          if i.fix_department_id in unstaffed else "")
                        + (f", retest {i.retest_due.strftime('%a %d %b')}"
                           if i.retest_due else ""))
             conc = "concession: none"
@@ -2336,7 +2356,8 @@ class ValidationIssueService:
 
     # Acts that are not a step of the issue: never the primary button (the
     # frontend's QUIET list), add_action excepted when it is the only way on.
-    QUIET_ACTS = ("edit", "attach", "escalate", "add_action", "concession_request")
+    QUIET_ACTS = ("edit", "attach", "escalate", "add_action", "concession_request",
+                  "refix")
 
     @staticmethod
     def _needs_new_action(issue: ValidationIssue, actions: list) -> bool:
@@ -2411,9 +2432,11 @@ class ValidationIssueService:
         if svc.fix_rule_on() and v.quality and change.status in WORK_STATUSES:
             # §10: Quality's Fix task (who fixes, retest date) on a failed
             # check, and the concession beside it
+            # the concession runs in parallel: asking the customer does not
+            # take the Fix pick away, and a pick may be changed (refix)
             if chk is not None and chk.status == "failed" \
-                    and issue.fix_department_id is None and issue.route is None:
-                acts.append("fix")
+                    and issue.route in (None, "customer_concession"):
+                acts.append("fix" if issue.fix_department_id is None else "refix")
             if issue.route is None:
                 acts.append("concession_request")
         if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
@@ -2689,6 +2712,10 @@ class ValidationIssueService:
                 "Fix {ref}: pick who fixes and the retest date"),
         "fix_work": ("validation_issue_fix_work", "Fix {ref}: {what}, retest {when}"),
     }
+    #: §10 (RELEASE_V2) the concession's two tasks: Sales asks the customer
+    #: and files the mail; Quality decides once it is filed
+    CONCESSION_ASK = "Ask the customer about the concession for {ref} and file the mail"
+    CONCESSION_DECIDE = "Decide concession {ref}: for a quantity or until a date"
 
     @staticmethod
     async def my_actions(session: AsyncSession, change: ChangeRequest,
@@ -2705,6 +2732,15 @@ class ValidationIssueService:
         acts = await svc.actions_of(session, ids)
         escs = await svc.escalations_of(session, ids)
         retired = await svc._retired_by_issue(session, issues)
+        from app.services.change_people import staffed_department_ids
+        fix_depts = {i.fix_department_id for i in issues if i.fix_department_id}
+        # §10: a fix department with no real member here hands its work task
+        # to the lead (no lead: PM), never to nobody
+        unstaffed_fix = (fix_depts - await staffed_department_ids(
+            session, change, fix_depts)) if fix_depts and svc.fix_rule_on() else set()
+        coordinates = v.lead or (change.lead_id is None and v.pm)
+        pm_dept = await svc._dept_id(session, PM_DEPARTMENT)
+        quality_dept = await svc._dept_id(session, QUALITY_DEPARTMENT)
         out = []
         for i in issues:
             possible, _primary, extra = await svc.next_acts(
@@ -2726,9 +2762,14 @@ class ValidationIssueService:
                     a.status == "open" and (a.owner_id == v.id or v.in_dept(a.department_id))
                     for a in acts[i.id]):
                 owed.append("action_done")
+            concession = (i.route == "customer_concession"
+                          and svc.quality_decides_concessions())
+            mail = (await svc.has_customer_mail(session, i)) if concession else False
             if "customer" in possible and not v.admin and i.customer_inform and (
                     i.customer_decision in (None, "pending")
-                    or i.route == "customer_concession"):
+                    or i.route == "customer_concession") and not (
+                    # Sales' part of a concession ends with the filed mail
+                    concession and mail and not v.quality):
                 owed.append("customer")
             if "quote_fix" in possible and not v.admin:
                 owed.append("quote_fix")
@@ -2739,8 +2780,10 @@ class ValidationIssueService:
                 owed.append("recheck")
             if "fix" in possible and not v.admin:
                 owed.append("fix")
+            fix_fallback = (i.fix_department_id in unstaffed_fix and coordinates)
             if (svc.fix_rule_on() and i.fix_department_id is not None
-                    and v.in_dept(i.fix_department_id) and not v.admin
+                    and (v.in_dept(i.fix_department_id) or fix_fallback)
+                    and not v.admin
                     and i.route not in FIX_ROUTES and "recheck" not in owed
                     and i.check_id is not None
                     and getattr(await session.get(ValidationCheck, i.check_id),
@@ -2757,6 +2800,12 @@ class ValidationIssueService:
                     label = label.format(
                         ref=i.ref, what=i.description,
                         when=i.retest_due.strftime("%a %d %b") if i.retest_due else "-")
+                    if not v.in_dept(i.fix_department_id):
+                        name = (await svc._dept_names(session)).get(i.fix_department_id)
+                        label += f" ({name} has no member here: you coordinate)"
+                elif key == "customer" and concession:
+                    label = (svc.CONCESSION_DECIDE if v.quality and mail
+                             else svc.CONCESSION_ASK).format(ref=i.ref)
                 else:
                     label = label.format(ref=i.ref)
                 if key == "recheck" and i.retest_due is not None:
@@ -2767,8 +2816,22 @@ class ValidationIssueService:
                 elif key == "fix":
                     from app.services.due_rules import task_due
                     item["due_date"] = task_due(i.created_at, change, "validation_issue_fix")
+                elif key == "customer" and concession:
+                    # a few working days from the ask (Sales) or the filed
+                    # mail (Quality), not the change's fallback due
+                    from app.services.due_rules import task_due
+                    since = ((await svc.customer_mail_at(session, i)) if v.quality and mail
+                             else i.concession_requested_at or i.route_decided_at
+                             or i.created_at)
+                    item["due_date"] = task_due(since, change, "validation_issue_customer")
+                    if v.quality and mail:
+                        item["role_department_id"] = quality_dept
                 if key == "fix_work":
-                    item["role_department_id"] = i.fix_department_id
+                    item["role_department_id"] = (
+                        i.fix_department_id if v.in_dept(i.fix_department_id) else pm_dept)
+                elif key == "fix":
+                    # Quality's pick (TeamRoles: main and backup within Quality)
+                    item["role_department_id"] = quality_dept
                 if key == "customer" and i.route == "customer_concession" and (
                         (v.quality and svc.quality_decides_concessions()
                          and await svc.has_customer_mail(session, i))

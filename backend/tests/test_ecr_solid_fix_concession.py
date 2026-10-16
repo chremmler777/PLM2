@@ -279,8 +279,7 @@ async def test_weight_delta_reaches_sales_only_above_two_percent(client, fix):
                         "measuring_ref": REF, **spec}})
     assert res.json()["status"] == "passed"
     assert (await _state(client, tool, fix))["weight_quote_update_open"] is False
-    pm = await _auth(client, fix, "Project Manager")
-    res = await client.post(_url(fix, "/checks"), headers=pm, json={
+    res = await client.post(_url(fix, "/checks"), headers=tool, json={
         "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
         "measurement": {"sample_size": 5, "min_value": 512.0, "max_value": 518.0,
                         "measuring_ref": REF}})
@@ -328,3 +327,113 @@ async def test_switch_off_raises_no_issue(client, fix, monkeypatch):
     assert res.status_code == 201
     quality = await _who(client, fix, "Quality")
     assert (await client.get(_iurl(fix), headers=quality)).json() == []
+
+
+# --- review loop 1: the Fix pick and the concession run in parallel --------
+
+async def test_concession_first_keeps_the_fix_task_and_the_fix_closes_it(client, fix):
+    """§10 'Request concession runs in parallel': asked first, the Fix pick
+    stays Quality's task; the fix and the retest close the issue."""
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    quality = await _who(client, fix, "Quality")
+    res = await client.post(_iurl(fix, f"/{iid}/concession"), headers=quality,
+                            json={"note": "ask for 518 g max, 500 parts"})
+    assert res.status_code == 200, res.text
+    card = (await client.get(_iurl(fix, f"/{iid}"), headers=quality)).json()
+    assert "fix" in card["next_acts"] and card["primary_act"] == "fix"
+    tasks = await _kinds(client, quality, fix["change_id"])
+    assert "validation_issue_fix" in tasks
+    assert tasks["validation_issue_fix"]["role"] == "main"
+    due = date.today() + timedelta(days=3)
+    res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
+        "owner": "process_parameters", "retest_due": due.isoformat()})
+    assert res.status_code == 200, res.text
+    card = (await client.get(_iurl(fix, f"/{iid}"), headers=quality)).json()
+    # picked: a quiet re-pick stays, the Fix task is done
+    assert "fix" not in card["next_acts"] and "refix" in card["next_acts"]
+    assert card["primary_act"] != "refix"
+    assert "validation_issue_fix" not in await _kinds(client, quality, fix["change_id"])
+    process = await _who(client, fix, "Process Engineer")
+    assert "validation_issue_fix_work" in await _kinds(client, process, fix["change_id"])
+    tool = await _auth(client, fix, "Tool Engineer")
+    assert "validation_issue_recheck" in await _kinds(client, tool, fix["change_id"])
+    st = await _state(client, tool, fix)
+    assert "fix: Process Engineer, retest" in st["release_line"]
+    assert "concession: waiting for customer" in st["release_line"]
+    # a new retest date: the re-pick
+    later = due + timedelta(days=2)
+    res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
+        "owner": "process_parameters", "retest_due": later.isoformat()})
+    assert res.status_code == 200 and res.json()["retest_due"] == later.isoformat()
+    res = await client.post(_url(fix, "/checks"), headers=tool, json={
+        "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
+        "measurement": {"sample_size": 5, "min_value": 503.0, "max_value": 509.0,
+                        "measuring_ref": REF, "what_changed_kind": "parameter",
+                        "what_changed_ref": "holding pressure -5 bar, PS-114 rev C"}})
+    assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+    assert (await client.get(_iurl(fix, f"/{iid}"), headers=quality)).json()["status"] == "closed"
+
+
+async def test_concession_tasks_say_who_owes_what_and_are_due_soon(client, fix):
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    quality = await _who(client, fix, "Quality")
+    sales = await _auth(client, fix, "Sales")
+    assert (await client.post(_iurl(fix, f"/{iid}/concession"), headers=quality,
+                              json={"note": "ask for 518 g max"})).status_code == 200
+    task = (await _kinds(client, sales, fix["change_id"]))["validation_issue_customer"]
+    assert task["label"] == "Ask the customer about the concession for VI-1 and file the mail"
+    due = datetime.fromisoformat(task["due_date"]).date()
+    assert due <= date.today() + timedelta(days=7)
+    # Quality owes nothing on the concession until the mail is filed
+    assert "validation_issue_customer" not in await _kinds(client, quality, fix["change_id"])
+    up = await client.post(
+        f"/api/v1/changes/{fix['change_id']}/attachments", headers=sales,
+        files={"file": ("mail.eml", b"From: customer", "message/rfc822")},
+        data={"kind": "customer_email", "validation_issue_id": str(iid)})
+    assert up.status_code in (200, 201), up.text
+    # the mail is filed: Sales is done, Quality decides (its own task)
+    assert "validation_issue_customer" not in await _kinds(client, sales, fix["change_id"])
+    task = (await _kinds(client, quality, fix["change_id"]))["validation_issue_customer"]
+    assert task["label"] == "Decide concession VI-1: for a quantity or until a date"
+    assert task["role"] == "main" and task["needs_you"] is True
+    assert datetime.fromisoformat(task["due_date"]).date() <= date.today() + timedelta(days=7)
+
+
+async def test_negative_an_inactive_department_does_not_fix(client, fix, session_factory):
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    async with session_factory() as s:
+        old = Department(name="Old Tooling", flow_type="action", is_active=False)
+        s.add(old)
+        await s.commit()
+        old_id = old.id
+    quality = await _who(client, fix, "Quality")
+    res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
+        "owner": "other", "department_id": old_id,
+        "retest_due": (date.today() + timedelta(days=3)).isoformat()})
+    assert res.status_code == 400 and "active" in res.json()["detail"]
+
+
+async def test_fix_department_without_members_hands_the_work_to_the_lead(
+        client, fix, session_factory):
+    """Process Engineer's only member left: the fix work reaches the lead
+    (no silent hole), and the status line says so."""
+    pm_id = fix["user"]["Project Manager"]["id"]
+    async with session_factory() as s:
+        (await s.get(User, fix["user"]["Process Engineer"]["id"])).is_active = False
+        (await s.get(ChangeRequest, fix["change_id"])).lead_id = pm_id
+        await s.commit()
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    quality = await _who(client, fix, "Quality")
+    res = await client.post(_iurl(fix, f"/{iid}/fix"), headers=quality, json={
+        "owner": "process_parameters",
+        "retest_due": (date.today() + timedelta(days=3)).isoformat()})
+    assert res.status_code == 200, res.text
+    pm = await _auth(client, fix, "Project Manager")
+    work = (await _kinds(client, pm, fix["change_id"]))["validation_issue_fix_work"]
+    assert "Process Engineer has no member here: you coordinate" in work["label"]
+    st = await _state(client, pm, fix)
+    assert "fix: Process Engineer (no member here: the lead coordinates)" in st["release_line"]

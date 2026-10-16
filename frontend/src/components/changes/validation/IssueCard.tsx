@@ -275,7 +275,7 @@ export default function IssueCard({
               onCancel={() => setActive(null)}
               onSubmit={(t) => (active === 'contain' ? contain : active === 'root_cause' ? rootCause : close).mutate(t)} />
           ) : null}
-          {active === 'fix' && (
+          {(active === 'fix' || active === 'refix') && (
             <FixForm changeId={changeId} issue={issue} departments={departments} onDone={() => setActive(null)} />
           )}
           {active === 'concession_request' && (

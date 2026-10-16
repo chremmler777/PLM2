@@ -112,6 +112,16 @@ describe('Fix task', () => {
     fireEvent.click(screen.getByTestId('fix-owner-process_parameters'))
     expect((screen.getByTestId('fix-submit') as HTMLButtonElement).disabled).toBe(true)
   })
+  it('after the pick (and beside a concession) Quality may change it: a quiet re-pick', () => {
+    wrap(<IssueCard changeId={7} changeStatus="in_validation" departments={[]} viewer={{ id: 9 }}
+      issue={issue({ route: 'customer_concession', fix_owner_kind: 'process_parameters', fix_department_id: 4,
+        retest_due: '2099-01-02', next_acts: ['refix'], primary_act: null })} />)
+    expect(screen.queryByTestId('issue-primary-11')).toBeNull()
+    fireEvent.click(screen.getByTestId('issue-act-refix-11'))
+    expect(screen.getByTestId('issue-fix-form-11')).toBeTruthy()
+    // prefilled with the current pick: only the changed field needs a touch
+    expect((screen.getByTestId('fix-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
   it('the Fix form submits process parameters with the date', async () => {
     const { container } = wrap(<FixForm changeId={7} issue={issue({ retest_due: '2099-01-02' })} departments={[]} onDone={() => {}} />)
     fireEvent.click(screen.getByTestId('fix-owner-process_parameters'))

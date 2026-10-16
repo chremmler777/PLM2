@@ -8,6 +8,7 @@ import type {
   IssueOut, IssueRoute, IssueSeverity,
 } from '../../../types/validationIssue'
 import { isIssueOpen } from '../../../types/validationIssue'
+import { t } from '../../../i18n/cmLabels'
 
 export const CATEGORY_LABEL: Record<IssueCategory, string> = {
   tool: 'Tool',
@@ -180,6 +181,7 @@ export const ACT_LABEL: Record<IssueAct, string> = {
   edit: 'Edit',
   attach: 'Attach',
   fix: 'Pick who fixes',
+  refix: t('fix.change'),
   concession_request: 'Request concession',
 }
 
@@ -191,7 +193,7 @@ export const FIX_OWNER_LABEL: Record<FixOwner, string> = {
 }
 
 /** Acts that are not a step of the issue: never the primary button. */
-const QUIET: IssueAct[] = ['edit', 'attach', 'escalate', 'add_action', 'concession_request']
+const QUIET: IssueAct[] = ['edit', 'attach', 'escalate', 'add_action', 'concession_request', 'refix']
 
 /** The 4-eyes rule: the raiser does not decide the route alone (admins may). */
 export const raiserBlocked = (i: IssueOut, v: IssueViewer) =>
