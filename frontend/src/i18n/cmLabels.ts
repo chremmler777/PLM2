@@ -2588,6 +2588,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.dueQuoteDeadline': { de: '(Angebotstermin {d})', en: '(quote deadline {d})' },
   'tasks.dueNeedBy': { de: '(benötigt bis {d})', en: '(need-by {d})' },
   'tasks.workingOn': { de: '{x} arbeitet daran', en: '{x} is working on this' },
+  'tasks.assignedTo': { de: 'übergeben an {x}', en: 'handed over to {x}' },
   'tasks.kind.deviation_decision': { de: 'Override entscheiden', en: 'Decide the override' },
   'tasks.kind.sign_off': { de: 'Freigabe unterschreiben', en: 'Sign off' },
   'tasks.kind.internal_approval': { de: 'Interne Kosten freigeben', en: 'Approve the internal costs' },

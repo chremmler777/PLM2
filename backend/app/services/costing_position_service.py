@@ -560,6 +560,8 @@ class CostingPositionService:
             session, change, "costing_position_added",
             f"Costing position '{position.label}' added for dept "
             f"{department_id}", actor, position)
+        from app.services.early_stage_service import EarlyStageService
+        await EarlyStageService.costing_edit_owns(session, change, department_id, actor)
         return position
 
     @staticmethod
@@ -612,6 +614,9 @@ class CostingPositionService:
         await CostingPositionService._log(
             session, change, "costing_position_updated",
             f"Costing position '{position.label}' updated", actor, position)
+        from app.services.early_stage_service import EarlyStageService
+        await EarlyStageService.costing_edit_owns(
+            session, change, position.department_id, actor)
         return position
 
     @staticmethod

@@ -693,9 +693,11 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
         <span className="block">
           <span className="text-slate-200">{taskKindLabel(task.kind, task.kind_label)}</span>
           {letters.length > 0 && <span className="ml-2"><LetterChips letters={letters} /></span>}
-          {task.kind === 'assessment' && task.owner_name && (
+          {(task.kind === 'assessment' || task.kind === 'costing_input') && task.owner_name && (
+            // A6-10: named by routing or a hand-over until the first edit
             <span data-testid="task-owner" className="block text-xs text-slate-400">
-              {t('tasks.workingOn').replace('{x}', task.owner_name)}
+              {t(task.owner_started === false ? 'tasks.assignedTo' : 'tasks.workingOn')
+                .replace('{x}', task.owner_name)}
             </span>
           )}
           {isBackup(task) && <BackupChip mainName={task.main_name} className="ml-2" />}

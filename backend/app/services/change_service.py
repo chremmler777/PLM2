@@ -4278,9 +4278,19 @@ class ChangeService:
                     submitted = [a.submitted_at for a in c.assessments
                                  if a.department_id == dept_id and a.submitted_at]
                     wait = costing_waits.get((c.id, dept_id))
+                    # A6-10: who works the department's costing (its row's owner)
+                    from app.services import early_costing as _ec
+                    from app.services.early_stage_service import EarlyStageService as _ESS
+                    anchor = next((a for a in _ec._rows(c, dept_id)
+                                   if a.verdict in _ec.COSTING_VERDICTS), None)
                     tasks.append({
                         **await _base(c), "kind": "costing_input",
                         "department_id": dept_id,
+                        **({"owner_id": anchor.effective_owner_id,
+                            "owner_name": anchor.effective_owner_name,
+                            "owner_started": _ESS.owner_started(anchor)}
+                           if anchor is not None and anchor.effective_owner_id
+                           else {}),
                         "since": max(submitted, default=None),
                         # a supplier wait pauses the late clock (spec §0)
                         **({"waiting_on": wait.vendor_name,

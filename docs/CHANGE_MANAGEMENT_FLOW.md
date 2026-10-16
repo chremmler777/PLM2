@@ -2481,10 +2481,16 @@ one, and "Absorb" on an open price for who may ask it.
   `in_validation` tells the implementing departments (the ones that priced
   the work) once per change and stage.
 - **Ownership.** No claim button: the first real member of the department
-  who edits its assessment (the draft autosave) owns it ("Holmes is working
-  on this"); a second editor does not take it over, an admin's edit owns
-  nothing; routing still names someone first. A "Hand over" button (the
-  spec's second path; `POST /assessments/{id}/assign` exists) has no UI yet.
+  who edits its assessment (the draft autosave) or its costing (a costing
+  position saved, A6-10) owns the department's row ("Holmes is working on
+  this", on the assessment and the costing input row); a second editor does
+  not take it over, an admin's edit owns nothing; routing still names
+  someone first, and that row reads "handed over to Holmes" until Holmes's
+  first edit (`owner_started`). Plan feedback stays department-wide (one
+  confirm per department) and a validation check names its measurer on the
+  check itself. A "Hand over" button (the spec's second path;
+  `POST /assessments/{id}/assign` exists) has no UI yet: there is no
+  "Assign" button to rename.
 - **Task card.** Every My Tasks link opens the change with `?task=<kind>`
   (plus `dept`, `dev` or `side` when a change has two rows of the kind):
   "Your part: <task>, due <date> (deadline). Next: <button>" to where the work

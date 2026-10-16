@@ -616,6 +616,20 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
     expect(title).not.toBe(t('tasks.lateHint'))
   })
 
+  it('A6-10: a named owner reads "handed over to X" until the first edit, then "X is working on this"', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'assessment', department_id: 5, owner_name: 'Holmes', owner_started: false }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'costing_input', department_id: 5,
+                   owner_name: 'Payne', owner_started: true }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    const owners = screen.getAllByTestId('task-owner').map((e) => e.textContent)
+    expect(owners).toContain(t('tasks.assignedTo').replace('{x}', 'Holmes'))
+    expect(owners).toContain(t('tasks.workingOn').replace('{x}', 'Payne'))
+    expect(owners).not.toContain(t('tasks.workingOn').replace('{x}', 'Holmes'))
+  })
+
   it('the hand-over row names what is missing in words', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'kickoff', missing: ['description', 'at least one attachment',

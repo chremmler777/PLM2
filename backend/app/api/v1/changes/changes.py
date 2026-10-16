@@ -429,6 +429,8 @@ async def my_change_tasks(
                 "department_id": a.department_id, "assessment_id": a.id,
                 "owner_id": a.effective_owner_id,
                 "owner_name": a.effective_owner_name,
+                # A6-10: "assigned to X" until X edits, then "X is working on this"
+                "owner_started": EarlyStageService.owner_started(a),
                 "accepted_at": a.effective_accepted_at,
                 "due_date": due,
                 "overdue": (due is not None and due < datetime.utcnow()

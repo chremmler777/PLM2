@@ -736,7 +736,60 @@ class EarlyStageService:
         a.details = json.dumps(details)
         await session.flush()
         await EarlyStageService.first_editor_owns(session, change, a, user)
+        EarlyStageService.note_owner_edit(a, user)
+        await session.flush()
         return EarlyStageService.draft_of(a)
+
+    @staticmethod
+    def note_owner_edit(a: ChangeAssessment, user: User) -> None:
+        """A6-10 (spec §0 ownership): the owner has started on it, so the
+        row reads "X is working on this", not "assigned to X" (routing or a
+        hand-over named X before any edit)."""
+        if a.effective_owner_id != user.id:
+            return
+        details = a.details_dict
+        if details.get("owner_edited_by") == user.id:
+            return
+        details["owner_edited_by"] = user.id
+        a.details = json.dumps(details)
+
+    @staticmethod
+    def owner_started(a: ChangeAssessment) -> bool:
+        """The owner edited it (note_owner_edit) or the row is submitted."""
+        owner = a.effective_owner_id
+        return owner is not None and (
+            a.submitted_at is not None
+            or a.details_dict.get("owner_edited_by") == owner)
+
+    @staticmethod
+    async def costing_edit_owns(session: AsyncSession, change: ChangeRequest,
+                                department_id: int, user: User) -> None:
+        """A6-10: a costing position saved is the department's work too: the
+        first real member who edits it owns the department's row (its
+        costing anchor), "X is working on this"."""
+        from app.services import early_costing
+        anchor = next((a for a in early_costing._rows(change, department_id)
+                       if a.verdict in early_costing.COSTING_VERDICTS), None)
+        if anchor is None:
+            return
+        if anchor.effective_owner_id is None and anchor.wf_instance_task_id is None:
+            # submitted already (accept refuses that): the first costing
+            # editor, a real member not acting as one, owns the row
+            from app.services.change_people import is_acting
+            from app.services.workflow_service import WorkflowService
+            if not is_acting(user) and await WorkflowService._is_department_member(
+                    session, user.id, department_id):
+                anchor.owner_id = user.id
+                anchor.accepted_at = datetime.utcnow()
+                from app.services.change_service import ChangeService
+                await ChangeService.append_changelog(
+                    session, change, "assessment_accepted",
+                    f"Assessment {anchor.id} owned by its first costing editor",
+                    user.id, new_value={"assessment_id": anchor.id, "owner_id": user.id})
+        else:
+            await EarlyStageService.first_editor_owns(session, change, anchor, user)
+        EarlyStageService.note_owner_edit(anchor, user)
+        await session.flush()
 
     @staticmethod
     async def first_editor_owns(session: AsyncSession, change: ChangeRequest,

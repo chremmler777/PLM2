@@ -498,3 +498,49 @@ async def test_my_tasks_reads_shared_lookups_once_per_list(
         cs = [await s.get(ChangeRequest, cid) for cid in internal]
         rows = [i for i in await owed_items(s, cs) if i["kind"] == "internal_approval"]
     assert len(rows) == 3 and calls["approvers"] == 1
+
+
+# ---------------------------------------------------------------------------
+# A6-10 the first person who edits it owns it (costing too)
+# ---------------------------------------------------------------------------
+async def test_first_costing_editor_owns_the_department_row(
+        client, seed, team, session_factory):
+    from app.models.change import ChangeAssessment
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "costing owner")
+    await _set(session_factory, cid, status="costing")
+    await _owing_costing(session_factory, team, cid, datetime.utcnow())
+    tool, tool2 = await _as(client, "Tool Engineer"), await _as(client, "tool2")
+    body = {"department_id": team["dept"]["Tool Engineer"], "label": "Insert re-cut",
+            "kind": "external", "quantity": 1, "quantity_unit": "pcs"}
+    res = await client.post(f"/api/v1/changes/{cid}/costing/positions", json=body,
+                            headers=tool)
+    assert res.status_code == 201, res.text
+    row = (await _tasks(client, tool, cid, "costing_input"))[0]
+    assert row["owner_name"] == "Tool Engineer person" and row["owner_started"] is True
+    # NEGATIVE: a second editor does not take it over
+    res = await client.post(f"/api/v1/changes/{cid}/costing/positions",
+                            json={**body, "label": "Slide"}, headers=tool2)
+    assert res.status_code == 201, res.text
+    async with session_factory() as s:
+        a = (await s.execute(sa.select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalar_one()
+        assert a.owner_id == team["user"]["Tool Engineer"]
+
+
+async def test_routing_named_owner_reads_handed_over_until_first_edit(
+        client, seed, team, session_factory):
+    from app.models.change import ChangeAssessment
+    from app.services.early_stage_service import EarlyStageService
+    async with session_factory() as s:
+        sales = await _as(client, "Sales")
+        cid = await _create(client, sales, seed, "named")
+        a = ChangeAssessment(change_id=cid, department_id=team["dept"]["Tool Engineer"],
+                             status="active", rasic_letter="R",
+                             owner_id=team["user"]["Tool Engineer"])
+        s.add(a); await s.commit(); await s.refresh(a)
+        assert EarlyStageService.owner_started(a) is False
+        u = await s.get(__import__("app.models.entities", fromlist=["User"]).User,
+                        team["user"]["Tool Engineer"])
+        EarlyStageService.note_owner_edit(a, u)
+        assert EarlyStageService.owner_started(a) is True
