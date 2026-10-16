@@ -78,7 +78,19 @@ async def _check(client, auth, cid, key, status, note=None, **extra):
 
 def _answer(key):
     """The extra fields a plain 'done' needs on this item."""
+    if key == "customer_approval":      # C7: a reference, not a tick
+        return {"note": "PSW 886.197-D 2026-10-12"}
     return {"outcome": "unchanged"} if key == "cycle_time_tool" else {}
+
+
+#: C7 (RELEASE_V2): a row is answered by its department; PM only where the
+#: department has no member here (Scheduling, Packaging Engineer, Sales).
+_OWNER_KEY = {"Development": "dev", "Tool Engineer": "tool", "APQP": "apqp",
+              "Process Engineer": "process", "Quality": "quality"}
+
+
+async def _owner(client, check):
+    return await _auth(client, _OWNER_KEY.get(check["department_name"], "pm"))
 
 
 async def test_sixteen_checks_seeded_with_owners(client, rel_world):
@@ -184,7 +196,8 @@ async def test_release_guard_messages(client, rel_world, monkeypatch):
     assert "Release checklist incomplete: 16 open" in res.json()["detail"]
     st = await _state(client, pm, cid)
     for c in st["checks"]:
-        res = await _check(client, pm, cid, c["key"], "done", **_answer(c["key"]))
+        res = await _check(client, await _owner(client, c), cid, c["key"], "done",
+                           **_answer(c["key"]))
         assert res.status_code == 200, res.text
     res = await release()
     assert res.status_code == 400
@@ -227,7 +240,8 @@ async def test_get_release_writes_nothing(client, rel_world, session_factory):
     # a refused answer writes nothing either; an accepted one writes its row only
     tool = await _auth(client, "tool")
     assert (await _check(client, tool, cid, "index_updated", "done")).status_code == 403
-    assert (await _check(client, pm, cid, "index_updated", "done")).status_code == 200
+    dev = await _auth(client, "dev")
+    assert (await _check(client, dev, cid, "index_updated", "done")).status_code == 200
     async with session_factory() as s:
         rows = (await s.execute(select(ChangeReleaseCheck)
                                 .where(ChangeReleaseCheck.change_id == cid))).scalars().all()
@@ -291,7 +305,7 @@ async def test_open_plan_deviations_block_the_release(client, rel_world, monkeyp
         await s.commit()
     st = await _state(client, pm, cid)
     for c in st["checks"]:
-        assert (await _check(client, pm, cid, c["key"], "done",
+        assert (await _check(client, await _owner(client, c), cid, c["key"], "done",
                              **_answer(c["key"]))).status_code == 200
     res = await client.post(f"/api/v1/changes/{cid}/lessons/complete",
                             json={"none_reason": "routine"}, headers=pm)

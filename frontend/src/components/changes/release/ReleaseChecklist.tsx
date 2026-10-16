@@ -1,7 +1,9 @@
 /**
  * The release checklist: what has to be true before a change is live, each
- * point owned by a department. Members of the owner department (and PM, the
- * change lead, admins) tick it done or not applicable; n.a. needs a note.
+ * point owned by a department. Members of the owner department tick it done
+ * or not applicable (C7, RELEASE_V2: PM, the lead or an admin only for a
+ * department nobody here belongs to; the backend's can_answer decides);
+ * n.a. needs a note, the customer's approval a reference.
  * The cycle time (Tool Engineer) is answered changed (with the new seconds)
  * or unchanged; the process-stable row (APQP) takes an optional Cm above
  * 1.67. Numbers are typed en-US ("." decimals); an unreadable number is
@@ -84,7 +86,12 @@ function CheckRow({ changeId, check, canEdit }: {
     : read.error === 'ambiguous' ? NUMBER_INPUT_HINT
     : null
   const cmLow = kind === 'cm' && read.value !== null && extra === null
-  const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim() : extra !== null)
+  // C7: the customer's approval is a document: 'done' names it
+  const refNeeded = editing === 'done' && !!check.needs_ref
+  const refOk = note.trim().length >= 5 && !['ok', 'okay', 'done', 'checked', 'tbd', 'n/a', 'na', 'yes']
+    .includes(note.trim().toLowerCase())
+  const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim()
+    : extra !== null && (!refNeeded || refOk))
   const confirmLabel = editing === 'na' ? 'Mark not applicable'
     : kind === 'cycle_time' ? (outcome === 'changed' ? 'Save new cycle time' : 'Confirm unchanged')
     : 'Mark done'
@@ -166,7 +173,8 @@ function CheckRow({ changeId, check, canEdit }: {
           {cmLow && <span className="text-[11px] text-amber-300">Cm must be above {CM_MIN}</span>}
           <input autoFocus={!kind} data-testid={`release-check-${check.key}-note`} value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder={editing === 'na' ? 'Why does this not apply? (required)' : 'Note (optional)'}
+            placeholder={editing === 'na' ? 'Why does this not apply? (required)'
+              : refNeeded ? 'PSW / ISIR reference or the file name of the approval (required)' : 'Note (optional)'}
             className={`${inputCls} min-w-0 flex-1`} />
           <button type="button" data-testid={`release-check-${check.key}-confirm`}
             disabled={!canConfirm}
@@ -222,7 +230,8 @@ export default function ReleaseChecklist({
             <ul className="space-y-1.5">
               {rows.map((c) => (
                 <CheckRow key={c.key} changeId={changeId} check={c}
-                  canEdit={editable && (canManage || (c.department_id != null && myDepartmentIds.includes(c.department_id)))} />
+                  canEdit={editable && (c.can_answer ?? (canManage
+                    || (c.department_id != null && myDepartmentIds.includes(c.department_id))))} />
               ))}
             </ul>
           </div>

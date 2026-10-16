@@ -143,6 +143,9 @@ OLD_LABELS: dict[str, str] = {
     "customer_approval": "Customer approval received (PPAP / ISIR / PSW)",
 }
 
+# C7 (RELEASE_V2): rows whose 'done' needs a reference to a document.
+EVIDENCE_KEYS = frozenset({"customer_approval"})
+
 # The answers that carry a value (no column of their own: the value is
 # written into the note in these words and into the changelog as data).
 CYCLE_TIME_KEY = "cycle_time_tool"

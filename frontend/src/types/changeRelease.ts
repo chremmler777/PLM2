@@ -27,6 +27,10 @@ export interface ReleaseCheck {
   value_kind?: ReleaseValueKind | null
   /** Answered before the item was taken off the checklist: read-only, not counted. */
   retired?: boolean
+  /** C7: whether this viewer may answer the row (the backend's rule). */
+  can_answer?: boolean | null
+  /** C7: 'done' needs a reference (the customer's approval). */
+  needs_ref?: boolean
 }
 
 export type LessonCategory =

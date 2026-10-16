@@ -55,14 +55,54 @@ class ReleaseService:
 
     @staticmethod
     async def may_answer(session, change, row: ChangeReleaseCheck, user) -> bool:
-        """A member of the item's owner department, PM, the lead, admin."""
-        if await ReleaseService.is_pm_or_lead(session, change, user):
-            return True
-        if row.department_id is None:
-            return False
+        """A member of the item's owner department. With RELEASE_V2 (C7,
+        spec §10 "rows answered by their department") only them: PM, the
+        lead or an admin answer a row only when its department has no
+        active member in the change's organization (no dead end). Off the
+        switch: PM, the lead and admin answer any row, as before."""
+        from app.services import cm_switches
         from app.services.workflow_service import WorkflowService
-        return await WorkflowService.actor_in_department(
-            session, user, row.department_id)
+        if row.department_id is not None and await WorkflowService.actor_in_department(
+                session, user, row.department_id):
+            return True
+        if not await ReleaseService.is_pm_or_lead(session, change, user):
+            return False
+        if not cm_switches.on("RELEASE_V2") or row.department_id is None:
+            return True
+        from app.services.change_people import department_members_of_change_org
+        return not await department_members_of_change_org(
+            session, change, [row.department_id])
+
+    @staticmethod
+    async def _answer_rights(session, change, rows, user) -> dict:
+        """may_answer for every row at once (three queries, not per row)."""
+        if user is None:
+            return {}
+        from app.services import cm_switches
+        from app.services.change_people import department_members_of_change_org
+        from app.services.workflow_service import WorkflowService
+        mine = set(await WorkflowService.effective_department_ids(session, user))
+        runs = await ReleaseService.is_pm_or_lead(session, change, user)
+        strict = cm_switches.on("RELEASE_V2")
+        staffed: set = set()
+        if runs and strict:
+            from app.models.workflow import UserDepartment
+            members = set(await department_members_of_change_org(
+                session, change, {r.department_id for r in rows if r.department_id}))
+            if members:
+                staffed = set((await session.execute(
+                    select(UserDepartment.department_id).where(
+                        UserDepartment.user_id.in_(members)))).scalars().all())
+        out = {}
+        for r in rows:
+            if r.department_id is not None and r.department_id in mine:
+                out[r.check_key] = True
+            elif not runs:
+                out[r.check_key] = False
+            else:
+                out[r.check_key] = (not strict or r.department_id is None
+                                    or r.department_id not in staffed)
+        return out
 
     # ------------------------------------------------------------------
     # Checks
@@ -156,6 +196,16 @@ class ReleaseService:
         note = (note or "").strip() or None
         if status == "na" and not note:
             raise ChangeError("'Not applicable' needs a note saying why")
+        if status == "done" and key in catalog.EVIDENCE_KEYS:
+            from app.services import cm_switches
+            if cm_switches.on("RELEASE_V2"):
+                # C7: the customer's approval is a document, not a tick
+                from app.services.cm_rules import reference_refusal
+                why = reference_refusal(
+                    note, "The customer's approval (PSW / ISIR reference or the "
+                          "file name of the approval)", "PSW 886.197-D 2026-10-12")
+                if why:
+                    raise ChangeError(why)
         if status == "done":
             try:
                 note = catalog.answer_note(key, outcome, value, note)
@@ -346,7 +396,8 @@ class ReleaseService:
         return out
 
     @staticmethod
-    async def state(session: AsyncSession, change: ChangeRequest) -> dict:
+    async def state(session: AsyncSession, change: ChangeRequest,
+                    user: Optional[User] = None) -> dict:
         rows = await ReleaseService.view_rows(session, change)
         retired = {r.check_key for r in await ReleaseService.retired_rows(session, change)}
         if retired:
@@ -366,7 +417,12 @@ class ReleaseService:
             hints["weight_measured"] = f"Validated part weight on file: {float(weight):g} g"
         hints.update(await ReleaseService.revision_hints(session, change))
         hints.update(await ReleaseService.cycle_time_hint(session, change, names))
+        if hints.get(catalog.CYCLE_TIME_KEY):
+            # §10 internal: the ERP routing time comes from the measured check
+            hints.setdefault("erp_updated", "Routing time from validation: "
+                             + hints[catalog.CYCLE_TIME_KEY].split(": ", 1)[-1])
         blockers = await ReleaseService.blockers(session, change)
+        answer = await ReleaseService._answer_rights(session, change, rows, user)
         return {
             "checks": [{
                 "key": r.check_key,
@@ -379,6 +435,10 @@ class ReleaseService:
                 "hint": hints.get(r.check_key),
                 "value_kind": catalog.value_kind(r.check_key),
                 "retired": r.check_key in retired,
+                # the backend rule for this viewer (None: not asked)
+                "can_answer": answer.get(r.check_key),
+                # C7: 'done' needs a reference (the customer's approval)
+                "needs_ref": r.check_key in catalog.EVIDENCE_KEYS,
             } for r in rows],
             "open_count": sum(1 for r in rows if r.status not in ANSWERED
                               and r.check_key not in retired),
