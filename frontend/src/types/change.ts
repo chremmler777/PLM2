@@ -1586,6 +1586,8 @@ export interface ActiveConcession {
 export interface ValidationDepartmentState {
   department_id: number;
   checks: ValidationCheck[];
+  /** C7: may this viewer record the department's checks (backend rule). */
+  can_write?: boolean;
 }
 
 /**

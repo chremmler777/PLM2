@@ -225,6 +225,18 @@ describe('ValidationPanel', () => {
     expect(screen.queryByTestId('validation-pass-4-sampled')).toBeNull()
   })
 
+  it('C7: follows the backend write rule (the run team for a department with no member)', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [
+        { department_id: 4, checks: [check()], can_write: true },
+        { department_id: 2, checks: [check({ check_key: 'revision_bump' })], can_write: false },
+      ],
+    }) as never)
+    render_({ canSeeAll: true, myDepartmentIds: [] })
+    expect(await screen.findByTestId('validation-pass-4-sampled')).toBeDefined()
+    expect(screen.queryByTestId('validation-pass-2-revision_bump')).toBeNull()
+  })
+
   it('escalates back to implementation with a written reason', async () => {
     vi.mocked(changesApi.validationState).mockResolvedValue(state({
       departments: [{ department_id: 4, checks: [

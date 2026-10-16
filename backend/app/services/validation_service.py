@@ -61,23 +61,47 @@ class ValidationService:
     @staticmethod
     async def may_write(session: AsyncSession, change: ChangeRequest,
                         department_id: int, actor: User) -> bool:
-        """A member of that department while the change is in validation, or
-        the people who run the programme (PM, admin) at any time.
+        """A member of that department while the change is in validation.
 
-        Same shape as ImplementationService.may_write with the window moved
-        one stage along. The window matters more here than it did there: a
-        check ticked after the change was released is a signature on a
-        decision that had already been made.
-        """
+        With RELEASE_V2 (C7, spec §10 "rows answered by their department")
+        that is the whole rule, the same as the release rows: PM, the lead
+        or an admin record a department's check only when that department
+        has no real member here (change_people.staffed_department_ids), and
+        only in validation. Otherwise the run team could fix the limits and
+        PASS another department's measurement with no evidence of its own,
+        or fail a check on a released change. Off the switch: PM and admin
+        at any time, as before."""
+        return (await ValidationService.write_rights(
+            session, change, [department_id], actor)).get(department_id, False)
+
+    @staticmethod
+    async def write_rights(session: AsyncSession, change: ChangeRequest,
+                           department_ids, actor: User) -> dict[int, bool]:
+        """may_write for several departments at once (a few queries)."""
+        from app.services import cm_switches
         from app.services.meeting_service import MeetingService
         from app.services.workflow_service import WorkflowService
-        if (actor.effective_role == "admin"
-                or await MeetingService.user_is_pm_member(session, actor)):
-            return True
+        ids = [d for d in dict.fromkeys(department_ids) if d is not None]
+        if not cm_switches.on("RELEASE_V2"):
+            if (actor.effective_role == "admin"
+                    or await MeetingService.user_is_pm_member(session, actor)):
+                return {d: True for d in ids}
+            if change.status != VALIDATION_STATUS:
+                return {d: False for d in ids}
+            mine = set(await WorkflowService.effective_department_ids(session, actor))
+            return {d: d in mine for d in ids}
         if change.status != VALIDATION_STATUS:
-            return False
-        return await WorkflowService.actor_in_department(
-            session, actor, department_id)
+            return {d: False for d in ids}
+        mine = set(await WorkflowService.effective_department_ids(session, actor))
+        out = {d: d in mine for d in ids}
+        rest = [d for d in ids if not out[d]]
+        if rest:
+            from app.services.release_service import ReleaseService
+            if await ReleaseService.is_pm_or_lead(session, change, actor):
+                from app.services.change_people import staffed_department_ids
+                staffed = await staffed_department_ids(session, change, rest)
+                out.update({d: d not in staffed for d in rest})
+        return out
 
     @staticmethod
     async def may_acknowledge_weight_delta(

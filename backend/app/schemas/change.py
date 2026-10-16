@@ -1853,6 +1853,8 @@ class ValidationDepartmentState(BaseModel):
     open_count: int
     failed_count: int
     all_passed: bool
+    # C7: may this viewer record the department's checks (the backend rule)
+    can_write: bool = False
 
 
 class ValidationStateResponse(BaseModel):

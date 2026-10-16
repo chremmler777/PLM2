@@ -936,20 +936,22 @@ async def test_check_answer_through_the_api_closes_the_linked_issue(
     await client.post(_url(vi, f"/{iid}/actions/{aid}/done"), headers=pm)
     checks = f"/api/v1/changes/{vi['change_id']}/validation/checks"
     body = {"department_id": vi["dept"]["Tool Engineer"], "check_key": "sampled"}
-    r = await client.post(checks, headers=pm, json={**body, "status": "failed"})
-    assert r.status_code == 201, r.text
-    assert (await client.get(_url(vi, f"/{iid}"), headers=pm)).json()["status"] == "fixing"
-    # HARD #3: the retest is the department's, in validation, saying what
-    # changed since (the fix route sent the change back to implementation)
-    r = await client.post(checks, headers=pm, json={**body, "status": "passed"})
-    assert r.status_code == 400, r.text
+    tool = await _auth(client, vi, "tool")
+    # C7: checks are recorded in validation only, by their own department
+    # (the fix route sent the change back to implementation)
+    r = await client.post(checks, headers=tool, json={**body, "status": "failed"})
+    assert r.status_code == 403, r.text
     async with session_factory() as s:
         c = await s.get(ChangeRequest, vi["change_id"])
         c.status = "in_validation"
         await s.commit()
+    r = await client.post(checks, headers=tool, json={**body, "status": "failed"})
+    assert r.status_code == 201, r.text
+    assert (await client.get(_url(vi, f"/{iid}"), headers=pm)).json()["status"] == "fixing"
+    # HARD #3: the retest is the department's, saying what changed since;
+    # PM records no department's check (403 at the door)
     r = await client.post(checks, headers=pm, json={**body, "status": "passed"})
-    assert r.status_code == 400, r.text
-    tool = await _auth(client, vi, "tool")
+    assert r.status_code == 403, r.text
     r = await client.post(checks, headers=tool, json={
         **body, "status": "passed", "note": "new slide insert, TC-0815"})
     assert r.status_code == 201, r.text

@@ -3964,6 +3964,13 @@ async def validation_state(
     from app.services.price_redaction import PriceViewer
     change = await _implementation_change(db, change_id, current_user)
     state = await ValidationService.state(db, change)
+    # the backend's write rule per department, so the form shows exactly
+    # where a measurement is accepted (C7: own department; the run team
+    # only for a department with no member here)
+    rights = await ValidationService.write_rights(
+        db, change, [d["department_id"] for d in state["departments"]], current_user)
+    for d in state["departments"]:
+        d["can_write"] = rights.get(d["department_id"], False)
     await db.commit()
     # The acknowledgement note is Sales' word on the quote update (often an
     # amount): the cost roles read it, everybody else sees that it happened.
@@ -3991,11 +3998,17 @@ async def record_validation_check(
     change = await _implementation_change(db, change_id, current_user)
     if not await ValidationService.may_write(
             db, change, body.department_id, current_user):
+        from app.services import cm_switches
         raise HTTPException(
             status_code=403,
-            detail="Only a member of that department while the change is in "
-                   "validation, Project Management or an admin may sign off "
-                   "its validation checks")
+            detail=("A department's validation checks are recorded by its own "
+                    "members while the change is in validation; Project "
+                    "Management, the lead or an admin only for a department "
+                    "with no member here"
+                    if cm_switches.on("RELEASE_V2") else
+                    "Only a member of that department while the change is in "
+                    "validation, Project Management or an admin may sign off "
+                    "its validation checks"))
     try:
         row = await ValidationService.record_check(
             db, change, body.model_dump(), current_user)

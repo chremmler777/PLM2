@@ -121,7 +121,8 @@ async def test_retest_keeps_the_failed_row_and_says_what_changed(client, val, ad
         res = await _measure(client, auth, val, "weight", _m(
             503.0, 509.0, what_changed_kind="parameter",
             what_changed_ref="holding pressure -5 bar, PS-114 C"))
-        assert res.status_code == 400 and "own department" in res.json()["detail"]
+        # C7: refused at the door now (the department's own members)
+        assert res.status_code == 403 and "own members" in res.json()["detail"]
     # NEGATIVE: an unknown kind
     res = await _measure(client, tool, val, "weight", _m(
         503.0, 509.0, what_changed_kind="luck", what_changed_ref="tried again 2x"))
@@ -185,3 +186,55 @@ async def test_switch_off_keeps_the_plain_tick(client, val, monkeypatch):
         "status": "passed", "value": 505.0})
     assert res.status_code == 201, res.text
     assert res.json()["status"] == "passed"
+
+
+# --- review loop 1: the department measures, in validation (C7, R24/R25) ---
+
+async def test_negative_pm_and_admin_do_not_measure_a_staffed_department(
+        client, val, admin_auth):
+    pm = await _auth(client, val, "Project Manager")
+    for auth in (pm, admin_auth):
+        res = await _measure(client, auth, val, "weight", _m(503.0, 509.0, **SPEC))
+        assert res.status_code == 403, res.text
+        assert "own members" in res.json()["detail"]
+    st = await _state(client, pm, val)
+    rights = {d["department_name"]: d["can_write"] for d in st["departments"]}
+    assert rights["Tool Engineer"] is False
+    tool = await _auth(client, val, "Tool Engineer")
+    st = await _state(client, tool, val)
+    assert {d["department_name"]: d["can_write"]
+            for d in st["departments"]}["Tool Engineer"] is True
+
+
+async def test_negative_nobody_measures_outside_validation(client, val, admin_auth,
+                                                           session_factory):
+    for status in ("released", "closed", "in_implementation"):
+        await _set_status(session_factory, val["change_id"], status)
+        tool = await _auth(client, val, "Tool Engineer")
+        for auth in (tool, admin_auth):
+            res = await _measure(client, auth, val, "weight", _m(520.0, 530.0, **SPEC))
+            assert res.status_code == 403, (status, res.text)
+    async with session_factory() as s:
+        from app.models.change_validation_issue import ValidationIssue
+        assert (await s.execute(select(ValidationIssue))).scalars().all() == []
+
+
+async def test_run_team_measures_for_a_department_with_no_member(
+        client, val, session_factory):
+    """No dead end: the Tool Engineer's only member left; PM measures."""
+    from app.models.entities import User
+    async with session_factory() as s:
+        (await s.get(User, val["user"]["Tool Engineer"]["id"])).is_active = False
+        await s.commit()
+    pm = await _auth(client, val, "Project Manager")
+    assert {d["department_name"]: d["can_write"]
+            for d in (await _state(client, pm, val))["departments"]}["Tool Engineer"] is True
+    res = await _measure(client, pm, val, "weight", _m(503.0, 509.0, **SPEC))
+    assert res.status_code == 201, res.text
+
+
+async def test_switch_off_pm_measures_any_department(client, val, monkeypatch):
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    pm = await _auth(client, val, "Project Manager")
+    res = await _measure(client, pm, val, "weight", _m(503.0, 509.0, **SPEC))
+    assert res.status_code == 201, res.text

@@ -146,11 +146,13 @@ async def _pass_all(client, auth, val, skip=()):
     state = await _state(client, auth, val)
     for dept in state["departments"]:
         name = dept["department_name"]
+        # C7 (RELEASE_V2): each department records its own checks
+        own = await _auth(client, val, name) if cm_switches.RELEASE_V2 else auth
         for check in dept["checks"]:
             if check["check_key"] in skip or check.get("retired"):
                 continue
             value = {"cycle_time": 41.5, "weight": 510.0}.get(check["check_key"])
-            res = await _check(client, auth, val, name, check["check_key"],
+            res = await _check(client, own, val, name, check["check_key"],
                                value=value)
             assert res.status_code == 201, res.text
 
@@ -255,7 +257,10 @@ async def test_department_signs_its_own_checks_only(client, val):
 
 
 async def test_pm_signs_for_anyone_and_admin_ignores_the_status_window(
-        client, admin_auth, val, session_factory):
+        client, admin_auth, val, session_factory, monkeypatch):
+    # the rule before C7; with RELEASE_V2 the department records its own
+    # (test_ecr_solid_computed_checks: the negative tests)
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     pm = await _auth(client, val, "Project Manager")
     assert (await _check(client, pm, val, "Development",
                          "revision_bump")).status_code == 201
@@ -276,7 +281,8 @@ async def test_a_department_cannot_sign_a_check_it_does_not_own(client, val):
 
 
 async def test_non_implementing_department_has_no_checks(client, admin_auth, val):
-    res = await client.post(_url(val, "/checks"), headers=admin_auth, json={
+    assembly = await _auth(client, val, "Assembly")
+    res = await client.post(_url(val, "/checks"), headers=assembly, json={
         "department_id": val["dept"]["Assembly"], "check_key": "sampled",
         "status": "passed"})
     assert res.status_code == 400, res.text
@@ -320,19 +326,21 @@ async def test_failed_check_is_lifted_only_by_its_departments_retest(
     for auth in (admin_auth, pm):  # NEGATIVE: no PM or admin shortcut
         res = await _check(client, auth, val, "Tool Engineer", "sampled",
                            note="looked again, fine now")
-        assert res.status_code == 400, res.text
-        assert "own department" in res.json()["detail"]
+        # C7: refused at the door (the department's own members)
+        assert res.status_code == 403, res.text
+        assert "own members" in res.json()["detail"]
     # NEGATIVE: the department itself needs what changed since
     for note in (None, "ok"):
         res = await _check(client, tool, val, "Tool Engineer", "sampled",
                            **({"note": note} if note else {}))
         assert res.status_code == 400, res.text
         assert "What changed since the failure" in res.json()["detail"]
-    # NEGATIVE: not outside validation
+    # NEGATIVE: not outside validation (C7: not even an admin, at the door)
     await _set_status(session_factory, val["change_id"], "in_implementation")
-    res = await _check(client, admin_auth, val, "Tool Engineer", "sampled",
-                       note="gate shortened, tool change TC-88")
-    assert res.status_code == 400, res.text
+    for auth in (admin_auth, tool):
+        res = await _check(client, auth, val, "Tool Engineer", "sampled",
+                           note="gate shortened, tool change TC-88")
+        assert res.status_code == 403, res.text
     await _set_status(session_factory, val["change_id"], "in_validation")
     res = await _check(client, tool, val, "Tool Engineer", "sampled",
                        note="gate shortened, tool change TC-88")
@@ -456,8 +464,8 @@ async def test_release_refused_while_checks_are_open(client, admin_auth, val):
 
 async def test_release_refused_when_a_check_failed(client, admin_auth, val):
     await _pass_all(client, admin_auth, val, skip={"revision_bump"})
-    await _check(client, admin_auth, val, "Development", "revision_bump",
-                 status="failed", note="customer statement says rev D")
+    await _check(client, await _auth(client, val, "Development"), val, "Development",
+                 "revision_bump", status="failed", note="customer statement says rev D")
     res = await _release(client, admin_auth, val)
     assert res.status_code == 400, res.text
     detail = res.json()["detail"]
@@ -705,8 +713,8 @@ async def test_cycle_time_measured_by_other_departments_stays_readable(
             if check["retired"]:
                 continue
             value = {"cycle_time": 41.5, "weight": 510.0}.get(check["check_key"])
-            res = await _check(client, admin_auth, val, dept["department_name"],
-                               check["check_key"], value=value)
+            res = await _check(client, await _auth(client, val, dept["department_name"]),
+                               val, dept["department_name"], check["check_key"], value=value)
             assert res.status_code == 201, res.text
     state = await _state(client, admin_auth, val)
     by_name = {d["department_name"]: d for d in state["departments"]}

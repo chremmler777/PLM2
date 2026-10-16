@@ -368,7 +368,10 @@ function DepartmentBlock({
       <ul className="space-y-1">
         {dept.checks.map((c) => (
           <CheckRow key={String(c.check_key)} changeId={changeId}
-            deptId={dept.department_id} check={c} editable={editable} mine={mine} hasCosting={hasCosting}
+            deptId={dept.department_id} check={c} editable={editable}
+            // C7: the backend's write rule (own department; the run team only
+            // for a department with no member here)
+            mine={dept.can_write ?? mine} hasCosting={hasCosting}
             plannedCycleMin={state.planned_cycle_time_min_per_part}
             weightEstimateG={state.weight_estimate_g}
             openIssue={openIssueForCheck(issues, dept.department_id, String(c.check_key))}
