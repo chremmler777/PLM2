@@ -2267,15 +2267,18 @@ mid-flow hops (C1); (7) internal: `ppap_decision` before proceed (see
 `costing → approved`, given by an engineering approver who is not the raiser
 (`settings.internal_approvers`, env `INTERNAL_APPROVERS`, default
 `christoph.demmler`; when no configured approver other than the raiser is an
-active user, a real Project Manager member (no admin shortcut, not while
-acting as a department: the same 4-eyes as the configured path, close-out
-A1-06, until P9's deputy is named), still never the raiser,
+active user, a real Project Manager member, or an admin acting as Project
+Management (an admin's own department rows do not count: in a small plant's
+set-up the admin account is in every department; close-out A1-06 and its
+review, until P9's deputy is named), still never the raiser,
 so a change the approver raised never stalls; the why-blocked row, the
 approval card and the "decision needed" notice name the same people; no
 switch); (9) at release the
 PM and Quality sign-offs bound to the latest offer sent, signed by a real
-member of Project Manager / Quality (acting as it counts, no admin shortcut:
-the override deciders' `member_of` rule, close-out A1-07)
+member of Project Manager / Quality or an admin acting as it (an admin's own
+department rows do not count, the `hard3_blind` rule of HARD #3 and the
+notices: `real_member_of`, close-out A1-07 and its review; the sign-off
+rows, the escalations and the notices go to the real members)
 (`pm_signed_offer_id`/`quality_signed_offer_id`, set by the sign-off,
 `RELEASE_V2`; the why-blocked row names the sides still owed and offers
 "Sign as PM / Quality for vN" to the viewer whose side it is, at any status;

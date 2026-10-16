@@ -32,6 +32,15 @@ async def _admin_in_pm(session_factory, seed):
 
 
 @pytest.fixture
+async def pm_auth(client, session_factory, seed, _admin_in_pm):
+    """The admin acting as Project Management: an admin's own department
+    rows do not approve internal spend (R25), acting puts PM on the record."""
+    from tests.conftest import login as _login
+    pm = await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+    return {**await _login(client, "admin@test.io"), "X-Acts-As-Department": str(pm)}
+
+
+@pytest.fixture
 async def internal(client, session_factory, seed):
     async with session_factory() as s:
         change = ChangeRequest(
@@ -48,18 +57,18 @@ def _url(cid):
     return f"/api/v1/changes/{cid}/internal-approval"
 
 
-async def test_no_cost_is_one_click_and_a_rationale(client, admin_auth, internal):
+async def test_no_cost_is_one_click_and_a_rationale(pm_auth, client, admin_auth, internal):
     res = await client.post(_url(internal), json={"release_due_date": DUE},
-                            headers=admin_auth)
+                            headers=pm_auth)
     assert res.status_code == 400 and "why we spend it" in res.json()["detail"]
     res = await client.post(_url(internal), json={"release_due_date": DUE,
                                                   "rationale": "quality"},
-                            headers=admin_auth)
+                            headers=pm_auth)
     assert res.status_code == 200, res.text
     assert res.json()["internal_rationale"] == "quality"
 
 
-async def test_with_money_the_case_owes_volume_and_saving(
+async def test_with_money_the_case_owes_volume_and_saving(pm_auth,
         client, admin_auth, internal, session_factory, seed):
     from app.models.workflow import Department
     async with session_factory() as s:
@@ -73,7 +82,7 @@ async def test_with_money_the_case_owes_volume_and_saving(
         await s.commit()
     # one round trip: every missing part of the case in one refusal
     res = await client.post(_url(internal), json={"release_due_date": DUE},
-                            headers=admin_auth)
+                            headers=pm_auth)
     detail = res.json()["detail"]
     assert res.status_code == 400 and all(w in detail for w in (
         "why we spend it", "annual volume", "saving per year", "calculated or an estimate"))
@@ -81,11 +90,11 @@ async def test_with_money_the_case_owes_volume_and_saving(
     for extra, words in (({}, "annual volume"),
                          ({"volume": 120000}, "saving per year"),
                          ({"volume": 120000, "saving": 2400}, "calculated or an estimate")):
-        res = await client.post(_url(internal), json={**base, **extra}, headers=admin_auth)
+        res = await client.post(_url(internal), json={**base, **extra}, headers=pm_auth)
         assert res.status_code == 400 and words in res.json()["detail"], res.text
     res = await client.post(_url(internal), json={
         **base, "volume": 120000, "saving": 2400, "saving_basis": "calculated"},
-        headers=admin_auth)
+        headers=pm_auth)
     assert res.status_code == 200, res.text
     body = res.json()
     assert (body["internal_volume"], body["internal_saving"],
@@ -100,10 +109,10 @@ async def test_the_raiser_still_never_approves(client, internal, seed):
     assert res.status_code == 403
 
 
-async def test_switch_off_needs_no_case(client, admin_auth, internal, monkeypatch):
+async def test_switch_off_needs_no_case(pm_auth, client, admin_auth, internal, monkeypatch):
     monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     res = await client.post(_url(internal), json={"release_due_date": DUE},
-                            headers=admin_auth)
+                            headers=pm_auth)
     assert res.status_code == 200, res.text
 
 

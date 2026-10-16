@@ -89,7 +89,7 @@ async def owed_items(session: AsyncSession, changes: list,
         if c.project_id not in pm_by_project:
             pm = [depts["Project Manager"]] if "Project Manager" in depts else []
             pm_by_project[c.project_id] = await department_members_of_change_org(
-                session, c, pm)
+                session, c, pm, real_only=True)
         return [i for i in pm_by_project[c.project_id] if i != c.raised_by]
     release_rule = cm_switches.on("RELEASE_V2")
     bound = cm_switches.on("COMMERCIAL_V2")
@@ -126,8 +126,10 @@ async def owed_items(session: AsyncSession, changes: list,
 
                 async def who(c=c, dept=dept, other=other):
                     # 4-eyes: never the other side's signer
+                    # real members: an admin signs only acting (R25)
                     return [u for u in await department_members_of_change_org(
-                        session, c, [depts[dept]] if dept in depts else [])
+                        session, c, [depts[dept]] if dept in depts else [],
+                        real_only=True)
                         if u != other]
                 version = latest.version if latest is not None else 0
                 own = max((t for t in (c.customer_response_at,

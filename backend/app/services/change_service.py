@@ -493,6 +493,19 @@ class ChangeService:
                 Department.is_active.is_(True)))).scalar())
 
     @staticmethod
+    async def real_member_of(session: AsyncSession, user: User, *names: str) -> bool:
+        """member_of without a real admin's own department rows (the
+        hard3_blind rule of staffed_department_ids and the notices): in a
+        small plant's set-up the admin account belongs to every department.
+        The change sign-offs and the HARD #8 fallback use it, so an admin
+        signs or approves only by acting as the department, which puts the
+        department on the record (R25, R37)."""
+        from app.services.change_people import hard3_blind
+        if hard3_blind(user):
+            return False
+        return await ChangeService.member_of(session, user, *names)
+
+    @staticmethod
     async def override_deciders(session: AsyncSession, change: ChangeRequest,
                                 guard_key: Optional[str], to_status: str) -> dict:
         """Who gives the OK on an override of this rule, for the dialog's
@@ -1007,7 +1020,10 @@ class ChangeService:
             dept_ids = [i for (i,) in (await session.execute(
                 select(Department.id).where(Department.name == "Project Manager",
                                             Department.is_active.is_(True)))).all()]
-            ids = set(await department_members_of_change_org(session, change, dept_ids))
+            # real members (R37): an admin account approves only acting as
+            # Project Management (is_internal_approver), so it is not told
+            ids = set(await department_members_of_change_org(
+                session, change, dept_ids, real_only=True))
         ids.discard(change.raised_by)
         return ids
 
@@ -1027,10 +1043,10 @@ class ChangeService:
         """HARD #8 (P9): an engineering approver (settings.internal_approvers),
         never the change's raiser, never while acting as a department. With
         no configured approver for this change (none active here, or the
-        only one raised it), a real Project Manager member stands in: no
-        admin shortcut and not while acting (4-eyes on internal spend, the
-        same as the configured path), still never the raiser. DECIDED BY
-        CLAUDE until Christoph names the deputy (P9)."""
+        only one raised it), a Project Manager member stands in, still never
+        the raiser: a real member, or an admin acting as Project Management
+        (its own department rows do not count: real_member_of, R25). DECIDED
+        BY CLAUDE until Christoph names the deputy (P9)."""
         from app.services.change_people import is_acting
         if user.effective_role == "viewer":
             return False      # read-only: the POST would refuse it (R24)
@@ -1039,8 +1055,7 @@ class ChangeService:
         approvers = await ChangeService.change_approvers(session, change)
         if approvers:
             return not is_acting(user) and any(u.id == user.id for u in approvers)
-        return (not is_acting(user)
-                and await ChangeService.member_of(session, user, "Project Manager"))
+        return await ChangeService.real_member_of(session, user, "Project Manager")
 
     @staticmethod
     async def create_change(
@@ -3364,12 +3379,12 @@ class ChangeService:
     @staticmethod
     async def user_can_sign_change(session: AsyncSession, user: User, role: str) -> bool:
         """The change's PM and Quality sign-offs that HARD #4 and #9 count
-        (R37): real membership of the department, acting as it allowed, no
-        admin shortcut. The same member_of rule the override deciders use,
-        so the hard gate never accepts a wider signer than the soft
-        override. (SEP gates and form signatures keep user_can_sign_off.)"""
+        (R37): real membership of the department, or an admin acting as it;
+        an admin's own department rows do not count (real_member_of, R25),
+        so a side is never signed with no department on the record. (SEP
+        gates and form signatures keep user_can_sign_off.)"""
         dept_name = "Quality" if role == "quality" else "Project Manager"
-        return await ChangeService.member_of(session, user, dept_name)
+        return await ChangeService.real_member_of(session, user, dept_name)
 
     @staticmethod
     async def user_can_set_quoted_price(
@@ -3423,7 +3438,8 @@ class ChangeService:
         """HARD #8 (P9): an engineering approver (settings.internal_approvers)
         who is not the change's raiser. No lead bypass. Until an approver is
         configured and active here: a real Project Manager member, not
-        acting, no admin shortcut (still never the raiser)."""
+        acting, or an admin acting as Project Management (still never the
+        raiser)."""
         return await ChangeService.is_internal_approver(session, user, change)
 
     # The department that owns tools (_DOMAIN_BY_DEPARTMENT's tool domain) and
@@ -4876,6 +4892,11 @@ class ChangeService:
             return out        # read-only: decides and moves nothing (R24)
         is_pm_member = await ChangeService.member_of(db, user, "Project Manager")
         is_quality = await ChangeService.member_of(db, user, "Quality")
+        # the sign-offs and the HARD #8 fallback: an admin's own department
+        # rows do not count (user_can_sign_change / is_internal_approver)
+        from app.services.change_people import hard3_blind
+        signs_pm = is_pm_member and not hard3_blind(user)
+        signs_quality = is_quality and not hard3_blind(user)
         from app.services import cm_switches
         from app.services.cm_rules import ABSORB_RULE
         # HARD #7 (SCOPING_V2): Quality's ppap_decision on an internal change
@@ -5002,7 +5023,7 @@ class ChangeService:
                         or c.start_at_risk_approved_at is not None)
             return release_rule and c.status == "in_validation"
         signable = [c for c in open_changes if _signable(c)] \
-            if (is_pm_member or is_quality) else []
+            if (signs_pm or signs_quality) else []
         sent_by: dict = {}
         if signable:
             from app.models.change_offer import ChangeOffer
@@ -5026,7 +5047,7 @@ class ChangeService:
             if c.status in ("approved", "in_implementation"):
                 sides = ChangeService.resign_sides(c, sides, latest)
             for side in sides:
-                if not (is_pm_member if side == "pm" else is_quality):
+                if not (signs_pm if side == "pm" else signs_quality):
                     continue
                 other = c.quality_signed_by if side == "pm" else c.pm_signed_by
                 if other == user.id:
@@ -5064,7 +5085,7 @@ class ChangeService:
                 mine = [u for u in approvers if u.id != c.raised_by]
                 # is_internal_approver's rule on the list read once
                 if not (any(u.id == user.id for u in mine) and not is_acting(user)
-                        if mine else (is_pm_member and not is_acting(user))):
+                        if mine else signs_pm):
                     continue
                 if (c.status == "costing" and cm_switches.on("ASSESSMENT_V2")
                         and await ChangeService.costing_pending_department_ids(db, c)):

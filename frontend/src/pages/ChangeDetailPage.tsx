@@ -368,12 +368,12 @@ export default function ChangeDetailPage() {
   // Governance authz (mirrors the backend 403 gates in change_service.py):
   // sign-off is department-gated with no lead bypass; quoted price and
   // internal-cost approval keep the lead/PM exceptions the backend allows.
-  // R37: real membership (acting as the department counts), no admin
-  // shortcut, the rule the override deciders use (user_can_sign_change).
-  const canSignPm = isPmMember;
-  const canSignQuality = isQualityMember;
+  // R25/R37: real membership or acting as the department; an admin's own
+  // department rows do not count (user_can_sign_change: real_member_of).
+  const canSignPm = isPmMember && !isAdmin;
+  const canSignQuality = isQualityMember && !isAdmin;
   // HARD #8: an engineering approver, never the raiser: the backend's verdict.
-  const canApproveInternalCosts = stage?.can_approve_internal ?? (isPmMember && !actingAs);
+  const canApproveInternalCosts = stage?.can_approve_internal ?? (isPmMember && !isAdmin);
   const canEditQuotedPrice = isAdmin || isChangeLead || isSalesMember;
   // The whole cost picture is PM/Sales/Management/lead/admin business; a
   // department sees its own bucket and nobody else's figures. The backend's

@@ -345,6 +345,30 @@ describe('ChangeDetailPage offer tab rights', () => {
       .toContain('write=false prices=false pm=false quality=true'))
   })
 
+  it('R25: an admin signs no side through its own department rows, only acting as the department', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 },
+        { id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 2 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9, 7] })
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 1 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=offer')
+    await waitFor(() => expect(screen.getByTestId('mock-offer-tab').textContent)
+      .toContain('pm=false quality=false'))
+    cleanup()
+    sessionStorage.setItem(ACTS_AS_KEY, '9')
+    try {
+      vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
+      wrap('/changes/1?tab=offer')
+      await waitFor(() => expect(screen.getByTestId('mock-offer-tab').textContent)
+        .toContain('pm=true quality=false'))
+    } finally {
+      sessionStorage.removeItem(ACTS_AS_KEY)
+    }
+  })
+
   it('labels the tab Approval for an internal change', async () => {
     change.status = 'costing'
     change.customer_relevant = false

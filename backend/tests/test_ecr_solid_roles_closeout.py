@@ -290,12 +290,19 @@ async def test_a1_06_internal_fallback_has_no_admin_shortcut(
         assert await ChangeService.is_internal_approver(s, admin, c) is False
         pm_user = await s.get(User, pm)
         assert await ChangeService.is_internal_approver(s, pm_user, c) is True
-        # acting as Project Manager is not membership on this 4-eyes step
+        # an admin approves only acting as Project Management (its own
+        # department rows do not count, R25); acting as another department
+        # is no approver
         from app.models.workflow import Department
         pm_dept = (await s.execute(select(Department).where(
             Department.name == "Project Manager"))).scalar_one()
         admin.acts_as_department_id = pm_dept.id
+        assert await ChangeService.is_internal_approver(s, admin, c) is True
+        other = Department(name="Other A6", flow_type="action", is_active=True)
+        s.add(other); await s.flush()
+        admin.acts_as_department_id = other.id
         assert await ChangeService.is_internal_approver(s, admin, c) is False
+        admin.acts_as_department_id = None
         # never the raiser
         c.raised_by = pm
         assert await ChangeService.is_internal_approver(s, pm_user, c) is False

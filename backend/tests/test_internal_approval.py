@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import update
 
-from tests.conftest import login, ENGINEER_PASSWORD, advance_to_assessment
+from tests.conftest import login, ENGINEER_PASSWORD, advance_to_assessment, make_department_member
 from tests.test_change_scoping import create_change, add_item_and_lead
 
 # Internal approval is where the release ("released-by") deadline is born.
@@ -31,8 +31,17 @@ async def _admin_in_pm(session_factory, seed):
     await make_department_member(session_factory, seed["admin_id"], "Project Manager")
 
 
+@pytest.fixture
+async def pm_auth(client, session_factory, seed, _admin_in_pm):
+    """The admin acting as Project Management: an admin's own department
+    rows do not approve internal spend (R25), acting puts PM on the record."""
+    from tests.conftest import login as _login
+    pm = await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+    return {**await _login(client, "admin@test.io"), "X-Acts-As-Department": str(pm)}
+
+
 @pytest.mark.asyncio
-async def test_internal_approval_snapshots_amount_and_unblocks_approved(
+async def test_internal_approval_snapshots_amount_and_unblocks_approved(pm_auth,
         client, admin_auth, seed, part, session_factory):
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
@@ -40,7 +49,7 @@ async def test_internal_approval_snapshots_amount_and_unblocks_approved(
     await advance_to_assessment(client, admin_auth, session_factory, change["id"])
     await to_costing(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={"note": "budget ok", "release_due_date": _RELEASE_DUE, "rationale": "quality"}, headers=admin_auth)
+                            json={"note": "budget ok", "release_due_date": _RELEASE_DUE, "rationale": "quality"}, headers=pm_auth)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["internal_approved_by"] == seed["admin_id"]
@@ -51,7 +60,7 @@ async def test_internal_approval_snapshots_amount_and_unblocks_approved(
 
 
 @pytest.mark.asyncio
-async def test_internal_approval_guards(client, admin_auth, seed, part,
+async def test_internal_approval_guards(pm_auth, client, admin_auth, seed, part,
                                         session_factory):
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
@@ -62,14 +71,14 @@ async def test_internal_approval_guards(client, admin_auth, seed, part,
         await s.commit()
     # wrong status
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={}, headers=admin_auth)
+                            json={}, headers=pm_auth)
     assert res.status_code == 400
     # customer-relevant change refuses internal approval
     await client.patch(f"/api/v1/changes/{change['id']}",
                        json={"customer_relevant": True}, headers=admin_auth)
     await to_costing(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={}, headers=admin_auth)
+                            json={}, headers=pm_auth)
     assert res.status_code == 400
     # non-PM engineer refused on an internal change (not admin, not PM member)
     change2 = await create_change(client, admin_auth, seed["project_id"],
@@ -108,7 +117,7 @@ async def test_internal_approval_allows_pm_department_member(
 
 
 @pytest.mark.asyncio
-async def test_internal_approval_requires_release_deadline(
+async def test_internal_approval_requires_release_deadline(pm_auth,
         client, admin_auth, seed, part, session_factory):
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
@@ -116,7 +125,7 @@ async def test_internal_approval_requires_release_deadline(
     await to_costing(session_factory, change["id"])
     cid = change["id"]
     res = await client.post(f"/api/v1/changes/{cid}/internal-approval",
-                            json={"note": "ok"}, headers=admin_auth)
+                            json={"note": "ok"}, headers=pm_auth)
     assert res.status_code == 400
     assert "release deadline" in res.json()["detail"].lower()
 
@@ -124,7 +133,7 @@ async def test_internal_approval_requires_release_deadline(
     res = await client.post(f"/api/v1/changes/{cid}/internal-approval", json={
         "note": "ok", "release_due_date": due, "release_due_reason": "plant window",
         "rationale": "quality",
-    }, headers=admin_auth)
+    }, headers=pm_auth)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["internal_approved_at"] is not None

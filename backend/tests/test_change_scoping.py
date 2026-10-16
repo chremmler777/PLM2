@@ -370,19 +370,22 @@ async def test_legacy_quoted_internal_change_approves_internally(
             ChangeRequest.id == change["id"]).values(
                 status="quoted", raised_by=seed["engineer_id"]))
         await s.commit()
-    # the fallback approver is a real Project Manager member (close-out A1-06)
+    # the fallback approver is a Project Manager member: the admin acts as
+    # Project Management (its own department rows do not count, R25)
     from tests.conftest import make_department_member
-    await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+    pm_dept = await make_department_member(session_factory, seed["admin_id"],
+                                           "Project Manager")
+    pm_auth = {**admin_auth, "X-Acts-As-Department": str(pm_dept)}
     res = await client.post(
         f"/api/v1/changes/{change['id']}/internal-approval",
         json={"release_due_date": (
             datetime.utcnow() + timedelta(days=120)).isoformat(),
             "rationale": "quality"},
-        headers=admin_auth)
+        headers=pm_auth)
     assert res.status_code == 200, res.text
     # F5: a second approval is refused.
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={}, headers=admin_auth)
+                            json={}, headers=pm_auth)
     assert res.status_code == 400
     assert "already approved" in res.json()["detail"].lower()
     res = await client.post(f"/api/v1/changes/{change['id']}/transition",

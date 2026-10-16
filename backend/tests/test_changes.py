@@ -184,8 +184,9 @@ async def departments(session_factory, seed):
         # department-membership guard doesn't block the blocking (R/A) rows.
         for dept_id in ids.values():
             s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
-        # The second signature (Quality) is the admin's: a change sign-off
-        # needs real membership, no admin shortcut (close-out A1-07).
+        # The second signature (Quality) is the admin's, acting as Quality:
+        # a change sign-off needs real membership or acting as the
+        # department; an admin's own rows do not count (A1-07, R25).
         s.add(UserDepartment(user_id=seed["admin_id"], department_id=ids["Quality"]))
         await s.commit()
         return ids
@@ -270,7 +271,7 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
                             json={"role": "quality"}, headers=eng_auth)
     assert res.status_code == 400, res.text
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",
-                            json={"role": "quality"}, headers=admin_auth)
+                            json={"role": "quality"}, headers={**admin_auth, "X-Acts-As-Department": str(departments["Quality"])})
     assert res.status_code == 200, res.text
     # ECR-solid §7: the last of the three approves on its own
     assert res.json()["status"] == "approved"
@@ -285,7 +286,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
-    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
+    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers={**admin_auth, "X-Acts-As-Department": str(departments["Quality"])})
     await _transition(client, eng_auth, cid, "approved")
     # The impacted set must be locked before kickoff. Development's manual
     # confirm is switched off (2026-10-14), the lock is stamped directly.
@@ -307,7 +308,7 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
-    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
+    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers={**admin_auth, "X-Acts-As-Department": str(departments["Quality"])})
     await _transition(client, eng_auth, cid, "approved")
     await lock_impact(session_factory, cid)
     await validate_timing(session_factory, cid)
@@ -704,8 +705,8 @@ async def test_sign_off_department_gating(
     client, eng_auth, admin_auth, seed, departments, session_factory,
 ):
     """Task: Quality & PM sign-off are department-gated, no admin shortcut
-    (close-out A1-07): an admin signs as a member or acting as the
-    department."""
+    (close-out A1-07): an admin signs only acting as the department, its
+    own department rows do not count (R25)."""
     change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
                                       session_factory)
     cid = change["id"]

@@ -230,7 +230,7 @@ async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departmen
                       json={"response": "accepted", **ACCEPT_EVIDENCE, "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     res = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"},
-                            headers=admin_auth)
+                            headers={**admin_auth, "X-Acts-As-Department": str(departments["Quality"])})
     # ECR-solid §7: the last of acceptance and both sign-offs approves
     assert res.json()["status"] == "approved", res.text
     return cid
