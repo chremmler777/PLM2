@@ -2552,6 +2552,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.lateHintLead': {
     de: 'Einen Arbeitstag über fällig: der Lead sieht es jetzt unter „Überfällig“',
     en: "One working day past due: the lead sees it in 'Overdue' now" },
+  'tasks.lateHintPm': {
+    de: 'Einen Arbeitstag über fällig: kein handlungsfähiger Lead, Projektmanagement sieht es jetzt unter „Überfällig“, und es steht im täglichen Überfällig-Bericht',
+    en: "One working day past due: no lead who can act, so Project Management sees it in 'Overdue' now, and it is in the daily overdue digest" },
+  'tasks.lateHintPmOnly': {
+    de: 'Einen Arbeitstag über fällig: kein handlungsfähiger Lead, Projektmanagement sieht es jetzt unter „Überfällig“',
+    en: "One working day past due: no lead who can act, so Project Management sees it in 'Overdue' now" },
   'tasks.lateHintDigest': {
     de: 'Einen Arbeitstag über fällig: es steht jetzt im täglichen Überfällig-Bericht',
     en: 'One working day past due: it is in the daily overdue digest now' },

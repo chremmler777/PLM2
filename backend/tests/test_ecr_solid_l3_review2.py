@@ -345,7 +345,7 @@ async def test_late_costing_reaches_the_lead_the_group_and_the_digest(
         await run_notification_sweep(s); await s.commit()
         lead = await _notes(s, user_id=pm_id, kind="overdue")
         assert [n.title for n in lead] == [
-            f"Costing input: Tool Engineer late (escalation): {row['change_number']}"]
+            f"Late: Costing input: Tool Engineer on {row['change_number']}"]
         assert not await _notes(s, user_id=team["user"]["Tool Engineer"], kind="due_soon")
         digest = (await _notes(s, kind="overdue_digest"))[0]
         assert "Costing input: Tool Engineer (Tool Engineer, due" in digest.body
@@ -385,9 +385,10 @@ async def test_late_rows_without_a_lead_or_digest_say_so(
     await _set(session_factory, cid, status="in_assessment", lead_id=None)
     await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=10))
     tool = await _as(client, "Tool Engineer")
-    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "digest"
+    # A6-03: no lead, so Project Management sees it (and the digest)
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "pm_digest"
     monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
-    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] is None
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "pm"
     await _set(session_factory, cid, lead_id=team["user"]["Project Manager"])
     assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "lead"
 
@@ -409,9 +410,9 @@ async def test_late_sign_off_and_override_reach_the_lead(client, seed, team, ses
         await s.commit()
         await run_notification_sweep(s); await s.commit()
         titles = sorted(n.title for n in await _notes(s, user_id=dev_id, kind="overdue"))
-    assert any(t.startswith("PM sign-off late") for t in titles)
-    assert any(t.startswith("Quality sign-off late") for t in titles)
-    assert any(t.startswith("Decide override #") for t in titles)
+    assert any(t.startswith("Late: PM sign-off") for t in titles)
+    assert any(t.startswith("Late: Quality sign-off") for t in titles)
+    assert any(t.startswith("Late: Decide override #") for t in titles)
 
 
 async def test_task_clock_floor_keeps_in_flight_rows_from_being_late(
@@ -525,7 +526,7 @@ async def test_part_revision_task_escalates_and_other_workflows_keep_their_words
         await s.commit()
         await run_notification_sweep(s); await s.commit()
         lead = await _notes(s, user_id=seed["admin_id"], kind="overdue")
-        assert [n.title for n in lead] == ["Task late (escalation)"]
+        assert [n.title for n in lead] == ["Late: task on C-PR-1"]
         mine = sorted(n.title for n in await _notes(s, user_id=seed["engineer_id"],
                                                      kind="overdue"))
         # the change's task under the one rule; the other workflow as before

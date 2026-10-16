@@ -106,3 +106,179 @@ def test_migration_143_stamps_once_and_downgrades(tmp_path):
     with engine.begin() as conn:
         _run(conn, m.downgrade)
         assert conn.execute(sa.text("SELECT count(*) FROM org_settings")).scalar() == 0
+
+
+# ---------------------------------------------------------------------------
+# A6-02 'decision needed' is delivered (spec §0 Notifications, immediate)
+# ---------------------------------------------------------------------------
+from tests.test_ecr_solid_commercial import _YES, _answer, quoted  # noqa: E402,F401
+from tests.test_offers import _auth as _offer_auth, offer_world  # noqa: E402,F401
+
+
+async def _decisions(session_factory, user_id):
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        return (await s.execute(sa.select(Notification).where(
+            Notification.user_id == user_id,
+            Notification.kind == "decision_needed"))).scalars().all()
+
+
+def test_decision_needed_and_override_answers_are_mailed():
+    from app.services.mail_outbox import MAIL_KINDS
+    assert {"decision_needed", "deviation_decided"} <= MAIL_KINDS
+
+
+async def test_first_sign_off_after_the_yes_tells_each_side_once(
+        client, quoted, session_factory):
+    cid, oid = quoted["change_id"], quoted["offer_id"]
+    pm_id, q_id = quoted["users"]["pm"], quoted["quality_id"]
+    # NEGATIVE: nothing before the customer's yes
+    assert await _decisions(session_factory, pm_id) == []
+    sales = await _offer_auth(client, "sales")
+    res = await _answer(client, cid, sales, _YES)
+    assert res.status_code == 200, res.text
+    pm_n = await _decisions(session_factory, pm_id)
+    q_n = await _decisions(session_factory, q_id)
+    assert [n.subject_key for n in pm_n] == [f"chg:{cid}:sign:pm:{oid}"]
+    assert [n.subject_key for n in q_n] == [f"chg:{cid}:sign:quality:{oid}"]
+    assert pm_n[0].title.startswith("PM sign-off needed")
+    # NEGATIVE: Sales (the actor, no signer) hears nothing
+    assert await _decisions(session_factory, quoted["users"]["sales"]) == []
+
+
+async def test_the_side_already_signed_gets_no_notice(client, quoted, session_factory):
+    from tests.conftest import login
+    cid = quoted["change_id"]
+    q = await login(client, "off-quality@test.io", "role-secret-1")
+    r = await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"},
+                          headers=q)
+    assert r.status_code == 200, r.text
+    sales = await _offer_auth(client, "sales")
+    assert (await _answer(client, cid, sales, _YES)).status_code == 200
+    assert len(await _decisions(session_factory, quoted["users"]["pm"])) == 1
+    assert await _decisions(session_factory, quoted["quality_id"]) == []
+
+
+async def test_switch_off_sends_no_sign_off_notice(client, quoted, session_factory,
+                                                   monkeypatch):
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "on",
+                        lambda k: k != "COMMERCIAL_V2")
+    sales = await _offer_auth(client, "sales")
+    res = await _answer(client, quoted["change_id"], sales,
+                        {"response": "accepted", "release_due_date": _YES["release_due_date"],
+                         "ref": "PO 4500123456"})
+    assert res.status_code == 200, res.text
+    assert await _decisions(session_factory, quoted["users"]["pm"]) == []
+
+
+async def test_internal_approval_owed_tells_the_approver_once_never_the_raiser(
+        client, seed, team, session_factory):
+    from app.services.decision_notices import internal_approval_owed
+    dev = await _as(client, "Development")
+    cid = await _create(client, dev, seed, "internal spend", customer_relevant=False)
+    await _set(session_factory, cid, status="costing")
+    await _owing_costing(session_factory, team, cid, datetime.utcnow())
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        # NEGATIVE: Tool Engineer has not finalized its costing yet
+        assert await internal_approval_owed(s, c, None) == 0
+    await _set(session_factory, cid, status="costing")
+    async with session_factory() as s:
+        from app.models.change import ChangeAssessment
+        a = (await s.execute(sa.select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalar_one()
+        await s.delete(a)
+        await s.commit()
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        assert await internal_approval_owed(s, c, None) == 1
+        assert await internal_approval_owed(s, c, None) == 0       # once
+        await s.commit()
+    pm_n = await _decisions(session_factory, team["user"]["Project Manager"])
+    assert [n.subject_key for n in pm_n] == [f"chg:{cid}:internal_approval"]
+    assert await _decisions(session_factory, team["user"]["Development"]) == []
+
+
+from tests.test_ecr_solid_fix_concession import (  # noqa: E402,F401
+    _fail_weight, _issue, _iurl, _who, fix,
+)
+from tests.test_validation_checks import _auth as _val_auth, val  # noqa: E402,F401
+
+
+async def test_filed_customer_mail_tells_quality_to_decide_the_concession(
+        client, fix, session_factory):
+    await _fail_weight(client, fix)
+    iid = (await _issue(client, fix))["id"]
+    quality = await _who(client, fix, "Quality")
+    res = await client.post(_iurl(fix, f"/{iid}/concession"), headers=quality,
+                            json={"note": "ask for 518 g max, 500 parts"})
+    assert res.status_code == 200, res.text
+    q_id, sales_id = fix["user"]["Quality"]["id"], fix["user"]["Sales"]["id"]
+    # NEGATIVE: nothing to decide before the mail is filed
+    assert await _decisions(session_factory, q_id) == []
+    sales = await _val_auth(client, fix, "Sales")
+    up = await client.post(
+        f"/api/v1/changes/{fix['change_id']}/attachments", headers=sales,
+        files={"file": ("mail.eml", b"From: customer", "message/rfc822")},
+        data={"kind": "customer_email", "validation_issue_id": str(iid)})
+    assert up.status_code in (200, 201), up.text
+    assert [n.subject_key for n in await _decisions(session_factory, q_id)] == [
+        f"vi:{iid}:concession_decide"]
+    assert await _decisions(session_factory, sales_id) == []
+
+
+# ---------------------------------------------------------------------------
+# A6-03 an idle or missing lead: Project Management gets the escalation
+# ---------------------------------------------------------------------------
+async def _overdue(session_factory, user_id):
+    from app.models.notification import Notification
+    async with session_factory() as s:
+        return (await s.execute(sa.select(Notification).where(
+            Notification.user_id == user_id,
+            Notification.kind == "overdue"))).scalars().all()
+
+
+@pytest.mark.parametrize("lead", ["idle", "none"])
+async def test_leadless_change_escalates_to_project_management(
+        client, seed, team, session_factory, lead):
+    from tests.test_ecr_solid_l3_review import _viewer
+    from app.services.notification_sweep import run_notification_sweep
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "no lead to act")
+    idle = await _viewer(session_factory, seed) if lead == "idle" else None
+    await _set(session_factory, cid, status="in_assessment", lead_id=idle)
+    await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=10))
+    tool = await _as(client, "Tool Engineer")
+    row = (await _tasks(client, tool, cid, "costing_input"))[0]
+    assert row["late"] is True and row["escalation"] == "pm_digest"
+    async with session_factory() as s:
+        await run_notification_sweep(s); await s.commit()
+    pm_id = team["user"]["Project Manager"]
+    titles = [n.title for n in await _overdue(session_factory, pm_id)]
+    assert any(t.startswith("Late: Costing input") and t.endswith(row["change_number"])
+               for t in titles), titles
+    if idle is not None:      # NEGATIVE: the idle lead gets nothing
+        assert await _overdue(session_factory, idle) == []
+    pm = await _as(client, "Project Manager")
+    esc = (await client.get("/api/v1/changes/my-escalations", headers=pm)).json()
+    assert any(e["change_id"] == cid and e["kind"] == "costing_input" for e in esc)
+
+
+async def test_active_lead_keeps_the_escalation_pm_gets_none(
+        client, seed, team, session_factory):
+    from app.services.notification_sweep import run_notification_sweep
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "lead acts")
+    dev_id = team["user"]["Development"]
+    await _set(session_factory, cid, status="in_assessment", lead_id=dev_id)
+    await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=10))
+    tool = await _as(client, "Tool Engineer")
+    assert (await _tasks(client, tool, cid, "costing_input"))[0]["escalation"] == "lead_digest"
+    async with session_factory() as s:
+        await run_notification_sweep(s); await s.commit()
+    assert len(await _overdue(session_factory, dev_id)) == 1
+    assert await _overdue(session_factory, team["user"]["Project Manager"]) == []
+    pm = await _as(client, "Project Manager")
+    esc = (await client.get("/api/v1/changes/my-escalations", headers=pm)).json()
+    assert not any(e["change_id"] == cid for e in esc)

@@ -2415,7 +2415,11 @@ one, and "Absorb" on an open price for who may ask it.
   task (owned unlinked assessments included) is reminded on the due date
   ("Task due today", "Assessment due today"); at due + 1 working day the
   owner hears it is late, the item escalates to the change lead (notification
-  and the "Overdue" group, `lead_escalations`) and the digest. The computed
+  and the "Overdue" group, `lead_escalations`) and the digest. A change
+  without a lead who can act (none, inactive or read-only:
+  `ChangeService.leadless_ids`, the onward hop's rule) escalates to Project
+  Management's members instead and shows in their "Overdue" group
+  (`escalation_targets`). Escalation notices read "Late: <what> on <CR>". The computed
   rows that owe a number or a decision follow the same rule
   (`app/services/owed_items.py`, read per change, not per viewer): costing
   input, sign-offs, the internal approval and overrides. Who owes it (the
@@ -2428,8 +2432,8 @@ one, and "Absorb" on an open price for who may ask it.
   weekend). Sales' late stage rows reach the digest. The rest (questions,
   plan feedback, checks, "Ready: move it on") is marked "Late" for its owner
   only in cut 1. The row's `escalation` words the Late chip so it never
-  promises more: `lead_digest`, `lead` (digest switched off), `digest` (no
-  lead, or Sales' rows) or none. Quote and release deadline alerts reach the
+  promises more: `lead_digest`, `lead` (digest switched off), `pm_digest` /
+  `pm` (no lead who can act), `digest` (Sales' rows) or none. Quote and release deadline alerts reach the
   Sales owner too; each names its deadline ("Release due 3 Nov"), and a
   release alert is not hidden by an earlier quote alert.
   A sweep notice is sent once per item and person, read or not
@@ -2471,7 +2475,15 @@ one, and "Absorb" on an open price for who may ask it.
   `frontend_url` + `/plm2`). Only the immediate class is mailed
   (`mail_outbox.MAIL_KINDS`: task newly yours, `task_assigned` to you or
   `task_new` to your department, decision needed, escalation to acknowledge,
-  the two digests); due reminders, late notices, deadline alerts, stage and
+  the two digests, an override's answer, sent only when it is a no or the
+  change is urgent); `decision_needed` (`decision_notices.py`, A6-02) goes
+  out once when a decision first becomes owed: a PM or Quality sign-off
+  after the customer's yes (`COMMERCIAL_V2`, never the actor or the other
+  side's signer; a re-sign stays `task_new` to the signer), the internal
+  approval once every department's costing is finalized (`COMMERCIAL_V2`,
+  the approvers, never the raiser), a concession for Quality once the
+  customer's mail is filed (`RELEASE_V2`), and the scope change, start at
+  risk and declined-supplement decisions; due reminders, late notices, deadline alerts, stage and
   FYI notices, kind-less notices (lesson reminders, "Cost carrier changed")
   and a backup's info copy stay badges. Read, older than 24 h or addressless
   ones are skipped; a hub account's bare username gets

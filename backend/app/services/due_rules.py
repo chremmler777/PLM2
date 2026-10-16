@@ -219,10 +219,14 @@ LEAD_ESCALATED_KINDS = frozenset({"assessment", "costing_input", "sign_off",
 DIGEST_KINDS = frozenset({"kickoff", "create_quote", "customer_response"})
 
 
-def escalation_of(task: dict, change) -> Optional[str]:
-    """'lead_digest' | 'lead' | 'digest' | None for a late My Tasks row."""
+def escalation_of(task: dict, change, leadless: bool = False) -> Optional[str]:
+    """'lead_digest' | 'lead' | 'pm_digest' | 'pm' | 'digest' | None for a
+    late My Tasks row. leadless: the change has no lead who can act
+    (ChangeService.leadless_ids), so Project Management sees it (A6-03)."""
     digest = cm_switches.on("RELEASE_V2")
     if task["kind"] in LEAD_ESCALATED_KINDS:
+        if leadless:
+            return "pm_digest" if digest else "pm"
         if getattr(change, "lead_id", None) is not None:
             return "lead_digest" if digest else "lead"
         return "digest" if digest else None
@@ -249,8 +253,12 @@ async def annotate_tasks(session, tasks: list[dict], changes,
     on = cm_switches.on("ASSESSMENT_V2")
     by_id = {c.id: c for c in changes}
     since: dict = {}
+    idle: set = set()
     if on and tasks:
         await load_clock_floor(session)
+        from app.services.change_service import ChangeService
+        idle = await ChangeService.leadless_ids(
+            session, [by_id[i] for i in {t["change_id"] for t in tasks} if i in by_id])
     ids = list({t["change_id"] for t in tasks if t["change_id"] in by_id})
     if on and ids:
         from sqlalchemy import func, select
@@ -288,7 +296,7 @@ async def annotate_tasks(session, tasks: list[dict], changes,
             t["due_date"] = due
             t["overdue"] = due < now
         t["late"] = is_late(due, now) if isinstance(due, datetime) else False
-        t["escalation"] = escalation_of(t, c)
+        t["escalation"] = escalation_of(t, c, c.id in idle)
 
 
 def task_order(t: dict) -> tuple:

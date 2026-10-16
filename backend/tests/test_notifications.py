@@ -16,6 +16,15 @@ from app.services.change_service import ChangeService
 from app.services.notification_sweep import run_notification_sweep
 
 
+
+@pytest.fixture(autouse=True)
+async def _engineer_can_act(session_factory, seed):
+    """A6-03: a late item escalates to a lead who can act; the seeded
+    engineer leads here, so give it a PLM department (strategy B: no
+    department = read-only, whose escalations go to Project Management)."""
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Lead Desk")
+
 @pytest.fixture(autouse=True)
 def _pre_c20_timing(monkeypatch):
     """These pin the earlier timing (escalation at the due date, due-soon two

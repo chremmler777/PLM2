@@ -25,7 +25,9 @@ export function dueNote(task: Pick<ChangeTask, 'deadline_date' | 'deadline_kind'
 export function lateHint(escalation: ChangeTask['escalation']): string {
   return t(escalation === 'lead_digest' ? 'tasks.lateHint'
     : escalation === 'lead' ? 'tasks.lateHintLead'
-      : escalation === 'digest' ? 'tasks.lateHintDigest' : 'tasks.lateHintOwn')
+      : escalation === 'pm_digest' ? 'tasks.lateHintPm'
+        : escalation === 'pm' ? 'tasks.lateHintPmOnly'
+          : escalation === 'digest' ? 'tasks.lateHintDigest' : 'tasks.lateHintOwn')
 }
 
 const earlier = (a: string | null | undefined, b: string | null | undefined) =>

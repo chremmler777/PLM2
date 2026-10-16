@@ -25,6 +25,15 @@ from app.services.notification_sweep import run_notification_sweep
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+async def _engineer_can_act(session_factory, seed):
+    """A6-03: a late item escalates to a lead who can act; the seeded
+    engineer leads here, so give it a PLM department (strategy B: no
+    department = read-only, whose escalations go to Project Management)."""
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Lead Desk")
+
+
 async def _change(s, seed, number, **kw):
     c = ChangeRequest(change_number=number, title="t", reason="r",
                       change_type="physical_part", project_id=seed["project_id"],

@@ -257,6 +257,9 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         for_department_id=department_id)
     # HARD #8: finalized above the approved total -> the approver again
     await ChangeService.withdraw_outgrown_internal_approval(session, change, actor.id)
+    # A6-02: the last finalize makes the internal approval owed
+    from app.services.decision_notices import internal_approval_owed
+    await internal_approval_owed(session, change, actor.id)
     return anchor
 
 
@@ -420,6 +423,8 @@ async def no_cost(session: AsyncSession, change: ChangeRequest, department_id: i
         f"No cost for dept {department_id}: {words}", actor.id,
         new_value={"department_id": department_id, **answer},
         for_department_id=department_id)
+    from app.services.decision_notices import internal_approval_owed
+    await internal_approval_owed(session, change, actor.id)
     return anchor
 
 

@@ -146,28 +146,41 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     # duplicate ping. A change's tasks: change-scoped instances and the
     # part revisions it originated (change_task_query, as the lead's
     # "Overdue" group counts them).
+    # A6-03: a change whose lead cannot act (none, inactive, read-only)
+    # escalates to Project Management, as its onward hop does
+    # (ChangeService.escalation_targets); one lookup for the whole sweep.
     q, cid = change_task_query()
     lead_task_rows = (await session.execute(
-        q.add_columns(ChangeRequest.lead_id)
+        q.add_columns(ChangeRequest)
         .join(ChangeRequest, ChangeRequest.id == cid)
         .where(
             WfInstanceTask.due_date < now,
-            ChangeRequest.lead_id.is_not(None),
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
         ))).all()
+    late_tasks = [(t, c) for t, _cid, c in lead_task_rows if escalated(t.due_date, now)]
+    targets: dict = {}
 
+    async def to(changes) -> None:
+        """Fill `targets` for these changes (one lookup per batch)."""
+        todo = {c.id: c for c in changes if c.id not in targets}
+        if todo:
+            targets.update(await ChangeService.escalation_targets(
+                session, list(todo.values())))
+
+    await to([c for _t, c in late_tasks])
     late_word = "late" if one_rule else "overdue"
-    for task, change_id, lead_id in lead_task_rows:
-        if task.owner_id == lead_id or not escalated(task.due_date, now):
+    for task, c in late_tasks:
+        ids = [i for i in targets.get(c.id, []) if i is not None and i != task.owner_id]
+        if not ids:
             continue
         claim = " and unclaimed" if task.owner_id is None else ""
         n = await _once(
-            session, [lead_id], kind="overdue",
+            session, ids, kind="overdue",
             subject_key=f"task:{task.id}:overdue:lead",
-            title=f"Task {late_word} (escalation)",
-            body=f"A task on your change is {late_word}"
+            title=f"Late: task on {c.change_number}",
+            body=f"A task on {c.change_number} is {late_word}"
                  f" (was due {fmt_date(task.due_date)}){claim}.",
-            link=f"/changes/{change_id}",
+            link=f"/changes/{c.id}",
         )
         counts["overdue"] += n
 
@@ -183,7 +196,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     if one_rule:            # owned rows due today get their reminder
         wanted = wanted | ChangeAssessment.owner_id.is_not(None)
     assessments = (await session.execute(
-        select(ChangeAssessment, ChangeRequest.lead_id)
+        select(ChangeAssessment, ChangeRequest)
         .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
         .where(
             ChangeAssessment.status == "active",
@@ -193,7 +206,8 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             ChangeRequest.status.not_in(TERMINAL_STATUSES),
         ))).all()
 
-    for assessment, lead_id in assessments:
+    await to([c for a, c in assessments if escalated(a.due_date, now)])
+    for assessment, change in assessments:
         due = assessment.due_date
         if not escalated(due, now):
             if (one_rule and assessment.owner_id is not None
@@ -217,13 +231,15 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 link="/my-tasks",
             )
             counts["overdue"] += n
-        if lead_id is not None and lead_id != assessment.owner_id:
+        ids = [i for i in targets.get(change.id, [])
+               if i is not None and i != assessment.owner_id]
+        if ids:
             n = await _once(
-                session, [lead_id], kind="overdue",
+                session, ids, kind="overdue",
                 subject_key=f"assessment:{assessment.id}:overdue:lead",
-                title=f"Assessment {late_word} (escalation)",
-                body=f"An assessment on your change is {late_word} (was due "
-                     f"{fmt_date(due)}).",
+                title=f"Late: assessment on {change.change_number}",
+                body=f"An assessment on {change.change_number} is {late_word} "
+                     f"(was due {fmt_date(due)}).",
                 link=f"/changes/{assessment.change_id}",
             )
             counts["overdue"] += n
@@ -236,15 +252,19 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         from app.services.owed_items import owed_items
         live = (await session.execute(select(ChangeRequest).where(
             ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()
-        for item in await owed_items(session, live, now):
+        items = await owed_items(session, live, now)
+        await to([i["change"] for i in items if escalated(i["due"], now)])
+        for item in items:
             c, due = item["change"], item["due"]
             if escalated(due, now):
-                if c.lead_id is None or item["owner_ids"] == [c.lead_id]:
+                ids = [i for i in targets.get(c.id, [])
+                       if i is not None and i not in item["owner_ids"]]
+                if not ids:
                     continue
                 counts["overdue"] += await _once(
-                    session, [c.lead_id], kind="overdue",
+                    session, ids, kind="overdue",
                     subject_key=f"{item['key']}:overdue:lead",
-                    title=f"{item['label']} late (escalation): {c.change_number}",
+                    title=f"Late: {item['label']} on {c.change_number}",
                     body=(f"{item['label']} on your change is late (was due "
                           f"{fmt_date(due)}); owed by {item['owner']}."),
                     link=f"/changes/{c.id}")

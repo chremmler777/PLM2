@@ -1221,14 +1221,27 @@ class ChangeService:
         return "at_risk" if needed > days_left else "on_track"
 
     @staticmethod
-    async def lead_escalations(session: AsyncSession, user_id: int) -> list[dict]:
+    async def lead_escalations(session: AsyncSession, user_id: int,
+                               viewer: Optional[User] = None) -> list[dict]:
+        """The "Overdue" group of the lead's changes; for a Project
+        Management member (viewer) also the changes without a lead who can
+        act (leadless_ids: none, inactive or read-only), which escalate to
+        Project Management (A6-03, R18, R21)."""
         from app.models.workflow import Department, WfInstance, WfInstanceTask, WfStep
 
         now = datetime.utcnow()
-        changes = (await session.execute(
+        changes = list((await session.execute(
             select(ChangeRequest).where(
                 ChangeRequest.lead_id == user_id,
-                ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()
+                ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all())
+        if viewer is not None and await ChangeService.member_of(
+                session, viewer, "Project Manager"):
+            others = (await session.execute(_org_scope(select(ChangeRequest).where(
+                ChangeRequest.status.not_in(TERMINAL_STATUSES),
+                ChangeRequest.lead_id.is_(None) | (ChangeRequest.lead_id != user_id)),
+                viewer))).scalars().all()
+            idle = await ChangeService.leadless_ids(session, list(others))
+            changes += [c for c in others if c.id in idle]
         if not changes:
             return []
         # One escalation rule (spec §0): an item reaches the lead's
@@ -2637,6 +2650,9 @@ class ChangeService:
             # locked at the top of this transition).
             from app.services.early_stage_service import EarlyStageService
             await EarlyStageService.wake_later_stages(session, change)
+            # A6-02: every department finalized already: approval is owed now
+            from app.services.decision_notices import internal_approval_owed
+            await internal_approval_owed(session, change, user_id)
         if to_status in ("in_implementation", "in_validation"):
             await ChangeService.notify_stage_entered(session, change, to_status)
         if to_status == "closed" and old == "released":
@@ -5113,6 +5129,28 @@ class ChangeService:
         return out
 
     @staticmethod
+    async def escalation_targets(db: AsyncSession, changes: list) -> dict:
+        """{change id: [user ids]} who a late item on the change escalates
+        to (spec §0 one escalation rule): the lead; Project Management's
+        members of the change's organization when the lead cannot act or
+        there is none (leadless_ids, the rule of the onward hop; A6-03)."""
+        idle = await ChangeService.leadless_ids(db, changes)
+        out: dict = {}
+        pm_ids: Optional[list] = None
+        for c in changes:
+            if c.id not in idle:
+                out[c.id] = [c.lead_id]
+                continue
+            if pm_ids is None:
+                pm_ids = [i for (i,) in (await db.execute(select(Department.id).where(
+                    Department.name == "Project Manager",
+                    Department.is_active.is_(True)))).all()]
+            from app.services.change_people import department_members_of_change_org
+            out[c.id] = await department_members_of_change_org(
+                db, c, pm_ids, real_only=True)
+        return out
+
+    @staticmethod
     async def leadless_ids(db: AsyncSession, changes: list) -> set:
         """Ids of the changes whose onward hop has no lead to make it: no
         lead, or a lead who cannot act (inactive, or read-only: no admin and
@@ -7384,6 +7422,11 @@ class ChangeService:
         what = "supplement" if getattr(offer, "kind", None) == "supplement" else "offer"
         names = {"pm": "PM", "quality": "Quality"}
         from app.services.notification_service import NotificationService
+        if change.status == "quoted" or change.start_at_risk_approved_at is not None:
+            # A6-02 (spec §0 decision needed): a first sign-off owed now
+            # tells the side's members once (a re-sign: below)
+            from app.services.decision_notices import sign_off_owed
+            await sign_off_owed(session, change, sides, latest, actor_id)
         for side in sides:
             by = change.pm_signed_by if side == "pm" else change.quality_signed_by
             if by is None or by == actor_id or latest is None:
@@ -8064,6 +8107,14 @@ class ChangeService:
                        "costing_offer_id": costing_offer_id,
                        "validation_issue_id": validation_issue_id},
         )
+        if validation_issue_id is not None and kind == "customer_email":
+            # A6-02: the customer's mail on a requested concession makes it
+            # Quality's decision (spec §10 "then Quality decides")
+            from app.services.decision_notices import concession_owed
+            from app.services.validation_issue_service import ValidationIssue
+            issue = await session.get(ValidationIssue, validation_issue_id)
+            if issue is not None:
+                await concession_owed(session, change, issue, user_id)
         return att
 
     @staticmethod

@@ -551,7 +551,7 @@ async def my_change_tasks(
 async def my_escalations(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    return await ChangeService.lead_escalations(db, current_user.id)
+    return await ChangeService.lead_escalations(db, current_user.id, current_user)
 
 
 @router.get("/routing-standards")

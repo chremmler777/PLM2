@@ -604,6 +604,18 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
     expect(titles).toContain(t('tasks.lateHint'))
   })
 
+  it('A6-03: without a lead who can act the Late chip names Project Management, not the lead', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'costing_input', department_id: 5, due_date: '2026-10-08T00:00:00',
+                   late: true, escalation: 'pm_digest' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    const title = screen.getByTestId('task-late').getAttribute('title')
+    expect(title).toBe(t('tasks.lateHintPm'))
+    expect(title).not.toBe(t('tasks.lateHint'))
+  })
+
   it('the hand-over row names what is missing in words', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'kickoff', missing: ['description', 'at least one attachment',

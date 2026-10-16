@@ -49,6 +49,9 @@ MAIL_KINDS = frozenset({
     "change_digest",
     # §10: an urgent change's FAIL reaches Management at once
     "validation_urgent_fail",
+    # §0 Immediate: a decision needed (A6-02); an override's answer (sent
+    # only when it is a no or the change is urgent)
+    "decision_needed", "deviation_decided",
 })
 #: This mail only is refused (its recipient, its content or a header):
 #: stamped and skipped. Anything else (the relay unreachable, dropped,
