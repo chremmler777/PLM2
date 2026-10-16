@@ -625,7 +625,21 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
     await screen.findByText('GB-CM-0007')
     expect(screen.getByText(t('tasks.hint.kickoff').replace('{x}', [
       t('kickoff.description'), t('kickoff.attachment'), t('deadline.quote'),
-      t('next.item.lead')].join(', ')))).toBeDefined()
+      t('kickoff.leadByPm')].join(', ')))).toBeDefined()
+  })
+
+  it('A6-04: the kickoff row shows the backend hint naming who acts first', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', missing: ['change lead'],
+                   hint: 'Project Management assigns a lead; then you hand over to scoping' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    expect(screen.getByText('Project Management assigns a lead; then you hand over to scoping; '
+      + t('tasks.hint.missingOnly').replace('{x}', t('kickoff.leadByPm')))).toBeDefined()
+    // NEGATIVE: not the generic "Kickoff pending" line
+    expect(screen.queryByText(t('tasks.hint.kickoff').replace('{x}', t('kickoff.leadByPm'))))
+      .toBeNull()
   })
 
   it('a link names the override and the sign-off side', async () => {

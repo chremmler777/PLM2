@@ -2145,13 +2145,18 @@ The scoping meeting's cost carrier follows the same rule (close-out A2-01,
 whose carrier moves the change to customer (or back) is 403 for anyone the
 PATCH would refuse, and the carrier option is not offered. Proceed applies the
 same people as the PATCH (`ChangeService.carrier_people`): to customer, the
-project's Sales contact as Sales owner and the project PM as lead; to internal,
+project's Sales contact as Sales owner (none on the project and a Sales member
+made the move: that member, A6-04) and the project PM as lead; to internal,
 no Sales owner (C10). An internal change with a lead is its run
 team's to hand over: the kickoff task goes to the lead and Project Management
 only, and Sales has no capture hop (scoping, reject) on it; the stage badge
 at capture reads "Lead", not "Sales" ("PM" while nobody leads it). A change with no lead shows "No lead
 assigned: Project Management picks one", and Project Management's kickoff row
-is its own ("Assign a lead, then hand over to scoping").
+is its own ("Assign a lead, then hand over to scoping"), the one main row
+(A6-04): Sales sees it as backup ("Project Management assigns a lead; then you
+hand over to scoping"; the missing item reads "change lead (Project Management
+sets it)") and may not hand over until a lead is set (403 and no button,
+`SCOPING_V2`); rejecting at capture stays Sales'.
 
 **Sales owner (ECR-solid C10).** `change_requests.sales_owner_id` names who
 owns the customer side: the raiser when in Sales, else the project's Sales

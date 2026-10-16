@@ -320,15 +320,20 @@ function taskLink(task: Pick<ChangeTask, 'kind' | 'change_id' | 'department_id' 
 const KICKOFF_ITEM: Record<string, string> = {
   description: 'kickoff.description', attachment: 'kickoff.attachment',
   'at least one attachment': 'kickoff.attachment', date: 'deadline.quote',
-  'quote deadline': 'deadline.quote', 'change lead': 'next.item.lead',
+  'quote deadline': 'deadline.quote', 'change lead': 'kickoff.leadByPm',
   // §2 capture
   'customer file': 'next.item.customer_file', 'what is wrong today': 'next.item.problem',
   target: 'next.item.target', 'need-by date': 'next.item.need_by',
   'urgent reason and evidence': 'next.item.urgent_reason',
 };
 
-const kickoffHint = (missing?: string[]): string => {
+const kickoffHint = (missing?: string[], hint?: string | null): string => {
   const parts = (missing ?? []).map((m) => (KICKOFF_ITEM[m] ? t(KICKOFF_ITEM[m]) : m));
+  // A6-04: the backend names who acts first ("Assign a lead, then hand over")
+  if (hint) {
+    return parts.length === 0 ? hint
+      : `${hint}; ${t('tasks.hint.missingOnly').replace('{x}', parts.join(', '))}`;
+  }
   return parts.length === 0
     ? t('tasks.hint.kickoffReady')
     : t('tasks.hint.kickoff').replace('{x}', parts.join(', '));
@@ -348,7 +353,7 @@ const taskHint = (task: ChangeTask): string | null => {
       // the backend's brief names the positions and the amount
       return task.hint ?? null;
     case 'kickoff':
-      return kickoffHint(task.missing);
+      return kickoffHint(task.missing, task.hint);
     case 'hold_resume':
       return task.reason?.trim()
         ? t('tasks.hint.hold_resume').replace('{x}', task.reason.trim())

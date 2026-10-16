@@ -126,6 +126,12 @@ class EarlyStageService:
             return None
         # Sales captures customer changes; an internal change with a lead
         # (P3: the engineering raiser) is its run team's to hand over.
+        if (frm == "captured" and to_status == "scoping" and r["sales"]
+                and change.lead_id is None and cm_switches.on("SCOPING_V2")):
+            # A6-04 (R5, R18): scoping waits for a lead, and only Project
+            # Management assigns one; Sales hands over once it is set
+            return ("Project Management assigns a change lead first; then "
+                    "Sales hands this change over to scoping")
         if (frm == "captured" and to_status in ("scoping", "rejected") and r["sales"]
                 and (change.customer_relevant or change.lead_id is None)):
             return None

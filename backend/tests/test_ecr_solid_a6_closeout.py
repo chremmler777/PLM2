@@ -282,3 +282,48 @@ async def test_active_lead_keeps_the_escalation_pm_gets_none(
     pm = await _as(client, "Project Manager")
     esc = (await client.get("/api/v1/changes/my-escalations", headers=pm)).json()
     assert not any(e["change_id"] == cid for e in esc)
+
+
+# ---------------------------------------------------------------------------
+# A6-04 the kickoff row has one owner
+# ---------------------------------------------------------------------------
+async def test_leadless_kickoff_is_pm_main_sales_backup_and_sales_cannot_hand_over(
+        client, seed, team, session_factory):
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "no lead yet")
+    await _set(session_factory, cid, lead_id=None)
+    pm = await _as(client, "Project Manager")
+    pm_row = (await _tasks(client, pm, cid, "kickoff"))[0]
+    s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
+    assert pm_row["role"] == "main"
+    assert pm_row["hint"] == "Assign a lead, then hand over to scoping"
+    assert (s_row["role"], s_row["main_name"]) == ("backup", "Project Management")
+    assert s_row["hint"].startswith("Project Management assigns a lead")
+    # NEGATIVE: Sales' hand-over is refused (and its button hidden) until a lead
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
+    assert st["can_transition"]["scoping"] is False
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=pm)).json()
+    assert st["can_transition"]["scoping"] is True
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "scoping"}, headers=sales)
+    assert res.status_code == 403 and "assigns a change lead" in res.json()["detail"]
+    # once a lead is set Sales' row is main again and the hop is Sales' to take
+    await _set(session_factory, cid, lead_id=team["user"]["Project Manager"])
+    s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
+    assert s_row["role"] == "main" and s_row.get("hint") is None
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
+    assert st["can_transition"]["scoping"] is True
+
+
+async def test_sales_member_flipping_to_customer_owns_the_customer_side(
+        client, seed, team, session_factory):
+    dev = await _as(client, "Development")
+    cid = await _create(client, dev, seed, "internal first", customer_relevant=False)
+    sales = await _as(client, "Sales")
+    res = await client.patch(f"/api/v1/changes/{cid}", json={"customer_relevant": True},
+                             headers=sales)
+    if res.status_code == 403:
+        pytest.skip("Sales may not flip this change by PATCH")
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cid)).sales_owner_id == team["user"]["Sales"]

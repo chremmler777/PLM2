@@ -104,6 +104,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.customer_response': { de: 'Kundenantwort', en: 'Customer answer' },
   'tasks.hint.kickoff': { de: 'Kickoff ausstehend, fehlt: {x}', en: 'Kickoff pending, missing: {x}' },
   'tasks.hint.kickoffReady': { de: 'Kickoff ausstehend', en: 'Kickoff pending' },
+  'tasks.hint.missingOnly': { de: 'fehlt: {x}', en: 'missing: {x}' },
+  // A6-04: who owes the missing lead (Sales cannot set it)
+  'kickoff.leadByPm': { de: 'Lead (setzt das Projektmanagement)', en: 'change lead (Project Management sets it)' },
   'tasks.hint.impactOpen': { de: 'Impact bestätigen', en: 'impact to confirm' },
   'tasks.hint.decisionOpen': { de: 'Entscheidung offen', en: 'decision open' },
   'tasks.hint.wrapup': { de: 'Scoping abschließen', en: 'wrap up scoping' },

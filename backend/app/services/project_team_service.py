@@ -357,7 +357,9 @@ class TeamRoles:
         # them up unless it is theirs.
         main_user = row.pop("main_user", None)
         if main_user is not None:
-            mine = owned or main_user[0] == self.user_id
+            # (None, "Project Management"): a department owns it, never
+            # this viewer (A6-04: the lead-less kickoff is PM's)
+            mine = main_user[0] is not None and (owned or main_user[0] == self.user_id)
             row["role"] = "main" if mine else "backup"
             row["main_name"] = None if mine else main_user[1]
             return row

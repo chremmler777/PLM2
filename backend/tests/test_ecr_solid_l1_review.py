@@ -138,7 +138,9 @@ async def test_stale_owner_leaves_sales_rows_main(client, seed, depts,
     _, otto_mail = await _user(session_factory, seed, "Otto", depts["Sales"])
     pm = {**admin, ACTS: str(depts["Project Manager"])}
     c = (await client.post("/api/v1/changes", json=_body(seed, True), headers=pm)).json()
-    await client.patch(f"/api/v1/changes/{c['id']}", json={"sales_owner_id": sally},
+    # a lead is set: with none the kickoff row is Project Management's (A6-04)
+    await client.patch(f"/api/v1/changes/{c['id']}",
+                       json={"sales_owner_id": sally, "lead_id": seed["admin_id"]},
                        headers=admin)
     otto = await login(client, otto_mail, admin=False)
 

@@ -3887,21 +3887,34 @@ class ChangeService:
             if c.status == "captured" and (
                     (holds_lead(c, user) or is_pm) if run_team_kickoff else (
                         can_capture or (is_pm and mp.is_mother_plant(c))
+                        # A6-04: no lead: picking one is Project Management's
+                        or (is_pm and c.lead_id is None)
                         or (flipped_kickoff and holds_lead(c, user)))):
                 # a mother-plant change is captured by Project Management;
                 # with no lead yet, Project Management's part is to pick one
                 pm_row = (mp.is_mother_plant(c) or run_team_kickoff
                           or (c.lead_id is None and is_pm and not in_sales))
+                # A6-04 (R5, R18): no lead yet: Project Management's row
+                # ("Assign a lead, then hand over") is the one main row;
+                # Sales backs it up and hands over once a lead is set
+                # (EarlyStageService.transition_refusal)
+                pm_first = (c.lead_id is None and not mp.is_mother_plant(c)
+                            and not is_pm)
                 tasks.append({**await _base(c), "kind": "kickoff",
                               "missing": await ChangeService.kickoff_missing(db, c),
                               **({"hint": "Assign a lead, then hand over to scoping"}
-                                 if c.lead_id is None and is_pm else {}),
+                                 if c.lead_id is None and is_pm else
+                                 {"hint": "Project Management assigns a lead; "
+                                          "then you hand over to scoping"}
+                                 if pm_first else {}),
                               # the lead hands it over; Project Management
                               # backs the lead up (R5: one main per row)
                               **({"main_user": (c.lead_id, c.lead_name or "")}
                                  if (run_team_kickoff or flipped_kickoff)
                                  and not holds_lead(c, user)
-                                 and c.id not in idle_lead else {}),
+                                 and c.id not in idle_lead else
+                                 {"main_user": (None, "Project Management")}
+                                 if pm_first else {}),
                               # project team: then it is PM's role, not Sales'
                               "role_department_id": (dept_by_name.get("Project Manager")
                                                      if pm_row else None)})
@@ -6688,6 +6701,12 @@ class ChangeService:
         if change.sales_owner_id is None and set_owner:
             change.sales_owner_id = await ChangeService.default_sales_owner_id(
                 session, change.project_id, True, change.origin)
+            actor = await session.get(User, user_id) if user_id is not None else None
+            if (change.sales_owner_id is None and actor is not None
+                    and await ChangeService.member_of(session, actor, "Sales")):
+                # A6-04 (C10): no project Sales contact: the Sales member
+                # who made it a customer change owns the customer side
+                change.sales_owner_id = user_id
         if not move_lead:
             return
         from app.services.project_team_service import ProjectTeamService
