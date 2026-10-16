@@ -1542,6 +1542,9 @@ class ConcernResponse(BaseModel):
     # (= that department's assessment due, once it is routed).
     owner_department_names: List[str] = []
     owner_due: Optional[datetime] = None
+    # A3-13 (R5): an open unanswered question from an assessment: answer by
+    # (the task rule, the same due the answerer's My Tasks row shows)
+    answer_due: Optional[datetime] = None
     # The answer form (Confirmed / Assumed) and its confirm item.
     answer_kind: Optional[str] = None
     answer_ref: Optional[str] = None

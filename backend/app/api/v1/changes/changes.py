@@ -3360,6 +3360,14 @@ async def list_concerns(
                 dues = [due_by_dept[d] for d in c.owner_department_ids
                         if due_by_dept.get(d) is not None]
                 row.owner_due = min(dues) if dues else None
+            elif (c.is_open and c.answered_at is None and c.flag_type == "question"
+                  and change.status not in ("captured", "scoping")
+                  and cm_switches.on("ASSESSMENT_V2")):
+                from app.services import due_rules
+                now = datetime.utcnow()
+                row.answer_due = due_rules.task_due(
+                    due_rules.start_of("obtain_info", c.raised_at, None, None, now),
+                    change, "obtain_info")
             row.part_number = part_numbers.get(c.part_id)
             row.confirm_by_name = names.get(c.confirm_by_id)
             row.can_switch = c.is_open and (

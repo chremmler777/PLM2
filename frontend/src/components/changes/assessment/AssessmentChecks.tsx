@@ -304,15 +304,23 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
       : q.answer_note
   return (
     <div className="rounded border border-sky-800/60 bg-sky-950/20 p-2 space-y-1" data-testid={`achk-q-${q.id}`}>
-      <p className="text-xs text-sky-200 font-semibold">
-        {t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
+      {/* A3-13: worded by viewer: the asker reads its own question, the
+          answerer who asks it, anybody else both */}
+      <p className="text-xs text-sky-200 font-semibold" data-testid={`achk-qhead-${q.id}`}>
+        {editable
+          ? t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))
+          : q.can_answer && !q.answered_at
+            ? t('achk.asksYou').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
+              + (q.answer_due ? `: ${t('achk.answerBy').replace('{d}', formatDate(q.answer_due))}` : '')
+            : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
+              .replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
       </p>
       <Head c={q} />
       {q.answered_at ? (
         <p className="text-xs text-slate-200">{t('achk.answer')}: {answer}
           {q.answered_by_name && <span className="text-slate-500"> ({q.answered_by_name})</span>}</p>
       ) : (
-        <p className="text-xs text-slate-400">{t('achk.waiting')}</p>
+        <p className="text-xs text-slate-400">{t(editable ? 'achk.waiting' : 'achk.waitingOther')}</p>
       )}
       {q.customer_copy && <CustomerCopy text={q.customer_copy} testId={`achk-copy-${q.id}`} />}
       {/* Sales, PM or the asking department answer here (C8): Confirmed or

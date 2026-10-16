@@ -79,6 +79,23 @@ describe('AssessmentChecks (spec §4)', () => {
     expect(screen.queryByTestId('achk-confirm-13')).toBeNull()
   })
 
+  it('words a question by viewer: asker, answerer, reader (A3-13)', () => {
+    const q = check({ id: 21, flag_type: 'question', answer_from: 'customer',
+      asking_department_name: 'Development', answer_due: '2026-10-20T12:00:00' })
+    render(view([q], true))
+    expect(screen.getByTestId('achk-qhead-21').textContent)
+      .toBe(t('achk.question').replace('{who}', t('flag.from.customer')))
+    expect(screen.getByText(t('achk.waiting'))).toBeTruthy()
+    cleanup()
+    render(view([{ ...q, can_answer: true }], false))
+    expect(screen.getByTestId('achk-qhead-21').textContent).toBe(
+      `${t('achk.asksYou').replace('{d}', 'Development')}: `
+      + t('achk.answerBy').replace('{d}', formatDate('2026-10-20T12:00:00')))
+    // negative: the answerer is not told it holds "your submit"
+    expect(screen.queryByText(t('achk.waiting'))).toBeNull()
+    expect(screen.getByText(t('achk.waitingOther'))).toBeTruthy()
+  })
+
   it('a viewer who may not check sees the item without the form', () => {
     render(view([check({ can_check: false })]))
     expect(screen.getByTestId('achk-item-11')).toBeTruthy()

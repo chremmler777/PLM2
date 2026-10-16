@@ -637,8 +637,14 @@ class MeetingService:
         dept = await session.get(Department, concern.department_id)
         who = dept.name if dept is not None else "A department"
         title = f"Question from {who}: {change.change_number}"[:255]
-        body = (f"'{concern.note}'. It holds {who}'s assessment until it is "
-                "answered.")
+        # A3-13: the hold sentence only while the asking department's
+        # submit is still open (asked after its submit, it holds nothing)
+        holds = any(a.department_id == concern.department_id
+                    and a.submitted_at is None
+                    and a.effective_status not in ("submitted", "waived")
+                    for a in change.assessments)
+        body = (f"'{concern.note}'." + (f" It holds {who}'s assessment until it "
+                                        "is answered." if holds else ""))
         link = f"/changes/{change.id}?tab=assessments"
         key = f"ask:{concern.id}"
         if concern.answer_from in ("customer", "supplier"):
@@ -1087,7 +1093,31 @@ class MeetingService:
             f"{' ' + concern.assumed_unit if concern.assumed_unit else ''} confirmed"
             + (f" ({ref.strip()})" if (ref or "").strip() else ""), user.id,
             new_value={"concern_id": concern.id})
+        # A3-13: one action per answered question: a caller who may also
+        # settle it (the asker, the asking department in assessment, PM)
+        # settles it with the confirmation
+        if (concern.is_question and concern.is_open
+                and concern.answered_at is not None
+                and await MeetingService._may_settle(session, change, concern, user)):
+            await MeetingService.withdraw_concern(
+                session, change, concern.id, user,
+                resolution_note=f"Confirmed: {concern.answer_ref}"[:500])
         return concern
+
+    @staticmethod
+    async def _may_settle(session: AsyncSession, change: ChangeRequest,
+                          concern: ChangeConcern, user: User) -> bool:
+        """The close_question rule (withdraw_concern's, without raising):
+        the asker (not acting), Project Management, or a member of the
+        asking department while the change is in assessment."""
+        acting = getattr(user, "acts_as_department_id", None) is not None
+        if concern.raised_by == user.id and not acting:
+            return True
+        if await MeetingService.user_is_pm_member(session, user):
+            return True
+        return (change.status == "in_assessment" and concern.department_id is not None
+                and await WorkflowService.actor_in_department(
+                    session, user, concern.department_id))
 
     @staticmethod
     async def retract_concern(

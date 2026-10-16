@@ -619,3 +619,80 @@ async def test_answered_by_a_file_counts_only_the_departments_own_file(
     assert res.status_code in (200, 201), res.text
     res = await _close(client, a["pe"], a, outcome="answered")
     assert res.status_code == 200, res.text
+
+
+async def test_an_assumed_answer_the_asker_confirms_is_one_action(
+        client, assess, session_factory):
+    """A3-13: the asker named to confirm an Assumed answer gets ONE row,
+    'Confirm the assumption <value> by <date>', and confirming settles the
+    question too; the answerer reads its due; the notice's hold sentence
+    names the asking department while its submit is open."""
+    from app.models.entities import User
+    a = assess
+    async with session_factory() as s:
+        te_id = (await s.execute(select(User.id).where(
+            User.email == "ac-te@test.io"))).scalar_one()
+    res = await client.post(_url(a, "/concerns"), json=_q(a["tool"]), headers=a["te"])
+    qid = res.json()["id"]
+    async with session_factory() as s:
+        body = (await s.execute(select(Notification.body).where(
+            Notification.subject_key == f"ask:{qid}"))).scalar_one()
+    assert "It holds Tool Engineer's assessment" in body
+    served = {c["id"]: c for c in (await client.get(
+        _url(a, "/concerns"), headers=a["sa"])).json()}
+    assert served[qid]["answer_due"] is not None
+    res = await client.post(_url(a, f"/concerns/{qid}/answer"), json={
+        "answer_kind": "assumed", "assumed_value": "120000", "assumed_unit": "pcs/yr",
+        "assumed_risk": "lower volume, fewer cavities", "confirm_by_id": te_id},
+        headers=a["sa"])
+    assert res.status_code == 200, res.text
+    tasks = [t for t in (await client.get("/api/v1/changes/my-tasks",
+                                          headers=a["te"])).json()
+             if t["change_id"] == a["cid"]
+             and t["kind"] in ("close_question", "confirm_assumption")]
+    assert [t["kind"] for t in tasks] == ["confirm_assumption"], tasks
+    assert tasks[0]["kind_label"].startswith("Confirm the assumption 120000 pcs/yr")
+    mail = await client.post(_url(a, "/attachments"),
+                             files={"file": ("volume.eml", b"From: c\n\n120k", "message/rfc822")},
+                             data={"kind": "customer_email"}, headers=a["sa"])
+    assert mail.status_code in (200, 201), mail.text
+    res = await client.post(_url(a, f"/concerns/{qid}/confirm"),
+                            json={"mail_id": mail.json()["id"]}, headers=a["te"])
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        q = await s.get(ChangeConcern, qid)
+        assert q.answer_kind == "confirmed" and q.withdrawn_at is not None
+
+
+async def test_a_sales_confirmer_leaves_the_asker_only_the_settle(client, assess):
+    """A3-13 negative: confirmed by Sales (default), the asker's one action
+    is to settle the answered question; no confirm row for the asker."""
+    a = assess
+    res = await client.post(_url(a, "/concerns"), json=_q(a["tool"]), headers=a["te"])
+    qid = res.json()["id"]
+    res = await client.post(_url(a, f"/concerns/{qid}/answer"), json={
+        "answer_kind": "assumed", "assumed_value": "120000", "assumed_unit": "pcs/yr",
+        "assumed_risk": "lower volume, fewer cavities"}, headers=a["sa"])
+    assert res.status_code == 200, res.text
+    kinds = [t["kind"] for t in (await client.get("/api/v1/changes/my-tasks",
+                                                  headers=a["te"])).json()
+             if t["change_id"] == a["cid"]
+             and t["kind"] in ("close_question", "confirm_assumption")]
+    assert kinds == ["close_question"]
+
+
+async def test_a_question_after_the_submit_holds_nothing_in_its_notice(
+        client, assess, session_factory):
+    """A3-13 negative: asked after the department submitted, the notice does
+    not claim it holds that department's assessment."""
+    a = assess
+    await _close(client, a["pe"], a, outcome="answered", ref="DRW-4471 rev C")
+    await _submit(client, a["pe"], a, a["proc"], ok=True)
+    res = await client.post(_url(a, "/concerns"), json=_q(a["proc"]), headers=a["pe"])
+    if res.status_code != 200:
+        assert res.status_code == 400, res.text      # refused outright: nothing to word
+        return
+    async with session_factory() as s:
+        body = (await s.execute(select(Notification.body).where(
+            Notification.subject_key == f"ask:{res.json()['id']}"))).scalar_one()
+    assert "It holds" not in body

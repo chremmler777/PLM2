@@ -4342,6 +4342,14 @@ class ChangeService:
                         or (c.status == "in_assessment"
                             and q.department_id is not None
                             and q.department_id in dep_ids)]
+                # A3-13: an Assumed answer the caller also confirms is one
+                # action (the confirm row below settles it too)
+                confirm_own = {q.id for q in mine if q.confirm_open and (
+                    (q.confirm_by_id == user.id and am_requester)
+                    or (in_sales and q.confirm_by_id is not None
+                        and q.confirm_by_id == c.sales_owner_id))}
+                settle_ids = {q.id for q in mine}
+                mine = [q for q in mine if q.id not in confirm_own]
                 if mine:
                     newest = mine[-1]
                     tasks.append({
@@ -4363,6 +4371,7 @@ class ChangeService:
             # member (any of them may confirm it, can_confirm).
             if c.status not in TERMINAL_STATUSES:
                 acting = getattr(user, "acts_as_department_id", None) is not None
+                settles = settle_ids if answered else set()
                 for q in c.concerns:
                     if not q.confirm_open:
                         continue
@@ -4372,9 +4381,15 @@ class ChangeService:
                     if mine or for_sales:
                         due = (datetime.combine(q.confirm_due, datetime.min.time())
                                if q.confirm_due else None)
+                        value = (f"{q.assumed_value}"
+                                 f"{' ' + q.assumed_unit if q.assumed_unit else ''}")
                         tasks.append({
                             **await _base(c), "kind": "confirm_assumption",
                             "concern_id": q.id,
+                            # A3-13: confirming it also settles the question
+                            **({"kind_label": f"Confirm the assumption {value}"
+                                + (f" by {q.confirm_due:%a %d %b}" if q.confirm_due else ""),
+                                "settles": True} if q.id in settles else {}),
                             **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
                                if not mine else {}),
                             "reason": (f"{q.assumed_value}"

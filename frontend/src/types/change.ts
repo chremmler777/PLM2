@@ -1279,6 +1279,8 @@ export interface ChangeConcern {
    *  department or the author, Sales, Project Management). Served by the list
    *  endpoint. */
   asking_department_name?: string | null;
+  /** A3-13: an open question from an assessment is answered by this date. */
+  answer_due?: string | null;
   can_answer?: boolean | null;
   /** C33: the caller may confirm this Assumed answer (named confirmer, or
    *  who may answer it), in any live status. */
