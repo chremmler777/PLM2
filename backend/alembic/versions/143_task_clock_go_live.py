@@ -30,12 +30,17 @@ KEY = "cm_task_clock_from"
 def upgrade() -> None:
     bind = op.get_bind()
     now = datetime.utcnow().replace(microsecond=0)
-    bind.execute(sa.text(
-        "INSERT INTO org_settings (organization_id, key, value, updated_at) "
-        "SELECT o.id, :key, :value, :now FROM organizations o "
-        "WHERE NOT EXISTS (SELECT 1 FROM org_settings s "
-        "WHERE s.organization_id = o.id AND s.key = :key)"),
-        {"key": KEY, "value": now.isoformat(), "now": now})
+    # row by row with plain binds: PostgreSQL cannot type a bind used in a
+    # SELECT list and a WHERE at once, SQLite would mangle a CAST
+    have = {r[0] for r in bind.execute(sa.text(
+        "SELECT organization_id FROM org_settings WHERE key = :k"), {"k": KEY})}
+    for (org_id,) in bind.execute(sa.text("SELECT id FROM organizations")).all():
+        if org_id in have:
+            continue
+        bind.execute(sa.text(
+            "INSERT INTO org_settings (organization_id, key, value, updated_at) "
+            "VALUES (:org, :k, :v, :at)"),
+            {"org": org_id, "k": KEY, "v": now.isoformat(), "at": now})
 
 
 def downgrade() -> None:
