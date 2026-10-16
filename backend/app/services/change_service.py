@@ -4395,7 +4395,9 @@ class ChangeService:
     async def notify_closed(session: AsyncSession, change: ChangeRequest,
                             user_id: int) -> int:
         """§11 (RELEASE_V2): closing tells the Sales owner (internal: the
-        lead) and Process; once per change, never the closer."""
+        lead) and Process when Process was on the change (an assessment or
+        implementing work: involved people only); once per change, never
+        the closer."""
         from app.services import cm_switches
         if not cm_switches.on("RELEASE_V2"):
             return 0
@@ -4408,7 +4410,16 @@ class ChangeService:
         process = (await session.execute(select(Department.id).where(
             Department.name == "Process Engineer"))).scalar_one_or_none()
         if process is not None:
-            users |= set(await department_members_of_change_org(session, change, [process]))
+            from app.services.implementation_service import ImplementationService
+            involved = (await session.execute(select(ChangeAssessment.id).where(
+                ChangeAssessment.change_id == change.id,
+                ChangeAssessment.department_id == process).limit(1))).first() is not None
+            if not involved:
+                involved = process in await ImplementationService.implementing_department_ids(
+                    session, change)
+            if involved:
+                users |= set(await department_members_of_change_org(
+                    session, change, [process]))
         users.discard(user_id)
         body = f"'{change.title}' is closed."
         if change.achieved_value is not None:

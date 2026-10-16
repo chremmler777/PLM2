@@ -72,14 +72,32 @@ async def test_negative_customer_change_has_no_achieved_value(
 
 async def test_close_tells_the_sales_owner_and_process_once(
         client, admin, seed, depts, people, session_factory):
+    from app.models.change import ChangeAssessment
     async with session_factory() as s:
         d = Department(name="Process Engineer", flow_type="action", is_active=True)
         s.add(d)
         await s.flush()
         s.add(UserDepartment(user_id=people["Quality"][0], department_id=d.id))
         await s.commit()
+        process = d.id
     cid = await _released(client, admin, seed, session_factory, customer=True,
                           sales_owner_id=people["Sales"][0])
+    other = await _released(client, admin, seed, session_factory, customer=True,
+                            sales_owner_id=people["Sales"][0])
+    async with session_factory() as s:     # Process assessed only the first
+        s.add(ChangeAssessment(change_id=cid, department_id=process, stage_order=1,
+                               verdict="feasible"))
+        await s.commit()
+    res = await _close(client, admin, other)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:     # R33: Process was not on it
+        rows = (await s.execute(select(Notification).where(
+            Notification.kind == "change_closed"))).scalars().all()
+    assert [r.user_id for r in rows] == [people["Sales"][0]]
+    async with session_factory() as s:
+        for r in rows:
+            await s.delete(await s.get(Notification, r.id))
+        await s.commit()
     res = await _close(client, admin, cid)
     assert res.status_code == 200, res.text
     async with session_factory() as s:

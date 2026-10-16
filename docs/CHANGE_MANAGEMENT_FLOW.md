@@ -78,7 +78,7 @@ flowchart TD
 | `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
 | `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
 | `in_validation` | Release tab: validation checks (weight, cycle time, dimensions computed from a measurement against fixed limits) plus the release checklist (16 items; 13 on a change that ended before the rework; each row answered by its department) and the lessons learned step; a FAIL raises its validation issue with Quality's Fix task (who fixes, retest date) and a concession beside it (§3 "Computed checks, the Fix task, the concession") | departments, Quality, PM |
-| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation, no newer index pending. Close is HARD-blocked while a price is open (`price_open`); an internal change closes with its achieved value beside the target (SOFT). Closing tells the Sales owner (internal: the lead) and Process. Summary with the P&L offer vs doing; then PM wraps it up | PM |
+| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation, no newer index pending. Close is HARD-blocked while a price is open (`price_open`); an internal change closes with its achieved value beside the target (SOFT). Closing tells the Sales owner (internal: the lead) and Process when it was on the change. Summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -1441,10 +1441,14 @@ existing per-department validation checks.
   (`ReleaseService.set_check`, `ReleaseChecklist.tsx`) by a member of the
   owner department, PM, lead or admin (`ReleaseService.may_answer`). With
   `RELEASE_V2` (C7): by the owner department only; PM, the lead or an admin
-  only for a department nobody in the change's organization belongs to (no
-  dead end; the state serves `can_answer` per row). `customer_approval`
+  only for a department with no real member in the change's organization
+  (inactive, or only admin accounts: `change_people.staffed_department_ids`;
+  no dead end). The state serves `can_answer` and `run_team_answers` per
+  row; the group reads "no member here: PM or the lead answers", and PM and
+  the lead get the `release_check` task for those rows. `customer_approval`
   "done" needs a reference (PSW / ISIR number or the approval's file name,
-  `cm_rules.reference_refusal`; `EVIDENCE_KEYS`). `erp_updated` reads the
+  `cm_rules.reference_refusal`; `EVIDENCE_KEYS`); on a customer change its
+  "not applicable" too: the customer's waiver (mail or document reference). `erp_updated` reads the
   routing time from the Tool Engineer's measured cycle time.
   Future, not built: process engineering tasks will later be forwarded
   from the PDB to PLM.
@@ -1567,24 +1571,37 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   min and max lie inside; the verdict is computed, a posted status is
   ignored. A retest adds a row and keeps the failed one; it is its own
   department's, in validation (HARD #3), and names what changed since:
-  parameter / tool / material / method + a reference.
+  parameter / tool / material / method + a reference. Every measurement or
+  tick is recorded by a member of the check's department while the change
+  is in validation; PM, the lead or an admin only for a department with no
+  real member here (`ValidationService.may_write`, the state's `can_write`
+  per department). A check failed outside implementation and validation
+  raises no issue.
 - **Fix task** (migration 137): a check that turns FAILED raises its issue
   (VI-n) at once. Quality's task "Fix VI-n: pick who fixes and the retest
   date": process parameters (Process Engineer), tool at supplier (Tool
   Engineer + the supplier), or another department; the retest date is today
-  or later. The fixing department gets "Fix VI-n: ..., retest <day>", the
+  or later; an inactive department is refused. The fixing department gets
+  "Fix VI-n: ..., retest <day>" (a department with no member here: the
+  lead, no lead: PM, "you coordinate"; the status line says so), the
   check's department "Retest for VI-n by <day>" (due that day). A passed
-  retest closes the issue. `POST .../validation/issues/{iid}/fix` (Quality
-  only).
+  retest closes the issue. Quality may change the pick or the date later
+  (the quiet "Change who fixes or the retest date"). `POST
+  .../validation/issues/{iid}/fix` (Quality only).
 - **Concession, in parallel** (`POST .../issues/{iid}/concession`, Quality
   only): a customer change: the issue's route becomes the concession and
   the Sales owner is told to ask the customer ("Waiting for customer (Sales
   owner, asked <date>)"); once Sales filed the customer's mail, Quality
-  decides, for a quantity of parts or until a date (required). An internal
+  decides, for a quantity of parts or until a date (required). The Fix pick
+  stays open beside it, whichever comes first. Tasks: Sales "Ask the
+  customer about the concession for VI-n and file the mail" until the mail
+  is filed, then Quality "Decide concession VI-n: for a quantity or until a
+  date" (Needs you); both due 2 working days from the ask or the mail. An internal
   change: "not for shipment", Quality decides at once, for a quantity or
   until a date. Accepted reads "Accepted under concession VI-n until <date>"
-  (or "for n parts") in the validation panel and the change header; Quality
-  and the lead are reminded once 10 working days before the end date
+  (or "for n parts") in the validation panel and the change header; the
+  Quality member who decided it (gone: the change's Quality members) and
+  the lead are reminded once 10 working days before the end date
   (notification sweep, `concession_expiring`).
 - **Status line** (validation state `release_line`): "Not releasable:
   <check> <worst value> vs <limits>; fix: <department>, retest <day>;
@@ -1604,9 +1621,10 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   lead, Project Management or an admin, in validation or released; the
   Release tab's "Achieved" card). Closing without it is the SOFT rule
   `achieved_missing` (the run team may override).
-- **Closing notice**: the Sales owner (internal: the lead) and Process
-  Engineer members are told once (`change_closed`), never the closer; an
-  internal change's notice carries achieved vs target.
+- **Closing notice**: the Sales owner (internal: the lead) and, when
+  Process was on the change (an assessment or implementing work), the
+  Process Engineer members are told once (`change_closed`), never the
+  closer; an internal change's notice carries achieved vs target.
 - **Header**: any concession in force ("Accepted under concession VI-n
   until <date>") shows beside the need-by line.
 
@@ -1622,7 +1640,12 @@ change that is open, until 7 days after it closed or was cancelled
 /changes/{id}/hours/{booking_id}` for your own). Bookings are the
 implementation bookings (one table) and store the day worked, the source
 (`estimate` = a confirmed estimate, `typed`) and the change's status then
-(migration 138). The department's last action ("our part done" on the
+(migration 138). `estimate` is the server's word: only hours equal to the
+prefill are stored as a confirmed estimate. The stage-8 `POST
+.../implementation/bookings` (labour position, machine hours) follows the
+same rule (your own department, an admin any; active departments; at most
+24 h; dated today), and its DELETE is the DELETE /hours rule (your own, an
+admin any, while the window is open). The department's last action ("our part done" on the
 Implementation tab, its last validation check passed) opens the one
 prefilled confirm, naming its source ("your estimate: 6 h", the department's
 own-labour positions plus its cost lines' hours, minus what is booked);

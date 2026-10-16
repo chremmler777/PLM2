@@ -2285,7 +2285,8 @@ class ValidationIssueService:
     @staticmethod
     async def remind_expiring_concessions(session: AsyncSession) -> int:
         """Sweep: an accepted concession ending within 10 working days tells
-        Quality and the lead once (§10)."""
+        the Quality member who decided it (inactive or gone from Quality:
+        the change's Quality members) and the lead, once (§10)."""
         svc = ValidationIssueService
         if not svc.fix_rule_on():
             return 0
@@ -2306,8 +2307,12 @@ class ValidationIssueService:
             if change is None:
                 continue
             org = await svc.change_org_id(session, change)
-            users = await svc._dept_members(
-                session, [await svc._dept_id(session, QUALITY_DEPARTMENT)], org)
+            quality = await svc._dept_id(session, QUALITY_DEPARTMENT)
+            members = await svc._dept_members(session, [quality], org)
+            decider = (await session.get(User, i.customer_decided_by)
+                       if i.customer_decided_by else None)
+            users = ({decider.id} if decider is not None and decider.is_active
+                     and decider.id in members else set(members))
             if change.lead_id:
                 users.add(change.lead_id)
             await NotificationService.notify_once(

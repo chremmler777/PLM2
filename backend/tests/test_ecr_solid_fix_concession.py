@@ -313,6 +313,32 @@ async def test_concession_reminder_ten_working_days_before_expiry_once(
                                          (await _lead(session_factory, fix))}
 
 
+async def test_concession_reminder_goes_to_its_decider_not_all_of_quality(
+        client, fix, session_factory):
+    from app.services.validation_issue_service import ValidationIssueService
+    async with session_factory() as s:
+        q2 = User(organization_id=(await s.get(User, fix["user"]["Quality"]["id"])).organization_id,
+                  username="q2", email="q2@fix.test", full_name="Quality Two", role="engineer",
+                  hashed_password=get_password_hash(ENGINEER_PASSWORD),
+                  is_active=True, mfa_enabled=False)
+        s.add(q2)
+        await s.flush()
+        s.add(UserDepartment(user_id=q2.id, department_id=fix["dept"]["Quality"]))
+        s.add(ValidationIssue(
+            change_id=fix["change_id"], number=7, title="weight", created_by=1,
+            description="518 g", route="customer_concession", status="accepted",
+            customer_decision="accept_deviation", customer_decided_by=q2.id,
+            concession_until=date.today() + timedelta(days=5)))
+        await s.commit()
+        q2_id = q2.id
+    async with session_factory() as s:
+        assert await ValidationIssueService.remind_expiring_concessions(s) == 1
+        await s.commit()
+        rows = (await s.execute(select(Notification).where(
+            Notification.kind == "concession_expiring"))).scalars().all()
+    assert {r.user_id for r in rows} == {q2_id, (await _lead(session_factory, fix))}
+
+
 async def _lead(session_factory, fix):
     async with session_factory() as s:
         return (await s.get(ChangeRequest, fix["change_id"])).lead_id
