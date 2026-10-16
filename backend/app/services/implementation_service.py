@@ -279,7 +279,8 @@ class ImplementationService:
     @staticmethod
     async def state(
         session: AsyncSession, change: ChangeRequest, actor: User,
-        *, now: datetime | None = None,
+        *, now: datetime | None = None, waits: dict | None = None,
+        names: dict | None = None,
     ) -> dict:
         """Per-department implementation state, scoped to what actor may read.
 
@@ -298,15 +299,19 @@ class ImplementationService:
         escalations = await ImplementationService.list_escalations(
             session, change)
 
-        names = dict((await session.execute(
-            select(Department.id, Department.name))).all())
+        # A6-09 (R34): a list passes the names and the supplier waits it
+        # read once for all its changes
+        if names is None:
+            names = dict((await session.execute(
+                select(Department.id, Department.name))).all())
         cutoff = now - timedelta(hours=REPORT_CADENCE_HOURS)
         in_implementation = change.status == IMPLEMENTATION_STATUS
         # C23: a supplier wait pauses the cadence until its expected date
         from app.services import cm_switches, supplier_wait_service as _sw
         v2 = cm_switches.on("ASSESSMENT_V2")
-        waits = (await _sw.open_by_department(session, [change.id], "implementation")
-                 if v2 else {})
+        if waits is None:
+            waits = (await _sw.open_by_department(session, [change.id], "implementation")
+                     if v2 else {})
 
         departments = []
         for dept_id in implementing:

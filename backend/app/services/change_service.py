@@ -3718,13 +3718,21 @@ class ChangeService:
             return tasks
         dep_ids = set(dep_ids or ())
 
+        states: dict = {}
+        impl_waits: Optional[dict] = None
+        impl_names: dict = {}
+
         async def _base(c) -> dict:
             """Shared shape: identity plus the ACTIVE deadline's context, computed
-            by the service so the badge here and the badge on the change agree."""
+            by the service so the badge here and the badge on the change agree.
+            The deadline state is read once per change, not per row (A6-09,
+            R34)."""
             kind = c.active_deadline
             due = (c.release_due_date if kind == "release"
                    else c.required_by_date if kind == "quote" else None)
-            state = await ChangeService.deadline_state(db, c)
+            if c.id not in states:
+                states[c.id] = await ChangeService.deadline_state(db, c)
+            state = states[c.id]
             return {
                 "change_id": c.id, "change_number": c.change_number, "title": c.title,
                 "project_id": c.project_id, "project_number": c.project_number,
@@ -4287,7 +4295,18 @@ class ChangeService:
             # Sales' errand until they take it somewhere.
             if c.status == "in_implementation":
                 from app.services.implementation_service import ImplementationService
-                impl = await ImplementationService.state(db, c, user)
+                if impl_waits is None:
+                    # A6-09 (R34): the supplier waits and department names
+                    # once for the list, as costing_waits
+                    impl_ids = [x.id for x in open_changes
+                                if x.status == "in_implementation"]
+                    impl_waits = (await _waits.open_by_department(
+                        db, impl_ids, "implementation")
+                        if cm_switches.on("ASSESSMENT_V2") else {})
+                    impl_names = dict((await db.execute(
+                        select(Department.id, Department.name))).all())
+                impl = await ImplementationService.state(
+                    db, c, user, waits=impl_waits, names=impl_names)
                 for row in impl["departments"]:
                     if row["owes_report"] and row["department_id"] in dep_ids:
                         tasks.append({

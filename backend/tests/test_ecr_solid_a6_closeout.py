@@ -449,3 +449,52 @@ async def test_overdue_digest_reader_reads_late_items_once(
             Notification.user_id == team["user"]["Sales"],
             Notification.kind == "change_digest"))).scalars().all()
     assert sales_digest and "late:" in sales_digest[0].body
+
+
+# ---------------------------------------------------------------------------
+# A6-09 per list, not per row (R34)
+# ---------------------------------------------------------------------------
+async def test_my_tasks_reads_shared_lookups_once_per_list(
+        client, seed, team, session_factory, monkeypatch):
+    from collections import Counter
+    from app.services import supplier_wait_service as sw
+    from app.services.change_service import ChangeService
+    from app.services.owed_items import owed_items
+    dev = await _as(client, "Development")
+    sales = await _as(client, "Sales")
+    internal = [await _create(client, dev, seed, f"int {i}", customer_relevant=False)
+                for i in range(3)]
+    for cid in internal:
+        await _set(session_factory, cid, status="costing")
+    impl = [await _create(client, sales, seed, f"impl {i}") for i in range(2)]
+    for cid in impl:
+        await _set(session_factory, cid, status="in_implementation",
+                   release_due_date=datetime.utcnow() + timedelta(days=30))
+    calls: Counter = Counter()
+    real_states = ChangeService.deadline_state
+    real_approvers = ChangeService.change_approvers
+    real_waits = sw.open_by_department
+
+    async def states(session, change):
+        calls[("state", change.id)] += 1
+        return await real_states(session, change)
+
+    async def approvers(session, change):
+        calls["approvers"] += 1
+        return await real_approvers(session, change)
+
+    async def waits(session, ids, phase):
+        calls[("waits", phase)] += 1
+        return await real_waits(session, ids, phase)
+    monkeypatch.setattr(ChangeService, "deadline_state", staticmethod(states))
+    monkeypatch.setattr(ChangeService, "change_approvers", staticmethod(approvers))
+    monkeypatch.setattr(sw, "open_by_department", waits)
+    pm = await _as(client, "Project Manager")
+    assert (await client.get("/api/v1/changes/my-tasks", headers=pm)).status_code == 200
+    assert all(n == 1 for k, n in calls.items() if k[0] == "state"), calls
+    assert calls[("waits", "implementation")] <= 1
+    calls.clear()
+    async with session_factory() as s:
+        cs = [await s.get(ChangeRequest, cid) for cid in internal]
+        rows = [i for i in await owed_items(s, cs) if i["kind"] == "internal_approval"]
+    assert len(rows) == 3 and calls["approvers"] == 1

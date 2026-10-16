@@ -76,6 +76,21 @@ async def owed_items(session: AsyncSession, changes: list,
         session, [c.id for c in changes if c.status in ("in_assessment", "costing")],
         "costing")
 
+    approvers: Optional[list] = None
+
+    async def _ids(users) -> list[int]:
+        return [u.id for u in users]
+
+    pm_by_project: dict = {}
+
+    async def _pm_ids(c) -> list[int]:
+        """internal_approver_ids' fallback (Project Management's members of
+        the change's organization, never the raiser), once per project."""
+        if c.project_id not in pm_by_project:
+            pm = [depts["Project Manager"]] if "Project Manager" in depts else []
+            pm_by_project[c.project_id] = await department_members_of_change_org(
+                session, c, pm)
+        return [i for i in pm_by_project[c.project_id] if i != c.raised_by]
     release_rule = cm_switches.on("RELEASE_V2")
     bound = cm_switches.on("COMMERCIAL_V2")
     for c in changes:
@@ -128,10 +143,18 @@ async def owed_items(session: AsyncSession, changes: list,
                 and not (c.status == "costing"
                          and await ChangeService.costing_pending_department_ids(
                              session, c))):
+            if approvers is None:
+                # A6-09 (R34): the approvers and their write rights once per
+                # call, not per internal change (change_approvers' rule)
+                approvers = await ChangeService.change_approvers(session, None)
+            mine = [u for u in approvers if u.id != c.raised_by]
             await add(c, "internal_approval", f"chg:{c.id}:internal_approval",
                       "Internal cost approval",
-                      await ChangeService.internal_approver_text(session, c),
-                      lambda c=c: ChangeService.internal_approver_ids(session, c),
+                      (", ".join(u.full_name or u.username for u in mine)
+                       or "a Project Management member"),
+                      # internal_approver_ids' rule on the list read once
+                      (lambda mine=mine, c=c: _ids(mine)) if mine
+                      else (lambda c=c: _pm_ids(c)),
                       ChangeService._last_costing_finalized(c))
 
         # overrides waiting on their deciders

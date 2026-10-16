@@ -20,6 +20,7 @@ notification sweep, with history rows, notifications and acknowledgement.
 
 Refusals: ChangeError (400), IssueForbidden (403), IssueNotFound (404).
 """
+import contextvars
 import math
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -64,6 +65,9 @@ CHECK_CATEGORY = {
     "packaging_validated": "packaging",
     "revision_bump": "documentation",
 }
+
+#: A6-09: the department names one my_actions call reads once (R34).
+_NAMES: contextvars.ContextVar = contextvars.ContextVar("vi_dept_names", default=None)
 
 PM_DEPARTMENT = "Project Manager"
 SALES_DEPARTMENT = "Sales"
@@ -180,8 +184,25 @@ class ValidationIssueService:
     # ------------------------------------------------------------------
     @staticmethod
     async def _dept_names(session: AsyncSession) -> dict[int, str]:
+        cached = _NAMES.get()
+        if cached is not None:
+            return cached
         return dict((await session.execute(
             select(Department.id, Department.name))).all())
+
+    @staticmethod
+    async def my_actions(session: AsyncSession, change: ChangeRequest,
+                         user: User) -> list[dict]:
+        """The viewer's owed acts (_my_actions), with the department names
+        read once for the whole call, not per label (A6-09, R34)."""
+        if _NAMES.get() is not None:
+            return await ValidationIssueService._my_actions(session, change, user)
+        token = _NAMES.set(dict((await session.execute(
+            select(Department.id, Department.name))).all()))
+        try:
+            return await ValidationIssueService._my_actions(session, change, user)
+        finally:
+            _NAMES.reset(token)
 
     @staticmethod
     def quality_decides_concessions() -> bool:
@@ -3011,8 +3032,8 @@ class ValidationIssueService:
     CONCESSION_DECIDE = "Decide concession {ref}: for a quantity or until a date"
 
     @staticmethod
-    async def my_actions(session: AsyncSession, change: ChangeRequest,
-                         user: User) -> list[dict]:
+    async def _my_actions(session: AsyncSession, change: ChangeRequest,
+                          user: User) -> list[dict]:
         """The viewer's owed acts on this change's open issues, plus one
         "Acknowledge escalation VI-n (level x)" per unacknowledged level-2/3
         escalation they were notified of."""
