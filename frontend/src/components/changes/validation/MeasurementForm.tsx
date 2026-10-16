@@ -16,16 +16,13 @@ import { readNumberInput } from '../../../lib/format'
 import { toastError } from '../../../lib/apiError'
 import { btnSm } from '../../common/buttonStyles'
 import { t } from '../../../i18n/cmLabels'
+import { refOk } from '../../../lib/evidence'
 
 const KINDS: RetestChangeKind[] = ['parameter', 'tool', 'material', 'method']
-const EMPTY = new Set(['ok', 'okay', 'tbd', 'na', 'n/a', 'done', 'checked', 'yes', '-', '--'])
 const fieldCls = 'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100'
 
-/** A reference that names something (backend cm_rules.reference_refusal, light). */
-export const refOk = (v: string) => {
-  const s = v.trim()
-  return s.length >= 5 && !EMPTY.has(s.toLowerCase()) && (/\d/.test(s) || s.split(/\s+/).length >= 2)
-}
+/** A reference that names something: the shared rule (lib/evidence). */
+export { refOk }
 
 export interface MeasureDraft {
   n: string; min: string; max: string; ref: string; lot: string

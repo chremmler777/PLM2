@@ -1571,8 +1571,8 @@ migration `090`), not just a bounce back. Shape, in order:
   severity is 3.
 - **Root cause**: required before any route, except a concession the
   customer accepts as-is.
-- **Route**, by PM or lead with a reason, 4-eyes (the decider is not the
-  raiser unless admin): 1 `internal_rework`, 2 `supplier_rework`, 3
+- **Route**, by PM or lead with a reason, 4-eyes (the decider is never the
+  raiser, an admin included): 1 `internal_rework`, 2 `supplier_rework`, 3
   `design_change` loop the change back to `in_implementation` with fix
   actions and a recovery group in the plan; 4 `customer_concession` closes as
   `accepted` only when, **with the customer mail filed** by Sales (hard
@@ -1585,7 +1585,10 @@ migration `090`), not just a bounce back. Shape, in order:
   (one entry point, Quality's Request concession below; the RouteDialog
   does not offer it and an `accept_deviation` outside a concession is
   refused), and `follow_up_change` is refused on a failed check (it would
-  not lift HARD #3 on this change).
+  not lift HARD #3 on this change); on any other open issue it is Quality's
+  call (a Quality member decides it, not PM, the lead or an admin; the card
+  offers "Move to a follow-up change" beside the concession,
+  `route_options` in the payload says which routes the viewer may pick).
 - **Re-validation**: all fix actions done → `revalidation`; the linked check
   answered `passed` closes the issue, a new `failed` reopens `fixing`. With
   `RELEASE_V2` a FAILED check is answered again only by a retest in
@@ -1597,7 +1600,13 @@ migration `090`), not just a bounce back. Shape, in order:
   material or method + a reference, `cm_rules.reference_refusal`).
 - **Raised in error**: an issue still `open` or `contained` (no route) is
   closed with a note; with `RELEASE_V2` only by a Quality member, the note
-  naming the evidence (a reference of at least 5 characters).
+  naming the evidence (a reference of at least 5 characters). The card
+  offers it to Quality as "Close: raised in error".
+- **Close without a check** (`RELEASE_V2`): an unlinked issue in
+  re-validation is closed by Quality or a real member of its owner
+  department (never an admin account alone, never PM or the lead), the note
+  a reference (`cm_rules.reference_refusal`: "ok" is refused). An issue on
+  a check no longer asked is closed by the run team, also with a reference.
 - **Guard**: `in_validation -> released` is HARD with `RELEASE_V2` while any
   issue is open (no override; exits: fix and re-validate, a concession,
   raised in error by Quality, or a follow-up change); switch off: "n

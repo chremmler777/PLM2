@@ -105,7 +105,12 @@ async def test_new_timing_end_of_day_keeps_reason_refuses_past(client, session_f
 
 # --- B2 extra cost after close --------------------------------------------------
 
-async def test_extra_cost_editable_after_close_audited(client, vi, session_factory):
+async def test_extra_cost_editable_after_close_audited(client, vi, session_factory,
+                                                      monkeypatch):
+    # PM decides the follow-up: the rule before HARD #3 (RELEASE_V2 off);
+    # with the switch on it is Quality's (test_ecr_solid_closeout_a5)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     # a check-free issue: a follow-up never takes a failed check off the
     # change (HARD #3, RELEASE_V2)
     issue = await _raised(client, vi, check_id=None, category="cosmetic",

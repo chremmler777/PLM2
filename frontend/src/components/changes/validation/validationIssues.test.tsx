@@ -237,10 +237,10 @@ describe('4-eyes', () => {
     expect(screen.getByTestId('issue-four-eyes-11').textContent).toMatch(/another PM or the lead decides/)
   })
 
-  it('another PM gets it as the primary act; an admin raiser too', () => {
+  it('another PM gets it as the primary act; an admin raiser does not (A5-01)', () => {
     const i = issue({ contained_at: 'x', root_cause_at: 'x', status: 'contained', created_by: 5 })
     expect(primaryAct(issueActs(i, { id: 6, canManage: true }))).toBe('route')
-    expect(primaryAct(issueActs(i, { id: 5, canManage: true, isAdmin: true }))).toBe('route')
+    expect(primaryAct(issueActs(i, { id: 5, canManage: true, isAdmin: true }))).not.toBe('route')
   })
 
   it('the backend next_acts win and pick the primary button', () => {

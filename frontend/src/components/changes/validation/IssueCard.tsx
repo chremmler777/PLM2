@@ -30,6 +30,7 @@ import { t } from '../../../i18n/cmLabels'
 import { useIssueMutation } from './useIssueMutation'
 import { ChevronRight } from 'lucide-react'
 import { btnSm } from '../../common/buttonStyles'
+import { refOk } from '../../../lib/evidence'
 
 /** Inline acts that are a single text: containment, root cause, closure note. */
 type TextAct = 'contain' | 'root_cause' | 'close'
@@ -39,18 +40,33 @@ const TEXT_ACT: Record<TextAct, { label: string; placeholder: string; submit: st
   close: { label: 'Closure note', placeholder: 'Closure note: how the fix was confirmed', submit: 'Close issue' },
 }
 
-function TextActForm({ act, onSubmit, onCancel, busy, issueId }: {
+function TextActForm({ act, onSubmit, onCancel, busy, issueId, needsRef, raisedInError }: {
   act: TextAct; onSubmit: (text: string) => void; onCancel: () => void; busy: boolean; issueId: number
+  /** HARD #3: the closure note is a reference (report, trial, document). */
+  needsRef?: boolean
+  raisedInError?: boolean
 }) {
   const [text, setText] = useState('')
+  const refNeeded = act === 'close' && !!needsRef
+  const ok = !!text.trim() && (!refNeeded || refOk(text))
+  const placeholder = refNeeded
+    ? raisedInError
+      ? 'Why it was raised in error: measurement, drawing or document reference (e.g. drawing rev C allows 0.2, MR-2231)'
+      : 'How the fix was confirmed: measuring report, trial or document reference (e.g. MR-2026-311)'
+    : TEXT_ACT[act].placeholder
   return (
     <div data-testid={`issue-form-${act}-${issueId}`} className="space-y-2 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
       <textarea autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)}
         data-testid={`issue-text-${act}-${issueId}`} aria-label={TEXT_ACT[act].label}
-        placeholder={TEXT_ACT[act].placeholder} className={`${inputCls} w-full`} />
+        placeholder={placeholder} className={`${inputCls} w-full`} />
+      {refNeeded && text.trim() && !ok && (
+        <p data-testid={`issue-text-ref-${act}-${issueId}`} className="text-[11px] text-amber-300">
+          Name the evidence: a report number, a date or a few words. &quot;ok&quot; says nothing.
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <button type="button" data-testid={`issue-text-submit-${act}-${issueId}`}
-          disabled={!text.trim() || busy} onClick={() => onSubmit(text.trim())}
+          disabled={!ok || busy} onClick={() => onSubmit(text.trim())}
           className={btnSm.primary}>
           {TEXT_ACT[act].submit}
         </button>
@@ -201,6 +217,14 @@ export default function IssueCard({
     </button>
   ) : null
 
+  // Quality's options name what they do: the follow-up change and the
+  // raised-in-error close (HARD #3)
+  const actLabel = (a: IssueAct) =>
+    a === 'route' && issue.route_options?.length === 1 && issue.route_options[0] === 'follow_up_change'
+      ? 'Move to a follow-up change'
+      : a === 'close' && (issue.status === 'open' || issue.status === 'contained')
+        ? 'Close: raised in error'
+        : ACT_LABEL[a]
   const deptName = issue.department_name ?? departments.find((d) => d.id === issue.department_id)?.name ?? null
   const decision = issue.customer_decision
 
@@ -271,6 +295,8 @@ export default function IssueCard({
         <div className="space-y-4 border-t border-slate-800 px-4 py-3">
           {active === 'contain' || active === 'root_cause' || active === 'close' ? (
             <TextActForm act={active} issueId={issue.id}
+              needsRef={!!issue.close_needs_ref}
+              raisedInError={issue.status === 'open' || issue.status === 'contained'}
               busy={contain.isPending || rootCause.isPending || close.isPending}
               onCancel={() => setActive(null)}
               onSubmit={(t) => (active === 'contain' ? contain : active === 'root_cause' ? rootCause : close).mutate(t)} />
@@ -396,7 +422,7 @@ export default function IssueCard({
               <span className="text-[11px] text-slate-400">Also:</span>
               {secondary.map((a) => (
                 <button key={a} type="button" data-testid={`issue-act-${a}-${issue.id}`} onClick={() => run(a)}
-                  className="text-[11px] text-sky-300 hover:text-sky-200">{ACT_LABEL[a]}</button>
+                  className="text-[11px] text-sky-300 hover:text-sky-200">{actLabel(a)}</button>
               ))}
               {canQuote && !!primary && (
                 <button type="button" data-testid={`issue-act-quote_fix-${issue.id}`} onClick={() => setActive('quote_fix')}

@@ -346,10 +346,13 @@ async def test_route_rights_four_eyes_and_preconditions(client, vi):
     assert (await _route(client, vi, iid, who="pm2")).status_code == 400
 
 
-async def test_admin_may_route_own_issue(client, vi):
+async def test_negative_admin_may_not_route_own_issue(client, vi):
+    # A5-01: four eyes hold for an admin too (no issue cleared alone)
     issue = await _raised(client, vi, who="admin")
     await _ready(client, vi, issue["id"])
     r = await _route(client, vi, issue["id"], who="admin")
+    assert r.status_code == 403 and "Four eyes" in r.json()["detail"], r.text
+    r = await _route(client, vi, issue["id"], who="pm")
     assert r.status_code == 200, r.text
 
 
@@ -708,7 +711,12 @@ async def test_failed_check_without_issue_offers_raise(client, vi, session_facto
     assert res["offer_raise"] is True
 
 
-async def test_close_without_check_by_pm(client, vi):
+async def test_close_without_check_by_pm(client, vi, monkeypatch):
+    # the rule before HARD #3 (RELEASE_V2 off); with the switch on Quality
+    # or the owner department closes it with a reference
+    # (test_ecr_solid_closeout_a5)
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     issue = await _raised(client, vi, check_id=None, category="other",
                           department_id=vi["dept"]["Tool Engineer"])
     iid = issue["id"]

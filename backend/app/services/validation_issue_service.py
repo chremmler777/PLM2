@@ -420,6 +420,28 @@ class ValidationIssueService:
                 f"implementation or validation, not '{change.status}'")
 
     @staticmethod
+    def route_options(v: Viewer, issue: ValidationIssue,
+                      chk: Optional[ValidationCheck]) -> list[str]:
+        """The routes this viewer may decide on this issue (the backend rule
+        of decide_route, so the dialog offers nothing it refuses). With
+        RELEASE_V2 a concession is Quality's 'Request concession' and a
+        follow-up change is Quality's, never on a failed check (HARD #3)."""
+        run = v.admin or v.pm or v.lead
+        if not ValidationIssueService.fix_rule_on():
+            return list(ISSUE_ROUTES) if run else []
+        out = list(FIX_ROUTES) if run else []
+        if v.quality and not (chk is not None and chk.status == "failed"):
+            out.append("follow_up_change")
+        return out
+
+    @staticmethod
+    def may_confirm_close(v: Viewer, issue: ValidationIssue) -> bool:
+        """HARD #3 (RELEASE_V2): who confirms the fix of an issue no check
+        closes: a Quality member, or a real member of the owner department
+        (an admin account belongs to every department and does not count)."""
+        return v.quality or (not v.admin and v.in_dept(issue.department_id))
+
+    @staticmethod
     def _owner_ok(v: Viewer, issue: ValidationIssue) -> bool:
         """Owner department, PM, lead, admin."""
         return v.pm_or_lead or v.in_dept(issue.department_id)
@@ -1166,11 +1188,16 @@ class ValidationIssueService:
         svc = ValidationIssueService
         v = await svc.viewer(session, change, user)
         issue = await svc.get_issue(session, change, iid, lock=True)
-        svc._require(v.admin or v.pm or v.lead,
+        route = spec.get("route")
+        # HARD #3 (RELEASE_V2): a follow-up change takes an open issue off
+        # this change's release, so it is Quality's call (A5-01)
+        quality_follow_up = svc.fix_rule_on() and route == "follow_up_change"
+        svc._require(v.admin or v.pm or v.lead or (quality_follow_up and v.quality),
                      "Only Project Management, the change lead or an admin decide "
                      "the route")
-        # 4-eyes: the route is not decided by the raiser alone
-        svc._require(v.admin or issue.created_by != user.id,
+        # 4-eyes: the route is not decided by the raiser alone, an admin
+        # included (A5-01: no admin clears an issue it raised by itself)
+        svc._require(issue.created_by != user.id,
                      "Four eyes: the route is decided by someone other than the "
                      "person who raised the issue")
         svc._require_open(issue)
@@ -1178,7 +1205,6 @@ class ValidationIssueService:
         if issue.route is not None:
             raise ChangeError(f"The route of {issue.ref} is already decided "
                               f"({issue.route})")
-        route = spec.get("route")
         if route not in ISSUE_ROUTES:
             raise ChangeError(f"Unknown route '{route}': one of {', '.join(ISSUE_ROUTES)}")
         if svc.fix_rule_on():
@@ -1198,6 +1224,10 @@ class ValidationIssueService:
                     f"{issue.ref}'s failed check holds this change's release "
                     "(HARD #3): fix and retest it here, or a concession "
                     "(Quality); a follow-up change does not lift it")
+            if route == "follow_up_change":
+                svc._require(v.quality,
+                             f"{issue.ref} holds this change's release (HARD #3): "
+                             "moving it to a follow-up change is Quality's call")
         reason = _txt(spec.get("reason"), "A reason for the route")
         if issue.severity == 3 and not issue.containment:
             raise ChangeError(
@@ -1942,17 +1972,15 @@ class ValidationIssueService:
                     note: str, user: User) -> ValidationIssue:
         svc = ValidationIssueService
         v = await svc.viewer(session, change, user)
-        svc._require(v.admin or v.pm or v.lead or v.quality,
+        issue = await svc.get_issue(session, change, iid)
+        rules = svc.quality_decides_concessions()
+        svc._require(v.admin or v.pm or v.lead
+                     or (rules and (v.quality or (
+                         issue.check_id is None and svc.may_confirm_close(v, issue)))),
                      "Only Project Management, the change lead or an admin close "
                      "an issue")
-        issue = await svc.get_issue(session, change, iid)
         svc._require_open(issue)
         note = _txt(note, "A closure note")
-        raised_in_error = (issue.status in ("open", "contained")
-                           and svc.quality_decides_concessions())
-        svc._require(v.admin or v.pm or v.lead or raised_in_error,
-                     "Only Project Management, the change lead or an admin close "
-                     "an issue")
         # A check no longer asked can never pass again: its issue closes
         # with a note, like an unlinked one, whatever step it is at.
         retired = issue.check_id is not None and await svc.check_retired(
@@ -1977,6 +2005,28 @@ class ValidationIssueService:
             from app.services.cm_rules import reference_refusal
             refusal = reference_refusal(
                 note, "Why it was raised in error (measurement, drawing or "
+                      "document reference)")
+            if refusal:
+                raise ChangeError(refusal)
+        elif svc.quality_decides_concessions():
+            # HARD #3 (A5-01): an issue no check closes still holds the
+            # release. Unlinked: whoever closes it confirms the fix with
+            # evidence, Quality or the owner department, never an admin
+            # account on its own. A check no longer asked (the catalog took
+            # it away): the run team closes it, naming why.
+            if not retired:
+                svc._require(svc.may_confirm_close(v, issue),
+                             f"{issue.ref} holds the release: Quality or the "
+                             "owner department confirms the fix and closes it")
+            else:
+                svc._require(v.admin or v.pm or v.lead,
+                             "Only Project Management, the change lead or an "
+                             "admin close an issue")
+            from app.services.cm_rules import reference_refusal
+            refusal = reference_refusal(
+                note, "Why it closes (measuring report, trial or document "
+                      "reference)" if retired else
+                      "How the fix was confirmed (measuring report, trial or "
                       "document reference)")
             if refusal:
                 raise ChangeError(refusal)
@@ -2512,6 +2562,8 @@ class ValidationIssueService:
                 extra.append("quote_fix")
             return [], None, extra
         acts: list[str] = []
+        # acts offered as an option, never the one primary button
+        options: set[str] = set()
         owner = svc._owner_ok(v, issue)
         decided = issue.route is not None
         if any(e.acknowledged_at is None and e.trigger != "deescalate"
@@ -2522,10 +2574,13 @@ class ValidationIssueService:
             acts.append("contain")
         if not decided and not issue.root_cause and owner:
             acts.append("root_cause")
-        can_route = (v.admin or v.pm or v.lead) and (
-            v.admin or issue.created_by != v.id)
-        if not decided and can_route and change.status in WORK_STATUSES and not (
-                issue.severity == 3 and not issue.containment):
+        chk = await session.get(ValidationCheck, issue.check_id) \
+            if issue.check_id is not None else None
+        # 4 eyes for everyone, an admin included (A5-01)
+        can_route = bool(svc.route_options(v, issue, chk)) and issue.created_by != v.id
+        route_ready = (not decided and can_route and change.status in WORK_STATUSES
+                       and not (issue.severity == 3 and not issue.containment))
+        if route_ready and (v.admin or v.pm or v.lead):
             acts.append("route")
         # with RELEASE_V2 Quality decides once Sales filed the customer's
         # mail; before that the card waits on Sales (spec §10)
@@ -2539,8 +2594,6 @@ class ValidationIssueService:
             # before the route without the mail is recorded again with it);
             # with RELEASE_V2 Quality gives the yes once the mail is filed
             acts.append("customer")
-        chk = await session.get(ValidationCheck, issue.check_id) \
-            if issue.check_id is not None else None
         if svc.fix_rule_on() and v.quality and change.status in WORK_STATUSES:
             # §10: Quality's Fix task (who fixes, retest date) on a failed
             # check, and the concession beside it
@@ -2551,6 +2604,11 @@ class ValidationIssueService:
                 acts.append("fix" if issue.fix_department_id is None else "refix")
             if issue.route is None:
                 acts.append("concession_request")
+            if route_ready and "route" not in acts:
+                # a follow-up change is Quality's (HARD #3), beside the
+                # concession: an option, the run team routes the fix
+                acts.append("route")
+                options.add("route")
         if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
             acts.append("action_done")
         # a check no longer asked of its department can never pass again:
@@ -2580,7 +2638,20 @@ class ValidationIssueService:
                         acts.append("recheck")
             elif v.admin or v.pm or v.in_dept(dept):
                 acts.append("recheck")
-        if (v.admin or v.pm or v.lead) and (
+        if svc.quality_decides_concessions():
+            # HARD #3: an issue no check closes is closed by Quality or its
+            # owner department with evidence (A5-01); an open one is closed
+            # as raised in error by Quality only (A5-08)
+            if (issue.check_id is None and issue.status == "revalidation"
+                    and svc.may_confirm_close(v, issue)) \
+                    or (retired and (v.admin or v.pm or v.lead)):
+                acts.append("close")
+            elif v.quality and issue.check_id is None \
+                    and issue.status in ("open", "contained"):
+                # raised in error: an option beside the route
+                acts.append("close")
+                options.add("close")
+        elif (v.admin or v.pm or v.lead) and (
                 retired or (issue.check_id is None
                             and issue.status == "revalidation")):
             acts.append("close")
@@ -2600,7 +2671,8 @@ class ValidationIssueService:
             extra.append("quote_fix")
         if (v.admin or v.pm) and issue.escalation_level > 1:
             extra.append("deescalate")
-        primary = next((a for a in acts if a not in svc.QUIET_ACTS), None)
+        primary = next((a for a in acts if a not in svc.QUIET_ACTS
+                        and a not in options), None)
         if svc._needs_new_action(issue, actions) and "add_action" in acts and \
                 primary in (None, "cost", "customer"):
             # re-validation failed with every action done: the next step is
@@ -2782,6 +2854,10 @@ class ValidationIssueService:
                 "next_acts": next_acts, "primary_act": primary,
                 "extra_acts": extra_acts,
                 "customer_options": svc.customer_options(v, i),
+                # the routes the route dialog may offer this viewer
+                "route_options": svc.route_options(v, i, checks.get(i.check_id)),
+                # HARD #3: closing it needs a reference, not a free note
+                "close_needs_ref": svc.quality_decides_concessions(),
                 # §10: the Fix task and the bounded concession apply
                 "fix_rule": svc.fix_rule_on(),
             })
@@ -2878,7 +2954,9 @@ class ValidationIssueService:
             if "root_cause" in possible and not i.root_cause and i.route is None \
                     and v.in_dept(i.department_id) and not light:
                 owed.append("root_cause")
-            if "route" in possible and not v.admin and not light:
+            if "route" in possible and not v.admin and not light \
+                    and (v.pm or v.lead):
+                # Quality's follow-up pick is an option, not a task
                 owed.append("route")
             if "action_done" in possible and any(
                     a.status == "open" and (a.owner_id == v.id or v.in_dept(a.department_id))
@@ -2937,6 +3015,9 @@ class ValidationIssueService:
                              else svc.CONCESSION_ASK).format(ref=i.ref)
                 else:
                     label = label.format(ref=i.ref)
+                if key == "close" and svc.quality_decides_concessions():
+                    item["role_department_id"] = (
+                        quality_dept if v.quality else i.department_id)
                 if key == "recheck" and i.retest_due is not None:
                     label = f"Retest for {i.ref} by {i.retest_due.strftime('%a %d %b')}"
                 if key == "recheck" and not v.in_dept(chk_dept):

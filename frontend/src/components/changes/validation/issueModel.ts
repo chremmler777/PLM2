@@ -196,8 +196,9 @@ export const FIX_OWNER_LABEL: Record<FixOwner, string> = {
 const QUIET: IssueAct[] = ['edit', 'attach', 'escalate', 'add_action', 'concession_request', 'refix']
 
 /** The 4-eyes rule: the raiser does not decide the route alone (admins may). */
+/** 4 eyes: the raiser never decides the route alone, an admin included. */
 export const raiserBlocked = (i: IssueOut, v: IssueViewer) =>
-  !v.isAdmin && v.id != null && i.created_by === v.id
+  v.id != null && i.created_by === v.id
 
 /**
  * The viewer's acts. The backend's `next_acts` wins when sent; otherwise the

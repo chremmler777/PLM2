@@ -23,9 +23,12 @@ const ORDER: IssueRoute[] = ['internal_rework', 'supplier_rework', 'design_chang
 
 /** The routes this issue offers. With the release rules (RELEASE_V2, §10)
  * a concession is Quality's 'Request concession' only, and a failed check
- * is not taken off the change by a follow-up (HARD #3): the backend refuses
- * both, so they are not offered. */
+ * is not taken off the change by a follow-up (HARD #3), and a follow-up on
+ * an open issue is Quality's call: the backend refuses the rest, so they are
+ * not offered. */
 export function routeOptions(issue: IssueOut): IssueRoute[] {
+  // the backend's per-viewer list wins (a follow-up change is Quality's)
+  if (issue.route_options) return ORDER.filter((r) => issue.route_options!.includes(r))
   if (!issue.fix_rule) return ORDER
   return ORDER.filter((r) => r !== 'customer_concession'
     && !(r === 'follow_up_change' && issue.check_id != null))

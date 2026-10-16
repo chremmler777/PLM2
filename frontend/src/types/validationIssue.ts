@@ -190,6 +190,10 @@ export interface IssueOut {
   /** The customer decisions this viewer may record (backend rule; HARD #3:
    * on a concession the yes is a Quality member's). Absent: all. */
   customer_options?: CustomerDecision[]
+  /** The routes this viewer may decide (backend route_options). */
+  route_options?: IssueRoute[]
+  /** HARD #3 (RELEASE_V2): the closure note must be a reference. */
+  close_needs_ref?: boolean
   /** raised, contained, root_cause, route, fixing, revalidation, closed. */
   step?: string | null
   escalation?: { level?: EscalationLevel | null; unacknowledged?: boolean } | null
