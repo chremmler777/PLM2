@@ -97,6 +97,10 @@ async def test_departments_map_to_roles_as_ruled():
         assert svc.roles_for_departments([d]) == ["engineering"], d
     assert svc.roles_for_departments(["Tool Engineer", "APQP"]) == ["engineering"]
     assert svc.roles_for_departments(["Logistics"]) == []
+    # A6-11: Toolshop books hours and Management gives the price OKs: both
+    # owe training (the gate would let them pass untrained otherwise)
+    assert svc.roles_for_departments(["Toolshop"]) == ["engineering"]
+    assert svc.roles_for_departments(["Management"]) == ["project_management"]
     assert svc.roles_for_departments(["Finance", "Quality", "Scheduling"]) == [
         "scheduling", "quality", "finance"]
 

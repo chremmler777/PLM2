@@ -180,7 +180,7 @@ another). The numbers in use, one per task:
 | CR-TRAIN-0007 | `sales_new_version` | quoted, v1 sent |
 | CR-TRAIN-0008 | `pm_route_issue` | validation, VI-1 contained with root cause |
 | CR-TRAIN-0009 | `eng_contain_issue` | validation, VI-1 not contained |
-| CR-TRAIN-0010 | `sales_issue_customer_decision` | validation, VI-1 routed as concession |
+| CR-TRAIN-0010 | `sales_issue_customer_decision` | validation, VI-1 with a concession Quality requested (500 parts) |
 | CR-TRAIN-0011 | `sch_release_stock` | validation, release checks open |
 | CR-TRAIN-0012 | `qa_add_lesson` | validation, no lessons |
 | CR-TRAIN-0013 | `sales_send_offer` | quoting, one severity-3 risk (hidden) |

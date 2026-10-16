@@ -343,14 +343,14 @@ export const salesTasks: PracticeTaskSpec[] = [
     status: 'needs-sandbox',
     screen: { kind: 'validation-issue', change: 'CR-TRAIN-0010' },
     brief:
-      'VI-1 on CR-TRAIN-0010 is a small gloss difference. PM routed it as a customer ' +
-      'concession. The customer accepts it for good and sent a mail saying so. File it so ' +
-      'Quality can decide.',
+      'VI-1 on CR-TRAIN-0010 is a small gloss difference. Quality requested a concession on ' +
+      'VI-1; the customer accepts it for the next 500 parts and sent a mail saying so. File it ' +
+      'so Quality can decide (for that quantity or until a date, never for good).',
     why:
       'A concession without the customer\'s written word is our word against theirs at the ' +
       'next complaint. Quality decides the concession only once the mail is filed into the issue.',
     fixture: [
-      'CR-TRAIN-0010 in_validation, VI-1 severity 1, route customer_concession, customer_inform true, no decision.',
+      'CR-TRAIN-0010 in_validation, VI-1 severity 1, concession requested by Quality (route customer_concession, concession_requested_by a Quality member), customer_inform true, no decision.',
       'Trainee acts as a Sales member.',
       'A sample mail file available to upload.',
     ],

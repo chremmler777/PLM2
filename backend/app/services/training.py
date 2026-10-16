@@ -14,10 +14,13 @@ score.
 
 Roles, split by what the person does in a change (ruling 2026-09-25):
 
-    project_management  Project Manager
+    project_management  Project Manager, Management (the price-drop and
+                        Absorb OKs, A6-11)
     sales               Sales
     engineering         Development, Tool Engineer, Manufacturing Engineer,
-                        Process Engineer, APQP, Packaging Engineer
+                        Process Engineer, APQP, Packaging Engineer, Toolshop
+                        (books toolmakers' hours, says whether toolmakers
+                        spend time, A6-11)
     scheduling          Scheduling
     quality             Quality
     finance             Finance
@@ -80,7 +83,9 @@ CURRICULA: dict[str, Curriculum] = {
     "project_management": Curriculum(
         role="project_management",
         label="Project Management",
-        departments=("Project Manager",),
+        # A6-11: Management gives the price-drop and Absorb OKs on the
+        # same screens Project Management decides on
+        departments=("Project Manager", "Management"),
         code_version=1,
         tasks=("pm_set_priority",),
     ),
@@ -101,6 +106,9 @@ CURRICULA: dict[str, Curriculum] = {
             "Process Engineer",
             "APQP",
             "Packaging Engineer",
+            # A6-11 (P7): its own department, the engineers' material
+            # (assess, cost, book hours)
+            "Toolshop",
         ),
         code_version=1,
         tasks=("eng_answer_checklist_row", "eng_submit_assessment"),

@@ -2628,8 +2628,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'This task is done or no longer yours.' },
   'taskcard.close': { de: 'Schließen', en: 'Close' },
   'taskcard.help': {
-    de: 'Diese Karte zeigt deinen Teil an dieser Änderung und bis wann. Der Knopf führt dorthin, wo du ihn erledigst. Eine Aufgabe ist 2 Arbeitstage, nachdem sie bei dir ankam, fällig (eine Bewertung: vor dem Termin der Änderung); einen Arbeitstag danach gilt sie als verspätet.',
-    en: "This card shows your part in this change and by when. The button takes you to where you do it. A task is due 2 working days after it reached you (an assessment: before the change's deadline); one working day later it counts as late." },
+    de: 'Diese Karte zeigt deinen Teil an dieser Änderung und bis wann. Der Knopf führt dorthin, wo du ihn erledigst. Eine Aufgabe ist 2 Arbeitstage, nachdem sie bei dir ankam, fällig (eine Bewertung: 7 Tage, früher, wenn der Termin der Änderung nah ist); einen Arbeitstag danach gilt sie als verspätet.',
+    en: "This card shows your part in this change and by when. The button takes you to where you do it. A task is due 2 working days after it reached you (an assessment: 7 days, earlier when the change's deadline is near); one working day later it counts as late." },
   'taskcard.below': { de: '{x} (unten)', en: '{x} (below)' },
   'taskcard.gotIt': { de: 'Verstanden', en: 'Got it' },
   // --- C33: scoping is triage (questions and check items) -------------------

@@ -21,6 +21,14 @@ export const pmChapter: ContentChapter = {
             'sure every step has its owner and nothing waits without a reason.',
         },
         {
+          p:
+            'Management members train with this chapter too. Their part is the OK a Project ' +
+            'Management member may also give: a customer accepting a lower total than the version ' +
+            'sent before (reason: volume, competitor, goodwill or error), "Absorb" on an open price, ' +
+            'and an override of an open scope change. They hear an urgent failed check at once. ' +
+            'They never OK their own request.',
+        },
+        {
           table: {
             head: ['Stage', 'What you do'],
             rows: [

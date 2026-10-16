@@ -1,7 +1,7 @@
 import type { ContentChapter, PracticeTaskSpec } from './types'
 
 //: Chapter 05, Engineers: Development, Tool Engineer, Manufacturing
-//: Engineer, Process Engineer, APQP, Packaging Engineer. eng-assessment,
+//: Engineer, Process Engineer, APQP, Packaging Engineer, Toolshop. eng-assessment,
 //: eng-checklist, eng-risks, eng-costing and eng-implementation replace the
 //: stubs of the same id in ../chapters.tsx.
 
@@ -41,6 +41,14 @@ export const engineeringChapter: ContentChapter = {
             'For a part change all five of Development, Tool Engineer, Manufacturing Engineer, APQP ' +
             'and Packaging Engineer assess. Process Engineer is routed when the scoping meeting ' +
             'gives it a letter.',
+        },
+        {
+          p:
+            'Toolshop is its own department and trains with this chapter. Its costing button reads ' +
+            '"Will toolmakers spend time on this?": no work, absorbed (with the hours estimate) or ' +
+            'the supplier does it, else it prices the toolmakers\' hours like any own time. Toolshop ' +
+            'books the hours actually spent with "Book hours", for a colleague too (Belk for his ' +
+            'toolmakers), until 7 days after the change closed.',
         },
         {
           p:

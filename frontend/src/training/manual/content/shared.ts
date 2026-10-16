@@ -65,6 +65,8 @@ export const basicsChapter: ContentChapter = {
               ['Project Management', 'Leading the change: scoping, deadlines, closing costing, the plan, the route of a validation issue, closing the change. Starting a change from KTX Weissenburg or KTX Solingen.'],
               ['Development', 'Locking what is impacted, deciding the route of every new customer index, the drawing and 3D data.'],
               ['Tool, Manufacturing, Process, APQP, Packaging', 'Assessing, costing and doing their own part of the work, and their own release checks.'],
+              ['Toolshop', 'Says whether toolmakers spend time on the change ("Will toolmakers spend time on this?"), costs that time and books the toolmakers\' hours (Belk for his team). Trains with the engineers.'],
+              ['Management', 'The OK on a lower accepted price and on Absorb (with Project Management), and the notice on an urgent failed check. Trains with Project Management.'],
               ['Scheduling', 'How the change reaches the line (bank build), the plan with PM and Sales, ERP and old stock.'],
               ['Quality', 'The Quality sign-off before approval, the governance view (D1, Audit), the training record.'],
               ['Finance', 'Checks the cost sheet Sales keeps, and may change it: every rate that prices a change.'],

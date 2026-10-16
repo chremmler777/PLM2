@@ -134,3 +134,20 @@ function prefixOf(chapterId: string): string {
   }
   return short[chapterId] ?? `${chapterId}-`
 }
+
+describe('A6-11 training matches the flow', () => {
+  it('the concession exercise: Quality requests it, the customer bounds it (no "for good")', () => {
+    const task = PRACTICE_TASKS.find((x) => x.key === 'sales_issue_customer_decision')
+    expect(task).toBeDefined()
+    expect(task!.brief).toContain('Quality requested a concession')
+    expect(task!.brief).not.toMatch(/PM routed|for good and/)
+    expect(task!.brief).toMatch(/500 parts|until/)
+  })
+
+  it('Toolshop and Management are named in the owners table', () => {
+    const rows = CONTENT_CHAPTERS.flatMap((c) => c.sections.flatMap((s) => s.blocks))
+      .flatMap((b) => ('table' in b ? b.table.rows.map((r) => r[0]) : []))
+    expect(rows).toContain('Toolshop')
+    expect(rows).toContain('Management')
+  })
+})
