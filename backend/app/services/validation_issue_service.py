@@ -548,14 +548,20 @@ class ValidationIssueService:
 
     @staticmethod
     async def _dept_members(session, dept_ids, org_id: Optional[int] = None) -> set[int]:
+        """The real members a notice reaches (A5-05, R33): active, not an
+        admin account (an admin sits in every department of a small
+        plant's set-up), of the change's organization when it has one: the
+        rule of change_people.department_members_of_change_org(real_only)."""
         ids = [i for i in dept_ids if i is not None]
         if not ids:
             return set()
-        q = select(UserDepartment.user_id).where(UserDepartment.department_id.in_(ids))
+        q = (select(UserDepartment.user_id)
+             .join(User, User.id == UserDepartment.user_id)
+             .where(UserDepartment.department_id.in_(ids),
+                    User.is_active.is_(True), User.role != "admin"))
         if org_id is not None:
             # departments are global: only the change's organization is told
-            q = q.join(User, User.id == UserDepartment.user_id).where(
-                User.organization_id == org_id)
+            q = q.where(User.organization_id == org_id)
         return set((await session.execute(q)).scalars().all())
 
     @staticmethod

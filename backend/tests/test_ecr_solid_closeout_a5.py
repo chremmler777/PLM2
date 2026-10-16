@@ -278,3 +278,48 @@ async def test_a5_04c_the_coordinator_reads_get_the_fixer_then_retest(
     st = (await client.get(_url(fix, "/state"), headers=pm)).json()
     assert "fix: Process Engineer (no member here: Project Manager coordinates), retest " \
         f"{due.strftime('%a %d %b')}" in st["release_line"]
+
+
+# --- A5-05 validation notices reach real members only ---------------------
+
+from app.models.notification import Notification  # noqa: E402
+
+
+async def _admin_member(session_factory, fix, *names):
+    async with session_factory() as s:
+        admin = (await s.execute(select(User).where(User.email == "admin@test.io"))).scalar_one()
+        for n in names:
+            s.add(UserDepartment(user_id=admin.id, department_id=fix["dept"][n]))
+        await s.commit()
+        return admin.id
+
+
+async def test_a5_05_negative_an_admin_in_quality_and_management_is_not_told(
+        client, fix, session_factory):
+    admin_id = await _admin_member(session_factory, fix, "Quality", "Management",
+                                   "Tool Engineer")
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, fix["change_id"])
+        c.priority = "critical"
+        c.lead_id = fix["user"]["Project Manager"]["id"]
+        await s.commit()
+    await _fail_weight(client, fix)
+    async with session_factory() as s:
+        rows = (await s.execute(select(Notification))).scalars().all()
+    assert not [r for r in rows if r.user_id == admin_id], [(r.kind, r.title) for r in rows]
+    urgent = [r.user_id for r in rows if r.kind == "validation_urgent_fail"]
+    assert urgent == [fix["user"]["Management"]["id"]]
+
+
+async def test_a5_05_urgent_pm_fallback_fires_when_management_has_only_an_admin(
+        client, fix, session_factory):
+    admin_id = await _admin_member(session_factory, fix, "Management")
+    async with session_factory() as s:
+        (await s.get(User, fix["user"]["Management"]["id"])).is_active = False
+        (await s.get(ChangeRequest, fix["change_id"])).priority = "critical"
+        await s.commit()
+    await _fail_weight(client, fix)
+    async with session_factory() as s:
+        urgent = [r.user_id for r in (await s.execute(select(Notification).where(
+            Notification.kind == "validation_urgent_fail"))).scalars().all()]
+    assert urgent == [fix["user"]["Project Manager"]["id"]] and admin_id not in urgent
