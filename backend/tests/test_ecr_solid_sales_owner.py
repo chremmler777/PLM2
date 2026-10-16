@@ -124,16 +124,29 @@ async def test_owner_change_refused(client, seed, depts, session_factory, admin)
 
 async def test_sales_tasks_name_the_owner(client, seed, depts, session_factory, admin):
     """All of Sales sees the kickoff; the owner as main, the rest as backup
-    with the owner's name."""
+    with the owner's name. With no lead yet the kickoff is Project
+    Management's one main row (A6-04): even the owner is backup, naming
+    Project Management, until a lead is set."""
     await _join(session_factory, seed["engineer_id"], depts["Sales"])
     eng = await login(client, "eng@test.io", admin=False)
     c = await _create(client, eng, seed)
-    mine = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=eng)).json()
-            if t["change_id"] == c["id"] and t["kind"] == "kickoff"]
+
+    async def kickoff(headers):
+        return [t for t in (await client.get("/api/v1/changes/my-tasks",
+                                             headers=headers)).json()
+                if t["change_id"] == c["id"] and t["kind"] == "kickoff"]
+    assert c["lead_id"] is None         # the project names no PM
+    # NEGATIVE: no lead: the Sales owner is not main yet
+    mine = await kickoff(eng)
+    assert mine and mine[0]["role"] == "backup"
+    assert mine[0]["main_name"] == "Project Management"
+    res = await client.patch(f"/api/v1/changes/{c['id']}",
+                             json={"lead_id": seed["admin_id"]}, headers=admin)
+    assert res.status_code == 200, res.text
+    mine = await kickoff(eng)
     assert mine and mine[0]["role"] == "main" and mine[0]["is_mine"]
     other = {**admin, ACTS: str(depts["Sales"])}
-    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=other)).json()
-            if t["change_id"] == c["id"] and t["kind"] == "kickoff"]
+    rows = await kickoff(other)
     assert rows and rows[0]["role"] == "backup" and rows[0]["main_name"] == "Engineer"
 
 

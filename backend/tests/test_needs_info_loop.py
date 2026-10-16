@@ -310,10 +310,16 @@ async def test_attribution_to_sales_gives_sales_no_settle_right(
                             json={**ASSUMED, "note": "Customer confirmed rev D"}, headers=sales)
     assert res.status_code == 200, res.text
 
-    # the close-question errand goes to the asker, not to Sales
+    # the settling errand goes to the asker, not to Sales. The Assumed answer
+    # defaults its confirmer to the lead (here the asker), so the asker has
+    # ONE row that confirms and settles together (A3-13), not a second
+    # close_question row
     assert await _close_rows(client, sales, cid) == []
-    author_rows = await _close_rows(client, admin_auth, cid)
+    assert await _confirm_rows(client, sales, cid) == []
+    assert await _close_rows(client, admin_auth, cid) == []
+    author_rows = await _confirm_rows(client, admin_auth, cid)
     assert len(author_rows) == 1 and author_rows[0]["concern_id"] == concern_id
+    assert author_rows[0]["settles"] is True
 
     # Sales cannot settle it, resolution note or not
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
@@ -672,6 +678,46 @@ async def _dept_member(client, session_factory, seed, name, email):
         await s.commit()
         return {"auth": await login(client, email), "dept_id": dept.id,
                 "user_id": u.id}
+
+
+async def _confirm_rows(client, auth, cid):
+    res = await client.get("/api/v1/changes/my-tasks", headers=auth)
+    assert res.status_code == 200, res.text
+    return [t for t in res.json()
+            if t["kind"] == "confirm_assumption" and t["change_id"] == cid]
+
+
+async def test_asker_who_is_not_the_confirmer_still_settles_by_close_question(
+        client, admin_auth, seed, session_factory):
+    """A3-13 merges confirm and settle only for a caller who does both. When
+    the answer names someone else to confirm, the asker keeps a separate
+    close_question row and the confirmer's row does not settle it."""
+    from sqlalchemy import select
+    from app.models.entities import User
+    from app.models.workflow import Department
+    cid = await _change_in_scoping(client, admin_auth, seed, "7c")
+    sales = await _sales_member(client, session_factory, seed)
+    async with session_factory() as s:
+        sales_dept_id = (await s.execute(select(Department.id).where(
+            Department.name == "Sales"))).scalar_one()
+        sales_id = (await s.execute(select(User.id).where(
+            User.username == "salesperson"))).scalar_one()
+    concern_id = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+        json={"kind": "needs_info", "note": "Ask the customer for rev E",
+              "department_id": sales_dept_id, **QUESTION})).json()["id"]
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={**ASSUMED, "note": "Rev E assumed",
+                                  "confirm_by_id": sales_id}, headers=sales)
+    assert res.status_code == 200, res.text
+    # the asker: a plain close_question row, no confirm row
+    rows = await _close_rows(client, admin_auth, cid)
+    assert len(rows) == 1 and rows[0]["concern_id"] == concern_id
+    assert await _confirm_rows(client, admin_auth, cid) == []
+    # NEGATIVE: Sales confirms but does not settle; no close_question for Sales
+    assert await _close_rows(client, sales, cid) == []
+    confirm = await _confirm_rows(client, sales, cid)
+    assert len(confirm) == 1 and not confirm[0].get("settles")
 
 
 async def _close_rows(client, auth, cid):

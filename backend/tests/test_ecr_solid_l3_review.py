@@ -380,6 +380,35 @@ async def test_concession_needs_only_the_quality_decider(
                 if t["kind"] == "validation_issue_customer"]
     quality = await rows(people["Quality"][1])
     assert quality and all(t["needs_you"] for t in quality)
-    # negative: Sales waits on the customer, nothing for it to decide
+    # negative: an internal change has no customer to ask: Sales gets no row
+    assert await rows(people["Sales"][1]) == []
+
+
+async def test_customer_concession_sales_waits_then_quality_decides(
+        client, admin, seed, depts, people, session_factory):
+    """A customer change: until the customer's mail is filed Sales owes the
+    ask (a plain task, not Needs you) and Quality has nothing to decide; once
+    it is filed Sales' part ends and Quality decides (Needs you)."""
+    from app.models.change import ChangeAttachment
+    from tests.test_ecr_solid_gates import _change as _gate_change, _concession, _failed_weight
+    cid = await _gate_change(client, admin, seed, session_factory, "in_validation",
+                             customer=True)
+    check_id = await _failed_weight(session_factory, cid, depts["Tool Engineer"])
+    iid = await _concession(session_factory, cid, check_id, people["Sales"][0], mail=False)
+
+    async def rows(auth):
+        return [t for t in await _tasks(client, auth, cid)
+                if t["kind"] == "validation_issue_customer"]
     sales = await rows(people["Sales"][1])
     assert sales and not any(t["needs_you"] for t in sales)
+    # negative: nothing for Quality to decide before the mail is filed
+    assert not any(t["needs_you"] for t in await rows(people["Quality"][1]))
+    async with session_factory() as s:
+        s.add(ChangeAttachment(change_id=cid, filename="yes.msg", stored_path="x",
+                               content_type="application/vnd.ms-outlook",
+                               size_bytes=1, sha256="0" * 64, kind="customer_email",
+                               validation_issue_id=iid, uploaded_by=people["Sales"][0]))
+        await s.commit()
+    quality = await rows(people["Quality"][1])
+    assert quality and all(t["needs_you"] for t in quality)
+    assert await rows(people["Sales"][1]) == []
