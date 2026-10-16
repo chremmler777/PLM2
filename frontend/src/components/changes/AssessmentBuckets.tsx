@@ -335,6 +335,10 @@ export default function AssessmentBuckets({
   })))
   // Untouched, a member's own bucket starts open — it is the thing they came for.
   const autoOpen = openDept === undefined && !canSeeAll
+  const confirmDeptIds = new Set((concerns as ChangeConcern[])
+    .filter((c) => c.flag_type === 'check' && c.can_confirm && !c.is_open)
+    .flatMap((c) => [c.department_id, ...(c.co_department_ids ?? [])])
+    .filter((d): d is number => d != null))
 
   return (
     <div className="space-y-2">
@@ -349,7 +353,11 @@ export default function AssessmentBuckets({
         // Another department's answers are theirs; ordinary members see the
         // status board only. The overview belongs to PM/Sales/lead/admin.
         const mayOpen = isMine || canSeeAll
-        const expanded = mayOpen && (autoOpen ? isMine : openDept === row.id)
+        // A3-01: untouched, a bucket holding a check item the viewer
+        // confirms starts open too (the confirm task leads here)
+        const expanded = mayOpen && (openDept === undefined
+          ? (autoOpen && isMine) || confirmDeptIds.has(row.id)
+          : openDept === row.id)
         const areas = impactedCount(a?.details)
         const risks = checklistRisks(row.id)
         const canSubmit = isMine && editable && (a?.status === 'active' || (owed && a?.status === 'pending'))

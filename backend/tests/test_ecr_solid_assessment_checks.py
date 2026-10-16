@@ -516,3 +516,36 @@ async def test_switch_off_keeps_the_risk_only_register(client, assess, monkeypat
                             json={"resolution_note": "checked against DRW-4471"},
                             headers=a["pe"])
     assert res.status_code == 200, res.text
+
+
+async def test_assumed_check_item_is_confirmed_where_its_task_leads(
+        client, assess, session_factory):
+    """A3-01: the confirm item of an Assumed check item is done on the
+    assessments tab (the check item's own bucket): the task and the notice
+    lead there, the row is served can_confirm, and it confirms in costing."""
+    a = assess
+    res = await _close(client, a["pe"], a, outcome="assumed", value="2.4", unit="mm",
+                       assumed_risk="gate moves, re-cut the insert")
+    assert res.status_code == 200, res.text
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=a["sa"])).json()
+    rows = [t for t in tasks if t.get("kind") == "confirm_assumption"
+            and t["change_id"] == a["cid"]]
+    assert rows and rows[0]["target_tab"] == "assessments"
+    async with session_factory() as s:
+        n = (await s.execute(select(Notification).where(
+            Notification.user_id == a["sales_id"],
+            Notification.kind == "confirm_assumption"))).scalars().one()
+        assert "tab=assessments" in n.link
+        change = await s.get(ChangeRequest, a["cid"])
+        change.status = "costing"
+        await s.commit()
+    served = (await client.get(_url(a, "/concerns"), headers=a["sa"])).json()
+    row = next(c for c in served if c["id"] == a["check"])
+    assert row["can_confirm"] is True
+    # negative: Tool Engineer is neither the confirmer nor may it answer
+    served = (await client.get(_url(a, "/concerns"), headers=a["te"])).json()
+    assert next(c for c in served if c["id"] == a["check"])["can_confirm"] is False
+    res = await client.post(_url(a, f"/concerns/{a['check']}/confirm"),
+                            json={"ref": "MAIL-2026-1015"}, headers=a["sa"])
+    assert res.status_code == 200, res.text
+    assert res.json()["answer_kind"] == "confirmed"

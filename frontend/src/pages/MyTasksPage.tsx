@@ -256,7 +256,9 @@ function FormsSection() {
 
 
 // Kinds whose row may name its own tab (it wins over TASK_TAB).
-const OWN_TAB_KINDS = new Set(['obtain_info'])
+// A3-01: a confirm item names its tab too (a check item is confirmed in its
+// assessment bucket, a question on the scoping card)
+const OWN_TAB_KINDS = new Set(['obtain_info', 'confirm_assumption'])
 
 // Where each kind of change task is actually done, and how it reads in a list.
 const TASK_TAB: Record<string, string> = {

@@ -84,7 +84,8 @@ export default function AssessmentChecks({
               others={others.filter((o) => o.id !== c.id)} onDone={refresh} />
           ))}
           {closed.map((c) => (
-            <ClosedCheck key={c.id} changeId={changeId} c={c} onDone={refresh} />
+            <ClosedCheck key={c.id} changeId={changeId} c={c} onDone={refresh}
+              attachments={attachments} />
           ))}
         </div>
       )}
@@ -239,7 +240,9 @@ function CheckRow({ changeId, departmentId, c, others, onDone }: {
   )
 }
 
-function ClosedCheck({ changeId, c, onDone }: { changeId: number; c: ChangeConcern; onDone: () => void }) {
+function ClosedCheck({ changeId, c, onDone, attachments }: {
+  changeId: number; c: ChangeConcern; onDone: () => void; attachments: Attachment[]
+}) {
   const [reopening, setReopening] = useState(false)
   const [reason, setReason] = useState('')
   const reopen = useMutation({
@@ -265,6 +268,21 @@ function ClosedCheck({ changeId, c, onDone }: { changeId: number; c: ChangeConce
           <button type="button" className={btnSm.secondary} disabled={reason.trim().length < 5}
             onClick={() => reopen.mutate()}>{t('achk.reopen')}</button>
         </span>
+      )}
+      {/* A3-01: an Assumed check item leaves a confirm item; its named
+          confirmer (default the Sales owner) confirms it here, in any live
+          status (the backend's can_confirm). */}
+      {c.answer_kind === 'assumed' && !c.confirmed_at && (
+        <p className="text-amber-200" data-testid={`achk-confirmline-${c.id}`}>
+          {t('answer.confirmLine').replace('{who}', c.confirm_by_name ?? '-')
+            .replace('{d}', c.confirm_due ? formatDate(c.confirm_due) : '-')}
+        </p>
+      )}
+      {c.answer_kind === 'assumed' && !c.confirmed_at && c.can_confirm && (
+        <div className="mt-1" data-testid={`achk-confirm-${c.id}`}>
+          <AnswerForm changeId={changeId} concern={c} attachments={attachments}
+            confirming onDone={onDone} />
+        </div>
       )}
     </div>
   )

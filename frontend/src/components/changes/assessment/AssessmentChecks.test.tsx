@@ -61,6 +61,24 @@ describe('AssessmentChecks (spec §4)', () => {
       .toContain(t('flag.due').replace('{d}', formatDate('2026-10-22T12:00:00')))
   })
 
+  it('an assumed check item with can_confirm shows the confirm form (A3-01)', () => {
+    const closed = check({ is_open: false, check_outcome: 'assumed', answer_kind: 'assumed',
+      assumed_value: '2.4', assumed_unit: 'mm', confirm_by_name: 'Sam Sales',
+      confirm_due: '2026-10-22', can_confirm: true })
+    render(view([closed], false))
+    expect(screen.getByTestId('achk-confirm-11').querySelector('[data-testid="answer-form"]'))
+      .toBeTruthy()
+    expect(screen.getByTestId('achk-confirmline-11').textContent).toContain('Sam Sales')
+  })
+
+  it('no confirm form without can_confirm or once confirmed (A3-01)', () => {
+    render(view([check({ is_open: false, answer_kind: 'assumed', can_confirm: false }),
+      check({ id: 13, is_open: false, answer_kind: 'confirmed', can_confirm: true,
+        confirmed_at: '2026-10-15T10:00:00Z' })], false))
+    expect(screen.queryByTestId('achk-confirm-11')).toBeNull()
+    expect(screen.queryByTestId('achk-confirm-13')).toBeNull()
+  })
+
   it('a viewer who may not check sees the item without the form', () => {
     render(view([check({ can_check: false })]))
     expect(screen.getByTestId('achk-item-11')).toBeTruthy()

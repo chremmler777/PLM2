@@ -4287,7 +4287,11 @@ class ChangeService:
                                        f": {q.note}"),
                             "due_date": due,
                             "overdue": due is not None and due < datetime.utcnow(),
-                            "target_tab": "scoping",
+                            # A3-01: a check item is confirmed in its own
+                            # assessment bucket (the notice leads there too);
+                            # a question on the scoping tab's card
+                            "target_tab": ("assessments" if q.is_check
+                                           else "scoping"),
                         })
 
         # §6 [R3] scope change cards: the lead decides, the departments
