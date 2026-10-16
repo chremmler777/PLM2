@@ -63,3 +63,4 @@
 - [1994 E1.1 FZ toolmaker data 2026-10-15](1994-e11-fz-toolmaker-2026-10-15.md) - 4 E1.1 drafts awaiting Brose confirmation; naming rule; data-exchange + moldflow backlog; stage via /tmp + docker cp
 - [Part-data mail 2026-10-15](part-data-mail-2026-10-15.md) - KTX Apps Graph mail like TWOS, 1994 list (EC kickoff + Karl), 5-min digest, trial first
 - [Session state 2026-10-15](session-state-2026-10-15.md) - end of day: deployed 0536924c/alembic 115, ecr-solid migration 115 clash, open decisions, backlog
+- [Session state 2026-10-16](session-state-2026-10-16.md) - back fix deployed; Moldflow overview (mig 116) in build; ECR must renumber 117+
