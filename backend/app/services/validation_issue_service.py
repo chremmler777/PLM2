@@ -2743,7 +2743,8 @@ class ValidationIssueService:
                     and v.in_dept(i.fix_department_id) and not v.admin
                     and i.route not in FIX_ROUTES and "recheck" not in owed
                     and i.check_id is not None
-                    and (await session.get(ValidationCheck, i.check_id)).status == "failed"):
+                    and getattr(await session.get(ValidationCheck, i.check_id),
+                                "status", None) == "failed"):
                 owed.append("fix_work")
             if "add_action" in possible and not v.admin and \
                     svc._needs_new_action(i, acts[i.id]) and \

@@ -349,9 +349,13 @@ async def test_plan_context_uses_the_plan_finish(monkeypatch):
 
 # --- validation check note ---------------------------------------------------
 
-async def test_passing_a_check_clears_the_failure_note(client, admin_auth, val):
+async def test_passing_a_check_clears_the_failure_note(client, admin_auth, val, monkeypatch):
     """The note explained the failure; passing without a new note drops it,
-    passing with one keeps the new one, a re-pass keeps what is there."""
+    passing with one keeps the new one, a re-pass keeps what is there.
+    The admin flips a failed check here: the rule before HARD #3 (RELEASE_V2
+    off); with it on only the department retests (test_validation_checks)."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     async def note():
         state = await _vstate(client, admin_auth, val)
         dev = next(d for d in state["departments"]

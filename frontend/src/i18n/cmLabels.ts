@@ -2374,7 +2374,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'next.item.price_drop': { de: 'Grund für den niedrigeren Preis (OK von PM oder Geschäftsleitung)', en: 'Reason for the lower price (OK of Project Management or Management)' },
   'next.item.release_signoffs': { de: 'Freigaben PM und Qualität zum letzten Angebot', en: 'PM and Quality sign-off on the latest offer' },
   'why.noOverride': { de: 'Keine Übersteuerung möglich.', en: 'No override.' },
-  'why.exit.concession': { de: 'Ausweg: Nacharbeit und Nachprüfung, oder eine Sonderfreigabe (Qualität)', en: 'Way out: fix and retest, or a concession (Quality)' },
+  'why.exit.concession': { de: 'Ausweg: Korrektur und Nachprüfung (Qualität legt fest, wer und wann), oder eine Sonderfreigabe (Qualität)', en: 'Way out: fix and retest (Quality names who and when), or a concession (Quality)' },
   'why.exit.customer_accepts': { de: 'Ausweg: der Kunde nimmt das Angebot an,', en: 'Ways out: the customer accepts the offer,' },
   'why.exit.absorb': { de: 'oder Absorbieren (OK von PM oder Geschäftsleitung).', en: 'or Absorb (OK of PM or Management).' },
   'why.exit.absorb_internal': { de: 'Ausweg: Absorbieren (OK des internen Freigebers, nie der Ersteller).', en: 'Way out: Absorb (OK of the internal approver, never the raiser).' },

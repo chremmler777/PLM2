@@ -861,6 +861,8 @@ export type MyActionKind =
   | 'validation_issue_recheck'
   /** Re-validation failed with every fix action done: a new action is owed. */
   | 'validation_issue_add_action'
+  /** ECR-solid §10: Quality's Fix task, and the fixing department's work. */
+  | 'validation_issue_fix' | 'validation_issue_fix_work'
   /** Spec §8 kinds the cockpit names itself. */
   | 'offer_build' | 'offer_expiring' | 'plan_feedback' | 'timing_validate'
   | 'plan_deviation' | 'release_check' | 'lessons_step' | 'needs_info'

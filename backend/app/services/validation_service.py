@@ -833,7 +833,7 @@ class ValidationService:
         outstanding = [r for r in rows if r.status not in ("passed", "failed")]
         return (
             ("Validation failed: " + ", ".join(sorted(map(_name, failed)))
-             + ". Fix it (back to implementation with a reason) and retest, or a "
+             + ". Fix it and retest (Quality's Fix task names who and when), or a "
              "concession (Quality)") if failed else None,
             ("Validation incomplete, still open: "
              + ", ".join(sorted(map(_name, outstanding)))) if outstanding else None,
