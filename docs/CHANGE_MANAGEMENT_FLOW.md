@@ -368,7 +368,12 @@ Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
   the PPAP decision unanswered: it is owed again and Quality is told.
   **Offer needed** sets the quote deadline (`POST /changes/{id}/customer-flip/answer`,
   Sales members; a date from today on) and the change takes the customer
-  path. `proceed` waits for this answer (part of HARD #7). **At approved or
+  path. `proceed` waits for this answer (part of HARD #7). A flip after
+  proceed (a customer index in assessment or costing) is in the C5
+  close-costing line, *"Customer notification or offer? (<Sales owner or
+  Sales>)"* (SOFT `costing_not_finalized`, close-out A2-08). One decision is
+  one Sales row: while the flip is open Sales gets no separate *Set the quote
+  deadline* row; *offer needed* sets the date. **At approved or
   later** only *offer needed* sets `price_open` (HARD #9 at close: a
   supplement accepted, or Absorb); *notification only* opens nothing.
   *Notification only* is the **only** way back to internal: the lead's PATCH

@@ -2028,6 +2028,13 @@ class ChangeService:
                           for w in await waits.open_waits(session, [change.id], "costing")
                           if w.department_id in pending]
         index_lines = wait_lines + index_lines
+        # A2-08: a flip still unanswered (customer index in assessment or
+        # costing) would reach quoting with no Sales answer and no quote
+        # deadline: the Sales owner (else Sales) answers it first
+        from app.services.ppap_decision_service import flip_open
+        if flip_open(change):
+            index_lines.append("Customer notification or offer? "
+                               f"({change.sales_owner_name or 'Sales'})")
         if not pending:
             return " · ".join(index_lines) if index_lines else None
         from app.services.change_plan_service import ChangePlanService
@@ -3807,8 +3814,11 @@ class ChangeService:
                 # C9 (spec §1): a customer change handed over without its
                 # quote deadline (a full ECR from the intake): Sales sets it
                 # while the lead scopes; owed before assessment
+                # A2-08: an open flip is one Sales row ("Customer
+                # notification or offer?"): its 'offer needed' sets the date
+                from app.services.ppap_decision_service import flip_open
                 if (in_sales and c.customer_relevant and c.required_by_date is None
-                        and c.flip_answer != "notification"
+                        and c.flip_answer != "notification" and not flip_open(c)
                         and not mp.is_mother_plant(c)):
                     tasks.append({
                         **await _base(c), "kind": "set_quote_deadline",

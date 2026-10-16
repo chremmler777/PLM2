@@ -253,3 +253,48 @@ async def test_a2_07_answers_refused_on_an_ended_change(session_factory, status)
             with pytest.raises(ChangeError) as e:
                 await call(s)
             assert f"The change is {status}: its record stays as it is" in str(e.value)
+
+
+# ---- A2-08: one Sales row per flip; an open flip is in the C5 line ---------
+
+async def test_a2_08_flip_gives_sales_one_row_not_two(
+        client, admin_auth, seed, session_factory):
+    from tests.test_ecr_solid_ppap_flip import _meeting, _tasks
+    cid, pid = await _internal_in_scoping(client, admin_auth, seed, "a208")
+    _, qid, quality = await _user(client, session_factory, seed, "q208", "Quality")
+    sally, sales_id, sales = await _user(client, session_factory, seed, "s208", "Sales")
+    await _responsible(session_factory, seed, sales_id, sally)
+    await _set(session_factory, cid, required_by_date=None)
+    await _meeting(client, admin_auth, cid, qid, carrier="internal")
+    res = await _ppap(client, quality, cid, answer="yes", part_ids=[pid])
+    assert res.status_code == 200, res.text
+    assert len(await _tasks(client, sales, cid, "customer_flip")) == 1
+    # negative: no second row for the same decision
+    assert await _tasks(client, sales, cid, "set_quote_deadline") == []
+
+
+async def test_a2_08_open_flip_holds_close_costing_soft(
+        client, admin_auth, seed, session_factory):
+    from datetime import datetime
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="CR-A208", project_id=seed["project_id"],
+                          title="a208", change_type="physical_part", status="costing",
+                          customer_relevant=True, origin="customer",
+                          lead_id=seed["admin_id"], raised_by=seed["admin_id"],
+                          customer_flip_at=datetime.utcnow(),
+                          customer_flip_reason="Quality answered yes to the PPAP question")
+        s.add(c)
+        await s.commit()
+        cid = c.id
+    ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    items = ch["next_step"]["items"]
+    row = next(i for i in items if i["key"] == "costing_input")
+    assert row["kind"] == "soft" and row["rule"] == "costing_not_finalized"
+    assert "Customer notification or offer? (Sales)" in row["who"]
+    # negative: closing costing is held (SOFT, the rule's name)
+    from app.services.change_service import ChangeService
+    async with session_factory() as s:
+        c = await ChangeService.get_change(s, cid)
+        why = {r.key: str(r) for r in await ChangeService._guard_reasons(s, c, "quoting")}
+    assert "Customer notification or offer? (Sales)" in why["costing_not_finalized"]
