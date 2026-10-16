@@ -47,6 +47,7 @@ async def owed_items(session: AsyncSession, changes: list,
     from app.services.change_people import department_members_of_change_org
     from app.services.change_service import ChangeService
     now = now or datetime.utcnow()
+    await due_rules.load_clock_floor(session)
     ids = [c.id for c in changes]
     entered = dict((await session.execute(
         select(ChangeChangelog.change_id, func.max(ChangeChangelog.performed_at))

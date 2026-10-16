@@ -79,16 +79,45 @@ def deadline_of(change) -> tuple[Optional[datetime], Optional[str]]:
     return min(out, key=lambda x: x[0])
 
 
-def clock_floor() -> Optional[datetime]:
-    """settings.cm_task_clock_from as a datetime, None when unset or bad."""
-    from app.core.config import get_settings
-    raw = (get_settings().cm_task_clock_from or "").strip()
+#: org_settings key migration 143 stamps with its run time (the go-live of
+#: the task clock); the earliest stamp of any organization counts.
+CLOCK_SETTING_KEY = "cm_task_clock_from"
+_stamped_floor: Optional[datetime] = None
+
+
+def _parse(raw: Optional[str]) -> Optional[datetime]:
+    raw = (raw or "").strip()
     if not raw:
         return None
     try:
         return datetime.fromisoformat(raw)
     except ValueError:
         return None
+
+
+async def load_clock_floor(session) -> Optional[datetime]:
+    """Read the stamped go-live (org_settings, written by migration 143)
+    so clock_floor() serves it; every entry point that dates computed rows
+    (annotate_tasks, owed_items, the digests) calls this first. A6-01: a
+    safe default, so changes in flight at go-live are not all Late on the
+    first sweep even when CM_TASK_CLOCK_FROM is not set."""
+    global _stamped_floor
+    from sqlalchemy import select
+    from app.models.cost_sheet import OrgSetting
+    vals = (await session.execute(select(OrgSetting.value).where(
+        OrgSetting.key == CLOCK_SETTING_KEY))).scalars().all()
+    stamps = [d for d in (_parse(v) for v in vals) if d is not None]
+    _stamped_floor = min(stamps) if stamps else None
+    return clock_floor()
+
+
+def clock_floor() -> Optional[datetime]:
+    """The task clock's go-live: settings.cm_task_clock_from when set (it
+    wins, so an installation can move it), else the stamp migration 143
+    wrote (load_clock_floor), else None."""
+    from app.core.config import get_settings
+    env = _parse(get_settings().cm_task_clock_from)
+    return env if env is not None else _stamped_floor
 
 
 def start_of(kind: str, own: Optional[datetime], entered: Optional[datetime],
@@ -220,6 +249,8 @@ async def annotate_tasks(session, tasks: list[dict], changes,
     on = cm_switches.on("ASSESSMENT_V2")
     by_id = {c.id: c for c in changes}
     since: dict = {}
+    if on and tasks:
+        await load_clock_floor(session)
     ids = list({t["change_id"] for t in tasks if t["change_id"] in by_id})
     if on and ids:
         from sqlalchemy import func, select

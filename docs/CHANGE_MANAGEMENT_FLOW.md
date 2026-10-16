@@ -2404,8 +2404,11 @@ one, and "Absorb" on an open price for who may ask it.
   added. Rows carry `deadline_date`/`deadline_kind` ("due Thu (quote deadline
   Mon)": the weekday within the coming week, else the date), `urgent` and
   `late`. One start rule for the rows and the sweep (`due_rules.start_of`);
-  `settings.cm_task_clock_from` (go-live date, empty = none) is the earliest
-  start, so changes in flight at go-live are not all Late on day one.
+  the task clock's go-live is the earliest start, so changes in flight at
+  go-live are not all Late on day one: migration 143 stamps it (org_settings
+  `cm_task_clock_from` = the migration's run time, an existing value kept);
+  `settings.cm_task_clock_from` (env, ISO date) wins when set. The overdue
+  digest's Sales rows use the same start rule.
   Switch off: rows keep the change's deadline as their due date, the
   assessment a flat 7 days.
 - **One escalation rule.** The owner of a department assessment or engine

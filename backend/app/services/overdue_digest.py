@@ -85,6 +85,8 @@ async def late_by_change(session: AsyncSession, changes: dict,
     def add(cid: int, text: str) -> None:
         items.setdefault(cid, []).append(text)
 
+    await due_rules.load_clock_floor(session)
+
     names = dict((await session.execute(select(Department.id, Department.name))).all())
     for a in (await session.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id.in_(changes),
@@ -125,7 +127,8 @@ async def late_by_change(session: AsyncSession, changes: dict,
             what = None
         if what is None:
             continue
-        start = since.get(c.id) or c.created_at
+        # A6-01: the one start rule, task clock floor included
+        start = due_rules.start_of("sales", None, since.get(c.id), c.created_at, now)
         due = (due_rules.add_wd(start, due_rules.CUSTOMER_CONTACT_WD)
                if c.status == "quoted" else due_rules.task_due(start, c, "sales"))
         if due_rules.is_late(due, now):

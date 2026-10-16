@@ -3340,6 +3340,9 @@ async def list_concerns(
     # the caller's departments once for every row's checks (R34, A2-10)
     viewer = await MeetingService.viewer_departments(db, current_user)
     my_dept_ids = viewer[0] if checks_v2 else set()
+    if cm_switches.on("ASSESSMENT_V2") and change.status not in ("captured", "scoping"):
+        from app.services import due_rules as _dr
+        await _dr.load_clock_floor(db)      # A6-01: the answer due's floor
     for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
         if c.kind == "needs_info":
