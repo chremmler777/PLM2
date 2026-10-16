@@ -33,8 +33,10 @@ WINDOW = timedelta(days=1)
 
 
 async def change_lines(session: AsyncSession, changes: list,
-                       now: datetime) -> dict[int, str]:
-    """{change id: its digest line} for the changes with something to tell."""
+                       now: datetime, *, late_too: bool = True) -> dict[int, str]:
+    """{change id: its digest line} for the changes with something to tell.
+    late_too=False: without the 'late:' part, for a reader of the overdue
+    digest, which lists the same late items (A6-08, R33 one per item)."""
     from app.services.change_service import ChangeService
     from app.services.cm_labels import label
     from app.services.overdue_digest import late_by_change
@@ -71,6 +73,8 @@ async def change_lines(session: AsyncSession, changes: list,
         kind = c.active_deadline
         state = await ChangeService.deadline_state(session, c) if kind else None
         alarm = state in ("at_risk", "overdue")
+        if not late_too:
+            late.pop(c.id, None)
         if not (news or waits or late.get(c.id) or alarm):
             continue        # nothing to tell about this change today
         parts = []
@@ -123,11 +127,20 @@ async def send_change_digest(session: AsyncSession,
         return 0
     lines = await change_lines(
         session, list({c.id: c for u in users for c in involved[u.id]}.values()), now)
+    # A6-08: an overdue-digest reader reads the late items there, once
+    from app.services.overdue_digest import digest_recipients
+    readers = {u.id for u in await digest_recipients(session)}
+    short: dict = {}
+    if readers & {u.id for u in users}:
+        short = await change_lines(
+            session, list({c.id: c for u in users if u.id in readers
+                           for c in involved[u.id]}.values()), now, late_too=False)
     from app.services.notification_service import NotificationService
     sent = 0
     for u in users:
-        mine = [lines[c.id] for c in sorted(involved[u.id], key=lambda c: c.change_number)
-                if c.id in lines]
+        src = short if u.id in readers else lines
+        mine = [src[c.id] for c in sorted(involved[u.id], key=lambda c: c.change_number)
+                if c.id in src]
         if not mine:
             continue
         sent += await NotificationService.notify_once(

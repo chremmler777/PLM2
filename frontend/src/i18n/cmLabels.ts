@@ -145,7 +145,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Kundenantwort einholen',
     en: "Chase the customer's answer",
   },
-  'esc.title': { de: 'Eskalationen: überfällig in meinen Changes', en: 'Escalations: overdue in my changes' },
+  'esc.title': { de: 'Überfällig oder gefährdet', en: 'Overdue or at risk' },
+  'esc.atRisk': { de: 'gefährdet', en: 'at risk' },
+  'esc.releaseDue': { de: 'Freigabe fällig {d}', en: 'Release due {d}' },
+  'esc.quoteDue': { de: 'Angebot fällig {d}', en: 'Quote due {d}' },
   // The other plant a change comes from (origin mother_plant): always named,
   // {p} is the plant ("KTX Weissenburg"), or both when none is set.
   'mp.generic': { de: 'KTX Weissenburg / Solingen', en: 'KTX Weissenburg / Solingen' },

@@ -1361,6 +1361,8 @@ class ChangeService:
                 # key kept for EscalationsCard compatibility; value is the
                 # active deadline's date, whichever kind that is.
                 "required_by_date": due.isoformat(),
+                # A6-08: which deadline (quote or release), for the card
+                "deadline_kind": kind,
                 "state": state,
                 # negative for at_risk (days until deadline) so the shared
                 # days_overdue sort ranks true overdues above at-risk rows.

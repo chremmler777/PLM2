@@ -3,8 +3,8 @@
  * Self-fetching; renders nothing when there is nothing overdue.
  */
 import { useQuery } from '@tanstack/react-query';
-import { formatCalendarDate } from '../lib/format';
 import { Link } from 'react-router-dom';
+import { formatCalendarDate } from '../lib/format';
 import { changesApi } from '../api/changes';
 import { t } from '../i18n/cmLabels';
 
@@ -31,9 +31,15 @@ export default function EscalationsCard() {
             </Link>
             {e.kind === 'deadline' ? (
               <span className={e.state === 'overdue' ? 'text-red-400 font-semibold' : 'text-amber-300 font-semibold'}>
+                {/* A6-08: which deadline (quote or release), then its state */}
+                {e.deadline_kind
+                  ? `${t(e.deadline_kind === 'release' ? 'esc.releaseDue' : 'esc.quoteDue')
+                    .replace('{d}', formatCalendarDate(e.required_by_date))} · `
+                  : ''}
                 {e.state === 'overdue'
                   ? t('deadline.overdue')
-                  : `at risk · due ${formatCalendarDate(e.required_by_date)}`}
+                  : e.deadline_kind ? t('esc.atRisk')
+                    : `${t('esc.atRisk')} · due ${formatCalendarDate(e.required_by_date)}`}
               </span>
             ) : (
               <>

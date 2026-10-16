@@ -2473,8 +2473,10 @@ one, and "Absorb" on an open price for who may ask it.
   that can write) gets one notice, one line per change of theirs with news
   or a problem: phase, deadline (with "at risk" / "overdue"), questions
   answered or closed since yesterday, waits (open questions, the customer),
-  and what is late (the overdue digest's own items). A change with nothing
-  to tell has no line; no line, no digest. Supplier waits join with lane L5.
+  and what is late (the overdue digest's own items; not for a reader of the
+  overdue digest, who reads them there once, A6-08). A change with nothing
+  to tell has no line; no line, no digest. Both digests print the status
+  label ("In assessment"), never the code. Supplier waits join with lane L5.
 - **Stage entry notice (C3, `RELEASE_V2`).** Entering `in_implementation` or
   `in_validation` tells the implementing departments (the ones that priced
   the work) once per change and stage.

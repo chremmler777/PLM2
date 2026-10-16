@@ -57,6 +57,7 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
     """One line per change with everything late on it, oldest change first;
     only the viewer's organization's changes when a viewer is given."""
     from app.services.change_service import _org_scope
+    from app.services.cm_labels import label
     now = now or datetime.utcnow()
     changes = {c.id: c for c in (await session.execute(_org_scope(select(ChangeRequest).where(
         ChangeRequest.status.not_in(TERMINAL_STATUSES)), viewer))).scalars().all()}
@@ -67,7 +68,8 @@ async def overdue_lines(session: AsyncSession, now: Optional[datetime] = None,
     for cid in sorted(items, key=lambda i: changes[i].change_number):
         c = changes[cid]
         lead = f", lead {c.lead_name}" if getattr(c, "lead_name", None) else ""
-        out.append(f"{c.change_number} ({c.status}{lead}): " + "; ".join(items[cid]))
+        out.append(f"{c.change_number} ({label('status', c.status)}{lead}): "
+                   + "; ".join(items[cid]))
     return out
 
 

@@ -415,3 +415,37 @@ async def test_routing_change_row_is_decide_not_soft_and_rows_carry_a_due(
     # every row names its owner and, with a deadline, its due
     assert all(i.get("who") for i in items.values())
     assert all(i.get("due") for i in items.values())
+
+
+# ---------------------------------------------------------------------------
+# A6-08 one digest per late item; words, not codes
+# ---------------------------------------------------------------------------
+async def test_overdue_digest_reader_reads_late_items_once(
+        client, seed, team, session_factory, monkeypatch):
+    from app.models.notification import Notification
+    from app.services.notification_sweep import run_notification_sweep
+    pm_id = team["user"]["Project Manager"]
+    monkeypatch.setattr(get_settings(), "overdue_digest_recipients", "project")
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "late costing digest")
+    await _set(session_factory, cid, status="in_assessment", lead_id=pm_id)
+    await _owing_costing(session_factory, team, cid, datetime.utcnow() - timedelta(days=10))
+    async with session_factory() as s:
+        await run_notification_sweep(s); await s.commit()
+        notes = (await s.execute(sa.select(Notification).where(
+            Notification.user_id == pm_id,
+            Notification.kind.in_(["overdue_digest", "change_digest"])))).scalars().all()
+    by_kind = {n.kind: n for n in notes}
+    over = by_kind["overdue_digest"].body
+    assert "Costing input" in over
+    assert "(In assessment" in over or "(in assessment" in over.lower()
+    assert "(in_assessment" not in over                  # the label, not the code
+    # NEGATIVE: the change digest does not list the same late item again
+    if "change_digest" in by_kind:
+        assert "late:" not in by_kind["change_digest"].body
+    # a non-reader (the Sales raiser) still reads 'late:' in its change digest
+    async with session_factory() as s:
+        sales_digest = (await s.execute(sa.select(Notification).where(
+            Notification.user_id == team["user"]["Sales"],
+            Notification.kind == "change_digest"))).scalars().all()
+    assert sales_digest and "late:" in sales_digest[0].body

@@ -126,6 +126,8 @@ export interface Escalation {
   days_overdue: number;
   /** Present only for kind === 'deadline'. */
   required_by_date?: string;
+  /** Which deadline a deadline row is (A6-08). */
+  deadline_kind?: 'quote' | 'release';
   state?: 'on_track' | 'at_risk' | 'overdue';
 }
 

@@ -45,6 +45,19 @@ describe('EscalationsCard', () => {
     expect(links.some(l => l.getAttribute('href') === '/changes/3')).toBe(true)
   })
 
+  it('A6-08: a deadline row says which deadline it is, and the box is "Overdue or at risk"', async () => {
+    vi.mocked(changesApi.myEscalations).mockResolvedValue([
+      { kind: 'deadline', change_id: 4, change_number: 'CR-2026-0011',
+        change_title: 'Bracket update', label: 'Release due 2026-07-12',
+        required_by_date: '2026-07-12T00:00:00', deadline_kind: 'release', state: 'at_risk',
+        days_overdue: -9 },
+    ])
+    wrap(<EscalationsCard />)
+    expect(await screen.findByText(/Release due 12 Jul 2026 · at risk/)).toBeDefined()
+    expect(screen.getByText(/Overdue or at risk/)).toBeDefined()
+    expect(screen.queryByText(/Quote due/)).toBeNull()
+  })
+
   it('renders deadline escalations with state label instead of raw days_overdue', async () => {
     vi.mocked(changesApi.myEscalations).mockResolvedValue([
       { kind: 'deadline', change_id: 4, change_number: 'CR-2026-0011',
@@ -53,8 +66,7 @@ describe('EscalationsCard', () => {
         days_overdue: -9 },
     ])
     wrap(<EscalationsCard />)
-    expect(await screen.findByText(/at risk/)).toBeDefined()
-    expect(screen.getByText(/12 Jul 2026/)).toBeDefined()
+    expect(await screen.findByText(/at risk · due 12 Jul 2026/)).toBeDefined()
     expect(screen.queryByText(/-9d/)).toBeNull()
   })
 

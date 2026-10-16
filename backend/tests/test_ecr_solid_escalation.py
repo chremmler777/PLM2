@@ -149,7 +149,7 @@ async def test_daily_digest_to_the_configured_manager_once(
         got = await _notes(s, kind="overdue_digest")
         assert [n.user_id for n in got] == [seed["admin_id"]]   # never the engineer
         body = got[0].body
-        assert body.startswith("C-E-5 (quoting)")
+        assert body.startswith("C-E-5 (Quote creation)")
         assert "Process Engineer assessment" in body and "Sales: create the quote" in body
         assert "C-E-6" not in body
         # read it; a second sweep the same day sends no second digest
