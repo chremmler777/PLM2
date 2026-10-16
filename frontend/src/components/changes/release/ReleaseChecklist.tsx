@@ -22,6 +22,7 @@ import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, readNumberInput } from '../../../lib/format'
 import { t } from '../../../i18n/cmLabels'
+import { refOk as isRef } from '../../../lib/evidence'
 
 const CHIP: Record<ReleaseCheckStatus, { label: string; on: string }> = {
   open: { label: 'Open', on: 'bg-slate-700 text-slate-100' },
@@ -92,9 +93,21 @@ function CheckRow({ changeId, check, canEdit }: {
   const refNeeded = editing === 'done' && !!check.needs_ref
   // ... and on a customer change 'not applicable' is the customer's waiver
   const waiverNeeded = editing === 'na' && !!check.na_needs_ref
-  const refOk = note.trim().length >= 5 && !['ok', 'okay', 'done', 'checked', 'tbd', 'n/a', 'na', 'yes']
-    .includes(note.trim().toLowerCase())
-  const canConfirm = !save.isPending && (editing === 'na' ? !!note.trim() && (!waiverNeeded || refOk)
+  // the backend's reference rule (cm_rules.reference_refusal), shared
+  const refOk = isRef(note)
+  // A5-09: a measured row (weight, cycle time, dimensions) answers from the
+  // validation measurement: 'done' needs one on file and not outside its
+  // limits ('changed' cycle time aside), 'n.a.' a reason of a few words
+  const measuredRow = check.measurement !== undefined
+  const measuredWhy = !measuredRow || editing === null ? null
+    : editing === 'na' ? (note.trim() && !refOk ? 'Say why it does not apply in a few words' : null)
+    : check.measurement == null ? 'Record the measurement in validation first: this row reads it'
+    : check.measurement_failed && (check.key !== 'cycle_time_tool' || outcome === 'unchanged')
+      ? `The validation measurement is outside its limits (${check.measurement}): fix and retest, or a concession (Quality)`
+      : null
+  const naReasonOk = !measuredRow || refOk
+  const canConfirm = !save.isPending && !measuredWhy && (editing === 'na'
+    ? !!note.trim() && (!waiverNeeded || refOk) && naReasonOk
     : extra !== null && (!refNeeded || refOk))
   const confirmLabel = editing === 'na' ? 'Mark not applicable'
     : kind === 'cycle_time' ? (outcome === 'changed' ? 'Save new cycle time' : 'Confirm unchanged')
@@ -119,6 +132,12 @@ function CheckRow({ changeId, check, canEdit }: {
             )}
           </div>
           {check.hint && <div className="text-[11px] text-sky-300/80">{check.hint}</div>}
+          {check.measurement && !check.hint?.includes(check.measurement) && (
+            <div data-testid={`release-check-${check.key}-measurement`}
+              className={`text-[11px] ${check.measurement_failed ? 'text-rose-300' : 'text-sky-300/80'}`}>
+              Validation: {check.measurement}
+            </div>
+          )}
           {check.status !== 'open' && (check.by_name || check.note) && (
             <div className="text-[11px] text-slate-400">
               {check.by_name}{check.at ? `, ${fmtDate(check.at)}` : ''}{check.note ? `: ${check.note}` : ''}
@@ -179,8 +198,12 @@ function CheckRow({ changeId, check, canEdit }: {
             onChange={(e) => setNote(e.target.value)}
             placeholder={waiverNeeded ? t('release.waiverRef')
               : editing === 'na' ? 'Why does this not apply? (required)'
-              : refNeeded ? 'PSW / ISIR reference or the file name of the approval (required)' : 'Note (optional)'}
+              : refNeeded ? 'PSW / ISIR reference or the file name of the approval (required)'
+              : check.measurement ? `Measured in validation: ${check.measurement}` : 'Note (optional)'}
             className={`${inputCls} min-w-0 flex-1`} />
+          {measuredWhy && (
+            <span data-testid={`release-check-${check.key}-why`} className="text-[11px] text-amber-300">{measuredWhy}</span>
+          )}
           <button type="button" data-testid={`release-check-${check.key}-confirm`}
             disabled={!canConfirm}
             onClick={() => save.mutate({ status: editing, ...(note.trim() ? { note: note.trim() } : {}), ...(extra ?? {}) })}

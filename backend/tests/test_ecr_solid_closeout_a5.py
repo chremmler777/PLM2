@@ -403,3 +403,43 @@ async def test_a5_07_negative_quality_cannot_decide_on_a_mail_it_filed(
     assert up.status_code in (200, 201), up.text
     res = await client.post(_iurl(fix, f"/{iid}/customer"), headers=quality, json=yes)
     assert res.status_code == 200 and res.json()["status"] == "accepted", res.text
+
+
+# --- A5-09 measured release rows answer from the validation measurement -----
+
+def _rurl(fix, key=""):
+    return f"/api/v1/changes/{fix['change_id']}/release" + (f"/checks/{key}" if key else "")
+
+
+async def test_a5_09_negative_unchanged_cycle_time_refused_on_a_failed_measurement(client, fix):
+    tool = await _auth(client, fix, "Tool Engineer")
+    # NEGATIVE: no measurement yet: 'done' has nothing to read; 'na' needs a reason
+    res = await client.post(_rurl(fix, "weight_measured"), headers=tool,
+                            json={"status": "done"})
+    assert res.status_code == 400 and "measurement in validation" in res.json()["detail"]
+    res = await client.post(_rurl(fix, "weight_measured"), headers=tool,
+                            json={"status": "na", "note": "na"})
+    assert res.status_code == 400, res.text
+    res = await client.post(_url(fix, "/checks"), headers=tool, json={
+        "department_id": fix["dept"]["Tool Engineer"], "check_key": "cycle_time",
+        "measurement": {"sample_size": 30, "min_value": 40.0, "max_value": 52.0,
+                        "measuring_ref": "MES log ML-2026-77", "lot_ref": "lot 2026-41-117",
+                        "lower_limit": 38.0, "upper_limit": 46.0,
+                        "spec_source": "process sheet PS-114 rev C"}})
+    assert res.status_code == 201 and res.json()["status"] == "failed", res.text
+    state = (await client.get(_rurl(fix), headers=tool)).json()
+    row = next(r for r in state["checks"] if r["key"] == "cycle_time_tool")
+    assert row["measurement"].startswith("n=30, 40-52 s vs 38-46 s") and row["measurement_failed"]
+    res = await client.post(_rurl(fix, "cycle_time_tool"), headers=tool,
+                            json={"status": "done", "outcome": "unchanged"})
+    assert res.status_code == 400 and "outside its limits" in res.json()["detail"]   # NEGATIVE
+    res = await client.post(_rurl(fix, "cycle_time_tool"), headers=tool,
+                            json={"status": "done", "outcome": "changed", "value": 47})
+    assert res.status_code in (200, 201), res.text
+    # a passing weight: 'done' prefilled with the measurement
+    await _weigh(client, fix)
+    res = await client.post(_rurl(fix, "weight_measured"), headers=tool, json={"status": "done"})
+    assert res.status_code in (200, 201), res.text
+    state = (await client.get(_rurl(fix), headers=tool)).json()
+    row = next(r for r in state["checks"] if r["key"] == "weight_measured")
+    assert row["note"].startswith("Measured in validation: n=5, 505-512 g")

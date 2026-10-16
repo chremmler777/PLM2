@@ -68,6 +68,39 @@ const wrap = (ui: React.ReactElement) => render(
 
 describe('ReleaseChecklist', () => {
   afterEach(cleanup)
+
+  it('A5-09: one word is no reference (the shared rule: no button the backend refuses)', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[9]} canManage={false} editable
+      checks={[check({ key: 'customer_approval', label: 'PPAP', department_id: 9, department_name: 'APQP', needs_ref: true })]} />)
+    fireEvent.click(screen.getByTestId('release-check-customer_approval-done'))
+    fireEvent.change(screen.getByTestId('release-check-customer_approval-note'), { target: { value: 'approved' } })
+    expect((screen.getByTestId('release-check-customer_approval-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('release-check-customer_approval-note'), { target: { value: 'PSW 886.197-D' } })
+    expect((screen.getByTestId('release-check-customer_approval-confirm') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('A5-09: an unchanged cycle time is refused while the measurement is outside its limits', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[4]} canManage={false} editable
+      checks={[check({ key: 'cycle_time_tool', label: 'Cycle time', value_kind: 'cycle_time', hint: null,
+        measurement: 'n=30, 40-52 s vs 38-46 s; MES log', measurement_failed: true })]} />)
+    expect(screen.getByTestId('release-check-cycle_time_tool-measurement').textContent).toContain('40-52 s')
+    fireEvent.click(screen.getByTestId('release-check-cycle_time_tool-done'))
+    fireEvent.click(screen.getByTestId('release-check-cycle_time_tool-unchanged'))
+    expect(screen.getByTestId('release-check-cycle_time_tool-why').textContent).toContain('outside its limits')
+    expect((screen.getByTestId('release-check-cycle_time_tool-confirm') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('A5-09: a measured row needs the measurement; n.a. a reason', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[4]} canManage={false} editable
+      checks={[check({ measurement: null })]} />)
+    fireEvent.click(screen.getByTestId('release-check-weight_measured-done'))
+    expect((screen.getByTestId('release-check-weight_measured-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('release-check-weight_measured-na'))
+    fireEvent.change(screen.getByTestId('release-check-weight_measured-note'), { target: { value: 'na' } })
+    expect((screen.getByTestId('release-check-weight_measured-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('release-check-weight_measured-note'), { target: { value: 'insert only, weight unchanged' } })
+    expect((screen.getByTestId('release-check-weight_measured-confirm') as HTMLButtonElement).disabled).toBe(false)
+  })
   beforeEach(() => { vi.clearAllMocks() })
 
   it('n.a. needs a note before it saves', async () => {

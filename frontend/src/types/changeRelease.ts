@@ -37,6 +37,10 @@ export interface ReleaseCheck {
   run_team_answers?: boolean
   /** A5-04 d: '<X> has no member here: <lead|Project Management> coordinates'. */
   no_member_hint?: string | null
+  /** A5-09: the validation measurement a measured row answers from (the key
+   *  is present on such a row; null: nothing measured yet). */
+  measurement?: string | null
+  measurement_failed?: boolean
 }
 
 export type LessonCategory =

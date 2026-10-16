@@ -1525,7 +1525,16 @@ existing per-department validation checks.
   `release_check` task for those rows. `customer_approval`
   "done" needs a reference (PSW / ISIR number or the approval's file name,
   `cm_rules.reference_refusal`; `EVIDENCE_KEYS`); on a customer change its
-  "not applicable" too: the customer's waiver (mail or document reference). `erp_updated` reads the
+  "not applicable" too: the customer's waiver (mail or document reference).
+  The measured rows (`weight_measured`, `cycle_time_tool`, `parts_measured`,
+  A5-09, `RELEASE_V2`) answer from the computed validation check
+  (`ReleaseService.measured_rows`): the row shows the last measurement,
+  "done" needs one on file (an empty note stores "Measured in validation:
+  <line>"), is refused while it is outside its limits (the cycle time's
+  "unchanged" too; "changed" with the new seconds stays), and "not
+  applicable" needs a reason of a few words (`reference_refusal`). The
+  checklist's reference check is the shared `lib/evidence.refOk`, the
+  backend's rule. `erp_updated` reads the
   routing time from the Tool Engineer's measured cycle time.
   Future, not built: process engineering tasks will later be forwarded
   from the PDB to PLM.

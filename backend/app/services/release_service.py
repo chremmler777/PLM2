@@ -229,6 +229,28 @@ class ReleaseService:
                       "or document reference)", "customer mail 2026-10-12 PPAP waived")
             if why:
                 raise ChangeError(why)
+        measured = (await ReleaseService.measured_rows(session, change)).get(key)
+        if measured is not None:
+            # A5-09 (RELEASE_V2, R4): a measured row answers from the
+            # validation measurement, not from a free word
+            line, failed = measured
+            if status == "na":
+                from app.services.cm_rules import reference_refusal
+                why = reference_refusal(
+                    note, "Why it does not apply (a reason of a few words)",
+                    "weight unchanged, insert only, drawing 886.197 D")
+                if why:
+                    raise ChangeError(why)
+            if status == "done" and line is None:
+                raise ChangeError(
+                    "Record the measurement in validation first: this row reads it")
+            if status == "done" and failed and (
+                    key != catalog.CYCLE_TIME_KEY or outcome == "unchanged"):
+                raise ChangeError(
+                    f"The validation measurement is outside its limits ({line}): "
+                    "fix and retest, or a concession (Quality)")
+            if status == "done" and not note and key != catalog.CYCLE_TIME_KEY:
+                note = f"Measured in validation: {line}"
         if status == "done":
             try:
                 note = catalog.answer_note(key, outcome, value, note)
@@ -452,6 +474,7 @@ class ReleaseService:
         blockers = await ReleaseService.blockers(session, change)
         answer = await ReleaseService._answer_rights(session, change, rows, user)
         unstaffed = await ReleaseService.unstaffed_department_ids(session, change, rows)
+        measured = await ReleaseService.measured_rows(session, change)
         from app.services.change_people import coordinator_name, no_member_words
         coordinator = await coordinator_name(session, change) if unstaffed else None
         return {
@@ -464,6 +487,10 @@ class ReleaseService:
                 "status": r.status, "note": r.note,
                 "by_name": users.get(r.checked_by), "at": r.checked_at,
                 "hint": hints.get(r.check_key),
+                # A5-09: the validation measurement this row answers from
+                **({"measurement": measured[r.check_key][0],
+                    "measurement_failed": measured[r.check_key][1]}
+                   if r.check_key in measured else {}),
                 "value_kind": catalog.value_kind(r.check_key),
                 "retired": r.check_key in retired,
                 # the backend rule for this viewer (None: not asked)
@@ -492,6 +519,50 @@ class ReleaseService:
             "can_release": change.status == "in_validation" and not blockers,
             "blockers": blockers,
         }
+
+    #: A5-09: the release rows a computed validation check answers
+    MEASURED_ROWS = {"weight_measured": ("Tool Engineer", "weight"),
+                     "cycle_time_tool": ("Tool Engineer", "cycle_time"),
+                     "parts_measured": ("APQP", "measured")}
+
+    @staticmethod
+    async def measured_rows(session: AsyncSession, change: ChangeRequest
+                            ) -> dict[str, tuple[Optional[str], bool]]:
+        """RELEASE_V2: release key -> (the last measurement in words or None,
+        it is outside its limits) for the rows whose computed validation
+        check exists on the change. Empty off the switch."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2"):
+            return {}
+        from app.models.change_validation import ValidationCheck
+        from app.services import validation_checklist as vcat
+        from app.services.validation_service import ValidationService
+        names = {i: n for i, n in (await session.execute(
+            select(Department.id, Department.name))).all()}
+        rows = (await session.execute(select(ValidationCheck).where(
+            ValidationCheck.change_id == change.id,
+            ValidationCheck.check_key.in_([k for _, k in ReleaseService.MEASURED_ROWS.values()])
+        ))).scalars().all()
+        by = {(names.get(r.department_id), r.check_key): r for r in rows}
+        measured = await ValidationService.measurements_by_check(session, change) if rows else {}
+        # owed: the department implements the change (its checks are seeded
+        # on the first read of the validation state)
+        owing = {names.get(d) for d in await ValidationService.implementing_department_ids(
+            session, change)}
+        out = {}
+        for key, pair in ReleaseService.MEASURED_ROWS.items():
+            r = by.get(pair)
+            if r is None:
+                if pair[0] in owing and pair[1] in vcat.keys_for(pair[0]):
+                    out[key] = (None, False)
+                continue
+            ms = measured.get(r.id) or []
+            unit = vcat.computed_unit(pair[1], pair[0])
+            line = (ValidationService.measurement_line(ms[-1], unit[1], r.lower_limit,
+                                                       r.upper_limit)
+                    if ms and unit else None)
+            out[key] = (line, r.status == "failed")
+        return out
 
     @staticmethod
     async def cycle_time_hint(session: AsyncSession, change: ChangeRequest,
