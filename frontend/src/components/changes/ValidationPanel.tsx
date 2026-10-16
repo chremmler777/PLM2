@@ -40,6 +40,7 @@ import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDial
 import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
 import { toastError } from '../../lib/apiError'
 import MeasurementForm, { MeasurementHistory } from './validation/MeasurementForm'
+import { requestBookHours } from '../../api/hours'
 import { Check, X } from 'lucide-react'
 import { btnSm } from '../common/buttonStyles'
 
@@ -355,6 +356,15 @@ function DepartmentBlock({
           {`${liveChecks(dept).length - open}/${liveChecks(dept).length}`}
         </span>
       </div>
+      {/* C15: the department's last check passed: its last action, the one
+          prefilled confirm of its hours */}
+      {mine && editable && open === 0 && liveChecks(dept).length > 0 && (
+        <button type="button" data-testid={`validation-book-hours-${dept.department_id}`}
+          onClick={() => requestBookHours({ departmentId: dept.department_id, confirm: true })}
+          className="text-xs text-sky-300 underline decoration-dotted hover:text-sky-200">
+          {t('hours.yourPartDone')}
+        </button>
+      )}
       <ul className="space-y-1">
         {dept.checks.map((c) => (
           <CheckRow key={String(c.check_key)} changeId={changeId}

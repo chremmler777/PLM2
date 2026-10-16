@@ -58,6 +58,9 @@ import StartAtRiskCard from '../components/changes/offer/StartAtRiskCard';
 import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/changes/CaptureV2';
 import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
 import { ConcessionLine } from '../components/changes/release/AchievedCard';
+import BookHoursDialog from '../components/changes/hours/BookHoursDialog';
+import HoursCard from '../components/changes/hours/HoursCard';
+import { BOOK_HOURS_EVENT } from '../api/hours';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -140,6 +143,14 @@ export default function ChangeDetailPage() {
   // Rejecting and reopening both stop or restart the flow, so both go through
   // a memo dialog rather than a bare button.
   const [rejectOpen, setRejectOpen] = useState(false);
+  // C15: one Book hours dialog, opened from the header, the hours card, or a
+  // department's last action (the prefilled confirm) on any tab
+  const [hoursDialog, setHoursDialog] = useState<{ departmentId?: number; confirm?: boolean } | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => setHoursDialog((e as CustomEvent).detail ?? {});
+    window.addEventListener(BOOK_HOURS_EVENT, on);
+    return () => window.removeEventListener(BOOK_HOURS_EVENT, on);
+  }, []);
   const [reopenOpen, setReopenOpen] = useState(false);
   // Pulling a change from quote creation back into costing: same people who
   // may close costing (PM, Sales, lead, admin), always with a reason.
@@ -922,8 +933,15 @@ export default function ChangeDetailPage() {
   };
   // Rare and destructive moves live behind "More actions", not beside the title.
   const canCancel = CANCELLABLE.includes(change.status) && may('cancelled');
+  const myDeptIds = myActions?.memberships ?? [];
+  // until 7 days after close (the card and the dialog read the window)
+  const canBookHours = !!canWrite && myDeptIds.length > 0;
   const headerActions = (
     <div className="flex shrink-0 items-center gap-2">
+      {canBookHours && !isRecord && (
+        <button type="button" data-testid="header-book-hours" className={btnSm.secondary}
+          onClick={() => setHoursDialog({})}>{t('hours.title')}</button>
+      )}
       {change.status === 'rejected' && may('scoping') && (
         <button type="button" data-testid="header-reopen" className={btnSm.secondary}
           onClick={() => setReopenOpen(true)}>{transitionLabel('scoping', 'rejected')}</button>
@@ -1185,8 +1203,15 @@ export default function ChangeDetailPage() {
           </div>
 
           <ChangeAttachments change={change} readOnly={readOnly} />
+          {/* C15: hours booked against the estimate, per department */}
+          <div className="pt-3">
+            <HoursCard changeId={change.id} canBook={canBookHours} />
+          </div>
         </div>
       )}
+      <BookHoursDialog changeId={change.id} open={!!hoursDialog} onClose={() => setHoursDialog(null)}
+        departments={allDepartments} myDepartmentIds={myDeptIds}
+        initialDepartmentId={hoursDialog?.departmentId ?? null} confirm={!!hoursDialog?.confirm} />
 
       {effectiveTab === 'scoping' && change && (
         <div className="space-y-4">

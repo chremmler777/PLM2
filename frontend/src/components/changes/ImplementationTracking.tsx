@@ -18,6 +18,7 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { requestBookHours } from '../../api/hours'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
@@ -171,8 +172,6 @@ function DepartmentBlock({
   // Not owed and never said anything: that is not "reported".
   const neverReported = !state.last_report_at && reports.length === 0
 
-  const [hours, setHours] = useState('')
-  const [bookingNote, setBookingNote] = useState('')
   const [reportNote, setReportNote] = useState('')
   const [atRisk, setAtRisk] = useState(false)
   const [partDone, setPartDone] = useState(false)
@@ -188,14 +187,6 @@ function DepartmentBlock({
     qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-escalations'] })
   }
 
-  const addBooking = useMutation({
-    mutationFn: () => changesApi.addImplBooking(changeId, {
-      department_id: id, hours: Number(hours),
-      ...(bookingNote.trim() !== '' ? { note: bookingNote.trim() } : {}),
-    }),
-    onSuccess: () => { setHours(''); setBookingNote(''); invalidate() },
-    onError: (e: unknown) => toastError(e, 'Could not book the time'),
-  })
   const removeBooking = useMutation({
     mutationFn: (bookingId: number) => changesApi.deleteImplBooking(changeId, bookingId),
     onSuccess: invalidate,
@@ -208,6 +199,9 @@ function DepartmentBlock({
       ...(partDone ? { part_done: true } : {}),
     }),
     onSuccess: () => {
+      // C15: "our part done" is the department's last action: one prefilled
+      // confirm of its hours (skipped = not booked)
+      if (partDone) requestBookHours({ departmentId: id, confirm: true })
       setReportNote(''); setAtRisk(false); setRiskNote(''); setPartDone(false); invalidate()
     },
     onError: (e: unknown) => toastError(e, 'Could not save the report'),
@@ -224,8 +218,6 @@ function DepartmentBlock({
     onError: (e: unknown) => toastError(e, 'Could not escalate'),
   })
 
-  const hoursValue = Number(hours)
-  const hoursOk = hours.trim() !== '' && !Number.isNaN(hoursValue) && hoursValue > 0
   // A red flag with no explanation is not a report — it is a rumour.
   const reportOk = reportNote.trim() !== '' && (!atRisk || riskNote.trim() !== '')
   const openEscalation = escalations.some((e) => !e.resolved_at)
@@ -300,23 +292,14 @@ function DepartmentBlock({
             ))}
           </ul>
         )}
-        {mayWrite && (
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <input type="number" min={0} step="0.25" value={hours}
-              data-testid={`impl-booking-hours-${id}`} aria-label={t('impl2.hours')}
-              placeholder={t('impl2.hours')}
-              onChange={(e) => setHours(e.target.value)}
-              className={`w-24 ${fieldCls}`} />
-            <input type="text" value={bookingNote}
-              data-testid={`impl-booking-note-${id}`} aria-label={t('impl2.bookingNote')}
-              placeholder={t('impl2.bookingNote')}
-              onChange={(e) => setBookingNote(e.target.value)}
-              className={`flex-1 min-w-[10rem] ${fieldCls}`} />
+        {/* C15: one Book hours dialog for every stage (day worked, for a
+            colleague, the lead's coordination) */}
+        {isMine && (
+          <div className="pt-1">
             <button type="button" data-testid={`impl-booking-add-${id}`}
-              disabled={!hoursOk || addBooking.isPending}
-              onClick={() => addBooking.mutate()}
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50">
-              {t('impl2.addBooking')}
+              onClick={() => requestBookHours({ departmentId: id })}
+              className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs">
+              {t('hours.title')}
             </button>
           </div>
         )}

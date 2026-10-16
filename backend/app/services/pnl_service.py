@@ -132,14 +132,30 @@ class PnlService:
             if not changes:
                 return []
 
-        effort_rows = (await session.execute(
-            select(ChangeAssessment.change_id,
-                   func.coalesce(func.sum(ChangeAssessment.effort_hours), 0.0))
-            .where(ChangeAssessment.change_id.in_(change_ids),
-                   ChangeAssessment.effort_hours.is_not(None))
-            .group_by(ChangeAssessment.change_id)
-        )).all()
-        efforts = {cid: hours for cid, hours in effort_rows}
+        # C15: the time a department spent on its assessment is its standing
+        # internal_effort position (CostService.summation's rule); the
+        # assessment's own effort_hours only for a department without one
+        from app.models.change_cost import CostingPosition
+        by_pos: dict[tuple[int, int], float] = {}
+        for cid, did, h in (await session.execute(
+                select(CostingPosition.change_id, CostingPosition.department_id,
+                       func.sum(CostingPosition.hours))
+                .where(CostingPosition.change_id.in_(change_ids),
+                       CostingPosition.kind == "internal_effort",
+                       CostingPosition.hours.is_not(None))
+                .group_by(CostingPosition.change_id, CostingPosition.department_id))).all():
+            by_pos[(cid, did)] = float(h or 0)
+        efforts: dict[int, float] = {}
+        for (cid, _did), h in by_pos.items():
+            efforts[cid] = efforts.get(cid, 0.0) + h
+        for cid, did, h in (await session.execute(
+                select(ChangeAssessment.change_id, ChangeAssessment.department_id,
+                       func.sum(ChangeAssessment.effort_hours))
+                .where(ChangeAssessment.change_id.in_(change_ids),
+                       ChangeAssessment.effort_hours.is_not(None))
+                .group_by(ChangeAssessment.change_id, ChangeAssessment.department_id))).all():
+            if (cid, did) not in by_pos and h:
+                efforts[cid] = efforts.get(cid, 0.0) + float(h)
 
         project_ids = {c.project_id for c in changes if c.project_id is not None}
         names: dict[int, str] = {}

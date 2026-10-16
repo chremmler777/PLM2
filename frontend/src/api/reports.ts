@@ -134,7 +134,29 @@ export interface EcrKpiReport {
   late: EcrKpiMiss[];
 }
 
+/** C15: booked vs estimated hours per change (PM, Management, admin). */
+export interface EcrEffortRow {
+  change_id: number
+  change_number: string
+  title: string
+  status: string
+  customer_relevant: boolean
+  booked_hours: number
+  estimate_hours: number
+  confirmed_estimate_hours: number
+  /** departments with an estimate and no booking ("not booked", never 0) */
+  not_booked: string[]
+}
+
+export interface EcrEffortReport {
+  changes: EcrEffortRow[]
+  booked_hours: number
+  estimate_hours: number
+}
+
 export const reportsApi = {
+  ecrEffort: (since?: string): Promise<EcrEffortReport> =>
+    client.get('/v1/reports/ecr-effort', { params: since ? { since } : {} }).then((r) => r.data),
   pipeline: (): Promise<PipelineReport> =>
     client.get('/v1/reports/pipeline').then((r) => r.data),
   workload: (): Promise<WorkloadReport> =>

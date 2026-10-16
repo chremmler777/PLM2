@@ -122,21 +122,18 @@ describe('ImplementationTracking booked time', () => {
   })
   afterEach(cleanup)
 
-  it('books hours with a note and keeps a zero out of the log', async () => {
+  it('books hours through the one Book hours dialog (C15)', async () => {
     setData({ state: [stateRow({ booked_hours: 12.5 })] })
     render_()
     expect((await screen.findByTestId('impl-hours-2')).textContent)
       .toBe(t('impl2.bookedHours').replace('{n}', '12.5'))
-
-    // Nothing to book is not a booking.
-    expect((screen.getByTestId('impl-booking-add-2') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('impl-booking-hours-2'), { target: { value: '3.5' } })
-    fireEvent.change(screen.getByTestId('impl-booking-note-2'),
-      { target: { value: 'tool trial at Ostrava' } })
+    const seen: unknown[] = []
+    const on = (e: Event) => seen.push((e as CustomEvent).detail)
+    window.addEventListener('plm2:book-hours', on)
     fireEvent.click(screen.getByTestId('impl-booking-add-2'))
-    await waitFor(() => expect(changesApi.addImplBooking).toHaveBeenCalledWith(7, {
-      department_id: 2, hours: 3.5, note: 'tool trial at Ostrava',
-    }))
+    window.removeEventListener('plm2:book-hours', on)
+    expect(seen).toEqual([{ departmentId: 2 }])
+    expect(changesApi.addImplBooking).not.toHaveBeenCalled()
   })
 
   it('lets a member drop their own entry and nobody else’s', async () => {

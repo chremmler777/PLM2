@@ -1,5 +1,6 @@
 """Reports/analytics: pipeline funnel + throughput + cycle time, department/
 owner workload, and cost roll-ups - all live SQL aggregates, org-scoped."""
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -42,6 +43,21 @@ async def ecr_kpis_report(
     """RFQ on-time and implementation-on-time KPIs over the last `months`
     calendar months (0 = all time)."""
     return await ReportService.ecr_kpis(db, current_user, months or None)
+
+
+@router.get("/ecr-effort")
+async def ecr_effort_report(
+    since: Optional[date] = Query(None), until: Optional[date] = Query(None),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C15: booked vs estimated hours per change and department, and the
+    departments with work and no booking ("not booked"). Project
+    Management, Management and admins."""
+    from app.services.hours_service import HoursForbidden, HoursService
+    try:
+        return await HoursService.effort_report(db, current_user, since=since, until=until)
+    except HoursForbidden as e:
+        raise HTTPException(403, str(e))
 
 
 class EcrKpiTargets(BaseModel):

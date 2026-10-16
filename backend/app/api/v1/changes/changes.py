@@ -1042,6 +1042,81 @@ async def record_achieved(
     return await _price_safe(db, change, current_user, ChangeResponse)
 
 
+# --- C15: book hours (any open change, until 7 days after close) ------------
+
+class HoursIn(BaseModel):
+    department_id: int
+    hours: float
+    work_date: Optional[str] = None
+    booked_for: Optional[str] = None
+    coordination: bool = False
+    source: Optional[str] = None
+    note: Optional[str] = None
+
+
+@router.get("/{change_id}/hours")
+async def get_hours(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C15: booked vs estimated hours per department, the bookings, and the
+    viewer's prefill ("your estimate: 6 h")."""
+    from app.services.hours_service import HoursService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return await HoursService.state(db, change, current_user)
+
+
+@router.post("/{change_id}/hours", status_code=status.HTTP_201_CREATED)
+async def book_hours(
+    change_id: int, body: HoursIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C15 "Book hours": department, hours, work date (back 21 days),
+    optionally for a colleague; the lead's Coordination row."""
+    from app.services.hours_service import HoursError, HoursForbidden, HoursService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await HoursService.book(db, change, body.model_dump(), current_user)
+    except HoursForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except HoursError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    out = await HoursService.state(db, change, current_user)
+    await db.commit()
+    return out
+
+
+@router.delete("/{change_id}/hours/{booking_id}")
+async def delete_hours(
+    change_id: int, booking_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """C15: take back your own booking while the window is open."""
+    from app.services.hours_service import HoursService, window_open
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        row = await ImplementationService.get_booking(db, change, booking_id)
+    except ImplementationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if row.booked_by != current_user.id and current_user.effective_role != "admin":
+        raise HTTPException(status_code=403, detail="Only your own booking is yours to take back")
+    if not window_open(change):
+        raise HTTPException(status_code=400, detail="The booking window of this change has ended")
+    await ImplementationService.delete_booking(db, change, row, current_user)
+    out = await HoursService.state(db, change, current_user)
+    await db.commit()
+    return out
+
+
 @router.get("/{change_id}/my-actions")
 async def get_my_actions(
     change_id: int,

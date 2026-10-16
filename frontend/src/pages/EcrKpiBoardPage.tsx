@@ -291,6 +291,56 @@ function ratio(onTime: number, late: number, target: number) {
   );
 }
 
+/** C15: hours booked against the estimate per change, for pushing back
+ *  with numbers. PM, Management and admins read it (the backend refuses
+ *  everybody else: the card then says nothing). */
+function EffortCard() {
+  const { data, isError } = useQuery({
+    queryKey: ['reports', 'ecr-effort'],
+    queryFn: () => reportsApi.ecrEffort(),
+    retry: false,
+  });
+  if (isError || !data) return null;
+  return (
+    <section data-testid="effort-card" className="bg-slate-800 border border-slate-700 rounded-lg p-4 mt-4" aria-label="Engineering hours">
+      <h2 className="text-sm font-semibold text-slate-200 mb-1">Engineering hours</h2>
+      <p className="text-xs text-slate-400 mb-3">
+        {Math.round(data.booked_hours)} h booked of {Math.round(data.estimate_hours)} h estimated.
+        "Not booked" names a department with an estimate and no booking yet.
+      </p>
+      {data.changes.length === 0 ? (
+        <div className="text-sm text-slate-500">No hours estimated or booked yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-slate-700">
+                <th className="py-1.5 pr-3 font-normal">Change</th>
+                <th className="py-1.5 pr-3 font-normal text-right">Booked</th>
+                <th className="py-1.5 pr-3 font-normal text-right">Estimated</th>
+                <th className="py-1.5 font-normal">Not booked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.changes.map((c) => (
+                <tr key={c.change_id} className="border-b border-slate-700/50 last:border-0">
+                  <td className="py-1.5 pr-3 text-slate-200">
+                    <Link to={`/changes/${c.change_id}`} className="font-mono text-blue-400 hover:text-blue-300">{c.change_number}</Link>
+                    <span className="text-slate-400"> · {c.title}</span>
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{c.booked_hours} h</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{c.estimate_hours} h</td>
+                  <td className="py-1.5 text-xs text-amber-300">{c.not_booked.join(', ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function EcrKpiBoardPage() {
   const [months, setMonths] = useState(12);
   const { isAdmin } = useAuth();
@@ -382,6 +432,7 @@ export default function EcrKpiBoardPage() {
               </div>
             )}
           </section>
+          <EffortCard />
         </>
       )}
     </div>
