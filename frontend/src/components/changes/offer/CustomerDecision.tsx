@@ -99,20 +99,12 @@ export default function CustomerDecision({
   const evidenceOk = evidenceId ? (!pickNeedsTick(files, evidenceId) || fromCustomer) : refOk
   const evidence = evidenceId ? pickBody(files, evidenceId) : { ref: ref.trim() }
   const total = latestSent ? fmtMoney(latestSent.totals.total_one_time, latestSent.currency) : ''
-  // §7 [R4] price diff: below the last version sent before it needs a
-  // reason and a PM / Management OK (the backend asks for it)
-  // A supplement compares with the supplement it revised (sent after the
-  // last accepted version), else with nothing: negative is a drop
-  // (backend supplement_drop_state).
-  const isSupp = latestSent?.kind === 'supplement'
-  const lastAccepted = Math.max(0, ...(offers ?? []).filter((o) => o.status === 'accepted').map((o) => o.version))
-  const prevSent = latestSent ? (offers ?? [])
-    .filter((o) => o.version < latestSent.version && !!o.sent_at
-      && (!isSupp || (o.kind === 'supplement' && o.version > lastAccepted)))
-    .sort((a, b) => b.version - a.version)[0] : undefined
-  const drop = !!(v2 && latestSent && (prevSent
-    ? latestSent.totals.total_one_time < prevSent.totals.total_one_time - 0.005
-    : isSupp && latestSent.totals.total_one_time < -0.005))
+  // §7 [R4] price diff (A4-01): the backend computes the drop against the
+  // baseline (the last accepted total, else the highest version sent since;
+  // a supplement against the highest supplement since, else zero; a lower
+  // piece price effect counts too) and the accept asks the reason for it
+  const pd = v2 ? latestSent?.price_drop ?? null : null
+  const drop = !!pd
   const [dropCode, setDropCode] = useState('')
   const [dropNote, setDropNote] = useState('')
   const dropOk = !drop || (!!dropCode && dropNote.trim().length >= 15)
@@ -331,9 +323,12 @@ export default function CustomerDecision({
           )}
           {drop && latestSent && (
             <div data-testid="accept-drop" className="space-y-1 rounded border border-amber-900/70 bg-amber-950/20 p-2 sm:col-span-2">
-              <p className="text-xs text-amber-200">{prevSent ? fill(atRisk || supplementOut ? 'cust.dropAfter' : 'cust.drop', {
-                v: latestSent.version, t: total, p: prevSent.version,
-                pt: fmtMoney(prevSent.totals.total_one_time, prevSent.currency) })
+              <p className="text-xs text-amber-200">{pd?.annual != null
+                ? fill('cust.dropAnnual', { v: latestSent.version, a: fmtMoney(pd.annual, latestSent.currency),
+                  p: pd.prev_version ?? '-', pa: pd.prev_annual != null ? fmtMoney(pd.prev_annual, latestSent.currency) : '-' })
+                : pd?.prev_version != null ? fill(atRisk || supplementOut ? 'cust.dropAfter' : 'cust.drop', {
+                  v: latestSent.version, t: total, p: pd.prev_version,
+                  pt: fmtMoney(pd.prev_total ?? 0, latestSent.currency) })
                 : fill('cust.dropSupp', { v: latestSent.version, t: total })}</p>
               <select data-testid="accept-drop-code" value={dropCode} aria-label={t('cust.dropReason')}
                 onChange={(e) => setDropCode(e.target.value)} className={`${inputCls} w-full`}>

@@ -204,7 +204,8 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
   it('a lower total than the last version sent asks why (price diff)', async () => {
     const v1 = sent({ id: 9, version: 1, status: 'superseded', sent_at: '2026-10-01T00:00:00',
       totals: { base: 0, factors: [], risks_total: 0, scrap: 0, free: 0, total_one_time: 5000 } as OfferOut['totals'] })
-    const v2 = { ...valid(), id: 10, version: 2, sent_at: '2026-10-10T00:00:00', index_changes: [] }
+    const v2 = { ...valid(), id: 10, version: 2, sent_at: '2026-10-10T00:00:00', index_changes: [],
+      price_drop: { version: 2, total: 4000, prev_version: 1, prev_total: 5000 } }
     wrap(<CustomerDecision change={change({ release_due_date: '2026-12-18T00:00:00' })} latestSent={v2} offers={[v2, v1]}
       canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
@@ -301,7 +302,8 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
     const s2 = { ...valid(), id: 11, version: 2, status: 'superseded' as const, kind: 'supplement' as const,
       sent_at: '2026-10-05T00:00:00', totals: { ...valid().totals, total_one_time: 5000 } }
     const s3 = { ...valid(), id: 12, version: 3, kind: 'supplement' as const, sent_at: '2026-10-06T00:00:00',
-      totals: { ...valid().totals, total_one_time: 2000 } }
+      totals: { ...valid().totals, total_one_time: 2000 },
+      price_drop: { version: 3, total: 2000, prev_version: 2, prev_total: 5000 } }
     const ch = change({ status: 'approved', customer_response: 'accepted', accepted_offer_id: 10 })
     wrap(<CustomerDecision change={ch} latestSent={s3} offers={[s3, s2, v1]} canRespond canSignPm={false}
       canSignQuality={false} userId={5} />)
@@ -311,6 +313,22 @@ describe('CustomerDecision §7 (COMMERCIAL_V2)', () => {
     // NEGATIVE: a first positive supplement is no drop, though below the offer
     wrap(<CustomerDecision change={ch} latestSent={{ ...s2, status: 'sent' as const }} offers={[s2, v1]} canRespond
       canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    expect(screen.queryByTestId('accept-drop')).toBeNull()
+  })
+
+  it('a lower piece price effect asks why too (A4-01, the backend names it)', () => {
+    const v3 = { ...valid(), id: 13, version: 3, sent_at: '2026-10-10T00:00:00', index_changes: [],
+      price_drop: { version: 3, total: 5000, prev_version: 2, prev_total: 5000, annual: 500, prev_annual: 1000 } }
+    wrap(<CustomerDecision change={change({ release_due_date: '2026-12-18T00:00:00' })} latestSent={v3} offers={[v3]}
+      canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    expect(screen.getByTestId('accept-drop').textContent).toContain('lowers the piece price effect')
+    cleanup()
+    // NEGATIVE: no drop from the backend, no reason asked
+    wrap(<CustomerDecision change={change({ release_due_date: '2026-12-18T00:00:00' })}
+      latestSent={{ ...v3, price_drop: null }} offers={[v3]}
+      canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
     expect(screen.queryByTestId('accept-drop')).toBeNull()
   })

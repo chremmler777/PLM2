@@ -182,6 +182,12 @@ export interface OfferOut {
   /** Spec §6 [R3] (COMMERCIAL_V2): what Send lists; a sent version keeps
    *  what it listed and the high-risk reason. null with the switch off. */
   send_list?: OfferSendList | null
+  /** §7 [R4] (A4-01): what accepting this sent version lowers against its
+   *  baseline (null: nothing lower). `annual` set: the piece price effect. */
+  price_drop?: {
+    version: number; total: number; prev_version?: number; prev_total?: number
+    annual?: number; prev_annual?: number
+  } | null
   /** §7: an offer out with the customer whose part index moved since. */
   index_changes?: { number: string; offer: string; now: string }[]
   /** §7 (C12): what the customer's answer on this version rests on. */

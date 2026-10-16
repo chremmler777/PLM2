@@ -1725,6 +1725,10 @@ class OfferService:
                 "diff": diff, "warnings": warnings,
                 "indexes": indexes, "send_list": send_list,
                 "index_changes": index_changes,
+                # §7 [R4] (A4-01): what accepting this version would lower
+                # (the accept dialog asks the reason; same rule as the backend)
+                "price_drop": (ChangeService.drop_against(all_offers, o)
+                               if commercial and o.status == "sent" else None),
                 "accept_evidence": o.accept_evidence,
                 "answered_at": o.answered_at,
                 "issued_by": await OfferService._issued_by(session, change, o),

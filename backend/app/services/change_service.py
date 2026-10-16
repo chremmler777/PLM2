@@ -7042,9 +7042,7 @@ class ChangeService:
                 codes=PRICE_DROP_REASONS)
             if why:
                 raise ChangeError(
-                    f"v{drop['version']} at {drop['total']:.2f} is below "
-                    f"v{drop['prev_version']} at {drop['prev_total']:.2f}: say why "
-                    f"({why})")
+                    f"{ChangeService.drop_text(drop)}: say why ({why})")
             evidence["price_drop"] = drop
         await OfferService.apply_customer_response(
             session, change, "accepted", user_id, expired_override_reason)
@@ -7103,7 +7101,7 @@ class ChangeService:
     async def price_drop_state(session: AsyncSession, change: ChangeRequest,
                                offer=None) -> Optional[dict]:
         """§7 [R4]: the accepted offer (or `offer`, about to be accepted)
-        against the last version sent before it. None when it is not lower
+        against its baseline (drop_against). None when it is not lower
         (or there is nothing to compare: v1, no offer)."""
         from app.models.change_offer import ChangeOffer
         if offer is None:
@@ -7112,17 +7110,91 @@ class ChangeService:
             offer = await session.get(ChangeOffer, change.accepted_offer_id)
         if offer is None or offer.total_one_time is None:
             return None
-        prev = (await session.execute(
-            select(ChangeOffer).where(
-                ChangeOffer.change_id == change.id, ChangeOffer.id != offer.id,
-                ChangeOffer.version < offer.version,
-                ChangeOffer.sent_at.isnot(None))
-            .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
-        if (prev is None or prev.total_one_time is None
-                or float(offer.total_one_time) >= float(prev.total_one_time) - 0.005):
+        rows = (await session.execute(
+            select(ChangeOffer).where(ChangeOffer.change_id == change.id))).scalars().all()
+        return ChangeService.drop_against(rows, offer)
+
+    @staticmethod
+    def was_accepted(o) -> bool:
+        """The customer said yes to this version: accepted, or accepted and
+        then cleared by a newer version sent while quoted (superseded, the
+        yes kept on record with its PO match)."""
+        ev = o.accept_evidence if isinstance(o.accept_evidence, dict) else {}
+        return o.status == "accepted" or (
+            o.status == "superseded" and ev.get("po_match") in ("yes", "no"))
+
+    @staticmethod
+    def annual_effect(o) -> Optional[float]:
+        """The recurring side of a version: piece price delta x annual
+        volume (offer_service.compute_totals); None without a piece price."""
+        from app.services.offer_service import _num
+        pp = (o.data or {}).get("piece_price") if isinstance(o.data, dict) else None
+        if not isinstance(pp, dict) or not pp.get("enabled"):
             return None
-        return {"version": offer.version, "total": float(offer.total_one_time),
-                "prev_version": prev.version, "prev_total": float(prev.total_one_time)}
+        piece = sum(_num(r.get("delta_per_piece")) for r in pp.get("rows") or []
+                    if isinstance(r, dict))
+        return round(piece * _num(pp.get("annual_volume")), 2)
+
+    @staticmethod
+    def drop_against(offers, offer) -> Optional[dict]:
+        """§7 [R4] price diff, one rule for offers and supplements (A4-01):
+        the baseline is the last accepted total; with nothing accepted yet,
+        the highest of every version sent since the last acceptance (v1 at
+        least), so an unanswered lower version in between never resets it.
+        A supplement compares with the highest supplement sent since the
+        last accepted version, else with zero (negative is a drop). DECIDED
+        BY CLAUDE: a lower annual effect (piece price x volume) against the
+        same baseline is a drop too. Pure: `offers` are every version of
+        the change. None when nothing is lower."""
+        supp = getattr(offer, "kind", None) == "supplement"
+        before = sorted((o for o in offers
+                         if o.id != offer.id and o.version < offer.version
+                         and o.sent_at is not None),
+                        key=lambda o: -o.version)
+        base = []
+        for o in before:
+            if ChangeService.was_accepted(o):
+                if not supp and getattr(o, "kind", None) != "supplement":
+                    base = [o]            # the last accepted total
+                break
+            if (getattr(o, "kind", None) == "supplement") == supp:
+                base.append(o)
+        total = float(offer.total_one_time or 0)
+        annual = ChangeService.annual_effect(offer)
+        out = {"version": offer.version, "total": total}
+        if base:
+            top = max(base, key=lambda o: (float(o.total_one_time or 0), o.version))
+            if total < float(top.total_one_time or 0) - 0.005:
+                return {**out, "prev_version": top.version,
+                        "prev_total": float(top.total_one_time or 0)}
+            yearly = [(a, o) for o in base
+                      if (a := ChangeService.annual_effect(o)) is not None]
+            if yearly:
+                a_top, a_o = max(yearly, key=lambda x: (x[0], x[1].version))
+                if (annual or 0.0) < a_top - 0.005:
+                    return {**out, "prev_version": a_o.version,
+                            "prev_total": float(a_o.total_one_time or 0),
+                            "annual": annual or 0.0, "prev_annual": a_top}
+            return None
+        if supp and total < -0.005:
+            return out
+        if supp and annual is not None and annual < -0.005:
+            return {**out, "annual": annual}
+        return None
+
+    @staticmethod
+    def drop_text(drop: dict, *, supplement: bool = False) -> str:
+        """The refusal and changelog words for a drop (drop_against)."""
+        what = f"Supplement v{drop['version']}" if supplement else f"v{drop['version']}"
+        if "annual" in drop:
+            return (f"{what} lowers the piece price effect to "
+                    f"{drop['annual']:.2f}/yr"
+                    + (f" (v{drop['prev_version']}: {drop['prev_annual']:.2f}/yr)"
+                       if drop.get("prev_version") else ""))
+        if drop.get("prev_version"):
+            return (f"{what} at {drop['total']:.2f} is below "
+                    f"v{drop['prev_version']} at {drop['prev_total']:.2f}")
+        return f"{what} lowers the accepted total by {-drop['total']:.2f}"
 
     @staticmethod
     async def _ask_resign(session: AsyncSession, change: ChangeRequest, offer,
@@ -7149,33 +7221,12 @@ class ChangeService:
     @staticmethod
     async def supplement_drop_state(session: AsyncSession, change: ChangeRequest,
                                     offer) -> Optional[dict]:
-        """§7 [R4] on a supplement: lower than the last supplement sent
-        before it for the same open price (sent after the last accepted
-        version), or, with none, negative (below the accepted total)."""
+        """§7 [R4] on a supplement: below the highest supplement sent since
+        the last accepted version, or, with none, negative (drop_against)."""
         from app.models.change_offer import ChangeOffer
-        total = float(offer.total_one_time or 0)
         rows = (await session.execute(
-            select(ChangeOffer).where(
-                ChangeOffer.change_id == change.id, ChangeOffer.id != offer.id,
-                ChangeOffer.version < offer.version,
-                ChangeOffer.sent_at.isnot(None))
-            .order_by(ChangeOffer.version.desc()))).scalars().all()
-        prev = None
-        for o in rows:
-            if o.status == "accepted":
-                break                     # an earlier price is settled
-            if o.kind == "supplement":
-                prev = o
-                break
-        if prev is not None and prev.total_one_time is not None:
-            if total < float(prev.total_one_time) - 0.005:
-                return {"version": offer.version, "total": total,
-                        "prev_version": prev.version,
-                        "prev_total": float(prev.total_one_time)}
-            return None
-        if total < -0.005:
-            return {"version": offer.version, "total": total}
-        return None
+            select(ChangeOffer).where(ChangeOffer.change_id == change.id))).scalars().all()
+        return ChangeService.drop_against(rows, offer)
 
     @staticmethod
     async def _record_supplement_answer(
@@ -7271,12 +7322,7 @@ class ChangeService:
                 codes=PRICE_DROP_REASONS)
             if why:
                 raise ChangeError(
-                    (f"Supplement v{offer.version} at {drop['total']:.2f} is below "
-                     f"v{drop['prev_version']} at {drop['prev_total']:.2f}"
-                     if drop.get("prev_version") else
-                     f"Supplement v{offer.version} lowers the accepted total by "
-                     f"{-drop['total']:.2f}")
-                    + f": say why ({why})")
+                    f"{ChangeService.drop_text(drop, supplement=True)}: say why ({why})")
             evidence["price_drop"] = drop
         offer.status = "accepted"
         offer.accept_evidence = evidence
