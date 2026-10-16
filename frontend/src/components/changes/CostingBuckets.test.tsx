@@ -159,6 +159,30 @@ describe('CostingBuckets', () => {
     expect(screen.queryByTestId('costpos-new-4')).toBeNull()
   })
 
+  it('gives PM in another department\'s bucket what the backend lets PM do (A3-12)', async () => {
+    buckets({ canSeeAll: true, isPm: true, change: change({
+      assessment_v2: true, costing_owed_department_ids: [4],
+      costing_pending_department_ids: [4], costing_finalized_department_ids: [],
+      open_supplier_waits: [],
+    }) })
+    fireEvent.click(screen.getByTestId('costing-toggle-4'))
+    expect(await screen.findByTestId('nocost-open-4')).toBeTruthy()
+    expect(screen.getByTestId('costing-finalize-4')).toBeTruthy()
+    expect(screen.getByTestId('supwait-panel-4')).toBeTruthy()
+  })
+
+  it('a reader who is not PM gets neither (A3-12 negative)', async () => {
+    buckets({ canSeeAll: true, change: change({
+      assessment_v2: true, costing_owed_department_ids: [4],
+      costing_pending_department_ids: [4], costing_finalized_department_ids: [],
+      open_supplier_waits: [],
+    }) })
+    fireEvent.click(screen.getByTestId('costing-toggle-4'))
+    await screen.findByTestId('costing-readonly-4')
+    expect(screen.queryByTestId('nocost-open-4')).toBeNull()
+    expect(screen.queryByTestId('supwait-panel-4')).toBeNull()
+  })
+
   it('gives a department routed on two stages one bucket, not two', () => {
     buckets({ canSeeAll: true, change: change({ assessments: [
       { id: 1, department_id: 2, stage_order: 1, rasic_letter: 'R', status: 'active', verdict: 'feasible' },

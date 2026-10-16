@@ -339,6 +339,18 @@ class CostingPositionService:
     # Validation
     # ------------------------------------------------------------------
     @staticmethod
+    def _refuse_empty_basis(position: CostingPosition) -> None:
+        """A3-12 (R4): a basis reference typed on save names something;
+        'checked' or 'ok' is refused at once, not only at Finalize."""
+        from app.services import cm_switches
+        from app.services.cm_rules import says_what
+        ref = (position.basis_ref or "").strip()
+        if ref and cm_switches.on("ASSESSMENT_V2") and not says_what(ref):
+            raise CostingPositionError(
+                f"The basis '{ref}' says nothing: name it, e.g. an earlier tool, "
+                "the supplier's figure and its date")
+
+    @staticmethod
     def _validate(position: CostingPosition) -> None:
         if not (position.label or "").strip():
             raise CostingPositionError("A costing position needs a label")
@@ -514,6 +526,7 @@ class CostingPositionService:
             raise CostingPositionError(
                 "Say how many of what this line stands for: quantity and unit "
                 "(e.g. 2 inserts, 1 tool)")
+        CostingPositionService._refuse_empty_basis(position)
         CostingPositionService._validate(position)
         await CostingPositionService._check_machine_class(session, change, position)
         # Priced now, from the cost sheet valid today: the snapshot stays on
@@ -578,6 +591,8 @@ class CostingPositionService:
             raise CostingPositionError(
                 "Say how many of what this line stands for: quantity and unit "
                 "(e.g. 2 inserts, 1 tool)")
+        if "basis_ref" in spec:
+            CostingPositionService._refuse_empty_basis(position)
         CostingPositionService._validate(position)
         await CostingPositionService._check_machine_class(session, change, position)
         # Re-priced only when what the rate depends on moved, or the line has

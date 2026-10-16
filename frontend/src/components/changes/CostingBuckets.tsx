@@ -331,7 +331,8 @@ export default function CostingBuckets({
                     )}
                     {change.assessment_v2 && (
                       <SupplierWaitPanel changeId={changeId} departmentId={id}
-                        waits={change.open_supplier_waits ?? []} editable={editable && !finalized} />
+                        waits={change.open_supplier_waits ?? []}
+                        editable={editable && owesInput(id) && !finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}
                       v2={!!change.assessment_v2}
@@ -377,8 +378,17 @@ export default function CostingBuckets({
                     )}
                     {/* PM may still fix another department's positions; Sales
                         and the lead only read them. */}
+                    {/* A3-12 (R24): what the backend lets PM do for any
+                        department: finalize, "no cost", supplier waits */}
                     {editable && isPm && owesInput(id) && (
-                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized} />
+                      <FinalizeBar changeId={changeId} departmentId={id} finalized={finalized}
+                        v2={!!change.assessment_v2} departmentName={deptName(id)}
+                        noCost={noCostWords(change.costing_no_cost?.[String(id)])} />
+                    )}
+                    {change.assessment_v2 && isPm && (
+                      <SupplierWaitPanel changeId={changeId} departmentId={id}
+                        waits={change.open_supplier_waits ?? []}
+                        editable={editable && owesInput(id) && !finalized} />
                     )}
                     <CostPositions changeId={changeId} departmentId={id}
                       v2={!!change.assessment_v2}

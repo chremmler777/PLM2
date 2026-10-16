@@ -243,3 +243,30 @@ async def test_within_is_refused_when_the_quote_in_the_same_step_is_above(
     res = await client.post(url, json={"verdict": "within", **quote, "cost": 5200.0},
                             headers=cb["te"])
     assert res.status_code == 200, res.text
+
+
+async def test_finalized_member_reads_the_cause_and_junk_basis_is_refused_on_save(
+        client, cb):
+    """A3-12: a member of a finalized department reads 'Your costing is
+    finalized: reopen it first' (not the generic rule); a basis that says
+    nothing is refused when saved (R4), not only at Finalize."""
+    res = await client.post(_u(cb, "/costing/positions"), json={
+        "department_id": cb["tool"], "label": "Insert re-cut", "kind": "external",
+        "quantity": 1, "quantity_unit": "pcs", "est_cost": 900.0,
+        "basis_ref": "checked"}, headers=cb["te"])
+    assert res.status_code == 400 and "says nothing" in res.json()["detail"], res.text
+    p = await _pos(client, cb, est_cost=900.0, basis_ref="Hasco figure 12 Oct 2026")
+    res = await client.put(_u(cb, f"/costing/positions/{p['id']}"),
+                           json={"basis_ref": "ok"}, headers=cb["te"])
+    assert res.status_code == 400, res.text
+    assert (await _finalize(client, cb)).status_code == 200
+    res = await client.post(_u(cb, "/costing/positions"), json={
+        "department_id": cb["tool"], "label": "Second", "kind": "external",
+        "quantity": 1, "quantity_unit": "pcs"}, headers=cb["te"])
+    assert res.status_code == 403
+    assert res.json()["detail"] == "Your costing is finalized: reopen it first"
+    # negative: someone outside the department reads the rule, not the cause
+    res = await client.post(_u(cb, "/costing/positions"), json={
+        "department_id": cb["tool"], "label": "Second", "kind": "external",
+        "quantity": 1, "quantity_unit": "pcs"}, headers=cb["pe"])
+    assert res.status_code == 403 and "Only a member" in res.json()["detail"]

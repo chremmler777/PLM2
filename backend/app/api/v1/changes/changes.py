@@ -2603,13 +2603,10 @@ async def put_cost_lines(
         raise HTTPException(status_code=404, detail="Assessment not found")
     # Same write rule as the costing positions: the department itself while
     # the change is in costing, Project Management and admins at any time.
-    if not await CostingPositionService.may_write(
-            db, change, a.department_id, current_user):
-        raise HTTPException(
-            status_code=403,
-            detail="Only a member of that department while the change is in "
-                   "costing, Project Management or an admin may change its "
-                   "cost lines")
+    refusal = await _costing_write_refusal(db, change, a.department_id, current_user,
+                                           "cost lines")
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     try:
         lines = await CostService.replace_cost_lines(
             db, change, a, [l.model_dump() for l in body.lines], current_user.id)
@@ -2643,16 +2640,31 @@ async def _costing_change(db: AsyncSession, change_id: int, current_user: User):
     return change
 
 
+async def _costing_write_refusal(db: AsyncSession, change, department_id: int,
+                                 current_user: User, what: str) -> Optional[str]:
+    """Why the caller may not write this department's costs, or None. A3-12
+    (R5): a member whose department finalized reads that cause, not the
+    generic rule."""
+    from app.services import early_costing
+    from app.services.costing_position_service import CostingPositionService
+    from app.services.workflow_service import WorkflowService
+    if await CostingPositionService.may_write(db, change, department_id, current_user):
+        return None
+    if (early_costing.costing_open_for(change, department_id)
+            and early_costing.is_finalized(change, department_id)
+            and await WorkflowService.actor_in_department(
+                db, current_user, department_id)):
+        return "Your costing is finalized: reopen it first"
+    return ("Only a member of that department while the change is in "
+            f"costing, Project Management or an admin may change its {what}")
+
+
 async def _require_costing_write(db: AsyncSession, change, department_id: int,
                                  current_user: User) -> None:
-    from app.services.costing_position_service import CostingPositionService
-    if not await CostingPositionService.may_write(
-            db, change, department_id, current_user):
-        raise HTTPException(
-            status_code=403,
-            detail="Only a member of that department while the change is in "
-                   "costing, Project Management or an admin may change its "
-                   "costing positions")
+    refusal = await _costing_write_refusal(db, change, department_id, current_user,
+                                           "costing positions")
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
 
 
 @router.get("/{change_id}/costing/positions",
