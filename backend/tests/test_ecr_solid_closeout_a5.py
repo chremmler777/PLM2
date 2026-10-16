@@ -443,3 +443,22 @@ async def test_a5_09_negative_unchanged_cycle_time_refused_on_a_failed_measureme
     state = (await client.get(_rurl(fix), headers=tool)).json()
     row = next(r for r in state["checks"] if r["key"] == "weight_measured")
     assert row["note"].startswith("Measured in validation: n=5, 505-512 g")
+
+
+# --- A5-10 b a plain 'Part measured' passes with the measuring report -------
+
+async def test_a5_10_negative_part_measured_needs_the_measuring_report(client, fix):
+    tool = await _auth(client, fix, "Tool Engineer")
+    body = {"department_id": fix["dept"]["Tool Engineer"], "check_key": "measured",
+            "status": "passed"}
+    for note in (None, "ok", "checked"):
+        res = await client.post(_url(fix, "/checks"), headers=tool,
+                                json={**body, **({"note": note} if note else {})})
+        assert res.status_code == 400, res.text                  # NEGATIVE
+    state = (await client.get(_url(fix, "/state"), headers=tool)).json()
+    chk = next(c for d in state["departments"] if d["department_name"] == "Tool Engineer"
+               for c in d["checks"] if c["check_key"] == "measured")
+    assert chk["pass_needs_report"] is True
+    res = await client.post(_url(fix, "/checks"), headers=tool,
+                            json={**body, "note": "CMM report MR-2026-311"})
+    assert res.status_code == 201 and res.json()["status"] == "passed", res.text

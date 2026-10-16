@@ -1850,6 +1850,8 @@ class ValidationCheckState(BaseModel):
     delta_g: Optional[float] = None
     # An answered row an older catalog seeded; shown, never counted.
     retired: bool = False
+    # A5-10 b: a plain 'Part measured' passes with the measuring report
+    pass_needs_report: bool = False
     # ECR-solid §10 computed checks: the verdict follows from measurements
     # against the limits the first one fixed; every measurement is kept.
     computed: bool = False

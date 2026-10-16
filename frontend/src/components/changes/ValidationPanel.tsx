@@ -40,6 +40,7 @@ import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDial
 import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
 import { toastError } from '../../lib/apiError'
 import MeasurementForm, { LimitsConfirm, MeasurementHistory } from './validation/MeasurementForm'
+import { refOk } from '../../lib/evidence'
 import { hoursApi, hoursKey, requestBookHours } from '../../api/hours'
 import { Check, X } from 'lucide-react'
 import { btnSm } from '../common/buttonStyles'
@@ -151,7 +152,9 @@ function CheckRow({
   // since (parameter, tool, material or method + reference, >= 5 characters)
   const retest = check.status === 'failed'
   const retestNoteOk = note.trim().length >= 5 && !EMPTY_WORDS.has(note.trim().toLowerCase())
-  const mayPass = (!needsValue || valueOk) && (!retest || retestNoteOk)
+  // A5-10 b: a plain 'Part measured' names its measuring report
+  const reportNeeded = !!check.pass_needs_report
+  const mayPass = (!needsValue || valueOk) && (!retest || retestNoteOk) && (!reportNeeded || refOk(note))
   const mayFail = !valueHint
   const mayWrite = editable && mine && !retired
   const tick = mayWrite && !computed
@@ -304,6 +307,12 @@ function CheckRow({
           <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
             data-testid={`validation-retest-note-${id}`} aria-label={t('validation.retestNote')}
             placeholder={t('validation.retestNote')} className={`w-full ${fieldCls}`} />
+        )}
+        {reportNeeded && !retest && (
+          <input value={note} onChange={(e) => setNote(e.target.value)}
+            data-testid={`validation-report-${id}`} aria-label="Measuring report"
+            placeholder="Measuring report (number or file name, e.g. MR-2026-118)"
+            className={`w-full ${fieldCls}`} />
         )}
         <div className="flex items-center gap-2">
           <button type="button" data-testid={`validation-pass-${id}`}

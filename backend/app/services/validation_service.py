@@ -334,6 +334,9 @@ class ValidationService:
                                         if row else None),
                     "checked_at": row.checked_at if row else None,
                     "retired": key not in current,
+                    # A5-10 b: 'passed' names the measuring report
+                    "pass_needs_report": ValidationService.pass_needs_report(
+                        key, catalog.computed_unit(key, dept_name)),
                 }
                 if key == catalog.CYCLE_TIME_KEY:
                     # The costing never stated an absolute cycle time, only
@@ -497,6 +500,15 @@ class ValidationService:
                 f"Invalid validation status '{status}': "
                 f"one of {', '.join(VALIDATION_WRITE_STATUSES)}")
 
+        if status == "passed" and ValidationService.pass_needs_report(check_key, computed):
+            # A5-10 b (RELEASE_V2, R4): a dimension check that is not
+            # computed passes with the measuring report, not a plain tick
+            from app.services.cm_rules import reference_refusal
+            why = reference_refusal(spec.get("note"),
+                                    "The measuring report (number or file name)",
+                                    "measuring report MR-2026-118")
+            if why:
+                raise ValidationError(why)
         value = spec.get("value")
         if value is not None:
             value = round(float(value), 3)
@@ -747,6 +759,16 @@ class ValidationService:
             notes=changed_ref or row.note, for_department_id=department_id)
         return await ValidationService._after_answer(
             session, change, row, old_status, actor)
+
+    #: A5-10 b: the plain dimension check of Tool, Manufacturing and
+    #: Process Engineer ('Part measured'), passed with the report
+    REPORT_KEYS = frozenset({"measured"})
+
+    @staticmethod
+    def pass_needs_report(check_key: str, computed) -> bool:
+        from app.services import cm_switches
+        return (cm_switches.on("RELEASE_V2") and not computed
+                and check_key in ValidationService.REPORT_KEYS)
 
     @staticmethod
     def limits_pending(row) -> bool:

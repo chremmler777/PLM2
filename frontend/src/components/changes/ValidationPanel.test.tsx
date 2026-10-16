@@ -83,6 +83,23 @@ describe('ValidationPanel', () => {
     }))
   })
 
+  it('A5-10: a plain Part measured passes only with the measuring report', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({ check_key: 'measured', pass_needs_report: true })] }],
+    }) as never)
+    render_()
+    const pass = await screen.findByTestId('validation-pass-4-measured') as HTMLButtonElement
+    expect(pass.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('validation-report-4-measured'), { target: { value: 'ok' } })
+    expect(pass.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('validation-report-4-measured'), { target: { value: 'CMM report MR-2026-311' } })
+    expect(pass.disabled).toBe(false)
+    fireEvent.click(pass)
+    await waitFor(() => expect(changesApi.setValidationCheck).toHaveBeenCalledWith(7, {
+      department_id: 4, check_key: 'measured', status: 'passed', note: 'CMM report MR-2026-311',
+    }))
+  })
+
   it('refuses an unreadable measurement instead of passing without it', async () => {
     vi.mocked(changesApi.validationState).mockResolvedValue(state({
       departments: [{ department_id: 4, checks: [check({ check_key: 'cycle_time' })] }],

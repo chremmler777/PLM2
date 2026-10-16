@@ -148,6 +148,10 @@ async def _check(client, auth, val, dept, key, status="passed", **kw):
         if res.status_code == 201 and res.json()["status"] == "passed":
             await _confirm_limits(client, val, res.json()["id"])
         return res
+    if key == "measured" and status == "passed" and not kw.get("note") \
+            and cm_switches.RELEASE_V2:
+        # A5-10 b: a plain 'Part measured' passes with the measuring report
+        kw = {**kw, "note": "measuring report MR-2026-118"}
     return await client.post(_url(val, "/checks"), headers=auth, json={
         "department_id": val["dept"][dept], "check_key": key,
         "status": status, **kw})

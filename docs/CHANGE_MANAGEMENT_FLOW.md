@@ -1687,7 +1687,14 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   release reads "still open: <check> (limits set by X: Quality confirms)",
   a linked issue stays open, and Quality has a "Needs you" row. In-flight
   limits got their setter from the first measurement and wait on the same
-  click. Cut 2: the §4 spec capture prefills the limits. A retest adds a row and keeps the failed one; it is its own
+  click. Cut 2: the §4 spec capture prefills the limits.
+  **Part measured (A5-10 b):** the common "Part measured" row of Tool,
+  Manufacturing and Process Engineer is not computed; with `RELEASE_V2` its
+  "passed" names the measuring report (`reference_refusal`: "ok" and a bare
+  tick are refused; the state's `pass_needs_report`). **Cut 2 (A5-10 a):**
+  §10 "internal cycle-time changes: Quality C, first article" has no
+  trigger yet (a `ppap_decision` yes flips the change to customer, so an
+  internal change keeps it only with a "no"); it is listed for cut 2. A retest adds a row and keeps the failed one; it is its own
   department's, in validation (HARD #3), and names what changed since:
   parameter / tool / material / method + a reference. Every measurement or
   tick is recorded by a member of the check's department while the change

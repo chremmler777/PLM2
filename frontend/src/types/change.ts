@@ -1545,6 +1545,8 @@ export interface ValidationCheck {
   /** No longer in the catalog: kept for the record when it was answered,
    *  never owed. Every count and gate skips it (the backend does too). */
   retired?: boolean;
+  /** A5-10 b: a plain 'Part measured' passes with the measuring report. */
+  pass_needs_report?: boolean;
   /** ECR-solid §10: computed from measurements against fixed limits. */
   computed?: boolean;
   unit_short?: string | null;
