@@ -1758,6 +1758,37 @@ class MeetingService:
         return out
 
     @staticmethod
+    async def _route_unrouted_checks(session: AsyncSession, change: ChangeRequest,
+                                     meeting: ChangeMeeting, user: User,
+                                     auto_c: dict[int, list[int]]) -> None:
+        """Spec §3 "Not routed" (SOFT, A2-03): proceed routes each owner
+        department of open check items that the meeting skips (or marks I)
+        as C, so every item leaves with an owner, a due and a task (R18).
+        `auto_c`: department id -> its item ids (unrouted_check_owners).
+        Logged; the lead may pick R or reassign before proceeding."""
+        letters = (dict(meeting.department_rasic) if meeting.department_rasic
+                   else {str(i): "R" for i in meeting.selected_department_ids or []})
+        for d in auto_c:
+            letters[str(d)] = "C"
+        meeting.department_rasic = letters
+        meeting.selected_department_ids = list(dict.fromkeys(
+            [*(meeting.selected_department_ids or []), *auto_c]))
+        names = dict((await session.execute(select(Department.id, Department.name).where(
+            Department.id.in_(list(auto_c))))).all())
+        parts = []
+        for d in auto_c:
+            n = len(auto_c[d])
+            parts.append(f"{names.get(d, f'department {d}')} "
+                         f"({n} check item{'s' if n != 1 else ''})")
+        await ChangeService.append_changelog(
+            session, change, "unrouted_checks_routed",
+            f"Proceed routes {', '.join(parts)} as C: "
+            "they own open check items the meeting did not route", user.id,
+            new_value={"meeting_id": meeting.id,
+                       "department_ids": list(auto_c), "letter": "C"})
+        await session.flush()
+
+    @staticmethod
     def open_checks(change: ChangeRequest) -> list[ChangeConcern]:
         """Open C33 check items (empty with SCOPING_V2 off)."""
         if not cm_switches.on("SCOPING_V2"):
@@ -1846,9 +1877,10 @@ class MeetingService:
         """What holds 'proceed' outside the meeting form (departments, R/A,
         cost carrier and the urgent need-by are answered in the proceed
         dialog): open questions and cancel votes (HARD #2), Quality's PPAP
-        decision and the flip's Sales answer (HARD #7), check items whose
-        owner the meeting (`meeting`, else the latest undecided one) does not
-        route (spec §3 "Not routed", R18), an empty impacted set (HARD #1).
+        decision and the flip's Sales answer (HARD #7), an empty impacted
+        set (HARD #1). Check items whose owner the meeting does not route
+        hold nothing (spec §3 "Not routed" is SOFT, A2-03): proceed routes
+        that department as C (_route_unrouted_checks).
         Each {key, owner, text, n?, due?}, owner and due in
         words, so the PM's scoping row, the change's checklist and the
         refusal name every hold at once, each with its owner. `names`:
@@ -1888,21 +1920,6 @@ class MeetingService:
                         "text": f"The change became a customer change; proceed "
                                 f"waits for {who}: customer notification only, "
                                 "or offer needed?"})
-        unrouted = MeetingService.unrouted_check_owners(change, meeting)
-        if unrouted:
-            missing = set(unrouted) - set(names or {})
-            if missing:
-                names = {**(names or {}), **dict((await session.execute(
-                    select(Department.id, Department.name).where(
-                        Department.id.in_(missing)))).all())}
-            fixes = "; ".join(
-                f"Route {names.get(d, f'department {d}')}: C / R, or reassign "
-                + ", ".join(f"#{i}" for i in ids)
-                for d, ids in unrouted.items())
-            out.append({"key": "unrouted_checks", "n": len(unrouted),
-                        "owner": change.lead_name or "Project Management",
-                        "text": (f"Check items go to departments this meeting does "
-                                 f"not route, so nobody would own them: {fixes}")})
         if not change.impacted_items and change.impact_confirmed_at is None:
             out.append({"key": "impacted_items",
                         "owner": change.lead_name or "Project Management",
@@ -1928,6 +1945,7 @@ class MeetingService:
         # cost carrier, the urgent need-by) and proceed_holds.
         open_concerns = MeetingService.open_concerns(change)
         blocking = MeetingService.open_blocking(change)
+        auto_c: dict[int, list[int]] = {}
         if decision == "proceed":
             # P3 / [R4]: proceed applies the room's carrier, on the decider's
             # rights (a room saved before the rule, or by somebody else)
@@ -1951,6 +1969,15 @@ class MeetingService:
                 problems += await ChangeRoutingService.unroutable_refusals(
                     session, meeting.rasic_map if meeting.department_rasic else
                     {i: "R" for i in meeting.selected_department_ids})
+            # §3 "Not routed" (SOFT, A2-03): a department that owns open
+            # check items but is not routed with a task letter is routed C
+            # (the spec's preselected pick); one that takes no task letter
+            # (Management, retired) is named like any unroutable letter
+            auto_c = MeetingService.unrouted_check_owners(change, meeting)
+            if auto_c:
+                from app.services.change_routing_service import ChangeRoutingService
+                problems += await ChangeRoutingService.unroutable_refusals(
+                    session, {d: "C" for d in auto_c})
             # HARD #2: proceeding over an unanswered objection is the failure
             # this exists to stop (C33: check items go along as conditions);
             # HARD #7 the PPAP decision and the flip's Sales answer; HARD #1
@@ -2008,6 +2035,9 @@ class MeetingService:
         if decision == "reject" or (decision == "needs_info" and not v2):
             for c in open_concerns:
                 c.resolved_by_meeting_id = meeting.id
+        if decision == "proceed" and auto_c:
+            await MeetingService._route_unrouted_checks(
+                session, change, meeting, user, auto_c)
         if decision == "proceed" and v2:
             checks = MeetingService.open_checks(change)
             meeting.go_conditions = [

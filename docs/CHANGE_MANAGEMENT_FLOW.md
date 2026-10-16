@@ -255,12 +255,16 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   answer form, *Make it a check item*), check items collapsed by owner with
   *Promote to question*, and for a department that owns check items but is not
   routed *Route <dept>: C / R* (C first for Process and Quality; writes the
-  meeting's RASIC). **Not routed holds proceed** (L4 review 2, R18): an open
-  check item whose owner (or co-owner) the meeting does not route with a
-  task letter (R/A/S/C; *I* owns nothing) would leave with no owner, due or
-  task, so proceed waits until it is routed or the item reassigned
-  (`MeetingService.unrouted_check_owners`, hold `unrouted_checks`, owner the
-  lead; named in the refusal, the PM's row and the checklist). The button reads *"Proceed: 12 check items go to
+  meeting's RASIC). **Not routed is SOFT** (close-out A2-03; the frozen spec's
+  HARD list is exactly #1-#10, "all else SOFT"): an open check item whose
+  owner (or co-owner) the meeting does not route with a task letter
+  (R/A/S/C; *I* owns nothing) does not hold proceed. The proceed dialog says
+  "Proceed routes <dept> as C" and offers *Route <dept>: C / R*; proceed
+  routes it as C (the spec's preselected pick; changelog
+  `unrouted_checks_routed`), so no item leaves without an owner, due and task
+  (R18). Management or a retired department takes no letter and is refused
+  as any unroutable letter (R25). The checklist lists it as the lead's to-do
+  (`unrouted_checks`, kind `todo`); the PM's row holds nothing for it. The button reads *"Proceed: 12 check items go to
   departments"*. **Go with conditions**: the meeting stores the open check
   items (`change_meetings.go_conditions`) and the changelog says how many.
 - **Check items in assessment**: each belongs to its department (and co-owners)
@@ -282,8 +286,7 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   *"Ready: proceed"* only when nothing holds proceed.
 - **Proceed holds** (`MeetingService.proceed_holds`, L4 review): open
   questions and cancel votes (HARD #2), the PPAP decision and the flip's Sales
-  answer (HARD #7), check items with no routed owner, no impacted parts
-  (HARD #1), each with owner and due. The lead owns an empty impacted set:
+  answer (HARD #7), no impacted parts (HARD #1), each with owner and due. The lead owns an empty impacted set:
   a My Tasks row *Pick the impacted parts* (`pick_impacted`, Impacted tab;
   Quality's PPAP *yes* waits on it and says so), and the cockpit counts every
   one of these holds. The

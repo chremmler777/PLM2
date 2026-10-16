@@ -2678,8 +2678,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'flag.noOwner': { de: 'ohne Fachbereich', en: 'no department' },
   'proceed.promote': { de: 'Zur Frage machen', en: 'Promote to question' },
   'proceed.notRouted': {
-    de: '{d} ist nicht geroutet, hat aber {n} Prüfpunkt(e); Freigabe wartet, bis geroutet oder neu zugeordnet:',
-    en: '{d} is not routed but owns {n} check item(s); proceed waits until it is routed or they are reassigned:',
+    de: '{d} ist nicht geroutet, hat aber {n} Prüfpunkt(e); die Freigabe routet {d} als C, oder wählen:',
+    en: '{d} is not routed but owns {n} check item(s); proceed routes it as C, or pick:',
+  },
+  'proceed.routesC': {
+    de: 'Die Freigabe routet {d} als C: hat {n} offene(n) Prüfpunkt(e).',
+    en: 'Proceed routes {d} as C: it owns {n} open check item(s).',
   },
   'proceed.routeAs': { de: '{d} routen: {l}', en: 'Route {d}: {l}' },
   'proceed.conditionsInfo': {
@@ -2746,13 +2750,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'proceed.hold.ppap_decision': { de: 'PPAP-Entscheidung ({who})', en: 'PPAP decision ({who})' },
   'proceed.hold.customer_flip': { de: 'Kundeninfo oder Angebot? ({who})', en: 'notification or offer? ({who})' },
   'proceed.hold.impacted_items': { de: 'betroffene Teile ({who})', en: 'impacted parts ({who})' },
-  'proceed.hold.unrouted_checks': { de: 'Prüfpunkte ohne Routing ({who})', en: 'routing for check items ({who})' },
   'cockpit.proceedWaits': {
     de: 'Freigabe wartet auf: {x}. Scoping ansehen →',
     en: 'Proceed waits for: {x}. See Scoping →' },
   'next.item.unrouted_checks': {
-    de: 'Prüfpunkte ohne geroutete Abteilung ({n}): Abteilung als C / R routen oder neu zuordnen',
-    en: 'Check items for {n} department(s) not routed: route them as C / R or reassign',
+    de: 'Prüfpunkte für {n} nicht geroutete Abteilung(en): die Freigabe routet sie als C (oder R wählen / neu zuordnen)',
+    en: 'Check items for {n} department(s) not routed: proceed routes them as C (or pick R / reassign)',
   },
   'next.item.customer_flip': { de: 'Sales: Kundeninfo oder Angebot?', en: 'Sales: notification or offer?' },
   // §2 capture: urgent, internal problem and target; §3 urgent proceed

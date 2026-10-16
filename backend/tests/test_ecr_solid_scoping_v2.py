@@ -633,33 +633,40 @@ async def test_confirm_item_for_the_sales_owner_shows_to_all_of_sales(
     assert res.status_code == 200, res.text
 
 
-async def test_check_item_for_an_unrouted_department_holds_proceed(
+async def test_check_item_for_an_unrouted_department_is_routed_c_at_proceed(
         client, admin_auth, seed, session_factory):
-    """§3 "Not routed" (R18): a check item raised for a department the
-    meeting does not route (or routes as I only) would leave proceed with no
-    owner, no due and no task; proceed waits until it is routed as C / R or
-    the item is reassigned. The PM's row names the hold."""
+    """§3 "Not routed" is SOFT (A2-03, frozen spec: HARD is exactly #1-#10):
+    a check item raised for a department the meeting does not route (or
+    routes as I only) does not hold proceed. Proceed routes that department
+    as C (the spec's preselected pick), logged, so the item leaves with an
+    owner, a due and a task (R18). The PM's row holds nothing for it; the
+    checklist lists it as the lead's to-do (pick R or reassign instead)."""
     cid, _ = await _scoping(client, admin_auth, seed, "21")
     _, proc, pe = await _user(client, session_factory, seed, "pe21", "Process Engineer")
     _, qual, _quality = await _user(client, session_factory, seed, "q21", "Quality")
     _, _, pm = await _user(client, session_factory, seed, "pm21", "Project Manager")
     mid = await _meeting(client, admin_auth, cid, {str(proc): "R", str(qual): "I"})
     chk = (await _raise(client, pe, cid, _check(qual, note="Check the gauge"))).json()
-    res = await _decide(client, admin_auth, cid, mid, "proceed")
-    assert res.status_code == 400, res.text
-    assert "Route Quality: C / R, or reassign #" in res.json()["detail"]
     rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
             if t["kind"] == "scoping_wrapup" and t["change_id"] == cid]
-    assert [h["key"] for h in rows[0]["holds"]] == ["unrouted_checks"]
+    assert rows[0]["holds"] == []
     ch = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
-    assert any(i["key"] == "unrouted_checks" for i in ch["next_step"]["items"])
-    # routed as C: proceed goes, the item has its owner and a task
-    res = await client.patch(f"/api/v1/changes/{cid}/meetings/{mid}", json={
-        "department_rasic": {str(proc): "R", str(qual): "C"}}, headers=admin_auth)
-    assert res.status_code == 200, res.text
+    item = next(i for i in ch["next_step"]["items"] if i["key"] == "unrouted_checks")
+    assert item["kind"] == "todo"
     res = await _decide(client, admin_auth, cid, mid, "proceed")
     assert res.status_code == 200, res.text
-    assert [c["id"] for c in res.json()["go_conditions"]] == [chk["id"]]
+    body = res.json()
+    assert body["department_rasic"][str(qual)] == "C"
+    assert [c["id"] for c in body["go_conditions"]] == [chk["id"]]
+    from app.models.change import ChangeAssessment, ChangeChangelog
+    async with session_factory() as s:
+        depts = {a.department_id for a in (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalars()}
+        log = (await s.execute(select(ChangeChangelog.action_description).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "unrouted_checks_routed"))).scalars().all()
+    assert qual in depts
+    assert log and "Quality" in log[0] and "as C" in log[0]
 
 
 async def test_unrouted_check_item_no_hold_with_switch_off(

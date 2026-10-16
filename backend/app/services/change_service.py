@@ -1542,10 +1542,13 @@ class ChangeService:
             for key in ("ppap_decision", "customer_flip"):
                 if key in holds:
                     add(key, "hard", who=holds[key]["owner"])
-            # §3 "Not routed": check items whose owner the meeting skips
-            if "unrouted_checks" in holds:
-                add("unrouted_checks", "hard", n=holds["unrouted_checks"]["n"],
-                    who=holds["unrouted_checks"]["owner"])
+            # §3 "Not routed" (SOFT, A2-03): check items whose owner the
+            # meeting skips; proceed routes that department as C, the lead
+            # may pick R or reassign first (no override: nothing is refused)
+            unrouted = MeetingService.unrouted_check_owners(change)
+            if unrouted:
+                add("unrouted_checks", "todo", n=len(unrouted),
+                    who=change.lead_name or "Project Management")
             # HARD #2: questions and cancel votes; C33 check items go along
             concerns = MeetingService.open_blocking(change)
             if concerns:

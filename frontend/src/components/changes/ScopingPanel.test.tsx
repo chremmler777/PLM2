@@ -878,6 +878,24 @@ describe('ScopingPanel §16 meeting record', () => {
     await waitFor(() => expect(changesApi.decideMeeting).toHaveBeenCalledWith(7, 21, 'proceed', undefined))
   })
 
+  it('A2-03: a check item for an unrouted department does not hold proceed; proceed says it routes it C', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({
+      cost_carrier: 'customer', selected_department_ids: [2], department_rasic: { '2': 'R' } })] as never)
+    vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 43, change_id: 7, kind: 'needs_info', flag_type: 'check', check_what: 'tool',
+        note: 'Slider wear', raised_by: 9, raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z',
+        is_open: true, department_id: 4, owner_department_names: ['Tool Engineer'] },
+    ] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true, scoping_v2: true })} />))
+    fireEvent.click(await screen.findByTestId('meeting-proceed-21'))
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(false)
+    expect(screen.getByTestId('confirm-in_assessment').textContent).toContain(
+      t('proceed.routesC').replace('{d}', 'Tool Engineer').replace('{n}', '1'))
+    expect(screen.getByTestId('proceed-route-4-R')).toBeTruthy()
+  })
+
   it("C33: 'Not yet' with open questions decides without asking for a new reason", async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'customer' })] as never)
     vi.mocked(changesApi.decideMeeting).mockResolvedValue({} as never)

@@ -625,21 +625,22 @@ export default function ScopingPanel(
     const assessors = Object.values(rasic).filter((l) => l === 'R' || l === 'A').length
     const c = carrierOfMeeting(m)
     const flipped = c !== '' && carrierOf(change.customer_relevant) !== '' && c !== carrierOf(change.customer_relevant)
-    // §3 "Not routed": check items whose owner this meeting skips hold
-    // proceed until routed (the fix list's Route buttons) or reassigned
+    // §3 "Not routed" (SOFT, A2-03): check items whose owner this meeting
+    // skips do not hold proceed; proceed routes that department as C (the
+    // fix list's Route buttons pick R or C first)
     const live = meetings.find((x: ChangeMeeting) => x.id === m.id) ?? m
     const unrouted = v2 ? [...unroutedCheckOwners(live, concerns).entries()].map(([id, n]) =>
-      t('proceed.notRouted').replace('{d}', departments.find((d) => d.id === id)?.name ?? `#${id}`)
-        .replace('{n}', String(n)).replace(/:$/, '')) : []
+      t('proceed.routesC').replace('{d}', departments.find((d) => d.id === id)?.name ?? `#${id}`)
+        .replace('{n}', String(n))) : []
     // Open flags hold the step: the same dialog becomes the warning, listing
     // each flag and how it is cleared, and its confirm stays disabled.
-    if (openFlags.length > 0 || hard7.length > 0 || unrouted.length > 0) {
+    if (openFlags.length > 0 || hard7.length > 0) {
       return {
         to: 'in_assessment',
         title: t('meeting.proceedBlockedTitle'),
         consequence: !v2 ? t('meeting.proceedBlocked')
           : openFlags.length > 0 ? t('proceed.questionsOpen') : t('proceed.heldBelow'),
-        open: [...openFlags, ...hard7, ...unrouted],
+        open: [...openFlags, ...hard7],
         holdWhileOpen: true,
         confirmLabel: v2 && openChecks.length > 0
           ? t('proceed.go').replace('{n}', String(openChecks.length))
@@ -656,6 +657,7 @@ export default function ScopingPanel(
         ...(assessors === 0 && m.department_rasic ? [t('meeting.proceedNoAssessor')] : []),
         ...(flipped ? [t('meeting.costCarrierFlip')
           .replace('{from}', carrierName(carrierOf(change.customer_relevant))).replace('{to}', carrierName(c))] : []),
+        ...unrouted,
       ],
       allClear: undefined,
       info: [t('meeting.proceedCarrier').replace('{x}', carrierName(c)),
