@@ -188,3 +188,35 @@ async def test_internal_estimate_low_without_a_lead_goes_to_pm(
     assert {cc["lead_id"], pm2_id} <= told and cc["dale_id"] not in told
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm2)).json()
     assert [t for t in tasks if t["kind"] == "estimate_low"]
+
+
+async def test_a_pm_edit_above_the_approved_total_owes_the_approval_again(
+        client, cc, seed, session_factory):
+    """A3-04: PM/admin may write positions at any time; an edit that lifts
+    the total above the approved amount withdraws the approval like a
+    finalize does: the approver gets the notice and the My Tasks row back
+    (no dead end behind HARD #8)."""
+    pm2_id, _, pm2 = await _user(client, session_factory, seed, "pm-a304", "Project Manager")
+    await _set(session_factory, cc["cid"], customer_relevant=False)
+    pid = await _position(session_factory, cc["cid"], cc["shop"], cc["dale_id"],
+                          basis_ref=REF)
+    await _finalized(session_factory, cc["cid"], cc["shop"])
+    assert (await _approve(client, cc["cid"], cc["lead"])).status_code == 200
+    # negative: an edit that keeps the total keeps the approval
+    res = await client.put(_u(cc["cid"], f"/costing/positions/{pid}"),
+                           json={"notes": "FZ figure"}, headers=pm2)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cc["cid"])).internal_approved_at is not None
+    res = await client.put(_u(cc["cid"], f"/costing/positions/{pid}"),
+                           json={"est_cost": 7000.0}, headers=pm2)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        assert (await s.get(ChangeRequest, cc["cid"])).internal_approved_at is None
+        told = (await s.execute(select(Notification.user_id).where(
+            Notification.subject_key.like(f"internal_reapprove:{cc['cid']}:%")))
+        ).scalars().all()
+    assert told == [cc["lead_id"]]
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=cc["lead"])).json()
+    assert [t for t in tasks if t["kind"] == "internal_approval"
+            and t["change_id"] == cc["cid"]]

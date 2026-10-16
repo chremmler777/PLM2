@@ -2615,6 +2615,7 @@ async def put_cost_lines(
             db, change, a, [l.model_dump() for l in body.lines], current_user.id)
     except CostError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     return lines
 
@@ -2624,6 +2625,16 @@ async def put_cost_lines(
 # mirror the cost grid — the department writes its own rows while the change is
 # in costing, PM and admins write anyone's, and the people accountable for the
 # change as a whole read everything.
+
+async def _after_cost_write(db: AsyncSession, change, current_user: User) -> None:
+    """A3-04 (HARD #8): PM and admin may write costs at any time; a write
+    that lifts an internal change's total above the approved amount
+    withdraws the approval, as a finalize does, so the approver is told and
+    owes it again (never a silent dead end)."""
+    await db.flush()
+    await ChangeService.withdraw_outgrown_internal_approval(
+        db, change, current_user.id)
+
 
 async def _costing_change(db: AsyncSession, change_id: int, current_user: User):
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
@@ -2682,6 +2693,7 @@ async def create_costing_position(
             db, change, body.model_dump(), current_user)
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     await db.refresh(position)
     return (await CostingPositionService.serialize(db, [position]))[0]
@@ -2708,6 +2720,7 @@ async def update_costing_position(
             current_user)
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     await db.refresh(position)
     return (await CostingPositionService.serialize(db, [position]))[0]
@@ -2729,6 +2742,7 @@ async def delete_costing_position(
     await _require_costing_write(db, change, position.department_id, current_user)
     paths = await CostingPositionService.delete_position(
         db, change, position, current_user)
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     _unlink_all(paths)
 
@@ -2754,6 +2768,7 @@ async def create_costing_offer(
             db, change, position, body.model_dump(), current_user)
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     await db.refresh(position)
     return _offer_row(
@@ -2785,6 +2800,7 @@ async def check_quote_against_estimate(
         raise HTTPException(status_code=403, detail=str(e))
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     await db.refresh(position)
     return (await CostingPositionService.serialize(db, [position]))[0]
@@ -2812,6 +2828,7 @@ async def update_costing_offer(
             db, change, offer, body.model_dump(exclude_unset=True), current_user)
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     await db.refresh(position)
     return _offer_row(
@@ -2854,6 +2871,7 @@ async def choose_costing_offer(
             db, change, offer, body.reason, current_user)
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     await db.refresh(position)
     return _offer_row(
@@ -2878,6 +2896,7 @@ async def delete_costing_offer(
     await _require_costing_write(db, change, position.department_id, current_user)
     paths = await CostingPositionService.delete_offer(
         db, change, offer, current_user)
+    await _after_cost_write(db, change, current_user)
     await db.commit()
     _unlink_all(paths)
 

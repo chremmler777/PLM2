@@ -7457,7 +7457,7 @@ class ChangeService:
             subject_key=f"internal_reapprove:{change.id}:{int(old_at.timestamp())}",
             title=f"Costs rose after your approval: approve again: "
                   f"{change.change_number}"[:255],
-            body="A department finalized costs above the approved total.",
+            body="Costs rose above the approved total.",
             link=f"/changes/{change.id}?tab=costing")
         return True
 
