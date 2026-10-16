@@ -559,6 +559,24 @@ describe('pop-out detail window from the project page', () => {
       expect(await screen.findByText('project-selector')).toBeTruthy()
     })
 
+    it('the header ← says "Items" in the worksheet and returns to the project', async () => {
+      mountFromList()
+      expect((await screen.findByTestId('project-back')).textContent).toContain('Projects')
+      fireEvent.click(await screen.findByTestId('show-worksheet'))
+      await screen.findByTestId('ws-close')
+      const back = screen.getByTestId('project-back')
+      expect(back.textContent).toContain('Items')
+      fireEvent.click(back)
+      expect(await screen.findByTestId('items-pane')).toBeTruthy()
+      expect(screen.queryByText('project-selector')).toBeNull()
+    })
+
+    it('the header ← on the item list leaves to the project list', async () => {
+      mountFromList()
+      fireEvent.click(await screen.findByTestId('project-back'))
+      expect(await screen.findByText('project-selector')).toBeTruthy()
+    })
+
     it('"Back to list" on a worksheet deep link stays in the project', async () => {
       mount('/projects/2?view=worksheet')
       fireEvent.click(await screen.findByTestId('ws-close'))

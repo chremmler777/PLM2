@@ -11,10 +11,12 @@ import { ProjectTeamCard } from './ProjectTeamCard';
 import { ProjectMailListCard } from './ProjectMailListCard';
 import { CUSTOMER_NAMING_LABELS, type Project } from './projectTypes';
 
-export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: {
+export default function ProjectHeaderBar({ project, onStartChange, onAddPart, back }: {
   project: Project;
   onStartChange(): void;
   onAddPart(): void;
+  /** One level up inside the project (e.g. worksheet → items). Without it, ← leaves to the project list. */
+  back?: { label: string; onClick(): void };
 }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -45,12 +47,13 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: 
       className="flex-shrink-0 h-12 px-4 flex items-center gap-3 border-b border-slate-700 bg-slate-900"
     >
       <button
-        aria-label="Back to projects"
-        title="Back to projects"
-        onClick={() => navigate('/projects')}
-        className="text-slate-400 hover:text-slate-200 text-sm"
+        data-testid="project-back"
+        aria-label={back ? `Back to ${back.label.toLowerCase()}` : 'Back to projects'}
+        title={back ? `Back to ${back.label.toLowerCase()}` : 'Back to projects'}
+        onClick={back ? back.onClick : () => navigate('/projects')}
+        className="px-2 py-1 rounded text-slate-300 hover:text-slate-100 hover:bg-slate-700 text-sm whitespace-nowrap"
       >
-        ←
+        ← {back ? back.label : 'Projects'}
       </button>
       <h1 className="min-w-0 truncate text-sm text-slate-100">
         <span className="font-mono font-semibold">{project.code}</span>{' '}

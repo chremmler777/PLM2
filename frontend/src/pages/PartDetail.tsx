@@ -224,7 +224,7 @@ export default function PartDetail() {
           thumbnail_url: part.thumbnail_url ?? null,
         }}
         onOpenPart={(id) => navigate(`/parts/${id}`)}
-        onBack={() => navigate('/dashboard')}
+        onBack={() => navigate(part.project_id ? `/projects/${part.project_id}?part=${part.id}` : '/dashboard')}
         nextPhase={isAdmin ? TOOL_NEXT_PHASE[part.lifecycle_phase] ?? null : null}
         onMarkPhase={(next) => phase.mutate(next)}
         phasePending={phase.isPending}
@@ -258,8 +258,8 @@ export default function PartDetail() {
     <div className="min-h-screen bg-slate-900 p-8">
       <div className="max-w-5xl mx-auto">
         <div className="mb-8">
-          <button onClick={() => navigate('/dashboard')}
-            className="mb-4 px-3 py-1 bg-slate-700 text-slate-100 rounded hover:bg-slate-600 text-sm">← Back</button>
+          <button onClick={() => navigate(part.project_id ? `/projects/${part.project_id}?part=${part.id}` : '/dashboard')}
+            className="mb-4 px-3 py-1 bg-slate-700 text-slate-100 rounded hover:bg-slate-600 text-sm">← {part.project_id ? 'Back to project' : 'Back'}</button>
           <div className="flex justify-between items-start gap-4">
             <div>
               <h1 data-field-key="part.part_number" className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}{marker('part.part_number', 'KTX no.')}</h1>

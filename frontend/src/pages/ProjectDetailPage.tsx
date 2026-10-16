@@ -195,6 +195,7 @@ function ProjectDetailView() {
         project={project}
         onStartChange={() => setShowStartChange(true)}
         onAddPart={() => setShowAddModal(true)}
+        back={showWorksheet ? { label: 'Items', onClick: () => setWorksheet(false) } : undefined}
       />
       <ProjectStatusNav projectId={id} />
 
