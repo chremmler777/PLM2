@@ -19,7 +19,7 @@ from app.models.notification import Notification
 from app.models.workflow import Department, UserDepartment
 from app.services import cm_switches
 from tests.conftest import ENGINEER_PASSWORD, login
-from tests.test_validation_checks import _auth, _state, _url, val  # noqa: F401
+from tests.test_validation_checks import _auth, _confirm_limits, _state, _url, val  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -164,6 +164,9 @@ async def test_fix_owner_works_the_check_department_retests_and_it_closes(client
                         "measuring_ref": REF, "what_changed_kind": "parameter",
                         "what_changed_ref": "holding pressure -5 bar, PS-114 rev C"}})
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+    # A5-02: the measurer's limits count once Quality confirms them
+    assert (await client.get(_iurl(fix, f"/{issue['id']}"), headers=quality)).json()["status"] != "closed"
+    await _confirm_limits(client, fix, res.json()["id"])
     assert (await client.get(_iurl(fix, f"/{issue['id']}"), headers=quality)).json()["status"] == "closed"
     assert (await _state(client, tool, fix))["release_line"] is None
 
@@ -399,6 +402,7 @@ async def test_concession_first_keeps_the_fix_task_and_the_fix_closes_it(client,
                         "measuring_ref": REF, "what_changed_kind": "parameter",
                         "what_changed_ref": "holding pressure -5 bar, PS-114 rev C"}})
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+    await _confirm_limits(client, fix, res.json()["id"])           # A5-02
     assert (await client.get(_iurl(fix, f"/{iid}"), headers=quality)).json()["status"] == "closed"
 
 

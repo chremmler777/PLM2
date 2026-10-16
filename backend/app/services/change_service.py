@@ -4110,12 +4110,26 @@ class ChangeService:
                                  if n in dept_by_name}
                 latest = feedback.get(c.id, {})
                 revision = int(c.plan_revision or 0)
-                for did in sorted(required & dep_ids):
+                # A5-03 (R37): a required department with no real member
+                # here is the lead's to confirm (no lead: Project Management)
+                fallback: set = set()
+                if cm_switches.on("RELEASE_V2") and (
+                        holds_lead(c, user) or (c.lead_id is None and is_pm_member)):
+                    from app.services.change_plan_service import ChangePlanService
+                    fallback = await ChangePlanService.unstaffed_feedback_ids(
+                        db, c, required - dep_ids)
+                    if fallback:
+                        from app.services.change_people import (
+                            coordinator_name, no_member_words,
+                        )
+                        coordinator = await coordinator_name(db, c)
+                        dept_names = {i: n for n, i in dept_by_name.items()}
+                for did in sorted((required & dep_ids) | fallback):
                     r = latest.get(did)
                     stale = bool(r is not None and r.plan_revision < revision)
                     if r is not None and r.verdict == "confirmed" and not stale:
                         continue
-                    tasks.append({
+                    row = {
                         **await _base(c), "kind": "plan_feedback",
                         "department_id": did,
                         "stale": stale, "target_tab": "timing",
@@ -4123,7 +4137,12 @@ class ChangeService:
                         # owed since the plan last changed (a plan edit
                         # bumps plan_revision on the change row)
                         "since": c.updated_at,
-                    })
+                    }
+                    if did in fallback:
+                        row["hint"] = (no_member_words(dept_names.get(did), coordinator)
+                                       + ": confirm the detailed plan for it")
+                        row["role_department_id"] = dept_by_name.get("Project Manager")
+                    tasks.append(row)
 
             # Stage 10: open release-checklist items, per owner department.
             runs_release = c.id in release_orgs
@@ -4991,6 +5010,41 @@ class ChangeService:
                         out.append({**await base(c), "kind": "validation_check",
                                     "department_id": did, "open_count": len(open_keys),
                                     "target_tab": "release"})
+        if validating and cm_switches.on("RELEASE_V2") \
+                and user.effective_role != "admin":
+            # A5-02: a PASS against the measurer's own limits waits on
+            # Quality's confirm (no Quality member here: the lead, else PM)
+            from app.models.change_validation import ValidationCheck
+            from app.services import validation_checklist as catalog
+            from app.services.validation_service import ValidationService
+            pend = (await db.execute(select(ValidationCheck).where(
+                ValidationCheck.change_id.in_([c.id for c in validating]),
+                ValidationCheck.status == "passed",
+                ValidationCheck.lower_limit.is_not(None),
+                ValidationCheck.limits_confirmed_at.is_(None)))).scalars().all()
+            if pend:
+                names = dict((await db.execute(select(Department.id, Department.name))).all())
+                setters = await ValidationService._names(db, [r.limits_set_by for r in pend])
+                by_change = {c.id: c for c in validating}
+                for cid in sorted({r.change_id for r in pend}):
+                    c = by_change[cid]
+                    staffed, ids = await ValidationService.limits_confirmers(db, c)
+                    if user.id not in ids:
+                        continue
+                    for r in pend:
+                        if r.change_id != cid or r.limits_set_by == user.id:
+                            continue
+                        dept = names.get(r.department_id)
+                        out.append({
+                            **await base(c), "kind": "validation_check",
+                            "department_id": r.department_id, "needs_you": True,
+                            "target_tab": "release",
+                            "reason": (
+                                f"Confirm the limits of {catalog.label_for(r.check_key, dept)} "
+                                f"({dept}): {float(r.lower_limit):g}-{float(r.upper_limit):g}"
+                                f" set by {setters.get(r.limits_set_by) or 'the measurer'}"
+                                + ("" if staffed else "; Quality has no member here: you confirm")),
+                            "since": r.checked_at})
 
         out += await ChangeService.advance_tasks(db, user, open_changes, base,
                                                  is_pm_member=is_pm_member)
@@ -5459,9 +5513,13 @@ class ChangeService:
 
         if change.status == "approved" and change.timing_validated_at is None:
             if await ChangePlanService.tasks(session, change, "detailed"):
-                state = await ChangePlanService.feedback_state(session, change)
+                state = await ChangePlanService.feedback_state(session, change, user)
                 for row in state["required"]:
-                    if row["department_id"] not in dept_ids:
+                    from app.services.change_people import holds_lead as _hl
+                    if row["department_id"] not in dept_ids and not (
+                            row.get("no_member") and row.get("can_answer")
+                            and user.effective_role != "admin"
+                            and (_hl(change, user) or change.lead_id is None)):
                         continue
                     if row["verdict"] == "confirmed" and not row["stale"]:
                         continue

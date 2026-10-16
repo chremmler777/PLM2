@@ -1423,6 +1423,14 @@ validated, every responsible team must confirm the detailed plan" when
 `change.timing_validated_at is None`. It applies only on the hop out of
 `approved` itself, not when resuming from `on_hold` or looping back from
 `in_validation`, both of which re-enter a plan that was already live.
+With `RELEASE_V2` a required department with no real member here
+(`change_people.staffed_department_ids`, e.g. Scheduling or Packaging in a
+small plant) is confirmed by the lead or a Project Management member
+(A5-03, the R37 fallback of release rows and validation checks); the task
+goes to the lead (no lead: Project Management) and the row reads
+"Scheduling has no member here: <lead name|Project Management>
+coordinates" (`change_people.no_member_words`). A member of another
+department, or PM for a staffed one, is refused.
 
 ### Deviations after baseline (2026-09-25)
 
@@ -1658,7 +1666,17 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   drawing, customer spec, process sheet + reference); a retest never moves
   them ("a different spec is a concession, not a retest"). PASS only if both
   min and max lie inside; the verdict is computed, a posted status is
-  ignored. A retest adds a row and keeps the failed one; it is its own
+  ignored. **Who sets the limits (A5-02, migration 142, `RELEASE_V2`):** the
+  department being judged does not set its own pass criterion alone. The
+  limits store their setter ("limits set by <measurer>"); a FAIL counts at
+  once, a PASS counts only once a Quality member (never the setter, never
+  a real admin alone; no Quality member here: the lead, else PM) clicks
+  "Confirm limits" or corrects them with a source reference (the latest
+  measurement is judged again against the corrected limits). Until then the
+  release reads "still open: <check> (limits set by X: Quality confirms)",
+  a linked issue stays open, and Quality has a "Needs you" row. In-flight
+  limits got their setter from the first measurement and wait on the same
+  click. Cut 2: the §4 spec capture prefills the limits. A retest adds a row and keeps the failed one; it is its own
   department's, in validation (HARD #3), and names what changed since:
   parameter / tool / material / method + a reference. Every measurement or
   tick is recorded by a member of the check's department while the change

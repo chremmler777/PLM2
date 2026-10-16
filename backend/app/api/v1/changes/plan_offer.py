@@ -551,7 +551,7 @@ async def get_plan_feedback(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
-    return await ChangePlanService.feedback_state(db, change)
+    return await ChangePlanService.feedback_state(db, change, current_user)
 
 
 @router.post("/{change_id}/plan/feedback")
@@ -565,7 +565,7 @@ async def post_plan_feedback(
             db, change, body.department_id, body.verdict, body.note, current_user)
     except _ERRORS as e:
         raise _http(e)
-    out = await ChangePlanService.feedback_state(db, change)
+    out = await ChangePlanService.feedback_state(db, change, current_user)
     await db.commit()
     return out
 

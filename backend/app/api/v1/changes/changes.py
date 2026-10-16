@@ -63,7 +63,7 @@ from app.schemas.change import (
     ImplementationReportCreate, ImplementationReportResponse,
     ImplementationEscalationCreate, ImplementationEscalationResolveIn,
     ImplementationEscalationResponse, ImplementationStateResponse,
-    ValidationCheckIn, ValidationCheckResponse, ValidationStateResponse,
+    ValidationCheckIn, ValidationCheckResponse, ValidationLimitsIn, ValidationStateResponse,
     WeightDeltaAckIn,
 )
 
@@ -4059,6 +4059,15 @@ async def validation_state(
         db, change, [d["department_id"] for d in state["departments"]], current_user)
     for d in state["departments"]:
         d["can_write"] = rights.get(d["department_id"], False)
+    # A5-02: the confirm button follows the backend rule
+    pending = [c for d in state["departments"] for c in d["checks"]
+               if c.get("limits_pending") and c.get("check_id")]
+    if pending:
+        from app.models.change_validation import ValidationCheck
+        for c in pending:
+            row = await db.get(ValidationCheck, c["check_id"])
+            c["can_confirm_limits"] = await ValidationService.limits_confirm_refusal(
+                db, change, row, current_user) is None
     await db.commit()
     # The acknowledgement note is Sales' word on the quote update (often an
     # amount): the cost roles read it, everybody else sees that it happened.
@@ -4100,6 +4109,30 @@ async def record_validation_check(
     try:
         row = await ValidationService.record_check(
             db, change, body.model_dump(), current_user)
+    except VError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.post("/{change_id}/validation/checks/{check_id}/limits",
+             response_model=ValidationCheckResponse)
+async def confirm_validation_limits(
+    change_id: int, check_id: int, body: ValidationLimitsIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A5-02: Quality confirms (or corrects) the limits a measurer set with
+    the first measurement; a PASS against them counts from then on."""
+    from app.services.validation_service import (
+        ValidationError as VError, ValidationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    try:
+        row = await ValidationService.confirm_limits(
+            db, change, check_id, body.model_dump(), current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except VError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

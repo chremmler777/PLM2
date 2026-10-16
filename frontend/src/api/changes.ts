@@ -603,6 +603,12 @@ export const changesApi = {
     measurement?: ValidationMeasurementIn;
   }) => client.post(`/v1/changes/${id}/validation/checks`, body).then((r) => r.data),
 
+  /** A5-02: Quality confirms (empty body) or corrects the limits a
+   *  measurer set with the first measurement. */
+  confirmValidationLimits: (id: number, checkId: number, body: {
+    lower_limit?: number; upper_limit?: number; spec_source?: string
+  } = {}) => client.post(`/v1/changes/${id}/validation/checks/${checkId}/limits`, body).then((r) => r.data),
+
   // Sales confirming the validated weight has been taken into the quote. The
   // note is optional: acknowledging is the act, explaining it is a courtesy.
   acknowledgeWeightDelta: (id: number, note?: string) =>

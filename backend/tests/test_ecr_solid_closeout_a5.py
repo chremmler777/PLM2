@@ -109,3 +109,74 @@ async def test_a5_01_negative_follow_up_on_an_open_issue_is_qualitys(
     assert "validation_issue_route" not in await _kinds(client, quality, fix["change_id"])
     res = await client.post(_iurl(fix, f"/{iid}/route"), headers=quality, json=body)
     assert res.status_code == 200 and res.json()["status"] == "transferred", res.text
+
+
+# --- A5-02 the measurer's own limits: a PASS counts after Quality confirms ----
+
+SPEC = {"lower_limit": 480.0, "upper_limit": 530.0,
+        "spec_source": "drawing 886.197 D, weight 505 g +/-25"}
+
+
+async def _weigh(client, fix, lo=505.0, hi=512.0, spec=SPEC):
+    tool = await _auth(client, fix, "Tool Engineer")
+    res = await client.post(_url(fix, "/checks"), headers=tool, json={
+        "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
+        "measurement": {"sample_size": 5, "min_value": lo, "max_value": hi,
+                        "measuring_ref": "scale WG-0042, report MR-2026-118", **spec}})
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+async def _weight_row(client, fix, auth):
+    state = (await client.get(_url(fix, "/state"), headers=auth)).json()
+    dept = next(d for d in state["departments"]
+                if d["department_id"] == fix["dept"]["Tool Engineer"])
+    return state, next(c for c in dept["checks"] if c["check_key"] == "weight")
+
+
+async def test_a5_02_negative_own_limits_do_not_make_a_pass_count(
+        client, fix, admin_auth):
+    row = await _weigh(client, fix)
+    assert row["status"] == "passed"
+    tool = await _auth(client, fix, "Tool Engineer")
+    state, chk = await _weight_row(client, fix, tool)
+    assert chk["limits_pending"] is True and chk["limits_set_by_name"] == "Tool Engineer"
+    assert chk["can_confirm_limits"] is False
+    assert "limits set by Tool Engineer: Quality confirms" in state["release_blocker"]
+    url = _url(fix, f"/checks/{chk['check_id']}/limits")
+    # NEGATIVE: the setter, an admin alone and PM (Quality is staffed) cannot
+    for auth in (tool, admin_auth, await _auth(client, fix, "Project Manager")):
+        res = await client.post(url, headers=auth, json={})
+        assert res.status_code == 403, res.text
+    quality = await _who(client, fix, "Quality")
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=quality)).json()
+    row = next(t for t in tasks if t["change_id"] == fix["change_id"]
+               and t["kind"] == "validation_check")
+    assert row["needs_you"] and "Confirm the limits of" in row["reason"]
+    assert "set by Tool Engineer" in row["reason"]
+    _, chk = await _weight_row(client, fix, quality)
+    assert chk["can_confirm_limits"] is True
+    res = await client.post(url, headers=quality, json={})
+    assert res.status_code == 200 and res.json()["status"] == "passed", res.text
+    state, chk = await _weight_row(client, fix, quality)
+    assert chk["limits_pending"] is False and chk["limits_confirmed_by_name"] == "Quality"
+    assert "limits set by" not in (state["release_blocker"] or "")
+    # once confirmed, there is nothing left to confirm
+    assert (await client.post(url, headers=quality, json={})).status_code == 400
+
+
+async def test_a5_02_quality_corrects_wide_limits_and_the_fail_counts(client, fix):
+    await _weigh(client, fix, lo=505.0, hi=528.0)
+    quality = await _who(client, fix, "Quality")
+    _, chk = await _weight_row(client, fix, quality)
+    url = _url(fix, f"/checks/{chk['check_id']}/limits")
+    res = await client.post(url, headers=quality, json={
+        "lower_limit": 495, "upper_limit": 515, "spec_source": "ok"})
+    assert res.status_code == 400                                 # NEGATIVE
+    res = await client.post(url, headers=quality, json={
+        "lower_limit": 495, "upper_limit": 515,
+        "spec_source": "drawing 886.197 D, weight 505 g +/-10"})
+    assert res.status_code == 200 and res.json()["status"] == "failed", res.text
+    issue = await _issue(client, fix)                              # HARD #3 holds
+    assert issue["check_key"] == "weight"
+

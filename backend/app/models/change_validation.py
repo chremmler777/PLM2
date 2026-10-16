@@ -70,6 +70,21 @@ class ValidationCheck(Base):
     upper_limit: Mapped[float | None] = mapped_column(
         Numeric(12, 3, asdecimal=False), nullable=True)
     spec_source: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # A5-02 (migration 142): the measurer's own limits make a PASS count
+    # only once Quality (never the setter) confirms them; a FAIL counts at
+    # once. Quality correcting the limits sets and confirms them.
+    limits_set_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    limits_confirmed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    limits_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
+
+    @property
+    def limits_pending(self) -> bool:
+        """A PASS against limits nobody but the setter has confirmed."""
+        return (self.status == "passed" and self.lower_limit is not None
+                and self.limits_confirmed_at is None)
 
     @property
     def is_answered(self) -> bool:

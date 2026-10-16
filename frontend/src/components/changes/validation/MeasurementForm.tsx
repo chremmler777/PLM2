@@ -59,6 +59,7 @@ export function measurementBody(check: Pick<ValidationCheck, 'lower_limit' | 'up
 
 export function MeasurementHistory({ check, id }: { check: ValidationCheck; id: string }) {
   const rows = check.measurements ?? []
+  const who = check.limits_set_by_name ?? '-'
   return (
     <div className="space-y-0.5">
       {check.lower_limit != null && check.upper_limit != null && (
@@ -66,6 +67,13 @@ export function MeasurementHistory({ check, id }: { check: ValidationCheck; id: 
           {t('validation.limitsFixed').replace('{lo}', String(check.lower_limit))
             .replace('{hi}', String(check.upper_limit)).replace('{u}', check.unit_short ?? '')
             .replace('{src}', check.spec_source ?? '-')}
+          {check.limits_set_by_name && `, ${t('validation.limitsSetBy').replace('{who}', who)}`}
+          {check.limits_confirmed_by_name && `, ${t('validation.limitsConfirmedBy').replace('{who}', check.limits_confirmed_by_name)}`}
+        </p>
+      )}
+      {check.limits_pending && (
+        <p data-testid={`validation-limits-pending-${id}`} className="text-[11px] text-amber-300">
+          {t('validation.limitsPending').replace('{who}', who)}
         </p>
       )}
       {rows.length > 0 && (
@@ -174,6 +182,58 @@ export default function MeasurementForm({ changeId, deptId, check, id, prefillNo
           <span data-testid={`validation-measure-why-${id}`} className="text-[11px] text-slate-400">{why}</span>
         )}
       </div>
+    </div>
+  )
+}
+
+/** A5-02: Quality's one click on the measurer's limits, or a correction
+ *  (the latest measurement is judged against the corrected limits). Shown
+ *  only when the backend says this viewer may (can_confirm_limits). */
+export function LimitsConfirm({ changeId, check, id }: { changeId: number; check: ValidationCheck; id: string }) {
+  const qc = useQueryClient()
+  const [correcting, setCorrecting] = useState(false)
+  const [lo, setLo] = useState('')
+  const [hi, setHi] = useState('')
+  const [src, setSrc] = useState('')
+  const loR = readNumberInput(lo)
+  const hiR = readNumberInput(hi)
+  const correctionOk = loR.value !== null && hiR.value !== null && loR.value < hiR.value && refOk(src)
+  const save = useMutation({
+    mutationFn: (corrected: boolean) => changesApi.confirmValidationLimits(changeId, check.check_id!,
+      corrected ? { lower_limit: loR.value!, upper_limit: hiR.value!, spec_source: src.trim() } : {}),
+    onSuccess: () => {
+      setCorrecting(false)
+      qc.invalidateQueries({ queryKey: ['change', changeId, 'validation'] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
+      qc.invalidateQueries({ queryKey: validationIssuesKey(changeId) })
+    },
+    onError: (e: unknown) => toastError(e, 'Could not confirm the limits'),
+  })
+  if (!check.can_confirm_limits || check.check_id == null) return null
+  const u = check.unit_short ?? ''
+  return (
+    <div data-testid={`validation-limits-confirm-${id}`} className="flex flex-wrap items-center gap-1.5">
+      <button type="button" data-testid={`validation-limits-ok-${id}`} disabled={save.isPending}
+        onClick={() => save.mutate(false)} className={btnSm.primary}>
+        {t('validation.limitsConfirm')}
+      </button>
+      {!correcting ? (
+        <button type="button" data-testid={`validation-limits-correct-${id}`} onClick={() => setCorrecting(true)}
+          className={btnSm.ghost}>{t('validation.limitsCorrect')}</button>
+      ) : (
+        <>
+          <input aria-label={`${t('validation.lower')} (${u})`} placeholder={`${t('validation.lower')} (${u})`} inputMode="decimal"
+            data-testid={`validation-limits-lower-${id}`} value={lo} onChange={(e) => setLo(e.target.value)} className={`w-24 ${fieldCls}`} />
+          <input aria-label={`${t('validation.upper')} (${u})`} placeholder={`${t('validation.upper')} (${u})`} inputMode="decimal"
+            data-testid={`validation-limits-upper-${id}`} value={hi} onChange={(e) => setHi(e.target.value)} className={`w-24 ${fieldCls}`} />
+          <input aria-label={t('validation.specSource')} placeholder={t('validation.specSource')}
+            data-testid={`validation-limits-source-${id}`} value={src} onChange={(e) => setSrc(e.target.value)}
+            className={`flex-1 min-w-[12rem] ${fieldCls}`} />
+          <button type="button" data-testid={`validation-limits-save-${id}`} disabled={!correctionOk || save.isPending}
+            onClick={() => save.mutate(true)} className={btnSm.secondary}>{t('validation.limitsCorrectSave')}</button>
+        </>
+      )}
     </div>
   )
 }

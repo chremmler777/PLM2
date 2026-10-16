@@ -88,7 +88,9 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
         <ul className="divide-y divide-slate-700/70">
           {rows.map((r) => {
             const chip = chipOf(r)
-            const mine = isAdmin || myDepartmentIds.includes(r.department_id)
+            // the backend's rule wins (A5-03: the lead or PM for a
+            // department with no member here)
+            const mine = r.can_answer ?? (isAdmin || myDepartmentIds.includes(r.department_id))
             const open = concernFor === r.department_id
             return (
               <li key={r.department_id} className="py-2" data-testid={`feedback-row-${r.department_id}`}>
@@ -98,6 +100,9 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
                     data-testid={`feedback-chip-${r.department_id}`}>{CHIP[chip].label}</span>
                   {r.by_name && (
                     <span className="text-[11px] text-slate-400">{r.by_name}, {formatDate(r.at)}</span>
+                  )}
+                  {r.no_member && r.hint && (
+                    <span data-testid={`feedback-hint-${r.department_id}`} className="text-[11px] text-amber-300">{r.hint}</span>
                   )}
                   {mine && canRespond && !open && (
                     <div className="ml-auto flex gap-2">

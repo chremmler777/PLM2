@@ -287,7 +287,8 @@ class ValidationService:
         planned_total_s = (round(sum(planned.values()), 3)
                            if planned else None)
         people = await ValidationService._names(
-            session, [r.checked_by for r in rows] + [change.weight_delta_ack_by])
+            session, [r.checked_by for r in rows] + [change.weight_delta_ack_by]
+            + [x for r in rows for x in (r.limits_set_by, r.limits_confirmed_by)])
         estimate = (float(change.estimated_part_weight_g)
                     if change.estimated_part_weight_g is not None else None)
         delta = ValidationService.weight_delta(change)
@@ -364,6 +365,15 @@ class ValidationService:
                         "needs_lot": key in catalog.NEEDS_LOT_REF,
                         "lower_limit": lo, "upper_limit": hi,
                         "spec_source": row.spec_source if row else None,
+                        "check_id": row.id if row else None,
+                        "limits_set_by_name": (people.get(row.limits_set_by)
+                                               if row else None),
+                        "limits_confirmed_by_name": (
+                            people.get(row.limits_confirmed_by) if row else None),
+                        "limits_confirmed_at": (row.limits_confirmed_at
+                                                if row else None),
+                        "limits_pending": bool(
+                            row and ValidationService.limits_pending(row)),
                         "measurements": [{
                             "id": m.id, "sample_size": m.sample_size,
                             "min_value": m.min_value, "max_value": m.max_value,
@@ -551,9 +561,11 @@ class ValidationService:
                 session, change, row.value, actor)
         # Validation issues (spec §12): a passed re-answer closes the issue
         # linked to this check; a new failure sends one waiting for
-        # re-validation back to fixing.
+        # re-validation back to fixing. A5-02: a PASS against limits only
+        # the measurer stated closes nothing until Quality confirms them.
         from app.services.validation_issue_service import ValidationIssueService
-        await ValidationIssueService.on_check_answered(session, change, row, actor)
+        if not ValidationService.limits_pending(row):
+            await ValidationIssueService.on_check_answered(session, change, row, actor)
         if row.status == "failed" and old_status != "failed":
             # §10 (RELEASE_V2): a FAIL raises its issue with a Fix task for
             # Quality, tells the Sales owner of a failed weight, and an
@@ -690,6 +702,10 @@ class ValidationService:
                 raise ValidationError(why)
             row.lower_limit, row.upper_limit = new_lo, new_hi
             row.spec_source = source[:200]
+            # A5-02: the measurer's own limits; a PASS against them counts
+            # once Quality (never the setter) confirms them
+            row.limits_set_by = actor.id
+            row.limits_confirmed_by = row.limits_confirmed_at = None
         elif ((new_lo is not None and new_lo != float(row.lower_limit))
               or (new_hi is not None and new_hi != float(row.upper_limit))):
             raise ValidationError(
@@ -731,6 +747,141 @@ class ValidationService:
             notes=changed_ref or row.note, for_department_id=department_id)
         return await ValidationService._after_answer(
             session, change, row, old_status, actor)
+
+    @staticmethod
+    def limits_pending(row) -> bool:
+        """A5-02 (RELEASE_V2): a PASS held against limits nobody but their
+        setter confirmed does not count yet."""
+        from app.services import cm_switches
+        return cm_switches.on("RELEASE_V2") and bool(row.limits_pending)
+
+    @staticmethod
+    async def limits_confirmers(session: AsyncSession, change: ChangeRequest
+                                ) -> tuple[bool, set[int]]:
+        """(quality_staffed, ids): who confirms a check's limits. Quality's
+        real members; with none on this change the lead (no lead: Project
+        Management), the R37 fallback of a department with no member."""
+        from app.services.change_people import (
+            department_members_of_change_org, staffed_department_ids,
+        )
+        q = (await session.execute(select(Department.id).where(
+            Department.name == "Quality").limit(1))).scalar_one_or_none()
+        if q is not None and await staffed_department_ids(session, change, [q]):
+            return True, set(await department_members_of_change_org(
+                session, change, [q], real_only=True))
+        lead = await session.get(User, change.lead_id) if change.lead_id else None
+        if lead is not None and lead.is_active and lead.role != "admin":
+            return False, {lead.id}
+        # no lead, or an admin account as lead (HARD #3: it does not decide
+        # alone): Project Management
+        pm = (await session.execute(select(Department.id).where(
+            Department.name == "Project Manager").limit(1))).scalar_one_or_none()
+        return False, set(await department_members_of_change_org(
+            session, change, [pm] if pm else [], real_only=True))
+
+    @staticmethod
+    async def limits_confirm_refusal(session: AsyncSession, change: ChangeRequest,
+                                     row, actor: User) -> str | None:
+        """None when `actor` may confirm (or correct) the row's limits: a
+        Quality member (acts-as aware), else the lead / PM fallback; never
+        the person who set them, never a real admin alone (HARD #3)."""
+        from app.services import cm_switches
+        from app.services.change_people import hard3_blind, is_acting
+        if not cm_switches.on("RELEASE_V2"):
+            return "Limits are confirmed only with the release rules on"
+        if row.lower_limit is None:
+            return "The limits are set with the first measurement"
+        if row.limits_set_by is not None and row.limits_set_by == actor.id:
+            return ("You set these limits: Quality confirms them (the department "
+                    "being judged does not set its own pass criterion alone)")
+        if hard3_blind(actor):
+            return ("An admin confirms limits only acting as Quality (HARD #3: "
+                    "no admin shortcut)")
+        from app.services.workflow_service import WorkflowService
+        mine = set(await WorkflowService.effective_department_ids(session, actor))
+        q = (await session.execute(select(Department.id).where(
+            Department.name == "Quality").limit(1))).scalar_one_or_none()
+        if q is not None and q in mine:
+            return None
+        staffed, ids = await ValidationService.limits_confirmers(session, change)
+        if not staffed and not is_acting(actor) and actor.id in ids:
+            return None
+        return ("Quality confirms the limits (the lead or Project Management "
+                "only when Quality has no member here)")
+
+    @staticmethod
+    async def confirm_limits(session: AsyncSession, change: ChangeRequest,
+                             check_id: int, spec: dict, actor: User):
+        """A5-02: Quality confirms the limits the measurer set (one click),
+        or corrects them; the latest measurement is held against the
+        confirmed limits and the PASS (or a FAIL) counts from now on."""
+        from app.models.change_validation import ValidationMeasurement
+        from app.services.cm_rules import reference_refusal
+        row = await session.get(ValidationCheck, check_id)
+        if row is None or row.change_id != change.id:
+            raise ValidationError("No such validation check on this change")
+        why = await ValidationService.limits_confirm_refusal(session, change, row, actor)
+        if why:
+            raise PermissionError(why)
+        if not ValidationService.limits_pending(row):
+            # a FAIL counts at once; changing the limits after it would lift
+            # HARD #3 without a concession
+            raise ValidationError(
+                "Only a PASS against limits nobody confirmed waits on Quality "
+                "(a different spec after a FAIL is a concession)")
+        lo, hi = spec.get("lower_limit"), spec.get("upper_limit")
+        source = (spec.get("spec_source") or "").strip() or None
+        corrected = lo is not None or hi is not None
+        if corrected:
+            try:
+                lo, hi = round(float(lo), 3), round(float(hi), 3)
+            except (TypeError, ValueError):
+                raise ValidationError("Enter both limits as numbers")
+            if lo >= hi:
+                raise ValidationError("The lower limit is below the upper limit")
+            refusal = reference_refusal(source, "Where the limits come from",
+                                        "drawing 886.197 D or process sheet PS-114")
+            if refusal:
+                raise ValidationError(refusal)
+            row.lower_limit, row.upper_limit = lo, hi
+            row.spec_source = source[:200]
+            row.limits_set_by = actor.id
+        row.limits_confirmed_by = actor.id
+        row.limits_confirmed_at = datetime.utcnow()
+        old_status = row.status
+        last = (await session.execute(
+            select(ValidationMeasurement).where(ValidationMeasurement.check_id == row.id)
+            .order_by(ValidationMeasurement.id.desc()).limit(1))).scalar_one_or_none()
+        if last is not None:
+            ok = float(row.lower_limit) <= float(last.min_value) \
+                and float(last.max_value) <= float(row.upper_limit)
+            row.status = "passed" if ok else "failed"
+            last.result = row.status
+        await session.flush()
+        names = await ValidationService._department_names(session)
+        label = catalog.label_for(row.check_key, names.get(row.department_id))
+        from app.services.change_service import ChangeService
+        await ChangeService.append_changelog(
+            session, change, "validation_limits",
+            f"{label}: limits {float(row.lower_limit):g}-{float(row.upper_limit):g} "
+            f"{'corrected' if corrected else 'confirmed'} ({row.spec_source}); "
+            f"{row.status}", actor.id,
+            field_name=f"validation_{row.check_key}_limits",
+            new_value={"lower_limit": float(row.lower_limit),
+                       "upper_limit": float(row.upper_limit),
+                       "status": row.status, "corrected": corrected},
+            for_department_id=row.department_id)
+        # the PASS waited on this confirm: what a pass (or a new FAIL) sets
+        # off runs now; the weight was stamped at the measurement already
+        if (row.check_key == catalog.WEIGHT_KEY and row.status == "passed"
+                and old_status != "passed"):
+            await ValidationService._stamp_validated_weight(
+                session, change, row.value, actor)
+        from app.services.validation_issue_service import ValidationIssueService
+        await ValidationIssueService.on_check_answered(session, change, row, actor)
+        if row.status == "failed" and old_status != "failed":
+            await ValidationIssueService.on_check_failed(session, change, row, actor)
+        return row
 
     @staticmethod
     async def failed_overwrite_refusal(
@@ -870,12 +1021,17 @@ class ValidationService:
                         and ValidationIssueService.concession_in_force(i)}
             failed = [r for r in failed if r.id not in conceded]
         outstanding = [r for r in rows if r.status not in ("passed", "failed")]
+        # A5-02: a PASS against the measurer's own limits is not yet a pass
+        pending = [r for r in rows if ValidationService.limits_pending(r)]
+        setters = await ValidationService._names(session, [r.limits_set_by for r in pending])
+        words = sorted(map(_name, outstanding)) + sorted(
+            f"{_name(r)} (limits set by {setters.get(r.limits_set_by) or 'the measurer'}: "
+            "Quality confirms)" for r in pending)
         return (
             ("Validation failed: " + ", ".join(sorted(map(_name, failed)))
              + ". Fix it and retest (Quality's Fix task names who and when), or a "
              "concession (Quality)") if failed else None,
-            ("Validation incomplete, still open: "
-             + ", ".join(sorted(map(_name, outstanding)))) if outstanding else None,
+            ("Validation incomplete, still open: " + ", ".join(words)) if words else None,
         )
 
     @staticmethod

@@ -39,7 +39,7 @@ import { isIssueOpen, issueCode } from '../../types/validationIssue'
 import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDialog'
 import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
 import { toastError } from '../../lib/apiError'
-import MeasurementForm, { MeasurementHistory } from './validation/MeasurementForm'
+import MeasurementForm, { LimitsConfirm, MeasurementHistory } from './validation/MeasurementForm'
 import { hoursApi, hoursKey, requestBookHours } from '../../api/hours'
 import { Check, X } from 'lucide-react'
 import { btnSm } from '../common/buttonStyles'
@@ -256,6 +256,7 @@ function CheckRow({
       )}
 
       {computed && <MeasurementHistory check={check} id={id} />}
+      {computed && <LimitsConfirm changeId={changeId} check={check} id={id} />}
       {computed && mayWrite && (
         <MeasurementForm changeId={changeId} deptId={deptId} check={check} id={id}
           prefillNominal={key === 'weight' ? weightEstimateG : null} />

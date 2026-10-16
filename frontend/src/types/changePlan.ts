@@ -211,6 +211,11 @@ export interface PlanFeedbackRow {
   by_name: string | null
   at: string | null
   stale: boolean
+  /** A5-03: nobody here answers for it; the lead (no lead: PM) confirms. */
+  no_member?: boolean
+  hint?: string | null
+  /** The backend rule for this viewer (member, admin, or the fallback). */
+  can_answer?: boolean
 }
 
 export interface PlanFeedback {

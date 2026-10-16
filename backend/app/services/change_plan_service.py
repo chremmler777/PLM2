@@ -2381,9 +2381,47 @@ class ChangePlanService:
         return sorted(ids)
 
     @staticmethod
+    async def unstaffed_feedback_ids(session: AsyncSession, change: ChangeRequest,
+                                     required) -> set[int]:
+        """RELEASE_V2 (A5-03, R37): the required departments with no real
+        member here (change_people.staffed_department_ids): the lead (no
+        lead: Project Management) confirms the plan for them."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2") or not required:
+            return set()
+        from app.services.change_people import staffed_department_ids
+        return set(required) - await staffed_department_ids(session, change, required)
+
+    @staticmethod
+    async def may_answer_feedback(session: AsyncSession, change: ChangeRequest,
+                                  department_id: int, user: User,
+                                  unstaffed: Optional[set] = None) -> bool:
+        """A member of the department, an admin; for a required department
+        with no real member here (RELEASE_V2) also the lead or a Project
+        Management member, the rule of the validation checks (R37)."""
+        from app.services.workflow_service import WorkflowService
+        if user.effective_role == "admin" or await WorkflowService.actor_in_department(
+                session, user, department_id):
+            return True
+        if unstaffed is None:
+            unstaffed = await ChangePlanService.unstaffed_feedback_ids(
+                session, change, await ChangePlanService.required_department_ids(
+                    session, change))
+        if department_id not in unstaffed:
+            return False
+        from app.services.change_people import holds_lead
+        from app.services.meeting_service import MeetingService
+        return holds_lead(change, user) or await MeetingService.user_is_pm_member(
+            session, user)
+
+    @staticmethod
     async def feedback_state(session: AsyncSession,
-                             change: ChangeRequest) -> dict:
+                             change: ChangeRequest, viewer: Optional[User] = None) -> dict:
         required = await ChangePlanService.required_department_ids(session, change)
+        unstaffed = await ChangePlanService.unstaffed_feedback_ids(
+            session, change, required)
+        from app.services.change_people import coordinator_name, no_member_words
+        coordinator = await coordinator_name(session, change) if unstaffed else None
         rows = list((await session.execute(
             select(ChangePlanFeedback)
             .where(ChangePlanFeedback.change_id == change.id)
@@ -2406,6 +2444,12 @@ class ChangePlanService:
                 "by_name": users.get(r.created_by) if r else None,
                 "at": r.created_at if r else None,
                 "stale": bool(r is not None and r.plan_revision < revision),
+                # A5-03: nobody here answers for it; the lead (no lead: PM) does
+                "no_member": did in unstaffed,
+                "hint": (no_member_words(names.get(did), coordinator)
+                         if did in unstaffed else None),
+                **({"can_answer": await ChangePlanService.may_answer_feedback(
+                    session, change, did, viewer, unstaffed)} if viewer is not None else {}),
             })
         return {
             "revision": revision, "required": out,
@@ -2427,11 +2471,11 @@ class ChangePlanService:
             raise ChangeError("A concern needs a note saying what is wrong with the plan")
         if await session.get(Department, department_id) is None:
             raise ChangeError(f"Department {department_id} does not exist")
-        if not (user.effective_role == "admin"
-                or await WorkflowService.actor_in_department(
-                    session, user, department_id)):
+        if not await ChangePlanService.may_answer_feedback(
+                session, change, department_id, user):
             raise PlanForbidden(
-                "Only a member of that department may answer for it")
+                "Only a member of that department may answer for it (the lead "
+                "or Project Management only when it has no member here)")
         if change.status not in FEEDBACK_WINDOW:
             raise ChangeError(
                 "The detailed plan is confirmed while the change is approved "

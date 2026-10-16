@@ -157,3 +157,20 @@ async def change_org_ids(session: AsyncSession, change_ids: Iterable[int]
         .join(Plant, Plant.id == Project.plant_id)
         .where(ChangeRequest.id.in_(ids)))).all()))
     return out
+
+
+async def coordinator_name(session: AsyncSession, change) -> str:
+    """Who coordinates a department with no real member here (R37): the
+    change lead by name, else Project Management."""
+    if getattr(change, "lead_id", None) is not None:
+        from app.models.entities import User
+        lead = await session.get(User, change.lead_id)
+        if lead is not None:
+            return lead.full_name or lead.username
+    return "Project Management"
+
+
+def no_member_words(department_name: Optional[str], coordinator: str) -> str:
+    """The one phrase of the fallback (A5-04 d): '<X> has no member here:
+    <lead name|Project Management> coordinates'."""
+    return f"{department_name or 'This department'} has no member here: {coordinator} coordinates"

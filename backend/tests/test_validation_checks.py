@@ -126,6 +126,15 @@ _WIDE = {"lower_limit": 0.0, "upper_limit": 100000.0,
          "spec_source": "test spec 0-100000"}
 
 
+async def _confirm_limits(client, val, check_id):
+    """A5-02: the measurer's own limits count once Quality confirms them
+    (no Quality member here: the lead, else Project Management)."""
+    who = "Quality" if "Quality" in val["user"] else "Project Manager"
+    res = await client.post(_url(val, f"/checks/{check_id}/limits"),
+                            headers=await _auth(client, val, who), json={})
+    assert res.status_code in (200, 400), res.text   # 400: already confirmed
+
+
 async def _check(client, auth, val, dept, key, status="passed", **kw):
     if (dept == "Tool Engineer" and key in _COMPUTED and status == "passed"
             and kw.get("value") is not None and cm_switches.RELEASE_V2):
@@ -133,9 +142,12 @@ async def _check(client, auth, val, dept, key, status="passed", **kw):
              "measuring_ref": "scale WG-0042, report MR-1", **_WIDE}
         if key == "cycle_time":
             m["lot_ref"] = "lot 2026-41-117"
-        return await client.post(_url(val, "/checks"), headers=auth, json={
+        res = await client.post(_url(val, "/checks"), headers=auth, json={
             "department_id": val["dept"][dept], "check_key": key,
             "measurement": m, **({"note": kw["note"]} if kw.get("note") else {})})
+        if res.status_code == 201 and res.json()["status"] == "passed":
+            await _confirm_limits(client, val, res.json()["id"])
+        return res
     return await client.post(_url(val, "/checks"), headers=auth, json={
         "department_id": val["dept"][dept], "check_key": key,
         "status": status, **kw})

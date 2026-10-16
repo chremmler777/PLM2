@@ -1859,6 +1859,23 @@ class ValidationCheckState(BaseModel):
     upper_limit: Optional[float] = None
     spec_source: Optional[str] = None
     measurements: List[dict] = []
+    # A5-02: who set the limits, who confirmed them; a PASS against limits
+    # only their setter stated counts once Quality confirms them
+    limits_set_by_name: Optional[str] = None
+    limits_confirmed_by_name: Optional[str] = None
+    limits_confirmed_at: Optional[datetime] = None
+    limits_pending: bool = False
+    can_confirm_limits: bool = False
+    # the row's id (the confirm endpoint names it)
+    check_id: Optional[int] = None
+
+
+class ValidationLimitsIn(BaseModel):
+    # empty: confirm the limits as set; with all three: Quality corrects
+    # them (the latest measurement is held against the new limits)
+    lower_limit: Optional[float] = None
+    upper_limit: Optional[float] = None
+    spec_source: Optional[str] = None
 
 
 class ValidationDepartmentState(BaseModel):

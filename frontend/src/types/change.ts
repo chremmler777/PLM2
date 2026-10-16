@@ -1553,6 +1553,14 @@ export interface ValidationCheck {
   upper_limit?: number | null;
   spec_source?: string | null;
   measurements?: ValidationMeasurement[];
+  /** A5-02: who set the limits, who confirmed them; a PASS against
+   *  limits only their setter stated counts once Quality confirms. */
+  check_id?: number | null;
+  limits_set_by_name?: string | null;
+  limits_confirmed_by_name?: string | null;
+  limits_confirmed_at?: string | null;
+  limits_pending?: boolean;
+  can_confirm_limits?: boolean;
 }
 
 export type RetestChangeKind = 'parameter' | 'tool' | 'material' | 'method';

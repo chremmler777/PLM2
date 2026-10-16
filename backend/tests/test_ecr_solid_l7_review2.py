@@ -26,7 +26,7 @@ from app.utils.clock import business_today
 from tests.test_ecr_solid_fix_concession import (  # noqa: F401
     REF, SPEC, _fail_weight, _issue, _iurl, _kinds, _who, fix,
 )
-from tests.test_validation_checks import _auth, _state, _url, val  # noqa: F401
+from tests.test_validation_checks import _auth, _confirm_limits, _state, _url, val  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -92,6 +92,7 @@ async def test_pm_retests_a_member_less_departments_failed_check(
             for d in st["departments"]}["Tool Engineer"] is True
     res = await _post_weight(client, pm, fix, 503.0, 509.0, **RETEST)
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+    await _confirm_limits(client, fix, res.json()["id"])       # A5-02: Quality
     assert (await client.get(_iurl(fix, f"/{iid}"), headers=pm)).json()["status"] == "closed"
 
 

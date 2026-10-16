@@ -398,7 +398,9 @@ const taskHint = (task: ChangeTask): string | null => {
     case 'escalate_risk':
       return t('tasks.hint.escalate_risk');
     case 'validation_check':
-      return t('tasks.hint.validation_check');
+      // A5-02 / A5-04: the row names what it is (confirm limits, a
+      // department with no member here)
+      return task.reason?.trim() || t('tasks.hint.validation_check');
     case 'update_quote':
       return t('tasks.hint.update_quote');
     case 'deviation_decision':
