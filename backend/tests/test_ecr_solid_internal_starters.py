@@ -168,3 +168,34 @@ async def test_raiser_department_rule_off_with_the_switch(
     res = await client.post(f"/api/v1/changes/{cid}/meetings", json=_meeting_body(
         {str(depts["Tool Engineer"]): "R"}), headers=admin)
     assert res.status_code == 200, res.text
+
+
+async def test_a2_06_meeting_without_departments_cannot_skip_the_raiser_waiver(
+        client, seed, depts, session_factory):
+    """Close-out A2-06: a meeting recorded with no departments, then edited
+    to route others, still owes the logged reason for leaving the raiser's
+    department out (an empty 'before' is not 'already out')."""
+    cid = await _internal_in_scoping(client, seed, depts, session_factory)
+    admin = await login(client, "admin@test.io")
+    tool = str(depts["Tool Engineer"])
+    url = f"/api/v1/changes/{cid}/meetings"
+    res = await client.post(url, json={"channel": "meeting",
+                                       "participants": [{"name": "Eva"}],
+                                       "cost_carrier": "internal"}, headers=admin)
+    assert res.status_code == 200, res.text
+    mid = res.json()["id"]
+    # negative: departments edited in without the raiser and without a reason
+    res = await client.patch(f"{url}/{mid}", json={"department_rasic": {tool: "R"}},
+                             headers=admin)
+    assert res.status_code == 400, res.text
+    assert "Process Engineer raised this internal change" in res.json()["detail"]
+    res = await client.patch(f"{url}/{mid}", json={"selected_department_ids": [int(tool)]},
+                             headers=admin)
+    assert res.status_code == 400, res.text
+    res = await client.patch(f"{url}/{mid}", json={
+        "department_rasic": {tool: "R"},
+        "raiser_waive_reason": "Only the tool insert changes, no process step"},
+        headers=admin)
+    assert res.status_code == 200, res.text
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin)).json()
+    assert any(e["action"] == "raiser_department_waived" for e in log)

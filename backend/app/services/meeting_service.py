@@ -245,7 +245,9 @@ class MeetingService:
         rd = await MeetingService.raiser_department_id(session, change)
         if rd is None or letters.get(str(rd)) in BLOCKING_LETTERS:
             return
-        if before is not None:
+        # A2-06: an empty 'before' (a meeting recorded with no departments)
+        # routed nobody yet: like a new meeting, not "already out"
+        if before:
             if before.get(str(rd)) not in BLOCKING_LETTERS:
                 return                      # already out: nothing moves
         else:
