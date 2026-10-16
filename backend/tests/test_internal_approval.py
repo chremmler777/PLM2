@@ -21,6 +21,16 @@ async def to_costing(session_factory, change_id, raised_by=2):
         await s.commit()
 
 
+
+@pytest.fixture(autouse=True)
+async def _admin_in_pm(session_factory, seed):
+    """HARD #8 fallback (close-out A1-06): with no configured approver, a
+    real Project Manager member approves, no admin shortcut. The admin who
+    approves in these tests is one."""
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+
+
 @pytest.mark.asyncio
 async def test_internal_approval_snapshots_amount_and_unblocks_approved(
         client, admin_auth, seed, part, session_factory):
@@ -85,13 +95,8 @@ async def test_internal_approval_allows_pm_department_member(
         client, admin_auth, seed, part, session_factory):
     """A Project Manager department member (not admin, not the lead) may
     approve internal costs — no second-signer restriction."""
-    from app.models.workflow import Department, UserDepartment
-    async with session_factory() as s:
-        dept = Department(name="Project Manager", flow_type="action", is_active=True)
-        s.add(dept)
-        await s.flush()
-        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept.id))
-        await s.commit()
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["engineer_id"], "Project Manager")
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
     await to_costing(session_factory, change["id"], raised_by=seed["admin_id"])

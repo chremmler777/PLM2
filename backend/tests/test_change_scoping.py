@@ -370,6 +370,9 @@ async def test_legacy_quoted_internal_change_approves_internally(
             ChangeRequest.id == change["id"]).values(
                 status="quoted", raised_by=seed["engineer_id"]))
         await s.commit()
+    # the fallback approver is a real Project Manager member (close-out A1-06)
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["admin_id"], "Project Manager")
     res = await client.post(
         f"/api/v1/changes/{change['id']}/internal-approval",
         json={"release_due_date": (

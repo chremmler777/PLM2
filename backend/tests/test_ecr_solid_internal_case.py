@@ -22,6 +22,15 @@ pytestmark = pytest.mark.asyncio
 DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()
 
 
+
+@pytest.fixture(autouse=True)
+async def _admin_in_pm(session_factory, seed):
+    """HARD #8 fallback (close-out A1-06): a real Project Manager member
+    approves, no admin shortcut. The admin who approves here is one."""
+    from tests.conftest import make_department_member
+    await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+
+
 @pytest.fixture
 async def internal(client, session_factory, seed):
     async with session_factory() as s:
