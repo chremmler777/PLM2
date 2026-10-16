@@ -571,6 +571,9 @@ export interface ChangeTask {
    *  and the check items that go along. */
   open_questions?: number;
   waiting_on?: string[];
+  /** A2-04: answered questions still open: their askers settle them. */
+  answered_questions?: number;
+  settle_by?: string[];
   /** What else holds proceed, each with its owner (and due) in words:
    *  ppap_decision (Quality), customer_flip (Sales), impacted_items. */
   holds?: { key: string; owner: string }[];

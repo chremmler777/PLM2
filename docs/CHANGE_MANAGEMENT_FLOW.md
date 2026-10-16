@@ -283,7 +283,11 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   every flag [KEEP]. The PM's *Wrap up scoping* row reads *"Not yet: waiting
   for n answer(s) (...)"*, then *"Proceed waits for: PPAP decision (Quality,
   due Thu), notification or offer? (Sales), impacted parts (lead)"*, and
-  *"Ready: proceed"* only when nothing holds proceed.
+  *"Ready: proceed"* only when nothing holds proceed. An answered question
+  still holds proceed but waits on its asker, not on an answer (close-out
+  A2-04): the row, the 'Not yet' reason and the refusal read *"1 answered,
+  Quality settles"* (`waiting_on` / `open_questions` count only unanswered
+  ones; `answered_questions` / `settle_by` the rest).
 - **Proceed holds** (`MeetingService.proceed_holds`, L4 review): open
   questions and cancel votes (HARD #2), the PPAP decision and the flip's Sales
   answer (HARD #7), no impacted parts (HARD #1), each with owner and due. The lead owns an empty impacted set:

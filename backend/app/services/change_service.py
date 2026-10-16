@@ -3760,6 +3760,7 @@ class ChangeService:
                     from app.services.meeting_service import MeetingService
                     names = {i: n for n, i in dept_by_name.items()}
                     holding = MeetingService.open_blocking(c)
+                    unanswered, answered = MeetingService.split_answered(holding)
                     # every hold of 'proceed' with its owner (questions,
                     # PPAP decision, the flip's Sales answer, no parts):
                     # "Ready: proceed" only when none is left
@@ -3783,8 +3784,12 @@ class ChangeService:
                                              if c.impact_confirm_step else None),
                         "has_decision": any(m.decision in ("proceed", "reject")
                                             for m in c.meetings),
-                        "open_questions": len(holding),
-                        "waiting_on": MeetingService.asking_sides(holding, names, c),
+                        # A2-04: an answered question waits on its asker
+                        # (who settles it), not on the answering side
+                        "open_questions": len(unanswered),
+                        "waiting_on": MeetingService.asking_sides(unanswered, names, c),
+                        "answered_questions": len(answered),
+                        "settle_by": MeetingService.asking_sides(answered, names),
                         "holds": [{"key": h["key"], "owner": h["owner"]}
                                   for h in holds if h["key"] != "questions"],
                         "open_checks": len(MeetingService.open_checks(c)),

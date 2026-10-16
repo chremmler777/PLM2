@@ -1822,7 +1822,13 @@ class MeetingService:
             who = c.raised_by_name or f"user #{c.raised_by}"
             if c.department_id:
                 who += f" ({names.get(c.department_id, c.department_id)})"
-            lines.append(f"{kinds.get(c.kind, c.kind)} by {who}: {c.note}")
+            line = f"{kinds.get(c.kind, c.kind)} by {who}: {c.note}"
+            if c.kind == "needs_info" and c.is_answered:
+                # A2-04: the ball is with the asker, who settles it
+                asker = (names.get(c.department_id) if c.department_id
+                         else c.raised_by_name) or f"user #{c.raised_by}"
+                line += f" (answered, {asker} settles)"
+            lines.append(line)
         if cm_switches.on("SCOPING_V2"):
             return (f"{len(open_concerns)} open concern(s) block 'proceed' "
                     "(questions and cancel votes; check items do not): "
@@ -1867,6 +1873,30 @@ class MeetingService:
                 d = due_rules.task_due(c.raised_at, change, "obtain_info")
                 due[side] = min(d, due.get(side, d))
         return [f"{s} {due[s]:%a}" if s in due else s for s in out]
+
+    @staticmethod
+    def split_answered(concerns: list[ChangeConcern]) -> tuple[list, list]:
+        """(unanswered, answered) open questions; a cancel vote is never
+        answered (A2-04: an answered question waits on its asker)."""
+        answered = [c for c in concerns if c.is_question and c.is_answered]
+        return [c for c in concerns if c not in answered], answered
+
+    @staticmethod
+    def waiting_words(concerns: list[ChangeConcern], names: dict,
+                      change: Optional[ChangeRequest] = None) -> str:
+        """'waiting for 2 answers (Sales Thu, Process Fri); 1 answered,
+        Quality settles' (A2-04)."""
+        unanswered, answered = MeetingService.split_answered(concerns)
+        parts = []
+        if unanswered:
+            sides = MeetingService.asking_sides(unanswered, names, change)
+            parts.append(f"waiting for {len(unanswered)} answer"
+                         f"{'s' if len(unanswered) != 1 else ''} ({', '.join(sides)})")
+        if answered:
+            settlers = MeetingService.asking_sides(answered, names)
+            parts.append(f"{len(answered)} answered, {', '.join(settlers)} "
+                         f"settle{'s' if len(settlers) == 1 else ''}")
+        return "; ".join(parts)
 
     @staticmethod
     async def proceed_holds(session: AsyncSession, change: ChangeRequest, *,
@@ -2013,14 +2043,13 @@ class MeetingService:
         waiting = [c for c in blocking if c.is_question]
         if decision == "needs_info" and not reason and v2 and waiting:
             # "Not yet: waiting for 3 answers (Sales, Process)": the open
-            # questions are the reason; no new one is raised.
+            # questions are the reason; no new one is raised. An answered
+            # one waits on its asker, who settles it (A2-04).
             dept_ids = {c.department_id for c in waiting if c.department_id}
             names = dict((await session.execute(
                 select(Department.id, Department.name).where(
                     Department.id.in_(dept_ids)))).all()) if dept_ids else {}
-            sides = MeetingService.asking_sides(waiting, names, change)
-            reason = (f"Not yet: waiting for {len(waiting)} answer"
-                      f"{'s' if len(waiting) != 1 else ''} ({', '.join(sides)})")
+            reason = "Not yet: " + MeetingService.waiting_words(waiting, names, change)
             raise_question = False
         else:
             raise_question = True

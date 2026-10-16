@@ -359,6 +359,10 @@ const taskHint = (task: ChangeTask): string | null => {
           ...(task.open_questions > 0
             ? [t('tasks.hint.scopingWaiting').replace('{n}', String(task.open_questions))
               .replace('{x}', (task.waiting_on ?? []).join(', '))] : []),
+          // A2-04: an answered question is its asker's to settle
+          ...((task.answered_questions ?? 0) > 0
+            ? [t('tasks.hint.scopingSettle').replace('{n}', String(task.answered_questions))
+              .replace('{x}', (task.settle_by ?? []).join(', '))] : []),
           ...((task.holds ?? []).length > 0
             ? [t('tasks.hint.scopingHeld').replace('{x}', (task.holds ?? [])
               .map((h) => t(`proceed.hold.${h.key}`).replace('{who}', h.owner)).join(', '))] : []),

@@ -169,3 +169,38 @@ async def test_a2_02_switch_off_keeps_the_free_answer(
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{lid}/answer",
                             json={"note": "Grain K31 per mail 12 Oct"}, headers=admin_auth)
     assert res.status_code == 200, res.text
+
+
+# ---- A2-04: an answered question waits on its asker, not on the answer ----
+
+async def test_a2_04_answered_question_is_the_askers_to_settle(
+        client, admin_auth, seed, session_factory):
+    from tests.test_ecr_solid_scoping_v2 import (
+        _scoping, _user as _sv_user, _question, _raise, _meeting, _decide)
+    cid, _ = await _scoping(client, admin_auth, seed, "a204")
+    _, proc, pe = await _sv_user(client, session_factory, seed, "pe204", "Process Engineer")
+    _, qual, qe = await _sv_user(client, session_factory, seed, "q204", "Quality")
+    _, _, sales = await _sv_user(client, session_factory, seed, "sa204", "Sales")
+    _, _, pm = await _sv_user(client, session_factory, seed, "pm204", "Project Manager")
+    mid = await _meeting(client, admin_auth, cid, {str(proc): "R"})
+    q1 = (await _raise(client, qe, cid, _question(qual, note="Gauge class?",
+                                                  what="tolerance"))).json()
+    q2 = (await _raise(client, pe, cid, _question(proc))).json()
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{q1['id']}/answer", json={
+        "answer_kind": "assumed", "assumed_value": "2", "assumed_unit": "class",
+        "assumed_risk": "regauging if wrong"}, headers=sales)
+    assert res.status_code == 200, res.text
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
+            if t["kind"] == "scoping_wrapup" and t["change_id"] == cid]
+    row = rows[0]
+    # waiting_on names only the unanswered question's side
+    assert row["open_questions"] == 1
+    assert [w.split(" ")[0] for w in row["waiting_on"]] == ["Process"]
+    assert row["answered_questions"] == 1 and row["settle_by"] == ["Quality"]
+    # the refusal says the answered one is the asker's to settle
+    res = await _decide(client, admin_auth, cid, mid, "proceed")
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert "Gauge class? (answered, Quality settles)" in detail
+    assert "Which resin lot? (answered" not in detail
+    assert q2["id"]

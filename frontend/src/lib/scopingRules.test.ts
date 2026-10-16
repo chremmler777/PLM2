@@ -46,4 +46,8 @@ describe('askingSide / openFlagLines', () => {
       q({ id: 4, is_open: false }),
     ], () => 'APQP')).toEqual(['Question · Ann (APQP): Tolerance?', 'Cancel vote · Ben: Too costly'])
   })
+  it('A2-04: an answered question says its asker settles it', () => {
+    expect(openFlagLines([q({ department_id: 4, answered_at: '2026-10-15T09:00:00Z' })], () => 'APQP'))
+      .toEqual(['Question · Ann (APQP): Tolerance? (answered, APQP settles)'])
+  })
 })

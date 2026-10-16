@@ -154,7 +154,10 @@ export function openFlagLines(
       const dept = c.asking_department_name
         ?? (c.department_id != null ? departmentName?.(c.department_id) : undefined)
       const who = `${c.raised_by_name ?? `#${c.raised_by}`}${dept ? ` (${dept})` : ''}`
-      return `${kind} · ${who}: ${c.note}`
+      // A2-04: an answered question is its asker's to settle
+      const settle = c.kind === 'needs_info' && c.answered_at != null
+        ? ` (${t('concern.answeredSettles').replace('{x}', dept ?? c.raised_by_name ?? `#${c.raised_by}`)})` : ''
+      return `${kind} · ${who}: ${c.note}${settle}`
     })
 }
 

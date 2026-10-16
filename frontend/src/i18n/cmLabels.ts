@@ -2894,6 +2894,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.index_decision': { de: 'Neuer Index: weitere Teile oder Abteilungen?', en: 'New index: adds parts or departments?' },
   'tasks.kind.index_deadline': { de: 'Neuer Index: hält der Termin?', en: 'New index: deadline holds?' },
   'tasks.kind.index_deadline_confirm': { de: 'Termin mit dem Kunden bestätigen', en: 'Confirm the deadline with the customer' },
+  'tasks.hint.scopingSettle': { de: '{n} beantwortet, {x} schließt ab', en: '{n} answered, {x} settles' },
+  'concern.answeredSettles': { de: 'beantwortet, {x} schließt ab', en: 'answered, {x} settles' },
   'tasks.hint.scopingWaiting': { de: 'Noch nicht: wartet auf {n} Antwort(en) ({x})', en: 'Not yet: waiting for {n} answer(s) ({x})' },
   // --- spec §4: check items first, C8 questions in the assessment ----------
   'achk.title': { de: 'Prüfpunkte für {d}: {n} offen', en: 'Checks for {d}: {n} open' },

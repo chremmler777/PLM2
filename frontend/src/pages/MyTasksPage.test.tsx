@@ -145,6 +145,18 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(hint.textContent).not.toContain(t('tasks.hint.scopingReady'))
   })
 
+  it('A2-04: an answered question reads as the asker\'s to settle, not as waiting', async () => {
+    await renderWith(changeTask({
+      kind: 'scoping_wrapup', impact_confirmed: null, has_decision: false,
+      open_questions: 1, waiting_on: ['Process Fri'], answered_questions: 1,
+      settle_by: ['Quality'], holds: [],
+    }))
+    const hint = screen.getByText(/Not yet: waiting for 1 answer/)
+    expect(hint.textContent).toContain('(Process Fri)')
+    expect(hint.textContent).toContain('1 answered, Quality settles')
+    expect(hint.textContent).not.toContain('Quality Fri')
+  })
+
   it('reads Ready: proceed once nothing holds it', async () => {
     await renderWith(changeTask({
       kind: 'scoping_wrapup', impact_confirmed: null, has_decision: false,
