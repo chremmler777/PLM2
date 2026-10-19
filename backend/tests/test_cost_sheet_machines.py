@@ -738,3 +738,44 @@ async def test_sync_skips_an_out_of_range_clamping_force(session_factory, world)
         assert p350.clamping_force_t == 350 and p350.retired_at is None
         assert (await s.execute(select(CostSheetMachine).where(
             CostSheetMachine.machinedb_id == 60))).scalar_one_or_none() is None
+
+
+# ---------------------------------------------------------------- D-cost
+
+RATE_FIELDS = ("hourly_rate", "entered_rate", "local_rate", "class_rate", "note")
+
+
+async def test_d_cost_machine_list_carries_no_rates_for_non_readers(
+        client, admin_auth, eng_auth, world, session_factory):
+    """D-cost (Christoph 2026-10-19): the machine list stays usable for
+    costing (pick a press, see whether it has an own rate), but its rates
+    are read by the cost roles only, and a draft by nobody else."""
+    await _sync(session_factory, world["org_id"], FLEET)
+    ids = await _machine_ids(session_factory)
+    vid = await _published(session_factory, world["org_id"], tool=world["tool"],
+                           items=[(ids["P-80"], 70)],
+                           machines=[dict(machine_class="<=200 t", machine_class_id=world["small"],
+                                          plant_id=world["usa"],
+                                          hourly_rate=59, currency="USD")])
+    draft = (await client.post("/api/v1/cost-sheet/drafts", json={},
+                               headers=admin_auth)).json()
+    url = "/api/v1/cost-sheet/machines"
+    # the cost roles read the rates (admin here)
+    full = {m["internal_name"]: m for m in (await client.get(
+        f"{url}?version_id={vid}", headers=admin_auth)).json()["machines"]}
+    assert full["P-80"]["hourly_rate"] == 70 and full["P-80"]["class_rate"] == 59
+    assert full["P-80"]["has_own_rate"] is True
+    # NEGATIVE: an engineer still lists the machines of the published version
+    # that prices a change, but reads no rate of any kind
+    res = await client.get(f"{url}?version_id={vid}", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    rows = {m["internal_name"]: m for m in res.json()["machines"]}
+    assert rows["P-80"]["has_own_rate"] is True and rows["P-350"]["has_own_rate"] is False
+    for m in rows.values():
+        for f in RATE_FIELDS:
+            assert m.get(f) is None, (m["internal_name"], f)
+    assert all(m.get(f) is None for m in (await client.get(url, headers=eng_auth)).json()[
+        "machines"] for f in RATE_FIELDS)
+    # NEGATIVE: an unpublished draft is the cost roles' only
+    res = await client.get(f"{url}?version_id={draft['id']}", headers=eng_auth)
+    assert res.status_code == 403, res.text

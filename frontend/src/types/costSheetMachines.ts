@@ -24,6 +24,9 @@ export interface CostSheetMachine {
   machine_class: string | null
   /** Its own rate in the version asked for; null = the class rate applies. */
   rate_id: number | null
+  /** It has an own rate in that version; set for everyone, while the rate
+   *  fields are null for a caller who does not read the cost sheet (D-cost). */
+  has_own_rate?: boolean
   hourly_rate: number | null
   currency: string | null
   note: string | null

@@ -645,17 +645,23 @@ async def reference_rates(db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     # The cost sheet's currently valid version (spec §15); department_rate
     # only until a first version is published.
-    from app.services.cost_sheet_service import reference_rates as sheet_rates
+    from app.services.cost_sheet_service import can_read, reference_rates as sheet_rates
     sheet = await sheet_rates(db, current_user.organization_id)
-    if sheet is not None:
+    if sheet is None:
+        from app.services.costing_rates import has_cost_sheet
+        if await has_cost_sheet(db, current_user.organization_id):
+            return []  # a cost sheet exists but none is valid today: no rates
+        from app.models.change_cost import DepartmentRate
+        rows = (await db.execute(select(DepartmentRate))).scalars().all()
+        sheet = [{"department_id": r.department_id, "plant_id": r.plant_id,
+                  "hourly_rate": r.hourly_rate, "min_factor": r.min_factor} for r in rows]
+    if await can_read(db, current_user):
         return sheet
-    from app.services.costing_rates import has_cost_sheet
-    if await has_cost_sheet(db, current_user.organization_id):
-        return []      # a cost sheet exists but none is valid today: no rates
-    from app.models.change_cost import DepartmentRate
-    rows = (await db.execute(select(DepartmentRate))).scalars().all()
-    return [{"department_id": r.department_id, "plant_id": r.plant_id,
-             "hourly_rate": r.hourly_rate, "min_factor": r.min_factor} for r in rows]
+    # D-cost (Christoph 2026-10-19): the rate table is the cost roles'; a
+    # costing department's grid needs its own rows only (acts-as aware)
+    from app.services.workflow_service import WorkflowService
+    mine = set(await WorkflowService.effective_department_ids(db, current_user))
+    return [r for r in sheet if r["department_id"] in mine]
 
 
 @router.get("/reference/assessment-checklist")

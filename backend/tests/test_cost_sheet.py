@@ -549,14 +549,14 @@ async def test_export_csv_and_xlsx(client, admin_auth, world, session_factory):
     assert wb["Rates"]["B4"].value == "All plants"
 
 
-async def test_reference_rates_reads_the_current_version(client, eng_auth, world,
-                                                         session_factory):
+async def test_reference_rates_reads_the_current_version(client, eng_auth, admin_auth,
+                                                         world, session_factory):
     t, p1, p2 = world["tool"], world["p1"], world["p2"]
     async with session_factory() as s:
         s.add(DepartmentRate(department_id=t, plant_id=p1, hourly_rate=11.0,
                              min_factor=0.6, effective_from=date(2020, 1, 1)))
         await s.commit()
-    legacy = (await client.get("/api/v1/changes/reference/rates", headers=eng_auth)).json()
+    legacy = (await client.get("/api/v1/changes/reference/rates", headers=admin_auth)).json()
     assert legacy == [{"department_id": t, "plant_id": p1, "hourly_rate": 11.0,
                        "min_factor": 0.6}]
     await _published(session_factory, world["org_id"], valid_from=date(2026, 1, 1), rates=[
@@ -564,12 +564,32 @@ async def test_reference_rates_reads_the_current_version(client, eng_auth, world
         dict(department_id=t, hourly_rate=50),
         dict(department_id=world["qa"], plant_id=p1, hourly_rate=None),   # empty: left out
     ])
+    # D-cost: a costing department reads its own rates here, not the table
+    rows = (await client.get("/api/v1/changes/reference/rates", headers=eng_auth)).json()
+    assert rows == []                                             # NEGATIVE
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=world["engineer_id"], department_id=t))
+        await s.commit()
     rows = (await client.get("/api/v1/changes/reference/rates", headers=eng_auth)).json()
     by_plant = {r["plant_id"]: r for r in rows}
     assert by_plant[p1] == {"department_id": t, "plant_id": p1, "hourly_rate": 65.0,
                             "min_factor": 0.6}
     assert by_plant[p2]["hourly_rate"] == 50.0 and by_plant[p2]["min_factor"] == 1.0
     assert len(rows) == 2
+    # the cost roles read every department's rows
+    async with session_factory() as s:
+        s.add(DepartmentRate(department_id=world["qa"], plant_id=p1, hourly_rate=1.0,
+                             min_factor=1.0, effective_from=date(2020, 1, 1)))
+        await s.commit()
+    await _published(session_factory, world["org_id"], version=2,
+                     valid_from=date(2026, 2, 1), rates=[
+                         dict(department_id=t, hourly_rate=50),
+                         dict(department_id=world["qa"], hourly_rate=40)])
+    assert {r["department_id"] for r in (await client.get(
+        "/api/v1/changes/reference/rates", headers=admin_auth)).json()} == {t, world["qa"]}
+    # NEGATIVE: the engineer still reads only Tooling-CS
+    assert {r["department_id"] for r in (await client.get(
+        "/api/v1/changes/reference/rates", headers=eng_auth)).json()} == {t}
 
 
 # ---------------------------------------------------------------- review fixes

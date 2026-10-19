@@ -2218,7 +2218,19 @@ Management". The lookups (`/lookup/rate|machine|sampling`), the machine
 classes, the settings and the machine list (`/cost-sheet/machines`) stay open:
 every department that costs prices its own positions from there. `/auth/me`
 returns `can_read_cost_sheet`; the "Cost sheet" nav item shows only when it is
-true. This replaces "rates are public by design".
+true. This replaces "rates are public by design". The bulk reads carry no
+other department's rates (review 2026-10-19): for a caller without
+`can_read`, `GET /changes/reference/rates` (the cost-line grid) returns the
+rows of the caller's own departments only (acts-as aware), and the machine
+list keeps every press with `has_own_rate` (the "own rate" mark of the
+machine picker) but blanks `rate_id`, `hourly_rate`, `entered_rate`,
+`local_rate`, `class_rate` and the note; a draft version there is 403 (a
+change prices on a published one). **DECIDED BY CLAUDE (ask Christoph):**
+the single lookups keep their rate, one department / class / plant at a
+time: that is the price a costing department's own position carries anyway
+(the position shows hours x rate). If the hidden sheet is not enough, strip
+the rate there for non-readers too; costing computes server-side and does
+not call the lookups from the UI.
 Migration 119 also adds the columns later lanes fill: `sales_owner_id`,
 `price_open`, `pm_signed_offer_id` / `quality_signed_offer_id` (backfilled to
 the accepted offer, else the latest sent one), and on

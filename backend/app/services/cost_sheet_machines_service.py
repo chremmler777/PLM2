@@ -509,6 +509,12 @@ async def set_machine_rate(db: AsyncSession, v: CostSheetVersion, machine_id: in
 
 # ---------------------------------------------------------------- listing
 
+# What D-cost blanks for a caller who does not read the cost sheet
+# (cost_sheet_machines.list_machines): the money, and the note beside it.
+RATE_FIELDS = ("rate_id", "hourly_rate", "entered_rate", "local_rate", "class_rate",
+               "note")
+
+
 async def list_machines(db: AsyncSession, org_id: int, *,
                         version: Optional[CostSheetVersion] = None,
                         plant_id: Optional[int] = None, active_only: bool = False,
@@ -556,6 +562,7 @@ async def list_machines(db: AsyncSession, org_id: int, *,
             "machine_class_id": cls.id if cls else None,
             "machine_class": cls.name if cls else None,
             "rate_id": own.id if own else None,
+            "has_own_rate": own is not None,
             "hourly_rate": float(own.hourly_rate) if own else None,
             "currency": own.currency if own else None,
             "note": own.note if own else None,

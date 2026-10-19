@@ -613,7 +613,7 @@ function MachineSelect({ testId, value, classId, ctx, onChange }: {
       {machines.map((m) => (
         <option key={m.id} value={m.id}>
           {m.internal_name}{m.clamping_force_t != null ? ` · ${formatNumber(m.clamping_force_t, { max: 0 })} t` : ''}
-          {m.hourly_rate != null ? ` · ${t('costpos.ownRate')}` : ''}
+          {(m.has_own_rate ?? m.hourly_rate != null) ? ` · ${t('costpos.ownRate')}` : ''}
           {m.active ? '' : ` (${t('costpos.machineInactive')})`}
         </option>
       ))}

@@ -1,6 +1,7 @@
 """Cost sheet machines API: the MachineDB presses and their per-machine rates.
 
-Read: everyone in the org (like the rest of the sheet). Sync and plant
+Read: everyone in the org; the rates in it and a draft version only the
+cost roles (D-cost, cost_sheet_service.can_read). Sync and plant
 mapping: Sales, Finance or an admin. Per-machine rates: whoever may edit the
 cost sheet (cost_sheet_service.require_edit), in the open draft only.
 """
@@ -72,14 +73,24 @@ async def list_machines(version_id: Optional[int] = None, plant_id: Optional[int
     class rate of its plant in that version (default: the version valid
     today)."""
     org = current_user.organization_id
+    readable = await svc.can_read(db, current_user)
     try:
         v = (await svc.get_version(db, org, version_id) if version_id
              else await svc.version_on(db, org))
     except CostSheetError as e:
         _raise(e)
+    if v is not None and v.status != "published" and not readable:
+        # D-cost: a draft is the cost roles' (a change prices on a published one)
+        _raise(CostSheetError(svc.READ_DENIED, 403))
     machines = await msvc.list_machines(
         db, org, version=v, plant_id=plant_id, active_only=active_only,
         min_tonnage=min_tonnage, max_tonnage=max_tonnage)
+    if not readable:
+        # D-cost (Christoph 2026-10-19): everyone who costs picks a press and
+        # sees whether it has an own rate; the rates are the cost roles'
+        for m in machines:
+            for f in msvc.RATE_FIELDS:
+                m[f] = None
     return {"version_id": v.id if v else None, "machines": machines,
             **await _status(db, current_user)}
 

@@ -768,7 +768,8 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
       id: 1, internal_name: 'P-350', plant_id: 1, clamping_force_t: 350, active: true,
       hourly_rate: null, ...over })
     vi.mocked(costSheetMachinesApi.list).mockResolvedValue({ machines: [
-      press({}),
+      // D-cost: a non-reader gets no rate, only whether there is an own one
+      press({ has_own_rate: true }),
       press({ id: 2, internal_name: 'P-300 old', active: false }),
       press({ id: 3, internal_name: 'P-400 other plant', plant_id: 8 }),
       press({ id: 4, internal_name: 'P-900 other class', clamping_force_t: 900 }),
@@ -783,7 +784,7 @@ describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
     await waitFor(() => expect(pick.options).toHaveLength(3))
     expect(pick.value).toBe('2')
     const names = [...pick.options].map((o) => o.textContent)
-    expect(names).toEqual([t('costpos.machineAny'), 'P-350 · 350 t',
+    expect(names).toEqual([t('costpos.machineAny'), `P-350 · 350 t · ${t('costpos.ownRate')}`,
       `P-300 old · 350 t (${t('costpos.machineInactive')})`])
   })
 
