@@ -5,6 +5,7 @@ import CockpitSummary, { nextStepFor, pluralizeLabel } from './CockpitSummary'
 import type { ChangeDetail, MyAction } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
 import { changesApi } from '../../api/changes'
+import { formatDayMonth } from '../../lib/format'
 
 const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
   id: 7, change_number: 'CR-2026-0007', project_id: 1, title: 'Housing fix',
@@ -454,6 +455,36 @@ describe('CockpitSummary scoping decisions belong to the meeting', () => {
     const pointer = screen.getByText(/Record the scoping meeting: proceed/)
     fireEvent.click(pointer)
     expect(onAction).toHaveBeenCalledWith('scoping')
+  })
+
+  it('after a saved meeting the header says decide that meeting, not record one (R37)', async () => {
+    const list = vi.spyOn(changesApi, 'listMeetings').mockResolvedValue([
+      { id: 3, change_id: 7, meeting_date: '2026-10-16T10:00:00', decision: 'needs_info',
+        participants: [] },
+      { id: 4, change_id: 7, meeting_date: '2026-10-19T09:00:00', decision: null,
+        participants: [] },
+    ] as never)
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} onAction={() => {}} />))
+    await waitFor(() => expect(screen.getByTestId('meeting-decides').textContent)
+      .toBe(t('cockpit.decideSavedMeeting').replace('{d}', formatDayMonth('2026-10-19T09:00:00'))))
+    expect(screen.queryByText(/Record the scoping meeting/)).toBeNull()
+    cleanup()
+    // someone who does not record it is told who decides the saved meeting
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} onAction={() => {}}
+      canRecordMeeting={false} />))
+    await waitFor(() => expect(screen.getByTestId('meeting-decides').textContent)
+      .toBe(t('cockpit.savedMeetingDecides').replace('{d}', formatDayMonth('2026-10-19T09:00:00'))))
+    cleanup()
+    // negative: every meeting decided ("Not yet") -> the next one is recorded
+    list.mockResolvedValue([{ id: 3, change_id: 7, meeting_date: '2026-10-16T10:00:00',
+      decision: 'needs_info', participants: [] }] as never)
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} onAction={() => {}} />))
+    await waitFor(() => expect(list).toHaveBeenCalled())
+    expect(screen.getByTestId('meeting-decides').textContent).toBe(t('cockpit.decideInMeeting'))
+    list.mockRestore()
   })
 
   it('names the PPAP decision with its owner while it holds proceed (HARD #7), never "Nothing blocking"', () => {

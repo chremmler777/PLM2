@@ -294,6 +294,13 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   stays for a question or legacy hold (R37 polish, 2026-10-19). See "Check items first and questions in the assessment"
   below for how it is closed (`ASSESSMENT_V2`; switch off: a member closes it
   with a resolution note).
+- **Header after a saved meeting (R37 polish, 2026-10-19):** a scoping
+  meeting saved without its decision is decided, not recorded again: the
+  cockpit reads *"Decide the scoping meeting of 19 Oct: proceed, not yet or
+  reject"* (who may record it) or *"Scoping meeting of 19 Oct saved; the
+  lead or Project Management decides"* (everyone else). With every meeting
+  decided (*Not yet*), it reads *"Record the scoping meeting: proceed, not
+  yet or reject"* again (the words of the buttons, no "ask for information").
 - **C13, "Not yet"** (the meeting's `needs_info`, button *Not yet* in the UI):
   closes nobody's question. With questions open it needs no reason; it records
   *"Not yet: waiting for 2 answers (Process Engineer Thu, Tool Engineer Fri)"*

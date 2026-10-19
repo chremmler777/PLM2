@@ -564,6 +564,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const lead = hardBlockers.find((b) => b.go) ?? hardBlockers[0]
   const meetingDecides = DECIDED_BY_MEETING.includes(change.status) && !motherPlant
     && change.origin !== 'engineering_review'
+  const { data: meetings = [] } = useQuery({
+    queryKey: ['change-meetings', change.id],
+    queryFn: () => changesApi.listMeetings(change.id),
+    enabled: meetingDecides,
+  })
 
   // Same names as the tab bar.
   // Old names (commercial, implementation) resolve to the tab for the stage.
@@ -605,10 +610,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const ownHold = proceedHolds.length > 0
     ? mainActions.find((a) => a.kind === 'ppap_decision' || a.kind === 'customer_flip')
     : undefined
+  // R37: a meeting saved without its decision is decided, not recorded
+  // again (same cache as the Scoping tab, read only while the meeting decides).
+  const savedMeeting = [...meetings].filter((m) => !m.decision)
+    .sort((a, b) => b.meeting_date.localeCompare(a.meeting_date))[0]
   const meetingText = proceedHolds.length > 0
     ? t('cockpit.proceedWaits').replace('{x}', proceedHolds
       .map((i) => `${itemLabel(i)}${i.who ? ` (${i.who})` : ''}`).join(', '))
-    : canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')
+    : savedMeeting
+      ? t(canRecordMeeting ? 'cockpit.decideSavedMeeting' : 'cockpit.savedMeetingDecides')
+        .replace('{d}', formatDayMonth(savedMeeting.meeting_date))
+      : canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')
   const backupActions = shownActions.filter((a) => a.role === 'backup')
   const actionKey = (a: MyAction, i: number) =>
     `${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? a.department_id ?? a.offer_id ?? i}`

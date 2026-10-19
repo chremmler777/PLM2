@@ -120,7 +120,7 @@ export const pmChapter: ContentChapter = {
             { title: 'Record it', body: '"+ Record a meeting" on the "Scoping" tab: channel, "Meeting date", "Participants". Attendance only, not responsibility.' },
             { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supportive", "Consulted", "Informed (notified only)" or "Not involved". The standard routing is pre-selected; the room overrules it. An "Informed" department gets the notification and no task.' },
             { title: 'Confirm the cost carrier', body: '"Cost carrier" is required before the assessment can start. Flipping it is audited and Sales is notified.' },
-            { title: 'Decide', body: '"Proceed & start assessment", "Not yet" or "Reject". Proceed starts the assessment for every R and A department. With open check items the button reads "Proceed: 3 check items go to departments": they go along as conditions, each due with its department\'s assessment.' },
+            { title: 'Decide', body: '"Proceed & start assessment", "Not yet" or "Reject". Proceed starts the assessment for every R and A department. With open check items the button reads "Proceed: 3 check items go to departments": they go along as conditions, each due with its department\'s assessment. A meeting saved without its decision stays open: the header then reads "Decide the scoping meeting of 19 Oct", not "Record".' },
           ],
         },
         {
