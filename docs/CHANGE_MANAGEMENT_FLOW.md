@@ -1897,6 +1897,14 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   closer; an internal change's notice carries achieved vs target.
 - **Header**: any concession in force ("Accepted under concession VI-n
   until <date>") shows beside the need-by line.
+- **Close dialog (R37 polish, 2026-10-19)**: the last look before *Close*
+  (`CloseSummary`, info only, nothing here holds the step): hours booked
+  against the estimate and the departments that have not booked (with their
+  estimate), the Assumed answers nobody confirmed yet (value, unit, who
+  confirms by when), the lessons (count and titles, the none-reason, or
+  "step not done"), and the closer's own hours prefilled with what is left
+  of their estimate (`prefill_hours`; booked as `estimate` while unchanged,
+  else `typed`; not offered once the booking window closed).
 
 ### Book hours (ECR-solid C15, 2026-10-16; no switch)
 

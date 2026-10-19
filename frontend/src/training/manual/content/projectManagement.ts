@@ -39,7 +39,7 @@ export const pmChapter: ContentChapter = {
               ['Quoted', 'Give the "PM sign-off". The cockpit asks for it once the customer accepted.'],
               ['Timing', 'Create the detailed plan, get every team to confirm, "Validate timing".'],
               ['Implementing', 'Lock or escalate each deviation. The change cannot be released while one is open.'],
-              ['Validation', 'Read the "Not releasable" line (fix, retest, concession), retest for a department with no member here, complete the lessons step, release and close.'],
+              ['Validation', 'Read the "Not releasable" line (fix, retest, concession), retest for a department with no member here, complete the lessons step, release and close. The close dialog shows the hours booked against the estimate (and who has not booked), the assumptions nobody confirmed yet and the lessons, and offers your own hours prefilled with your estimate.'],
             ],
           },
         },

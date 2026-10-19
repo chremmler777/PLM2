@@ -59,6 +59,7 @@ import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/c
 import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
 import { ConcessionLine } from '../components/changes/release/AchievedCard';
 import BookHoursDialog from '../components/changes/hours/BookHoursDialog';
+import CloseSummary from '../components/changes/CloseSummary';
 import HoursCard from '../components/changes/hours/HoursCard';
 import { BOOK_HOURS_EVENT } from '../api/hours';
 import { useDepartments } from '../hooks/queries/useWorkflows';
@@ -1137,6 +1138,8 @@ export default function ChangeDetailPage() {
           }
           transition.mutate(reason ? { to, reason } : { to });
         }}>
+        {/* R37: hours vs estimate, open assumptions, lessons; own hours prefilled */}
+        {confirmTo === 'closed' && <CloseSummary changeId={change.id} />}
         {motherPlant && change.status === 'captured' && confirmTo === 'scoping'
           && !change.description?.trim() && (canEditDescription || canRunMotherPlant) && (
           <div data-testid="kickoff-description" className="mt-3 text-sm">
