@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from tests.checklist_helpers import details_in
 from tests.conftest import login, lock_impact
 
 pytestmark = pytest.mark.asyncio
@@ -506,7 +507,7 @@ async def test_deviation_add_to_passed_stage_task_active_still_blocks(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["Tool Engineer"]))
         await s.commit()
     async with session_factory() as s:
         inst = (await s.execute(select(WfInstance).where(
@@ -542,7 +543,7 @@ async def test_deviation_add_to_passed_stage_task_active_still_blocks(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["APQP"]))
         await s.commit()
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
@@ -579,9 +580,9 @@ async def test_born_complete_stage_advances_and_completes(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["APQP"]))
         await ChangeService.submit_assessment(
-            s, change, dev_departments["Quality"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["Quality"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["Quality"]))
         await s.commit()
 
     # Stage 1 completes -> stage 2 is created with both actionable tasks mirrored
@@ -589,7 +590,7 @@ async def test_born_complete_stage_advances_and_completes(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["Tool Engineer"]))
         await s.commit()
 
     async with session_factory() as s:
@@ -617,7 +618,7 @@ async def test_completing_passed_stage_task_emits_single_completion(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["Tool Engineer"]))
         await s.commit()
 
     # Add a blocking dept to the PASSED stage 1.
@@ -633,7 +634,7 @@ async def test_completing_passed_stage_task_emits_single_completion(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"])
+            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"], details=await details_in(s, dev_departments["APQP"]))
         await s.commit()
 
     async with session_factory() as s:
