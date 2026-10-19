@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CHAPTERS } from '../chapters'
+import { HANDOUTS, handoutMarkdown } from './handouts'
 import { CONTENT_CHAPTERS, PRACTICE_TASKS, PRACTICE_TASKS_BY_ROLE, SHOT_SLOTS } from './index'
 import type { Block } from './types'
 import wiring from './WIRING.md?raw'
@@ -149,5 +150,15 @@ describe('A6-11 training matches the flow', () => {
       .flatMap((b) => ('table' in b ? b.table.rows.map((r) => r[0]) : []))
     expect(rows).toContain('Toolshop')
     expect(rows).toContain('Management')
+  })
+
+  it('every line that says who sees prices names Management (R37)', () => {
+    const lists = (x: string) => /(shown|visible) to Sales/.test(x)
+    const md = HANDOUTS.map(handoutMarkdown)
+    const lines = [...allTexts, ...md.flatMap((m) => m.split('\n'))].filter(lists)
+    expect(lines.length).toBeGreaterThan(0)
+    for (const x of lines) expect(x, x).toMatch(/Project Management, Management/)
+    // negative: nobody tells Finance it is among them
+    for (const x of lines) expect(x, x).not.toMatch(/(shown|visible) to [^.:]*Finance/)
   })
 })

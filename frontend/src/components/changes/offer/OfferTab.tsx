@@ -604,7 +604,7 @@ export default function OfferTab(props: OfferTabProps) {
       <div className="space-y-4">
         <p data-testid="offer-no-access"
           className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-400">
-          Offer prices are visible to Sales, the Project Manager, the change lead and admins.
+          {t('price.whoSees')}
         </p>
         {/* Quality signs without the price (P4): the sign block in every
             status a signature is given in (C14: a re-sign after approval) */}

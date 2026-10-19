@@ -1239,6 +1239,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Ein angehängtes Antwortdokument zählt ebenfalls als Beleg.',
     en: 'An attached response document counts as substance too.',
   },
+  // One wording wherever the app says who reads prices (R37; PriceViewer:
+  // admin, any PM member, Sales, Management, plus the change lead).
+  'price.whoSees': {
+    de: 'Preise sehen Vertrieb, Projektmanagement, Geschäftsleitung (Management), der Lead der Änderung und Admins.',
+    en: 'Prices are visible to Sales, Project Management, Management, the change lead and admins.',
+  },
   'concern.onHold': { de: 'Wartet auf Klärung', en: 'On hold' },
   // Adding a department after the routing was built (routing deviation).
   'routingDev.add': { de: 'Abteilung hinzufügen', en: 'Add department' },

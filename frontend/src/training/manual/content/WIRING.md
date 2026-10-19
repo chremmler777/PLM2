@@ -312,7 +312,8 @@ open by nature:
 The app and the content follow these; the chapters and handouts say them.
 
 - **Finance and Quality do not see prices: intended.** The price viewer
-  stays admin, lead, Sales and any Project Management member. The Finance
+  stays admin, lead, Sales, any Project Management member and (P4,
+  ECR-solid) Management, which OKs price drops and Absorb. The Finance
   chapter ("you own the rates, not the offers") and the Quality chapter
   ("your sign-off is on the process record, not the price") state it as
   the rule. (Was question 2.)

@@ -2171,7 +2171,10 @@ Absorb (P4) and therefore reads prices. One price rule serves every read:
 serves it as `can_see_prices` for the cost cards; the all-department costing
 and implementation views (`CostingPositionService` / `ImplementationService.
 readable_department_ids`) ask it too, so whoever reads the summation reads
-every position, and everyone else their own departments' rows. Management is
+every position, and everyone else their own departments' rows. The app says
+it in one wording wherever a viewer is refused prices (Offer tab, P&L,
+training: label `price.whoSees`): *Sales, Project Management, Management,
+the change lead and admins* (R37 polish, 2026-10-19). Management is
 never routed and gets no cost-sheet rate row
 (`cost_sheet_service.NON_ROUTABLE_DEPARTMENTS`): a routing deviation that adds
 Management, or a retired department, is refused (400), and the add pickers do

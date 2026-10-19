@@ -13,6 +13,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
 import { pnlApi } from '../api/pnl';
+import { t } from '../i18n/cmLabels';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
 import { formatDays, formatMoney, formatMoneyDelta, formatPercent } from '../lib/format';
@@ -354,7 +355,7 @@ export default function PnlPage() {
       <div className="max-w-7xl mx-auto p-6">
         <h1 className="text-2xl font-semibold mb-6">P&amp;L</h1>
         <p data-testid="pnl-no-prices" className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
-          Prices are visible to Sales, Project Management, Management, the change lead and admins.
+          {t('price.whoSees')}
         </p>
       </div>
     );

@@ -132,7 +132,7 @@ export default function CostingBuckets({
   myDepartmentIds: number[]
   plants: { id: number; name: string; is_active?: boolean; code?: string | null; location?: string | null }[]
   projectPlantId?: number | null
-  /** PM, Sales, the change lead and admins see every figure. */
+  /** PM, Sales, Management, the change lead and admins see every figure. */
   canSeeAll: boolean
   editable: boolean
   /** Project Management (and an admin not acting as a department) maintains

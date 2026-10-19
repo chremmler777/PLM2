@@ -50,7 +50,7 @@ export const qualityChapter: ContentChapter = {
         {
           points: [
             ['What you confirm:', 'the process record. The customer\'s acceptance is recorded, the risks are stated, the concerns are settled, and nothing in the audit says the change should not go ahead.'],
-            ['You do not see prices, on purpose.', 'Offer prices are shown to Sales, Project Management, the change lead and admins. The "Offer" tab shows you the sign-off without the figures, and money is blanked in the audit and its CSV. Your sign-off is on the process record, not the price.'],
+            ['You do not see prices, on purpose.', 'Offer prices are shown to Sales, Project Management, Management, the change lead and admins. The "Offer" tab shows you the sign-off without the figures, and money is blanked in the audit and its CSV. Your sign-off is on the process record, not the price.'],
             ['"Start at risk: add the quality risks"', 'an urgent change starts before the PO. Write one line of what can go wrong for quality (e.g. "No PPAP before SOP; first lot 100 % checked"). Project Management approves after you. Your sign-off row follows at once.'],
             ['A new version:', 'your signature stays when only the price moved. When the plan, the parts or a part index changed, it is taken back and you are told to sign the new version.'],
             ['Four eyes:', '"PM and Quality sign-off must be different users". If you signed as PM, somebody else from Quality signs.'],

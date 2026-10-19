@@ -1,3 +1,4 @@
+import { t } from '../i18n/cmLabels'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -81,8 +82,7 @@ describe('PnlPage', () => {
     summaryMock.mockClear()
     changesMock.mockClear()
     renderPage()
-    expect(screen.getByTestId('pnl-no-prices').textContent).toContain(
-      'Prices are visible to Sales, Project Management, Management, the change lead and admins')
+    expect(screen.getByTestId('pnl-no-prices').textContent).toContain(t('price.whoSees'))
     expect(screen.queryByText('0.00 EUR')).toBeNull()
     expect(summaryMock).not.toHaveBeenCalled()
     expect(changesMock).not.toHaveBeenCalled()

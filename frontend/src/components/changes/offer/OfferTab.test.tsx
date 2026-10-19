@@ -1,3 +1,4 @@
+import { t } from '../../../i18n/cmLabels'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { planApi } from '../../../api/changePlan'
@@ -105,6 +106,15 @@ describe('OfferTab', () => {
     renderTab(props({ canWrite: false, canSeePrices: false }))
     expect(await screen.findByTestId('offer-no-access')).toBeDefined()
     expect(changeOfferApi.list).not.toHaveBeenCalled()
+  })
+
+  it('names Management among who sees prices, one wording with the P&L (R37)', async () => {
+    renderTab(props({ canWrite: false, canSeePrices: false }))
+    const text = (await screen.findByTestId('offer-no-access')).textContent ?? ''
+    expect(text).toContain(t('price.whoSees'))
+    expect(text).toContain('Management, the change lead')
+    // negative: Finance and Quality read no offer prices
+    expect(text).not.toMatch(/Finance|Quality/)
   })
 
   it('Quality (no prices) gets the sign block in approved too (C14 re-sign)', async () => {
