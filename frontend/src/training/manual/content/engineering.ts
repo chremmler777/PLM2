@@ -65,7 +65,8 @@ export const engineeringChapter: ContentChapter = {
             'An internal change is complete with a description, one evidence file or photo, and ' +
             '"Wrong today": the number with its unit (for example 12.4 g, 4 % scrap) and the target. ' +
             'Volume and saving come later, at the internal approval. With all of it the form offers ' +
-            '"Create and hand over": created and in scoping in one click.',
+            '"Create and hand over": created and in scoping in one click. It has no customer: no ' +
+            'customer-mail slot, and costing shows no Sales or Project Manager row.',
         },
       ],
     },

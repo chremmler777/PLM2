@@ -183,6 +183,35 @@ describe('CostingBuckets', () => {
     expect(screen.queryByTestId('supwait-panel-4')).toBeNull()
   })
 
+  it('an internal change has no Sales or PM costing row (R37)', async () => {
+    const depts = [...DEPTS, { id: 8, name: 'Sales', is_active: true },
+      { id: 9, name: 'Project Manager', is_active: true }]
+    const rows = [assessment(), assessment({ id: 2, department_id: 4 }),
+      assessment({ id: 3, department_id: 8, stage_order: 2, rasic_letter: 'A' }),
+      assessment({ id: 4, department_id: 9, stage_order: 2, rasic_letter: 'R' })]
+    buckets({ canSeeAll: true, departments: depts,
+      change: change({ customer_relevant: false, assessments: rows }) })
+    expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
+    expect(screen.queryByTestId('costing-bucket-8')).toBeNull()
+    expect(screen.queryByTestId('costing-bucket-9')).toBeNull()
+    cleanup()
+    // negative: a customer change keeps both
+    buckets({ canSeeAll: true, departments: depts,
+      change: change({ customer_relevant: true, assessments: rows }) })
+    expect(screen.getByTestId('costing-bucket-8')).toBeTruthy()
+    expect(screen.getByTestId('costing-bucket-9')).toBeTruthy()
+  })
+
+  it('an internal change still shows a Sales or PM row that has money booked (in flight)', async () => {
+    const depts = [...DEPTS, { id: 9, name: 'Project Manager', is_active: true }]
+    vi.mocked(changesApi.getSummation).mockResolvedValue({ ...summation, by_department: [
+      ...summation.by_department, { department_id: 9, one_time_internal: 50,
+        one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 }] } as never)
+    buckets({ canSeeAll: true, departments: depts, change: change({ customer_relevant: false,
+      assessments: [assessment(), assessment({ id: 4, department_id: 9, stage_order: 2 })] }) })
+    expect(await screen.findByTestId('costing-bucket-9')).toBeTruthy()
+  })
+
   it('gives a department routed on two stages one bucket, not two', () => {
     buckets({ canSeeAll: true, change: change({ assessments: [
       { id: 1, department_id: 2, stage_order: 1, rasic_letter: 'R', status: 'active', verdict: 'feasible' },

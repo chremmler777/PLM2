@@ -638,11 +638,14 @@ export default function AssessmentBuckets({
                           kind="rfq" label={t('attach.rfqSlot')}
                           extensions={DOCUMENT_EXTENSIONS.rfq}
                           onUploaded={invalidate} />)}
-                      {slot(`bucket-mail-${row.id}`, t('mail.title'),
-                        mails, t('mail.none'),
-                        <AttachmentDropzone changeId={changeId} compact
-                          kind="customer_email" label={t('mail.slot')}
-                          onUploaded={invalidate} />)}
+                      {/* R37: an internal change has no customer to mail */}
+                      {(change.customer_relevant !== false || mails.length > 0)
+                        && slot(`bucket-mail-${row.id}`, t('mail.title'),
+                          mails, t('mail.none'),
+                          change.customer_relevant === false ? null
+                            : <AttachmentDropzone changeId={changeId} compact
+                              kind="customer_email" label={t('mail.slot')}
+                              onUploaded={invalidate} />)}
                     </div>
                   )
                 })()}

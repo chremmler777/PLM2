@@ -571,7 +571,7 @@ Three typed containers, three responsibilities:
 |---|---|---|---|
 | **Change PPT** (internal explanation of the change) | per assessing department's bucket (`kind=change_ppt`) | assessing department | required for a `not_feasible` verdict (replaces the generic evidence gate) |
 | **RFQ** (external: supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | required at submit when "external modification" is Yes (since 2026-09-27; .pdf, .xlsx, .xls, .docx, .msg, .eml) |
-| **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads, Sales owns the customer relationship | chronological tracked list, visible to all — the customer-communication record of the change |
+| **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads, Sales owns the customer relationship | chronological tracked list, visible to all — the customer-communication record of the change. An internal change (`customer_relevant` false) has no slot, neither on the change nor in a bucket; a mail filed before still lists (R37 polish, 2026-10-19) |
 
 ### Assessment shape (2026-08-11, in build)
 
@@ -855,6 +855,10 @@ Switch `ASSESSMENT_V2` (migration 129).
 
 ### Close costing: ready to quote, the internal approval card (ECR-solid §5, 2026-10-15)
 Switch `ASSESSMENT_V2` (migration 130).
+- **Internal change, costing board (R37 polish, 2026-10-19):** no offer and
+  no customer, so the Sales and Project Manager rows (routed for the
+  summation and customer stages) get no costing bucket; a row that already
+  holds money (in flight) still shows.
 - **Ready to quote**: closing costing (`costing -> quoting`) on a customer
   change tells the Sales owner once (`task_new`, `ready_to_quote:<id>`;
   without a Sales owner every Sales member), unless they closed it

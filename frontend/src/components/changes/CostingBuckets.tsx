@@ -121,6 +121,9 @@ function LeadTimeField({ changeId, departmentId, initial }: {
   )
 }
 
+/** Departments whose costing row exists for the offer only (R37). */
+const COMMERCIAL_DEPTS = ['Sales', 'Project Manager']
+
 export default function CostingBuckets({
   change, departments, myDepartmentIds, plants, projectPlantId, canSeeAll, editable,
   isPm = false, canDecideWaits = false,
@@ -199,6 +202,12 @@ export default function CostingBuckets({
       || deptName(a.department_id).localeCompare(deptName(b.department_id)))
     .filter((a, i, all) => all.findIndex((x) => x.department_id === a.department_id) === i)
     .filter((a) => !early || earlyIds.has(a.department_id))
+    // R37: an internal change has no offer and no customer, so Sales and
+    // the PM row (summation / customer stages) cost nothing there; a row
+    // that already holds money (in flight) still shows.
+    .filter((a) => change.customer_relevant !== false
+      || !COMMERCIAL_DEPTS.includes(deptName(a.department_id))
+      || deptCosted(a.department_id) === true)
 
   if (rows.length === 0) {
     return <p data-testid="costing-none" className="text-sm text-slate-400">

@@ -62,4 +62,15 @@ describe('CustomerMailLog', () => {
     // The hint tells people what to drop — saved mails, not a live Outlook drag.
     expect(screen.getByText(t('mail.hint'))).toBeTruthy()
   })
+
+  it('an internal change offers no customer-mail drop zone (R37)', () => {
+    const { container } = wrap(<CustomerMailLog changeId={7} attachments={[]} customerRelevant={false} />)
+    expect(container.textContent).toBe('')
+    expect(screen.queryByTestId('dropzone')).toBeNull()
+    cleanup()
+    // a mail filed before still reads, without a slot to add more
+    wrap(<CustomerMailLog changeId={7} attachments={[att()]} customerRelevant={false} />)
+    expect(screen.getByRole('link', { name: 'mail.msg' })).toBeTruthy()
+    expect(screen.queryByTestId('dropzone')).toBeNull()
+  })
 })

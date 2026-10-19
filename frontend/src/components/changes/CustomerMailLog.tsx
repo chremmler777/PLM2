@@ -15,18 +15,25 @@ import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 
-export default function CustomerMailLog({ changeId, attachments, readOnly = false }: {
+export default function CustomerMailLog({
+  changeId, attachments, readOnly: closed = false, customerRelevant = true,
+}: {
   changeId: number
   /** The change's documents; the card picks its own out of them. */
   attachments: Attachment[]
   /** Closed or canceled: the thread is a record, no new mails. */
   readOnly?: boolean
+  /** R37: an internal change has no customer to mail; no slot, and no card
+      at all unless a mail was filed before. */
+  customerRelevant?: boolean
 }) {
+  const readOnly = closed || !customerRelevant
   const qc = useQueryClient()
   // Oldest first: a mail thread reads forward, not backward.
   const mails = attachments
     .filter((a) => a.kind === 'customer_email')
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
+  if (!customerRelevant && mails.length === 0) return null
 
   return (
     <section data-testid="customer-mails"

@@ -1221,7 +1221,8 @@ export default function ChangeDetailPage() {
           {/* Customer correspondence sits above the document lists: it is what
               everyone comes looking for, and it belongs to no phase. */}
           <div className="pt-3">
-            <CustomerMailLog changeId={change.id} attachments={change.attachments ?? []} readOnly={readOnly} />
+            <CustomerMailLog changeId={change.id} attachments={change.attachments ?? []} readOnly={readOnly}
+              customerRelevant={change.customer_relevant !== false} />
           </div>
 
           <ChangeAttachments change={change} readOnly={readOnly}

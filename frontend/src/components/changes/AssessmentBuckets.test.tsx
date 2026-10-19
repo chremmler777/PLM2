@@ -599,6 +599,19 @@ describe('AssessmentBuckets checklist', () => {
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('an internal change has no customer-mail slot in the bucket (R37)', async () => {
+    buckets({ myDepartmentIds: [2], change: change({ customer_relevant: false,
+      assessments: [assessment({ id: 1, department_id: 2 })] }) })
+    expect(await screen.findByTestId('bucket-rfq-2')).toBeTruthy()
+    expect(screen.queryByTestId('bucket-mail-2')).toBeNull()
+    cleanup()
+    // negative: a customer change keeps its mail slot with the drop zone
+    buckets({ myDepartmentIds: [2], change: change({ customer_relevant: true,
+      assessments: [assessment({ id: 1, department_id: 2 })] }) })
+    const slot = await screen.findByTestId('bucket-mail-2')
+    expect(within(slot).getByTestId('dropzone').dataset.kind).toBe('customer_email')
+  })
+
   it('shows the filed documents under their row and lets the submit through', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })],
