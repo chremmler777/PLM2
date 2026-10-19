@@ -124,7 +124,7 @@ async def _decisions(session_factory, user_id):
 
 
 def test_decision_needed_and_override_answers_are_mailed():
-    from app.services.mail_outbox import MAIL_KINDS
+    from app.services.ecr_mail import MAIL_KINDS
     assert {"decision_needed", "deviation_decided"} <= MAIL_KINDS
 
 

@@ -211,52 +211,52 @@ async def test_not_feasible_answer_is_the_leads_decision(
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def smtp_on(monkeypatch):
+    from tests.test_ecr_solid_mail import switch_on
     s = get_settings()
-    monkeypatch.setattr(s, "smtp_enabled", True)
+    switch_on(monkeypatch)
     monkeypatch.setattr(s, "mail_default_domain", "")
     return []
 
 
 async def test_refused_recipient_is_skipped_and_the_next_mail_goes(
         session_factory, seed, smtp_on):
-    import smtplib
-    from app.services import mail_outbox
+    from app.services import ecr_mail
     from app.services.notification_service import NotificationService
 
     def sender(msg):
-        if msg["Subject"] == "first":
-            raise smtplib.SMTPRecipientsRefused({msg["To"]: (550, b"no such user")})
+        if msg.subject == "first":   # graph_send's error for a bad recipient
+            raise RuntimeError("Graph sendMail 400: ErrorInvalidRecipients")
         smtp_on.append(msg)
     async with session_factory() as s:
         for title in ("first", "second"):
             await NotificationService.notify_users(s, [seed["engineer_id"]], title,
                                                    kind="task_assigned")
         await s.commit()
-        assert await mail_outbox.send_pending(s, sender=sender) == 1
+        assert await ecr_mail.send_pending(s, sender=sender) == 1
         assert all(n.mailed_at is not None for n in await _notes(s))  # no retry loop
-    assert [m["Subject"] for m in smtp_on] == ["second"]
+    assert [m.subject for m in smtp_on] == ["second"]
 
 
 async def test_relay_down_stops_and_retries_next_run(session_factory, seed, smtp_on):
-    import smtplib
-    from app.services import mail_outbox
+    import httpx
+    from app.services import ecr_mail
     from app.services.notification_service import NotificationService
 
     def down(msg):
-        raise smtplib.SMTPServerDisconnected("gone")
+        raise httpx.ConnectError("gone")
     async with session_factory() as s:
         await NotificationService.notify_users(s, [seed["engineer_id"]], "x",
                                                kind="task_assigned")
         await s.commit()
-        assert await mail_outbox.send_pending(s, sender=down) == 0
+        assert await ecr_mail.send_pending(s, sender=down) == 0
         assert (await _notes(s))[0].mailed_at is None
-        assert await mail_outbox.send_pending(s, sender=smtp_on.append) == 1
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 1
 
 
 async def test_bare_hub_username_gets_the_mail_domain(
         session_factory, seed, smtp_on, monkeypatch):
     from app.models.entities import User
-    from app.services import mail_outbox
+    from app.services import ecr_mail
     from app.services.notification_service import NotificationService
     async with session_factory() as s:
         (await s.get(User, seed["engineer_id"])).email = "christoph.demmler"
@@ -264,17 +264,17 @@ async def test_bare_hub_username_gets_the_mail_domain(
                                                kind="task_assigned")
         await s.commit()
         # no domain configured: no address, stamped, nothing sent
-        assert await mail_outbox.send_pending(s, sender=smtp_on.append) == 0
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 0
         monkeypatch.setattr(get_settings(), "mail_default_domain", "ktx.example")
         await NotificationService.notify_users(s, [seed["engineer_id"]], "b",
                                                kind="task_assigned")
         await s.commit()
-        assert await mail_outbox.send_pending(s, sender=smtp_on.append) == 1
-    assert smtp_on[0]["To"] == "christoph.demmler@ktx.example"
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 1
+    assert smtp_on[0].to == ["christoph.demmler@ktx.example"]
 
 
 async def test_kind_less_fyi_is_not_mailed(session_factory, seed, smtp_on):
-    from app.services import mail_outbox
+    from app.services import ecr_mail
     from app.services.notification_service import NotificationService
     async with session_factory() as s:
         await NotificationService.notify_users(
@@ -282,7 +282,7 @@ async def test_kind_less_fyi_is_not_mailed(session_factory, seed, smtp_on):
         await NotificationService.notify_users(
             s, [seed["engineer_id"]], "Overdue lesson action (94d): L")
         await s.commit()
-        assert await mail_outbox.send_pending(s, sender=smtp_on.append) == 0
+        assert await ecr_mail.send_pending(s, sender=smtp_on.append) == 0
     assert smtp_on == []
 
 

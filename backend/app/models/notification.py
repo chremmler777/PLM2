@@ -24,7 +24,7 @@ class Notification(Base):
     subject_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    # Mail copy (app/services/mail_outbox.py): when it was mailed, or
+    # Mail copy (app/services/ecr_mail.py): when it was mailed, or
     # skipped; NULL = not yet. One mail per notification at most.
     mailed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

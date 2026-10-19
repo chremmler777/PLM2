@@ -2529,12 +2529,16 @@ one, and "Absorb" on an open price for who may ask it.
   is done ("Ready: move it on" makes the move itself); on the tab where the
   work already is it names the step ("... (below)") instead of a second
   button. A first-use help line is dismissed once per browser.
-- **Mail (`mail_outbox.py`, migration 122).** The notice channel stays the
+- **Mail (`ecr_mail.py`, migration 122).** The notice channel stays the
   in-app notification (one per item: `notify_once`, involved people only).
-  While `smtp_enabled` (default off) a one-minute loop mails each new one once,
-  plain text ending "Answer in PLM2: <link>" (`plm2_public_url`, else
-  `frontend_url` + `/plm2`). Only the immediate class is mailed
-  (`mail_outbox.MAIL_KINDS`: task newly yours, `task_assigned` to you or
+  While `ECR_MAIL_ENABLED` (default off) and Graph is configured (`ENTRA_*`)
+  a one-minute loop mails each new one once, plain text ending "Answer in
+  PLM2: <link>" (`NOTIFY_BASE_URL`). The transport is the part data mail's
+  ("KTX Apps" via Microsoft Graph, `part_data_mail.graph_send`), so
+  `NOTIFY_TRIAL_RECIPIENT` diverts these mails too; `notifications.mailed_at`
+  is the per-user dedupe and the `mail_outbox` table stays the part data
+  digest's. Only the immediate class is mailed
+  (`ecr_mail.MAIL_KINDS`: task newly yours, `task_assigned` to you or
   `task_new` to your department, decision needed, escalation to acknowledge,
   the two digests, an override's answer, sent only when it is a no or the
   change is urgent); `decision_needed` (`decision_notices.py`, A6-02) goes
@@ -2548,9 +2552,10 @@ one, and "Absorb" on an open price for who may ask it.
   FYI notices, kind-less notices (lesson reminders, "Cost carrier changed")
   and a backup's info copy stay badges. Read, older than 24 h or addressless
   ones are skipped; a hub account's bare username gets
-  `settings.mail_default_domain` (empty: not mailed). A mail the relay
-  refuses for its recipient or content is skipped; only an unreachable relay
-  stops the run (retried next minute). Existing notifications were stamped
+  `settings.mail_default_domain` (empty: not mailed); an invalid address is
+  no address. A mail Graph refuses for its recipient or content (4xx) is
+  skipped; Graph unreachable, throttling (408/429) or refusing our app
+  (401/403) stops the run (retried next minute). Existing notifications were stamped
   mailed by the migration.
   Batching and reply-to answers: cut 2.
 

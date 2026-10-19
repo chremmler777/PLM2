@@ -27,7 +27,7 @@ class NotificationService:
         kind: str | None = None,
     ) -> int:
         """Create a notification per user. Returns how many were created.
-        kind: what it is (mail_outbox.MAIL_KINDS decides what is mailed;
+        kind: what it is (ecr_mail.MAIL_KINDS decides what is mailed;
         a kind-less notice is a badge only)."""
         unique_ids = set(user_ids)
         for user_id in unique_ids:

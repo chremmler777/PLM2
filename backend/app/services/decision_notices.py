@@ -1,6 +1,6 @@
 """The 'decision needed' immediate notices (ECR-solid spec §0
 Notifications, close-out A6-02): when a decision first becomes owed, the
-people who decide hear it once, by mail (mail_outbox.MAIL_KINDS):
+people who decide hear it once, by mail (ecr_mail.MAIL_KINDS):
 
 - a PM or Quality sign-off owed after the customer's yes (COMMERCIAL_V2),
   key chg:<id>:sign:<side>:<offer id>; a re-sign stays task_new

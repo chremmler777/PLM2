@@ -481,13 +481,15 @@ async def lifespan(app: FastAPI):
     # pending outbox row is NOTIFY_DIGEST_MINUTES old (app/services/part_data_mail.py).
     from app.services.part_data_mail import digest_loop as part_data_mail_loop
     part_data_mail_task = asyncio.create_task(part_data_mail_loop())
-    # One mail per notification, ending with the PLM2 link (spec §0), while
-    # SMTP is enabled; every minute so a decision request is not hours late.
+
+    # ECR mail: one mail per notification, ending with the PLM2 link (spec
+    # §0), while ECR_MAIL_ENABLED and Graph is configured (app/services/
+    # ecr_mail.py); every minute so a decision request is not hours late.
     async def _mail_loop():
         from app.models import AsyncSessionLocal
-        from app.services.mail_outbox import send_pending
+        from app.services.ecr_mail import enabled, send_pending
         while True:
-            if settings.smtp_enabled:
+            if enabled():
                 try:
                     async with AsyncSessionLocal() as session:
                         await send_pending(session)

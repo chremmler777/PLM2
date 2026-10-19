@@ -25,7 +25,8 @@ from app.models.change import ChangeAssessment, ChangeChangelog, ChangeRequest
 from app.models.entities import Organization, Plant, Project, User
 from app.models.notification import Notification
 from app.models.workflow import Department
-from app.services import cm_switches, due_rules, mail_outbox
+from app.services import cm_switches, due_rules, ecr_mail
+from tests.test_ecr_solid_mail import switch_on
 from app.services.notification_service import NotificationService
 from app.services.notification_sweep import escalated, run_notification_sweep, sweep_once
 from tests.test_ecr_solid_tasks import _as, _create, _set, _tasks, team  # noqa: F401
@@ -78,7 +79,7 @@ async def test_sweep_once_commits_its_notices(session_factory, seed):
 # One notice per item, read or not; only the immediate class is mailed
 # ---------------------------------------------------------------------------
 async def test_a_read_late_notice_is_not_sent_again(session_factory, seed, monkeypatch):
-    monkeypatch.setattr(get_settings(), "smtp_enabled", True)
+    switch_on(monkeypatch)
     sent = []
     now = datetime.utcnow()
     async with session_factory() as s:
@@ -103,14 +104,14 @@ async def test_a_read_late_notice_is_not_sent_again(session_factory, seed, monke
         for n in await _notes(s, kind="overdue"):
             n.is_read = False
         await s.commit()
-        await mail_outbox.send_pending(s, sender=sent.append)
+        await ecr_mail.send_pending(s, sender=sent.append)
     # only the involved people's daily digest goes out, no late notice
-    assert [m["Subject"] for m in sent if "late" in m["Subject"].lower()] == []
-    assert all(m["Subject"].startswith("Your changes today") for m in sent)
+    assert [m.subject for m in sent if "late" in m.subject.lower()] == []
+    assert all(m.subject.startswith("Your changes today") for m in sent)
 
 
 async def test_only_immediate_notices_are_mailed(session_factory, seed, monkeypatch):
-    monkeypatch.setattr(get_settings(), "smtp_enabled", True)
+    switch_on(monkeypatch)
     sent = []
     eng = seed["engineer_id"]
     async with session_factory() as s:
@@ -127,10 +128,10 @@ async def test_only_immediate_notices_are_mailed(session_factory, seed, monkeypa
             "Your department has an assessment to give.\n"
             "Info: you are backup here, main: Sam.")
         await s.commit()
-        assert await mail_outbox.send_pending(s, sender=sent.append) == 1
+        assert await ecr_mail.send_pending(s, sender=sent.append) == 1
         rows = (await s.execute(select(Notification))).scalars().all()
         assert all(r.mailed_at is not None for r in rows)    # stamped, never retried
-    assert [m["Subject"] for m in sent] == ["Decision needed"]
+    assert [m.subject for m in sent] == ["Decision needed"]
 
 
 # ---------------------------------------------------------------------------

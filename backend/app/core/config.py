@@ -114,9 +114,11 @@ class Settings(BaseSettings):
     # C27 / P6 (cut 1): who gets the daily overdue digest (usernames or
     # e-mails, comma separated). Cut 2 adds a manager per department.
     overdue_digest_recipients: str = "christoph.demmler"
-    # Absolute base of the PLM2 UI for links in mails ("Answer in PLM2:
-    # <link>"); empty = frontend_url + "/plm2".
-    plm2_public_url: str = ""
+    # ECR mail (app/services/ecr_mail.py): one mail per immediate
+    # notification through the part data mail's Graph transport (ENTRA_*,
+    # NOTIFY_SENDER, NOTIFY_TRIAL_RECIPIENT, links on NOTIFY_BASE_URL).
+    # Off until switched on (env ECR_MAIL_ENABLED).
+    ecr_mail_enabled: bool = False
     # Hub accounts carry their bare username as e-mail ("christoph.demmler"):
     # the mail outbox appends "@<this>" to such an address; empty = an
     # address without "@" is not mailed (the notice stays in PLM2).
