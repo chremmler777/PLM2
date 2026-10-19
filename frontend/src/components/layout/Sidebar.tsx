@@ -34,7 +34,7 @@ function isProjectPage(path: string): boolean {
 
 export default function Sidebar() {
   const location = useLocation();
-  const { logout, username, role } = useAuth();
+  const { logout, username, role, priceView } = useAuth();
   const onProjectPage = isProjectPage(location.pathname);
   // Anything but an explicit "expanded" (missing, garbage, unreadable) means the rail.
   const [railCollapsed, setRailCollapsed] = useState(() => readStored(RAIL_KEY) !== 'expanded');
@@ -63,7 +63,9 @@ export default function Sidebar() {
     { path: '/lessons', label: 'Lessons Learned', icon: BookOpen },
     { path: '/changes', label: 'Changes', icon: GitPullRequestArrow },
     { path: '/process-map', label: 'Process Flow', icon: Workflow },
-    { path: '/pnl', label: 'P&L', icon: CircleDollarSign },
+    // R23: nobody is shown a P&L of zeros; the link shows to whoever reads
+    // any price (all, or the changes they lead).
+    ...(priceView === 'none' ? [] : [{ path: '/pnl', label: 'P&L', icon: CircleDollarSign }]),
     { path: '/reports', label: 'Reports', icon: ChartColumn },
     { path: '/my-tasks', label: 'My Tasks', icon: ListChecks },
     { path: '/training', label: 'Training', icon: GraduationCap },

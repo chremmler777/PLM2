@@ -15,7 +15,7 @@ const wfTasks = (n: number) => Array.from({ length: n }, (_, i) => ({
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('../../api/changes', () => ({ changesApi: { myTasks: vi.fn().mockResolvedValue([]) } }))
 
-const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn() } }))
+const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn(), priceView: 'all' as string | null | undefined } as { role: string | null; username: string; logout: () => void; priceView?: string | null } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
 vi.mock('./ActsAsSwitch', () => ({ default: () => <div>mock-acts-as-switch</div> }))
 
@@ -53,6 +53,17 @@ describe('Sidebar nav groups', () => {
     expect(await screen.findByText('SETUP')).toBeDefined()
     expect(screen.getByText('Workflows')).toBeDefined()
     expect(screen.queryByText('Users')).toBeNull()
+  })
+
+  it('hides the P&L link from a viewer who reads no prices (R23)', async () => {
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn(), priceView: 'none' }
+    wrap(<Sidebar />)
+    expect(await screen.findByText('Changes')).toBeDefined()
+    expect(screen.queryByText('P&L')).toBeNull()
+    cleanup()
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn(), priceView: 'led' }
+    wrap(<Sidebar />)
+    expect(await screen.findByText('P&L')).toBeDefined()
   })
 
   it('hides SETUP heading and Workflows for viewer role', async () => {

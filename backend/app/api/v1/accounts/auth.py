@@ -30,6 +30,19 @@ async def change_password_gone():
     raise HTTPException(status.HTTP_410_GONE, _GONE)
 
 
+async def _price_view(db: AsyncSession, user) -> str:
+    from app.models.change import ChangeRequest
+    from app.services.change_people import is_acting
+    from app.services.price_redaction import PriceViewer
+    if await PriceViewer(db, user)._base():
+        return "all"
+    if is_acting(user):
+        return "none"   # acting as a department drops the personal lead right (C32)
+    leads = (await db.execute(select(ChangeRequest.id).where(
+        ChangeRequest.lead_id == user.id).limit(1))).first()
+    return "led" if leads else "none"
+
+
 @router.get("/me")
 async def me(request: Request, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     payload = getattr(request.state, "hub_payload", {})
@@ -51,6 +64,10 @@ async def me(request: Request, user=Depends(get_current_user), db: AsyncSession 
         "effective_role": user.effective_role,
         # Tool data (tool fields, produces links, shrinkage, DFM): Tool Engineer or admin
         "can_edit_tools": await can_edit_tools(db, user),
+        # Which prices the viewer reads (R23): "all" (admin, PM, Sales,
+        # Management), "led" (only the changes they lead), "none". The P&L
+        # link and page go by it instead of showing someone zeros.
+        "price_view": await _price_view(db, user),
         # The user-facing version the training record is stamped with.
         "software_version": SOFTWARE_VERSION,
     }

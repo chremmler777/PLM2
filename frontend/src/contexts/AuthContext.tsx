@@ -15,6 +15,9 @@ interface AuthContextType {
    *  A viewer is read-only — the backend answers every write 403 — so no
    *  write control should be offered. Department gates still apply on top. */
   canWrite: boolean;
+  /** Which prices the viewer reads (R23, /auth/me): all (admin, PM, Sales,
+   *  Management), led (only the changes they lead), none. Null while loading. */
+  priceView: 'all' | 'led' | 'none' | null;
   loading: boolean;
   logout: () => void;
 }
@@ -27,6 +30,7 @@ type MeResponse = {
   username?: string | null; user_id?: number | null; plm2_roles?: string[];
   /** Local role: admin | engineer | viewer (engineer = department member). */
   role?: string | null;
+  price_view?: 'all' | 'led' | 'none' | null;
 };
 let meInFlight: Promise<{ data: MeResponse }> | null = null;
 function fetchMe(): Promise<{ data: MeResponse }> {
@@ -44,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userId, setUserId] = useState<number | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
   const [localRole, setLocalRole] = useState<string | null>(null);
+  const [priceView, setPriceView] = useState<AuthContextType['priceView']>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -56,6 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUserId(res.data.user_id ?? null);
         setRoles(res.data.plm2_roles ?? []);
         setLocalRole(res.data.role ?? null);
+        setPriceView(res.data.price_view ?? null);
         setIsAuthenticated(true);
       })
       .catch(() => {
@@ -87,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAuthenticated,
     isAdmin,
     canWrite,
+    priceView,
     loading,
     logout,
   };

@@ -59,6 +59,9 @@ vi.mock('../api/client', () => ({
   },
 }))
 
+const authMock = vi.hoisted(() => ({ current: { priceView: 'all' as string | null } }))
+vi.mock('../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
+
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -71,7 +74,19 @@ function renderPage() {
 }
 
 describe('PnlPage', () => {
-  afterEach(() => cleanup())
+  afterEach(() => { cleanup(); authMock.current = { priceView: 'all' } })
+
+  it('says whose numbers these are instead of showing zeros to a viewer without price rights', async () => {
+    authMock.current = { priceView: 'none' }
+    summaryMock.mockClear()
+    changesMock.mockClear()
+    renderPage()
+    expect(screen.getByTestId('pnl-no-prices').textContent).toContain(
+      'Prices are visible to Sales, Project Management, Management, the change lead and admins')
+    expect(screen.queryByText('0.00 EUR')).toBeNull()
+    expect(summaryMock).not.toHaveBeenCalled()
+    expect(changesMock).not.toHaveBeenCalled()
+  })
 
   it('renders summary tiles from summary data', async () => {
     renderPage()

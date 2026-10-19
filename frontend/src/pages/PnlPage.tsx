@@ -10,6 +10,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
 import { pnlApi } from '../api/pnl';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
@@ -319,14 +320,20 @@ export default function PnlPage() {
   };
   const filterKey = [projectId, plantId, branch, statusGroup, dateFrom, dateTo];
 
+  // R23: a viewer who reads no price is told whose numbers these are; the
+  // redacted totals would read as real zeros.
+  const { priceView } = useAuth();
+  const noPrices = priceView === 'none';
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ['pnl', 'summary', ...filterKey],
     queryFn: () => pnlApi.summary(filters),
+    enabled: !noPrices,
   });
 
   const { data: changesData, isLoading: rowsLoading } = useQuery({
     queryKey: ['pnl', 'changes', ...filterKey],
     queryFn: () => pnlApi.changes(filters),
+    enabled: !noPrices,
   });
   const rows = useMemo(() => changesData?.rows ?? [], [changesData]);
   const [sortKey, setSortKey] = useState<SortKey>('change_number');
@@ -341,6 +348,17 @@ export default function PnlPage() {
     active ? 'bg-sky-500/20 text-sky-200' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`;
   const selectCls = 'bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200';
   const dateCls = 'w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-200';
+
+  if (noPrices) {
+    return (
+      <div className="max-w-7xl mx-auto p-6">
+        <h1 className="text-2xl font-semibold mb-6">P&amp;L</h1>
+        <p data-testid="pnl-no-prices" className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
+          Prices are visible to Sales, Project Management, Management, the change lead and admins.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto p-6">
