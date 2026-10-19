@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from sqlalchemy import select
 
 pytestmark = pytest.mark.asyncio
@@ -347,7 +348,7 @@ async def test_submitting_claims_an_unowned_assessment(
         assert task.owner_id is None        # nobody accepted it
 
     res = await client.post(f"/api/v1/changes/{change['id']}/assessments", json={
-        "department_id": dep["Tool Engineer"], "verdict": "feasible"},
+        "department_id": dep["Tool Engineer"], "details": await checklist_details(client, dep["Tool Engineer"]), "verdict": "feasible"},
         headers=eng_auth)
     assert res.status_code == 200, res.text
     body = res.json()
@@ -389,7 +390,7 @@ async def test_an_existing_owner_survives_the_submit(
     assert res.status_code == 200, res.text
 
     res = await client.post(f"/api/v1/changes/{change['id']}/assessments", json={
-        "department_id": a.department_id, "verdict": "feasible"},
+        "department_id": a.department_id, "details": await checklist_details(client, a.department_id), "verdict": "feasible"},
         headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["owner_id"] == seed["engineer_id"]   # not the admin

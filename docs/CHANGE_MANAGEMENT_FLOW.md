@@ -544,7 +544,11 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 127).
   evidence; the form flags the same rows; **impact no** (every
   row No) = each No of the department's current checklist carries its
   reference (`ref`: checklist, drawing or report; the form offers one
-  reference for every No without one). "ok", "checked" and the like are
+  reference for every No without one; with a Yes the No rows owe none).
+  A submit without the checklist (no `details`, no `impacts`, or a bare
+  "not impacted" from a department without a questionnaire) is refused
+  under ASSESSMENT_V2 (click-through R38: the UI's rule is the server's).
+  "ok", "checked" and the like are
   refused; a number with its unit counts. **Feasible with conditions** names
   the condition (5+ characters). In flight: an answer started on the
   earlier checklist resubmits as it is (judged by what the row already
@@ -936,7 +940,15 @@ nothing. **"Tool sampled"** is asked of the Tool Engineer only
 Engineer stay readable, not owed). **Soft guard into validation**
 (`tool_change_open`, "Tool change not done (Tool Engineer): T-3454"): every
 impacted tool whose check workflow still has its *Implement tool change*
-task open; override as for any soft rule into validation. **Toolshop**
+task open; override as for any soft rule into validation. **No dead end
+(click-through R38):** a step owed by a department with no real member on
+the change (`change_people.staffed_department_ids`) is done by the change's
+coordinator (the lead who can act, else a Project Management member):
+`WorkflowService.complete_task` lets them, `/workflow-instances/my-tasks`
+lists the step for them (`coordinated`, hint "<X> has no member here: <name>
+coordinates"), and the instance serves `can_act` / `coordinator_hint` per
+open task, so only who may act sees Approve / Reject / Waive (R24).
+**Toolshop**
 (P7) has typical cost positions (toolmaker hours, in-house rework, EDM /
 wire, steel / material, polishing / texture).
 
@@ -1545,6 +1557,16 @@ existing per-department validation checks.
   "done" needs a reference (PSW / ISIR number or the approval's file name,
   `cm_rules.reference_refusal`; `EVIDENCE_KEYS`); on a customer change its
   "not applicable" too: the customer's waiver (mail or document reference).
+  **Evidence rows (click-through R38, `RELEASE_V2`,
+  `release_checklist.DONE_REF_PROMPTS`):** "done" on `parts_measured`
+  (unless it reads a validation measurement), `erp_updated` and
+  `customer_informed` names its reference (measurement report, ERP
+  routing/BOM number, the customer mail); `process_stable_apqp` takes the
+  measured Cm (> 1.67) or the SPC report; the state serves `needs_ref` and
+  `ref_prompt` (the field's words). `drawing_released` is refused while a
+  resulting revision has neither a drawing nor a 3D file (`done_refusal`,
+  the same files the row's hint lists); "not applicable" with a reason
+  stays open for a change without new drawings.
   The measured rows (`weight_measured`, `cycle_time_tool`, `parts_measured`,
   A5-09, `RELEASE_V2`) answer from the computed validation check
   (`ReleaseService.measured_rows`): the row shows the last measurement,
@@ -1713,7 +1735,10 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   **Part measured (A5-10 b):** the common "Part measured" row of Tool,
   Manufacturing and Process Engineer is not computed; with `RELEASE_V2` its
   "passed" names the measuring report (`reference_refusal`: "ok" and a bare
-  tick are refused; the state's `pass_needs_report`). **Cut 2 (A5-10 a):**
+  tick are refused; the state's `pass_needs_report`). Development's
+  "Revision levels raised per customer statement and verified" passes the
+  same way with the raised index (drawing / PLM revision, click-through
+  R38; `ValidationService.REPORT_PROMPTS`, the state's `pass_ref_prompt`). **Cut 2 (A5-10 a):**
   §10 "internal cycle-time changes: Quality C, first article" has no
   trigger yet (a `ppap_decision` yes flips the change to customer, so an
   internal change keeps it only with a "no"); deferred to cut 2 by the

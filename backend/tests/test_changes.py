@@ -1,6 +1,7 @@
 from tests.conftest import ACCEPT_EVIDENCE, DECLINE_EVIDENCE, post_active
 # backend/tests/test_changes.py
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from datetime import datetime, timedelta
 from sqlalchemy import select
 
@@ -210,7 +211,7 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
     # submitting feasible for all then moving to costing should work
     for a in assessments:
         r = await client.post(f"/api/v1/changes/{change['id']}/assessments", json={
-            "department_id": a["department_id"], "verdict": "feasible",
+            "department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": "feasible",
         }, headers=eng_auth)
         assert r.status_code in (200, 201), r.text
 
@@ -234,7 +235,7 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth, sessio
     # (a non-member may not submit a department's assessment).
     for a in res.json()["assessments"]:
         await client.post(f"/api/v1/changes/{change['id']}/assessments",
-                          json={"department_id": a["department_id"], "verdict": "feasible"},
+                          json={"department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": "feasible"},
                           headers=admin_auth)
     await _transition(client, auth, change["id"], "costing")
     # C5: every owing department finalized its costing before the quote

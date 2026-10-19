@@ -9,6 +9,7 @@ import os
 import tempfile
 
 import pytest
+from tests.checklist_helpers import checklist_details
 
 from app.auth.security import get_password_hash
 from app.models.change import ChangeAssessment, ChangeAttachment, ChangeRequest
@@ -194,7 +195,8 @@ async def test_non_blocking_assessment_submit_needs_membership(
                                rasic_letter="S", status="active"))
         await s.commit()
     url = f"/api/v1/changes/{cid}/assessments"
-    body = {"department_id": tool_dept, "verdict": "feasible"}
+    body = {"department_id": tool_dept, "verdict": "feasible",
+            "details": await checklist_details(client, tool_dept)}
     res = await client.post(url, headers=await _auth(client, "q"), json=body)
     assert res.status_code == 400
     assert "member" in res.json()["detail"]
@@ -208,7 +210,8 @@ async def test_bare_assessment_submit_needs_membership(
     await _user(session_factory, seed, "q", "Quality")
     sales_dept = offer_world["depts"]["Sales"]
     url = f"/api/v1/changes/{cid}/assessments"
-    body = {"department_id": sales_dept, "verdict": "feasible"}
+    body = {"department_id": sales_dept, "verdict": "feasible",
+            "details": await checklist_details(client, sales_dept)}
     res = await client.post(url, headers=await _auth(client, "q"), json=body)
     assert res.status_code == 400
     async with session_factory() as s:

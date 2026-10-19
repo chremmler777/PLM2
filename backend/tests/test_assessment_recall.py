@@ -2,6 +2,7 @@
 impacted set — but only while no assessment work has started. Recall tears
 down the spawned assessments + routing so a corrected set rebuilds cleanly."""
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 
 from tests.conftest import advance_to_assessment
 from tests.test_changes import departments  # noqa: F401
@@ -42,7 +43,7 @@ async def test_recall_refused_after_assessment_submitted(
     a = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)
          ).json()["assessments"][0]
     await client.post(f"/api/v1/changes/{cid}/assessments",
-                      json={"department_id": a["department_id"], "verdict": "feasible"},
+                      json={"department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": "feasible"},
                       headers=admin_auth)
 
     blocked = await client.post(f"/api/v1/changes/{cid}/transition",

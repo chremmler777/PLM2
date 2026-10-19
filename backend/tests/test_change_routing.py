@@ -2,6 +2,7 @@
 import json
 
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 import pytest_asyncio
 from sqlalchemy import select
 from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic
@@ -197,14 +198,14 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(
     detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
     # Quality (C, stage1) submitting alone must NOT advance to stage 2; costing blocked.
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Quality"], "verdict": "feasible"}, headers=auth)
+                      json={"department_id": departments["Quality"], "details": await checklist_details(client, departments["Quality"]), "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400, res.text  # Tool Engineer (R) still pending
     # Submit Tool Engineer (R) -> stage 1 blocking done -> engine advances to stage 2 (APQP).
     # Observe advancement through the engine's read-through status (routing view uses
     # effective_status), not the raw assessment-row column which stays "pending".
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"}, headers=auth)
     routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
     apqp = next(d for st in routing["stages"] for d in st["departments"]
                 if d["department_id"] == departments["APQP"])
@@ -235,9 +236,9 @@ async def test_deviation_requires_approval_then_clears(
     for a in detail["assessments"]:
         if a["rasic_letter"] in ("R", "A"):
             await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                              json={"department_id": a["department_id"], "verdict": "feasible"}, headers=auth)
+                              json={"department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": "feasible"}, headers=auth)
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Manufacturing Engineer"], "verdict": "feasible"}, headers=auth)
+                      json={"department_id": departments["Manufacturing Engineer"], "details": await checklist_details(client, departments["Manufacturing Engineer"]), "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400
     admin_auth = await _login_admin(client)
@@ -362,7 +363,7 @@ async def test_my_tasks_active_stage_filter_exercised(
 
     # Submitting Tool Engineer (R) clears stage 1's blocking → stage 2 activates.
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"}, headers=auth)
     dep_ids2 = {t["department_id"] for t in (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
                 if t["kind"] == "assessment"}
     # Spec §16 P1-2: stage 2 stays dormant during assessment and is no
@@ -390,7 +391,7 @@ async def test_not_feasible_blocks_costing_until_justified(
     for i, a in enumerate(assessments):
         verdict = "not_feasible" if i == 0 else "feasible"
         await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                          json={"department_id": a["department_id"], "verdict": verdict}, headers=auth)
+                          json={"department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": verdict}, headers=auth)
     # costing soft-blocked due to not_feasible
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400, res.text
@@ -443,7 +444,7 @@ async def test_maybe_advance_cascades_through_optional_only_stage(
     # C-only stage 2 (no gate to wait on) and activating stage 3 APQP. Observe via
     # the routing view (effective_status), since raw assessment rows stay "pending".
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"}, headers=auth)
     # Spec §16 P1-2: the cascade runs when costing wakes the later stages.
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
@@ -504,7 +505,7 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
     # First submit for Tool Engineer must hit the stage-1 active row (not raise).
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
-        await ChangeService.submit_assessment(s, change, te, "feasible", seed["engineer_id"])
+        await ChangeService.submit_assessment(s, change, te, "feasible", seed["engineer_id"], details=await details_in(s, te))
         await s.commit()
     async with session_factory() as s:
         rows = rows_by((await s.execute(select(ChangeAssessment).where(
@@ -518,7 +519,7 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
         await ChangeService.submit_assessment(
-            s, change, departments["Quality"], "feasible", seed["engineer_id"])
+            s, change, departments["Quality"], "feasible", seed["engineer_id"], details=await details_in(s, departments["Quality"]))
         await s.commit()
     async with session_factory() as s:
         rows = rows_by((await s.execute(select(ChangeAssessment).where(
@@ -528,7 +529,7 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
     # Second submit for the SAME dept now targets the stage-2 row.
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
-        await ChangeService.submit_assessment(s, change, te, "feasible", seed["engineer_id"])
+        await ChangeService.submit_assessment(s, change, te, "feasible", seed["engineer_id"], details=await details_in(s, te))
         await s.commit()
     async with session_factory() as s:
         rows = rows_by((await s.execute(select(ChangeAssessment).where(
@@ -623,7 +624,7 @@ async def test_reject_deviation_undoes_the_added_department(
     for a in detail["assessments"]:
         if a["rasic_letter"] in ("R", "A"):
             await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                              json={"department_id": a["department_id"], "verdict": "feasible"}, headers=auth)
+                              json={"department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
 
@@ -639,7 +640,7 @@ async def test_reject_deviation_keeps_a_submitted_added_row(
         "op": "add", "department_id": departments["Manufacturing Engineer"],
         "rasic_letter": "R", "stage_order": 1, "reason": "maybe"}, headers=auth)
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Manufacturing Engineer"], "verdict": "feasible"}, headers=auth)
+                      json={"department_id": departments["Manufacturing Engineer"], "details": await checklist_details(client, departments["Manufacturing Engineer"]), "verdict": "feasible"}, headers=auth)
     admin_auth = await _login_admin(client)
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
                             json={"reason": "too late"}, headers=admin_auth)
@@ -777,7 +778,7 @@ async def test_informed_deviation_approved_does_not_block_costing(
     for a in detail["assessments"]:
         if a["rasic_letter"] in ("R", "A"):
             await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                              json={"department_id": a["department_id"], "verdict": "feasible"},
+                              json={"department_id": a["department_id"], "details": await checklist_details(client, a["department_id"]), "verdict": "feasible"},
                               headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
@@ -912,7 +913,7 @@ async def test_later_stage_deviation_R_is_asked_when_its_stage_starts(
                           headers=admin_auth)
     assert r.status_code == 200, r.text
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"},
                       headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
@@ -1125,7 +1126,7 @@ async def test_assessment_submit_on_a_change_task_repairs_the_next_stage(
         inst_id, task_id = inst.id, task.id
     res = await client.post(f"/api/v1/changes/{c['id']}/assessments",
                             json={"department_id": departments["Tool Engineer"],
-                                  "verdict": "feasible", "notes": "ok"}, headers=auth)
+                                  "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible", "notes": "ok"}, headers=auth)
     assert res.status_code == 200, res.text
     async with session_factory() as s:
         assert (await s.get(WfInstanceTask, task_id)).status == "approved"
@@ -1213,7 +1214,7 @@ async def _in_costing_at_stage2(client, auth, seed, session_factory, departments
     c = await _api_change_in_assessment(client, auth, seed, session_factory)
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
                       json={"department_id": departments["Tool Engineer"],
-                            "verdict": "feasible"}, headers=auth)
+                            "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
@@ -1228,7 +1229,7 @@ async def _complete_apqp(client, auth, session_factory, cid, apqp):
         inst_id = (await s.execute(select(WfInstance.id).where(
             WfInstance.change_id == cid))).scalar_one()
     res = await client.post(f"/api/v1/changes/{cid}/assessments",
-                            json={"department_id": apqp, "verdict": "feasible",
+                            json={"department_id": apqp, "details": await checklist_details(client, apqp), "verdict": "feasible",
                                   "notes": "ok"}, headers=auth)
     assert res.status_code == 200, res.text
     return inst_id
@@ -1329,7 +1330,7 @@ async def test_stage_start_task_of_a_row_outside_template_and_snapshot_has_no_st
     assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
                               headers=admin_auth)).status_code == 200
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"},
                       headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
@@ -1371,7 +1372,7 @@ async def test_approved_reletter_moves_the_snapshot_so_the_stage_starts_clean(
         assert [d["rasic_letter"] for d in st2["departments"]
                 if d["department_id"] == apqp] == ["C"]
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"},
                       headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
@@ -1579,7 +1580,7 @@ async def test_rejecting_a_later_deviation_keeps_an_earlier_approved_add(
     # The approved add still holds costing until it answers.
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
                       json={"department_id": departments["Tool Engineer"],
-                            "verdict": "feasible"}, headers=auth)
+                            "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400, res.text
@@ -1616,7 +1617,7 @@ async def test_stage_start_after_an_approved_add_creates_one_stepless_task(
     assert (await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
                               json={"reason": "no"}, headers=admin_auth)).status_code == 200
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"},
+                      json={"department_id": departments["Tool Engineer"], "details": await checklist_details(client, departments["Tool Engineer"]), "verdict": "feasible"},
                       headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)
@@ -1985,7 +1986,7 @@ async def test_take_off_routing_waits_for_the_decision(
     async with session_factory() as s:
         assert (await s.get(WfInstanceTask, task_id)).status == "active"
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["Quality"], "verdict": "feasible"},
+                      json={"department_id": departments["Quality"], "details": await checklist_details(client, departments["Quality"]), "verdict": "feasible"},
                       headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "costing"}, headers=auth)

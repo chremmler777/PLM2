@@ -8,6 +8,7 @@ verdict is gated on, and customer correspondence that belongs to nobody's
 assessment.
 """
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 
 from app.models.change import ChangeAssessment, ChangeConcern, ChangeRequest
 from app.models.workflow import Department
@@ -48,7 +49,7 @@ async def _raise(client, auth, assessing, **body):
 async def _submit(client, auth, assessing, verdict="feasible"):
     return await client.post(
         f"/api/v1/changes/{assessing['change_id']}/assessments",
-        json={"department_id": assessing["department_id"], "verdict": verdict},
+        json={"department_id": assessing["department_id"], "details": await checklist_details(client, assessing["department_id"]), "verdict": verdict},
         headers=auth)
 
 

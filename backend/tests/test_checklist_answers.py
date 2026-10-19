@@ -95,16 +95,30 @@ async def test_impacted_is_normalised_from_answer(client, admin_auth, tab, sessi
     assert stored["impacts"][1]["impacted"] is False
 
 
-async def test_not_impacted_questionnaire_is_exempt(client, admin_auth, tab):
+async def test_not_impacted_questionnaire_is_exempt(client, admin_auth, tab, monkeypatch):
+    """Only a department with its own questionnaire (Packaging) answers
+    'not impacted' for the whole form under ASSESSMENT_V2 (click-through
+    R38); off the switch any department still may."""
+    from app.services import cm_switches
+    res = await _submit(client, admin_auth, tab,
+                        {"impacted": False, "impacts": [answered(DEPT)[0]]})
+    assert res.status_code == 400 and "Checklist incomplete" in res.json()["detail"]
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
     res = await _submit(client, admin_auth, tab,
                         {"impacted": False, "impacts": [answered(DEPT)[0]]})
     assert res.status_code == 200, res.text
 
 
-async def test_submit_without_details_is_unchanged(client, admin_auth, tab):
-    res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
-                            json={"department_id": tab["department_id"],
-                                  "verdict": "feasible"}, headers=admin_auth)
+async def test_submit_without_details(client, admin_auth, tab, monkeypatch):
+    """R38: no verdict without the checklist under ASSESSMENT_V2; off the
+    switch the bare submit is unchanged."""
+    from app.services import cm_switches
+    url = f"/api/v1/changes/{tab['change_id']}/assessments"
+    body = {"department_id": tab["department_id"], "verdict": "feasible"}
+    res = await client.post(url, json=body, headers=admin_auth)
+    assert res.status_code == 400 and "Checklist incomplete" in res.json()["detail"]
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+    res = await client.post(url, json=body, headers=admin_auth)
     assert res.status_code == 200, res.text
 
 

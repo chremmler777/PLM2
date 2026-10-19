@@ -9,6 +9,7 @@ department holds (reject_proposal rows with a department) still block their
 department's submit until settled with a note.
 """
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 
 from tests.conftest import QUESTION, insert_legacy_concern
 
@@ -371,7 +372,7 @@ async def test_a_legacy_hold_still_blocks_and_is_settled_with_a_note(
     assert got["blocked_department_ids"] == [held]
 
     blocked = await client.post(f"/api/v1/changes/{cid}/assessments", headers=admin_auth,
-                                json={"department_id": held, "verdict": "feasible"})
+                                json={"department_id": held, "details": await checklist_details(client, held), "verdict": "feasible"})
     assert blocked.status_code == 400
     detail = blocked.json()["detail"]
     assert "hold its submit" in detail and "Tolerance cannot be held" in detail
@@ -393,7 +394,7 @@ async def test_a_legacy_hold_still_blocks_and_is_settled_with_a_note(
     assert res.json()["is_open"] is False
 
     ok = await client.post(f"/api/v1/changes/{cid}/assessments", headers=admin_auth,
-                           json={"department_id": held, "verdict": "feasible"})
+                           json={"department_id": held, "details": await checklist_details(client, held), "verdict": "feasible"})
     assert ok.status_code == 200, ok.text
 
     log = await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)

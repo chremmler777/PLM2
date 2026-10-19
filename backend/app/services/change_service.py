@@ -6139,12 +6139,21 @@ class ChangeService:
         answer is the truth; `impacted` is derived from it so costing keeps
         reading what it always read."""
         impacts = details.get("impacts")
-        if impacts is None:
-            return
-        if not isinstance(impacts, list):
-            raise ChangeError("details.impacts must be a list")
         dept = await session.get(Department, department_id)
         dept_name = dept.name if dept is not None else None
+        # R1/R4 (click-through R38): the checklist is the answer, not the
+        # verdict alone. Under ASSESSMENT_V2 a submit without it is judged as
+        # an empty checklist; "not impacted" stands in for it only where the
+        # department has its own questionnaire (Packaging).
+        not_impacted = details.get("impacted") is False and (
+            not cm_switches.on("ASSESSMENT_V2")
+            or checklist.has_questionnaire(dept_name))
+        if impacts is None:
+            if not cm_switches.on("ASSESSMENT_V2") or not_impacted:
+                return
+            impacts = []
+        if not isinstance(impacts, list):
+            raise ChangeError("details.impacts must be a list")
         # Current items plus the legacy ones: an answer stored before the
         # checklist changed resubmits as it is (only current items are owed).
         allowed_keys = checklist.accepted_keys_for(dept_name)
@@ -6199,7 +6208,7 @@ class ChangeService:
             e.get("activity_id") is not None
             or (e.get("key") is None and e.get("answer") is None)
             for e in impacts)
-        if details.get("impacted") is not False and not legacy_only:
+        if not not_impacted and not legacy_only:
             missing = [i["label_en"] for i in checklist.items_for(dept_name)
                        if i["key"] not in answered]
             # An assessment started on the earlier checklist (the 13 common
@@ -6644,7 +6653,13 @@ class ChangeService:
                 session, department_id, details, stored=a.details_dict)
             details.pop("draft", None)
             a.details = json.dumps(details)
-        elif "draft" in a.details_dict:
+        elif cm_switches.on("ASSESSMENT_V2"):
+            # A bare verdict is judged on the answer the row already holds
+            # (a reopened assessment's earlier answer); none -> refused.
+            kept = {k: v for k, v in a.details_dict.items() if k != "draft"}
+            await ChangeService._validate_impacts(
+                session, department_id, kept, stored=a.details_dict)
+        if details is None and "draft" in a.details_dict:
             # The submit is the answer; an unfinished draft ends with it.
             kept = a.details_dict
             kept.pop("draft", None)

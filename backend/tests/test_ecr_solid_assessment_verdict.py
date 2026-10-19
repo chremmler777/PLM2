@@ -131,3 +131,63 @@ async def test_a_row_started_on_the_earlier_checklist_keeps_its_exemption(
         await s.commit()
     res = await _submit(client, tab, legacy)
     assert res.status_code == 200, res.text
+
+
+# --- click-through R38: the verdict alone is no answer (R1, R4) -------------
+
+async def test_a_bare_verdict_is_refused(client, tab):
+    """The UI's structure is the server's rule: a submit without the
+    checklist (no details, no impacts, or a crafted 'not impacted' from a
+    department without a questionnaire) is refused under ASSESSMENT_V2."""
+    url = f"/api/v1/changes/{tab['cid']}/assessments"
+    body = {"department_id": tab["dept"], "verdict": "feasible"}
+    res = await client.post(url, json=body, headers=tab["auth"])
+    assert res.status_code == 400
+    assert "Checklist incomplete" in res.json()["detail"]
+    res = await client.post(url, json={**body, "details": {}}, headers=tab["auth"])
+    assert res.status_code == 400 and "Checklist incomplete" in res.json()["detail"]
+    res = await client.post(url, json={**body, "details": {"impacted": False}},
+                            headers=tab["auth"])
+    assert res.status_code == 400 and "Checklist incomplete" in res.json()["detail"]
+    # the full answer goes through
+    res = await _submit(client, tab, answered(DEPT))
+    assert res.status_code == 200, res.text
+
+
+async def test_a_bare_verdict_passes_with_the_switch_off(client, tab, monkeypatch):
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+    res = await client.post(f"/api/v1/changes/{tab['cid']}/assessments", json={
+        "department_id": tab["dept"], "verdict": "feasible"}, headers=tab["auth"])
+    assert res.status_code == 200, res.text
+
+
+async def test_packaging_not_impacted_questionnaire_still_answers(
+        client, session_factory, seed):
+    """The one department questionnaire ('Packaging not impacted') keeps
+    answering the whole form, as the UI offers it."""
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username="av-pk", email="av-pk@test.io",
+                 full_name="AV pk", hashed_password=get_password_hash("av-secret-12"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.commit()
+        uid = u.id
+    dept = await make_department_member(session_factory, uid, "Packaging Engineer")
+    async with session_factory() as s:
+        change = ChangeRequest(
+            change_number="C-AV-2", title="pk", reason="r",
+            change_type="physical_part", project_id=seed["project_id"],
+            raised_by=seed["admin_id"], lead_id=seed["admin_id"], status="in_assessment")
+        s.add(change)
+        await s.flush()
+        s.add(ChangeAssessment(change_id=change.id, department_id=dept,
+                               stage_order=1, rasic_letter="R"))
+        await s.commit()
+        cid = change.id
+    auth = await login(client, "av-pk@test.io")
+    res = await client.post(f"/api/v1/changes/{cid}/assessments", json={
+        "department_id": dept, "verdict": "feasible",
+        "details": {"impacted": False}}, headers=auth)
+    assert res.status_code == 200, res.text

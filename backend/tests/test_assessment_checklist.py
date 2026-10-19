@@ -1,6 +1,7 @@
 """The workbook D-tabs are checklists: each department says which catalog
 items the change touches, and costing starts from that answer."""
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from sqlalchemy import select
 
 from app.models.change import ChangeAssessment, ChangeImpactedItem, ChangeRequest
@@ -215,7 +216,7 @@ async def test_not_feasible_requires_the_explanation_document(
     will be shown."""
     res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
                             json={"department_id": tab["department_id"],
-                                  "verdict": "not_feasible"}, headers=admin_auth)
+                                  "details": await checklist_details(client, tab["department_id"]), "verdict": "not_feasible"}, headers=admin_auth)
     assert res.status_code == 400
     assert "explanation document" in res.json()["detail"]
 
@@ -230,7 +231,7 @@ async def test_not_feasible_requires_the_explanation_document(
 
     res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
                             json={"department_id": tab["department_id"],
-                                  "verdict": "not_feasible"}, headers=admin_auth)
+                                  "details": await checklist_details(client, tab["department_id"]), "verdict": "not_feasible"}, headers=admin_auth)
     assert res.status_code == 200, res.text
 
 
@@ -265,7 +266,7 @@ async def test_not_feasible_reads_the_deck_on_the_open_row(
     async def not_feasible():
         return await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
                                  json={"department_id": tab["department_id"],
-                                       "verdict": "not_feasible"}, headers=admin_auth)
+                                       "details": await checklist_details(client, tab["department_id"]), "verdict": "not_feasible"}, headers=admin_auth)
 
     res = await not_feasible()
     assert res.status_code == 400, res.text
@@ -285,7 +286,7 @@ async def test_not_feasible_reads_the_deck_on_the_open_row(
 async def test_other_verdicts_need_no_evidence(client, admin_auth, tab):
     res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
                             json={"department_id": tab["department_id"],
-                                  "verdict": "feasible_with_conditions",
+                                  "details": await checklist_details(client, tab["department_id"]), "verdict": "feasible_with_conditions",
                                   "conditions": "if the tool is freed up"},
                             headers=admin_auth)
     assert res.status_code == 200, res.text

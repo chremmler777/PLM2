@@ -1,6 +1,7 @@
 """Assessment buckets: each routed department gets the objects in ITS domain,
 derived from the impacted set through the existing part relations."""
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from sqlalchemy import select
 
 from app.models.change import ChangeAssessment, ChangeImpactedItem, ChangeRequest
@@ -212,19 +213,22 @@ async def test_packaging_questionnaire_round_trips(
         await s.commit()
         pack_id = pack.id
 
+    # the questionnaire's "not impacted" as the form sends it (impacted:
+    # false): with ASSESSMENT_V2 only a questionnaire department answers the
+    # whole form with it (click-through R38)
     res = await client.post(f"/api/v1/changes/{world['change_id']}/assessments",
                             json={"department_id": pack_id, "verdict": "feasible",
-                                  "details": {"packaging_impacted": False}},
+                                  "details": {"impacted": False}},
                             headers=admin_auth)
     assert res.status_code == 200, res.text
-    assert res.json()["details"] == {"packaging_impacted": False}
+    assert res.json()["details"] == {"impacted": False}
     # "not impacted" is a complete assessment, not an empty one
     assert res.json()["verdict"] == "feasible"
 
     detail = (await client.get(f"/api/v1/changes/{world['change_id']}",
                                headers=admin_auth)).json()
     row = next(a for a in detail["assessments"] if a["department_id"] == pack_id)
-    assert row["details"] == {"packaging_impacted": False}
+    assert row["details"] == {"impacted": False}
 
 
 async def test_packaging_impacted_details_carry_the_kinds(
@@ -243,7 +247,9 @@ async def test_packaging_impacted_details_carry_the_kinds(
 
     details = {"packaging_impacted": True,
                "kinds": ["layout_change", "packaging_modification"],
-               "notes": "New insert needed"}
+               "notes": "New insert needed",
+               # impacted: the checklist is answered too (R38)
+               **await checklist_details(client, pack_id)}
     res = await client.post(f"/api/v1/changes/{world['change_id']}/assessments",
                             json={"department_id": pack_id, "verdict": "feasible",
                                   "details": details}, headers=admin_auth)
@@ -252,10 +258,16 @@ async def test_packaging_impacted_details_carry_the_kinds(
 
 
 async def test_assessments_without_details_stay_empty(
-        client, admin_auth, world):
-    res = await client.post(f"/api/v1/changes/{world['change_id']}/assessments",
-                            json={"department_id": world["depts"]["Development"],
-                                  "verdict": "feasible"}, headers=admin_auth)
+        client, admin_auth, world, monkeypatch):
+    """Off ASSESSMENT_V2 a bare verdict stores no details; with it the bare
+    verdict is refused (click-through R38)."""
+    from app.services import cm_switches
+    url = f"/api/v1/changes/{world['change_id']}/assessments"
+    body = {"department_id": world["depts"]["Development"], "verdict": "feasible"}
+    res = await client.post(url, json=body, headers=admin_auth)
+    assert res.status_code == 400 and "Checklist incomplete" in res.json()["detail"]
+    monkeypatch.setattr(cm_switches, "ASSESSMENT_V2", False)
+    res = await client.post(url, json=body, headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["details"] == {}
 

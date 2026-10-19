@@ -324,3 +324,13 @@ def label_for(key: str, department_name: str | None) -> str | None:
 def choices_for(key: str, department_name: str | None) -> list:
     item = _find(key, department_name)
     return [c["value"] for c in item.get("choices", [])] if item else []
+
+
+# Departments whose assessment form opens with their own questionnaire; its
+# "not impacted" answers the whole form (the checklist is hidden then). The
+# frontend registry is departmentForms/index.ts.
+QUESTIONNAIRE_DEPARTMENTS = frozenset({"Packaging Engineer"})
+
+
+def has_questionnaire(department_name: str | None) -> bool:
+    return department_name in QUESTIONNAIRE_DEPARTMENTS

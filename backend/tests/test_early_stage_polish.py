@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 import pytest_asyncio
 from sqlalchemy import select, update
 
@@ -113,7 +114,7 @@ async def _in_assessment(client, auth, seed, session_factory):
 
 async def _submit(client, auth, cid, dept_id, verdict="feasible"):
     res = await client.post(f"/api/v1/changes/{cid}/assessments",
-                            json={"department_id": dept_id, "verdict": verdict}, headers=auth)
+                            json={"department_id": dept_id, "details": await checklist_details(client, dept_id), "verdict": verdict}, headers=auth)
     assert res.status_code in (200, 201), res.text
     return res.json()
 

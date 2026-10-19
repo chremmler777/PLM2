@@ -3,6 +3,7 @@ dev-seed idempotence, and the complete_task department-membership guard."""
 from tests.conftest import post_active
 import pytest_asyncio
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from sqlalchemy import select
 
 from app.models.workflow import Department, UserDepartment
@@ -265,7 +266,7 @@ async def test_submit_assessment_blocked_for_non_member(
 
     res = await client.post(
         f"/api/v1/changes/{c['id']}/assessments",
-        json={"department_id": dept_id, "verdict": "feasible"}, headers=eng_auth,
+        json={"department_id": dept_id, "details": await checklist_details(client, dept_id), "verdict": "feasible"}, headers=eng_auth,
     )
     assert res.status_code == 400, res.text
 
@@ -273,6 +274,6 @@ async def test_submit_assessment_blocked_for_non_member(
                      json={"department_ids": [dept_id]}, headers=admin_auth)
     res = await client.post(
         f"/api/v1/changes/{c['id']}/assessments",
-        json={"department_id": dept_id, "verdict": "feasible"}, headers=eng_auth,
+        json={"department_id": dept_id, "details": await checklist_details(client, dept_id), "verdict": "feasible"}, headers=eng_auth,
     )
     assert res.status_code == 200, res.text

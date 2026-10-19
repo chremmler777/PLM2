@@ -1,6 +1,7 @@
 """The costing contract the shipped UI already speaks: per-part minutes, lead
 time, the summation rollups they feed, and who still owes a number."""
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from sqlalchemy import select
 
 from app.models.change import ChangeAssessment, ChangeRequest
@@ -369,5 +370,5 @@ async def test_evidence_is_optional_for_submission(client, admin_auth, costing):
     """Evidence is "if needed" — no gate depends on it."""
     res = await client.post(f"/api/v1/changes/{costing['change_id']}/assessments",
                             json={"department_id": costing["tool"],
-                                  "verdict": "feasible"}, headers=admin_auth)
+                                  "details": await checklist_details(client, costing["tool"]), "verdict": "feasible"}, headers=admin_auth)
     assert res.status_code == 200, res.text

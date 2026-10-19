@@ -1,5 +1,6 @@
 """Effort tracking: submit carries effort_hours; summation rolls it up."""
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from sqlalchemy import select
 
 from tests.conftest import advance_to_assessment
@@ -31,7 +32,7 @@ async def test_effort_hours_persist_and_roll_up(client, admin_auth, seed, part,
     dept_id = assessments[0]["department_id"]
     res = await client.post(
         f"/api/v1/changes/{change['id']}/assessments",
-        json={"department_id": dept_id, "verdict": "feasible",
+        json={"department_id": dept_id, "details": await checklist_details(client, dept_id), "verdict": "feasible",
               "effort_hours": 2.5, "notes": "quick check"},
         headers=admin_auth)
     assert res.status_code == 200, res.text
@@ -55,6 +56,6 @@ async def test_negative_effort_rejected(client, admin_auth, seed, part,
     dept_id = res.json()["assessments"][0]["department_id"]
     res = await client.post(
         f"/api/v1/changes/{change['id']}/assessments",
-        json={"department_id": dept_id, "verdict": "feasible", "effort_hours": -1},
+        json={"department_id": dept_id, "details": await checklist_details(client, dept_id), "verdict": "feasible", "effort_hours": -1},
         headers=admin_auth)
     assert res.status_code == 422

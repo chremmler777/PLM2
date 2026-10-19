@@ -2,6 +2,7 @@
 Task 2: change-aware workflow engine (start_change_workflow, gate skips).
 Task 3: submit spawns the assessment instance; payload rows link lazily."""
 import pytest
+from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 from datetime import datetime, timedelta
 from sqlalchemy import select
 from app.models.workflow import (
@@ -279,7 +280,7 @@ async def test_ra_submission_completes_task_and_engine_advances(
 
     # Submit the only stage-1 blocking assessment (E-D1 = R). E-D2 is C (non-blocking).
     res = await client.post(f"/api/v1/changes/{cid}/assessments",
-                            json={"department_id": dep["E-D1"], "verdict": "feasible"},
+                            json={"department_id": dep["E-D1"], "details": await checklist_details(client, dep["E-D1"]), "verdict": "feasible"},
                             headers=auth)
     assert res.status_code in (200, 201), res.text
 
@@ -323,7 +324,7 @@ async def test_sc_submission_is_payload_only(client, session_factory, seed):
 
     # E-D2 is C (non-blocking) in stage 1, linked to a 'noted' task.
     res = await client.post(f"/api/v1/changes/{cid}/assessments",
-                            json={"department_id": dep["E-D2"], "verdict": "feasible"},
+                            json={"department_id": dep["E-D2"], "details": await checklist_details(client, dep["E-D2"]), "verdict": "feasible"},
                             headers=auth)
     assert res.status_code in (200, 201), res.text
 
@@ -355,7 +356,7 @@ async def test_future_stage_only_submit_is_payload_only_no_advance(
 
     # E-D3 (A) exists only in stage 2, which has NOT started — its row is unlinked.
     res = await client.post(f"/api/v1/changes/{cid}/assessments",
-                            json={"department_id": dep["E-D3"], "verdict": "feasible"},
+                            json={"department_id": dep["E-D3"], "details": await checklist_details(client, dep["E-D3"]), "verdict": "feasible"},
                             headers=auth)
     assert res.status_code in (200, 201), res.text
 
