@@ -37,6 +37,14 @@ const wrap = (ui: React.ReactElement) => (
 describe('DeadlineEditor', () => {
   afterEach(() => { cleanup(); vi.mocked(changesApi.update).mockClear() })
 
+  it('shows the date but no edit button to someone the backend would refuse', () => {
+    render(wrap(<DeadlineEditor canEdit={false} change={change({
+      status: 'quoted', required_by_date: '2026-09-01T23:59:59Z', required_by_reason: 'customer moved it',
+    })} />))
+    expect(screen.queryByTestId('deadline-edit')).toBeNull()
+    expect(screen.getByText('customer moved it')).toBeTruthy()
+  })
+
   it('sets a first release deadline plainly (no existing commitment to move)', async () => {
     const { container } = render(wrap(<DeadlineEditor change={change({
       release_due_date: null, release_due_reason: null,

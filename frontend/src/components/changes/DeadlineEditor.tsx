@@ -16,8 +16,11 @@ const ENDED = new Set(['rejected', 'closed', 'cancelled'])
 
 // The same editor drives both phases: the quote deadline (required_by_*) up to
 // the quote, and the release deadline (release_due_*) after acceptance.
-export function DeadlineEditor({ change, kind = 'quote' }:
-    { change: ChangeRequest; kind?: 'quote' | 'release' }) {
+export function DeadlineEditor({ change, kind = 'quote', canEdit = true }:
+    { change: ChangeRequest; kind?: 'quote' | 'release'
+      /** The backend lets only the lead, PM, Sales and admin move a deadline:
+       *  everyone else sees the date, not a button the server would refuse. */
+      canEdit?: boolean }) {
   const dateField = kind === 'release' ? 'release_due_date' : 'required_by_date'
   const reasonField = kind === 'release' ? 'release_due_reason' : 'required_by_reason'
   const curDate = change[dateField]
@@ -48,6 +51,18 @@ export function DeadlineEditor({ change, kind = 'quote' }:
   })
   if (ENDED.has(change.status)) return null
   const what = t(kind === 'release' ? 'deadline.release' : 'deadline.quote')
+  if (!canEdit) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <DeadlineChip date={curDate} state={change.deadline_state} kind={kind} />
+        {pushback && curReason && (
+          <span className="text-xs text-slate-500 truncate max-w-[16rem]" title={curReason}>
+            {curReason}
+          </span>
+        )}
+      </span>
+    )
+  }
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <DeadlineChip date={curDate} state={change.deadline_state} kind={kind} />

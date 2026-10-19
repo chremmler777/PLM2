@@ -860,6 +860,8 @@ export default function ChangeDetailPage() {
     actions: myActions?.actions ?? [],
     onAction: goTab,
     canRecordMeeting, canSeeGovernance,
+    // PATCH rights of the deadlines: lead, PM, Sales, admin (a viewer: none)
+    canEditDeadline: !!canWrite && (isAdmin || isChangeLead || isPmMember || isSalesMember),
     // What the change is waiting on: same list for every viewer, whoever
     // owns the next move.
     waits: earlyStageWaits(change, resolveWaitStates(change, concerns, deptName, change.assessments,
