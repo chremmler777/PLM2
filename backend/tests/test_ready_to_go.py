@@ -1,7 +1,9 @@
 import pytest
 from sqlalchemy import select, update
 
-from tests.conftest import complete_release_step, force_complete_check_workflows
+from tests.conftest import (
+    complete_release_step, complete_tool_changes, force_complete_check_workflows,
+)
 from tests.test_change_kickoff import _approved_change
 
 pytestmark = pytest.mark.asyncio
@@ -47,6 +49,9 @@ async def test_release_guarded_by_ready_to_go(
     from app.services.change_service import ChangeService, ChangeError
 
     cid = await _kickoff(session_factory, seed, part["part_id"])
+    # C21: the tool change is done before validation (SOFT tool_change_open);
+    # the rest of the check workflow stays open
+    await complete_tool_changes(session_factory, cid)
     async with session_factory() as s:
         change = await ChangeService.get_change(s, cid)
         await ChangeService.transition(s, change, "in_validation",

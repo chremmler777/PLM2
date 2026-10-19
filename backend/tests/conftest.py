@@ -543,6 +543,38 @@ async def force_complete_check_workflows(session_factory, change_id: int):
         await s.commit()
 
 
+
+async def complete_tool_changes(session_factory, change_id: int):
+    """C21: the 'Implement tool change' step of each active check workflow is
+    done (its tasks approved, its stage reached), the instance stays active:
+    for tests that pass into validation (SOFT tool_change_open) but still
+    need the ready-to-go guard on release."""
+    from datetime import datetime
+    from sqlalchemy import select, update
+    from app.models.change import ChangeImpactedItem
+    from app.models.workflow import WfInstance, WfInstanceTask, WfStage, WfStep
+    from app.services.wf_seed_service import TOOL_CHANGE_STEP
+    async with session_factory() as s:
+        rev_ids = [r for (r,) in await s.execute(
+            select(ChangeImpactedItem.resulting_revision_id).where(
+                ChangeImpactedItem.change_id == change_id,
+                ChangeImpactedItem.resulting_revision_id.is_not(None)))]
+        rows = (await s.execute(
+            select(WfInstance, WfStage.stage_order, WfStep.id)
+            .join(WfStage, WfStage.template_id == WfInstance.template_id)
+            .join(WfStep, WfStep.stage_id == WfStage.id)
+            .where(WfInstance.part_revision_id.in_(rev_ids),
+                   WfInstance.status == "active",
+                   WfStep.step_name == TOOL_CHANGE_STEP))).all() if rev_ids else []
+        for inst, order, step_id in rows:
+            inst.current_stage_order = max(inst.current_stage_order or 0, order)
+            await s.execute(update(WfInstanceTask)
+                            .where(WfInstanceTask.instance_id == inst.id,
+                                   WfInstanceTask.step_id == step_id)
+                            .values(status="approved",
+                                    completed_at=datetime.utcnow()))
+        await s.commit()
+
 MATERIALDB_ITEMS = [
     {"id": 11, "ktx_number": "40-1234", "trade_name": "Ultramid B3WG6", "grade": "black 00564",
      "manufacturer": "BASF", "family": "PA6", "classification": "series", "iso_designation": "PA6-GF30",
