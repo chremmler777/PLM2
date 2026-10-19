@@ -6,7 +6,7 @@ re-sends a state it already reported (spec §0: one per item).
 ECR-solid one escalation rule (spec §0, ASSESSMENT_V2): the owner is reminded
 on the due date; at due + 1 working day the owner hears it is late and the
 item escalates to the change lead (the lead's "Overdue" group); the deadline
-alerts reach the Sales owner too (C20). The computed My Tasks rows that
+alerts reach the Sales contact too (C20). The computed My Tasks rows that
 owe a decision or a number (owed_items: costing input, sign-offs, the
 internal approval, overrides) follow the same rule. RELEASE_V2 adds the daily overdue
 digest (C27/P6, app/services/overdue_digest.py) and the daily digest for
@@ -298,7 +298,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         ))).scalars().all()
 
     for change in changes:
-        # C20: the Sales owner who promised the date hears it too
+        # C20: the Sales contact who promised the date hears it too
         recipients = [u for u in (change.lead_id,
                                   change.sales_owner_id if one_rule else None)
                       if u is not None]
@@ -338,7 +338,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     # C27 / P6: the daily overdue digest for the configured managers.
     from app.services.overdue_digest import send_overdue_digest
     counts["overdue_digest"] = await send_overdue_digest(session, now=now)
-    # spec §0 Digest: one line per change for its lead, raiser, Sales owner
+    # spec §0 Digest: one line per change for its lead, raiser, Sales contact
     from app.services.change_digest import send_change_digest
     counts["change_digest"] = await send_change_digest(session, now=now)
 

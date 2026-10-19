@@ -5,7 +5,7 @@ sequence of rounds — a call, a meeting, a mail thread — each moving somethin
 until one of them ends it. Those rounds are the record behind the go-ahead:
 without them the accepted price is a number nobody can explain six months later.
 
-Who may write is the quote rule everywhere else: Sales owns the customer
+Who may write is the quote rule everywhere else: Sales is the customer contact
 relationship, so a Sales member, the change lead or an admin records the
 rounds (ChangeService.user_can_set_quoted_price — acts-as aware). Who may READ
 is the commercial crowd: the same people who see the costing numbers, because a

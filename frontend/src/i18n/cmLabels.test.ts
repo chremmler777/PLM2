@@ -30,3 +30,20 @@ describe('cmLabels', () => {
     }
   });
 });
+
+describe('D2 wording (Project Management owns the process, R37)', () => {
+  // Sales is the change's commercial contact, not its process owner: no
+  // label may say Sales owns it, names a "Sales owner", or makes the
+  // lead's risk escalation Sales' (DECIDED BY CHRISTOPH 2026-10-19, D2).
+  const STALE = /Sales owns|Sales owner|Sales escalation|Vertriebsverantwortlich|Eskalation durch den Vertrieb/i
+  it('no label says Sales owns the process', () => {
+    const bad = Object.entries(cmLabels).flatMap(([k, v]) =>
+      (['de', 'en'] as const).filter((l) => STALE.test(v[l])).map((l) => `${k}.${l}: ${v[l]}`))
+    expect(bad).toEqual([])
+  })
+  it('negative: the guard catches the old wording', () => {
+    expect(STALE.test('At-risk flagged - Sales escalation pending')).toBe(true)
+    expect(STALE.test('the Sales contact sends the offer')).toBe(false)
+  })
+})
+

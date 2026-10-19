@@ -972,7 +972,7 @@ class CostingPositionService:
                 if change.sales_owner_id:
                     ids = [change.sales_owner_id]
                 else:
-                    # no Sales owner: all of Sales, as the other Sales notices
+                    # no Sales contact: all of Sales, as the other Sales notices
                     from app.models.workflow import Department
                     sales = (await session.execute(select(Department.id).where(
                         Department.name == "Sales"))).scalar_one_or_none()

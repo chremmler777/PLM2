@@ -8,8 +8,8 @@
   customer change. An internal change proceeds only once it is answered
   (HARD #7).
 - The customer flip (ppap 'yes', or a customer index on an internal change):
-  customer_relevant, the project's Sales contact as Sales owner, the project
-  PM as lead; the Sales owner answers "notification only" (filed mail or a
+  customer_relevant, the project's Sales contact as Sales contact, the project
+  PM as lead; the Sales contact answers "notification only" (filed mail or a
   reference) or "offer needed" (the quote deadline). Proceed waits for that
   answer. "Notification only": the customer is told, the money stays ours,
   so the change goes back to what it was before the flip (lead, cost
@@ -209,7 +209,7 @@ class PpapDecisionService:
     async def flip(session: AsyncSession, change: ChangeRequest, user_id: int,
                    why: str) -> ChangeRequest:
         """The customer flip (spec §0): customer change, the project's Sales
-        contact as Sales owner, the project PM as lead, and the Sales task
+        contact as Sales contact, the project PM as lead, and the Sales task
         "Customer notification or offer needed?". Idempotent. A customer
         change the scoping meeting set to internal flips too (the room's
         carrier goes back to customer)."""
@@ -263,7 +263,7 @@ class PpapDecisionService:
     @staticmethod
     async def _notify_flip(session: AsyncSession, change: ChangeRequest,
                            after_approval: bool) -> None:
-        """Task newly theirs (spec §0 Notifications): the Sales owner (else
+        """Task newly theirs (spec §0 Notifications): the Sales contact (else
         Sales) and the new lead, once per change."""
         from app.models.workflow import Department
         from app.services.notification_service import NotificationService
@@ -308,7 +308,7 @@ class PpapDecisionService:
         ref: Optional[str] = None, mail_id: Optional[int] = None,
         quote_deadline: Optional[datetime] = None,
     ) -> ChangeRequest:
-        """The Sales owner's answer to the flip (any Sales member may act):
+        """The Sales contact's answer to the flip (any Sales member may act):
         notification only (a filed customer mail or a reference) or offer
         needed (the quote deadline)."""
         from app.services.cm_rules import ended_refusal
@@ -388,7 +388,7 @@ class PpapDecisionService:
     @staticmethod
     async def _undo_flip(session: AsyncSession, change: ChangeRequest) -> None:
         """'Notification only': restore what the flip changed, from its
-        changelog row (customer_relevant, origin, Sales owner, the lead while
+        changelog row (customer_relevant, origin, Sales contact, the lead while
         that person is still active, the rooms it moved to customer). A flip
         logged before that record existed goes back to internal, no Sales
         owner (C10), the lead kept when unknown."""

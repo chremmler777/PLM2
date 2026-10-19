@@ -39,11 +39,12 @@ export function mayTransition(
   const from = change.status
   // Resuming a hold (often "no PO yet") is the run team's (C1).
   if (from === 'on_hold') return leadPmAdmin
-  // Sales captures customer changes; an internal change with a lead (P3: the
+  // Sales may hand over a customer capture on the lead's behalf (D2: the
+  // lead, PM by default, owns it); an internal change with a lead (P3: the
   // engineering raiser) is its run team's to hand over or reject.
   const salesCaptures = v.isSales && (change.customer_relevant !== false || change.lead_id == null)
   if (to === 'scoping') {
-    // Kickoff from capture: Sales does the capture, so Sales may hand it over.
+    // Kickoff from capture: the lead (PM) hands over; Sales may on its behalf.
     if (from === 'captured') return leadPmAdmin || salesCaptures
     // Reopening a rejected change and recalling an assessment: lead/PM/admin.
     return leadPmAdmin
@@ -65,7 +66,7 @@ export function mayTransition(
  * mirrors PATCH customer_relevant)? Internal to customer is a starter's call:
  * Sales, Project Management or an admin (`canStartChange`, the backend's
  * permissions answer), whether or not they lead the change; an engineering
- * lead may not. Customer to internal drops the Sales owner [R4]: the lead
+ * lead may not. Customer to internal drops the Sales contact [R4]: the lead
  * with a starter's or Project Management's rights, or an admin.
  */
 export function mayMoveCarrier(

@@ -6,7 +6,7 @@
  *   (picked from the mails filed on the change) or the customer's document
  *   uploaded into the question; anything else also by a reference.
  * - Assumed: the value as a number with its unit (or "n/a"), the risk if it
- *   is wrong; the Sales owner (else the lead) confirms it within 5 working
+ *   is wrong; the Sales contact (else the lead) confirms it within 5 working
  *   days. The assumption goes to the scoping record and creates their task.
  *
  * Also used, with `confirming`, to confirm an open assumption later: the
@@ -30,7 +30,7 @@ export default function AnswerForm({
   concern: ChangeConcern
   /** Every attachment on the change: the filed customer mails are picked from it. */
   attachments: Attachment[]
-  /** Who confirms an assumption by default (the Sales owner, else the lead). */
+  /** Who confirms an assumption by default (the Sales contact, else the lead). */
   confirmerName?: string | null
   onDone: () => void
   /** Confirm an open assumption (evidence only) instead of answering. */

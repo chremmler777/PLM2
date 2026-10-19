@@ -13,7 +13,7 @@ the change's status at booking.
 
 The effort report (GET /reports/ecr-effort) sums booked against estimated
 hours per change and department, and names the departments with work and no
-booking ("not booked"). Its split by origin and Sales owner is cut 2.
+booking ("not booked"). Its split by origin and Sales contact is cut 2.
 """
 from __future__ import annotations
 
@@ -311,7 +311,7 @@ class HoursService:
         ("not booked", never 0). Changes the viewer may see. With a date
         window (work date): only the changes with hours booked in it, their
         bookings in it, and "not booked" still means never booked. Split by
-        origin and Sales owner: cut 2."""
+        origin and Sales contact: cut 2."""
         from app.services.change_service import ChangeService, _org_scope
         if not (actor.effective_role == "admin"
                 or await ChangeService._user_in_department(session, actor, "Project Manager")

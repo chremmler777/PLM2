@@ -423,7 +423,7 @@ export const changesApi = {
   /** HARD #7: Quality's ppap_decision on an internal change. */
   ppapDecision: (id: number, body: { answer: 'no' | 'yes'; basis?: string; ref?: string; part_ids?: number[] }) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/ppap-decision`, body).then((r) => r.data),
-  /** The Sales owner's answer to a customer flip. */
+  /** The Sales contact's answer to a customer flip. */
   answerCustomerFlip: (id: number, body: {
     answer: 'notification' | 'offer'; ref?: string; mail_id?: number; quote_deadline?: string
   }) => client.post<ChangeRequest>(`/v1/changes/${id}/customer-flip/answer`, body).then((r) => r.data),

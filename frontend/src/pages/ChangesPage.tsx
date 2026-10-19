@@ -63,7 +63,7 @@ const STATUS_ORDER = Object.keys(STATUS_LABELS);
 
 const statusText = (c: ChangeRequest): string => endLabel(c) ?? STATUS_LABELS[c.status] ?? c.status;
 
-/** C10: in a Sales stage the named Sales owner holds the change. */
+/** C10: in a Sales stage the named Sales contact holds the change. */
 const salesOwnerNow = (c: ChangeRequest): string | null =>
   stageResponsibleKey(c.status, c.origin) === 'role.sales' ? (c.sales_owner_name ?? null) : null;
 

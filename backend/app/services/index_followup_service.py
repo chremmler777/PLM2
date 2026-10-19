@@ -131,7 +131,7 @@ class IndexFollowupService:
                       to_name: str, actor_id: int) -> None:
         """Task newly theirs, once per item, involved people only: the
         assessment's owner of each rechecking department (else its project
-        team), the lead, the Sales owner (else Sales)."""
+        team), the lead, the Sales contact (else Sales)."""
         from app.services.change_people import department_members_of_change_org
         from app.services.notification_service import NotificationService
         link = f"/changes/{change.id}?tab=assessments"
@@ -272,7 +272,7 @@ class IndexFollowupService:
                                   recheck: ChangeRecheck, dept: str,
                                   actor_id: int) -> None:
         """The offer Sales was writing waits for a department's new costing:
-        the Sales owner (else Sales) and the lead hear it once, with the
+        the Sales contact (else Sales) and the lead hear it once, with the
         reason (spec §0: a decision that moves their task)."""
         from app.services.notification_service import NotificationService
         ids = [change.sales_owner_id] if change.sales_owner_id else []

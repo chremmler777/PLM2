@@ -691,7 +691,7 @@ class ChangeService:
     @staticmethod
     async def absorb_refusal(session: AsyncSession, change: ChangeRequest,
                              user: User) -> Optional[str]:
-        """Who may ask to absorb an open price: Sales (the Sales owner's
+        """Who may ask to absorb an open price: Sales (the Sales contact's
         side) and the run team (lead, PM member, admin); for an internal
         change the lead or the run team. None when allowed."""
         from app.services.change_people import holds_lead
@@ -1110,7 +1110,7 @@ class ChangeService:
         if customer_relevant is not None:
             change.customer_relevant = customer_relevant
         change.origin = origin
-        # C10: the named Sales owner of a customer change (the caller passes
+        # C10: the named Sales contact of a customer change (the caller passes
         # the raiser when in Sales), else the project's Sales responsible.
         change.sales_owner_id = await ChangeService.default_sales_owner_id(
             session, project_id, bool(customer_relevant), origin, sales_owner_id)
@@ -1895,7 +1895,7 @@ class ChangeService:
                 i["due"] = due.isoformat()
 
     #: Whose a why-blocked row is when the rule names nobody itself (R5): a
-    #: department in words, "sales" = the Sales owner, "capture" = the Sales
+    #: department in words, "sales" = the Sales contact, "capture" = the Sales
     #: owner or the raiser; everything else falls to the lead.
     _ROW_OWNER = {
         "description": "capture", "attachment": "capture", "quote_deadline": "sales",
@@ -1970,7 +1970,7 @@ class ChangeService:
                 out.append(R("no_lead", "No lead (project manager) assigned"))
             # Internal changes have no quote deadline; only customer-relevant
             # changes must set the required-by date before assessment. A
-            # flipped change whose Sales owner answered "notification only"
+            # flipped change whose Sales contact answered "notification only"
             # owes no quote.
             if (change.customer_relevant and change.required_by_date is None
                     and change.flip_answer != "notification"):
@@ -2206,7 +2206,7 @@ class ChangeService:
         index_lines = wait_lines + index_lines
         # A2-08: a flip still unanswered (customer index in assessment or
         # costing) would reach quoting with no Sales answer and no quote
-        # deadline: the Sales owner (else Sales) answers it first
+        # deadline: the Sales contact (else Sales) answers it first
         from app.services.ppap_decision_service import flip_open
         if flip_open(change):
             index_lines.append("Customer notification or offer? "
@@ -2679,7 +2679,7 @@ class ChangeService:
         await session.flush()
         if (to_status == "quoting" and change.customer_relevant
                 and cm_switches.on("ASSESSMENT_V2")):
-            # spec §5 "Sales owner: ready to quote" (immediate, once)
+            # spec §5 "Sales contact: ready to quote" (immediate, once)
             from app.services.notification_service import NotificationService
             title = f"Ready to quote: {change.change_number}"[:255]
             body = "Costing is closed: build and send the offer."
@@ -4493,7 +4493,7 @@ class ChangeService:
             # answering it. Same rule as MeetingService.can_answer_question.
             # The asking-side rule holds in captured/scoping only; from
             # assessment on a question is Sales' errand as it was before
-            # (Sales owns the customer relationship), one task per change.
+            # (Sales is the customer contact relationship), one task per change.
             questions = ChangeService.unanswered_questions(c)
             # C8: a department's question for our team (not the customer or
             # a supplier) is the lead's errand, else Project Management's
@@ -4607,11 +4607,11 @@ class ChangeService:
                     })
 
             # C33: the confirm item of an Assumed answer, owed by the person
-            # named to confirm it (default the Sales owner) by its due date,
+            # named to confirm it (default the Sales contact) by its due date,
             # in any live status: the assumption travels into the assessment
             # and the offer until it is confirmed.
             # [R3] Sales tasks show to all of Sales with the owner's name:
-            # an item the Sales owner is named for shows to every Sales
+            # an item the Sales contact is named for shows to every Sales
             # member (any of them may confirm it, can_confirm).
             if c.status not in TERMINAL_STATUSES:
                 acting = getattr(user, "acts_as_department_id", None) is not None
@@ -4801,7 +4801,7 @@ class ChangeService:
     @staticmethod
     async def notify_closed(session: AsyncSession, change: ChangeRequest,
                             user_id: int) -> int:
-        """§11 (RELEASE_V2): closing tells the Sales owner (internal: the
+        """§11 (RELEASE_V2): closing tells the Sales contact (internal: the
         lead) and Process when Process was on the change (an assessment or
         implementing work: involved people only); once per change, never
         the closer."""
@@ -5844,7 +5844,7 @@ class ChangeService:
     def unanswered_questions(change: ChangeRequest) -> list:
         """Every open, unanswered QUESTION on the change, newest last.
 
-        Sales owns the customer relationship, so Sales answers whatever the
+        Sales is the customer contact relationship, so Sales answers whatever the
         team needs asked — a tolerance question from APQP is as much a customer
         question as one the scoping meeting raised. Attribution says who wants
         to know, not who has to go and ask, so department-raised and Team flags
@@ -6907,7 +6907,7 @@ class ChangeService:
         """P3 / [R4]: who may move the cost carrier (PATCH customer_relevant
         and the scoping room's carrier). To customer: a starter (Sales,
         Project Management, admin), lead or not, never an engineering lead.
-        Back to internal drops the Sales owner: an admin, a starter or a
+        Back to internal drops the Sales contact: an admin, a starter or a
         Project Management member. None = allowed."""
         if bool(change.customer_relevant) == to_customer:
             return None
@@ -7078,7 +7078,7 @@ class ChangeService:
             if k in allowed and v is not None and getattr(change, k) != v:
                 setattr(change, k, v)
                 plain_changed = True
-        # C10: an internal change has no Sales owner, whatever the PATCH sent.
+        # C10: an internal change has no Sales contact, whatever the PATCH sent.
         if not change.customer_relevant:
             change.sales_owner_id = None
         # §2: an urgent change names its need-by, reason and evidence

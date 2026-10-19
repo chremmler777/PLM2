@@ -1386,7 +1386,7 @@ class EarlyStageService:
     @staticmethod
     async def sales_owner_candidates(session: AsyncSession,
                                      change: ChangeRequest) -> list[dict]:
-        """C10: [{id, name, is_default, is_current}] for the Sales owner
+        """C10: [{id, name, is_default, is_current}] for the Sales contact
         picker: active Sales members of the change's organization, the
         current owner first, then the project's Sales responsible."""
         from app.models.workflow import UserDepartment

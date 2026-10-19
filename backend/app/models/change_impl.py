@@ -21,7 +21,7 @@ from app.models.database import Base
 
 # Where a flagged risk goes. 'customer' means the customer has to be told —
 # the timeline or the scope they agreed to has moved. 'internal' means we
-# absorb it and re-plan. Sales makes the call either way, because Sales owns
+# absorb it and re-plan. Sales makes the call either way, because Sales keeps
 # the customer relationship; that is a rule of the house, not a preference.
 ESCALATION_DIRECTIONS = ("customer", "internal")
 

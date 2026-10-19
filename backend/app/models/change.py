@@ -272,7 +272,7 @@ class ChangeRequest(Base):
     quality_signed_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_open: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())
-    # The named Sales owner (C10): the raiser when in Sales, else the
+    # The named Sales contact (C10): the raiser when in Sales, else the
     # project's Sales responsible; NULL on internal and mother-plant changes.
     # Sales tasks still show to all of Sales, with this name on them.
     sales_owner_id: Mapped[int | None] = mapped_column(
@@ -341,7 +341,7 @@ class ChangeRequest(Base):
         ForeignKey("users.id"), nullable=True)
     ppap_decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The customer flip (spec §0): an internal change became a customer one
-    # (ppap yes, or a customer index). The Sales owner then answers
+    # (ppap yes, or a customer index). The Sales contact then answers
     # "notification only" (filed mail / ref) or "offer needed" (quote
     # deadline); proceed waits for that answer.
     customer_flip_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

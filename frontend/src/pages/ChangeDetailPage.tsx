@@ -923,7 +923,7 @@ export default function ChangeDetailPage() {
             && (isAdmin || isChangeLead || isPmMember)}
           viewer={!actingAs && userId != null ? { id: userId, name: t('cockpit.leadMe') } : null}
           isAdmin={isAdmin} />
-        {/* C10: only a customer change has a Sales owner. */}
+        {/* C10: only a customer change has a Sales contact. */}
         {change.customer_relevant && change.origin !== 'mother_plant' && (
           <SalesOwnerPicker change={change}
             canEdit={!['closed', 'cancelled', 'released'].includes(change.status)

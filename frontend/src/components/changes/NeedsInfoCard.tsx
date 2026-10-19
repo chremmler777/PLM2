@@ -47,7 +47,7 @@ export default function NeedsInfoCard({
   /** C33 (SCOPING_V2): the structured question (what, part, who answers,
    *  what it changes) with the Confirmed / Assumed answer form. */
   structured?: boolean
-  /** Who confirms an Assumed answer by default (Sales owner, else lead). */
+  /** Who confirms an Assumed answer by default (Sales contact, else lead). */
   confirmerName?: string | null
 }) {
   const [answer, setAnswer] = useState(c.answer_note ?? '')

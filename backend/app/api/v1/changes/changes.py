@@ -541,7 +541,7 @@ async def my_change_tasks(
         # Project team (spec §18): "main" rows count on the badge and the
         # list header; "backup" rows (another responsible leads this role
         # on the project) stay listed, muted, with the main's name. A Sales
-        # row names the change's Sales owner instead (C10).
+        # row names the change's Sales contact instead (C10).
         await team.annotate(t, t.get("project_id"), owned=t["is_mine"],
                             sales_owner=owner)
         if owner is not None and not acting and owner[0] == current_user.id \
@@ -2102,7 +2102,7 @@ async def update_change(
                        f"({', '.join(moving_d1)}) is read only")
     # P3 / [R4]: an engineering lead starts internal changes only; making
     # one a customer change is a starter's call (Sales, Project Management,
-    # admin), lead or not; the way back drops the Sales owner, so it needs a
+    # admin), lead or not; the way back drops the Sales contact, so it needs a
     # starter's or Project Management's rights too. Asked first, so the
     # engineering lead hears who can do it. The scoping room's cost carrier
     # follows the same rule (MeetingService).
@@ -3514,7 +3514,7 @@ async def post_customer_flip_answer(
     change_id: int, body: CustomerFlipAnswerIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """The Sales owner's answer to a customer flip: notification only (a
+    """The Sales contact's answer to a customer flip: notification only (a
     filed customer mail or a reference) or offer needed (quote deadline)."""
     from app.services.ppap_decision_service import PpapDecisionService, PpapForbidden
     change = await ChangeService.get_change(db, change_id, viewer=current_user)

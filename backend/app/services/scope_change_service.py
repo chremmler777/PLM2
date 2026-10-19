@@ -537,7 +537,7 @@ class ScopeChangeService:
             else:
                 what = "Send supplement" if post else "Revise offer"
             title = f"{what}: scope change re-costed: {change.change_number}"[:255]
-            # spec §0: involved people only: the Sales owner (the row shows
+            # spec §0: involved people only: the Sales contact (the row shows
             # to all of Sales); no owner: Sales
             if change.sales_owner_id is not None:
                 await NotificationService.notify_once(
@@ -574,7 +574,7 @@ class ScopeChangeService:
     @staticmethod
     async def _notify_sales(session: AsyncSession, change: ChangeRequest, *,
                             subject_key: str, title: str, body: str, skip: int) -> None:
-        """The Sales owner (the row shows to all of Sales); none: Sales."""
+        """The Sales contact (the row shows to all of Sales); none: Sales."""
         from app.services.notification_service import NotificationService
         if change.sales_owner_id is not None:
             if change.sales_owner_id != skip:
@@ -593,7 +593,7 @@ class ScopeChangeService:
     async def ask(session: AsyncSession, change: ChangeRequest, card_id: int,
                   user: User, text: Optional[str]) -> ChangeScopeChange:
         """Missing info on a requested card is a question to the customer:
-        the lead (run team) or Sales asks; Sales owns it (a task with the
+        the lead (run team) or Sales asks; Sales keeps it (a task with the
         mail text to copy); it holds the accept until Sales files the
         customer's answer. A refusal does not wait for it."""
         card = await ScopeChangeService._card(session, change, card_id)

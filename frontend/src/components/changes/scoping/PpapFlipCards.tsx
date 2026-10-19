@@ -7,7 +7,7 @@
  * reference. Yes: the parts; it makes a customer notification task for Sales
  * (the change becomes a customer change). Everyone else reads who owes it.
  *
- * CustomerFlipCard: the change became a customer change; the Sales owner
+ * CustomerFlipCard: the change became a customer change; the Sales contact
  * answers "notification only" (a filed customer mail or a reference) or
  * "offer needed" (the quote deadline). Proceed waits for it.
  */

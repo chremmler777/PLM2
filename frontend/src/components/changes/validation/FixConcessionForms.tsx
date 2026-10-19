@@ -6,7 +6,7 @@
  * department retests, a pass closes the issue.
  *
  * ConcessionForm: Quality requests a concession beside the fix. A customer
- * change: the Sales owner asks the customer, Quality decides once the mail
+ * change: the Sales contact asks the customer, Quality decides once the mail
  * is filed. An internal change: the parts are not for shipment and Quality
  * decides now, for a quantity of parts or until a date.
  */

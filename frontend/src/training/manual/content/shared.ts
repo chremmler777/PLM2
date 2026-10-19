@@ -75,8 +75,8 @@ export const basicsChapter: ContentChapter = {
         },
         {
           p:
-            'Sales owns the customer. Anyone can file a customer mail on a change, but what goes ' +
-            'to the customer goes through Sales.',
+            'Project Management owns the change from capture to close; Sales is the customer contact. ' +
+            'Anyone can file a customer mail on a change, but what goes to the customer goes through Sales.',
         },
       ],
     },

@@ -146,7 +146,7 @@ def need_by_refusal(change: ChangeRequest, answer: Optional[str],
 async def check_need_by(session: AsyncSession, change: ChangeRequest, user_id: int,
                         answer: Optional[str], proposed: Optional[datetime]) -> None:
     """At proceed of an urgent change: need-by realistic? Refuses without an
-    answer; 'no' needs the proposed date. Not 'yes' notifies the Sales owner
+    answer; 'no' needs the proposed date. Not 'yes' notifies the Sales contact
     (else Sales) once on a customer change, the lead (else the raiser) on
     an internal one."""
     from app.services.change_service import ChangeError, ChangeService
@@ -172,7 +172,7 @@ async def check_need_by(session: AsyncSession, change: ChangeRequest, user_id: i
 
 
 async def _notify_sales(session: AsyncSession, change: ChangeRequest, actor_id: int) -> None:
-    """Customer change: the Sales owner, else Sales, gets the tell task's
+    """Customer change: the Sales contact, else Sales, gets the tell task's
     notice. Internal: the lead, else the raiser, is told (no task)."""
     from app.models.workflow import Department
     from app.services.change_people import department_members_of_change_org

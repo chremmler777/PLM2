@@ -17,8 +17,10 @@ export const salesChapter: ContentChapter = {
       blocks: [
         {
           lede:
-            'You own the customer. You start the request, you build and send the offer, you log ' +
-            'every round, and anything the customer has to hear after acceptance goes through you.',
+            'You are the customer contact. Project Management owns the change from capture to close ' +
+            '(the project\'s lead PM leads it); you start the request (or PM does on your behalf), you ' +
+            'build and send the offer, you log every round, and anything the customer has to hear ' +
+            'after acceptance goes through you.',
         },
         {
           table: {
@@ -85,7 +87,7 @@ export const salesChapter: ContentChapter = {
       blocks: [
         {
           points: [
-            ['Customer mails', 'are filed on the change as a tracked list. Everybody may upload one; you own the relationship.'],
+            ['Customer mails', 'are filed on the change as a tracked list. Everybody may upload one; you are the customer contact.'],
             ['A question from the team', 'arrives as an open question at scoping. Answer it "Confirmed" or "Assumed". A customer question is "Confirmed" only by the customer\'s mail (pick it from the filed mails) or document. Without it answer "Assumed": the value with its unit and the risk if it is wrong. You then get "Confirm an assumption" in My Tasks, due in 5 working days. The asker or PM marks the question solved; you never do.'],
             ['A question from an assessment', 'a department that is blocked asks it from its own assessment ("Question from Tool Engineer"). It holds only that department\'s submit, so answer it within the task\'s due date the same way: "Confirmed" or "Assumed".'],
             ['"Not yet"', 'from the scoping meeting keeps the change in scoping while the open questions wait for their answers.'],

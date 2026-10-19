@@ -2,7 +2,7 @@
 Notifications "Digest: one line per change (phase, answers, deadline,
 waits, overdue)", §4 "raiser and lead's digest told"; switch RELEASE_V2).
 
-Once a day each lead, raiser and Sales owner of a live change gets one
+Once a day each lead, raiser and Sales contact of a live change gets one
 notification (kind change_digest, mailed) with one line per change of
 theirs that has news or needs an eye:
   "CR-2026-0006 (In assessment): quote deadline 28 Oct (at risk);

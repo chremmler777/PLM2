@@ -344,7 +344,7 @@ class ChangeResponse(BaseModel):
     status: str
     lead_id: Optional[int] = None
     lead_name: Optional[str] = None
-    # C10: the named Sales owner (NULL on internal changes).
+    # C10: the named Sales contact (NULL on internal changes).
     sales_owner_id: Optional[int] = None
     sales_owner_name: Optional[str] = None
     # HARD #9 (ECR-solid): a price still open after approval.
@@ -1354,7 +1354,7 @@ class IndexDeadlineIn(BaseModel):
 
 
 class CustomerFlipAnswerIn(BaseModel):
-    """The Sales owner's answer to a customer flip."""
+    """The Sales contact's answer to a customer flip."""
     answer: str            # notification | offer
     ref: Optional[str] = Field(default=None, max_length=255)
     mail_id: Optional[int] = None

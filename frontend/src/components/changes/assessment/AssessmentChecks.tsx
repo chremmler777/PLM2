@@ -46,7 +46,7 @@ export default function AssessmentChecks({
 }: {
   /** The change's attachments: an answerer picks the filed customer mail. */
   attachments?: Attachment[]
-  /** Who confirms an Assumed answer by default (Sales owner, else lead). */
+  /** Who confirms an Assumed answer by default (Sales contact, else lead). */
   confirmerName?: string | null
   changeId: number
   departmentId: number
@@ -270,7 +270,7 @@ function ClosedCheck({ changeId, c, onDone, attachments }: {
         </span>
       )}
       {/* A3-01: an Assumed check item leaves a confirm item; its named
-          confirmer (default the Sales owner) confirms it here, in any live
+          confirmer (default the Sales contact) confirms it here, in any live
           status (the backend's can_confirm). */}
       {c.answer_kind === 'assumed' && !c.confirmed_at && (
         <p className="text-amber-200" data-testid={`achk-confirmline-${c.id}`}>

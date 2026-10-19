@@ -85,7 +85,7 @@ export const HANDOUTS: Handout[] = [
     title: 'Sales',
     audience: 'Sales',
     chapter: '04',
-    job: 'you own the customer. You start the request, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.',
+    job: 'you are the customer contact; Project Management (the change lead) owns the change from capture to close. You start the request, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.',
     blocks: [
       {
         h2: 'Stage by stage',

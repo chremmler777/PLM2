@@ -78,7 +78,7 @@ flowchart TD
 | `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
 | `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
 | `in_validation` | Release tab: validation checks (weight, cycle time, dimensions computed from a measurement against fixed limits) plus the release checklist (16 items; 13 on a change that ended before the rework; each row answered by its department) and the lessons learned step; a FAIL raises its validation issue with Quality's Fix task (who fixes, retest date) and a concession beside it (§3 "Computed checks, the Fix task, the concession") | departments, Quality, PM |
-| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation, no newer index pending. Close is HARD-blocked while a price is open (`price_open`); an internal change closes with its achieved value beside the target (SOFT). Closing tells the Sales owner (internal: the lead) and Process when it was on the change. Summary with the P&L offer vs doing; then PM wraps it up | PM |
+| `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation, no newer index pending. Close is HARD-blocked while a price is open (`price_open`); an internal change closes with its achieved value beside the target (SOFT). Closing tells the Sales contact (internal: the lead) and Process when it was on the change. Summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -142,10 +142,10 @@ soft kickoff guard above reads `kickoff_missing`, which adds:
   today and after the need-by; *at_risk* only with `START_AT_RISK` on, off
   the dialog reads "No start before PO"). On a customer
   change (the cost carrier proceed goes on with) anything but yes notifies
-  the Sales owner (else Sales) once and gives all of Sales the task
+  the Sales contact (else Sales) once and gives all of Sales the task
   `need_by_tell` ("Tell customer: new date or start at risk?", owner named),
   answered with a filed mail or a reference (`POST /changes/{id}/need-by/tell`).
-  An internal change has no customer and no Sales owner: *start at risk* is
+  An internal change has no customer and no Sales contact: *start at risk* is
   not offered (refused), *no* is recorded and the lead (else the raiser) is
   told once; Sales gets nothing (L4 review).
 - **Urgent rule on edits**: create, and a PATCH that moves the urgency itself
@@ -248,11 +248,11 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   customer mail (picked, `mail_id`) or the customer's document uploaded into
   the question; others also by a reference (5+ characters, not "ok"/"tbd").
   **Assumed** = value as a number with its unit (or "n/a"), the risk if wrong;
-  confirmed by the Sales owner (else the lead) within 5 working days. An
+  confirmed by the Sales contact (else the lead) within 5 working days. An
   Assumed answer leaves a **confirm task** (`confirm_assumption`, My Tasks, due
   at `confirm_due`) for that person in any live status until someone who may
   answer it confirms it with evidence (`POST /concerns/{id}/confirm`). When
-  the person named is the Sales owner, the row shows to all of Sales with the
+  the person named is the Sales contact, the row shows to all of Sales with the
   owner's name ([R3]); closed, cancelled or rejected changes take no confirm.
   The form is required for every question in captured/scoping (legacy untyped
   `needs_info` questions included) and for a C8 question from an assessment:
@@ -382,7 +382,7 @@ Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 124).
 - **Customer flip** (a *yes*, or a customer index on an internal change):
   `customer_relevant` + origin `customer`, the project's Sales contact as Sales
   owner, the project PM as lead (when the project names one), an undecided
-  meeting's cost carrier follows to *customer*. The Sales owner and the lead
+  meeting's cost carrier follows to *customer*. The Sales contact and the lead
   are notified once (`customer_flip:<id>`; the lead's notice names Sales and
   asks nothing); all of Sales see *"Customer notification or offer needed?"*
   (`customer_flip`, 1 wd, owner named). **Notification only** needs a filed
@@ -399,7 +399,7 @@ Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 124).
   Sales members; a date from today on) and the change takes the customer
   path. `proceed` waits for this answer (part of HARD #7). A flip after
   proceed (a customer index in assessment or costing) is in the C5
-  close-costing line, *"Customer notification or offer? (<Sales owner or
+  close-costing line, *"Customer notification or offer? (<Sales contact or
   Sales>)"* (SOFT `costing_not_finalized`, close-out A2-08). One decision is
   one Sales row: while the flip is open Sales gets no separate *Set the quote
   deadline* row; *offer needed* sets the date. **At approved or
@@ -483,7 +483,7 @@ feasible / with-conditions / not-feasible verdict, and the register is what
 travels.
 
 - **Severity-3 risks surface to Sales on the commercial view** — they belong
-  on the offer as technical judgment. Sales owns carrying them to the
+  on the offer as technical judgment. Sales (the Sales contact) carries them to the
   customer; the assessing department owns raising them.
 - **"Reject" is not a raiseable option.** A department that cannot do it sets
   verdict `not_feasible` (which hard-requires the Change PPT, below).
@@ -506,7 +506,7 @@ Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 127).
   names something, or a file filed on the item), **Not relevant** (the
   department's checklist row, a drawing reference, *outside our scope* + who
   owns it, or *same as #n*) or **Assumed** (value + unit or n/a, the risk if
-  wrong; the confirm item goes to the Sales owner, else the lead, +5 wd, as
+  wrong; the confirm item goes to the Sales contact, else the lead, +5 wd, as
   for a scoping answer). Stored as `check_outcome` and the resolution note;
   logged `concern_withdrawn`, so the raiser's and the lead's daily digest
   count it as closed (the raiser of a check item closed since yesterday gets
@@ -578,7 +578,7 @@ Three typed containers, three responsibilities:
 |---|---|---|---|
 | **Change PPT** (internal explanation of the change) | per assessing department's bucket (`kind=change_ppt`) | assessing department | required for a `not_feasible` verdict (replaces the generic evidence gate) |
 | **RFQ** (external: supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | required at submit when "external modification" is Yes (since 2026-09-27; .pdf, .xlsx, .xls, .docx, .msg, .eml) |
-| **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads, Sales owns the customer relationship | chronological tracked list, visible to all — the customer-communication record of the change. An internal change (`customer_relevant` false) has no slot, neither on the change nor in a bucket; a mail filed before still lists (R37 polish, 2026-10-19) |
+| **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads; Sales is the customer contact (D2: Project Management owns the process) | chronological tracked list, visible to all — the customer-communication record of the change. An internal change (`customer_relevant` false) has no slot, neither on the change nor in a bucket; a mail filed before still lists (R37 polish, 2026-10-19) |
 
 ### Assessment shape (2026-08-11, in build)
 
@@ -835,7 +835,7 @@ Switch `ASSESSMENT_V2` (migration 129).
   quote number of 5+ characters, amount: the offer is created on the
   position). The positions list serves `can_check_estimate` with the same
   rule. Above sets `price_open` (HARD #9 at close) and one
-  task: customer change, the Sales owner (no Sales owner: all of Sales; Sales
+  task: customer change, the Sales contact (no Sales contact: all of Sales; Sales
   sees it) *"Estimate low by x: send a supplement or absorb"*; internal
   (row *"Cost above the approved estimate: re-approve or absorb"*), the
   lead (no lead: Project Management), who reads prices, *"Cost x above the
@@ -867,8 +867,8 @@ Switch `ASSESSMENT_V2` (migration 130).
   summation and customer stages) get no costing bucket; a row that already
   holds money (in flight) still shows.
 - **Ready to quote**: closing costing (`costing -> quoting`) on a customer
-  change tells the Sales owner once (`task_new`, `ready_to_quote:<id>`;
-  without a Sales owner every Sales member), unless they closed it
+  change tells the Sales contact once (`task_new`, `ready_to_quote:<id>`;
+  without a Sales contact every Sales member), unless they closed it
   themselves. The quote task is theirs from then on.
 - **Internal approval card** (HARD #8 kept: an engineering approver, never
   the raiser): the cost (the summation: one bold *Total*, the grand total;
@@ -1208,7 +1208,7 @@ nothing preselected:
   scope change request, `ChangeService.customer_evidence_file`) or a
   PO number / reference (`ref`, `cm_rules.reference_refusal`: 5+ characters,
   no "ok"). When an offer version went out: "PO matches vN exactly?" (`yes` /
-  `no`, `no` names what differs and other P/Ns: the lead and the Sales owner
+  `no`, `no` names what differs and other P/Ns: the lead and the Sales contact
   are told, `po_differs`) and the confirmed total (`confirm_total`, "This
   mail says yes to vN at <total>"). The index match is computed
   (`index_changes`: the parts whose index moved since the version was
@@ -1317,7 +1317,7 @@ accepted (evidence, PO match, confirmed total) closes the open price
 (`supplement_accepted`, `price_closed`) and the signers are asked to sign it
 (My Tasks rows in approved / in implementation are re-signs only, after the
 customer's yes); still talking sets the next contact; declined leaves the
-price open and tells the lead and the Sales owner: Absorb (HARD #9's exit) or
+price open and tells the lead and the Sales contact: Absorb (HARD #9's exit) or
 the run team puts the change on hold. A4-03: Sales (internal: the lead) gets
 the My Tasks row "Price open: absorb or send a new version" (`price_open`,
 due 5 wd from the decline, Offer tab) until an Absorb is asked, a new version
@@ -1350,8 +1350,8 @@ card, three steps, an owner each:
    Project Management); My Tasks `scope_change_decide` (Needs you).
    **Missing info is a question** (migration 137, `change_scope_changes.question`):
    the lead (run team) or Sales asks the customer from the card ("Missing
-   info? Ask the customer", 10+ characters); Sales owns it (My Tasks
-   `scope_change_question` with the mail text to copy, Sales owner notified)
+   info? Ask the customer", 10+ characters); Sales asks it (My Tasks
+   `scope_change_question` with the mail text to copy, Sales contact notified)
    and files the customer's answer with its evidence (a filed customer mail
    or its reference). While it is open the accept waits (the lead's decide
    row is hidden, the accept is refused with the question); a refusal does
@@ -1368,7 +1368,7 @@ card, three steps, an owner each:
    has priced (`department_cost_moved`), else "No cost impact" with why (15+
    characters, logged). The card reads "Waiting for: Toolshop (by Thu)". The
    last one hands Sales `revise_offer` ("send a supplement" after approval;
-   Needs you for the Sales owner, who alone is notified; the cockpit button
+   Needs you for the Sales contact, who alone is notified; the cockpit button
    reads the same stage-aware words). Only active departments re-cost (an
    inactive one is refused by name and not offered). When every department
    said "No cost impact" there is nothing to price: the row reads "Scope
@@ -1451,7 +1451,7 @@ without a status hop (the Offer tab starts, edits and sends it in approved
 and labels the next one "New version"), and the Customer answer works in
 any later status: accepted clears `price_open` (a lower total waits for the
 price-drop OK first); declined leaves it open (no rejection: the work runs;
-the lead and the Sales owner are told: Absorb or hold; the panel says so),
+the lead and the Sales contact are told: Absorb or hold; the panel says so),
 and a newer version sent after it is answered again. Close is
 HARD-blocked while the price is open (#9). Switch off: an urgent change reads
 "No start before PO" and nothing here is offered.
@@ -1846,12 +1846,12 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   offers no second "Raise issue".
 - **Concession, in parallel** (`POST .../issues/{iid}/concession`, Quality
   only): a customer change: the issue's route becomes the concession and
-  the Sales owner is told to ask the customer ("Waiting for customer (Sales
+  the Sales contact is told to ask the customer ("Waiting for customer (Sales
   owner, asked <date>)"); once Sales filed the customer's mail, Quality
   decides, for a quantity of parts or until a date (required). The yes
   never rests only on a mail the deciding member filed (A5-07): with every
   customer mail on the issue filed by them, the card offers no decision and
-  the yes is refused; the Sales owner files it, or another Quality member
+  the yes is refused; the Sales contact files it, or another Quality member
   decides. The Fix pick
   stays open beside it, whichever comes first. Tasks: Sales "Ask the
   customer about the concession for VI-n and file the mail" until the mail
@@ -1875,11 +1875,11 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
 - **Status line** (validation state `release_line`): "Not releasable:
   <check> <worst value> vs <limits>; fix: <department> (<the person, when
   the department has exactly one member here>), retest <day>;
-  concession: none / waiting for customer (Sales owner, asked <date>) /
+  concession: none / waiting for customer (Sales contact, asked <date>) /
   Quality decides / VI-n expired <date>". An urgent change's FAIL sends that line at once to
   Management (no Management member: Project Management), mailed
   (`validation_urgent_fail`).
-- **Weight to Sales**: the Sales owner hears of a FAILED weight check (one
+- **Weight to Sales**: the Sales contact hears of a FAILED weight check (one
   notice), and the "update quote" task opens only when the validated weight
   differs from the estimate by more than 2 % (`WEIGHT_DELTA_SALES_SHARE`).
 
@@ -1891,7 +1891,7 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   lead, Project Management or an admin, in validation or released; the
   Release tab's "Achieved" card). Closing without it is the SOFT rule
   `achieved_missing` (the run team may override).
-- **Closing notice**: the Sales owner (internal: the lead) and, when
+- **Closing notice**: the Sales contact (internal: the lead) and, when
   Process was on the change (an assessment or implementing work), the
   Process Engineer members are told once (`change_closed`), never the
   closer; an internal change's notice carries achieved vs target.
@@ -1936,7 +1936,7 @@ and the departments not booked; one card on the ECR KPI board. With a date
 window (`since`, `until`, the day worked) it lists the changes with hours
 in the window, their hours in it, and "not booked" still means never
 booked. Its split by
-origin and Sales owner is cut 2.
+origin and Sales contact is cut 2.
 
 ### P&L: offer vs doing (spec §13)
 
@@ -1994,7 +1994,7 @@ moved, the BOM tree and the viewer fall back past it. Import scripts
   - `full_ecr`: a new customer change, lead item = the part, the pending
     index as the item's `resulting_revision_id` (the ECN spawn skips it).
     With `SCOPING_V2` (C9) it is handed over to `scoping` at once: the
-    customer's files linked, the Sales owner set, the lead told "schedule
+    customer's files linked, the Sales contact set, the lead told "schedule
     scoping" and Sales "Set quote deadline" (an incomplete capture is logged
     as `capture_incomplete`, not overridden; the deadline is owed before
     assessment). Switch off: it stays in `captured`.
@@ -2053,7 +2053,7 @@ Switch `SCOPING_V2` (`revision_intake_service.py`,
   not run-team impact edits.
 - **full_ecr hands over (C9)**: the index's files are linked on the change
   as `customer_file` attachments (by reference: deleting one from the change
-  never removes the revision's file), the Sales owner is the project's Sales
+  never removes the revision's file), the Sales contact is the project's Sales
   contact, the lead the project PM; the change is **handed over to
   scoping** at once (the soft kickoff rule is logged, `handover_logged`, not
   overridden), so the lead schedules scoping while Sales sets the quote
@@ -2070,7 +2070,7 @@ Switch `SCOPING_V2` (`revision_intake_service.py`,
     the offer is sent reopens the department's finalized costing (in quoting
     the change first steps back to costing, the correction path, logged; it
     is a system consequence of the department's answer, not a run-team hop,
-    and the Sales owner (else Sales) and the lead are told once: "Offer on
+    and the Sales contact (else Sales) and the lead are told once: "Offer on
     hold: <dept> recosts for index D", `recheck_back:<id>`);
     from quoted on it is a scope change of type customer index
     (`scope_changed_after_quote` + `costing_update` for that department).
@@ -2265,7 +2265,7 @@ Project Manager start customer changes; Development, Process Engineer, Tool
 Engineer, Manufacturing Engineer start internal changes. Ask one of them to raise it.", read from the
 department flags). A `POST /changes` that omits `customer_relevant` raises
 what the caller's department starts: a customer change for a Sales or PM
-member (with its Sales owner), else an internal one (the UI always sends the
+member (with its Sales contact), else an internal one (the UI always sends the
 flag). Everyone else's rules are unchanged (Sales and
 PM start any change; an internal one raised by Sales is led by the project's
 PM). Turning an internal change into a customer change (`PATCH
@@ -2276,7 +2276,7 @@ changes, e.g. Quality) gets 403 "Only Sales, Project Management or an admin
 may make this a customer change", and neither the Cost carrier editor nor the
 D1 panel offers it (`lib/transitionRights.mayMoveCarrier`, from
 `permissions.can_start_change`). The way back (customer to internal) drops
-the Sales owner: the lead decides it only with a starter's or Project
+the Sales contact: the lead decides it only with a starter's or Project
 Management's rights, or an admin (close-out A1-09), so an engineering raiser
 cannot take the customer off. A manual flip moves the lead to the project PM
 like the PPAP flip (spec §0 [R4]); with no PM on the project the lead stays.
@@ -2285,9 +2285,9 @@ The scoping meeting's cost carrier follows the same rule (close-out A2-01,
 whose carrier moves the change to customer (or back) is 403 for anyone the
 PATCH would refuse, and the carrier option is not offered. Proceed applies the
 same people as the PATCH (`ChangeService.carrier_people`): to customer, the
-project's Sales contact as Sales owner (none on the project and a Sales member
+project's Sales contact as the change's Sales contact (none on the project and a Sales member
 made the move: that member, A6-04) and the project PM as lead; to internal,
-no Sales owner (C10). An internal change with a lead is its run
+no Sales contact (C10). An internal change with a lead is its run
 team's to hand over: the kickoff task goes to the lead and Project Management
 only, and Sales has no capture hop (scoping, reject) on it; the stage badge
 at capture reads "Lead", not "Sales" ("PM" while nobody leads it). A change with no lead shows "No lead
@@ -2342,7 +2342,7 @@ member (an admin acting as Sales does not), and a stale owner (inactive, or
 left Sales) owns nothing, so the Sales rows fall back to all of Sales as
 "main". The Status card
 shows the owner under the lead; the list shows it beside the Sales badge in
-the Sales stages. **"Mine"** on the list = lead, raiser, Sales owner, or one
+the Sales stages. **"Mine"** on the list = lead, raiser, Sales contact, or one
 of my departments owes an open R/A assessment or an unfinalized cost input
 (`ChangeService.owing_change_ids`, from the loaded assessments, no query per
 change).
@@ -2544,7 +2544,7 @@ and of the decisions and hops that waive a price rule.
 
 **Why blocked.** `next_step.items` (cockpit "Missing before ...") carry the
 rule (`rule`), the owner and due in words (`who`; every row has one, R5:
-the rule's own owner, else its default, e.g. the Sales owner for the quote
+the rule's own owner, else its default, e.g. the Sales contact for the quote
 rows, Quality for the Quality sign-off, else the lead, else Project
 Management; task dues follow the due rules above, lane L5 adds supplier waits), a hard rule's only exits
 (`exits`: concession, absorb, customer_accepts, sign, record_answer,
@@ -2650,7 +2650,7 @@ one, and "Absorb" on an open price for who may ask it.
   only in cut 1. The row's `escalation` words the Late chip so it never
   promises more: `lead_digest`, `lead` (digest switched off), `pm_digest` /
   `pm` (no lead who can act), `digest` (Sales' rows) or none. Quote and release deadline alerts reach the
-  Sales owner too; each names its deadline ("Release due 3 Nov"), and a
+  Sales contact too; each names its deadline ("Release due 3 Nov"), and a
   release alert is not hidden by an earlier quote alert.
   A sweep notice is sent once per item and person, read or not
   (`notify_once(include_read=True)`); the reminder loop commits each run
@@ -2664,7 +2664,7 @@ one, and "Absorb" on an open price for who may ask it.
   digest; never twice a day, read or not. A non-admin recipient sees only
   their organization's changes. Cut 2: a manager per department.
 - **Digest for the people involved (`RELEASE_V2`, `change_digest.py`).** Once
-  a day each lead, raiser and Sales owner of a live change (active accounts
+  a day each lead, raiser and Sales contact of a live change (active accounts
   that can write) gets one notice, one line per change of theirs with news
   or a problem: phase, deadline (with "at risk" / "overdue"), questions
   answered or closed since yesterday, waits (open questions, the customer),

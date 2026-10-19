@@ -5,8 +5,8 @@ import type { ChangeStatus } from '../../types/change'
  * Which role owns a change while it sits in a given stage (agreed 2026-08-12,
  * D2 2026-10-19): Project Management owns the process from capture to close,
  * so the capture is the change lead's (the project's lead PM by default;
- * Sales may start and hand it over on PM's behalf). Sales owns everything
- * quote-shaped: the offer and, at `quoted`, the customer's answer.
+ * Sales may start and hand it over on PM's behalf). Sales, the change's
+ * commercial contact, keeps everything quote-shaped: the offer and, at `quoted`, the customer's answer.
  * Assessment, costing, implementation and validation belong to the team;
  * release is PM's end responsibility. Closed states are just closed — no badge.
  */

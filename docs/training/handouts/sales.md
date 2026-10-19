@@ -2,7 +2,7 @@
 
 For Sales. One page for the session and the desk; the full chapter is in PLM2 under **Training**, "Manual", chapter 04. Address: https://apps.ad.us.ktx.group/plm2/
 
-**Your job:** you own the customer. You start the request, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.
+**Your job:** you are the customer contact; Project Management (the change lead) owns the change from capture to close. You start the request, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.
 
 ## Stage by stage
 

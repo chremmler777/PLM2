@@ -140,7 +140,7 @@ function Card({ card, changeId, status, canRequest, mayDecide, isSales, myDepart
   const [noCostFor, setNoCostFor] = useState<number | null>(null)
   const [noCost, setNoCost] = useState('')
   const told = useCardMutation(changeId, () => changesApi.scopeTold(changeId, card.id, toldRef.trim()))
-  // §6 step 1: missing info is a question to the customer (Sales owns it)
+  // §6 step 1: missing info is a question to the customer (the Sales contact asks it)
   const [askOpen, setAskOpen] = useState(false)
   const [askText, setAskText] = useState('')
   const ask = useCardMutation(changeId, () => changesApi.scopeAsk(changeId, card.id, askText.trim()),

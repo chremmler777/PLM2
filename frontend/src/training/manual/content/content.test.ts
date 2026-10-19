@@ -161,4 +161,10 @@ describe('A6-11 training matches the flow', () => {
     // negative: nobody tells Finance it is among them
     for (const x of lines) expect(x, x).not.toMatch(/(shown|visible) to [^.:]*Finance/)
   })
+
+  it('no training text says Sales owns the process or the customer (D2, R37)', () => {
+    const md = HANDOUTS.map(handoutMarkdown)
+    const bad = [...allTexts, ...md].filter((x) => /Sales owns|Sales owner|Sales is the process owner|you own the customer|you own the relationship/i.test(x))
+    expect(bad).toEqual([])
+  })
 })

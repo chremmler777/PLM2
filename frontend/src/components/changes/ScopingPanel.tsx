@@ -434,7 +434,7 @@ export default function ScopingPanel(
   const openChecks = concerns.filter((c) => c.is_open && isCheckItem(c))
   // HARD #7: a change that goes on as internal (internal now, or a customer
   // change the open meeting set to internal) waits for Quality's PPAP
-  // decision; a flipped one for the Sales owner's "notification or offer"
+  // decision; a flipped one for the Sales contact's "notification or offer"
   // answer (mirrors ppap_decision_service.applies / flip_open).
   const ppapOwed = v2 && ppapApplies(change, meetings)
   // Every hold names its owner and due ("Quality's PPAP decision (Quality, due

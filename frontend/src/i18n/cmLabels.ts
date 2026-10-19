@@ -1849,8 +1849,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments owe a progress report',
   },
   'wait.onRiskEscalation': {
-    de: 'Gefährdung gemeldet - Eskalation durch den Vertrieb offen',
-    en: 'At-risk flagged - Sales escalation pending',
+    de: 'Gefährdung gemeldet - Eskalation durch den Lead offen (zum Kunden über den Vertrieb)',
+    en: 'At-risk flagged - the lead\'s escalation pending (to the customer through Sales)',
   },
 
   // ── Stage 9: validation ───────────────────────────────────────────────────

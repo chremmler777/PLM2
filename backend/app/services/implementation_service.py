@@ -12,7 +12,7 @@ Three facts, one derived view.
   that debt becomes a my-tasks row rather than an email nobody sends.
 
   Escalations are the answer to a flagged report, and they are Sales' to make
-  because Sales owns the customer. Everything about the direction ('customer'
+  because Sales is the customer contact. Everything about the direction ('customer'
   vs 'internal') is a commercial call, not a technical one.
 
 Who implements is DERIVED: a department that put a costing position or a cost

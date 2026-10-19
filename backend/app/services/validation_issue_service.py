@@ -1236,7 +1236,7 @@ class ValidationIssueService:
             raise ChangeError(f"Unknown route '{route}': one of {', '.join(ISSUE_ROUTES)}")
         if svc.fix_rule_on():
             # §10 (RELEASE_V2): the concession has one entry point, Quality's
-            # 'Request concession' (Sales owner's ask, internal 'not for
+            # 'Request concession' (Sales contact's ask, internal 'not for
             # shipment'); a fix route back to implementation stays the
             # exception beside Quality's Fix task
             if route == "customer_concession":
@@ -2310,7 +2310,7 @@ class ValidationIssueService:
     async def request_concession(session: AsyncSession, change: ChangeRequest,
                                  iid: int, spec: dict, user: User) -> ValidationIssue:
         """Quality asks for a concession beside the fix (§10). A customer
-        change: the issue's route becomes the concession and the Sales owner
+        change: the issue's route becomes the concession and the Sales contact
         asks the customer ("Waiting for customer"); Quality decides once the
         customer's mail is filed. An internal change: the parts are "not for
         shipment" and Quality decides now, for a quantity or until a date."""

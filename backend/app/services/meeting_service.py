@@ -322,7 +322,7 @@ class MeetingService:
         from app.services import mother_plants as mp
         if not mp.is_mother_plant(change):
             change.origin = meeting.cost_carrier
-            # C10 + spec §0 [R4], as PATCH: internal = no Sales owner;
+            # C10 + spec §0 [R4], as PATCH: internal = no Sales contact;
             # customer = the project's Sales contact, led by the project PM
             await ChangeService.carrier_people(session, change, wanted, user.id)
         await session.flush()
@@ -631,7 +631,7 @@ class MeetingService:
                                    concern: ChangeConcern, user: User) -> None:
         """C8: a question from an assessment is a task newly someone's (spec
         §0, immediate, once per question): a customer or supplier question
-        goes to the Sales owner (else every Sales member, [R3]), a question
+        goes to the Sales contact (else every Sales member, [R3]), a question
         for our team to the lead (else Project Management)."""
         from app.services.notification_service import NotificationService
         dept = await session.get(Department, concern.department_id)

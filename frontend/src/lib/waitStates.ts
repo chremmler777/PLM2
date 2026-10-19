@@ -364,7 +364,7 @@ export function resolveWaitStates(
       })
     }
     // An escalation is a change-level act, so the pairing is change-level too:
-    // any at-risk department while nothing is open means Sales still owes one.
+    // any at-risk department while nothing is open means the lead still owes one (D2).
     const openEscalation = (impl.escalations ?? []).some((e) => !e.resolved_at)
     if (state.some((s) => s.at_risk_open) && !openEscalation) {
       waits.push({

@@ -117,7 +117,7 @@ class ValidationIssue(Base):
     # ECR-solid §10 (migration 139, RELEASE_V2). The Fix task: Quality
     # picks who fixes (FIX_OWNERS) and a retest date; the check's own
     # department retests. A concession runs in parallel: requested by
-    # Quality, the customer asked by the Sales owner (internal: "not for
+    # Quality, the customer asked by the Sales contact (internal: "not for
     # shipment"), decided by Quality for a quantity or until a date.
     fix_owner_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     fix_department_id: Mapped[int | None] = mapped_column(

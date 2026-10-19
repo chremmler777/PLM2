@@ -192,6 +192,9 @@ describe('ProcessMapPage', () => {
     expect(rules).toContain("the engineering approver's internal cost approval")
     const text = container.textContent ?? ''
     expect(text).not.toContain('Sales only')
+    // D2 (R37): Project Management owns the process; Sales is the contact
+    expect(text).not.toMatch(/Sales owns|Sales owner|Sales is the process owner/)
+    expect(text).toContain('Project Management owns the process')
     expect(text).not.toContain('any member records the decision')
     expect(text).not.toContain('admin via acts-as')
     expect(text).not.toContain('in build')

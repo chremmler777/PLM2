@@ -587,7 +587,7 @@ class ValidationService:
             await ValidationIssueService.on_check_answered(session, change, row, actor)
         if row.status == "failed" and old_status != "failed":
             # §10 (RELEASE_V2): a FAIL raises its issue with a Fix task for
-            # Quality, tells the Sales owner of a failed weight, and an
+            # Quality, tells the Sales contact of a failed weight, and an
             # urgent change's Management at once
             await ValidationIssueService.on_check_failed(session, change, row, actor)
         return row

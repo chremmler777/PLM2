@@ -42,7 +42,7 @@ async def _project_org_id(session: AsyncSession, project_id: int) -> Optional[in
 async def is_live_member(session: AsyncSession, user_id: Optional[int],
                          department_name: str) -> bool:
     """An active user with a real (not acting-as) membership of the named
-    department. The one test for a named owner (C10 Sales owner, a project
+    department. The one test for a named owner (C10 Sales contact, a project
     responsible): an inactive user, one who left the department, or a member
     of a retired department owns nothing, and the department's work falls back to all of its members."""
     if user_id is None:
@@ -402,7 +402,7 @@ class TeamRoles:
     async def annotate(self, row: dict, project_id: Optional[int],
                        owned: bool = False,
                        sales_owner: Optional[tuple[int, str]] = None) -> dict:
-        """sales_owner (C10): (id, name) of the change's Sales owner. On a
+        """sales_owner (C10): (id, name) of the change's Sales contact. On a
         Sales row it takes the project responsible's place: the owner sees
         it as main, the rest of Sales as backup with the owner's name."""
         dept = await self.row_department(row)

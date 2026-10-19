@@ -928,9 +928,9 @@ class RevisionIntakeService:
                          intake: RevisionIntake, part: Part, rev: PartRevision,
                          user: User, related: Optional[ChangeRequest]) -> None:
         """C9 (spec §1 full_ecr): the customer's files linked (by reference,
-        kind customer_file), the Sales owner set by create_change (the
+        kind customer_file), the Sales contact set by create_change (the
         project's Sales contact), the related live change linked both ways,
-        and the Sales owner and the lead told once: set the quote deadline,
+        and the Sales contact and the lead told once: set the quote deadline,
         schedule scoping."""
         from app.models.change import ChangeAttachment
         from app.services.change_people import department_members_of_change_org

@@ -131,7 +131,7 @@ async def lead_candidates(change_id: int,
 async def sales_owner_candidates(change_id: int,
                                  current_user: User = Depends(get_current_user),
                                  db: AsyncSession = Depends(get_db)):
-    """[{id, name, is_default, is_current}] for the Sales owner picker (C10):
+    """[{id, name, is_default, is_current}] for the Sales contact picker (C10):
     active Sales members of the change's organization."""
     change = await _change(db, change_id, current_user)
     return await EarlyStageService.sales_owner_candidates(db, change)
