@@ -2731,6 +2731,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Die Freigabe routet {d} als C: hat {n} offene(n) Prüfpunkt(e).',
     en: 'Proceed routes {d} as C: it owns {n} open check item(s).',
   },
+  'proceed.ownerUnroutable': {
+    de: '{d} wird nie geroutet ({why}), hat aber {n} offene(n) Prüfpunkt(e): zur Frage machen oder zurückziehen, dann freigeben.',
+    en: '{d} is never routed ({why}) but owns {n} open check item(s): make them questions or withdraw them, then proceed.',
+  },
+  'proceed.whyManagement': { de: 'gibt Freigaben, bucht keine Stunden', en: 'gives OKs, books no hours' },
+  'proceed.whyRetired': { de: 'stillgelegt', en: 'retired' },
   'proceed.routeAs': { de: '{d} routen: {l}', en: 'Route {d}: {l}' },
   'proceed.conditionsInfo': {
     de: 'Go mit Bedingungen: jeder Prüfpunkt geht an seinen Fachbereich, fällig mit dessen Bewertung.',

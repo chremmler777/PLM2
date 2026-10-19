@@ -896,6 +896,36 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(screen.getByTestId('proceed-route-4-R')).toBeTruthy()
   })
 
+  it('A2-03: a check item owned by Management holds proceed with the way out, no Route button', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({
+      cost_carrier: 'customer', selected_department_ids: [2], department_rasic: { '2': 'R' } })] as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 44, change_id: 7, kind: 'needs_info', flag_type: 'check', check_what: 'other',
+        note: 'Budget OK?', raised_by: 9, raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z',
+        is_open: true, department_id: 9, owner_department_names: ['Management'] },
+      { id: 43, change_id: 7, kind: 'needs_info', flag_type: 'check', check_what: 'tool',
+        note: 'Slider wear', raised_by: 9, raised_by_name: 'Ann', raised_at: '2026-07-04T09:00:00Z',
+        is_open: true, department_id: 4, owner_department_names: ['Tool Engineer'] },
+    ] as never)
+    const before = deptState.current
+    deptState.current = [
+      { id: 2, name: 'Quality', is_active: true }, { id: 4, name: 'Tool Engineer', is_active: true },
+      { id: 9, name: 'Management', is_active: true }]
+    try {
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true, scoping_v2: true })} />))
+    fireEvent.click(await screen.findByTestId('meeting-proceed-21'))
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(true)
+    const dialog = screen.getByTestId('confirm-in_assessment').textContent ?? ''
+    expect(dialog).toContain(t('proceed.ownerUnroutable').replace('{d}', 'Management')
+      .replace('{why}', t('proceed.whyManagement')).replace('{n}', '1'))
+    expect(dialog).not.toContain(t('proceed.routesC').replace('{d}', 'Management').replace('{n}', '1'))
+    expect(screen.queryByTestId('proceed-route-9-R')).toBeNull()
+    // NEGATIVE: the routable owner keeps its Route buttons
+    expect(screen.getByTestId('proceed-route-4-R')).toBeTruthy()
+    } finally { deptState.current = before }
+  })
+
   it('A2-07: a rejected change shows the open flip without an answer control', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     render(wrap(<ScopingPanel canAnswerConcerns change={change({

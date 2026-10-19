@@ -708,9 +708,53 @@ class MeetingService:
                 raise ChangeError(
                     "A check item needs the department that checks it "
                     "('Raised for')")
+            await MeetingService.refuse_unroutable_check_owner(
+                session, [department_id])
             return flag_type, check_what, part_id, None, None
         return (flag_type, check_what, part_id,
                 *MeetingService._question_fields(answer_from, scope_effect))
+
+    @staticmethod
+    def _unroutable_reason(dept: Department) -> Optional[str]:
+        """Why a department can own no check item: proceed routes an
+        unrouted owner as C (A2-03), and Management (OKs only, no hours) or
+        a retired department takes no task letter. None: it can."""
+        from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+        if dept.name in NON_ROUTABLE_DEPARTMENTS:
+            return f"{dept.name} gives OKs and books no hours, so it is never routed"
+        if not dept.is_active:
+            return f"{dept.name} is retired, so it cannot be routed"
+        return None
+
+    @staticmethod
+    async def refuse_unroutable_check_owner(session: AsyncSession,
+                                            dept_ids: list) -> None:
+        """One rule everywhere (A2-03, R24): a check item is owned only by a
+        department proceed can route. Refused at the raise, at 'same as'
+        and at 'make it a check item', so proceed never meets it."""
+        for d in dept_ids:
+            dept = await session.get(Department, d) if d is not None else None
+            why = MeetingService._unroutable_reason(dept) if dept else None
+            if why:
+                raise ChangeError(
+                    f"{why}: a check item needs a department that checks it. "
+                    "Raise it for that department, or make it a question")
+
+    @staticmethod
+    async def unroutable_check_owner_refusals(
+            session: AsyncSession, auto_c: dict[int, list[int]]) -> list[str]:
+        """Proceed's words for an open check item whose owner can take no
+        task (an item from before the rule, or its department retired
+        since): no override lifts it, the item is moved first."""
+        out = []
+        for d, ids in sorted(auto_c.items()):
+            dept = await session.get(Department, d)
+            why = MeetingService._unroutable_reason(dept) if dept else None
+            if why:
+                items = ", ".join(f"#{i}" for i in ids)
+                out.append(f"{why}: its check item(s) {items} have no owner. "
+                           "Make them questions or withdraw them")
+        return out
 
     @staticmethod
     def _question_fields(answer_from: Optional[str],
@@ -796,8 +840,11 @@ class MeetingService:
         elif concern.department_id is None:
             raise ChangeError(
                 "A check item needs the department that checks it ('Raised for')")
-        elif concern.check_what is None:
-            concern.check_what = "other"
+        else:
+            await MeetingService.refuse_unroutable_check_owner(
+                session, concern.owner_department_ids)
+            if concern.check_what is None:
+                concern.check_what = "other"
         concern.flag_type = flag_type
         await session.flush()
         if before != flag_type:
@@ -853,6 +900,9 @@ class MeetingService:
             dept = await session.get(Department, department_id)
             if dept is None or not dept.is_active:
                 raise ChangeError(f"Unknown or inactive department {department_id}")
+            if concern.is_check:
+                await MeetingService.refuse_unroutable_check_owner(
+                    session, [department_id])
             if department_id not in concern.owner_department_ids:
                 concern.co_department_ids = [
                     *(concern.co_department_ids or []), department_id]
@@ -2123,9 +2173,8 @@ class MeetingService:
             # (Management, retired) is named like any unroutable letter
             auto_c = MeetingService.unrouted_check_owners(change, meeting)
             if auto_c:
-                from app.services.change_routing_service import ChangeRoutingService
-                problems += await ChangeRoutingService.unroutable_refusals(
-                    session, {d: "C" for d in auto_c})
+                problems += await MeetingService.unroutable_check_owner_refusals(
+                    session, auto_c)
             # HARD #2: proceeding over an unanswered objection is the failure
             # this exists to stop (C33: check items go along as conditions);
             # HARD #7 the PPAP decision and the flip's Sales answer; HARD #1

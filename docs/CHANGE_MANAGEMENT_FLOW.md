@@ -269,8 +269,16 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   "Proceed routes <dept> as C" and offers *Route <dept>: C / R*; proceed
   routes it as C (the spec's preselected pick; changelog
   `unrouted_checks_routed`), so no item leaves without an owner, due and task
-  (R18). Management or a retired department takes no letter and is refused
-  as any unroutable letter (R25). The checklist lists it as the lead's to-do
+  (R18). Management (OKs only, no hours) or a retired department takes no
+  letter (R25), so it owns no check item: the quick add offers only routable
+  departments for a check item (a question may still be asked of
+  Management), and the raise, *same as* and *Make it a check item* refuse it
+  ("... is never routed: a check item needs a department that checks it").
+  An item from before that rule, or whose department retired since, holds
+  proceed with no override: the dialog names it ("<dept> is never routed
+  ... make them questions or withdraw them, then proceed") with confirm
+  disabled and no *Route* button, the backend the same with the item ids.
+  The checklist lists it as the lead's to-do
   (`unrouted_checks`, kind `todo`); the PM's row holds nothing for it. The button reads *"Proceed: 12 check items go to
   departments"*. **Go with conditions**: the meeting stores the open check
   items (`change_meetings.go_conditions`) and the changelog says how many.

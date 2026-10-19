@@ -104,6 +104,31 @@ describe('ScopingFlags quick add', () => {
     await waitFor(() => expect(changesApi.joinConcern).toHaveBeenCalledWith(7, 14, { department_id: 3 }))
   })
 
+  it('A2-03: a check item is raised only for a routable department; a question may name Management', () => {
+    render(wrap(
+      <ScopingFlags changeId={7} concerns={[]} impactedItems={[]}
+        departments={[...DEPTS, { id: 9, name: 'Management', is_active: true },
+          { id: 8, name: 'Old Lab', is_active: false }]}
+        myDepartmentIds={[3]} changeDepartmentIds={[3]} editable onChanged={() => {}} />))
+    const ids = () => [...(screen.getByTestId('quick-add-dept') as HTMLSelectElement).options].map((o) => o.value)
+    expect(ids()).not.toContain('9')
+    expect(ids()).not.toContain('8')
+    fireEvent.click(screen.getByTestId('quick-add-question'))
+    expect(ids()).toContain('9')
+    expect(ids()).not.toContain('8')
+  })
+
+  it('A2-03: a Management member is not offered same as on a check item', () => {
+    render(wrap(
+      <ScopingFlags changeId={7} concerns={[concern({ id: 12, department_id: 4, owner_department_names: ['Tool Engineer'] })]}
+        impactedItems={[]} departments={[...DEPTS, { id: 9, name: 'Management', is_active: true }]}
+        myDepartmentIds={[9]} changeDepartmentIds={[4]} editable onChanged={() => {}} />))
+    fireEvent.click(screen.getByTestId('quick-add-question'))
+    fireEvent.change(screen.getByTestId('quick-add-dept'), { target: { value: '9' } })
+    fireEvent.change(screen.getByTestId('quick-add-what'), { target: { value: 'drawing' } })
+    expect(screen.queryByTestId('quick-add-same-12')).toBeNull()
+  })
+
   it('does not offer same as for a department that is not mine', () => {
     render(flags([concern({ id: 12, department_id: 4, owner_department_names: ['Tool Engineer'] })]))
     fireEvent.change(screen.getByTestId('quick-add-dept'), { target: { value: '6' } })

@@ -3,7 +3,7 @@
  * can be shared and tested on their own.
  */
 import { t } from '../i18n/cmLabels'
-import { preferredDepartmentId } from './departments'
+import { isRoutable, preferredDepartmentId } from './departments'
 import type { Contact } from '../api/contacts'
 import { isCheckItem, type ChangeConcern, type ChangeMeeting, type ChangeRequest, type CostCarrier } from '../types/change'
 
@@ -165,7 +165,10 @@ export function openFlagLines(
  * Spec §3 "Not routed" (mirror of MeetingService.unrouted_check_owners):
  * owner departments of open check items that the meeting does not route
  * with a task letter (I = told only, owns nothing), with how many items
- * each owns. Proceed waits until each is routed or its items reassigned.
+ * each owns. SOFT since A2-03: proceed routes each as C. An owner that
+ * takes no task letter (Management, retired: an item from before the rule,
+ * which the raise now refuses) is split out by splitUnroutedOwners: proceed
+ * refuses until its items are made questions or withdrawn.
  */
 export function unroutedCheckOwners(
   meeting: Pick<ChangeMeeting, 'department_rasic' | 'selected_department_ids'>,
@@ -182,4 +185,33 @@ export function unroutedCheckOwners(
     }
   }
   return out
+}
+
+/**
+ * The backend's proceed outcome for each unrouted check-item owner
+ * (MeetingService.unroutable_check_owner_refusals): a routable one is routed
+ * C, Management or a retired department holds proceed (no override).
+ */
+export function splitUnroutedOwners(
+  unrouted: Map<number, number>,
+  departments: { id: number; name: string; is_active?: boolean | null }[],
+): { routesC: [number, number][]; blocked: [number, number][] } {
+  const routesC: [number, number][] = []
+  const blocked: [number, number][] = []
+  for (const [id, n] of unrouted.entries()) {
+    const d = departments.find((x) => x.id === id)
+    ;(d && !isRoutable(d) ? blocked : routesC).push([id, n])
+  }
+  return { routesC, blocked }
+}
+
+/** The line naming a blocked owner (splitUnroutedOwners().blocked). */
+export function ownerUnroutableLine(
+  id: number, n: number,
+  departments: { id: number; name: string; is_active?: boolean | null }[],
+): string {
+  const d = departments.find((x) => x.id === id)
+  const why = d?.is_active === false ? t('proceed.whyRetired') : t('proceed.whyManagement')
+  return t('proceed.ownerUnroutable').replace('{d}', d?.name ?? `#${id}`)
+    .replace('{why}', why).replace('{n}', String(n))
 }

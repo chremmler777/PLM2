@@ -20,7 +20,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import AnswerForm from './AnswerForm'
 import { CheckRow } from './ScopingFlags'
-import { unroutedCheckOwners } from '../../../lib/scopingRules'
+import { splitUnroutedOwners, unroutedCheckOwners } from '../../../lib/scopingRules'
 import {
   isCheckItem, type Attachment, type ChangeConcern, type ChangeMeeting, type RasicLetter,
 } from '../../../types/change'
@@ -35,7 +35,7 @@ export default function ProceedFixList({
   meeting: ChangeMeeting
   concerns: ChangeConcern[]
   attachments: Attachment[]
-  departments: { id: number; name: string }[]
+  departments: { id: number; name: string; is_active?: boolean | null }[]
   confirmerName?: string | null
   onChanged: () => void
 }) {
@@ -43,8 +43,11 @@ export default function ProceedFixList({
   const open = concerns.filter((c) => c.is_open && c.kind !== 'risk')
   const questions = open.filter((c) => !isCheckItem(c)).sort((a, b) => a.id - b.id)
   const checks = open.filter(isCheckItem).sort((a, b) => a.id - b.id)
-  // Owners of check items the meeting has not routed (proceed waits)
-  const unrouted = unroutedCheckOwners(meeting, concerns)
+  // Owners of check items the meeting has not routed: proceed routes a
+  // routable one as C (A2-03); Management or a retired one takes no letter
+  // (no Route button: the dialog names it as what holds proceed)
+  const { routesC: unrouted } = splitUnroutedOwners(
+    unroutedCheckOwners(meeting, concerns), departments)
   const nameOf = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
 
   // Check items by owner (the raised-for department), largest group first
@@ -126,7 +129,7 @@ export default function ProceedFixList({
         </section>
       )}
 
-      {[...unrouted.entries()].map(([id, n]) => {
+      {unrouted.map(([id, n]) => {
         const name = nameOf(id)
         const letters: RasicLetter[] = CONSULTED_FIRST.includes(name) ? ['C', 'R'] : ['R', 'C']
         return (

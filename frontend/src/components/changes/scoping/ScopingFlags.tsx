@@ -25,6 +25,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import { formatDate } from '../../../lib/format'
 import { defaultFlagDepartment } from '../../../lib/scopingRules'
+import { isRoutable } from '../../../lib/departments'
 import { getActsAsDepartmentId } from '../../../lib/actsAs'
 import { useAuth } from '../../../contexts/AuthContext'
 import {
@@ -86,17 +87,20 @@ export default function ScopingFlags({
   editable: boolean
   onChanged: () => void
 }) {
-  const options = departments.filter((d) => d.is_active !== false)
   const [note, setNote] = useState('')
   const [deptPicked, setDeptPicked] = useState<number | undefined>(undefined)
+  const [asQuestion, setAsQuestion] = useState(false)
+  // A2-03: proceed routes a check item's owner as C, so a check item is
+  // raised only for a department that can be routed (not Management, not
+  // retired); a question may be asked of any active department.
+  const options = departments.filter((d) => (asQuestion ? d.is_active !== false : isRoutable(d)))
   const remembered = lastDept()
-  const deptId = deptPicked
+  const deptId = (deptPicked != null && options.some((d) => d.id === deptPicked) ? deptPicked : undefined)
     ?? (remembered != null && options.some((d) => d.id === remembered) ? remembered : undefined)
     ?? defaultFlagDepartment(myDepartmentIds, options, changeDepartmentIds)
     ?? changeDepartmentIds.find((id) => options.some((d) => d.id === id))
   const [what, setWhat] = useState<CheckWhat | ''>('')
   const [partId, setPartId] = useState<number | ''>('')
-  const [asQuestion, setAsQuestion] = useState(false)
   const [from, setFrom] = useState<AnswerFrom | ''>('')
   const [effect, setEffect] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
@@ -137,6 +141,11 @@ export default function ScopingFlags({
   // 'same as' is a department act: members only (an admin acts as the
   // department), as the backend's join_flag
   const mayCoOwn = deptId != null && myDepartmentIds.includes(deptId)
+  // ...and a check item is co-owned only by a department that can be routed
+  const deptRoutable = (id?: number) => {
+    const d = departments.find((x) => x.id === id)
+    return !!d && isRoutable(d)
+  }
 
   const missing = [
     ...(note.trim() ? [] : [t('flag.missingNote')]),
@@ -219,7 +228,8 @@ export default function ScopingFlags({
                 <div key={c.id} className="flex flex-wrap items-center gap-2">
                   <span className="text-slate-300">#{c.id} {c.note.split('\n')[0]}</span>
                   <span className="text-slate-500">({(c.owner_department_names ?? []).join(', ')})</span>
-                  {mayCoOwn && !(c.owner_department_names ?? []).includes(deptName(deptId)) && (
+                  {mayCoOwn && (!isCheckItem(c) || deptRoutable(deptId))
+                    && !(c.owner_department_names ?? []).includes(deptName(deptId)) && (
                     <button type="button" className="text-sky-300 hover:text-sky-200"
                       data-testid={`quick-add-same-${c.id}`} disabled={join.isPending}
                       onClick={() => join.mutate({ id: c.id, sameAs: true, addTo: !!c.can_add_to })}>
