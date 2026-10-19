@@ -287,7 +287,11 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   and is due with that department's assessment (`owner_due` on the concern
   list). The department cannot submit its assessment while one of its own
   check items is open (HARD #10, the existing department hold, now also for
-  co-owners). See "Check items first and questions in the assessment"
+  co-owners). It is the department's own work, not a wait on anyone: the
+  change serves it as `check_department_ids` (owner and co-owners), never in
+  `blocked_department_ids`, so the bucket reads *Waiting* / *In work* with
+  *Check items first* (a C row that owns one is not *Optional*), and *On hold*
+  stays for a question or legacy hold (R37 polish, 2026-10-19). See "Check items first and questions in the assessment"
   below for how it is closed (`ASSESSMENT_V2`; switch off: a member closes it
   with a resolution note).
 - **C13, "Not yet"** (the meeting's `needs_info`, button *Not yet* in the UI):

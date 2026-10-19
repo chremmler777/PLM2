@@ -562,3 +562,38 @@ async def test_only_the_author_may_withdraw_even_without_meeting_rights(
     res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
                               headers=member["auth"])
     assert res.status_code == 200, res.text
+
+
+async def test_an_own_check_item_is_no_hold_on_the_change(
+        client, admin_auth, seed, session_factory):
+    """R37 polish: a check item is the department's own work, not a wait on
+    someone else. It is served as check_department_ids (owner and "same as"
+    co-owners), never as a hold, so the bucket says In work / Waiting with
+    "check items first", not On hold. A question still holds (negative)."""
+    from datetime import datetime
+    from app.models.change import ChangeConcern
+    cid, dept_ids = await _change_in_assessment(
+        client, admin_auth, seed, session_factory, "R37c")
+    owner = dept_ids[0]
+    co = await _a_department(session_factory, name="R37 co-owner")
+    asker = await _a_department(session_factory, name="R37 asker")
+    async with session_factory() as s:
+        s.add(ChangeConcern(change_id=cid, kind="needs_info", flag_type="check",
+                            note="Check the gate position", raised_by=seed["admin_id"],
+                            department_id=owner, co_department_ids=[co]))
+        s.add(ChangeConcern(change_id=cid, kind="needs_info", flag_type="check",
+                            note="Closed already", raised_by=seed["admin_id"],
+                            department_id=asker,
+                            withdrawn_at=datetime.utcnow(), resolution_note="done"))
+        await s.commit()
+    got = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert got["blocked_department_ids"] == []
+    assert got["check_department_ids"] == sorted([owner, co])
+
+    # negative: a question the department asked is a real hold
+    await insert_legacy_concern(session_factory, cid, kind="needs_info",
+                                note="Which wall thickness?", raised_by=seed["admin_id"],
+                                department_id=asker)
+    got = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert got["blocked_department_ids"] == [asker]
+    assert got["check_department_ids"] == sorted([owner, co])

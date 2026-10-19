@@ -245,6 +245,8 @@ export interface ChangeRequest {
   open_supplier_waits?: SupplierWait[];
   /** Departments with an open assessment concern — their submit is blocked. */
   blocked_department_ids?: number[];
+  /** Departments with an open check item of their own (not a hold, R37). */
+  check_department_ids?: number[];
   quoted_at: string | null;
   quoted_on_time: boolean | null;
   active_deadline: 'quote' | 'release' | null;

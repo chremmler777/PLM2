@@ -232,6 +232,24 @@ describe('AssessmentBuckets', () => {
     expect((await screen.findByTestId('bucket-toggle-2')).textContent).toContain(formatDate(due))
   })
 
+  it('an own check item is no hold: Waiting with "check items first" (R37)', async () => {
+    buckets({ canSeeAll: true, change: change({ check_department_ids: [2] }) })
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.waiting'))
+    expect(screen.getByTestId('bucket-checks-2').textContent).toBe(t('bucket.checksFirst'))
+    cleanup()
+    // a consulted department that owns check items is not "Optional" either
+    buckets({ canSeeAll: true, change: change({ check_department_ids: [2], assessments: [
+      assessment({ id: 1, department_id: 2, rasic_letter: 'C', status: 'active', verdict: 'pending' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.waiting'))
+  })
+
+  it('negative: a real hold still reads On hold and shows no check chip', async () => {
+    buckets({ canSeeAll: true, change: change({ blocked_department_ids: [2] }) })
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('concern.onHold'))
+    expect(screen.queryByTestId('bucket-checks-2')).toBeNull()
+  })
+
   it('says a department is on hold when a concern blocks it', async () => {
     buckets({ canSeeAll: true, change: change({ blocked_department_ids: [2] }) })
     expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('concern.onHold'))

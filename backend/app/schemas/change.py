@@ -414,6 +414,8 @@ class ChangeResponse(BaseModel):
     active_deadline: Optional[str] = None  # quote | release | None
     # Departments soft-held by an open assessment concern (badge source).
     blocked_department_ids: List[int] = []
+    # Departments with an open check item of their own (not a hold, R37).
+    check_department_ids: List[int] = []
     # Departments that owe a cost input and have not finalized it yet.
     # Populated while the change is in assessment or costing (per-department
     # pipeline, early_costing).
@@ -566,6 +568,7 @@ class ChangeResponse(BaseModel):
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
             row["blocked_department_ids"] = data.blocked_department_ids
+            row["check_department_ids"] = data.check_department_ids
             row["negotiated_final_price"] = data.negotiated_final_price
             row["scrap_price_set"] = data.scrap_quote_price is not None
             row["info_sent_at"] = getattr(data, "info_sent_at", None)

@@ -543,9 +543,23 @@ class ChangeRequest(Base):
         this is free."""
         if self.status != "in_assessment":
             return []
+        # A check item (C33) is the department's own work, not a wait on
+        # someone else: it holds the submit all the same (HARD #10), but it
+        # is served as check_department_ids so nobody reads "On hold" (R37).
         return sorted({c.department_id for c in self.concerns
                        if c.department_id is not None and c.is_open
-                       and c.kind != "risk"})
+                       and c.kind != "risk" and not c.is_check})
+
+    @property
+    def check_department_ids(self) -> list[int]:
+        """Departments (owner and "same as" co-owners) that still have an open
+        check item of their own to close in assessment. Not a hold: the
+        bucket shows its normal state with "check items first"."""
+        if self.status != "in_assessment":
+            return []
+        return sorted({d for c in self.concerns
+                       if c.is_open and c.is_check
+                       for d in c.owner_department_ids})
 
     @property
     def quoted_on_time(self) -> bool | None:

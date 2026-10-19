@@ -128,6 +128,18 @@ describe('resolveWaitStates', () => {
     }
   })
 
+  it('an own check item is named once as info, never as "open concerns" (R37)', () => {
+    const check = concern({ id: 9, flag_type: 'check', department_id: 4,
+      owner_department_names: ['Tool Engineer'], note: 'gate position' })
+    const waits = resolveWaitStates(
+      change({ status: 'in_assessment', check_department_ids: [4] }), [check], deptName)
+    expect(waits.map((w) => w.key)).toEqual(['check-9'])
+    expect(waits[0].info).toBe(true)
+    // negative: the served ids alone add no hold line
+    expect(resolveWaitStates(
+      change({ status: 'in_assessment', check_department_ids: [4] }), [], deptName)).toEqual([])
+  })
+
   it('names the departments an open concern is holding, in assessment', () => {
     const waits = resolveWaitStates(
       change({ status: 'in_assessment', blocked_department_ids: [2, 4] }), [], deptName)

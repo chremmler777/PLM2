@@ -293,6 +293,8 @@ export default function AssessmentBuckets({
       // over from an earlier routing version. Later stages are not "stale".
       stale: Math.max(0, mine.filter((x) => x.stage_order === (a?.stage_order ?? assessStage)).length - 1),
       onHold: change.blocked_department_ids?.includes(id) ?? false,
+      // R37: its own open check items are its work, not a hold
+      checks: change.check_department_ids?.includes(id) ?? false,
       declined: (declinedIds ?? change.stage_state?.declined_pending_department_ids ?? []).includes(id),
       // A pending deviation asks to take this row off; it is still owed until then.
       pendingRemoval: r?.pendingRemoval ?? false,
@@ -357,7 +359,9 @@ export default function AssessmentBuckets({
         const a = row.assessment
         const owed = owedIds.has(row.id) && (row.rasic === 'R' || row.rasic === 'A')
         // A department the gate waits on is never "Optional", whatever its letter.
+        // ... nor one that still owns open check items: they are its task.
         const assesses = owedIds.has(row.id) || row.rasic == null || row.rasic === 'R' || row.rasic === 'A'
+          || row.checks
         const state = stateOf(a, row.onHold, row.declined, owed, assesses)
         const isMine = myDepartmentIds.includes(row.id)
         // Another department's answers are theirs; ordinary members see the
@@ -403,6 +407,12 @@ export default function AssessmentBuckets({
                 className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
                 {stateLabel(state)}
               </span>
+              {row.checks && (state === 'waiting' || state === 'in_work') && (
+                <span data-testid={`bucket-checks-${row.id}`} title={t('bucket.checksFirstHint')}
+                  className="rounded border border-sky-800 text-sky-200 px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0">
+                  {t('bucket.checksFirst')}
+                </span>
+              )}
               {row.pendingRemoval && <PendingRemovalChip testId={`bucket-removal-${row.id}`} />}
               {sentBack && !a?.submitted_at && (
                 <span data-testid={`bucket-sent-back-chip-${row.id}`}

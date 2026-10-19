@@ -1069,6 +1069,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'bucket.continueCosting': { de: 'Weiter zur Kalkulation', en: 'Continue to costing' },
   'bucket.waiting': { de: 'Wartet', en: 'Waiting' },
   'bucket.inWork': { de: 'In Arbeit', en: 'In work' },
+  'bucket.checksFirst': { de: 'Erst Prüfpunkte', en: 'Check items first' },
+  'bucket.checksFirstHint': {
+    de: 'Eigene offene Prüfpunkte: erst schließen, dann absenden (kein Warten auf andere)',
+    en: 'Own open check items: close them, then submit (not waiting on anyone else)',
+  },
   'bucket.submitted': { de: 'Eingereicht', en: 'Submitted' },
   'bucket.waived': { de: 'Entfällt', en: 'Waived' },
   'bucket.objects': { de: 'Zu bewerten', en: 'To assess' },
@@ -1234,7 +1239,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Ein angehängtes Antwortdokument zählt ebenfalls als Beleg.',
     en: 'An attached response document counts as substance too.',
   },
-  'concern.onHold': { de: 'Wartet', en: 'On hold' },
+  'concern.onHold': { de: 'Wartet auf Klärung', en: 'On hold' },
   // Adding a department after the routing was built (routing deviation).
   'routingDev.add': { de: 'Abteilung hinzufügen', en: 'Add department' },
   'routingDev.addTitle': {
