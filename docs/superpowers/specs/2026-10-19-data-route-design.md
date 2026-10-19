@@ -158,6 +158,29 @@ Documents tab. There's one place to act.
 - The 1994 data on prod is the acceptance check: every part's tree reads correctly,
   with direction markers, before and after the backfill.
 
+## Tracking: who sent it, who received it, who pulled it (added 2026-10-19)
+
+Christoph: "in the future track from who and when, also needs an input mask since people actually have to do that".
+
+**Input mask, required in both dialogs.** People fill it in; nothing is guessed silently.
+
+| Field | ⬇ Data from Brose | ⬆ Data to Brose |
+|---|---|---|
+| From / to (person) | sender at Brose (e.g. Philip Paluch) | recipient (e.g. Philip Paluch, FZ Tools) |
+| Channel | GlobalX / OpenDXM / mail / other | GlobalX / mail / other |
+| Date + time | received (prefilled now, editable) | sent |
+| Customer doc no. | optional (e.g. P007193 / D605064-A) | – |
+| Requested by | – | optional (e.g. Dale) |
+| Filed by | automatic (logged-in user) | automatic |
+
+- The fields are stored per version in a new `revision_transfers` record: direction, counterpart, channel, at, doc_no, requested_by, filed_by. The tree tooltip and the part history show them.
+- The person list is remembered per project, so "Philip Paluch" is picked from a list next time.
+- **Sharing official data onward** (e.g. E2 · 002 to FZ) uses the same mask through a third, small action on a folder: "⬆ Share with toolmaker / supplier". It records recipient, channel and time. This is not a new version; it's a transfer record on the existing one.
+
+**Download log.** Every pull of a part file is logged: who, when, which file, how (download / 3D viewer / PDF view), and from which IP. This follows the DFM archive's `file_downloaded` / `file_viewed` pattern. The three file endpoints (`/download`, `/viewer`, `/inline`) **require a login**; today they don't.
+
+Where a file goes after the download can't be seen by the server. It is captured by "Data to Brose" / "Share with toolmaker".
+
 ## Out of scope
 
 - Role-based rights for who may Confirm (later, with role-based mail).

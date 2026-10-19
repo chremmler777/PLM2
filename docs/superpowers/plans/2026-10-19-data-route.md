@@ -1689,6 +1689,24 @@ If `scripts` is not importable from tests, add `sys.path` handling the way exist
 
 ---
 
+---
+
+### Task 12 (added 2026-10-19): Transfer records, input mask, share action, download log
+
+Spec section "Tracking". This task is planned in detail **after Tasks 0–11 are reviewed**, as its own plan (`docs/superpowers/plans/2026-10-xx-transfer-tracking.md`), because it adds:
+- a table (`revision_transfers`) and a second migration, to be numbered with the ECR session as in Task 0
+- changes to both dialogs from Tasks 7–8
+- auth changes to three file endpoints, which may affect the 3D viewer iframe and drawing popups
+
+Scope to plan:
+- the `revision_transfers` model, service and API
+- the required mask fields in DataFromBroseDialog and DataToBroseDialog
+- a remembered counterpart list per project
+- the "Share with toolmaker / supplier" action on folders
+- the `file_access_events` log
+- `get_current_user` on `/download`, `/viewer`, `/inline`, with frontend checks that viewer and popup still load with the session cookie
+- the history display
+
 ## Self-Review Notes
 
 - Spec coverage:
