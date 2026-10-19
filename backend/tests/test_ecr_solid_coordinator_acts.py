@@ -1,6 +1,6 @@
 """R18/R25/R37: the coordinator of a department with no member here (A5) is
 a lead who can act (A1-05: active, not an admin account, with an active PLM
-department), else Project Management; and with Quality unstaffed the limits
+department), else Project Management; and with APQP unstaffed (D5) the limits
 of a check are confirmed by the lead or a Project Management member, never
 by whoever set them (A5-02), so a PASS can always count."""
 import pytest
@@ -90,12 +90,12 @@ async def test_lead_with_only_retired_departments_does_not_coordinate(
         assert (await coordinator(s, c))[0] == fix["user"]["Development"]["id"]
 
 
-# --- limits with Quality unstaffed ----------------------------------------
+# --- limits with APQP unstaffed (D5) ----------------------------------------
 
 async def test_viewer_lead_and_no_quality_pm_confirms_the_limits(
         client, fix, session_factory):
     viewer, _ = await _user(session_factory, fix, "viewlead2", role="viewer")
-    await _memberless(session_factory, fix, "Quality", lead="Development")
+    await _memberless(session_factory, fix, "APQP", lead="Development")
     await _set_lead(session_factory, fix, viewer)
     tool = await _auth(client, fix, "Tool Engineer")
     await _measure(client, fix, tool)
@@ -108,10 +108,10 @@ async def test_viewer_lead_and_no_quality_pm_confirms_the_limits(
 
 
 async def test_no_quality_the_lead_measures_pm_confirms(client, fix, session_factory):
-    """A5-02 with Quality unstaffed: the lead measured for a member-less
+    """A5-02 with APQP unstaffed: the lead measured for a member-less
     department; the lead is refused (own limits) and told who confirms; a
     Project Management member confirms and the PASS counts."""
-    await _memberless(session_factory, fix, "Quality", "Tool Engineer", lead="Development")
+    await _memberless(session_factory, fix, "APQP", "Tool Engineer", lead="Development")
     dev = await _auth(client, fix, "Development")
     await _measure(client, fix, dev)
     _, chk = await _weight_row(client, fix, dev)
@@ -135,9 +135,9 @@ async def test_no_quality_the_lead_measures_pm_confirms(client, fix, session_fac
 
 async def test_no_quality_a_staffed_department_member_still_cannot_confirm(
         client, fix, session_factory):
-    """NEGATIVE: with Quality unstaffed, a member of another department is
+    """NEGATIVE: with APQP unstaffed, a member of another department is
     no confirmer (only the lead or Project Management)."""
-    await _memberless(session_factory, fix, "Quality", lead="Project Manager")
+    await _memberless(session_factory, fix, "APQP", lead="Project Manager")
     tool = await _auth(client, fix, "Tool Engineer")
     await _measure(client, fix, tool)
     proc = await _who(client, fix, "Process Engineer")
@@ -148,11 +148,11 @@ async def test_no_quality_a_staffed_department_member_still_cannot_confirm(
     assert "Project Manager" in res.json()["detail"]
 
 
-async def test_retired_quality_counts_as_unstaffed(client, fix, session_factory):
-    """A retired Quality department grants nothing: the lead or Project
+async def test_retired_apqp_counts_as_unstaffed(client, fix, session_factory):
+    """A retired APQP department grants nothing: the lead or Project
     Management confirm, its former member does not."""
     async with session_factory() as s:
-        (await s.get(Department, fix["dept"]["Quality"])).is_active = False
+        (await s.get(Department, fix["dept"]["APQP"])).is_active = False
         (await s.get(ChangeRequest, fix["change_id"])).lead_id = \
             fix["user"]["Development"]["id"]
         await s.commit()

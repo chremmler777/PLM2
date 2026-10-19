@@ -5160,11 +5160,13 @@ class ChangeService:
                         out.append(row)
         if validating and cm_switches.on("RELEASE_V2") \
                 and user.effective_role != "admin":
-            # A5-02: a PASS against the measurer's own limits waits on
-            # Quality's confirm (no Quality member here: the lead, else PM)
+            # A5-02 / D5: a PASS against the measurer's own limits waits on
+            # APQP's confirm (no other APQP member here: the lead, then PM)
             from app.models.change_validation import ValidationCheck
             from app.services import validation_checklist as catalog
-            from app.services.validation_service import ValidationService
+            from app.services.validation_service import (
+                LIMITS_CONFIRMER_DEPARTMENT, ValidationService,
+            )
             from app.services.change_people import coordinator_name, no_member_words
             pend = (await db.execute(select(ValidationCheck).where(
                 ValidationCheck.change_id.in_([c.id for c in validating]),
@@ -5193,7 +5195,8 @@ class ChangeService:
                                 f"({dept}): {float(r.lower_limit):g}-{float(r.upper_limit):g}"
                                 f" set by {setters.get(r.limits_set_by) or 'the measurer'}"
                                 + ("" if staffed else "; " + no_member_words(
-                                    "Quality", await coordinator_name(db, c)))),
+                                    LIMITS_CONFIRMER_DEPARTMENT,
+                                    await coordinator_name(db, c)))),
                             "since": r.checked_at})
 
         out += await ChangeService.advance_tasks(db, user, open_changes, base,

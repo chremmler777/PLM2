@@ -1566,7 +1566,7 @@ export interface ValidationCheck {
   spec_source?: string | null;
   measurements?: ValidationMeasurement[];
   /** A5-02: who set the limits, who confirmed them; a PASS against
-   *  limits only their setter stated counts once Quality confirms. */
+   *  limits only their setter stated counts once APQP confirms (D5). */
   check_id?: number | null;
   limits_set_by_name?: string | null;
   limits_confirmed_by_name?: string | null;

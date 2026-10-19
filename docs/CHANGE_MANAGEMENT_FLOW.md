@@ -1721,15 +1721,18 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   ignored. **Who sets the limits (A5-02, migration 144, `RELEASE_V2`):** the
   department being judged does not set its own pass criterion alone. The
   limits store their setter ("limits set by <measurer>"); a FAIL counts at
-  once, a PASS counts only once a Quality member (never the setter, never
-  a real admin alone; no Quality member here, or Quality retired: the lead
-  who can act or a Project Management member, never the setter, so a lead
-  who measured for a member-less department is not left alone with it; a
+  once, a PASS counts only once an **APQP** member (DECIDED BY CHRISTOPH
+  2026-10-19, D5: APQP, not Quality; `validation_service.
+  LIMITS_CONFIRMER_DEPARTMENT`; never the setter, never a real admin alone;
+  no APQP member here other than the setter, or APQP retired: the lead who
+  can act, then a Project Management member, never the setter, so a lead
+  or the only APQP member who measured is not left alone with it; a
   refusal names who can confirm) clicks
   "Confirm limits" or corrects them with a source reference (the latest
   measurement is judged again against the corrected limits). Until then the
-  release reads "still open: <check> (limits set by X: Quality confirms)",
-  a linked issue stays open, and Quality has a "Needs you" row. In-flight
+  release reads "still open: <check> (limits set by X: APQP confirms)",
+  a linked issue stays open, and APQP has a "Needs you" row. Quality no
+  longer confirms limits (it keeps the Fix task and the concession). In-flight
   limits got their setter from the first measurement and wait on the same
   click. Cut 2: the §4 spec capture prefills the limits.
   **Part measured (A5-10 b):** the common "Part measured" row of Tool,

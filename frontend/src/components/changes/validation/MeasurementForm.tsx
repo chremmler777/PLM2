@@ -186,7 +186,7 @@ export default function MeasurementForm({ changeId, deptId, check, id, prefillNo
   )
 }
 
-/** A5-02: Quality's one click on the measurer's limits, or a correction
+/** A5-02 / D5: APQP's one click on the measurer's limits, or a correction
  *  (the latest measurement is judged against the corrected limits). Shown
  *  only when the backend says this viewer may (can_confirm_limits). */
 export function LimitsConfirm({ changeId, check, id }: { changeId: number; check: ValidationCheck; id: string }) {

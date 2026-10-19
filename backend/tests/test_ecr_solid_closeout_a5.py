@@ -114,7 +114,7 @@ async def test_a5_01_negative_follow_up_on_an_open_issue_is_qualitys(
     assert res.status_code == 200 and res.json()["status"] == "transferred", res.text
 
 
-# --- A5-02 the measurer's own limits: a PASS counts after Quality confirms ----
+# --- A5-02 the measurer's own limits: a PASS counts after APQP confirms (D5) ----
 
 SPEC = {"lower_limit": 480.0, "upper_limit": 530.0,
         "spec_source": "drawing 886.197 D, weight 505 g +/-25"}
@@ -139,50 +139,81 @@ async def _weight_row(client, fix, auth):
 
 async def test_a5_02_negative_own_limits_do_not_make_a_pass_count(
         client, fix, admin_auth):
+    """D5 (Christoph 2026-10-19): APQP confirms measured limits, not Quality."""
     row = await _weigh(client, fix)
     assert row["status"] == "passed"
     tool = await _auth(client, fix, "Tool Engineer")
     state, chk = await _weight_row(client, fix, tool)
     assert chk["limits_pending"] is True and chk["limits_set_by_name"] == "Tool Engineer"
     assert chk["can_confirm_limits"] is False
-    assert "limits set by Tool Engineer: Quality confirms" in state["release_blocker"]
+    assert "limits set by Tool Engineer: APQP confirms" in state["release_blocker"]
     url = _url(fix, f"/checks/{chk['check_id']}/limits")
-    # NEGATIVE: the setter, an admin alone and PM (Quality is staffed) cannot
-    for auth in (tool, admin_auth, await _auth(client, fix, "Project Manager")):
+    # NEGATIVE: the setter, an admin alone, PM (APQP is staffed) and Quality
+    # (no longer the confirmer, D5) cannot
+    for auth in (tool, admin_auth, await _auth(client, fix, "Project Manager"),
+                 await _who(client, fix, "Quality")):
         res = await client.post(url, headers=auth, json={})
         assert res.status_code == 403, res.text
+    assert "APQP confirms them: APQP" in res.json()["detail"]
     quality = await _who(client, fix, "Quality")
-    tasks = (await client.get("/api/v1/changes/my-tasks", headers=quality)).json()
+    assert not any(t["change_id"] == fix["change_id"] and "Confirm the limits of"
+                   in (t.get("reason") or "")
+                   for t in (await client.get("/api/v1/changes/my-tasks",
+                                              headers=quality)).json())
+    apqp = await _who(client, fix, "APQP")
+    tasks = (await client.get("/api/v1/changes/my-tasks", headers=apqp)).json()
     row = next(t for t in tasks if t["change_id"] == fix["change_id"]
-               and t["kind"] == "validation_check")
-    assert row["needs_you"] and "Confirm the limits of" in row["reason"]
-    assert "set by Tool Engineer" in row["reason"]
-    _, chk = await _weight_row(client, fix, quality)
+               and t["kind"] == "validation_check"
+               and "Confirm the limits of" in (t.get("reason") or ""))
+    assert row["needs_you"] and "set by Tool Engineer" in row["reason"]
+    _, chk = await _weight_row(client, fix, apqp)
     assert chk["can_confirm_limits"] is True
-    res = await client.post(url, headers=quality, json={})
+    res = await client.post(url, headers=apqp, json={})
     assert res.status_code == 200 and res.json()["status"] == "passed", res.text
-    state, chk = await _weight_row(client, fix, quality)
-    assert chk["limits_pending"] is False and chk["limits_confirmed_by_name"] == "Quality"
+    state, chk = await _weight_row(client, fix, apqp)
+    assert chk["limits_pending"] is False and chk["limits_confirmed_by_name"] == "APQP"
     assert "limits set by" not in (state["release_blocker"] or "")
     # once confirmed, there is nothing left to confirm
-    assert (await client.post(url, headers=quality, json={})).status_code == 400
+    assert (await client.post(url, headers=apqp, json={})).status_code == 400
 
 
-async def test_a5_02_quality_corrects_wide_limits_and_the_fail_counts(client, fix):
+async def test_a5_02_apqp_corrects_wide_limits_and_the_fail_counts(client, fix):
     await _weigh(client, fix, lo=505.0, hi=528.0)
-    quality = await _who(client, fix, "Quality")
-    _, chk = await _weight_row(client, fix, quality)
+    apqp = await _who(client, fix, "APQP")
+    _, chk = await _weight_row(client, fix, apqp)
     url = _url(fix, f"/checks/{chk['check_id']}/limits")
-    res = await client.post(url, headers=quality, json={
+    res = await client.post(url, headers=apqp, json={
         "lower_limit": 495, "upper_limit": 515, "spec_source": "ok"})
     assert res.status_code == 400                                 # NEGATIVE
-    res = await client.post(url, headers=quality, json={
+    res = await client.post(url, headers=apqp, json={
         "lower_limit": 495, "upper_limit": 515,
         "spec_source": "drawing 886.197 D, weight 505 g +/-10"})
     assert res.status_code == 200 and res.json()["status"] == "failed", res.text
     issue = await _issue(client, fix)                              # HARD #3 holds
     assert issue["check_key"] == "weight"
 
+
+async def test_d5_apqp_whose_only_member_set_the_limits_falls_back(
+        client, fix, session_factory):
+    """D5: never the measurer who set them. APQP's only member set the limits:
+    the lead, then a Project Management member confirm instead (no deadlock)."""
+    from app.models.change import ChangeRequest
+    from app.services.validation_service import ValidationService
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, fix["change_id"])).lead_id = \
+            fix["user"]["Development"]["id"]
+        await s.commit()
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, fix["change_id"])
+        staffed, ids = await ValidationService.limits_confirmers(s, c)
+        assert staffed is True and ids == {fix["user"]["APQP"]["id"]}
+        staffed, ids = await ValidationService.limits_confirmers(
+            s, c, fix["user"]["APQP"]["id"])
+        assert staffed is False
+        assert ids == {fix["user"]["Development"]["id"],
+                       fix["user"]["Project Manager"]["id"]}
+        # NEGATIVE: Quality is never among them
+        assert fix["user"]["Quality"]["id"] not in ids
 
 
 # --- A5-04 the member-less department fallback, complete and worded once ----

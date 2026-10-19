@@ -4140,7 +4140,7 @@ async def confirm_validation_limits(
     change_id: int, check_id: int, body: ValidationLimitsIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """A5-02: Quality confirms (or corrects) the limits a measurer set with
+    """A5-02 / D5: APQP confirms (or corrects) the limits a measurer set with
     the first measurement; a PASS against them counts from then on."""
     from app.services.validation_service import (
         ValidationError as VError, ValidationService,

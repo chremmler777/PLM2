@@ -603,7 +603,7 @@ export const changesApi = {
     measurement?: ValidationMeasurementIn;
   }) => client.post(`/v1/changes/${id}/validation/checks`, body).then((r) => r.data),
 
-  /** A5-02: Quality confirms (empty body) or corrects the limits a
+  /** A5-02 / D5: APQP confirms (empty body) or corrects the limits a
    *  measurer set with the first measurement. */
   confirmValidationLimits: (id: number, checkId: number, body: {
     lower_limit?: number; upper_limit?: number; spec_source?: string

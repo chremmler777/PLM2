@@ -1600,8 +1600,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'validation.limitsSetBy': { de: 'gesetzt von {who}', en: 'set by {who}' },
   'validation.limitsConfirmedBy': { de: 'bestätigt von {who}', en: 'confirmed by {who}' },
   'validation.limitsPending': {
-    de: 'Bestanden gegen Grenzen, die nur {who} gesetzt hat: zählt, sobald Quality sie bestätigt',
-    en: 'Passed against limits only {who} set: counts once Quality confirms them',
+    de: 'Bestanden gegen Grenzen, die nur {who} gesetzt hat: zählt, sobald APQP sie bestätigt',
+    en: 'Passed against limits only {who} set: counts once APQP confirms them',
   },
   'validation.limitsConfirm': { de: 'Grenzen bestätigen', en: 'Confirm limits' },
   'validation.limitsCorrect': { de: 'Grenzen korrigieren', en: 'Correct limits' },

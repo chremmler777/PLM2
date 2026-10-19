@@ -254,7 +254,10 @@ export const engineeringChapter: ContentChapter = {
             '"Record measurement" with the sample size n, the smallest and the largest value and ' +
             'the measuring report or device (cycle time: the lot). The first measurement sets the ' +
             'limits and where they come from; PASS only if both values lie inside, and a PASS counts ' +
-            'once Quality confirms the limits you set ("Confirm limits"; a FAIL counts at once). A retest adds a ' +
+            'once APQP confirms the limits you set ("Confirm limits"; a FAIL counts at once). APQP: the "Needs you" ' +
+            'row "Confirm the limits of ..." is yours; confirm with one click or correct the limits with the ' +
+            'drawing or process sheet reference, never limits you set yourself (then the lead, else Project ' +
+            'Management confirms; with no APQP member here the same). A retest adds a ' +
             'row, keeps the failed one, and names what changed (parameter, tool, material or ' +
             'method + reference). "Tool sampled" is the Tool Engineer\'s too. A cycle time another ' +
             'department measured earlier stays readable, marked "No longer asked". Type numbers ' +

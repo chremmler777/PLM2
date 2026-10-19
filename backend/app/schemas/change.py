@@ -1863,7 +1863,7 @@ class ValidationCheckState(BaseModel):
     spec_source: Optional[str] = None
     measurements: List[dict] = []
     # A5-02: who set the limits, who confirmed them; a PASS against limits
-    # only their setter stated counts once Quality confirms them
+    # only their setter stated counts once APQP confirms them (D5)
     limits_set_by_name: Optional[str] = None
     limits_confirmed_by_name: Optional[str] = None
     limits_confirmed_at: Optional[datetime] = None
@@ -1874,7 +1874,7 @@ class ValidationCheckState(BaseModel):
 
 
 class ValidationLimitsIn(BaseModel):
-    # empty: confirm the limits as set; with all three: Quality corrects
+    # empty: confirm the limits as set; with all three: APQP corrects
     # them (the latest measurement is held against the new limits)
     lower_limit: Optional[float] = None
     upper_limit: Optional[float] = None

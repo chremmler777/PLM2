@@ -1,4 +1,4 @@
-/** A5-02: the measurer's own limits wait on Quality's one click. */
+/** A5-02 / D5: the measurer's own limits wait on APQP's one click (not Quality). */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -21,10 +21,12 @@ const wrap = (ui: React.ReactElement) => render(
 afterEach(cleanup)
 
 describe('A5-02 limits confirm', () => {
-  it('shows the setter and that the pass waits on Quality', () => {
+  it('shows the setter and that the pass waits on APQP (D5)', () => {
     wrap(<MeasurementHistory check={check()} id="x" />)
     expect(screen.getByTestId('validation-limits-x').textContent).toContain('set by Tool')
-    expect(screen.getByTestId('validation-limits-pending-x').textContent).toContain('counts once Quality confirms')
+    const pending = screen.getByTestId('validation-limits-pending-x').textContent
+    expect(pending).toContain('counts once APQP confirms')
+    expect(pending).not.toContain('Quality')   // NEGATIVE: Quality no longer confirms
   })
   it('no button for a viewer the backend refuses', () => {
     wrap(<LimitsConfirm changeId={7} check={check({ can_confirm_limits: false })} id="x" />)

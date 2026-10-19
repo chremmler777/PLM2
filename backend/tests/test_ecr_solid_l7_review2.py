@@ -94,7 +94,7 @@ async def test_pm_retests_a_member_less_departments_failed_check(
             for d in st["departments"]}["Tool Engineer"] is True
     res = await _post_weight(client, pm, fix, 503.0, 509.0, **RETEST)
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
-    await _confirm_limits(client, fix, res.json()["id"])       # A5-02: Quality
+    await _confirm_limits(client, fix, res.json()["id"])       # A5-02 / D5: APQP
     assert (await client.get(_iurl(fix, f"/{iid}"), headers=pm)).json()["status"] == "closed"
 
 

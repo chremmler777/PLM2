@@ -127,9 +127,9 @@ _WIDE = {"lower_limit": 0.0, "upper_limit": 100000.0,
 
 
 async def _confirm_limits(client, val, check_id):
-    """A5-02: the measurer's own limits count once Quality confirms them
-    (no Quality member here: the lead, else Project Management)."""
-    who = "Quality" if "Quality" in val["user"] else "Project Manager"
+    """A5-02 / D5: the measurer's own limits count once APQP confirms them
+    (no APQP member here: the lead, else Project Management)."""
+    who = "APQP" if "APQP" in val["user"] else "Project Manager"
     res = await client.post(_url(val, f"/checks/{check_id}/limits"),
                             headers=await _auth(client, val, who), json={})
     assert res.status_code in (200, 400), res.text   # 400: already confirmed

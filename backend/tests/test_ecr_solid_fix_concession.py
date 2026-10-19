@@ -33,11 +33,11 @@ REF = "scale WG-0042, report MR-2026-118"
 
 @pytest.fixture
 async def fix(val, session_factory):
-    """val plus Quality, Process Engineer and Management members; the Sales
-    user is the Sales owner."""
+    """val plus Quality, Process Engineer, Management and APQP members (APQP
+    confirms measured limits, D5); the Sales user is the Sales owner."""
     async with session_factory() as s:
         org = (await s.get(User, val["user"]["Tool Engineer"]["id"])).organization_id
-        for name in ("Quality", "Process Engineer", "Management"):
+        for name in ("Quality", "Process Engineer", "Management", "APQP"):
             d = Department(name=name, flow_type="action", is_active=True)
             s.add(d)
             await s.flush()
@@ -167,7 +167,7 @@ async def test_fix_owner_works_the_check_department_retests_and_it_closes(client
                         "measuring_ref": REF, "what_changed_kind": "parameter",
                         "what_changed_ref": "holding pressure -5 bar, PS-114 rev C"}})
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
-    # A5-02: the measurer's limits count once Quality confirms them
+    # A5-02 / D5: the measurer's limits count once APQP confirms them
     assert (await client.get(_iurl(fix, f"/{issue['id']}"), headers=quality)).json()["status"] != "closed"
     await _confirm_limits(client, fix, res.json()["id"])
     assert (await client.get(_iurl(fix, f"/{issue['id']}"), headers=quality)).json()["status"] == "closed"

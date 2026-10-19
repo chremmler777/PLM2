@@ -47,6 +47,9 @@ VALIDATION_STATUS = "in_validation"
 #: §10 (RELEASE_V2): a weight delta reaches Sales above this share of the
 #: estimate (or on a FAIL).
 WEIGHT_DELTA_SALES_SHARE = 0.02
+#: D5 (Christoph 2026-10-19): the department that confirms the limits a
+#: measurer set with the first measurement (A5-02); was Quality.
+LIMITS_CONFIRMER_DEPARTMENT = "APQP"
 
 
 class ValidationError(ValueError):
@@ -578,7 +581,7 @@ class ValidationService:
         # Validation issues (spec §12): a passed re-answer closes the issue
         # linked to this check; a new failure sends one waiting for
         # re-validation back to fixing. A5-02: a PASS against limits only
-        # the measurer stated closes nothing until Quality confirms them.
+        # the measurer stated closes nothing until APQP confirms them (D5).
         from app.services.validation_issue_service import ValidationIssueService
         if not ValidationService.limits_pending(row):
             await ValidationIssueService.on_check_answered(session, change, row, actor)
@@ -719,7 +722,7 @@ class ValidationService:
             row.lower_limit, row.upper_limit = new_lo, new_hi
             row.spec_source = source[:200]
             # A5-02: the measurer's own limits; a PASS against them counts
-            # once Quality (never the setter) confirms them
+            # once APQP (D5; never the setter) confirms them
             row.limits_set_by = actor.id
             row.limits_confirmed_by = row.limits_confirmed_at = None
         elif ((new_lo is not None and new_lo != float(row.lower_limit))
@@ -792,26 +795,32 @@ class ValidationService:
         return cm_switches.on("RELEASE_V2") and bool(row.limits_pending)
 
     @staticmethod
+    async def _limits_department_id(session: AsyncSession) -> int | None:
+        return (await session.execute(select(Department.id).where(
+            Department.name == LIMITS_CONFIRMER_DEPARTMENT,
+            Department.is_active.is_(True)).limit(1))).scalar_one_or_none()
+
+    @staticmethod
     async def limits_confirmers(session: AsyncSession, change: ChangeRequest,
                                 set_by: int | None = None
                                 ) -> tuple[bool, set[int]]:
-        """(quality_staffed, ids): who confirms a check's limits, never
-        `set_by` (whoever set them). Quality's real members; with none on
-        this change (or Quality retired) the coordinator (the lead who can
-        act, change_people.coordinator) and Project Management's real
-        members, so a lead who measured for a member-less department is not
-        the only one left (A5-02: no deadlock on HARD #3)."""
+        """(apqp_confirms, ids): who confirms a check's limits, never
+        `set_by` (whoever set them). D5 (Christoph 2026-10-19): APQP's real
+        members, not Quality. With no APQP member here other than the setter
+        (or APQP retired): the lead who can act (change_people.coordinator),
+        then Project Management's real members, so a lead or the only APQP
+        member who measured is never the only one left (A5-02: no deadlock
+        on HARD #3)."""
         from app.services.change_people import (
             coordinator, department_members_of_change_org, staffed_department_ids,
         )
-        q = (await session.execute(select(Department.id).where(
-            Department.name == "Quality", Department.is_active.is_(True))
-            .limit(1))).scalar_one_or_none()
-        if q is not None and await staffed_department_ids(session, change, [q]):
+        apqp = await ValidationService._limits_department_id(session)
+        if apqp is not None and await staffed_department_ids(session, change, [apqp]):
             ids = set(await department_members_of_change_org(
-                session, change, [q], real_only=True))
+                session, change, [apqp], real_only=True))
             ids.discard(set_by)
-            return True, ids
+            if ids:
+                return True, ids
         lead_id, _ = await coordinator(session, change)
         pm = (await session.execute(select(Department.id).where(
             Department.name == "Project Manager", Department.is_active.is_(True))
@@ -830,20 +839,22 @@ class ValidationService:
         staffed, ids = await ValidationService.limits_confirmers(session, change, set_by)
         names = sorted(n for n in (await ValidationService._names(
             session, list(ids))).values() if n)
+        d = LIMITS_CONFIRMER_DEPARTMENT
         if not names:
-            return ("nobody else here can confirm them: give Quality (or Project "
+            return (f"nobody else here can confirm them: give {d} (or Project "
                     "Management) a member")
         who = ", ".join(names[:3]) + (f" (+{len(names) - 3})" if len(names) > 3 else "")
-        return (f"Quality confirms them: {who}" if staffed else
-                f"Quality has no member here: {who} confirm them")
+        return (f"{d} confirms them: {who}" if staffed else
+                f"{d} has no other member here: {who} confirm them")
 
     @staticmethod
     async def limits_confirm_refusal(session: AsyncSession, change: ChangeRequest,
                                      row, actor: User) -> str | None:
-        """None when `actor` may confirm (or correct) the row's limits: a
-        Quality member (acts-as aware), else (Quality unstaffed) the lead who
-        can act or a Project Management member; never the person who set
-        them, never a real admin alone (HARD #3). A refusal names who can."""
+        """None when `actor` may confirm (or correct) the row's limits: an
+        APQP member (D5; acts-as aware) who did not set them, else (no other
+        APQP member here) the lead who can act or a Project Management
+        member; never the person who set them, never a real admin alone
+        (HARD #3). A refusal names who can."""
         from app.services import cm_switches
         from app.services.change_people import hard3_blind, is_acting
         if not cm_switches.on("RELEASE_V2"):
@@ -855,14 +866,12 @@ class ValidationService:
                     "set its own pass criterion alone. " + await
                     ValidationService._confirmers_words(session, change, row.limits_set_by))
         if hard3_blind(actor):
-            return ("An admin confirms limits only acting as Quality (HARD #3: "
-                    "no admin shortcut)")
+            return (f"An admin confirms limits only acting as "
+                    f"{LIMITS_CONFIRMER_DEPARTMENT} (HARD #3: no admin shortcut)")
         from app.services.workflow_service import WorkflowService
         mine = set(await WorkflowService.effective_department_ids(session, actor))
-        q = (await session.execute(select(Department.id).where(
-            Department.name == "Quality", Department.is_active.is_(True))
-            .limit(1))).scalar_one_or_none()
-        if q is not None and q in mine:
+        apqp = await ValidationService._limits_department_id(session)
+        if apqp is not None and apqp in mine:
             return None
         staffed, ids = await ValidationService.limits_confirmers(
             session, change, row.limits_set_by)
@@ -873,7 +882,7 @@ class ValidationService:
     @staticmethod
     async def confirm_limits(session: AsyncSession, change: ChangeRequest,
                              check_id: int, spec: dict, actor: User):
-        """A5-02: Quality confirms the limits the measurer set (one click),
+        """A5-02 / D5: APQP confirms the limits the measurer set (one click),
         or corrects them; the latest measurement is held against the
         confirmed limits and the PASS (or a FAIL) counts from now on."""
         from app.models.change_validation import ValidationMeasurement
@@ -888,7 +897,7 @@ class ValidationService:
             # a FAIL counts at once; changing the limits after it would lift
             # HARD #3 without a concession
             raise ValidationError(
-                "Only a PASS against limits nobody confirmed waits on Quality "
+                f"Only a PASS against limits nobody confirmed waits on {LIMITS_CONFIRMER_DEPARTMENT} "
                 "(a different spec after a FAIL is a concession)")
         lo, hi = spec.get("lower_limit"), spec.get("upper_limit")
         source = (spec.get("spec_source") or "").strip() or None
@@ -1087,7 +1096,7 @@ class ValidationService:
         setters = await ValidationService._names(session, [r.limits_set_by for r in pending])
         words = sorted(map(_name, outstanding)) + sorted(
             f"{_name(r)} (limits set by {setters.get(r.limits_set_by) or 'the measurer'}: "
-            "Quality confirms)" for r in pending)
+            f"{LIMITS_CONFIRMER_DEPARTMENT} confirms)" for r in pending)
         return (
             ("Validation failed: " + ", ".join(sorted(map(_name, failed)))
              + ". Fix it and retest (Quality's Fix task names who and when), or a "
