@@ -1707,6 +1707,28 @@ Scope to plan:
 - `get_current_user` on `/download`, `/viewer`, `/inline`, with frontend checks that viewer and popup still load with the session cookie
 - the history display
 
+---
+
+### Task 13 (added 2026-10-19): Triage button does nothing on the part page
+
+Christoph clicked "Decide the route" on https://apps.ad.us.ktx.group/plm2/parts/2275 (intake 4) and got no dialog and no visible reaction.
+
+**Ruled out:**
+- prod returns `can_decide: true` for him
+- `IntakePanel` + `RouteDialog` open correctly in vitest with that exact JSON
+- no deploy happened at the time
+- the app has no lazy chunks
+
+**Files:** `frontend/src/components/intake/IntakePanel.tsx`, `RouteDialog.tsx`, `components/common/Dialog.tsx`, `pages/PartDetail.tsx`.
+
+- [ ] **Step 1:** Reproduce in a real browser (Playwright, Chromium) on a local build of `PartDetail` with the mocked API (the same preview-harness approach as Task 9 Step 5), rendering the full page with a pending intake. Click `triage-<id>`. Capture the console errors and whether `dialog[open]` exists and is visible.
+- [ ] **Step 2:** Write a failing test that pins the cause. Exactly what it checks depends on Step 1. Candidates:
+  - `showModal()` throwing because another `<dialog>` is open non-modally
+  - an overlay intercepting the click
+  - `RouteDialog` throwing on render
+- [ ] **Step 3:** Fix it and add the test. Run `npx vitest run src/components/intake src/pages/PartDetail*`.
+- [ ] **Step 4:** Commit: `fix(intake): triage dialog opens on the part page`.
+
 ## Self-Review Notes
 
 - Spec coverage:
