@@ -13,8 +13,10 @@ const row = (over: Record<string, unknown> = {}) => ({
   overdue: false, deadline_kind: 'quote', deadline_date: '2026-10-19T00:00:00', ...over,
 })
 
+let lastClient: QueryClient
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  lastClient = qc
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
@@ -37,6 +39,16 @@ describe('TaskCard (spec §0 task links)', () => {
     fireEvent.click(screen.getByTestId('task-card-next'))
     expect(onGo).toHaveBeenCalledWith('assessments')
     expect(screen.getByTestId('task-card-next').textContent).toBe('Submit assessment for Process')
+  })
+
+  it('turns into "done" at once when the change refreshes and the task is gone (no reload)', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValueOnce([row()] as never)
+    wrap(<TaskCard changeId={7} kind="assessment" departmentId={2} actions={[]} onGo={vi.fn()} onClose={vi.fn()} />)
+    expect((await screen.findByTestId('task-card')).textContent).toContain('Your part: Assessment')
+    // the viewer submits: the change's queries refresh, the task list no longer has the row
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    await lastClient.fetchQuery({ queryKey: ['change', 7, 'costing'], queryFn: async () => ({}) })
+    expect(await screen.findByText(t('taskcard.done'))).toBeDefined()
   })
 
   it('shows the first-use help once; dismissed it stays away', async () => {

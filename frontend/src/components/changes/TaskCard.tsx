@@ -7,8 +7,8 @@
  * step instead of repeating that tab's own button. A first-use help line
  * explains it once and is dismissed for good (per browser).
  */
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { changesApi } from '../../api/changes';
 import { t } from '../../i18n/cmLabels';
@@ -51,6 +51,17 @@ export default function TaskCard({ changeId, kind, departmentId, deviationId, si
     queryFn: () => changesApi.myTasks(),
     staleTime: 30_000,
   });
+  // The card must not outlive its task: whatever the viewer does on this change
+  // (submit, finalize, close...) refreshes the change's queries; the list of my
+  // tasks follows, so "Your part" turns into "done" at once, not after a reload.
+  const qc = useQueryClient();
+  useEffect(() => qc.getQueryCache().subscribe((ev) => {
+    const key = ev.query.queryKey
+    if (ev.type === 'updated' && ev.action.type === 'success'
+      && key[0] === 'change' && key[1] === changeId) {
+      void qc.invalidateQueries({ queryKey: ['change-my-tasks'] })
+    }
+  }), [qc, changeId]);
   // optional narrowing: a link names the department, the override or the side
   const fits = (x: { department_id?: number | null; deviation_id?: number | null; side?: string | null }) =>
     (departmentId == null || x.department_id == null || x.department_id === departmentId)

@@ -83,6 +83,16 @@ describe('resolveWaitStates', () => {
     expect(waits.map((w) => w.key)).toEqual(['check-1'])
   })
 
+  it('a check item in scoping is info on the Scoping tab, never a blocker beside the questions', () => {
+    const waits = resolveWaitStates(change({ status: 'scoping' }), [
+      concern({ id: 1 }),
+      concern({ id: 2, flag_type: 'check', department_id: 2, owner_department_names: ['Development'],
+        note: 'draft angle' }),
+    ], deptName)
+    expect(waits.map((w) => [w.key, !!w.info, w.tab])).toEqual([
+      ['sales-info-1', false, 'scoping'], ['check-2', true, 'scoping']])
+  })
+
   it('A6-06: a scoping question still holds proceed (not info)', () => {
     const [w] = resolveWaitStates(change({ status: 'scoping' }), [concern()], deptName)
     expect(w.info).toBeUndefined()

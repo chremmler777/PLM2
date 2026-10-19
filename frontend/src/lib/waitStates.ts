@@ -213,12 +213,15 @@ export function resolveWaitStates(
       ?? c.raised_by_name ?? `#${c.raised_by}`)
   const listed = new Set<string>()
   for (const c of questions) {
-    if (!askingSide && c.flag_type === 'check') {
-      listed.add(ownerOf(c))
+    // A check item never holds a step (SOFT): in scoping it is listed as info on
+    // the Scoping tab (the department closes it in its assessment), not counted
+    // as a blocker beside the real questions.
+    if (c.flag_type === 'check') {
+      if (!askingSide) listed.add(ownerOf(c))
       waits.push({
         key: `check-${c.id}`,
         text: t('wait.checkItem').replace('{d}', ownerOf(c)).replace('{x}', excerpt(c.note)),
-        tab: 'assessments',
+        tab: askingSide ? 'scoping' : 'assessments',
         info: true,
       })
       continue

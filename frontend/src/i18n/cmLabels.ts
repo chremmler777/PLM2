@@ -270,7 +270,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'next.item.impacted_items': { de: 'Betroffene Teile festlegen', en: 'Define the impacted items' },
   'next.item.impact_confirmed': { de: 'Betroffene Teile bestätigen (Entwicklung)', en: 'Confirm the impacted items (Development)' },
   'next.item.lead': { de: 'Verantwortlichen (Lead) zuweisen', en: 'Assign a lead' },
-  'next.item.open_concerns': { de: '{n} offene Fragen oder Ablehnungsvoten schließen', en: 'Close {n} open questions or cancel votes' },
+  'next.item.open_concerns': { de: 'Offene Fragen oder Ablehnungsvoten schließen ({n})', en: 'Close the open questions or cancel votes ({n})' },
   'next.item.assessments': { de: 'Bewertungen der verantwortlichen Abteilungen', en: 'Assessments from the responsible departments' },
   'next.item.assessments_1': { de: '1 Bewertung noch offen', en: '1 assessment still open' },
   'next.item.offer_sent': { de: 'Zuerst das Angebot senden (dann unterschreiben PM und Qualität)', en: 'Send the offer first (then PM and Quality sign it)' },
@@ -497,7 +497,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'No concerns. Anyone who sees a blocker can flag it here, even before the meeting.',
   },
   'concern.raise': { de: 'Einwand', en: 'Flag' },
-  'concern.raiseVote': { de: 'Abbruch-Votum', en: 'Cancel vote' },
+  'concern.raiseVote': { de: 'Abbruch vorschlagen', en: 'Propose to cancel' },
   'concern.blocking': {
     de: '{n} offen, blockiert die Freigabe',
     en: '{n} open, blocks proceed',
