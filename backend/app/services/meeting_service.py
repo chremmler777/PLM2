@@ -217,8 +217,8 @@ class MeetingService:
     async def raiser_department_id(session: AsyncSession,
                                    change: ChangeRequest) -> Optional[int]:
         """Spec §3 "Internal: raiser's department auto-R" (SCOPING_V2): the
-        active internal-starter department (P3: Development, Process, Tool
-        Engineer) of the person who raised an internal change, the first by
+        active internal-starter department (P3 + D1: Development, Process, Tool,
+        Manufacturing Engineer) of the person who raised an internal change, the first by
         sort order; else None."""
         if (not cm_switches.on("SCOPING_V2") or change.origin != "internal"
                 or change.raised_by is None):

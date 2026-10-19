@@ -1328,8 +1328,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Open question:',
   },
   'start.salesOnly': {
-    de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an; Entwicklung, Prozess und Werkzeugtechnik legen interne an',
-    en: 'Only Sales or Project Management raises change requests; Development, Process and Tool Engineer raise internal ones',
+    de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an; Entwicklung, Prozess, Werkzeugtechnik und Fertigungstechnik legen interne an',
+    en: 'Only Sales or Project Management raises change requests; Development, Process, Tool and Manufacturing Engineer raise internal ones',
   },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },

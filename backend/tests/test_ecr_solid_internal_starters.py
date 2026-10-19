@@ -199,3 +199,75 @@ async def test_a2_06_meeting_without_departments_cannot_skip_the_raiser_waiver(
     assert res.status_code == 200, res.text
     log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin)).json()
     assert any(e["action"] == "raiser_department_waived" for e in log)
+
+
+# --- D1 (Christoph 2026-10-19): Manufacturing Engineer starts internal ECRs --
+
+def _load_migration_147():
+    """By file path; the real alembic package first, as
+    test_change_starter_departments does (backend/alembic shadows it)."""
+    import importlib.util
+    import pathlib
+    import sys
+    path = (pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions"
+            / "147_manufacturing_engineer_internal_starter.py")
+    backend_dir = str(path.parents[2])
+    for name in list(sys.modules):
+        if name == "alembic" or name.startswith("alembic."):
+            if (getattr(sys.modules[name], "__file__", "") or "").startswith(backend_dir):
+                del sys.modules[name]
+    original = sys.path[:]
+    sys.path[:] = [p for p in sys.path if p not in ("", backend_dir)]
+    try:
+        import alembic  # noqa: F401
+        import alembic.op  # noqa: F401
+    finally:
+        sys.path[:] = original
+    spec = importlib.util.spec_from_file_location("migration_147", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+async def test_manufacturing_engineer_starts_internal_after_migration_147(
+        client, seed, depts, session_factory, db_engine):
+    """D1: migration 147 flags Manufacturing Engineer (idempotent); its member
+    then starts an internal change and leads it, like the other engineering
+    starters. Before the flag (NEGATIVE) it starts nothing, and it never
+    starts a customer change."""
+    async with session_factory() as s:
+        me = Department(name="Manufacturing Engineer", flow_type="action",
+                        is_active=True, sort_order=9)
+        s.add(me); await s.flush(); me_id = me.id
+        await s.commit()
+    await _join(session_factory, seed["engineer_id"], me_id)
+    eng = await login(client, "eng@test.io", admin=False)
+    perms = (await client.get("/api/v1/changes/permissions", headers=eng)).json()
+    assert perms["can_start_internal_change"] is False          # before 147
+    assert (await client.post("/api/v1/changes", json=_body(seed, False),
+                              headers=eng)).status_code == 403
+
+    mig = _load_migration_147()
+    for _ in range(2):                                         # idempotent
+        async with db_engine.begin() as conn:
+            await conn.run_sync(mig.flag_internal_starters)
+    perms = (await client.get("/api/v1/changes/permissions", headers=eng)).json()
+    assert perms["can_start_change"] is False
+    assert perms["can_start_internal_change"] is True
+    res = await client.post("/api/v1/changes", json=_body(seed, False),
+                            headers={**eng, KEEP_LEAD_RULE: "1"})
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["origin"] == "internal"
+    assert res.json()["lead_id"] == seed["engineer_id"]
+    # NEGATIVE: still no customer change, and Quality is not flagged
+    res = await client.post("/api/v1/changes", json=_body(seed, True), headers=eng)
+    assert res.status_code == 403
+    async with session_factory() as s:
+        q = await s.get(Department, depts["Quality"])
+        assert q.can_start_internal_change is False
+
+
+def test_seed_names_manufacturing_engineer_an_internal_starter():
+    from app.main import INTERNAL_STARTER_DEPARTMENTS
+    assert INTERNAL_STARTER_DEPARTMENTS == {
+        "Development", "Process Engineer", "Tool Engineer", "Manufacturing Engineer"}

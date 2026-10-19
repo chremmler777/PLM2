@@ -52,7 +52,7 @@ export const engineeringChapter: ContentChapter = {
         },
         {
           p:
-            'Development, Process Engineer and Tool Engineer may start an internal change, one the ' +
+            'Development, Process Engineer, Tool Engineer and Manufacturing Engineer may start an internal change, one the ' +
             'plant pays for: "Start change", then "Internal change". You lead it and hand it over to ' +
             'scoping ("Hand over to scoping" in My Tasks). A customer change is started by Sales or ' +
             'Project Management; if your change turns out to be one, ask Sales or Project Management ' +

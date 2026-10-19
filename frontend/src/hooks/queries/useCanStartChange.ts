@@ -15,7 +15,7 @@ import client from '../../api/client';
 
 export interface ChangePermissions {
   can_start_change: boolean;
-  /** P3: internal changes only (Development, Process Engineer, Tool Engineer). */
+  /** P3 + D1: internal changes only (Development, Process, Tool, Manufacturing Engineer). */
   can_start_internal_change?: boolean;
   /** Mother-plant side track (spec §14): starters plus Project Management. */
   can_start_mother_plant?: boolean;

@@ -119,7 +119,7 @@ async def create_change(
     internal = not mother_plant and not body.customer_relevant
     allowed = (await MotherPlantService.may_start(db, current_user) if mother_plant
                else await ChangeService.user_can_start_change(db, current_user))
-    # P3: Development, Process Engineer and Tool Engineer start internal
+    # P3 + D1: Development, Process, Tool and Manufacturing Engineer start internal
     # changes (never a customer one) and lead them.
     engineering_raiser = (internal and await ChangeService
                           .in_internal_starter_department(db, current_user))
@@ -266,7 +266,7 @@ async def change_permissions(
     from app.services.mother_plant_service import MotherPlantService
     return {
         "can_start_change": await ChangeService.user_can_start_change(db, current_user),
-        # P3: internal changes only (Development, Process, Tool Engineer).
+        # P3 + D1: internal changes only (Development, Process, Tool, Manufacturing Engineer).
         "can_start_internal_change": await ChangeService.user_can_start_internal_change(
             db, current_user),
         # Mother-plant side track (spec §14): Project Management (and

@@ -69,7 +69,7 @@ flowchart TD
 
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces). Internal changes (P3): Development, Process Engineer and Tool Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management picks one first and Sales hands over once it is set (A6-04) |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces). Internal changes (P3, D1): Development, Process Engineer, Tool Engineer and Manufacturing Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management picks one first and Sales hands over once it is set (A6-04) |
 | `scoping` | Team decides: proceed / needs info / reject. Impacted set picked and locked (first action there: Development picks and confirms; the lead and PM may pick too), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
@@ -2157,8 +2157,8 @@ the accepted offer, else the latest sent one), and on
 
 Stage responsibilities so far: `captured` = Sales (`can_start_change`;
 Project Management may act too), internal changes their engineering raiser
-(P3: Development, Process Engineer, Tool Engineer; the raiser leads and hands
-over), a change with no lead Project Management (it picks the lead first),
+(P3: Development, Process Engineer, Tool Engineer; D1: Manufacturing Engineer;
+the raiser leads and hands over), a change with no lead Project Management (it picks the lead first),
 `scoping` = the lead, Project Management backing up, impact lock = **Development only — no
 admin shortcut**; an admin who needs to lock a set does it through acts-as
 (`X-Acts-As-Department: <Development>`), so the department is on the record
@@ -2180,7 +2180,8 @@ a badge on the stage (`StageResponsibleBadge.tsx`).
 
 **Internal starters (ECR-solid P3, decided 2026-10-14).** Members of a
 `can_start_internal_change` department (Development, Process Engineer, Tool
-Engineer; migration 119) may start an INTERNAL change and lead it: the
+Engineer; migration 119; **Manufacturing Engineer: DECIDED BY CHRISTOPH
+2026-10-19 (D1), migration 147**, seed `app.main.INTERNAL_STARTER_DEPARTMENTS`) may start an INTERNAL change and lead it: the
 create endpoint sets the raiser as lead unless Project Management named one
 (an admin acting as an engineering department is not made the lead: the
 project PM default applies, else PM picks one).
@@ -2190,7 +2191,7 @@ greys the customer option. `GET /changes/permissions` answers
 `can_start_internal_change`. A caller from any other department gets 403
 naming who starts what ("Your department does not start changes: Sales,
 Project Manager start customer changes; Development, Process Engineer, Tool
-Engineer start internal changes. Ask one of them to raise it.", read from the
+Engineer, Manufacturing Engineer start internal changes. Ask one of them to raise it.", read from the
 department flags). A `POST /changes` that omits `customer_relevant` raises
 what the caller's department starts: a customer change for a Sales or PM
 member (with its Sales owner), else an internal one (the UI always sends the
@@ -2674,8 +2675,8 @@ changed in it from here):
    or no visible change with a reason); a live change on the part suggests
    attach; a newer index never refused (supersede); rechecks per routed
    department and the lead's "Index D adds parts or departments?".
-2. **Capture:** Development, Process Engineer and Tool Engineer start
-   internal changes and lead them (P3); a customer change is complete with
+2. **Capture:** Development, Process Engineer, Tool Engineer and
+   Manufacturing Engineer (D1) start internal changes and lead them (P3); a customer change is complete with
    the customer's typed file and the quote deadline; urgent needs the
    need-by with reason and evidence; no lead: Project Management picks one
    before the hand-over.

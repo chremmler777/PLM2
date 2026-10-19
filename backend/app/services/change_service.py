@@ -3311,7 +3311,7 @@ class ChangeService:
     async def in_internal_starter_department(session: AsyncSession,
                                              user: User) -> bool:
         """Member of a can_start_internal_change department (P3: Development,
-        Process Engineer, Tool Engineer). Membership only, no admin
+        Process Engineer, Tool Engineer; D1: Manufacturing Engineer). Membership only, no admin
         shortcut: it also decides that the raiser leads the change."""
         from app.services.workflow_service import WorkflowService
         dept_ids = await WorkflowService.effective_department_ids(session, user)

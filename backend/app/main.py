@@ -10,6 +10,12 @@ from app.api import api_router
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
+
+# P3 + D1 (Christoph 2026-10-19): these departments start internal changes
+# (and the raiser leads them). Migrations 119 and 147 flag them in place.
+INTERNAL_STARTER_DEPARTMENTS = {"Development", "Process Engineer", "Tool Engineer",
+                                "Manufacturing Engineer"}
+
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
@@ -142,8 +148,7 @@ async def seed_test_data():
                 ("Operations Manager", "info", 17, False),
                 ("Developer", "action", 18, False),
             ]
-            # P3: these start internal changes (and lead them).
-            internal_starters = {"Development", "Process Engineer", "Tool Engineer"}
+            internal_starters = INTERNAL_STARTER_DEPARTMENTS
             for dept_name, flow_type, sort_order, active in departments_data:
                 result = await session.execute(
                     select(Department).where(Department.name == dept_name)

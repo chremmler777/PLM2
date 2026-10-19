@@ -147,7 +147,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(true);
   // Third origin (spec §14): a change engineered and sold by the mother plant.
   const permissions = useChangePermissions();
-  // P3: Development, Process and Tool Engineer start internal changes only.
+  // P3 + D1: Development, Process, Tool and Manufacturing Engineer start internal changes only.
   const internalOnly = useInternalOnlyStarter();
   useEffect(() => { if (internalOnly) setCustomerRelevant(false); }, [internalOnly]);
   const motherPlants = permissions?.mother_plants ?? FALLBACK_MOTHER_PLANTS;
