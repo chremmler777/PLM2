@@ -66,6 +66,16 @@ describe('ChangeAttachments', () => {
     expect(screen.getByText(/frozen/i)).toBeTruthy()
   })
 
+  it('CO2: no Delete on a document the server would refuse the viewer (mayDelete)', () => {
+    wrap(<ChangeAttachments mayDelete={(a) => a.filename !== 'theirs.pdf'} change={change({
+      status: 'in_assessment', attachments: [
+        att({ id: 2, filename: 'mine.pdf', phase: 'post_scoping' }),
+        att({ id: 3, filename: 'theirs.pdf', phase: 'post_scoping' })],
+    })} />)
+    expect(screen.getByLabelText('Delete mine.pdf')).toBeTruthy()
+    expect(screen.queryByLabelText('Delete theirs.pdf')).toBeNull()
+  })
+
   it('keeps post-scoping docs deletable', () => {
     wrap(<ChangeAttachments change={change({
       status: 'in_assessment', attachments: [att({ id: 2, filename: 'later.pdf', phase: 'post_scoping' })],

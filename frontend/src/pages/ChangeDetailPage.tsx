@@ -1224,7 +1224,16 @@ export default function ChangeDetailPage() {
             <CustomerMailLog changeId={change.id} attachments={change.attachments ?? []} readOnly={readOnly} />
           </div>
 
-          <ChangeAttachments change={change} readOnly={readOnly} />
+          <ChangeAttachments change={change} readOnly={readOnly}
+            mayDelete={(a) => {
+              // The default rule (backend _require_attachment_delete): the uploader,
+              // the lead, a PM member, an admin. It covers every file but an
+              // assessment's evidence and a vendor quote, whose rules (department
+              // membership, the costing position) the server decides.
+              const plain = !a.assessment_id && !a.costing_offer_id && a.kind !== 'vendor_quote'
+              return !plain || isAdmin || isChangeLead || isPmMember
+                || (userId != null && a.uploaded_by === userId)
+            }} />
           {/* C15: hours booked against the estimate, per department */}
           <div className="pt-3">
             <HoursCard changeId={change.id} canBook={canBookHours} />

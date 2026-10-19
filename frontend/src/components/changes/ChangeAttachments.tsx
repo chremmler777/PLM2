@@ -19,10 +19,12 @@ import type { Attachment, ChangeDetail } from '../../types/change'
 
 const isScopingPhase = (status: string) => status === 'captured' || status === 'scoping'
 
-export default function ChangeAttachments({ change, readOnly = false }: {
+export default function ChangeAttachments({ change, readOnly = false, mayDelete = () => true }: {
   change: ChangeDetail
   /** Closed or canceled: documents are a record, nothing is added or deleted. */
   readOnly?: boolean
+  /** Who may remove this document (the server's rule): no Delete for the rest. */
+  mayDelete?: (a: Attachment) => boolean
 }) {
   const qc = useQueryClient()
   const invalidate = () => qc.invalidateQueries({ queryKey: ['change', change.id] })
@@ -48,10 +50,10 @@ export default function ChangeAttachments({ change, readOnly = false }: {
       b.request ? (
         <InfoRequestBlock key={b.request.id} changeId={change.id} request={b.request}
           responses={b.responses} onChanged={invalidate}
-          onDelete={deletable ? del : undefined} />
+          onDelete={deletable && mayDelete(b.request) ? del : undefined} />
       ) : (
         <AttachmentRow key={b.plain!.id} changeId={change.id} attachment={b.plain!}
-          onDelete={deletable ? del : undefined} />
+          onDelete={deletable && mayDelete(b.plain!) ? del : undefined} />
       ))
 
   return (
