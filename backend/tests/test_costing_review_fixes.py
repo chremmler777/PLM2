@@ -202,7 +202,7 @@ async def test_position_totals_are_not_counted_twice(
         dict(department_id=world["tool"], hourly_rate=21.5, currency="USD")])
     await _add(client, admin_auth, world, hours=13)                           # 279.50
     await _add(client, admin_auth, world, kind="external", label="Tool insert",
-               est_cost=13350)
+               est_cost=13350, quantity=1, quantity_unit="insert")
     summ = await _summation(session_factory, world)
     assert summ["totals"]["grand_total"] == 13629.5
     assert summ["total_position_cost"] + summ["total_position_hours_cost"] == 13629.5
