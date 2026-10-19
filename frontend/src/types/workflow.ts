@@ -112,6 +112,10 @@ export interface WfInstanceTask {
   overdue: boolean;
   /** The step refuses "approved" until the revision has 3D evidence. */
   requires_cad_evidence?: boolean;
+  /** R24: this viewer may approve / reject / waive it (the backend rule). */
+  can_act?: boolean;
+  /** R38: '<X> has no member here: <lead|Project Management> coordinates'. */
+  coordinator_hint?: string | null;
 }
 
 export interface Escalation {
@@ -175,6 +179,9 @@ export interface MyTask {
   /** Project team (spec §18): "main" counts; "backup" is listed muted. */
   role?: 'main' | 'backup';
   main_name?: string | null;
+  /** R38: a member-less department's step this user coordinates. */
+  coordinated?: boolean;
+  hint?: string | null;
 }
 
 // Instance request types

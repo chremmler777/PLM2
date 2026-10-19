@@ -68,12 +68,20 @@ def _serialize_task(t: WfInstanceTask) -> dict:
     }
 
 
-async def _instance_out(db: AsyncSession, instance: WfInstance) -> dict:
+async def _instance_out(db: AsyncSession, instance: WfInstance, viewer=None) -> dict:
     """The instance as the screens read it, plus whether its revision has
     the 3D evidence a CAD-evidence step needs to be approved (the same
     WorkflowService.has_3d_evidence the complete endpoint checks), so an
-    Approve button the backend would refuse is shown disabled with why."""
+    Approve button the backend would refuse is shown disabled with why.
+    With a viewer, each open actionable task says whether this viewer may
+    act on it (`can_act`, R24) and, for a department with no member here,
+    who coordinates (`coordinator_hint`, R38)."""
     out = _serialize_instance(instance)
+    rights = await WorkflowService.task_rights(db, instance, viewer) if viewer else {}
+    for t in out["tasks"]:
+        r = rights.get(t["id"])
+        t["can_act"] = r["can_act"] if r else False
+        t["coordinator_hint"] = r["coordinator_hint"] if r else None
     needs = any(t.get("requires_cad_evidence") for t in out["tasks"])
     out["has_3d_evidence"] = (
         await WorkflowService.has_3d_evidence(db, instance.part_revision_id)
@@ -175,7 +183,13 @@ async def get_my_tasks(
         dept_ids = [department_id]
     else:
         dept_ids = await WorkflowService.effective_department_ids(db, current_user)
-    return await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
+    rows = await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
+    # R38: the check workflow steps of member-less departments this user
+    # coordinates (the lead, else Project Management) are theirs to do
+    seen = {r["task_id"] for r in rows}
+    rows += [r for r in await WorkflowService.get_coordinated_tasks(db, current_user)
+             if r["task_id"] not in seen]
+    return WorkflowService.sort_my_tasks(rows)
 
 
 @router.post(
@@ -198,7 +212,7 @@ async def start_workflow(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return await _instance_out(db, full)
+        return await _instance_out(db, full, current_user)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -214,7 +228,7 @@ async def get_current_workflow(
     instance = await WorkflowService.get_revision_workflow(db, revision_id)
     if instance is None:
         return {"instance": None}
-    return {"instance": await _instance_out(db, instance)}
+    return {"instance": await _instance_out(db, instance, current_user)}
 
 
 @router.get("/{instance_id}")
@@ -227,7 +241,7 @@ async def get_workflow_instance(
     full = await _load_instance_full(db, instance_id)
     if not full:
         raise HTTPException(status_code=404, detail="Workflow instance not found")
-    return await _instance_out(db, full)
+    return await _instance_out(db, full, current_user)
 
 
 @router.post("/{instance_id}/tasks/{task_id}/complete")
@@ -268,7 +282,7 @@ async def complete_task(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return await _instance_out(db, full)
+        return await _instance_out(db, full, current_user)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -357,7 +371,7 @@ async def cancel_workflow(
         )
         await db.commit()
         full = await _load_instance_full(db, instance.id)
-        return await _instance_out(db, full)
+        return await _instance_out(db, full, current_user)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

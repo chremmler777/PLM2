@@ -749,6 +749,9 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
           <span className="block text-xs text-slate-400">{task.owner_name}</span>
         )}
         <span className="block text-xs text-slate-500">{task.department_name}</span>
+        {task.coordinated && task.hint && (
+          <span data-testid="task-coordinated" className="block text-xs text-amber-300/90">{task.hint}</span>
+        )}
         {isBackup(task) && <BackupChip mainName={task.main_name} className="mt-0.5" />}
       </td>
       <td className="px-4 py-3 align-top text-slate-300">

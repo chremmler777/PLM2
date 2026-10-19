@@ -321,6 +321,9 @@ function TaskRow({
           {task.owner_name}
         </span>
       )}
+      {/* R24: only who may act gets the buttons (a member, the coordinator
+          of a member-less department, an admin); the rest read who owes it. */}
+      {task.can_act !== false && (
       <div className="flex gap-2">
         <button
           onClick={onApprove}
@@ -347,7 +350,11 @@ function TaskRow({
           {t('wf.waive')}
         </button>
       </div>
+      )}
     </div>
+    {task.coordinator_hint && (
+      <p data-testid={`wf-coordinator-${task.id}`} className="mt-1.5 text-xs text-slate-400">{task.coordinator_hint}</p>
+    )}
     {approveBlocked && (
       <p id={`wf-approve-why-${task.id}`} data-testid={`wf-approve-why-${task.id}`}
         className="mt-1.5 text-xs text-amber-300">{approveBlocked}</p>

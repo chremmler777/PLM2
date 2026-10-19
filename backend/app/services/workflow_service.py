@@ -437,9 +437,11 @@ class WorkflowService:
         if actor is None:
             raise ValueError("Actor not found")
         if actor.effective_role != "admin" and not await WorkflowService.actor_in_department(
-                db, actor, task.department_id):
+                db, actor, task.department_id) and not await WorkflowService.coordinates_task(
+                db, task, actor):
             raise ValueError(
-                "Only members of the task's department (or an admin) may complete it")
+                "Only members of the task's department (or an admin) may complete it; "
+                "for a department with no member here the change's coordinator does")
 
         step = task.step
         # CAD-evidence gate applies to revision-scoped (ECN) instances only;
@@ -789,6 +791,172 @@ class WorkflowService:
         )
         return [d for (d,) in result.all()]
 
+    # ------------------------------------------------------------------
+    # Click-through R38 (R5, R18): a revision check workflow step owed by a
+    # department with no real member on the change is no dead end. The
+    # change's coordinator (change_people.coordinator: the lead who can
+    # act, else a Project Management member) acts for it, as on the release
+    # checklist (C7 fallback).
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def coordinated_change(db: AsyncSession, task: WfInstanceTask):
+        """The open change whose coordinator acts for this task, or None: a
+        revision-scoped instance whose revision an open change created, and
+        a task department nobody real belongs to on that change."""
+        from app.models.change import ChangeRequest, TERMINAL_STATUSES
+        from app.services.change_people import staffed_department_ids
+        inst = await db.get(WfInstance, task.instance_id)
+        if inst is None or inst.change_id is not None or inst.part_revision_id is None:
+            return None
+        rev = await db.get(PartRevision, inst.part_revision_id)
+        if rev is None or rev.originating_change_id is None:
+            return None
+        change = await db.get(ChangeRequest, rev.originating_change_id)
+        if change is None or change.status in TERMINAL_STATUSES:
+            return None
+        if task.department_id in await staffed_department_ids(db, change, [task.department_id]):
+            return None
+        return change
+
+    @staticmethod
+    async def coordinates_task(db: AsyncSession, task: WfInstanceTask, user) -> bool:
+        change = await WorkflowService.coordinated_change(db, task)
+        if change is None:
+            return False
+        from app.services.change_people import coordinates
+        return await coordinates(db, change, user)
+
+    @staticmethod
+    async def task_rights(db: AsyncSession, instance: WfInstance, user) -> dict:
+        """task id -> {can_act, coordinator_hint} for the open actionable
+        tasks of this instance (the backend rule of complete_task)."""
+        from app.models.workflow import Department
+        open_tasks = [t for t in instance.tasks
+                      if t.status == "active" and t.is_actionable]
+        if not open_tasks or user is None:
+            return {}
+        admin = user.effective_role == "admin"
+        mine = set(await WorkflowService.effective_department_ids(db, user))
+        out = {}
+        for t in open_tasks:
+            change = await WorkflowService.coordinated_change(db, t)
+            hint = None
+            if change is not None:
+                from app.services.change_people import coordinator_name, no_member_words
+                dept = await db.get(Department, t.department_id)
+                hint = no_member_words(dept.name if dept else None,
+                                       await coordinator_name(db, change))
+            can = admin or t.department_id in mine or (
+                change is not None and await WorkflowService.coordinates_task(db, t, user))
+            out[t.id] = {"can_act": bool(can), "coordinator_hint": hint}
+        return out
+
+    @staticmethod
+    async def get_coordinated_tasks(db: AsyncSession, user) -> list[dict]:
+        """The open check workflow steps this user coordinates (a member-less
+        department on a change they lead, or as Project Management where no
+        lead can act), shaped like get_my_tasks rows."""
+        from app.models.change import ChangeRequest, TERMINAL_STATUSES
+        from app.models.workflow import Department
+        from app.services.change_people import (
+            coordinates, coordinator_name, is_acting, no_member_words,
+            staffed_department_ids)
+        from app.services.meeting_service import MeetingService
+        if user is None or is_acting(user) or user.effective_role == "admin":
+            return []
+        is_pm = await MeetingService.user_is_pm_member(db, user)
+        mine = set(await WorkflowService.effective_department_ids(db, user))
+        q = (select(WfInstanceTask, ChangeRequest)
+             .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+             .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+             .join(ChangeRequest, ChangeRequest.id == PartRevision.originating_change_id)
+             .where(WfInstanceTask.status == "active",
+                    WfInstanceTask.is_actionable.is_(True),
+                    WfInstance.change_id.is_(None),
+                    WfInstance.status == "active",
+                    ChangeRequest.status.not_in(TERMINAL_STATUSES))
+             .options(selectinload(WfInstanceTask.instance)
+                      .selectinload(WfInstance.part_revision)
+                      .selectinload(PartRevision.part),
+                      selectinload(WfInstanceTask.step).selectinload(WfStep.stage),
+                      selectinload(WfInstanceTask.department)))
+        if mine:
+            q = q.where(WfInstanceTask.department_id.not_in(mine))
+        if not is_pm:
+            q = q.where(ChangeRequest.lead_id == user.id)
+        rows = (await db.execute(q)).all()
+        if not rows:
+            return []
+        by_change: dict = {}
+        for t, change in rows:
+            by_change.setdefault(change.id, (change, []))[1].append(t)
+        from app.services.project_team_service import TeamRoles
+        roles = TeamRoles(db, user.id)
+        out = []
+        for change, tasks in by_change.values():
+            if not await coordinates(db, change, user, is_pm_member=is_pm):
+                continue
+            staffed = await staffed_department_ids(
+                db, change, [t.department_id for t in tasks])
+            who = None
+            for t in tasks:
+                if t.department_id in staffed:
+                    continue
+                who = who or await coordinator_name(db, change)
+                row = await WorkflowService._my_task_row(t, roles, user.id)
+                row.update({"coordinated": True, "role": "main", "main_name": None,
+                            "change_id": change.id, "change_number": change.change_number,
+                            "hint": no_member_words(
+                                t.department.name if t.department else None, who)})
+                out.append(row)
+        return out
+
+    @staticmethod
+    async def _my_task_row(t: WfInstanceTask, roles, user_id: int) -> dict:
+        instance = t.instance
+        revision = instance.part_revision
+        part = revision.part
+        stage = t.step.stage if t.step else None
+        # A task the viewer took is theirs, backup or not.
+        role, main_name = await roles.role(part.project_id, t.department_id,
+                                           owned=t.owner_id == user_id)
+        return {
+            "task_id": t.id,
+            "instance_id": t.instance_id,
+            "status": t.status,
+            "is_actionable": t.is_actionable,
+            "rasic_letter": t.rasic_letter,
+            "department_name": t.department.name if t.department else "",
+            "step_name": t.step.step_name if t.step else "",
+            "stage_order": t.stage_order,
+            "stage_name": stage.name if stage else None,
+            "part_id": part.id,
+            "part_number": part.part_number,
+            "part_name": part.name,
+            "project_id": part.project_id,
+            "revision_id": revision.id,
+            "revision_name": revision.revision_name,
+            "instance_started_at": instance.started_at,
+            "owner_id": t.owner_id,
+            "owner_name": t.owner_name,
+            "accepted_at": t.accepted_at,
+            "due_date": t.due_date,
+            "overdue": t.overdue,
+            "mine": t.owner_id == user_id,
+            # Project team (spec 2026-09-25): "main" (counts) or "backup"
+            # (visible, actionable, not counted); main_name only set when
+            # this task's role is "backup".
+            "role": role,
+            "main_name": main_name if role == "backup" else None,
+        }
+
+    @staticmethod
+    def sort_my_tasks(results: list[dict]) -> list[dict]:
+        results.sort(key=lambda d: (
+            not d["mine"], not d["overdue"],
+            d["due_date"] is None, d["due_date"] or datetime.max, d["task_id"]))
+        return results
+
     @staticmethod
     async def get_my_tasks(
         db: AsyncSession,
@@ -831,49 +999,8 @@ class WorkflowService:
         from app.services.project_team_service import TeamRoles
         roles = TeamRoles(db, user_id)
 
-        results = []
-        for t in tasks:
-            instance = t.instance
-            revision = instance.part_revision
-            part = revision.part
-            stage = t.step.stage
-            # A task the viewer took is theirs, backup or not.
-            role, main_name = await roles.role(part.project_id, t.department_id,
-                                               owned=t.owner_id == user_id)
-            results.append({
-                "task_id": t.id,
-                "instance_id": t.instance_id,
-                "status": t.status,
-                "is_actionable": t.is_actionable,
-                "rasic_letter": t.rasic_letter,
-                "department_name": t.department.name if t.department else "",
-                "step_name": t.step.step_name if t.step else "",
-                "stage_order": t.stage_order,
-                "stage_name": stage.name if stage else None,
-                "part_id": part.id,
-                "part_number": part.part_number,
-                "part_name": part.name,
-                "project_id": part.project_id,
-                "revision_id": revision.id,
-                "revision_name": revision.revision_name,
-                "instance_started_at": instance.started_at,
-                "owner_id": t.owner_id,
-                "owner_name": t.owner_name,
-                "accepted_at": t.accepted_at,
-                "due_date": t.due_date,
-                "overdue": t.overdue,
-                "mine": t.owner_id == user_id,
-                # Project team (spec 2026-09-25): "main" (counts) or "backup"
-                # (visible, actionable, not counted); main_name only set when
-                # this task's role is "backup".
-                "role": role,
-                "main_name": main_name if role == "backup" else None,
-            })
-
-        results.sort(key=lambda d: (
-            not d["mine"], not d["overdue"],
-            d["due_date"] is None, d["due_date"] or datetime.max, d["task_id"]))
-        return results
+        results = [await WorkflowService._my_task_row(t, roles, user_id) for t in tasks]
+        return WorkflowService.sort_my_tasks(results)
 
     @staticmethod
     async def owning_open_change(db: AsyncSession, instance_id: int) -> str | None:

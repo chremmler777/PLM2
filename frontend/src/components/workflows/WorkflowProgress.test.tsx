@@ -39,3 +39,20 @@ describe('WorkflowProgress approve and 3D evidence', () => {
     expect((screen.getByTestId('wf-approve-5') as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+describe('WorkflowProgress rights (R24, R38)', () => {
+  afterEach(cleanup)
+  it('shows no Approve / Reject / Waive to a viewer the backend refuses', () => {
+    show(instance({}, task({ can_act: false })))
+    expect(screen.queryByTestId('wf-approve-5')).toBeNull()
+    expect(screen.queryByText('Reject')).toBeNull()
+  })
+
+  it('names who coordinates a department with no member, and gives the coordinator the buttons', () => {
+    show(instance({}, task({ can_act: true, department_name: 'Tool Engineer',
+      coordinator_hint: 'Tool Engineer has no member here: Holmes coordinates' })))
+    expect(screen.getByTestId('wf-coordinator-5').textContent).toBe(
+      'Tool Engineer has no member here: Holmes coordinates')
+    expect(screen.getByTestId('wf-approve-5')).toBeDefined()
+  })
+})
