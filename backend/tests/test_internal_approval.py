@@ -25,8 +25,8 @@ async def to_costing(session_factory, change_id, raised_by=2):
 @pytest.fixture(autouse=True)
 async def _admin_in_pm(session_factory, seed):
     """HARD #8 fallback (close-out A1-06): with no configured approver, a
-    real Project Manager member approves, no admin shortcut. The admin who
-    approves in these tests is one."""
+    Project Manager member approves; the admin is one and approves acting
+    as Project Management (pm_auth): its own rows do not count."""
     from tests.conftest import make_department_member
     await make_department_member(session_factory, seed["admin_id"], "Project Manager")
 

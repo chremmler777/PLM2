@@ -160,19 +160,25 @@ async def change_org_ids(session: AsyncSession, change_ids: Iterable[int]
 
 
 
-def _lead_acts(lead) -> bool:
-    """A lead who can coordinate: active and not an admin account (an admin
-    does not decide HARD #3 alone, hard3_blind)."""
-    return lead is not None and bool(lead.is_active) and lead.role != "admin"
+async def lead_can_act(session: AsyncSession, lead) -> bool:
+    """A lead who can coordinate: active, not an admin account (an admin
+    does not decide HARD #3 alone, hard3_blind), and able to write (A1-05:
+    an active PLM department; a viewer or a lead whose departments were all
+    retired cannot act, ChangeService._writers, the leadless_ids rule)."""
+    if lead is None or not lead.is_active or lead.role == "admin":
+        return False
+    from app.services.change_service import ChangeService
+    return bool(await ChangeService._writers(session, [lead]))
 
 
 async def coordinator(session: AsyncSession, change) -> tuple[Optional[int], str]:
     """Who coordinates a department with no real member here (R37): the
-    change lead (id, name), else Project Management (None, its name)."""
+    change lead (id, name) when the lead can act, else Project Management
+    (None, its name)."""
     if getattr(change, "lead_id", None) is not None:
         from app.models.entities import User
         lead = await session.get(User, change.lead_id)
-        if _lead_acts(lead):
+        if await lead_can_act(session, lead):
             return lead.id, lead.full_name or lead.username
     return None, "Project Management"
 

@@ -778,35 +778,58 @@ class ValidationService:
         return cm_switches.on("RELEASE_V2") and bool(row.limits_pending)
 
     @staticmethod
-    async def limits_confirmers(session: AsyncSession, change: ChangeRequest
+    async def limits_confirmers(session: AsyncSession, change: ChangeRequest,
+                                set_by: int | None = None
                                 ) -> tuple[bool, set[int]]:
-        """(quality_staffed, ids): who confirms a check's limits. Quality's
-        real members; with none on this change the lead (no lead: Project
-        Management), the R37 fallback of a department with no member."""
+        """(quality_staffed, ids): who confirms a check's limits, never
+        `set_by` (whoever set them). Quality's real members; with none on
+        this change (or Quality retired) the coordinator (the lead who can
+        act, change_people.coordinator) and Project Management's real
+        members, so a lead who measured for a member-less department is not
+        the only one left (A5-02: no deadlock on HARD #3)."""
         from app.services.change_people import (
-            department_members_of_change_org, staffed_department_ids,
+            coordinator, department_members_of_change_org, staffed_department_ids,
         )
         q = (await session.execute(select(Department.id).where(
-            Department.name == "Quality").limit(1))).scalar_one_or_none()
+            Department.name == "Quality", Department.is_active.is_(True))
+            .limit(1))).scalar_one_or_none()
         if q is not None and await staffed_department_ids(session, change, [q]):
-            return True, set(await department_members_of_change_org(
+            ids = set(await department_members_of_change_org(
                 session, change, [q], real_only=True))
-        lead = await session.get(User, change.lead_id) if change.lead_id else None
-        if lead is not None and lead.is_active and lead.role != "admin":
-            return False, {lead.id}
-        # no lead, or an admin account as lead (HARD #3: it does not decide
-        # alone): Project Management
+            ids.discard(set_by)
+            return True, ids
+        lead_id, _ = await coordinator(session, change)
         pm = (await session.execute(select(Department.id).where(
-            Department.name == "Project Manager").limit(1))).scalar_one_or_none()
-        return False, set(await department_members_of_change_org(
+            Department.name == "Project Manager", Department.is_active.is_(True))
+            .limit(1))).scalar_one_or_none()
+        ids = set(await department_members_of_change_org(
             session, change, [pm] if pm else [], real_only=True))
+        if lead_id is not None:
+            ids.add(lead_id)
+        ids.discard(set_by)
+        return False, ids
+
+    @staticmethod
+    async def _confirmers_words(session: AsyncSession, change: ChangeRequest,
+                                set_by: int | None) -> str:
+        """Who can confirm, in words, for a refusal (R5: name the unblocker)."""
+        staffed, ids = await ValidationService.limits_confirmers(session, change, set_by)
+        names = sorted(n for n in (await ValidationService._names(
+            session, list(ids))).values() if n)
+        if not names:
+            return ("nobody else here can confirm them: give Quality (or Project "
+                    "Management) a member")
+        who = ", ".join(names[:3]) + (f" (+{len(names) - 3})" if len(names) > 3 else "")
+        return (f"Quality confirms them: {who}" if staffed else
+                f"Quality has no member here: {who} confirm them")
 
     @staticmethod
     async def limits_confirm_refusal(session: AsyncSession, change: ChangeRequest,
                                      row, actor: User) -> str | None:
         """None when `actor` may confirm (or correct) the row's limits: a
-        Quality member (acts-as aware), else the lead / PM fallback; never
-        the person who set them, never a real admin alone (HARD #3)."""
+        Quality member (acts-as aware), else (Quality unstaffed) the lead who
+        can act or a Project Management member; never the person who set
+        them, never a real admin alone (HARD #3). A refusal names who can."""
         from app.services import cm_switches
         from app.services.change_people import hard3_blind, is_acting
         if not cm_switches.on("RELEASE_V2"):
@@ -814,22 +837,24 @@ class ValidationService:
         if row.lower_limit is None:
             return "The limits are set with the first measurement"
         if row.limits_set_by is not None and row.limits_set_by == actor.id:
-            return ("You set these limits: Quality confirms them (the department "
-                    "being judged does not set its own pass criterion alone)")
+            return ("You set these limits; the department being judged does not "
+                    "set its own pass criterion alone. " + await
+                    ValidationService._confirmers_words(session, change, row.limits_set_by))
         if hard3_blind(actor):
             return ("An admin confirms limits only acting as Quality (HARD #3: "
                     "no admin shortcut)")
         from app.services.workflow_service import WorkflowService
         mine = set(await WorkflowService.effective_department_ids(session, actor))
         q = (await session.execute(select(Department.id).where(
-            Department.name == "Quality").limit(1))).scalar_one_or_none()
+            Department.name == "Quality", Department.is_active.is_(True))
+            .limit(1))).scalar_one_or_none()
         if q is not None and q in mine:
             return None
-        staffed, ids = await ValidationService.limits_confirmers(session, change)
+        staffed, ids = await ValidationService.limits_confirmers(
+            session, change, row.limits_set_by)
         if not staffed and not is_acting(actor) and actor.id in ids:
             return None
-        return ("Quality confirms the limits (the lead or Project Management "
-                "only when Quality has no member here)")
+        return await ValidationService._confirmers_words(session, change, row.limits_set_by)
 
     @staticmethod
     async def confirm_limits(session: AsyncSession, change: ChangeRequest,

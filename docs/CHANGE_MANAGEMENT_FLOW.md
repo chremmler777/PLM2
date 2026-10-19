@@ -1429,7 +1429,9 @@ With `RELEASE_V2` a required department with no real member here
 (`change_people.staffed_department_ids`, e.g. Scheduling or Packaging in a
 small plant) is confirmed by the lead or a Project Management member
 (A5-03, the R37 fallback of release rows and validation checks); the task
-goes to the lead (no lead: Project Management) and the row reads
+goes to the lead (no lead, or a lead who cannot act: inactive, an admin
+account, read-only or with only retired departments: Project Management;
+`change_people.coordinator`) and the row reads
 "Scheduling has no member here: <lead name|Project Management>
 coordinates" (`change_people.no_member_words`). A member of another
 department, or PM for a staffed one, is refused.
@@ -1683,7 +1685,10 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   department being judged does not set its own pass criterion alone. The
   limits store their setter ("limits set by <measurer>"); a FAIL counts at
   once, a PASS counts only once a Quality member (never the setter, never
-  a real admin alone; no Quality member here: the lead, else PM) clicks
+  a real admin alone; no Quality member here, or Quality retired: the lead
+  who can act or a Project Management member, never the setter, so a lead
+  who measured for a member-less department is not left alone with it; a
+  refusal names who can confirm) clicks
   "Confirm limits" or corrects them with a source reference (the latest
   measurement is judged again against the corrected limits). Until then the
   release reads "still open: <check> (limits set by X: Quality confirms)",
