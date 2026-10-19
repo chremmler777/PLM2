@@ -146,6 +146,26 @@ OLD_LABELS: dict[str, str] = {
 # C7 (RELEASE_V2): rows whose 'done' needs a reference to a document.
 EVIDENCE_KEYS = frozenset({"customer_approval"})
 
+# Click-through R38 (RELEASE_V2, R4): rows whose words promise evidence take
+# it on 'done' (the reference rule of cm_rules.reference_refusal): key ->
+# (what is asked, an example). The process-stable row takes the measured Cm
+# instead (CM_KEYS); a measured row answers from validation (A5-09).
+DONE_REF_PROMPTS: dict[str, tuple[str, str]] = {
+    "customer_approval": ("The customer's approval (PSW / ISIR reference or the "
+                          "file name of the approval)", "PSW 886.197-D 2026-10-12"),
+    "parts_measured": ("The measurement report (number or file name)",
+                       "measurement report MR-2026-118"),
+    "process_stable_apqp": ("The measured Cm, or the SPC report that shows Cm "
+                            "> 1.67", "SPC report 2026-55"),
+    "erp_updated": ("The ERP reference (routing, BOM or material number)",
+                    "routing 4711 rev 3, BOM 886.197-D"),
+    "customer_informed": ("The filed customer mail or its reference",
+                          "mail to Brose 2026-10-20: SOP KW 45"),
+}
+# The row answered from the linked revisions' files (revision_hints): no
+# 'done' while a resulting revision has neither a drawing nor a 3D file.
+DRAWING_KEY = "drawing_released"
+
 # The answers that carry a value (no column of their own: the value is
 # written into the note in these words and into the changelog as data).
 CYCLE_TIME_KEY = "cycle_time_tool"

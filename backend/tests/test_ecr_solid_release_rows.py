@@ -26,7 +26,7 @@ async def test_negative_pm_does_not_tick_an_owned_row(client, rel_world, admin_a
     # Scheduling has no member): PM answers, so nothing is stuck
     assert rows["packaging_updated"]["can_answer"] is True
     assert rows["erp_updated"]["can_answer"] is True
-    res = await _check(client, pm, cid, "erp_updated", "done")
+    res = await _check(client, pm, cid, "erp_updated", "done", "routing 4711 rev 3")
     assert res.status_code == 200, res.text
     dev = await _auth(client, "dev")
     res = await _check(client, dev, cid, "index_updated", "done")
@@ -103,7 +103,7 @@ async def test_admin_only_department_falls_back_to_pm(
     assert not any(t["kind"] == "release_check" and t["change_id"] == cid
                    and t["department_id"] == rel_world["depts"]["Development"]
                    for t in tasks)
-    res = await _check(client, pm, cid, "erp_updated", "done")
+    res = await _check(client, pm, cid, "erp_updated", "done", "routing 4711 rev 3")
     assert res.status_code == 200, res.text
 
 
@@ -154,3 +154,69 @@ async def test_switch_off_na_needs_only_a_note(client, rel_world, monkeypatch):
     apqp = await _auth(client, "apqp")
     res = await _check(client, apqp, rel_world["change_id"], "customer_approval", "na", "x")
     assert res.status_code == 200, res.text
+
+
+# --- click-through R38 (R4): rows whose words promise evidence demand it ----
+
+@pytest.mark.parametrize("key,who,ref", [
+    ("parts_measured", "apqp", "measurement report MR-2026-118"),
+    ("customer_informed", "pm", "mail to Brose 2026-10-20: SOP KW 45"),
+    ("erp_updated", "pm", "routing 4711 rev 3, BOM 886.197-D"),
+])
+async def test_evidence_rows_refuse_a_bare_done(client, rel_world, key, who, ref):
+    cid = rel_world["change_id"]
+    auth = await _auth(client, who)
+    for note in (None, "ok", "done"):
+        res = await _check(client, auth, cid, key, "done", note)
+        assert res.status_code == 400, (key, note, res.text)
+        assert "e.g." in res.json()["detail"]
+    st = await _state(client, auth, cid)
+    row = {c["key"]: c for c in st["checks"]}[key]
+    assert row["needs_ref"] is True and row["ref_prompt"]
+    res = await _check(client, auth, cid, key, "done", ref)
+    assert res.status_code == 200, res.text
+
+
+async def test_cm_row_takes_the_value_or_the_spc_report(client, rel_world):
+    cid = rel_world["change_id"]
+    apqp = await _auth(client, "apqp")
+    res = await _check(client, apqp, cid, "process_stable_apqp", "done")
+    assert res.status_code == 400 and "SPC" in res.json()["detail"]
+    res = await _check(client, apqp, cid, "process_stable_apqp", "done", "SPC report 2026-55")
+    assert res.status_code == 200, res.text
+    res = await _check(client, apqp, cid, "process_stable_apqp", "open")
+    res = await _check(client, apqp, cid, "process_stable_apqp", "done", value=1.85)
+    assert res.status_code == 200, res.text
+
+
+async def test_drawing_row_refuses_done_while_the_revision_has_no_files(
+        client, rel_world, part, session_factory, seed):
+    from app.models.change import ChangeImpactedItem
+    from app.models.part import RevisionFile
+    cid = rel_world["change_id"]
+    async with session_factory() as s:
+        s.add(ChangeImpactedItem(change_id=cid, part_id=part["part_id"],
+                                 resulting_revision_id=part["revision_id"],
+                                 created_by=seed["admin_id"]))
+        await s.commit()
+    dev = await _auth(client, "dev")
+    row = {c["key"]: c for c in (await _state(client, dev, cid))["checks"]}["drawing_released"]
+    assert "no drawing or 3D file" in (row["done_refusal"] or "")
+    res = await _check(client, dev, cid, "drawing_released", "done")
+    assert res.status_code == 400 and "no drawing or 3D file" in res.json()["detail"]
+    async with session_factory() as s:
+        s.add(RevisionFile(revision_id=part["revision_id"], filename="d.pdf",
+                           file_path="/tmp/d.pdf", file_type="drawing", file_size=1,
+                           mime_type="application/pdf", file_hash="0" * 64,
+                           uploaded_by=seed["admin_id"]))
+        await s.commit()
+    res = await _check(client, dev, cid, "drawing_released", "done")
+    assert res.status_code == 200, res.text
+
+
+async def test_switch_off_takes_the_bare_evidence_rows(client, rel_world, monkeypatch):
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
+    cid = rel_world["change_id"]
+    pm = await _auth(client, "pm")
+    for key in ("parts_measured", "erp_updated", "customer_informed", "process_stable_apqp"):
+        assert (await _check(client, pm, cid, key, "done")).status_code == 200, key

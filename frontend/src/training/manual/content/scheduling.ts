@@ -28,7 +28,7 @@ export const schedulingChapter: ContentChapter = {
               ['Costing to quoted', 'You may edit the quote plan with PM and Sales.'],
               ['Approved', 'You decide the bank build plan, refine the detailed plan and confirm the timing.'],
               ['In implementation', 'You report progress on your own blocks. A date move needs a reason.'],
-              ['In validation', 'You tick "ERP, BOM and routing updated" and "Old stock handled as agreed (bank consumed or scrapped)".'],
+              ['In validation', 'You mark "ERP, BOM and routing updated" done with the ERP reference (routing or BOM number) and "Old stock handled as agreed (bank consumed or scrapped)".'],
             ],
           },
         },
@@ -167,7 +167,7 @@ export const schedulingChapter: ContentChapter = {
         },
         {
           points: [
-            ['"ERP, BOM and routing updated"', 'The new index, the BOM and the routing are live in ERP.'],
+            ['"ERP, BOM and routing updated"', 'The new index, the BOM and the routing are live in ERP; "Done" names the ERP reference (routing or BOM number).'],
             ['"Old stock handled as agreed (bank consumed or scrapped)"', 'What the bank build or scrap plan promised has happened.'],
           ],
         },

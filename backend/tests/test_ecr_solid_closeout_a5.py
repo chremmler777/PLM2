@@ -467,6 +467,27 @@ async def test_a5_10_negative_part_measured_needs_the_measuring_report(client, f
     assert res.status_code == 201 and res.json()["status"] == "passed", res.text
 
 
+async def test_r38_negative_revision_bump_names_the_raised_index(client, val):
+    """Click-through R38 (R4): 'Revision levels raised per customer statement
+    and verified' passes with the index that shows it, not a bare Pass."""
+    from tests.test_validation_checks import _auth as _vauth
+    dev = await _vauth(client, val, "Development")
+    body = {"department_id": val["dept"]["Development"], "check_key": "revision_bump",
+            "status": "passed"}
+    for note in (None, "ok", "verified"):
+        res = await client.post(_url(val, "/checks"), headers=dev,
+                                json={**body, **({"note": note} if note else {})})
+        assert res.status_code == 400, res.text                  # NEGATIVE
+        assert "index" in res.json()["detail"]
+    state = (await client.get(_url(val, "/state"), headers=dev)).json()
+    chk = next(c for d in state["departments"] if d["department_name"] == "Development"
+               for c in d["checks"] if c["check_key"] == "revision_bump")
+    assert chk["pass_needs_report"] is True and "index" in chk["pass_ref_prompt"]
+    res = await client.post(_url(val, "/checks"), headers=dev,
+                            json={**body, "note": "886.197 index D in drawing and PLM"})
+    assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+
+
 # --- A5-11 fix and concession edges -----------------------------------------
 
 async def test_a5_11_a_weekend_retest_moves_to_the_next_working_day(client, fix):

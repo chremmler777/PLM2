@@ -79,6 +79,38 @@ describe('ReleaseChecklist', () => {
     expect((screen.getByTestId('release-check-customer_approval-confirm') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('R38: a row that promises a report asks for it by name; the Cm row takes the value instead', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[9]} canManage={false} editable
+      checks={[
+        check({ key: 'parts_measured', label: 'Measurements confirmed', department_id: 9, department_name: 'APQP',
+          needs_ref: true, ref_prompt: 'The measurement report (number or file name)' }),
+        check({ key: 'process_stable_apqp', label: 'Process stable', department_id: 9, department_name: 'APQP',
+          value_kind: 'cm', needs_ref: true, ref_prompt: 'The measured Cm, or the SPC report' }),
+      ]} />)
+    fireEvent.click(screen.getByTestId('release-check-parts_measured-done'))
+    const note = screen.getByTestId('release-check-parts_measured-note') as HTMLInputElement
+    expect(note.placeholder).toBe('The measurement report (number or file name) (required)')
+    expect((screen.getByTestId('release-check-parts_measured-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(note, { target: { value: 'MR-2026-118' } })
+    expect((screen.getByTestId('release-check-parts_measured-confirm') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('release-check-process_stable_apqp-done'))
+    expect((screen.getByTestId('release-check-process_stable_apqp-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('release-check-process_stable_apqp-value'), { target: { value: '1.85' } })
+    expect((screen.getByTestId('release-check-process_stable_apqp-confirm') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('R38: the drawing row refuses done while the revision shows no files', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[9]} canManage={false} editable
+      checks={[check({ key: 'drawing_released', label: 'Drawing and 3D data released', department_id: 9,
+        department_name: 'Development', hint: '20-9901-001 0: no files yet',
+        done_refusal: 'Drawing and 3D data released: 20-9901-001 0 has no drawing or 3D file on the revision yet.' })]} />)
+    fireEvent.click(screen.getByTestId('release-check-drawing_released-done'))
+    expect(screen.getByTestId('release-check-drawing_released-refused').textContent).toContain('no drawing or 3D file')
+    expect((screen.getByTestId('release-check-drawing_released-confirm') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('release-check-drawing_released-na'))
+    expect(screen.queryByTestId('release-check-drawing_released-refused')).toBeNull()
+  })
+
   it('A5-09: an unchanged cycle time is refused while the measurement is outside its limits', () => {
     wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[4]} canManage={false} editable
       checks={[check({ key: 'cycle_time_tool', label: 'Cycle time', value_kind: 'cycle_time', hint: null,

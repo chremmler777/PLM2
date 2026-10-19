@@ -325,8 +325,10 @@ function CheckRow({
         )}
         {reportNeeded && !retest && (
           <input value={note} onChange={(e) => setNote(e.target.value)}
-            data-testid={`validation-report-${id}`} aria-label="Measuring report"
-            placeholder="Measuring report (number or file name, e.g. MR-2026-118)"
+            data-testid={`validation-report-${id}`} aria-label={check.pass_ref_prompt ?? 'Measuring report'}
+            placeholder={check.pass_ref_prompt
+              ? `${check.pass_ref_prompt} (required)`
+              : 'Measuring report (number or file name, e.g. MR-2026-118)'}
             className={`w-full ${fieldCls}`} />
         )}
         <div className="flex items-center gap-2">

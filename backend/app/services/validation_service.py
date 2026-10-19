@@ -337,6 +337,11 @@ class ValidationService:
                     # A5-10 b: 'passed' names the measuring report
                     "pass_needs_report": ValidationService.pass_needs_report(
                         key, catalog.computed_unit(key, dept_name)),
+                    # what that reference is (the field's words)
+                    "pass_ref_prompt": (ValidationService.REPORT_PROMPTS[key][0]
+                                        if ValidationService.pass_needs_report(
+                                            key, catalog.computed_unit(key, dept_name))
+                                        else None),
                 }
                 if key == catalog.CYCLE_TIME_KEY:
                     # The costing never stated an absolute cycle time, only
@@ -505,8 +510,7 @@ class ValidationService:
             # computed passes with the measuring report, not a plain tick
             from app.services.cm_rules import reference_refusal
             why = reference_refusal(spec.get("note"),
-                                    "The measuring report (number or file name)",
-                                    "measuring report MR-2026-118")
+                                    *ValidationService.REPORT_PROMPTS[check_key])
             if why:
                 raise ValidationError(why)
         value = spec.get("value")
@@ -762,7 +766,17 @@ class ValidationService:
 
     #: A5-10 b: the plain dimension check of Tool, Manufacturing and
     #: Process Engineer ('Part measured'), passed with the report
-    REPORT_KEYS = frozenset({"measured"})
+    #: Click-through R38 (R4): Development's 'Revision levels raised per
+    #: customer statement and verified' passes with the index that shows it.
+    #: key -> (what is asked, an example)
+    REPORT_PROMPTS = {
+        "measured": ("The measuring report (number or file name)",
+                     "measuring report MR-2026-118"),
+        "revision_bump": ("The raised index that shows it (drawing or PLM "
+                          "revision, per the customer statement)",
+                          "886.197 index D in drawing and PLM"),
+    }
+    REPORT_KEYS = frozenset(REPORT_PROMPTS)
 
     @staticmethod
     def pass_needs_report(check_key: str, computed) -> bool:

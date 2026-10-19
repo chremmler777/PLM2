@@ -29,8 +29,13 @@ export interface ReleaseCheck {
   retired?: boolean
   /** C7: whether this viewer may answer the row (the backend's rule). */
   can_answer?: boolean | null
-  /** C7: 'done' needs a reference (the customer's approval). */
+  /** C7 + R38: 'done' needs a reference (the customer's approval, the
+   *  measurement report, the ERP reference, the customer mail, ...). */
   needs_ref?: boolean
+  /** What that reference is (the field's words), e.g. "The measurement report". */
+  ref_prompt?: string | null
+  /** Why 'done' is refused right now (the drawing row without files). */
+  done_refusal?: string | null
   /** C7: on a customer change 'not applicable' names the customer's waiver. */
   na_needs_ref?: boolean
   /** C7: the owner department has no member here: PM or the lead answer. */

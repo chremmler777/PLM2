@@ -100,6 +100,20 @@ describe('ValidationPanel', () => {
     }))
   })
 
+  it('R38: the revision row passes only with the raised index, asked by name', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [check({ check_key: 'revision_bump', pass_needs_report: true,
+        pass_ref_prompt: 'The raised index that shows it' })] }],
+    }) as never)
+    render_()
+    const pass = await screen.findByTestId('validation-pass-4-revision_bump') as HTMLButtonElement
+    expect(pass.disabled).toBe(true)
+    const field = screen.getByTestId('validation-report-4-revision_bump') as HTMLInputElement
+    expect(field.placeholder).toBe('The raised index that shows it (required)')
+    fireEvent.change(field, { target: { value: '886.197 index D' } })
+    expect(pass.disabled).toBe(false)
+  })
+
   it('refuses an unreadable measurement instead of passing without it', async () => {
     vi.mocked(changesApi.validationState).mockResolvedValue(state({
       departments: [{ department_id: 4, checks: [check({ check_key: 'cycle_time' })] }],

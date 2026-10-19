@@ -152,6 +152,10 @@ async def _check(client, auth, val, dept, key, status="passed", **kw):
             and cm_switches.RELEASE_V2:
         # A5-10 b: a plain 'Part measured' passes with the measuring report
         kw = {**kw, "note": "measuring report MR-2026-118"}
+    if key == "revision_bump" and status == "passed" and not kw.get("note") \
+            and cm_switches.RELEASE_V2:
+        # R38: the raised index is named (drawing / PLM revision)
+        kw = {**kw, "note": "886.197 index D in drawing and PLM"}
     return await client.post(_url(val, "/checks"), headers=auth, json={
         "department_id": val["dept"][dept], "check_key": key,
         "status": status, **kw})

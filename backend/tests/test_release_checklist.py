@@ -80,6 +80,13 @@ def _answer(key):
     """The extra fields a plain 'done' needs on this item."""
     if key == "customer_approval":      # C7: a reference, not a tick
         return {"note": "PSW 886.197-D 2026-10-12"}
+    # R38 (R4): the rows whose words promise evidence name it
+    refs = {"parts_measured": "measurement report MR-2026-118",
+            "process_stable_apqp": "SPC report 2026-55",
+            "erp_updated": "routing 4711 rev 3",
+            "customer_informed": "mail to Brose 2026-10-20"}
+    if key in refs:
+        return {"note": refs[key]}
     return {"outcome": "unchanged"} if key == "cycle_time_tool" else {}
 
 

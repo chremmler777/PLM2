@@ -303,7 +303,7 @@ export const engineeringChapter: ContentChapter = {
             rows: [
               ['Development', '"Part index / revision level updated in drawing and PLM", "Drawing and 3D data released and distributed", "Spare and service parts considered".'],
               ['Tool Engineer', '"Tool and equipment data updated (tool card, equipment list)", "Part weight measured and recorded", "Cycle time: changed (new value entered) or confirmed unchanged": pick "Changed" and enter the new seconds, or "Unchanged". The row shows the cycle time you measured in validation.'],
-              ['APQP', '"Process stable: SPC Cm > 1.67" (Cm optional, above 1.67), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file", "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)" ("Done" names the PSW / ISIR reference or the approval file), "Control plan / inspection plan updated".'],
+              ['APQP', '"Process stable: SPC Cm > 1.67" ("Done" takes the measured Cm, above 1.67, or the SPC report), "Surface quality confirmed", "Technical quality confirmed", "Measurements confirmed, measurement report on file" ("Done" names the report), "PPAP / initial sample documentation complete, customer approval received (ISIR / PSW)" ("Done" names the PSW / ISIR reference or the approval file), "Control plan / inspection plan updated".'],
               ['Packaging Engineer', '"Packaging instruction updated".'],
             ],
           },

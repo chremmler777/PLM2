@@ -85,6 +85,66 @@ class ReleaseService:
                 and cm_switches.on("RELEASE_V2"))
 
     @staticmethod
+    def done_ref_prompt(key: str, measured: bool) -> Optional[tuple[str, str]]:
+        """RELEASE_V2: (what, example) a 'done' on this row names, or None.
+        A measured row answers from validation instead (A5-09)."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2") or measured:
+            return None
+        return catalog.DONE_REF_PROMPTS.get(key)
+
+    @staticmethod
+    async def files_missing(session, change) -> list[str]:
+        """'P/N rev' of each resulting revision with neither a drawing nor a
+        3D file on file (the drawing row's evidence)."""
+        from app.models.part import Part, PartRevision, RevisionFile
+        from app.models.change import ChangeImpactedItem
+        rev_ids = [r for (r,) in (await session.execute(
+            select(ChangeImpactedItem.resulting_revision_id).where(
+                ChangeImpactedItem.change_id == change.id,
+                ChangeImpactedItem.resulting_revision_id.is_not(None)))).all()]
+        if not rev_ids:
+            return []
+        have = {r for (r,) in (await session.execute(
+            select(RevisionFile.revision_id).where(
+                RevisionFile.revision_id.in_(rev_ids),
+                RevisionFile.is_deleted.is_(False),
+                RevisionFile.file_type.in_(("drawing", "cad"))))).all()}
+        out = []
+        for part_number, rev_name, rev_id in (await session.execute(
+                select(Part.part_number, PartRevision.revision_name, PartRevision.id)
+                .join(Part, Part.id == PartRevision.part_id)
+                .where(PartRevision.id.in_(rev_ids)).order_by(Part.part_number))).all():
+            if rev_id not in have:
+                out.append(f"{part_number} {rev_name}")
+        return out
+
+    @staticmethod
+    def drawing_refusal(missing: list[str]) -> Optional[str]:
+        if not missing:
+            return None
+        return ("Drawing and 3D data released: " + ", ".join(missing)
+                + (" has" if len(missing) == 1 else " have")
+                + " no drawing or 3D file on the revision yet. Upload them to the "
+                "revision first, or mark the row not applicable with the reason")
+
+    @staticmethod
+    async def done_refusal(session, change, key: str, note: Optional[str],
+                           value: Optional[float], measured: bool) -> Optional[str]:
+        """Why 'done' is refused on this row (RELEASE_V2), or None."""
+        from app.services import cm_switches
+        if not cm_switches.on("RELEASE_V2"):
+            return None
+        if key == catalog.DRAWING_KEY:
+            return ReleaseService.drawing_refusal(
+                await ReleaseService.files_missing(session, change))
+        prompt = ReleaseService.done_ref_prompt(key, measured)
+        if prompt is None or (key in catalog.CM_KEYS and value is not None):
+            return None
+        from app.services.cm_rules import reference_refusal
+        return reference_refusal(note, *prompt)
+
+    @staticmethod
     async def unstaffed_department_ids(session, change, rows) -> set:
         """Owner departments of these rows that PM or the lead answer for
         (RELEASE_V2): no real member in the change's organization."""
@@ -210,16 +270,7 @@ class ReleaseService:
         note = (note or "").strip() or None
         if status == "na" and not note:
             raise ChangeError("'Not applicable' needs a note saying why")
-        if status == "done" and key in catalog.EVIDENCE_KEYS:
-            from app.services import cm_switches
-            if cm_switches.on("RELEASE_V2"):
-                # C7: the customer's approval is a document, not a tick
-                from app.services.cm_rules import reference_refusal
-                why = reference_refusal(
-                    note, "The customer's approval (PSW / ISIR reference or the "
-                          "file name of the approval)", "PSW 886.197-D 2026-10-12")
-                if why:
-                    raise ChangeError(why)
+        measured = (await ReleaseService.measured_rows(session, change)).get(key)
         if status == "na" and ReleaseService.na_needs_ref(change, key):
             # C7: on a customer change 'not applicable' is the customer's
             # waiver of the approval, which is a document too
@@ -229,7 +280,6 @@ class ReleaseService:
                       "or document reference)", "customer mail 2026-10-12 PPAP waived")
             if why:
                 raise ChangeError(why)
-        measured = (await ReleaseService.measured_rows(session, change)).get(key)
         if measured is not None:
             # A5-09 (RELEASE_V2, R4): a measured row answers from the
             # validation measurement, not from a free word
@@ -278,6 +328,13 @@ class ReleaseService:
                 "here" if cm_switches.on("RELEASE_V2") else
                 "Only the owner department, Project Management, the change "
                 "lead or an admin may answer this item")
+        if status == "done":
+            # C7 + click-through R38 (R4): a row whose words promise evidence
+            # names it; the drawing row needs the files on the revision
+            why = await ReleaseService.done_refusal(
+                session, change, key, note, value, measured is not None)
+            if why:
+                raise ChangeError(why)
         row = await ReleaseService._row_for_write(session, change, key)
         old = row.status
         row.status = status
@@ -477,6 +534,12 @@ class ReleaseService:
         measured = await ReleaseService.measured_rows(session, change)
         from app.services.change_people import coordinator_name, no_member_words
         coordinator = await coordinator_name(session, change) if unstaffed else None
+        prompts = {r.check_key: ReleaseService.done_ref_prompt(
+            r.check_key, r.check_key in measured) for r in rows}
+        from app.services import cm_switches
+        drawing_why = (ReleaseService.drawing_refusal(
+            await ReleaseService.files_missing(session, change))
+            if cm_switches.on("RELEASE_V2") else None)
         return {
             "checks": [{
                 "key": r.check_key,
@@ -495,8 +558,16 @@ class ReleaseService:
                 "retired": r.check_key in retired,
                 # the backend rule for this viewer (None: not asked)
                 "can_answer": answer.get(r.check_key),
-                # C7: 'done' needs a reference (the customer's approval)
-                "needs_ref": r.check_key in catalog.EVIDENCE_KEYS,
+                # C7 + R38: 'done' needs a reference (the customer's
+                # approval, the measurement report, the ERP reference, ...);
+                # ref_prompt says what (the field's placeholder)
+                "needs_ref": (r.check_key in catalog.EVIDENCE_KEYS
+                              or prompts.get(r.check_key) is not None),
+                "ref_prompt": (prompts[r.check_key][0]
+                               if prompts.get(r.check_key) else None),
+                # the drawing row: no 'done' while a revision has no files
+                "done_refusal": (drawing_why if r.check_key == catalog.DRAWING_KEY
+                                 else None),
                 # ... and on a customer change 'not applicable' names the
                 # customer's waiver
                 "na_needs_ref": ReleaseService.na_needs_ref(change, r.check_key),

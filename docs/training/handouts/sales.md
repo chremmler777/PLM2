@@ -14,7 +14,7 @@ For Sales. One page for the session and the desk; the full chapter is in PLM2 un
 | Quoted | "+ Record round"; "New version" with what changed; "Customer accepted" with the release deadline, or "Customer declined" | "Offer", "Negotiation" |
 | Timing | "Confirm timing" for Sales; "Publish plan to customer" once validated and the bank build mode is set | "Timing" |
 | Implementing | Tell the customer about escalated deviations (one escalation per group) | "Timing" |
-| Validation | "Record customer decision" on an issue; "Quote the fix" if the customer pays; tick "Customer informed of the implementation date / first shipment" | "Release" |
+| Validation | "Record customer decision" on an issue; "Quote the fix" if the customer pays; mark "Customer informed of the implementation date / first shipment" done with the customer mail or its reference | "Release" |
 
 ## Rules to remember
 

@@ -1555,6 +1555,8 @@ export interface ValidationCheck {
   retired?: boolean;
   /** A5-10 b: a plain 'Part measured' passes with the measuring report. */
   pass_needs_report?: boolean;
+  /** R38: what that reference is, e.g. "The raised index that shows it". */
+  pass_ref_prompt?: string | null;
   /** ECR-solid §10: computed from measurements against fixed limits. */
   computed?: boolean;
   unit_short?: string | null;

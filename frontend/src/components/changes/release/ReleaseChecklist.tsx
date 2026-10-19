@@ -90,7 +90,12 @@ function CheckRow({ changeId, check, canEdit }: {
     : null
   const cmLow = kind === 'cm' && read.value !== null && extra === null
   // C7: the customer's approval is a document: 'done' names it
+  // R38 (R4): the measurement report, the ERP reference, the customer mail;
+  // the process-stable row takes the measured Cm instead of the SPC report
   const refNeeded = editing === 'done' && !!check.needs_ref
+    && !(kind === 'cm' && read.value !== null)
+  // the drawing row: no 'done' while a revision has no drawing or 3D file
+  const doneRefused = editing === 'done' ? check.done_refusal ?? null : null
   // ... and on a customer change 'not applicable' is the customer's waiver
   const waiverNeeded = editing === 'na' && !!check.na_needs_ref
   // the backend's reference rule (cm_rules.reference_refusal), shared
@@ -108,7 +113,7 @@ function CheckRow({ changeId, check, canEdit }: {
   const naReasonOk = !measuredRow || refOk
   const canConfirm = !save.isPending && !measuredWhy && (editing === 'na'
     ? !!note.trim() && (!waiverNeeded || refOk) && naReasonOk
-    : extra !== null && (!refNeeded || refOk))
+    : extra !== null && (!refNeeded || refOk) && !doneRefused)
   const confirmLabel = editing === 'na' ? 'Mark not applicable'
     : kind === 'cycle_time' ? (outcome === 'changed' ? 'Save new cycle time' : 'Confirm unchanged')
     : 'Mark done'
@@ -198,9 +203,12 @@ function CheckRow({ changeId, check, canEdit }: {
             onChange={(e) => setNote(e.target.value)}
             placeholder={waiverNeeded ? t('release.waiverRef')
               : editing === 'na' ? 'Why does this not apply? (required)'
-              : refNeeded ? 'PSW / ISIR reference or the file name of the approval (required)'
+              : refNeeded ? `${check.ref_prompt ?? 'PSW / ISIR reference or the file name of the approval'} (required)`
               : check.measurement ? `Measured in validation: ${check.measurement}` : 'Note (optional)'}
             className={`${inputCls} min-w-0 flex-1`} />
+          {doneRefused && (
+            <span data-testid={`release-check-${check.key}-refused`} className="text-[11px] text-amber-300">{doneRefused}</span>
+          )}
           {measuredWhy && (
             <span data-testid={`release-check-${check.key}-why`} className="text-[11px] text-amber-300">{measuredWhy}</span>
           )}
