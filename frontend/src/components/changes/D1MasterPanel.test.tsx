@@ -423,9 +423,10 @@ describe('SummationView', () => {
     await waitFor(() => expect(
       screen.getByTestId('summation-dept-positions-5').textContent).toBe('6,000.00 EUR'));
     expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6,043.00 EUR');
-    expect(screen.getByTestId('summation-total').textContent).toBe('43.00 EUR');
+    // one total; the cost lines and the positions are its parts (R37)
+    expect(screen.getByTestId('summation-total').textContent).toBe('6,043.00 EUR');
+    expect(screen.getByTestId('summation-lines-part').textContent).toBe('43.00 EUR');
     expect(screen.getByTestId('summation-positions-total').textContent).toBe('6,000.00 EUR');
-    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6,043.00 EUR');
     // The chosen vendor is named — it is the price the total is built on.
     expect((await screen.findByTestId('summation-position-vendor-3')).textContent).toContain('Vendor A');
   });

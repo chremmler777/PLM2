@@ -211,13 +211,14 @@ describe('SummationView totals come from the backend, counted once', () => {
   });
   afterEach(cleanup);
 
-  it('shows 13,629.50 USD including the positions, and the positions as a part of it', async () => {
+  it('shows one total, 13,629.50 USD, and the positions as a part of it (R37)', async () => {
     wrap(<SummationView changeId={3} status="closed" />);
-    expect((await screen.findByTestId('summation-grand-with-positions')).textContent)
-      .toBe('13,629.50 USD');
-    // the cost lines alone: nothing beyond the positions
-    expect(screen.getByTestId('summation-total').textContent).toBe('0.00 USD');
+    expect((await screen.findByTestId('summation-total')).textContent).toBe('13,629.50 USD');
     expect(screen.getByTestId('summation-positions-total').textContent).toBe('13,629.50 USD');
+    // negative: no second "total" of 0.00 for cost lines that booked nothing
+    expect(screen.queryByTestId('summation-lines-part')).toBeNull();
+    expect(screen.queryByTestId('summation-grand-with-positions')).toBeNull();
+    expect(screen.queryByText(/Total cost lines/)).toBeNull();
   });
 
   it('keeps the department total the backend row total; positions are a part of it', async () => {

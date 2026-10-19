@@ -864,7 +864,10 @@ Switch `ASSESSMENT_V2` (migration 130).
   without a Sales owner every Sales member), unless they closed it
   themselves. The quote task is theirs from then on.
 - **Internal approval card** (HARD #8 kept: an engineering approver, never
-  the raiser): the cost (the summation) with a **"Tool cost ESTIMATE"**
+  the raiser): the cost (the summation: one bold *Total*, the grand total;
+  with cost positions, *of which cost lines* (only when not zero) and *of
+  which cost positions* read as its parts, never a second total of 0.00,
+  R37 polish 2026-10-19) with a **"Tool cost ESTIMATE"**
   banner while any external line is priced on an estimate, and the case,
   nothing preselected: **why** (`internal_rationale`: saving / quality /
   capacity / safety / maintenance / other) always; with money also the

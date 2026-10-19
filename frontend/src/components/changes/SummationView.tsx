@@ -238,34 +238,28 @@ export default function SummationView({
             <tr><td>{t('one_time')} ({t('external')})</td><td className="text-right tabular-nums">{money(tot.one_time_external)}</td></tr>
             <tr><td>{t('lifecycle')} ({t('internal')})</td><td className="text-right tabular-nums">{money(tot.lifecycle_internal)}</td></tr>
             <tr><td>{t('lifecycle')} ({t('external')})</td><td className="text-right tabular-nums">{money(tot.lifecycle_external)}</td></tr>
-            {hasPositions ? (
-              <>
-                {/* The four rows above hold everything; below they split into
-                    what the cost lines booked and what the positions did. */}
-                <tr className="border-t border-slate-600 font-semibold">
-                  <td>{t('summation.costLines')}</td>
-                  <td className="text-right tabular-nums" data-testid="summation-total">
-                    {money(costLinesTotal)}
-                  </td>
-                </tr>
-                <tr>
-                  <td>{t('costpos.title')}</td>
-                  <td className="text-right tabular-nums" data-testid="summation-positions-total">
-                    {money(positionsTotal)}
-                  </td>
-                </tr>
-                <tr className="border-t border-slate-600 font-semibold">
-                  <td>{t('summation.withPositions')}</td>
-                  <td className="text-right tabular-nums" data-testid="summation-grand-with-positions">
-                    {money(tot.grand_total)}
-                  </td>
-                </tr>
-              </>
-            ) : (
-              <tr className="border-t border-slate-600 font-semibold">
-                <td>{t('total')}</td>
-                <td className="text-right tabular-nums" data-testid="summation-total">
-                  {money(tot.grand_total)}
+            {/* One total (R37): the four rows above hold everything. With
+                positions, what they and the cost lines contributed reads as
+                parts of it, never as a second "total" of 0.00. */}
+            <tr className="border-t border-slate-600 font-semibold">
+              <td>{t('total')}</td>
+              <td className="text-right tabular-nums" data-testid="summation-total">
+                {money(tot.grand_total)}
+              </td>
+            </tr>
+            {hasPositions && Math.abs(costLinesTotal) > 0.004 && (
+              <tr className="text-xs text-slate-400">
+                <td className="pl-3">{t('summation.ofLines')}</td>
+                <td className="text-right tabular-nums" data-testid="summation-lines-part">
+                  {money(costLinesTotal)}
+                </td>
+              </tr>
+            )}
+            {hasPositions && (
+              <tr className="text-xs text-slate-400">
+                <td className="pl-3">{t('summation.ofPositions')}</td>
+                <td className="text-right tabular-nums" data-testid="summation-positions-total">
+                  {money(positionsTotal)}
                 </td>
               </tr>
             )}

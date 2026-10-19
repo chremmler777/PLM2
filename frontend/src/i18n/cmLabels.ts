@@ -990,11 +990,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Planungstool folgt. Reihenfolge und Parallelität entscheidet der Vertrieb später.',
     en: 'Planning tool to come. Sales will sequence the work (what runs in parallel) later.',
   },
-  'summation.withPositions': {
-    de: 'Gesamt inkl. Kostenpositionen',
-    en: 'Total incl. cost positions',
-  },
-  'summation.costLines': { de: 'Summe Kostenzeilen', en: 'Total cost lines' },
+  'summation.ofLines': { de: 'davon Kostenzeilen', en: 'of which cost lines' },
+  'summation.ofPositions': { de: 'davon Kostenpositionen', en: 'of which cost positions' },
   'summation.positionsPart': {
     de: 'Kostenpositionen (in den Spalten enthalten)',
     en: 'Cost positions (included in the columns)',
