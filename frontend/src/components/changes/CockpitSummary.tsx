@@ -49,6 +49,8 @@ interface Props {
   canSeeGovernance?: boolean
   /** May the viewer record the scoping meeting; others get a pointer, not an instruction. */
   canRecordMeeting?: boolean
+  /** Who may move the deadlines (PATCH rights: lead, PM, Sales, admin); others see the chip only. */
+  canEditDeadline?: boolean
   /** What the change is waiting on (resolveWaitStates). Listed under "Blocked
       by" — the one place a viewer looks to see why nothing is moving. */
   waits?: WaitState[]
@@ -337,7 +339,7 @@ const Where = ({ to }: { to: string }) => (
 /** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
 interface Blocker { key: string; text: string; go?: () => void }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits: rawWaits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign, nextHopFree = false, pendingOverrides }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, canEditDeadline = true, waits: rawWaits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview, onOverride, onAbsorb, canAbsorb = false, mayOverride, onSign, maySign, nextHopFree = false, pendingOverrides }: Props) {
   // A6-06: only what holds the next hop is a blocker
   const waits = nextHopFree ? rawWaits.map((w) => ({ ...w, info: true })) : rawWaits
   const pendingCount = nextHopFree ? 0 : pendingDeviations
@@ -649,8 +651,18 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         className={stepCls(primary, size)}
         disabled={!!denied || (st.kind === 'advance' && advancing)}
         title={denied ?? blockedHint ?? (st.kind === 'advance' || st.kind === 'action' ? st.hint : undefined) ?? undefined}
-        onClick={() => (st.kind === 'go' ? (onGo ?? onAction)?.(st.tab)
-          : st.kind === 'action' ? onStepAction?.(st.key) : onAdvance(st.to))}>
+        onClick={() => {
+          if (st.kind === 'go') {
+            (onGo ?? onAction)?.(st.tab)
+            // The answer panel sits below the offer's own steps (a screen or
+            // more down): the button that names it must land on it.
+            if (st.key === 'answer') {
+              window.setTimeout(() => document.querySelector('[data-testid="customer-decision"]')
+                ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 150)
+            }
+          } else if (st.kind === 'action') onStepAction?.(st.key)
+          else onAdvance(st.to)
+        }}>
         {st.kind === 'go' || st.kind === 'action' ? st.label : (st.label ?? transitionLabel(st.to, change.status))}
       </button>
     )
@@ -838,11 +850,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         {/* Phase-aware: release deadline once active, otherwise the frozen
             quote verdict, otherwise the quote deadline for customer work. */}
         {ended ? null : change.active_deadline === 'release' ? (
-          <DeadlineEditor change={change} kind="release" />
+          <DeadlineEditor change={change} kind="release" canEdit={canEditDeadline} />
         ) : change.quoted_on_time !== null ? (
           <QuotedFactChip change={change} />
         ) : change.customer_relevant ? (
-          <DeadlineEditor change={change} kind="quote" />
+          <DeadlineEditor change={change} kind="quote" canEdit={canEditDeadline} />
         ) : motherPlant && change.mother_plant_sop ? (
           // Until approval makes it the release deadline, the SOP is a fact.
           <span data-testid="mother-plant-sop"

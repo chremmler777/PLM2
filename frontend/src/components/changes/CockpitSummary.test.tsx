@@ -307,6 +307,25 @@ describe('CockpitSummary', () => {
     expect(screen.getByText(/Feasibility/)).toBeDefined()
   })
 
+  it('"Record the customer answer" lands on the answer panel, not at the top of a long offer tab', () => {
+    vi.useFakeTimers()
+    const panel = document.createElement('div')
+    panel.setAttribute('data-testid', 'customer-decision')
+    const scroll = vi.fn()
+    panel.scrollIntoView = scroll
+    document.body.appendChild(panel)
+    const onGo = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'quoted', customer_relevant: true,
+      customer_response: 'pending', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} onGo={onGo} />))
+    fireEvent.click(screen.getByTestId('next-answer'))
+    expect(onGo).toHaveBeenCalledWith('offer')
+    vi.advanceTimersByTime(200)
+    expect(scroll).toHaveBeenCalled()
+    panel.remove()
+    vi.useRealTimers()
+  })
+
   it('hides a later gate nobody has set (no "Gate Release: NA" noise)', () => {
     render(wrap(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
       gates={[{ gate_key: 'release', decision: 'na' }]}
