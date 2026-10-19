@@ -798,6 +798,27 @@ describe('ScopingPanel §16 meeting record', () => {
       .toBe(t('meeting.costCarrierNotYours.customer'))
   })
 
+  it('CO2: where only one carrier is open to the lead, it counts as picked (no click on the only option)', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: false })} canMoveCarrier={false} />))
+    const internal = await screen.findByTestId('meeting-carrier-internal') as HTMLInputElement
+    expect(internal.checked).toBe(true)
+    const save = screen.getByTestId('meeting-save') as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].cost_carrier).toBe('internal')
+  })
+
+  it('CO2: a viewer who may move the carrier still has to choose (two open options)', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: false })} canMoveCarrier={true} />))
+    const internal = await screen.findByTestId('meeting-carrier-internal') as HTMLInputElement
+    expect(internal.checked).toBe(false)
+    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('takes the meeting date as dd.mm.yyyy and sends it as ISO', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)
@@ -856,6 +877,19 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(open).not.toContain('never listed')
     expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
     expect(changesApi.decideMeeting).not.toHaveBeenCalled()
+  })
+
+  it('CO2: the proceed dialog names who owes the PPAP decision and by when', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ cost_carrier: 'internal' })] as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([] as never)
+    render(wrap(<ScopingPanel change={change({
+      customer_relevant: false, scoping_v2: true, origin: 'internal', ppap_decision: null,
+      next_step: { items: [{ key: 'ppap_decision', kind: 'hard', who: 'Quality, due Tue' }] },
+    })} />))
+    fireEvent.click(await screen.findByTestId('meeting-proceed-21'))
+    expect(screen.getByTestId('confirm-open').textContent)
+      .toContain(`${t('next.item.ppap_decision')} (Quality, due Tue)`)
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('C33: a check item never holds proceed; it goes along as a condition', async () => {

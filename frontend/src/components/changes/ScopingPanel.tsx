@@ -26,7 +26,7 @@ import { formatDate } from '../../lib/format'
 import {
   isCheckItem,
   type Attachment, type ChangeConcern, type ChangeMeeting, type ChangeRequest, type CostCarrier,
-  type ImpactedItem, type MeetingParticipant, type RasicLetter,
+  type ImpactedItem, type MeetingParticipant, type NextStep, type RasicLetter,
 } from '../../types/change'
 import {
   askingSide, canAnswerQuestion, carrierOf, flipHolds, unroutedCheckOwners, splitUnroutedOwners, ownerUnroutableLine, isPersonContact, openFlagLines, ppapApplies,
@@ -78,7 +78,7 @@ const DECISION_LABEL: Record<string, string> = {
 export default function ScopingPanel(
   { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [],
     canRecordMeeting = true, onInformTeam, readOnly = false, canMoveCarrier = true }: {
-    change: ChangeRequest & { attachments?: Attachment[] }
+    change: ChangeRequest & { attachments?: Attachment[]; next_step?: NextStep | null }
     /** A read-only viewer (no active department) or a closed record: the
      *  backend refuses every write, so no control is offered (R24). */
     readOnly?: boolean
@@ -154,7 +154,12 @@ export default function ScopingPanel(
   // Who pays, as the room confirms it: required next to RASIC (spec §16).
   // Never preselected: the room makes the call consciously; what capture
   // said (and the last meeting's call) is shown beside it as a hint.
-  const [carrier, setCarrier] = useState<CostCarrier | ''>('')
+  const [carrierPick, setCarrier] = useState<CostCarrier | ''>('')
+  // Where only one carrier is open to the viewer (a Process lead on an internal
+  // change may not make it a customer change), there is no call to make: that
+  // one counts as picked, instead of a click on the only option.
+  const openCarriers = (['customer', 'internal'] as CostCarrier[]).filter((c) => !carrierBarred(c))
+  const carrier: CostCarrier | '' = carrierPick || (openCarriers.length === 1 ? openCarriers[0] : '')
   // The form is a record of one meeting: open while there is none, then one
   // click away. After a save it resets and folds up.
   const [formOpen, setFormOpen] = useState<boolean | null>(null)
@@ -432,10 +437,17 @@ export default function ScopingPanel(
   // decision; a flipped one for the Sales owner's "notification or offer"
   // answer (mirrors ppap_decision_service.applies / flip_open).
   const ppapOwed = v2 && ppapApplies(change, meetings)
+  // Every hold names its owner and due ("Quality's PPAP decision (Quality, due
+  // Tue)"), as the header and the dialog's own sentence promise (R5).
+  const holdWho = (key: string) => {
+    const who = change.next_step?.items?.find((i) => i.kind === 'hard' && i.key === key)?.who
+    return who ? ` (${who})` : ''
+  }
   const hard7 = v2 ? [
-    ...(ppapOwed && change.ppap_decision == null ? [t('next.item.ppap_decision')] : []),
+    ...(ppapOwed && change.ppap_decision == null
+      ? [t('next.item.ppap_decision') + holdWho('ppap_decision')] : []),
     ...(change.customer_flip_at && change.flip_answer == null
-      ? [t('next.item.customer_flip')] : []),
+      ? [t('next.item.customer_flip') + holdWho('customer_flip')] : []),
   ] : []
   // R25: the letters a department may take. Management gives OKs and books
   // no hours (Informed only); a retired department carried on an old record
