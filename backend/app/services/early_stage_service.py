@@ -162,8 +162,12 @@ class EarlyStageService:
                                 user: User) -> dict:
         """{to_status: bool} for every hop out of the current status: the
         early-stage rights above plus the endpoint's existing role gates, so
-        a hidden button is a refused request and the other way round."""
+        a hidden button is a refused request and the other way round. A
+        read-only user (a viewer named as lead too) takes no hop (R24: the
+        auth layer refuses every write with 403)."""
         out = {}
+        if user.effective_role == "viewer":
+            return {t: False for t in sorted(ALLOWED_TRANSITIONS.get(change.status, set()))}
         for to_status in sorted(ALLOWED_TRANSITIONS.get(change.status, set())):
             ok = await EarlyStageService.may_take_hop(session, change, user, to_status)
             if ok and await EarlyStageService.hard_refusal(
@@ -1234,7 +1238,7 @@ class EarlyStageService:
             from app.services.cost_service import CostService
             summ = await CostService.summation(session, change)
             internal_needs_money = abs(summ["totals"]["grand_total"] or 0) > 0.004
-        return {
+        out = {
             "change_id": change.id,
             "status": change.status,
             "status_label": cm_labels.label("status", change.status),
@@ -1271,6 +1275,19 @@ class EarlyStageService:
             "scope_change": scope,
             "waits": waits,
         }
+        if user.effective_role == "viewer":
+            # R24 (A1-03): a read-only user, a viewer named as lead too,
+            # writes nothing: every write flag is off so the page offers no
+            # button the auth layer refuses with 403
+            out.update({"can_edit_impact": False, "can_record_meeting": False,
+                        "can_approve_internal": False,
+                        "internal_hold_can_override": False})
+            if isinstance(out.get("assessment"), dict):
+                out["assessment"] = {**out["assessment"], "can_close": False}
+            if isinstance(out.get("routing_deviation"), dict):
+                out["routing_deviation"] = {**out["routing_deviation"],
+                                            "can_decide": False}
+        return out
 
     @staticmethod
     async def _may_record_meeting(session, change, user) -> bool:

@@ -412,11 +412,15 @@ export default function ChangeDetailPage() {
   const canRunMotherPlant = isAdmin || isChangeLead || isPmMember;
   // The scoping meeting and its decision: the backend's verdict (stage-state),
   // else lead, PM or admin (the backend answers anyone else 403).
-  const canRecordMeeting = stage?.can_record_meeting ?? (isAdmin || isChangeLead || isPmMember);
+  // R24: a read-only user (a viewer named as lead too) records nothing.
+  const canRecordMeeting = !!canWrite
+    && (stage?.can_record_meeting ?? (isAdmin || isChangeLead || isPmMember));
 
   // Transition rights (spec §16 P1 4): the backend's verdict for this viewer,
   // else the client mirror. A step the viewer may not take is not shown.
   const may = (to: string): boolean => {
+    // R24: a read-only user takes no step, whatever a stale flag says
+    if (!canWrite) return false;
     if (stage?.can_transition) return stage.can_transition[to] === true;
     return !!change && mayTransition(change, to,
       { isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember });
@@ -1249,8 +1253,8 @@ export default function ChangeDetailPage() {
           // Lead, PM and admin edit the set; Development picks it too while it
           // is at scoping and not locked, then confirms it. The backend's
           // can_edit_impact is the answer; the fallback mirrors it.
-          canEdit={stage ? stage.can_edit_impact : (isAdmin || isChangeLead || isPmMember
-            || (isDevelopmentMember && change.status === 'scoping' && !change.impact_confirmed_at))}
+          canEdit={!!canWrite && (stage ? stage.can_edit_impact : (isAdmin || isChangeLead || isPmMember
+            || (isDevelopmentMember && change.status === 'scoping' && !change.impact_confirmed_at)))}
           titleAuto={stage?.title_auto ?? change.title_auto}
           scopeChangedAfterQuote={change.scope_changed_after_quote
             ?? (stage?.scope_change ? !stage.scope_change.covered : false)}

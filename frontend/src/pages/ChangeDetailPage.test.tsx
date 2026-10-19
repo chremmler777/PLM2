@@ -1062,6 +1062,22 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     expect(await screen.findByTestId('header-cancel')).toBeDefined()
   })
 
+  it('R24: a read-only user named as lead gets no Cancel, whatever stage-state says', async () => {
+    authState.current = { isAdmin: false, role: 'viewer', canWrite: false, userId: 42 }
+    change.lead_id = 42
+    try {
+      vi.mocked(changesApi.stageState).mockResolvedValueOnce(
+        { can_transition: { cancelled: true, on_hold: true }, can_record_meeting: true, can_edit_impact: true } as never)
+      wrap('/changes/1')
+      await screen.findByText('mock-cockpit-summary')
+      await waitFor(() => expect(changesApi.stageState).toHaveBeenCalled())
+      expect(screen.queryByTestId('header-cancel')).toBeNull()
+    } finally {
+      change.lead_id = null
+      authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
+    }
+  })
+
   it('states that canceling is final', async () => {
     authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
     wrap('/changes/1')
