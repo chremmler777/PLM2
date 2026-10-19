@@ -1944,6 +1944,11 @@ class MeetingService:
         exclude_departments are named elsewhere (their open submit)."""
         if not cm_switches.on("ASSESSMENT_V2"):
             return None
+        # Read on guard paths (leaving costing) whose caller may not have
+        # loaded the concerns: an async lazy load would raise MissingGreenlet
+        from sqlalchemy import inspect as _inspect
+        if "concerns" in _inspect(change).unloaded:
+            await session.refresh(change, ["concerns"])
         by_dept: dict[int, list[int]] = {}
         for c in MeetingService.open_checks(change):
             owners = c.owner_department_ids
