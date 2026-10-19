@@ -214,6 +214,30 @@ async def test_d5_apqp_whose_only_member_set_the_limits_falls_back(
                        fix["user"]["Project Manager"]["id"]}
         # NEGATIVE: Quality is never among them
         assert fix["user"]["Quality"]["id"] not in ids
+    # My Tasks follows the same rule per row: APQP's only member set the
+    # limits, so the lead and PM get the row (review: nobody was told)
+    await _weigh(client, fix)
+    from app.models.change_validation import ValidationCheck
+    async with session_factory() as s:
+        row = (await s.execute(select(ValidationCheck).where(
+            ValidationCheck.change_id == fix["change_id"],
+            ValidationCheck.check_key == "weight"))).scalar_one()
+        row.limits_set_by = fix["user"]["APQP"]["id"]
+        await s.commit()
+
+    async def confirm_rows(name):
+        tasks = (await client.get("/api/v1/changes/my-tasks",
+                                  headers=await _who(client, fix, name))).json()
+        return [t for t in tasks if t["change_id"] == fix["change_id"]
+                and "Confirm the limits of" in (t.get("reason") or "")]
+    for name in ("Development", "Project Manager"):
+        rows = await confirm_rows(name)
+        assert len(rows) == 1 and rows[0]["needs_you"], (name, rows)
+        assert "set by APQP" in rows[0]["reason"]
+        assert "APQP has no other member here" in rows[0]["reason"], rows[0]["reason"]
+    # NEGATIVE: the APQP setter and Quality get no row
+    for name in ("APQP", "Quality"):
+        assert await confirm_rows(name) == [], name
 
 
 # --- A5-04 the member-less department fallback, complete and worded once ----

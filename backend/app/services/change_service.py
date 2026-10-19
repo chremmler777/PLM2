@@ -5180,7 +5180,7 @@ class ChangeService:
             from app.services.validation_service import (
                 LIMITS_CONFIRMER_DEPARTMENT, ValidationService,
             )
-            from app.services.change_people import coordinator_name, no_member_words
+            from app.services.change_people import coordinator_name
             pend = (await db.execute(select(ValidationCheck).where(
                 ValidationCheck.change_id.in_([c.id for c in validating]),
                 ValidationCheck.status == "passed",
@@ -5190,27 +5190,33 @@ class ChangeService:
                 names = dict((await db.execute(select(Department.id, Department.name))).all())
                 setters = await ValidationService._names(db, [r.limits_set_by for r in pend])
                 by_change = {c.id: c for c in validating}
-                for cid in sorted({r.change_id for r in pend}):
-                    c = by_change[cid]
-                    staffed, ids = await ValidationService.limits_confirmers(db, c)
+                # who confirms depends on who set the limits (D5: APQP's only
+                # member measured -> the lead and PM), so per (change, setter)
+                confirmers: dict = {}
+                for r in sorted(pend, key=lambda r: (r.change_id, r.id)):
+                    if r.limits_set_by == user.id:
+                        continue
+                    c = by_change[r.change_id]
+                    key = (r.change_id, r.limits_set_by)
+                    if key not in confirmers:
+                        confirmers[key] = await ValidationService.limits_confirmers(
+                            db, c, r.limits_set_by)
+                    staffed, ids = confirmers[key]
                     if user.id not in ids:
                         continue
-                    for r in pend:
-                        if r.change_id != cid or r.limits_set_by == user.id:
-                            continue
-                        dept = names.get(r.department_id)
-                        out.append({
-                            **await base(c), "kind": "validation_check",
-                            "department_id": r.department_id, "needs_you": True,
-                            "target_tab": "release",
-                            "reason": (
-                                f"Confirm the limits of {catalog.label_for(r.check_key, dept)} "
-                                f"({dept}): {float(r.lower_limit):g}-{float(r.upper_limit):g}"
-                                f" set by {setters.get(r.limits_set_by) or 'the measurer'}"
-                                + ("" if staffed else "; " + no_member_words(
-                                    LIMITS_CONFIRMER_DEPARTMENT,
-                                    await coordinator_name(db, c)))),
-                            "since": r.checked_at})
+                    dept = names.get(r.department_id)
+                    out.append({
+                        **await base(c), "kind": "validation_check",
+                        "department_id": r.department_id, "needs_you": True,
+                        "target_tab": "release",
+                        "reason": (
+                            f"Confirm the limits of {catalog.label_for(r.check_key, dept)} "
+                            f"({dept}): {float(r.lower_limit):g}-{float(r.upper_limit):g}"
+                            f" set by {setters.get(r.limits_set_by) or 'the measurer'}"
+                            + ("" if staffed else
+                               f"; {LIMITS_CONFIRMER_DEPARTMENT} has no other member "
+                               f"here: {await coordinator_name(db, c)} coordinates")),
+                        "since": r.checked_at})
 
         out += await ChangeService.advance_tasks(db, user, open_changes, base,
                                                  is_pm_member=is_pm_member)
