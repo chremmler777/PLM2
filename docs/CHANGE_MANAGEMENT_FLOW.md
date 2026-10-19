@@ -741,6 +741,12 @@ for the whole team." Decision: a pipeline per department.
   the department's assessment bucket offers **Continue to costing**. The
   cockpit reads "Costing: 3/5 finalized, waiting on ..." (muted, as
   information, during assessment; a wait in costing).
+- **Not built (A3-07b):** the spec's §4 *"[R3] Submit = assess + cost +
+  finalize in one action when nothing is waited on; the step bar shows only
+  while waiting"*. Today they are three steps: submit the assessment,
+  *Continue to costing*, then *Finalize*. Open decision for Christoph:
+  build it in cut 1, or move it to the cut-2 list (the frozen spec's cut-2
+  list does not name it).
 
 ### "<Dept> has no cost" and waiting on a supplier (ECR-solid §4/§5, C18, 2026-10-15)
 Switch `ASSESSMENT_V2` (migration 126: `supplier_waits`).
@@ -900,9 +906,10 @@ begin_impact_edit` / `_reopen_after_locked_edit`), in `in_assessment`,
   `impact_edited_after_lock`.
 Who may edit is unchanged (lead, PM members, admin; P1-5). Intake attach and
 supersede (§1) pass their own reason. **Not built:** the send-back in
-`costing` and `quoting` (the routing engine has moved past the assessment
-stage there: it needs a step back to assessment; open question for
-Christoph). There every text names an exit that exists (review L5 loop
+`costing` and `quoting` (A3-06; the routing engine has moved past the
+assessment stage there: it needs a step back to assessment; open decision
+for Christoph: build it in cut 1 as the spec's §4 says, or move it to the
+cut-2 list, which does not name it). There every text names an exit that exists (review L5 loop
 2): the reopened costing, the lead by name. Reopening a closed check item after
 its department submitted is refused the same way: in assessment *"ask the
 department to record it as a risk on its assessment"*; after assessment
@@ -1709,7 +1716,9 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   tick are refused; the state's `pass_needs_report`). **Cut 2 (A5-10 a):**
   §10 "internal cycle-time changes: Quality C, first article" has no
   trigger yet (a `ppap_decision` yes flips the change to customer, so an
-  internal change keeps it only with a "no"); it is listed for cut 2. A retest adds a row and keeps the failed one; it is its own
+  internal change keeps it only with a "no"); deferred to cut 2 by the
+  close-out, but the frozen spec puts it in cut 1 and its cut-2 list does
+  not name it: open decision for Christoph (build, or add it to cut 2). A retest adds a row and keeps the failed one; it is its own
   department's, in validation (HARD #3), and names what changed since:
   parameter / tool / material / method + a reference. Every measurement or
   tick is recorded by a member of the check's department while the change
