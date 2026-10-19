@@ -264,6 +264,7 @@ async def change_permissions(
     """
     from app.services import mother_plants as mp
     from app.services.mother_plant_service import MotherPlantService
+    from app.services.project_team_service import ProjectTeamService
     return {
         "can_start_change": await ChangeService.user_can_start_change(db, current_user),
         # P3 + D1: internal changes only (Development, Process, Tool, Manufacturing Engineer).
@@ -274,6 +275,9 @@ async def change_permissions(
         "can_start_mother_plant": await MotherPlantService.may_start(db, current_user),
         "mother_plants": list(mp.MOTHER_PLANTS),
         "default_mother_plant": mp.DEFAULT_MOTHER_PLANT,
+        # the project team screen (responsible, D2b backup): the PUT's right
+        "can_manage_team": (current_user.effective_role != "viewer"
+                            and await ProjectTeamService.user_can_manage(db, current_user)),
     }
 
 
@@ -543,6 +547,9 @@ async def my_change_tasks(
     # assessment's own), its deadline, late (due + 1 wd) and "Needs you".
     from app.services import due_rules
     await due_rules.annotate_tasks(db, tasks, open_changes)
+    # D2b: an overdue department task goes to the project's named backup too
+    for t in tasks:
+        await team.promote_overdue(t)
     # One order across every kind: "Needs you" on top by due; then mine,
     # overdue first, soonest due (undated last), change number.
     tasks.sort(key=due_rules.task_order)

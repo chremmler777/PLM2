@@ -107,7 +107,8 @@ Run these when discussing any stage's implementation:
   message: *"Incomplete capture: missing description, at least one attachment,
   change lead before scoping"*. Overridable by an approved override.
   `change_service.py::kickoff_missing`, read by `_guard`.
-  Rationale: Sales captures, the project team scopes — kickoff means handing
+  Rationale: Sales or PM capture, the lead (D2: the project's lead PM)
+  hands over, the project team scopes — kickoff means handing
   over a request someone can actually work on. The impacted set is **no longer**
   required here: it is defined during scoping (Development, the lead and PM
   pick it) and stays hard-locked before assessment, as before. Since
@@ -2280,6 +2281,35 @@ of my departments owes an open R/A assessment or an unfinalized cost input
 (`ChangeService.owing_change_ids`, from the loaded assessments, no query per
 change).
 
+**Project team: responsible and named backup (DECIDED BY CHRISTOPH
+2026-10-19, D2b; migration 148).** Admin or a Project Management member
+defines the project team per project on the project screen (Project team
+card, `PUT /projects/{id}/team {department_id, user_id, slot}`, slot
+`responsible` (default) or `backup`; anyone else 403 and no change button,
+`GET /changes/permissions` → `can_manage_team`). Per department: one
+responsible and one named **backup** (`project_responsibles.backup_user_id`;
+both active members of the department, two different people, 400
+otherwise; clearing the responsible keeps the backup). The Project Manager
+responsible is the project's **lead PM** (D2). Routing of a department task
+on the project (`project_team_service._pair` / `_responsible`, read by every
+task list, the "Your actions" card, the engine-task list, notifications and
+the stand-in audit): to the responsible; to the backup when the responsible
+is inactive, left the department or is not set (the backup is then main and
+the rest of the department backup with the backup's name); to the backup
+**too** once the task is overdue (the responsible keeps it as main; the
+backup's row turns main with "Overdue: you back up <responsible>",
+`TeamRoles.promote_overdue` after the due rules; the late sweep tells the
+backup once, `assessment:<id>:overdue:backup`); to the whole department only
+when neither is set (legacy, unchanged). There is no absence flag: "absent"
+is an inactive account or one that left the department (an `away_until`
+was rejected in spec round 1 as unmaintained). Project Management can always
+reassign: it changes the responsible or the backup (every open task of that
+department on the project follows at once), and a PM member may assign a
+single department task to a member of that department (`POST
+/changes/{id}/assessments/{aid}/assign`, the engine task's assign; before:
+admin, the change lead or a department member). Projects without a team row
+and existing rows (no backup) route as before; nothing to backfill.
+
 **Run team (ECR-solid C1, 2026-10-14, switch `COMMERCIAL_V2`).** The run
 team is the change lead (`holds_lead`: an admin acting as a department is not
 the lead), Project Management members and admins. Besides reject, cancel,
@@ -2662,6 +2692,11 @@ view.
   with safeguarding. When internal changes become a real volume, expect the
   starter set to widen (more `can_start_change` departments) and the internal
   branch to grow its own conventions. Revisit then; don't generalize early.
+- **Resolved (D2/D2b, 2026-10-19): process responsibles per project.** The
+  project team names a responsible and a backup per department; the lead PM
+  leads every change on the project; department tasks route to them (§5
+  "Project team: responsible and named backup"). Pickers preselecting the
+  responsible remain a later step.
 - ⚠ **Process responsibles per project (planned, not built — 2026-08-11).**
   Today department pickers preselect nothing (except Development, the master
   engineering role, when the user holds it). The intended end state: each
@@ -2708,7 +2743,10 @@ changed in it from here):
    Manufacturing Engineer (D1) start internal changes and lead them (P3);
    Project Management owns the process (D2): the project's lead PM leads
    every customer change and hands it over, Sales (the Sales contact) keeps
-   quote deadline, offer and customer answer; a customer change is complete with
+   quote deadline, offer and customer answer; the project team names a
+   responsible and a backup per department (D2b: tasks go to the
+   responsible, to the backup when the responsible is inactive or the task
+   is overdue); a customer change is complete with
    the customer's typed file and the quote deadline; urgent needs the
    need-by with reason and evidence; no lead: Project Management picks one
    before the hand-over.

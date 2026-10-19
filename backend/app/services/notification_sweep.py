@@ -231,6 +231,19 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 link="/my-tasks",
             )
             counts["overdue"] += n
+        # D2b: a late department task goes to the project's named backup
+        # too (once; not when the backup already owns it or is the lead)
+        from app.services.project_team_service import _pair
+        resp, backup = await _pair(session, change.project_id, assessment.department_id)
+        if (one_rule and resp is not None and backup is not None
+                and backup[0] != assessment.owner_id):
+            counts["overdue"] += await _once(
+                session, [backup[0]], kind="overdue",
+                subject_key=f"assessment:{assessment.id}:overdue:backup",
+                title=f"Late: assessment on {change.change_number}",
+                body=(f"An assessment on {change.change_number} is late (was due "
+                      f"{fmt_date(due)}); you back up {resp[1]}: it is yours too now."),
+                link="/my-tasks")
         ids = [i for i in targets.get(change.id, [])
                if i is not None and i != assessment.owner_id]
         if ids:

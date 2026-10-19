@@ -18,7 +18,7 @@ import { BookOpen, ClipboardList, FileText } from 'lucide-react';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
 import { dueNote, foldChangeTasks, lateHint, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
-import BackupChip from '../components/common/BackupChip';
+import BackupChip, { CoveringChip } from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import CustomerCopy from '../components/changes/scoping/CustomerCopy';
@@ -701,6 +701,7 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
             </span>
           )}
           {isBackup(task) && <BackupChip mainName={task.main_name} className="ml-2" />}
+          {task.covering_for && <CoveringChip name={task.covering_for} />}
           {hint && <span className="block text-xs text-slate-400">{hint}</span>}
           {task.kind === 'obtain_info' && task.asking_side && (
             <span data-testid="task-asking-side" className="block text-xs text-slate-500">
@@ -753,6 +754,7 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
           <span data-testid="task-coordinated" className="block text-xs text-amber-300/90">{task.hint}</span>
         )}
         {isBackup(task) && <BackupChip mainName={task.main_name} className="mt-0.5" />}
+        {task.covering_for && <CoveringChip name={task.covering_for} />}
       </td>
       <td className="px-4 py-3 align-top text-slate-300">
         <span className="whitespace-nowrap">{t('tasks.stageN').replace('{n}', String(task.stage_order))}</span>

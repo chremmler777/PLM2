@@ -3,6 +3,13 @@ department per project. Everyone else active in that department, in the
 project's organization, is a backup for that role -- they still see and can
 act on the department's work there, but it does not count as theirs.
 
+D2b (DECIDED BY CHRISTOPH 2026-10-19): plus a NAMED backup per department
+per project. The department's tasks go to the responsible; to the named
+backup when the responsible is inactive, left the department or is not set
+(the backup is then the main owner); and to the named backup too once a task
+is overdue (TeamRoles.covering, the late sweep). Project Management (or an
+admin) sets both and so reassigns.
+
 No row for a department on a project -> today's behaviour: every active
 member of the department counts as main (nobody is a backup)."""
 from __future__ import annotations
@@ -89,31 +96,35 @@ class ProjectTeamService:
         out = []
         for d in depts:
             members = await ProjectTeamService.department_members(session, d.id, org_id)
+            names = {m.id: _name(m) for m in members}
             row = rows.get(d.id)
-            main_id = row.user_id if row is not None else None
-            if main_id is not None and not any(m.id == main_id for m in members):
-                # The responsible left the department/org: fall back to legacy
-                # (everyone main) rather than pointing at a stale user.
-                main_id = None
-            responsible = ({"id": main_id, "name": next(
-                (_name(m) for m in members if m.id == main_id), None)}
-                if main_id is not None else None)
+            # A responsible / backup who left the department or the org (or
+            # is inactive) is not listed: the slot reads unassigned.
+            main_id = row.user_id if row is not None and row.user_id in names else None
+            backup_id = (row.backup_user_id if row is not None
+                         and row.backup_user_id in names else None)
+            # D2b: the named backup owns the work while nobody is responsible
+            owner_id = main_id if main_id is not None else backup_id
             member_rows = [
-                {"id": m.id, "name": _name(m),
-                 "role": "main" if main_id is None or m.id == main_id else "backup"}
+                {"id": m.id, "name": names[m.id],
+                 "role": "main" if owner_id is None or m.id == owner_id else "backup",
+                 **({"named_backup": True} if m.id == backup_id else {})}
                 for m in members
             ]
             out.append({
                 "department_id": d.id,
                 "department_name": d.name,
-                "responsible": responsible,
+                "responsible": ({"id": main_id, "name": names[main_id]}
+                                if main_id is not None else None),
+                "backup": ({"id": backup_id, "name": names[backup_id]}
+                           if backup_id is not None else None),
                 "members": member_rows,
             })
         return out
 
     @staticmethod
-    async def set_responsible(session: AsyncSession, project_id: int,
-                              department_id: int, user_id: int, actor: User) -> None:
+    async def _check_member(session: AsyncSession, project_id: int,
+                            department_id: int, user_id: int, word: str) -> Department:
         org_id = await _project_org_id(session, project_id)
         dept = await session.get(Department, department_id)
         if dept is None:
@@ -122,7 +133,7 @@ class ProjectTeamService:
         if (candidate is None or not candidate.is_active
                 or (org_id is not None and candidate.organization_id != org_id)):
             raise ProjectTeamError(
-                "The responsible must be an active user of this organization")
+                f"The {word} must be an active user of this organization")
         is_member = (await session.execute(
             select(UserDepartment.user_id).where(
                 UserDepartment.user_id == user_id,
@@ -130,31 +141,59 @@ class ProjectTeamService:
         )).scalar_one_or_none() is not None
         if not is_member:
             raise ProjectTeamError(
-                f"The responsible must be an active member of the {dept.name} department")
-        row = (await session.execute(
+                f"The {word} must be an active member of the {dept.name} department")
+        return dept
+
+    @staticmethod
+    async def _row(session: AsyncSession, project_id: int,
+                   department_id: int) -> Optional[ProjectResponsible]:
+        return (await session.execute(
             select(ProjectResponsible).where(
                 ProjectResponsible.project_id == project_id,
                 ProjectResponsible.department_id == department_id)
         )).scalar_one_or_none()
+
+    @staticmethod
+    async def set_responsible(session: AsyncSession, project_id: int,
+                              department_id: int, user_id: int, actor: User,
+                              slot: str = "responsible") -> None:
+        """Set the responsible (slot "responsible") or the named backup
+        (slot "backup", D2b) of one department on this project. Both are
+        active members of the department, and two different people."""
+        word = "backup" if slot == "backup" else "responsible"
+        await ProjectTeamService._check_member(
+            session, project_id, department_id, user_id, word)
+        row = await ProjectTeamService._row(session, project_id, department_id)
+        other = (None if row is None else
+                 row.user_id if slot == "backup" else row.backup_user_id)
+        if other == user_id:
+            raise ProjectTeamError(
+                "The responsible and the backup must be two different people")
         if row is None:
             row = ProjectResponsible(project_id=project_id, department_id=department_id)
             session.add(row)
-        row.user_id = user_id
+        if slot == "backup":
+            row.backup_user_id = user_id
+        else:
+            row.user_id = user_id
         row.set_by = actor.id
         row.set_at = datetime.utcnow()
         await session.flush()
 
     @staticmethod
     async def clear_responsible(session: AsyncSession, project_id: int,
-                                department_id: int) -> None:
-        row = (await session.execute(
-            select(ProjectResponsible).where(
-                ProjectResponsible.project_id == project_id,
-                ProjectResponsible.department_id == department_id)
-        )).scalar_one_or_none()
-        if row is not None:
+                                department_id: int, slot: str = "responsible") -> None:
+        """Clear one slot; the row goes once neither is set (legacy)."""
+        row = await ProjectTeamService._row(session, project_id, department_id)
+        if row is None:
+            return
+        if slot == "backup":
+            row.backup_user_id = None
+        else:
+            row.user_id = None
+        if row.user_id is None and row.backup_user_id is None:
             await session.delete(row)
-            await session.flush()
+        await session.flush()
 
     @staticmethod
     async def responsible_user_id(session: AsyncSession, project_id: Optional[int],
@@ -168,15 +207,12 @@ class ProjectTeamService:
         )).scalar_one_or_none()
         if dept_id is None:
             return None
-        row = (await session.execute(
-            select(ProjectResponsible).where(
-                ProjectResponsible.project_id == project_id,
-                ProjectResponsible.department_id == dept_id)
-        )).scalar_one_or_none()
-        if row is None:
+        row = await ProjectTeamService._row(session, project_id, dept_id)
+        if row is None or row.user_id is None:
             return None
         # A responsible who is inactive or left the department no longer
-        # counts.
+        # counts. (The named backup is not a default: a change's lead or
+        # Sales contact is the responsible or nobody.)
         return (row.user_id if await is_live_member(
             session, row.user_id, department_name) else None)
 
@@ -309,6 +345,7 @@ class TeamRoles:
         self._resp: dict[tuple[int, int], Optional[tuple[int, str]]] = {}
         self._dept_by_name: Optional[dict[str, int]] = None
         self._live_sales: dict[int, bool] = {}
+        self._pairs: dict[tuple[int, int], tuple] = {}
 
     async def department_id(self, name: str) -> Optional[int]:
         if self._dept_by_name is None:
@@ -335,6 +372,21 @@ class TeamRoles:
             return row["department_id"]
         name = KIND_DEPARTMENT.get(kind or "")
         return await self.department_id(name) if name else None
+
+    async def covering(self, project_id: Optional[int],
+                       department_id: Optional[int]) -> Optional[str]:
+        """D2b: the responsible's name when the viewer is the department's
+        named backup on this project and the responsible is live (an
+        overdue task then goes to the viewer too), else None."""
+        if project_id is None or department_id is None:
+            return None
+        key = (project_id, department_id)
+        if key not in self._pairs:
+            self._pairs[key] = await _pair(self.session, project_id, department_id)
+        resp, backup = self._pairs[key]
+        if resp is None or backup is None or backup[0] != self.user_id:
+            return None
+        return resp[1]
 
     async def role(self, project_id: Optional[int], department_id: Optional[int],
                    owned: bool = False) -> tuple[str, Optional[str]]:
@@ -379,31 +431,58 @@ class TeamRoles:
                 role, main = "backup", sales_owner[1]
         else:
             role, main = await self.role(project_id, dept, owned)
+            # D2b: the project team decided it; an overdue row may still go
+            # to the named backup (promote_overdue, after the due rules)
+            row["_team_dept"] = dept
         row["role"] = role
         row["main_name"] = main
         return row
 
+    async def promote_overdue(self, row: dict) -> dict:
+        """D2b: an overdue department task goes to the named backup too: the
+        backup's row turns main with `covering_for` = the responsible's name.
+        Call after due_rules.annotate_tasks (it sets `overdue`)."""
+        dept = row.pop("_team_dept", None)
+        if row.get("role") != "backup" or not row.get("overdue"):
+            return row
+        name = await self.covering(row.get("project_id"), dept)
+        if name is not None:
+            row["role"], row["main_name"], row["covering_for"] = "main", None, name
+        return row
 
-async def _responsible(session: AsyncSession, project_id: Optional[int],
-                       department_id: Optional[int]) -> Optional[tuple[int, str]]:
-    """(user_id, name) of the project's responsible for the department, or
-    None: no project, no row, or a stale row (the responsible is inactive or
-    left the department -- legacy behaviour applies then)."""
+
+async def _pair(session: AsyncSession, project_id: Optional[int],
+                department_id: Optional[int]) -> tuple:
+    """(responsible, backup) of the department on the project, each
+    (user_id, name) or None: not set, inactive, or no longer a member of the
+    department (stale: it counts as not set)."""
     if project_id is None or department_id is None:
-        return None
+        return None, None
     row = (await session.execute(
-        select(ProjectResponsible.user_id, User.full_name, User.username, User.is_active)
-        .join(User, User.id == ProjectResponsible.user_id)
+        select(ProjectResponsible.user_id, ProjectResponsible.backup_user_id)
         .where(ProjectResponsible.project_id == project_id,
                ProjectResponsible.department_id == department_id)
     )).first()
-    if row is None or not row.is_active:
-        return None
-    is_member = (await session.execute(
-        select(UserDepartment.user_id).where(
-            UserDepartment.user_id == row.user_id,
-            UserDepartment.department_id == department_id)
-    )).first() is not None
-    if not is_member:
-        return None
-    return row.user_id, (row.full_name or row.username)
+    if row is None:
+        return None, None
+    ids = [i for i in (row.user_id, row.backup_user_id) if i is not None]
+    if not ids:
+        return None, None
+    live = {u.id: (u.full_name or u.username) for u in (await session.execute(
+        select(User).join(UserDepartment, UserDepartment.user_id == User.id)
+        .where(User.id.in_(ids), User.is_active.is_(True),
+               UserDepartment.department_id == department_id))).scalars().all()}
+
+    def one(uid):
+        return (uid, live[uid]) if uid in live else None
+    return one(row.user_id), one(row.backup_user_id)
+
+
+async def _responsible(session: AsyncSession, project_id: Optional[int],
+                       department_id: Optional[int]) -> Optional[tuple[int, str]]:
+    """(user_id, name) of who owns the department's work on the project:
+    the responsible; D2b: the named backup when the responsible is not set,
+    inactive or left the department; None when neither is live (legacy
+    behaviour applies then: the whole department)."""
+    resp, backup = await _pair(session, project_id, department_id)
+    return resp or backup

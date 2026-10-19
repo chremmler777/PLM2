@@ -45,9 +45,11 @@ export const pmChapter: ContentChapter = {
         },
         {
           p:
-            'You are usually the change lead. The lead defaults to the Project Manager named on the ' +
-            'project\'s "Project team" card. Name that team for each project you run: it decides ' +
-            'whose badge each task counts on.',
+            'You are usually the change lead: Project Management owns the change process from capture to ' +
+            'close. The lead defaults to the Project Manager named on the project\'s "Project team" card ' +
+            '(the lead PM), also for a change Sales started. Name that team for each project you run, a ' +
+            'responsible and a backup per department: it decides whose badge each task counts on, and an ' +
+            'overdue task goes to the backup too.',
         },
         {
           p:
@@ -330,7 +332,7 @@ export const pmChapter: ContentChapter = {
             ['Validating the timing with a stale confirmation.', 'The button stays disabled. Ask the team to confirm the current plan.'],
             ['Leaving deviations open.', 'They do not stop the work, which is why they get forgotten, but the change cannot be released while one is open. Decide each group.'],
             ['Deciding the route of an issue you raised.', 'Refused. Ask the lead or another PM.'],
-            ['No project team named.', 'Then the whole department counts every task and nobody feels it is theirs.'],
+            ['No project team named.', 'Then the whole department counts every task and nobody feels it is theirs. Name a backup too, or an overdue task waits on one person.'],
           ],
         },
       ],

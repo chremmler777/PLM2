@@ -67,7 +67,7 @@ export const HANDOUTS: Handout[] = [
           ['A plan edit before validation makes every confirmation stale.', ''],
           ['After the baseline every date move is a deviation.', 'Decide each group: the change cannot be released while one is open.'],
           ['Four eyes:', 'you never decide the route of an issue you raised yourself. PM and Quality sign-offs are two different people.'],
-          ['Name the project team', '(one responsible per department) on each project page.'],
+          ['Name the project team', '(one responsible and one backup per department; the Project Manager responsible is the lead PM) on each project page.'],
         ],
       },
       {

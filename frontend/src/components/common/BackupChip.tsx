@@ -18,3 +18,16 @@ export default function BackupChip({ mainName, className = '' }: { mainName?: st
     </span>
   )
 }
+
+/**
+ * D2b (2026-10-19): an overdue department task is the named backup's too;
+ * the row is theirs (main) and says whom they back up.
+ */
+export function CoveringChip({ name }: { name: string }) {
+  return (
+    <span data-testid="covering-chip"
+      className="block text-xs font-medium text-amber-300">
+      {t('tasks.coveringFor').replace('{x}', name)}
+    </span>
+  )
+}

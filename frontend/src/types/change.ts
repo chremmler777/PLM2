@@ -608,6 +608,8 @@ export interface ChangeTask {
   role?: TeamRole;
   /** The responsible's name, on backup rows. */
   main_name?: string | null;
+  /** D2b: overdue, so it is the named backup's too: the responsible's name. */
+  covering_for?: string | null;
   /** A6-10: the owner edited it ("X is working on this"); false: named, not started. */
   owner_started?: boolean;
   /** C3: a decision only this person gives; listed under "Needs you". */

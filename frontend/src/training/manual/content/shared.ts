@@ -82,20 +82,23 @@ export const basicsChapter: ContentChapter = {
     },
     {
       id: 'basics-team',
-      title: 'Project team: one responsible per role',
+      title: 'Project team: a responsible and a backup per role',
       blocks: [
         {
           p:
-            'On every project, the Project Manager names one responsible per department on the ' +
-            '"Project team" card of the project page. The responsible leads that department\'s ' +
-            'tasks on the project\'s changes.',
+            'On every project, Project Management (or an admin) names one responsible and one backup per ' +
+            'department on the "Project team" card of the project page. The responsible leads that ' +
+            'department\'s tasks on the project\'s changes. The Project Manager responsible is the ' +
+            'project\'s lead PM: they lead every change on the project.',
         },
         {
           points: [
             ['Responsible:', 'the task counts on your badge and in "My Tasks", and the notification goes to you.'],
-            ['Everyone else in the department is backup:', 'you see the same task, marked "Backup" with "Main:" and the responsible\'s name. You can act on it. It does not count on your badge.'],
+            ['Named backup:', 'the task is yours when the responsible is inactive or nobody is responsible, and yours too once it is overdue: it turns into your own row with "Overdue: you back up" and the responsible\'s name, and you get one notice.'],
+            ['Everyone else in the department:', 'you see the same task, marked "Backup" with "Main:" and the name. You can act on it. It does not count on your badge.'],
             ['When a backup acts,', 'the record says who acted for whom.'],
-            ['No responsible set:', 'the whole department counts, as before.'],
+            ['Neither set:', 'the whole department counts, as before.'],
+            ['Reassign:', 'Project Management changes the responsible or the backup at any time; every open task of that department on the project follows.'],
           ],
         },
         { shot: 'basics-project-team', alt: 'The "Project team" card with one responsible per department and one row "Unassigned".' },

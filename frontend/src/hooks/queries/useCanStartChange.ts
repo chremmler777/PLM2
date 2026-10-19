@@ -21,6 +21,8 @@ export interface ChangePermissions {
   can_start_mother_plant?: boolean;
   mother_plants?: string[];
   default_mother_plant?: string;
+  /** Project team (responsible, backup): Project Management or an admin. */
+  can_manage_team?: boolean;
 }
 
 export function useChangePermissions(): ChangePermissions | undefined {

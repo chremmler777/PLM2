@@ -642,6 +642,19 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
       t('kickoff.leadByPm')].join(', ')))).toBeDefined()
   })
 
+  it('D2b: an overdue row the named backup covers says whom they back up', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', role: 'main', covering_for: 'Dana' }),
+      changeTask({ kind: 'scoping_wrapup', change_id: 8, change_number: 'GB-CM-0008', role: 'main' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    const chips = screen.getAllByTestId('covering-chip')
+    // NEGATIVE: only the covered row carries it
+    expect(chips).toHaveLength(1)
+    expect(chips[0].textContent).toBe(t('tasks.coveringFor').replace('{x}', 'Dana'))
+  })
+
   it('A6-04: the kickoff row shows the backend hint naming who acts first', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'kickoff', missing: ['change lead'],

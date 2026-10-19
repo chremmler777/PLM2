@@ -2342,6 +2342,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'team.change': { de: 'ändern', en: 'change' },
   'team.saved': { de: 'Gespeichert', en: 'Saved' },
   'team.saveFailed': { de: 'Speichern fehlgeschlagen', en: 'Could not save' },
+  // D2b (2026-10-19): a named backup per department per project
+  'team.pickBackup': { de: 'Vertretung wählen', en: 'Pick a backup' },
+  'team.changeBackup': { de: 'Vertretung ändern', en: 'Change backup' },
+  'team.leadPmHint': { de: 'Lead-PM: führt jede Änderung dieses Projekts', en: 'The lead PM: leads every change on this project' },
+  'team.routingHint': {
+    de: 'Aufgaben einer Abteilung gehen an die/den Zuständige/n; an die Vertretung, wenn niemand zuständig oder inaktiv ist oder die Aufgabe überfällig ist; an die ganze Abteilung nur ohne beide.',
+    en: 'A department\'s tasks go to the responsible; to the backup when nobody is responsible, the responsible is inactive, or the task is overdue; to the whole department only when neither is named.' },
+  'tasks.coveringFor': { de: 'Überfällig: du vertrittst {x}', en: 'Overdue: you back up {x}' },
   'next.overrideSent': { de: "Übersteuerung beantragt: jemand anderes entscheidet", en: "Override asked: someone other than you decides" },
   'confirm.kickoffTitle': { de: "An das Scoping übergeben", en: "Hand over to scoping" },
   'confirm.kickoffBody': { de: "Die Projektleitung übernimmt: sie trifft das Team, wählt die Abteilungen und entscheidet. Die Erfassung ist danach nur noch über die Leitung änderbar.", en: "Project Management takes over: it meets the team, picks the departments and decides. After this the capture changes only through the lead." },

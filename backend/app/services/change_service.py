@@ -5698,6 +5698,8 @@ class ChangeService:
             owned = bool(a.pop("_owned", False)) or lead
             await team.annotate(a, change.project_id, owned=owned,
                                 sales_owner=owner)
+            # D2b: an overdue item goes to the named backup too
+            await team.promote_overdue(a)
             a.pop("role_department_id", None)
         return actions
 
@@ -6793,12 +6795,16 @@ class ChangeService:
                 raise ChangeError(str(e))
         else:
             from app.services.change_people import holds_lead
+            from app.services.meeting_service import MeetingService
+            # D2b: Project Management can always reassign
             allowed = (actor.effective_role == "admin" or holds_lead(change, actor)
                        or await WorkflowService.actor_in_department(
-                           session, actor, a.department_id))
+                           session, actor, a.department_id)
+                       or await MeetingService.user_is_pm_member(session, actor))
             if not allowed:
                 raise ChangeError(
-                    "Only an admin, the change lead, or a department member may assign")
+                    "Only an admin, the change lead, Project Management or a "
+                    "department member may assign")
             assignee = await session.get(User, assignee_id)
             if assignee is None or not assignee.is_active:
                 raise ChangeError("Assignee not found or inactive")

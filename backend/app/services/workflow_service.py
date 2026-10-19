@@ -698,9 +698,13 @@ class WorkflowService:
                 db, actor, task.department_id)
         if not allowed:
             if task.instance.change_id is not None:
-                # Change-scoped: authorize against the change lead directly.
+                # Change-scoped: authorize against the change lead directly;
+                # D2b: Project Management can always reassign a change's task.
                 change = await db.get(ChangeRequest, task.instance.change_id)
-                allowed = change is not None and holds_lead(change, actor)
+                from app.services.meeting_service import MeetingService
+                allowed = change is not None and (
+                    holds_lead(change, actor)
+                    or await MeetingService.user_is_pm_member(db, actor))
             elif task.instance.part_revision_id is not None:
                 rev = await db.get(PartRevision, task.instance.part_revision_id)
                 if rev is not None and rev.originating_change_id is not None:
@@ -740,9 +744,13 @@ class WorkflowService:
         allowed = actor.effective_role == "admin" or task.instance.started_by == actor.id
         if not allowed:
             if task.instance.change_id is not None:
-                # Change-scoped: authorize against the change lead directly.
+                # Change-scoped: authorize against the change lead directly;
+                # D2b: Project Management can always reassign a change's task.
                 change = await db.get(ChangeRequest, task.instance.change_id)
-                allowed = change is not None and holds_lead(change, actor)
+                from app.services.meeting_service import MeetingService
+                allowed = change is not None and (
+                    holds_lead(change, actor)
+                    or await MeetingService.user_is_pm_member(db, actor))
             elif task.instance.part_revision_id is not None:
                 rev = await db.get(PartRevision, task.instance.part_revision_id)
                 if rev is not None and rev.originating_change_id is not None:
@@ -920,7 +928,13 @@ class WorkflowService:
         # A task the viewer took is theirs, backup or not.
         role, main_name = await roles.role(part.project_id, t.department_id,
                                            owned=t.owner_id == user_id)
+        # D2b: an overdue task goes to the project's named backup too
+        covering = (await roles.covering(part.project_id, t.department_id)
+                    if role == "backup" and t.overdue else None)
+        if covering is not None:
+            role, main_name = "main", None
         return {
+            **({"covering_for": covering} if covering is not None else {}),
             "task_id": t.id,
             "instance_id": t.instance_id,
             "status": t.status,

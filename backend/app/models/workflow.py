@@ -47,19 +47,27 @@ class ProjectResponsible(Base):
     the project's organization is a backup for that role -- they still see
     and can act on the department's tasks there, but the task is not
     counted as theirs. No row for a department -> today's behaviour: every
-    active member of the department counts as main."""
+    active member of the department counts as main.
+
+    D2b (Christoph 2026-10-19, migration 148): a named backup per department
+    per project. The department's tasks go to the responsible; to the backup
+    when the responsible is inactive or left the department (or nobody is
+    responsible), and to the backup too once a task is overdue. A row may
+    carry only a backup (user_id NULL)."""
     __tablename__ = "project_responsibles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    backup_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
     set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     set_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="responsibles")
     department: Mapped["Department"] = relationship()
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 
 
 class WfTemplate(Base):

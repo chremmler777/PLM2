@@ -178,6 +178,8 @@ export interface MyTask {
   mine: boolean;
   /** Project team (spec §18): "main" counts; "backup" is listed muted. */
   role?: 'main' | 'backup';
+  /** D2b: overdue, so it is the named backup's too: the responsible's name. */
+  covering_for?: string | null;
   main_name?: string | null;
   /** R38: a member-less department's step this user coordinates. */
   coordinated?: boolean;
