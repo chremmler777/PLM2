@@ -182,6 +182,11 @@ async def sign_no_geometry_change(
     revision.no_geometry_change_by = current_user.id
     revision.no_geometry_change_at = datetime.utcnow()
     revision.no_geometry_change_reason = reason
+    await db.flush()
+    # Christoph 2026-10-19 (ECN): its running check workflow drops the
+    # Design stages and what the release checklist asks (RELEASE_V2)
+    from app.services.workflow_service import WorkflowService
+    await WorkflowService.apply_no_geometry_change(db, revision, current_user.id)
 
     await ChangelogService.log_action(
         db,

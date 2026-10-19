@@ -278,17 +278,28 @@ function TaskRow({
   }
 
   if (task.status === 'waived') {
+    // The step and why it was waived: a revision signed 'no geometry change'
+    // drops steps the release checklist asks (Christoph 2026-10-19).
     return (
-      <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
-        <span
-          className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
-        >
-          {task.rasic_letter}
-        </span>
-        <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
-        <span className="text-xs bg-slate-700 text-slate-200 px-2 py-0.5 rounded font-medium">
-          waived
-        </span>
+      <div data-testid={`wf-waived-${task.id}`}
+        className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span
+            className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
+          >
+            {task.rasic_letter}
+          </span>
+          <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
+          <span className="text-xs text-slate-400">{task.step_name}</span>
+          <span className="text-xs bg-slate-700 text-slate-200 px-2 py-0.5 rounded font-medium">
+            waived
+          </span>
+        </div>
+        {task.notes && (
+          <p data-testid={`wf-waived-note-${task.id}`} className="mt-1 text-xs text-slate-400">
+            {task.notes}
+          </p>
+        )}
       </div>
     );
   }

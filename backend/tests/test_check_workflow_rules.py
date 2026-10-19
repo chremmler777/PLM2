@@ -208,10 +208,14 @@ async def _stage_actionable(session_factory, instance_id, stage_order):
 
 
 async def test_seeded_ecn_template_end_to_end(
-        session_factory, seed, part, check_wf_standards):
+        session_factory, seed, part, check_wf_standards, monkeypatch):
     """Drive the SEEDED 'ECN Implementation (Article)' template end-to-end: evidence
     gate on stage 1, four-eyes block on stage 2, advance to stage 3, then the
-    reject-restart recency rule via implementation_progress."""
+    reject-restart recency rule via implementation_progress. The full legacy
+    walk (RELEASE_V2 off): with the switch on, a revision signed 'no geometry
+    change' skips Design and Design check (test_ecr_solid_ecn_no_geometry)."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "RELEASE_V2", False)
     from app.services.workflow_service import WorkflowService
     from app.services.change_service import ChangeService
     from app.models.change import ChangeRequest, ChangeImpactedItem

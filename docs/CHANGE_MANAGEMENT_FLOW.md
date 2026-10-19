@@ -961,6 +961,31 @@ coordinator (the lead who can act, else a Project Management member):
 lists the step for them (`coordinated`, hint "<X> has no member here: <name>
 coordinates"), and the instance serves `can_act` / `coordinator_hint` per
 open task, so only who may act sees Approve / Reject / Waive (R24).
+**No geometry change: a short check workflow (DECIDED BY CHRISTOPH
+2026-10-19, switch `RELEASE_V2`).** For a revision signed *no geometry
+change* the ECN check workflow drops the **Design** and **Design check**
+stages, and it does not ask again what the release checklist (with
+validation) asks, the one place: *Clarify inspection plan / PPAP need*
+(release rows control plan, PPAP / customer approval), *Update master data &
+logistics* (ERP, BOM and routing; old stock), *Sampling / trial* (validation:
+tool sampled, weight, dimensions) and *Final release* (the change's release:
+checklist and the PM / Quality sign-offs). What stays: *Implement tool
+change* (the soft guard into validation reads it) and *Adjust process /
+parameter sheets* (no release row asks it: the process lives in the PDB).
+The dropped steps are on the record as **waived** with that reason
+(`WorkflowService.no_geometry_drops`; R/A tasks born waived, signed by the
+signer, no C/S/I task, nobody notified), so a new instance on a signed
+revision starts at Industrialization and completes after its two steps.
+Signing a revision whose workflow runs (`POST .../no-geometry-change`,
+`WorkflowService.apply_no_geometry_change`) waives the open tasks of those
+steps (signed by the signer, audited `tasks_dropped_no_geometry`) and moves
+the instance on; tasks already done stay as they were, and an in-flight
+workflow of a revision signed earlier keeps its current tasks (only the
+stages it reaches later are created short; no backfill). The workflow
+panel shows each waived step with its reason; the sign dialog says what
+drops. Switch off: the full four-stage workflow as before. Only the two ECN
+templates (`ECN_TEMPLATE_NAMES`) are shortened; any other revision workflow
+is untouched.
 **Toolshop**
 (P7) has typical cost positions (toolmaker hours, in-house rework, EDM /
 wire, steel / material, polishing / texture).
@@ -2780,6 +2805,11 @@ changed in it from here):
    approval by an engineering approver, never the raiser), HARD #9 (PM and
    Quality sign the latest offer or supplement); start at risk (urgent
    only, a PM member with price view approves).
-6. **Close:** blocked while a price is open (customer acceptance, or Absorb
+6. **Implementation (ECN):** a revision signed *no geometry change* runs a
+   short check workflow: no Design and Design check, and inspection plan /
+   PPAP, master data, sampling and final release are asked only on the
+   release checklist (with validation); the tool change and the process /
+   parameter sheets stay (DECIDED BY CHRISTOPH 2026-10-19).
+7. **Close:** blocked while a price is open (customer acceptance, or Absorb
    with a reason and the OK of a PM member or Management).
 

@@ -67,6 +67,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl.noGeometry': { de: 'Keine Geometrieänderung', en: 'No geometry change' },
   'impl.noGeometryReason': { de: 'Warum ändert diese Revision die Geometrie nicht? (Pflicht, protokolliert)', en: 'Why does this revision not change the geometry? (required, audited)' },
   'impl.signNoGeometry': { de: 'Keine Geometrieänderung bestätigen', en: 'Sign no geometry change' },
+  // Christoph 2026-10-19 (ECN): what the signature drops from the check workflow
+  'impl.signNoGeometryWarning': {
+    de: 'Der Prüf-Workflow dieser Revision lässt Konstruktion und Konstruktionsprüfung weg; Prüfplan / PPAP, Stammdaten, Bemusterung und Freigabe fragt nur noch die Freigabe-Checkliste (mit der Validierung). Werkzeugänderung und Prozess- / Parameterblätter bleiben.',
+    en: 'The check workflow of this revision drops Design and Design check; inspection plan / PPAP, master data, sampling and final release are asked only on the release checklist (with validation). The tool change and the process / parameter sheets stay.',
+  },
   'impl.stage': { de: 'Stufe', en: 'Stage' },
   'impl.noRevision': { de: 'Noch keine ECN-Revision (Kickoff ausstehend)', en: 'No ECN revision yet (kickoff pending)' },
   'wf.waive': { de: 'Erlassen', en: 'Waive' },

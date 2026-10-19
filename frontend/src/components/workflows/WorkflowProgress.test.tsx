@@ -57,3 +57,19 @@ describe('WorkflowProgress rights (R24, R38)', () => {
     expect(screen.getByTestId('wf-approve-5')).toBeDefined()
   })
 })
+
+describe('WorkflowProgress waived steps', () => {
+  afterEach(cleanup)
+  it('names the waived step and why (a no-geometry revision drops it)', () => {
+    show(instance({}, task({ status: 'waived', decision: 'waived',
+      step_name: 'Final release',
+      notes: 'Dropped: no geometry change signed; asked once in the release checklist' })))
+    expect(screen.getByTestId('wf-waived-5').textContent).toContain('Final release')
+    expect(screen.getByTestId('wf-waived-note-5').textContent).toContain('release checklist')
+  })
+
+  it('a waived step without a note shows no empty note line', () => {
+    show(instance({}, task({ status: 'waived', decision: 'waived', notes: null })))
+    expect(screen.queryByTestId('wf-waived-note-5')).toBeNull()
+  })
+})

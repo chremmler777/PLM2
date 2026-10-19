@@ -107,6 +107,26 @@ READY_TO_GO_STEPS = [
 #: The step a tool change is done in (the soft guard into validation).
 TOOL_CHANGE_STEP = "Implement tool change"
 
+# DECIDED BY CHRISTOPH 2026-10-19 (ECN, switch RELEASE_V2): a revision signed
+# 'no geometry change' drops the Design and Design check stages, and the
+# check workflow does not ask again what the release checklist (and
+# validation) ask: the release checklist is the one place. Those steps are
+# recorded as waived with the reason (WorkflowService.no_geometry_drop); the
+# tool change and the process / parameter sheets stay (no release row asks
+# them: the process lives in the PDB).
+NO_GEOMETRY_DROPPED_STAGES = ("Design", "Design check")
+#: step -> where it is asked instead (the waive note names it)
+ASKED_ON_RELEASE = {
+    "Clarify inspection plan / PPAP need":
+        "release checklist: control plan / inspection plan, PPAP and customer approval",
+    "Update master data & logistics":
+        "release checklist: ERP, BOM and routing; old stock",
+    "Sampling / trial":
+        "validation (tool sampled, weight, dimensions) and the release checklist",
+    "Final release":
+        "the change's release: release checklist and the PM and Quality sign-offs",
+}
+
 
 def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
     return {
@@ -143,6 +163,9 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
 
 ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Implementation (Tool)", "Tool Engineer")
 ECN_UMSETZUNG_ARTIKEL = _ecn_umsetzung("ECN Implementation (Article)", "Development")
+#: The ECN check workflow templates (the no-geometry shortening applies to them only).
+ECN_TEMPLATE_NAMES = frozenset({ECN_UMSETZUNG_WERKZEUG["name"],
+                                ECN_UMSETZUNG_ARTIKEL["name"]})
 
 CHECK_WF_CATEGORY_TEMPLATE = {
     "article": "ECN Implementation (Article)",

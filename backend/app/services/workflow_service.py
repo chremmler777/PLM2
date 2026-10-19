@@ -50,11 +50,17 @@ class WorkflowService:
 
         # Activate first stage tasks
         first_stage = sorted(template.stages, key=lambda s: s.stage_order)[0]
-        await WorkflowService._create_stage_tasks(db, instance, first_stage)
+        dropped = await WorkflowService._create_stage_tasks(db, instance, first_stage)
 
         await WorkflowService._audit(db, instance, "wf_started", started_by_id,
                                      {"template_id": template_id,
                                       "revision_id": revision_id})
+        if dropped:
+            # A revision signed 'no geometry change' starts past the stages
+            # it does not need (Christoph 2026-10-19): cascade as for a stage
+            # completed by its last task.
+            await WorkflowService._maybe_advance_stage(
+                db, instance, actor_id=started_by_id)
 
         return instance
 
@@ -168,13 +174,88 @@ class WorkflowService:
             user_id=user_id, new_values=new_values, correlation_id=correlation)
 
     @staticmethod
+    async def no_geometry_drops(db: AsyncSession,
+                                instance: WfInstance) -> tuple[dict, int | None]:
+        """DECIDED BY CHRISTOPH 2026-10-19 (switch RELEASE_V2): the steps an
+        ECN check workflow does not ask of a revision signed 'no geometry
+        change': the Design and Design check stages, and the steps the
+        release checklist (and validation) already ask, the one place.
+        Returns ({step_id: waive note}, the signer) - empty for any other
+        instance, an unsigned revision, another template or the switch off."""
+        from app.services import cm_switches
+        from app.services import wf_seed_service as seeds
+        if instance.part_revision_id is None or not cm_switches.on("RELEASE_V2"):
+            return {}, None
+        rev = await db.get(PartRevision, instance.part_revision_id)
+        if rev is None or not rev.no_geometry_change:
+            return {}, None
+        name = (await db.execute(select(WfTemplate.name).where(
+            WfTemplate.id == instance.template_id))).scalar_one_or_none()
+        if name not in seeds.ECN_TEMPLATE_NAMES:
+            return {}, None
+        rows = (await db.execute(
+            select(WfStep.id, WfStep.step_name, WfStage.name)
+            .join(WfStage, WfStage.id == WfStep.stage_id)
+            .where(WfStage.template_id == instance.template_id))).all()
+        out: dict[int, str] = {}
+        for step_id, step_name, stage_name in rows:
+            if stage_name in seeds.NO_GEOMETRY_DROPPED_STAGES:
+                out[step_id] = ("Dropped: no geometry change signed (no design "
+                                "work to update or check)")
+            elif step_name in seeds.ASKED_ON_RELEASE:
+                out[step_id] = ("Dropped: no geometry change signed; asked once "
+                                f"in the {seeds.ASKED_ON_RELEASE[step_name]}")
+        return out, rev.no_geometry_change_by
+
+    @staticmethod
+    async def apply_no_geometry_change(db: AsyncSession, revision: PartRevision,
+                                       user_id: int) -> int:
+        """The revision was just signed 'no geometry change': its running ECN
+        check workflow drops what it no longer asks (no_geometry_drops). Open
+        R/A tasks of those steps are waived with the reason, signed by the
+        signer; tasks already done stay as they are; the instance then moves
+        on as after any completed stage (later stages are created without the
+        dropped steps). Returns the number of tasks waived."""
+        instances = (await db.execute(select(WfInstance).where(
+            WfInstance.part_revision_id == revision.id,
+            WfInstance.status == "active"))).scalars().all()
+        waived = 0
+        for inst in instances:
+            drops, _ = await WorkflowService.no_geometry_drops(db, inst)
+            if not drops:
+                continue
+            tasks = (await db.execute(select(WfInstanceTask).where(
+                WfInstanceTask.instance_id == inst.id,
+                WfInstanceTask.step_id.in_(list(drops)),
+                WfInstanceTask.is_actionable.is_(True),
+                WfInstanceTask.status.in_(("pending", "active"))))).scalars().all()
+            now = datetime.utcnow()
+            for t in tasks:
+                t.status = "waived"
+                t.decision = "waived"
+                t.completed_by = user_id
+                t.completed_at = now
+                t.notes = drops[t.step_id]
+            if tasks:
+                waived += len(tasks)
+                await db.flush()
+                await WorkflowService._audit(
+                    db, inst, "tasks_dropped_no_geometry", user_id,
+                    {"task_ids": [t.id for t in tasks]})
+            await WorkflowService._maybe_advance_stage(db, inst, actor_id=user_id)
+        return waived
+
+    @staticmethod
     async def _create_stage_tasks(
         db: AsyncSession,
         instance: WfInstance,
         stage: WfStage,
-    ) -> None:
+    ) -> int:
         """Create tasks for every RASIC assignment in a stage and notify
-        members of the departments that have actionable tasks."""
+        members of the departments that have actionable tasks. A step an
+        ECN check workflow does not ask of a 'no geometry change' revision
+        (no_geometry_drops) gets its R/A tasks born waived with the reason
+        and no C/S/I task; returns how many were born waived."""
         actionable_departments: set[int] = set()
         fyi_departments: set[int] = set()
         tasks_created: list[WfInstanceTask] = []
@@ -207,8 +288,24 @@ class WorkflowService:
                     allowed_pairs = {(d["department_id"], d["rasic_letter"])
                                      for d in snap_departments}
 
+        drops, signer = await WorkflowService.no_geometry_drops(db, instance)
+        born_waived: list[WfInstanceTask] = []
+
         def _add_task(step_id, department_id: int, letter: str) -> None:
             is_actionable = letter in ACTIONABLE_LETTERS
+            if step_id in drops:
+                # not asked here (Christoph 2026-10-19): on the record as
+                # waived with where it is asked, nobody told, nothing noted
+                if is_actionable:
+                    task = WfInstanceTask(
+                        instance_id=instance.id, stage_order=stage.stage_order,
+                        step_id=step_id, department_id=department_id,
+                        rasic_letter=letter, status="waived", decision="waived",
+                        is_actionable=True, completed_by=signer,
+                        completed_at=datetime.utcnow(), notes=drops[step_id])
+                    db.add(task)
+                    born_waived.append(task)
+                return
             if is_actionable:
                 actionable_departments.add(department_id)
             elif letter == "I":
@@ -363,6 +460,7 @@ class WorkflowService:
                 body=f"'{stage_label}' has started — informational only.",
                 link=link,
             )
+        return len(born_waived)
 
     @staticmethod
     async def _instance_part_context(db: AsyncSession, instance: WfInstance):

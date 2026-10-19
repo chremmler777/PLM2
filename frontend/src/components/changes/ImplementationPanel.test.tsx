@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ImplementationPanel from './ImplementationPanel'
 import { changesApi } from '../../api/changes'
+import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -82,6 +83,13 @@ describe('ImplementationPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }))
     await waitFor(() =>
       expect(changesApi.signNoGeometryChange).toHaveBeenCalledWith(10, 55, 'label only'))
+  })
+
+  it('the sign dialog says what the check workflow drops (Christoph 2026-10-19)', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByText(/ECR1\.1/)
+    fireEvent.click(screen.getByRole('button', { name: /Sign no geometry change/ }))
+    expect(await screen.findByText(t('impl.signNoGeometryWarning'))).toBeDefined()
   })
 
   it('signing no geometry change refetches the revision workflow so a held Approve unlocks', async () => {

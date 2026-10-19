@@ -169,6 +169,7 @@ export default function ImplementationPanel({ changeId }: Props) {
         open={signTarget !== null}
         title={t('impl.signNoGeometry')}
         label={t('impl.noGeometryReason')}
+        warning={t('impl.signNoGeometryWarning')}
         submitLabel="Confirm"
         onSubmit={(reason: string) =>
           signTarget && sign.mutate({ item: signTarget, reason })
