@@ -20,8 +20,10 @@ export function deciderGroup(rule: string | null | undefined, to: string, custom
 }
 
 /** "the lead (Anna Berg), a Project Management member or an admin". */
-export function deciderText(group: DeciderGroup, leadName?: string | null): string {
+export function deciderText(group: DeciderGroup, leadName?: string | null, leadProposed = false): string {
   if (group === 'run') {
+    // the lead who asked never decides their own override: do not name them
+    if (leadProposed) return t('override.whoRunOthers')
     return leadName ? t('override.whoRunLead').replace('{lead}', leadName) : t('override.whoRun')
   }
   return t(`override.who.${group}`)

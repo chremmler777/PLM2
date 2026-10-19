@@ -889,7 +889,9 @@ export default function ChangeDetailPage() {
       && !stage.transition_blocks?.[change.next_step.to],
     pendingOverrides: deviations.filter((d) => d.status === 'pending').map((d) => ({
       id: d.id, to: d.to_status, since: d.proposed_at,
-      who: d.deciders ? deciderText(d.deciders.group, d.deciders.lead_name) : t('override.deciderUnknown'),
+      who: d.deciders
+        ? deciderText(d.deciders.group, d.deciders.lead_name, change.lead_id != null && d.proposed_by === change.lead_id)
+        : t('override.deciderUnknown'),
     })),
     onSign: readOnly ? undefined : (side: 'pm' | 'quality') => signOff.mutate(side),
     // 4-eyes (A4-08): never the other side's signer (the backend refuses it)
@@ -1299,6 +1301,7 @@ export default function ChangeDetailPage() {
           canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
           canManage={canManageRelease}
           viewerId={actingAs ? null : userId} isAdmin={isAdmin} isSales={isSalesMember}
+          canWrite={!!canWrite}
           onAdvance={advance} advancing={transition.isPending} focusIssueId={focusIssueId} />
       )}
 

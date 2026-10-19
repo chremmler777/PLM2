@@ -2455,6 +2455,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'override.releaseBody': { de: 'Die Punkte unten sind noch offen. Jede offene Regel braucht ihre eigene Übersteuerung; zuerst: {rule}. Grund wählen, sagen was es abdeckt, jemand anderes gibt das OK, dann freigeben.', en: 'The points below are still open. Each open rule needs its own override; first: {rule}. Pick why, say what covers it, someone other than you gives the OK, then release.' },
   'override.releaseAsk': { de: 'Diese Regel übersteuern', en: 'Override this rule' },
   'override.anyRule': { de: 'die erste offene Regel', en: 'the first open rule' },
+  'override.whoRunOthers': { de: 'einem PM-Mitglied oder einem Admin', en: 'a Project Management member or an admin' },
   'override.whoRun': { de: 'dem Lead, einem PM-Mitglied oder einem Admin', en: 'the lead, a Project Management member or an admin' },
   'override.whoRunLead': { de: '{lead} (Lead), einem PM-Mitglied oder einem Admin', en: '{lead} (lead), a Project Management member or an admin' },
   'override.who.pm_mgmt': { de: 'einem Mitglied von PM oder Geschäftsleitung', en: 'a Project Management or Management member' },

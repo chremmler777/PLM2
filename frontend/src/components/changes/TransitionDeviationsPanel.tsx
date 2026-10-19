@@ -109,7 +109,8 @@ export default function TransitionDeviationsPanel({
               ) : (
                 <p data-testid={`deviation-waiting-${d.id}`} className="mt-1 text-xs text-slate-500">
                   {d.deciders
-                    ? `${t('override.waitingFor').replace('{who}', deciderText(d.deciders.group, d.deciders.lead_name))}. ${t('override.neverRequester')}`
+                    ? `${t('override.waitingFor').replace('{who}', deciderText(d.deciders.group, d.deciders.lead_name,
+                      !!d.proposed_by_name && d.proposed_by_name === d.deciders.lead_name))}. ${t('override.neverRequester')}`
                     : t('override.waitingApprover')}
                 </p>
               )}
