@@ -20,7 +20,7 @@ from app.dependencies import get_current_user
 from app.models import get_db
 from app.models import User
 from app.models.entities import Project
-from app.models.part import RevisionFile, RevisionStatus
+from app.models.part import PartRevision, RevisionFile, RevisionStatus
 from app.services.customer_naming import CONVENTIONS, parse_filename
 from app.services.part_service import PartService, RevisionService, ChangelogService
 from app.services.revision_file_service import UnsupportedFile, store_revision_file, MIME_MAP
@@ -332,6 +332,28 @@ async def list_revision_files(
     result = await db.execute(
         select(RevisionFile)
         .where(RevisionFile.revision_id == revision_id, RevisionFile.is_deleted == False)  # noqa: E712
+        .order_by(RevisionFile.uploaded_at)
+    )
+    files = result.scalars().all()
+    names = await _uploader_names(db, {f.uploaded_by for f in files})
+    return [_file_response_dict(f, names.get(f.uploaded_by)) for f in files]
+
+
+@router.get("/{part_id}/revision-files", response_model=List[dict])
+async def list_part_revision_files(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """All (non-deleted) files of every revision of a part, for the version
+    tree: which file types each version holds and which it still takes from an
+    older one."""
+    if not await PartService.get_part(db, part_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+    result = await db.execute(
+        select(RevisionFile)
+        .join(PartRevision, PartRevision.id == RevisionFile.revision_id)
+        .where(PartRevision.part_id == part_id, RevisionFile.is_deleted == False)  # noqa: E712
         .order_by(RevisionFile.uploaded_at)
     )
     files = result.scalars().all()

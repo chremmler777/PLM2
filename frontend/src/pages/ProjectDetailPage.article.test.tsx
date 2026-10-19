@@ -62,11 +62,11 @@ describe('ProjectDetailPage article panel', () => {
   beforeEach(() => { clientMocks.get.mockReset(); clientMocks.post.mockReset() })
   afterEach(cleanup)
 
-  it('shows the revision strip with the proposal nested, grouped files and relation chips', async () => {
+  it('shows the version navigator with the iteration nested, grouped files and relation chips', async () => {
     mount()
     fireEvent.click(await screen.findByText(/Handle LH/))
-    expect(await screen.findByTestId('rev-tab-10')).toBeTruthy()
-    expect(screen.getByTestId('rev-tab-10').textContent).toContain('proposal')
+    expect(await screen.findByTestId('nav-rev-10')).toBeTruthy()
+    expect(screen.getByTestId('nav-rev-10').textContent).toContain('open iteration')
     expect(await screen.findByText('3D (2)')).toBeTruthy()
     expect(screen.getByText('2D (1)')).toBeTruthy()
     fireEvent.click(screen.getByTestId('detail-tab-links'))
@@ -174,12 +174,12 @@ describe('ProjectDetailPage article panel', () => {
     expect(await screen.findByTestId('mirror-banner')).toBeTruthy()
   })
 
-  it('+ Proposal on the selected major posts a proposal', async () => {
+  it('+ New iteration on the selected major posts a proposal', async () => {
     clientMocks.post.mockResolvedValue({ data: { id: 11, revision_name: 'E1.2' } })
     mount()
     fireEvent.click(await screen.findByText(/Handle LH/))
-    await screen.findByTestId('rev-tab-9')
-    fireEvent.click(screen.getByText('+ Proposal'))
+    await screen.findByTestId('nav-rev-9')
+    fireEvent.click(screen.getByTestId('nav-new-iteration-9'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/5/revisions/proposals', { parent_revision_id: 9 }))
   })
 
@@ -196,7 +196,7 @@ describe('ProjectDetailPage article panel', () => {
     expect(screen.queryByTestId('tree-numbers-5')).toBeNull()
     expect(screen.getByTestId('row-numbers-5-tier1').textContent).toBe('Tier 1 S00H4X-110')
     fireEvent.click(screen.getByTestId('tree-rev-10'))
-    expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
+    expect((await screen.findByTestId('nav-rev-10')).getAttribute('aria-current')).toBe('true')
   })
 
   it('a pending revision pick abandoned by switching parts does not leak into a later re-select', async () => {
@@ -234,13 +234,13 @@ describe('ProjectDetailPage article panel', () => {
     fireEvent.click(await screen.findByTestId('tree-rev-10'))
     // Switch to RH before LH's revisions query resolves.
     fireEvent.click(screen.getAllByText(/Handle RH/)[0])
-    expect((await screen.findByTestId('rev-tab-19')).getAttribute('aria-selected')).toBe('true')
+    expect((await screen.findByTestId('nav-rev-19')).getAttribute('aria-current')).toBe('true')
     // Now let LH's original in-flight fetch resolve and land in the cache.
     resolveLHRevisions({ data: structure.articles[0].revisions.map((r) => ({ ...r, part_id: 5, created_at: '2026-05-28' })) })
     await waitFor(() => expect(queryClient.getQueryData(['part-revisions', 5])).toBeTruthy())
     // Re-select LH: the abandoned pending pick for revision 10 must not resurrect —
     // the default (active) revision 9 should be selected instead.
     fireEvent.click(screen.getAllByText(/Handle LH/)[0])
-    expect((await screen.findByTestId('rev-tab-9')).getAttribute('aria-selected')).toBe('true')
+    expect((await screen.findByTestId('nav-rev-9')).getAttribute('aria-current')).toBe('true')
   })
 })

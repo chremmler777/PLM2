@@ -45,6 +45,7 @@ export function RevisionFileRow({
     onSuccess: () => {
       toast.success('File deleted');
       queryClient.invalidateQueries({ queryKey: ['revision-files', file.revision_id] });
+      queryClient.invalidateQueries({ queryKey: ['revision-files', 'part'] });
       invalidateRevisionWorkflow(queryClient, file.revision_id);
     },
     onError: (error: unknown) => {

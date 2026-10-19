@@ -231,10 +231,10 @@ describe('detail tabs under a pinned header', () => {
     expect(screen.getByRole('tablist', { name: 'Detail sections' })).toBeTruthy()
     expect(screen.getByTestId('detail-scroll').className).toContain('overflow-y-auto')
     expect(screen.getByTestId('detail-pane').className).not.toContain('overflow-y-auto')
-    expect(await screen.findByTestId('rev-tab-9')).toBeTruthy()
+    expect(await screen.findByTestId('nav-rev-9')).toBeTruthy()
 
     fireEvent.click(screen.getByTestId('detail-tab-links'))
-    expect(screen.queryByTestId('rev-tab-9')).toBeNull()
+    expect(screen.queryByTestId('nav-rev-9')).toBeNull()
     expect(screen.getByTestId('detail-header')).toBe(header)
     expect(screen.getByTestId('relation-chip-30')).toBeTruthy()
     expect(screen.getByText('relations-section')).toBeTruthy()
@@ -243,7 +243,7 @@ describe('detail tabs under a pinned header', () => {
   it('shows the existing sections under BOM, Workflow and Changelog', async () => {
     mount()
     await selectLH()
-    await screen.findByTestId('rev-tab-9')
+    await screen.findByTestId('nav-rev-9')
     fireEvent.click(screen.getByTestId('detail-tab-bom'))
     expect(await screen.findByTestId('bom-tree-section')).toBeTruthy()
     expect(screen.getByText('bom-section')).toBeTruthy()
@@ -338,7 +338,7 @@ describe('pop-out detail window from the project page', () => {
     window.open = open
     mount()
     fireEvent.click(await screen.findByTestId('item-row-5'))
-    await screen.findByTestId('rev-tab-9')
+    await screen.findByTestId('nav-rev-9')
     fireEvent.click(screen.getByLabelText('Open detail in new window'))
     expect(open).toHaveBeenCalledWith('/projects/2/detail?part=5&rev=9&owner=owner-a', 'plm2-detail-2', expect.any(String))
     expect(await screen.findByTestId('items-table')).toBeTruthy()
@@ -398,7 +398,7 @@ describe('pop-out detail window from the project page', () => {
     window.open = open
     mount()
     fireEvent.click(await screen.findByTestId('item-row-5'))
-    await screen.findByTestId('rev-tab-9')
+    await screen.findByTestId('nav-rev-9')
     fireEvent.click(screen.getByLabelText('Open detail in new window'))
     const url = new URL(String((open.mock.calls[0] as unknown[])[0]), 'http://x')
     const owner = url.searchParams.get('owner')

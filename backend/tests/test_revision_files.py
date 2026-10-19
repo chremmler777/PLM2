@@ -101,3 +101,29 @@ async def test_changelog_records_file_actions(client, eng_auth, part, monkeypatc
     res = await client.get(f"/api/v1/parts/{pid}/changelog", headers=eng_auth)
     actions = [e["action"] for e in res.json()]
     assert "file_uploaded" in actions
+
+
+async def test_part_revision_files_lists_all_revisions(client, eng_auth, part, monkeypatch, tmp_path):
+    """The version tree needs every revision's files in one call."""
+    monkeypatch.chdir(tmp_path)
+    pid, rid = part["part_id"], part["revision_id"]
+    res = await client.post(f"/api/v1/parts/{pid}/revisions/proposals",
+                            json={"parent_revision_id": rid}, headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    minor = res.json()["id"]
+    a = (await client.post(f"/api/v1/parts/{pid}/revisions/{rid}/files", files=_upload("a.txt"), headers=eng_auth)).json()
+    b = (await client.post(f"/api/v1/parts/{pid}/revisions/{minor}/files", files=_upload("b.txt"), headers=eng_auth)).json()
+    gone = (await client.post(f"/api/v1/parts/{pid}/revisions/{rid}/files", files=_upload("c.txt"), headers=eng_auth)).json()
+    await client.delete(f"/api/v1/parts/revision-files/{gone['id']}", headers=eng_auth)
+
+    res = await client.get(f"/api/v1/parts/{pid}/revision-files", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    rows = {f["id"]: f for f in res.json()}
+    assert set(rows) == {a["id"], b["id"]}
+    assert rows[a["id"]]["revision_id"] == rid and rows[b["id"]]["revision_id"] == minor
+    assert rows[a["id"]]["filename"] == "a.txt"
+
+
+async def test_part_revision_files_unknown_part(client, eng_auth):
+    res = await client.get("/api/v1/parts/999999/revision-files", headers=eng_auth)
+    assert res.status_code == 404

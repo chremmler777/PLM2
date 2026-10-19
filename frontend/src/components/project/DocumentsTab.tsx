@@ -1,5 +1,5 @@
 /**
- * Documents tab: revision strip, document pane (3D / picture; drawings pop up), grouped files,
+ * Documents tab: version navigator (side panel), document pane (3D / picture; drawings pop up), grouped files,
  * uploads, and the customer data / customer package entry points.
  */
 import { useMemo, useState, type ReactNode } from 'react';
@@ -10,16 +10,16 @@ import Viewer3D from '../Viewer3D';
 import UploadDialog from '../parts/UploadDialog';
 import CustomerDataDialog, { type CustomerDataInput } from '../parts/CustomerDataDialog';
 import CustomerPackageDialog from '../parts/CustomerPackageDialog';
-import RevisionStrip from '../parts/RevisionStrip';
+import VersionNav, { type NavFile } from '../parts/VersionNav';
 import DocumentPane, { type PaneDocument, type MirrorNotice } from '../parts/DocumentPane';
-import RevisionFilesGrouped, { docKindFor } from '../parts/RevisionFilesGrouped';
+import RevisionFilesGrouped, { canOpenInline, docKindFor } from '../parts/RevisionFilesGrouped';
 import { openDocumentWindow, opensInWindow } from '../parts/openDocumentWindow';
 import { revisionLabel } from '../parts/RevisionBadge';
 import ThumbnailSnapshot from '../parts/ThumbnailSnapshot';
 import type { CaptureFn } from '../../lib/thumbnail';
 import { apiErrorMessage } from '../../lib/apiError';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
-import { useAssemblyFiles, useRevisionFiles } from '../../hooks/queries/useProjectDetail';
+import { useAssemblyFiles, usePartRevisionFiles, useRevisionFiles } from '../../hooks/queries/useProjectDetail';
 import type { ArticleSelection } from '../../hooks/useArticleSelection';
 import { LOCKED_REVISION_STATUSES, type Part, type PartRevision, type Project, type RevisionFile } from './projectTypes';
 
@@ -35,6 +35,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
   const partRevisions = sel.partRevisions;
   const hasRevisions = !!partRevisions && partRevisions.length > 0;
   const { data: revisionFiles } = useRevisionFiles(sel.revisionId || 0);
+  const { data: partFiles } = usePartRevisionFiles(hasRevisions ? part.id : 0);
   const article = articleOf(structure, part.id);
   const mirrorSource = article?.mirror_of ? articleOf(structure, article.mirror_of.part_id) : undefined;
   const mirrorFiles = useRevisionFiles(mirrorSource?.active_revision_id ?? 0);
@@ -105,6 +106,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
   const afterUpload = (partId: number, targetRevisionId: number) => {
     queryClient.invalidateQueries({ queryKey: ['part-revisions', partId] });
     queryClient.invalidateQueries({ queryKey: ['revision-files', targetRevisionId] });
+    queryClient.invalidateQueries({ queryKey: ['revision-files', 'part', partId] });
     queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
     queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
     sel.setRevisionId(targetRevisionId);
@@ -129,6 +131,12 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
   // Drawings and PDFs open in their own window; only plain pictures use the pane.
   const openFile = (f: RevisionFile) =>
     opensInWindow(f) ? openDocumentWindow({ fileId: f.id, filename: f.filename }) : sel.setOpenDocId(f.id);
+  // A file picked in the navigator: 3D into the viewer, drawings/PDFs to their window, pictures to the pane.
+  const navFile = (f: NavFile) => {
+    const file = f as RevisionFile;
+    if (file.has_viewer) { sel.setViewingFileId(file.id); sel.setOpenDocId(null); }
+    else if (canOpenInline(file)) openFile(file);
+  };
   if (openDoc && docKindFor(openDoc) === 'image' && !opensInWindow(openDoc)) {
     paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind: 'image', revisionName: revName };
   } else if (viewingFile || assemblyActive) paneDoc = { fileId: viewingFile?.id ?? 0, filename: assemblyActive ? 'Assembly' : viewingFile!.filename, kind: '3d', revisionName: revName };
@@ -170,17 +178,6 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
             className="bg-blue-700 hover:bg-blue-600 border border-blue-600 rounded px-2 py-1 text-white text-xs font-medium">+ Customer package</button>
         </div>
       </div>
-      {hasRevisions && (
-        <div className="border-b border-slate-700 bg-slate-800/60">
-          <RevisionStrip
-            revisions={partRevisions!}
-            selectedId={sel.revisionId}
-            activeId={part.active_revision_id}
-            onSelect={sel.selectRevision}
-            onNewProposal={(majorId) => proposalMutation.mutate(majorId)}
-          />
-        </div>
-      )}
 
       {packageFor !== null && (
         <CustomerPackageDialog open assemblyId={packageFor}
@@ -231,7 +228,18 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
           })()}
         </div>
       ) : (
-        <>
+        <div className="flex min-h-0 flex-1">
+          <VersionNav
+            revisions={partRevisions!}
+            files={(partFiles ?? []) as NavFile[]}
+            activeId={part.active_revision_id ?? null}
+            selectedRevisionId={sel.revisionId}
+            viewingFileId={viewingFile?.id ?? sel.openDocId ?? null}
+            onSelectRevision={sel.selectRevision}
+            onFile={navFile}
+            onNewIteration={(majorId) => proposalMutation.mutate(majorId)}
+          />
+          <div className="flex min-w-0 flex-1 flex-col">
           {/* Document pane: openDoc (Open) -> 3D viewer -> mirror fallback -> none */}
           <DocumentPane document={paneDoc} mirror={paneMirror} onOpenPart={sel.openPart} placeholder={panePlaceholder}>
             <Viewer3D
@@ -304,7 +312,8 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
               }}
             />
           )}
-        </>
+          </div>
+        </div>
       )}
     </div>
   );

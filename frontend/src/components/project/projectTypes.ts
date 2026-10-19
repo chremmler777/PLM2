@@ -61,6 +61,8 @@ export interface PartRevision {
   summary?: string;
   part_phase_at_receipt?: string;
   customer_index?: string | null;
+  parent_revision_id?: number | null;
+  customer_received_at?: string | null;
   /** A new customer index still waiting for triage: never the current one. */
   intake_pending?: boolean;
 }

@@ -42,6 +42,19 @@ export function usePartRevisions(partId: number) {
   });
 }
 
+/** Every revision's files of a part, for the version navigator. Keyed under
+ *  'revision-files' so invalidating that prefix refreshes it too. */
+export function usePartRevisionFiles(partId: number) {
+  return useQuery<RevisionFile[]>({
+    queryKey: ['revision-files', 'part', partId],
+    queryFn: async () => {
+      const res = await client.get(`/v1/parts/${partId}/revision-files`);
+      return res.data;
+    },
+    enabled: !!partId,
+  });
+}
+
 export function useRevisionFiles(revisionId: number) {
   return useQuery<RevisionFile[]>({
     queryKey: ['revision-files', revisionId],

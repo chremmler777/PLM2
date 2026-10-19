@@ -85,7 +85,7 @@ describe('ProjectDetailPopout', () => {
 
   it('opens on the revision named in the URL', async () => {
     mount('/projects/2/detail?part=5&rev=10')
-    expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
+    expect((await screen.findByTestId('nav-rev-10')).getAttribute('aria-current')).toBe('true')
   })
 
   it('follows a selection posted by the main window', async () => {
@@ -95,7 +95,7 @@ describe('ProjectDetailPopout', () => {
     act(() => main.channel.postMessage({ type: 'select', partId: 6, revisionId: 19 }))
     await waitFor(() => expect(screen.getByTestId('detail-header').textContent).toContain('Handle RH'))
     act(() => main.channel.postMessage({ type: 'select', partId: 5, revisionId: 10 }))
-    expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
+    expect((await screen.findByTestId('nav-rev-10')).getAttribute('aria-current')).toBe('true')
   })
 
   it('answers a ping from the main window', async () => {
