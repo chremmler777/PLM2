@@ -47,6 +47,9 @@ async def _set_responsible(session_factory, project_id, dept_id, user_id):
 
 
 async def _change_in(client, session_factory, seed, status, **values):
+    """A6-05: a change's lead owns its scoping wrap-up (Project Management
+    backs it up); the wrap-up tests here pass lead_id=None so the row is
+    Project Management's own and its responsible/members decide the role."""
     from app.models.change import ChangeRequest
     sales = await login(client, "sales.one@test.io")
     res = await client.post("/api/v1/changes", json={
@@ -74,7 +77,7 @@ async def _rows(client, email, kind, cid):
 # --- counting: main vs backup vs no responsible -----------------------------
 
 async def test_without_responsible_every_member_is_main(client, seed, team, session_factory):
-    cid = await _change_in(client, session_factory, seed, "scoping")
+    cid = await _change_in(client, session_factory, seed, "scoping", lead_id=None)
     for email in ("project.one@test.io", "project.two@test.io"):
         [row] = await _rows(client, email, "scoping_wrapup", cid)
         assert row["role"] == "main"
@@ -84,7 +87,7 @@ async def test_without_responsible_every_member_is_main(client, seed, team, sess
 async def test_responsible_is_main_other_member_is_backup(client, seed, team, session_factory):
     await _set_responsible(session_factory, seed["project_id"],
                            team["dept"]["Project Manager"], team["user"]["project.one"])
-    cid = await _change_in(client, session_factory, seed, "scoping")
+    cid = await _change_in(client, session_factory, seed, "scoping", lead_id=None)
     [main] = await _rows(client, "project.one@test.io", "scoping_wrapup", cid)
     assert main["role"] == "main" and main["main_name"] is None
     [backup] = await _rows(client, "project.two@test.io", "scoping_wrapup", cid)
@@ -97,7 +100,7 @@ async def test_responsible_elsewhere_does_not_touch_other_roles(
     # A Sales responsible leaves Project Management's rows alone.
     await _set_responsible(session_factory, seed["project_id"],
                            team["dept"]["Sales"], team["user"]["sales.one"])
-    cid = await _change_in(client, session_factory, seed, "scoping")
+    cid = await _change_in(client, session_factory, seed, "scoping", lead_id=None)
     [row] = await _rows(client, "project.two@test.io", "scoping_wrapup", cid)
     assert row["role"] == "main"
 
@@ -110,7 +113,7 @@ async def test_stale_responsible_falls_back_to_everyone_main(
         u = await s.get(User, team["user"]["project.one"])
         u.is_active = False
         await s.commit()
-    cid = await _change_in(client, session_factory, seed, "scoping")
+    cid = await _change_in(client, session_factory, seed, "scoping", lead_id=None)
     [row] = await _rows(client, "project.two@test.io", "scoping_wrapup", cid)
     assert row["role"] == "main"
 
@@ -310,7 +313,7 @@ async def test_stand_in_only_for_members_and_new_value_keeps_its_shape(
 
 async def test_open_task_count_is_the_badge_number(client, seed, team, session_factory):
     pm = team["dept"]["Project Manager"]
-    cid = await _change_in(client, session_factory, seed, "scoping")
+    cid = await _change_in(client, session_factory, seed, "scoping", lead_id=None)
 
     async def count(email):
         res = await client.get("/api/v1/workflow-instances/open-task-count",
