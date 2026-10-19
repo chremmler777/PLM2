@@ -62,6 +62,31 @@ async def test_send_lists_assumed_answers_estimates_and_high_risks(client, risky
     assert [r["concern_id"] for r in listed["high_risks"]] == [risky["risk_id"]]
 
 
+async def test_a_closed_assumed_answer_is_still_listed_until_confirmed(client, risky, session_factory):
+    """A check item closed as Assumed (or a question the PM settled on an
+    assumption) is closed, but Sales has not confirmed it: Send still lists it."""
+    from datetime import datetime
+    async with session_factory() as s:
+        c = await s.get(ChangeConcern, risky["assumed_id"])
+        c.withdrawn_at = datetime.utcnow()
+        c.withdrawn_by = risky["users"]["sales"]
+        await s.commit()
+    sales = await _auth(client, "sales")
+    o = await _create(client, sales, risky["change_id"])
+    assert [a["concern_id"] for a in o["send_list"]["assumed"]] == [risky["assumed_id"]]
+    # NEGATIVE: confirmed, it is gone from the list
+    async with session_factory() as s:
+        c = await s.get(ChangeConcern, risky["assumed_id"])
+        c.confirmed_at = datetime.utcnow()
+        await s.commit()
+    res = await client.get(_url(risky["change_id"]), headers=sales)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    drafts = [x for x in (body if isinstance(body, list) else body.get("offers", []))
+              if x["id"] == o["id"]]
+    assert drafts and drafts[0]["send_list"]["assumed"] == []
+
+
 async def test_hidden_high_risk_needs_a_reason_to_go_out(client, risky, session_factory):
     cid = risky["change_id"]
     sales = await _auth(client, "sales")

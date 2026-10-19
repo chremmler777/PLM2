@@ -7773,7 +7773,7 @@ class ChangeService:
         carries them. My Tasks passes the versions it batched."""
         assumed = sum(1 for q in change.concerns
                       if q.answer_kind == "assumed" and q.confirmed_at is None
-                      and q.withdrawn_at is None and q.retracted_at is None)
+                      and q.retracted_at is None)
         out: dict = {"assumed_open": assumed}
         if latest is None or latest.total_one_time is None:
             return out

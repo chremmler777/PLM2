@@ -1944,8 +1944,11 @@ class OfferService:
         sent version showed counts as stated (`prior`, risks_stated_before)."""
         assumed = []
         for q in change.concerns:
+            # A settled (closed) concern keeps its Assumed answer: a check item
+            # closed as Assumed is closed by definition, and the answer still
+            # goes out unconfirmed until its confirm item is done.
             if (q.answer_kind == "assumed" and q.confirmed_at is None
-                    and q.withdrawn_at is None and q.retracted_at is None):
+                    and q.retracted_at is None):
                 value = (q.assumed_value or "") + (
                     f" {q.assumed_unit}" if q.assumed_unit else "")
                 assumed.append({
