@@ -3883,7 +3883,7 @@ class ChangeService:
         idle_lead = (await ChangeService.leadless_ids(
             db, [c for c in open_changes
                  if c.status in ("captured", "on_hold", "scoping")])
-            if is_pm else set())
+            if is_pm or can_capture else set())
         scoping_entered: Optional[dict] = None
         # spec §4: open supplier waits pause a department's costing task
         # (one query for the list)
@@ -3947,33 +3947,41 @@ class ChangeService:
             # customer file) and keeps the row as main owner (R18)
             flipped_kickoff = (c.customer_relevant and c.customer_flip_at is not None
                                and c.lead_id is not None and not mp.is_mother_plant(c))
+            # D2 (DECIDED BY CHRISTOPH 2026-10-19): Project Management owns
+            # the process from capture on. A customer change with a lead (the
+            # project's lead PM by default) is the lead's to hand over; Sales,
+            # who may start and hand it over on PM's behalf, backs the lead up.
+            lead_kickoff = (c.customer_relevant and c.lead_id is not None
+                            and not mp.is_mother_plant(c))
             if c.status == "captured" and (
                     (holds_lead(c, user) or is_pm) if run_team_kickoff else (
                         can_capture or (is_pm and mp.is_mother_plant(c))
                         # A6-04: no lead: picking one is Project Management's
                         or (is_pm and c.lead_id is None)
-                        or (flipped_kickoff and holds_lead(c, user)))):
+                        or (lead_kickoff and holds_lead(c, user)))):
                 # a mother-plant change is captured by Project Management;
                 # with no lead yet, Project Management's part is to pick one
-                pm_row = (mp.is_mother_plant(c) or run_team_kickoff
+                pm_row = (mp.is_mother_plant(c) or run_team_kickoff or lead_kickoff
                           or (c.lead_id is None and is_pm and not in_sales))
-                # A6-04 (R5, R18): no lead yet: Project Management's row
-                # ("Assign a lead, then hand over") is the one main row;
-                # Sales backs it up and hands over once a lead is set
+                # A6-04 (R5, R18): no lead yet (or a lead who cannot act):
+                # Project Management's row ("Assign a lead, then hand over")
+                # is the one main row; Sales backs it up
                 # (EarlyStageService.transition_refusal)
-                pm_first = (c.lead_id is None and not mp.is_mother_plant(c)
-                            and not is_pm)
+                pm_first = (not mp.is_mother_plant(c) and not is_pm
+                            and (c.lead_id is None or c.id in idle_lead))
                 tasks.append({**await _base(c), "kind": "kickoff",
                               "missing": await ChangeService.kickoff_missing(db, c),
-                              **({"hint": "Assign a lead, then hand over to scoping"}
+                              **({"hint": "Assign a lead (the project's lead PM "
+                                          "leads by default), then hand over "
+                                          "to scoping"}
                                  if c.lead_id is None and is_pm else
-                                 {"hint": "Project Management assigns a lead; "
-                                          "then you hand over to scoping"}
+                                 {"hint": "Project Management sets the lead; "
+                                          "then the change goes to scoping"}
                                  if pm_first else {}),
                               # the lead hands it over; Project Management
-                              # backs the lead up (R5: one main per row)
+                              # and Sales back the lead up (R5: one main per row)
                               **({"main_user": (c.lead_id, c.lead_name or "")}
-                                 if (run_team_kickoff or flipped_kickoff)
+                                 if (run_team_kickoff or lead_kickoff)
                                  and not holds_lead(c, user)
                                  and c.id not in idle_lead else
                                  {"main_user": (None, "Project Management")}
@@ -4348,11 +4356,16 @@ class ChangeService:
                 # this risk anywhere.
                 flagged = [row["department_id"] for row in impl["departments"]
                            if row["at_risk_open"]]
-                if in_sales and flagged:
+                # D2 (2026-10-19): escalation is Project Management's: the
+                # lead owns the row, Sales (who may escalate too) backs it up
+                lead_here = holds_lead(c, user)
+                if (in_sales or lead_here) and flagged:
                     tasks.append({
                         **await _base(c), "kind": "escalate_risk",
                         "department_ids": flagged,
                         "hint": "Take it to the customer, or escalate internally",
+                        **({"main_user": (c.lead_id, c.lead_name or "")}
+                           if c.lead_id is not None and not lead_here else {}),
                     })
 
             # Validation issues (spec §12): contain / root cause / fix actions for

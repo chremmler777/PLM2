@@ -1629,7 +1629,7 @@ class ValidationIssueService:
                 and await svc.mail_only_by(session, issue, user.id):
             # A5-07: the yes does not rest on evidence the decider filed
             raise ChangeError(
-                "You filed the customer's mail yourself: the Sales owner files "
+                "You filed the customer's mail yourself: the Sales contact files "
                 "it, or another Quality member decides (four eyes on the "
                 "concession's evidence)")
         if (concession and decision == "accept_deviation"
@@ -2370,7 +2370,7 @@ class ValidationIssueService:
         issue.updated_at = datetime.utcnow()
         await session.flush()
         await svc._log(session, change, issue, "concession_requested",
-                       "concession requested: the Sales owner asks the customer",
+                       "concession requested: the Sales contact asks the customer",
                        user.id, notes=note)
         if change.sales_owner_id:
             from app.services.notification_service import NotificationService
@@ -2546,7 +2546,7 @@ class ValidationIssueService:
                 else:
                     asked = (i.customer_decided_at if i.customer_decision == "pending"
                              else i.concession_requested_at or i.route_decided_at)
-                    conc = ("concession: waiting for customer (Sales owner"
+                    conc = ("concession: waiting for customer (Sales contact"
                             + (f", asked {svc.day(asked.date())}" if asked else "")
                             + ")")
             parts.append(f"{line}; {fix}; {conc}")

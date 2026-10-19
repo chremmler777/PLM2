@@ -280,14 +280,15 @@ DEPARTMENT_ROW_KINDS = frozenset({
 
 # Rows owed by a fixed role (the department does not ride on the row).
 KIND_DEPARTMENT: dict[str, str] = {
-    "kickoff": SALES,
+    # D2 (2026-10-19): Project Management owns the process from capture on
+    "kickoff": PM, "escalate_risk": PM,
     "scoping_wrapup": PM, "close_question": PM, "info_send": PM,
     "inform_mother_plant": PM, "timing_validate": PM, "lessons_step": PM,
     "validation_issue_route": PM, "validation_issue_close": PM,
     "impact_confirm": DEVELOPMENT, "review_escalate": DEVELOPMENT,
     "intake_triage": DEVELOPMENT,
     "send_rejection": SALES, "create_quote": SALES, "customer_response": SALES,
-    "publish_plan": SALES, "offer_expiring": SALES, "escalate_risk": SALES,
+    "publish_plan": SALES, "offer_expiring": SALES,
     # obtain_info is not here (2026-10-14): a question is the ASKING
     # department's task and the row carries it in role_department_id.
     "update_quote": SALES, "offer_build": SALES,

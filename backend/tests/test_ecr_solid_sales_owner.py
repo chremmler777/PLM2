@@ -123,8 +123,7 @@ async def test_owner_change_refused(client, seed, depts, session_factory, admin)
 
 
 async def test_sales_tasks_name_the_owner(client, seed, depts, session_factory, admin):
-    """All of Sales sees the kickoff; the owner as main, the rest as backup
-    with the owner's name. With no lead yet the kickoff is Project
+    """All of Sales sees the kickoff, as backup of the lead (D2). With no lead yet the kickoff is Project
     Management's one main row (A6-04): even the owner is backup, naming
     Project Management, until a lead is set."""
     await _join(session_factory, seed["engineer_id"], depts["Sales"])
@@ -143,11 +142,13 @@ async def test_sales_tasks_name_the_owner(client, seed, depts, session_factory, 
     res = await client.patch(f"/api/v1/changes/{c['id']}",
                              json={"lead_id": seed["admin_id"]}, headers=admin)
     assert res.status_code == 200, res.text
+    # D2 (2026-10-19): the hand-over is the lead's; the Sales contact and
+    # the rest of Sales back the lead up
     mine = await kickoff(eng)
-    assert mine and mine[0]["role"] == "main" and mine[0]["is_mine"]
-    other = {**admin, ACTS: str(depts["Sales"])}
-    rows = await kickoff(other)
-    assert rows and rows[0]["role"] == "backup" and rows[0]["main_name"] == "Engineer"
+    assert mine and mine[0]["role"] == "backup" and not mine[0]["is_mine"]
+    assert mine[0]["main_name"] == "Admin"
+    rows = await kickoff(admin)
+    assert rows and rows[0]["role"] == "main"
 
 
 async def test_mine_includes_owner_and_owing_department(client, seed, depts,

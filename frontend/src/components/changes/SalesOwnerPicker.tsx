@@ -1,5 +1,6 @@
 /**
- * The named Sales owner (ECR-solid C10), on the Status card under the lead.
+ * The named Sales contact (ECR-solid C10; D2 2026-10-19: the commercial
+ * contact, not the process owner), on the Status card under the lead.
  * Sales and Project Management (and admins) change it; everyone else reads
  * it. Only customer changes have one. Sales tasks still show to all of
  * Sales, with this name on them.
@@ -31,7 +32,7 @@ export default function SalesOwnerPicker({ change, canEdit }: {
       setEditing(false)
       qc.invalidateQueries({ queryKey: ['change', change.id] })
     },
-    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not set the Sales owner')),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not set the Sales contact')),
   })
 
   return (

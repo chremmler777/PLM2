@@ -645,11 +645,11 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
   it('A6-04: the kickoff row shows the backend hint naming who acts first', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'kickoff', missing: ['change lead'],
-                   hint: 'Project Management assigns a lead; then you hand over to scoping' }),
+                   hint: 'Project Management sets the lead; then the change goes to scoping' }),
     ] as never)
     wrap(<MyTasksPage />)
     await screen.findByText('GB-CM-0007')
-    expect(screen.getByText('Project Management assigns a lead; then you hand over to scoping; '
+    expect(screen.getByText('Project Management sets the lead; then the change goes to scoping; '
       + t('tasks.hint.missingOnly').replace('{x}', t('kickoff.leadByPm')))).toBeDefined()
     // NEGATIVE: not the generic "Kickoff pending" line
     expect(screen.queryByText(t('tasks.hint.kickoff').replace('{x}', t('kickoff.leadByPm'))))

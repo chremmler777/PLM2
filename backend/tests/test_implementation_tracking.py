@@ -332,6 +332,21 @@ async def test_at_risk_raises_a_sales_escalation_task(client, impl):
     assert await _tasks(client, tool, "escalate_risk") == []
 
 
+async def test_d2_the_lead_owns_the_risk_escalation_sales_backs_up(client, impl):
+    """D2 (2026-10-19): escalation is Project Management's: the change lead
+    sees the row as main, Sales as backup with the lead's name."""
+    tool = await _auth(client, impl, "Tool Engineer")
+    await _report(client, tool, impl, "Tool Engineer", at_risk=True,
+                  risk_note="steel slipped two weeks")
+    lead = await login(client, "admin@test.io")
+    [row] = await _tasks(client, lead, "escalate_risk")
+    assert row["role"] == "main"
+    [row] = await _tasks(client, await _auth(client, impl, "Sales"), "escalate_risk")
+    # NEGATIVE: Sales no longer owns it
+    assert row["role"] == "backup" and row["main_name"]
+    assert not row["is_mine"]
+
+
 async def test_only_sales_lead_or_admin_escalates(client, impl):
     tool = await _auth(client, impl, "Tool Engineer")
     report_id = (await _report(client, tool, impl, "Tool Engineer",

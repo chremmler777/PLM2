@@ -32,7 +32,7 @@ export const pmChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Captured', 'Take over with "Hand over to scoping". Set the lead; as the lead, set the priority and check the quote deadline.'],
+              ['Captured', 'You own the process from here to close. As the project\'s lead PM you lead every change on the project by default; the hand-over row is yours: "Hand over to scoping". No lead PM on the project: set the lead first (and name the lead PM in the project team). As the lead, set the priority and check the quote deadline.'],
               ['Scoping', 'Check the impacted set Development picks (you may pick too), run the scoping meeting, decide.'],
               ['In Assessment', 'Chase the open departments, add a forgotten one, decide on "Not our responsibility", then "Close assessment → Costing".'],
               ['Costing', 'Watch every department price its part, then "Close costing".'],
@@ -180,7 +180,7 @@ export const pmChapter: ContentChapter = {
         },
         {
           p:
-            'Closing costing freezes the numbers and hands the change to Sales: the Sales owner is ' +
+            'Closing costing freezes the numbers and hands the change to Sales: the Sales contact is ' +
             'told "Ready to quote". If a number has to ' +
             'change later, "Reopen costing" asks "Which numbers have to change? (required, audited)".',
         },
@@ -313,7 +313,7 @@ export const pmChapter: ContentChapter = {
             { title: 'Lessons learned', body: 'Make sure the team adds its lessons. Then "Complete lessons step", or give the reason there are none.' },
             { title: 'Release', body: '"Release change" once the release step shows no blocker: every validation check passed, no open validation issue, PM and Quality signed the latest offer, every impacted revision through its check workflow, every checklist row answered (by its department; a department with no member here is yours or the lead\'s to answer, the row says so and it is in your tasks), the lessons step completed, no open plan deviation and no newer index pending. A failed check or an open issue has no override: the exits are a passed retest or Quality\'s concession.' },
             { title: 'Read the summary', body: 'Plan against actual timing, offer against actual cost. The difference is the lesson for the next quote.' },
-            { title: 'Close', body: '"Close change". While a price is open it waits: the customer accepts, or "Absorb" with a reason and the OK of Project Management or Management. An internal change asks first what it achieved beside its target ("Achieved" on the Release tab, with where the number comes from). Closing tells the Sales owner (internal: the lead) and Process when it was on the change.' },
+            { title: 'Close', body: '"Close change". While a price is open it waits: the customer accepts, or "Absorb" with a reason and the OK of Project Management or Management. An internal change asks first what it achieved beside its target ("Achieved" on the Release tab, with where the number comes from). Closing tells the Sales contact (internal: the lead) and Process when it was on the change.' },
           ],
         },
       ],

@@ -195,7 +195,7 @@ async def test_customer_concession_sales_asks_quality_decides(client, fix, sessi
         assert len(n) == 1
     assert "validation_issue_customer" in await _kinds(client, sales, fix["change_id"])
     st = await _state(client, quality, fix)
-    assert "concession: waiting for customer (Sales owner, asked" in st["release_line"]
+    assert "concession: waiting for customer (Sales contact, asked" in st["release_line"]
     # NEGATIVE: Quality cannot decide before the customer's mail is filed
     res = await client.post(_iurl(fix, f"/{iid}/customer"), headers=quality, json={
         "decision": "accept_deviation", "note": "customer ok",

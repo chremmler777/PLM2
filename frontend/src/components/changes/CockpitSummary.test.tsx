@@ -608,9 +608,11 @@ describe('CockpitSummary next-step box', () => {
     expect(screen.queryByTestId('next-ready')).toBeNull()
   })
 
-  it('tags every stage with its agreed owner — Sales, PM or Team', () => {
+  it('tags every stage with its agreed owner — Lead, PM, Team or Sales', () => {
+    // D2: the capture is the lead's (the project's lead PM), not Sales'
     captured()
-    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.sales'))
+    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.lead'))
+    expect(screen.getByTestId('stage-responsible').textContent).not.toContain(t('role.sales'))
     cleanup()
     render(wrap(<CockpitSummary change={change({ status: 'scoping' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))

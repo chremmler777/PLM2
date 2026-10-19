@@ -2,14 +2,16 @@ import { t } from '../../i18n/cmLabels'
 import type { ChangeStatus } from '../../types/change'
 
 /**
- * Which role owns a change while it sits in a given stage (agreed 2026-08-12):
- * Sales writes the request and owns everything quote-shaped — creating it,
- * and at `quoted` the fork to rejection, negotiation or go. Assessment,
- * costing, implementation and validation belong to the team; release is PM's
- * end responsibility. Closed states are just closed — no badge.
+ * Which role owns a change while it sits in a given stage (agreed 2026-08-12,
+ * D2 2026-10-19): Project Management owns the process from capture to close,
+ * so the capture is the change lead's (the project's lead PM by default;
+ * Sales may start and hand it over on PM's behalf). Sales owns everything
+ * quote-shaped: the offer and, at `quoted`, the customer's answer.
+ * Assessment, costing, implementation and validation belong to the team;
+ * release is PM's end responsibility. Closed states are just closed — no badge.
  */
 export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
-  captured: 'role.sales',
+  captured: 'role.lead',
   scoping: 'role.pmShort',
   in_assessment: 'role.team',
   costing: 'role.team',
@@ -57,9 +59,10 @@ export const INTERNAL_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> =
 export function stageResponsibleKey(
   status: ChangeStatus, origin?: string | null, leadId?: number | null,
 ): string | undefined {
-  // An internal change nobody leads yet: Project Management picks the lead
-  // (the backend's "No lead assigned" wait), so the badge names PM.
-  if (origin === 'internal' && status === 'captured' && leadId === null) return 'role.pmShort'
+  // A change nobody leads yet: Project Management picks the lead (the
+  // backend's "No lead assigned" wait), so the badge names PM (A6-04, D2).
+  if (status === 'captured' && leadId === null
+      && origin !== 'engineering_review' && origin !== 'mother_plant') return 'role.pmShort'
   const table = origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE
     : origin === 'mother_plant' ? MOTHER_PLANT_STAGE_RESPONSIBLE
       : origin === 'internal' ? INTERNAL_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE

@@ -423,9 +423,12 @@ describe('ProcessMapPage', () => {
     wrap()
     expect(screen.getByTestId('procmap-role-in_assessment').textContent)
       .toBe('Routed departments (Sales exempt)')
-    // Who starts a change: Sales (PM may too); the mother-plant origin is PM only.
+    // D2: Project Management owns the process; Sales or PM start a change,
+    // each on the other's behalf; the mother-plant origin is PM only.
     const capture = screen.getByTestId('procmap-role-captured').textContent ?? ''
-    expect(capture).toContain('Sales (can_start_change); PM may start')
+    expect(capture).toContain('Project Management owns the process (D2)')
+    expect(capture).toContain('Sales or PM start it, each on the other\'s behalf')
+    expect(capture).not.toContain('Sales owner')
     expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
     expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(14)

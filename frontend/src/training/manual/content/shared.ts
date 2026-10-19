@@ -373,7 +373,7 @@ export const flowChapter: ContentChapter = {
             { title: 'Raised by itself', body: 'A FAIL raises its issue at once (VI-1), owned by the check\'s department. Quality and that department are told. Any other problem in validation: "Raise issue" (a member of a department working on the change, PM or the lead).' },
             { title: 'Fix', body: 'Quality\'s Fix task: who fixes (process parameters, tool at supplier, or another department) and the retest date. The fixing and the retesting department are told.' },
             { title: 'Retest', body: 'The check\'s own department retests in validation and says what changed since the failure. A pass closes the issue. A department with no member here: PM or the lead retest it, the lead gets the task.' },
-            { title: 'Concession, beside it', body: 'Quality only: "Request concession". A customer change: the Sales owner asks and files the customer\'s mail, then Quality decides for a quantity or until a date. An internal change: "not for shipment", Quality decides at once. After its end date it no longer covers the check.' },
+            { title: 'Concession, beside it', body: 'Quality only: "Request concession". A customer change: the Sales contact asks and files the customer\'s mail, then Quality decides for a quantity or until a date. An internal change: "not for shipment", Quality decides at once. After its end date it no longer covers the check.' },
           ],
         },
         {
@@ -462,7 +462,7 @@ export const flowChapter: ContentChapter = {
             'replaces the old one inside that change. Then: the departments that already submitted ' +
             'recheck the changed areas, the lead answers "Index D adds parts or departments?", and ' +
             'Sales answers "D replaces C; does the quote deadline hold?". A full ECR from a new index ' +
-            'arrives with the customer files attached and the Sales owner named: Sales sets the quote ' +
+            'arrives with the customer files attached and the Sales contact named: Sales sets the quote ' +
             'deadline, the lead schedules scoping.',
         },
       ],

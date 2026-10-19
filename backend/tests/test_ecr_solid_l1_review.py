@@ -123,7 +123,7 @@ async def test_sales_owner_error_names_the_owner(client, seed, depts, admin):
     res = await client.patch(f"/api/v1/changes/{c['id']}",
                              json={"sales_owner_id": 999999}, headers=admin)
     assert res.status_code == 400
-    assert res.json()["detail"] == "Sales owner user not found"
+    assert res.json()["detail"] == "Sales contact user not found"
 
 
 async def test_acting_admin_is_no_sales_owner(client, seed, depts, admin):
@@ -142,12 +142,17 @@ async def test_stale_owner_leaves_sales_rows_main(client, seed, depts,
     await client.patch(f"/api/v1/changes/{c['id']}",
                        json={"sales_owner_id": sally, "lead_id": seed["admin_id"]},
                        headers=admin)
+    # D2: the hand-over is the lead's now; the quote is a Sales row
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == c["id"])
+                        .values(status="quoting"))
+        await s.commit()
     otto = await login(client, otto_mail, admin=False)
 
     async def otto_row():
         rows = [t for t in (await client.get("/api/v1/changes/my-tasks",
                                              headers=otto)).json()
-                if t["change_id"] == c["id"] and t["kind"] == "kickoff"]
+                if t["change_id"] == c["id"] and t["kind"] == "create_quote"]
         assert rows
         return rows[0]
     assert (await otto_row())["role"] == "backup"

@@ -24,7 +24,7 @@ export const salesChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Captured', 'Start the request with its reason, parts, documents and quote deadline.'],
+              ['Captured', 'Start the request with its reason, parts, documents and quote deadline. The lead (the project\'s lead PM) hands it over; "Create and hand over" does it for them when the capture is complete.'],
               ['Scoping', 'Answer the team\'s questions for the customer. Send the rejection letter if the change is rejected.'],
               ['Costing', 'Nothing to enter. You see every department\'s numbers and may start the rough timing.'],
               ['Quote creation', 'Build the offer: timing, price, risks, document. Send v1.'],
@@ -37,11 +37,16 @@ export const salesChapter: ContentChapter = {
         },
         {
           p:
-            'A customer change has a Sales owner, shown on the Status card and in the change ' +
+            'Project Management owns the change process, from capture to close: the project\'s ' +
+            'lead PM leads every change on the project and hands it over to scoping, follows it up ' +
+            'and escalates. You keep the customer side: the quote deadline, the offer and the ' +
+            'customer\'s answer. You may start a change for the PM (and the PM for you); the hand-over ' +
+            'row is then the lead\'s, and you see it as backup with the lead\'s name. ' +
+            'A customer change has a Sales contact, shown on the Status card and in the change ' +
             'list: you when you started it, else the project\'s Sales contact. With neither it reads ' +
-            '"No Sales owner: all of Sales", and anyone in Sales takes it with "Pick a Sales owner". All of Sales still ' +
-            'sees the Sales tasks, with the owner\'s name on them, and anyone in Sales may act. ' +
-            'Hand a change to a colleague with "change" beside "Sales owner".',
+            '"No Sales contact: all of Sales", and anyone in Sales takes it with "Pick a Sales contact". All of Sales still ' +
+            'sees the Sales tasks, with the contact\'s name on them, and anyone in Sales may act. ' +
+            'Hand a change to a colleague with "change" beside "Sales contact".',
         },
       ],
     },
@@ -85,7 +90,7 @@ export const salesChapter: ContentChapter = {
             ['A question from an assessment', 'a department that is blocked asks it from its own assessment ("Question from Tool Engineer"). It holds only that department\'s submit, so answer it within the task\'s due date the same way: "Confirmed" or "Assumed".'],
             ['"Not yet"', 'from the scoping meeting keeps the change in scoping while the open questions wait for their answers.'],
             ['"Tell customer: new date or start at risk?"', 'appears at once when the scoping meeting proceeds an urgent customer change and says the need-by is not realistic (only with start at risk, or no with a proposed date). Tell the customer, then record it with the filed mail or a reference ("Customer told").'],
-            ['A new customer index', 'A full ECR started from a new index arrives with the customer files attached and you as Sales owner: set the quote deadline. When a new index replaces the old one in a running change, answer "New index: deadline holds?": "Holds" with the customer\'s mail or a reference, "New date" with the date and the mail, or "Not asked yet" (an assumption you confirm within 5 working days).'],
+            ['A new customer index', 'A full ECR started from a new index arrives with the customer files attached and you as Sales contact: set the quote deadline. When a new index replaces the old one in a running change, answer "New index: deadline holds?": "Holds" with the customer\'s mail or a reference, "New date" with the date and the mail, or "Not asked yet" (an assumption you confirm within 5 working days).'],
             ['"Customer notification or offer needed?"', 'appears when an internal change became a customer change (Quality said parameters, tool, material or cycle time changed, or a customer index arrived). Answer "Notification only" with the filed mail or a reference (the customer is told, the money stays ours: the change goes back to internal with its earlier lead and internal approval; this is the only way back, the lead cannot switch it), or "Offer needed" with the quote deadline (the change takes the quote path; past approval the price stays open until a supplement is accepted). The change cannot proceed before you answer.'],
             ['"Set the quote deadline"', 'appears when Development started a full ECR from a new customer index: the change is already in scoping, the lead scopes while you set the deadline. It is owed before assessment.'],
             ['"Copy mail text"', 'on a customer question (card and task row): the question, the part and what the answer decides, ready for your mail to the customer. File the reply on the change, then answer "Confirmed" with that mail.'],
@@ -123,7 +128,7 @@ export const salesChapter: ContentChapter = {
             ['Risks start hidden:', 'no risk is on the offer until you switch it on. The page warns while a severity-3 risk is not shown. State it, or price it, knowingly.'],
             ['"Result vs internal cost"', 'shows the margin before you send. The totals are computed by the server; what you see is what goes out.'],
             ['"↻ Refresh from costing"', 'pulls the current costing into the draft, keeping your own lines and overrides.'],
-            ['"Ready to quote"', 'is the notice you get when costing closes on your change: the offer is yours from then on. Without a Sales owner every Sales member gets it.'],
+            ['"Ready to quote"', 'is the notice you get when costing closes on your change: the offer is yours from then on. Without a Sales contact every Sales member gets it.'],
             ['"estimated" on a line', 'the cost stands on a department\'s estimate, not on a supplier quote yet. If the quote comes in higher later, the price opens again (below).'],
             ['"Quote above the estimate: supplement or absorb"', 'in My Tasks: a supplier quote came in above the estimate an offer was built on ("Estimate low by 4200.00"). Send a supplement for the difference, or ask to absorb it with a reason (a PM member or Management decides). The change cannot close while this price is open.'],
           ],
@@ -202,7 +207,7 @@ export const salesChapter: ContentChapter = {
             ['Confirm the plan.', 'Sales is always asked on the "Team confirmation" panel.'],
             ['"Publish plan to customer"', 'once the timing is validated and the bank build mode is set. It records that you sent the validated timing; export it with "MS Project" or "CSV" to attach.'],
             ['Escalated deviations', 'are yours to tell the customer. The escalation says what Sales tells them.'],
-            ['Validation issue, customer to be informed:', '"Record customer decision": "Accepts the deviation", "Requires a fix", "New timing" or "Pending". When Quality requests a concession you, the Sales owner, get "Ask the customer about the concession for VI-n and file the mail" (due in 2 working days): ask the customer ("Pending" records that you asked), then file the customer\'s mail into the issue; that ends your task, a Quality member then decides it (you get no "Accepts the deviation" there). A failed weight check is told to you; the quote task opens only when the weight is more than 2 % off the estimate.'],
+            ['Validation issue, customer to be informed:', '"Record customer decision": "Accepts the deviation", "Requires a fix", "New timing" or "Pending". When Quality requests a concession you, the Sales contact, get "Ask the customer about the concession for VI-n and file the mail" (due in 2 working days): ask the customer ("Pending" records that you asked), then file the customer\'s mail into the issue; that ends your task, a Quality member then decides it (you get no "Accepts the deviation" there). A failed weight check is told to you; the quote task opens only when the weight is more than 2 % off the estimate.'],
             ['A fix the customer pays:', 'you get the task to quote it. "Quote the fix", then "Fix quoted to the customer".'],
             ['Release:', 'mark "Customer informed of the implementation date / first shipment" done with the customer mail or its reference.'],
             ['"Ask to start at risk"', 'urgent changes only, before the PO: file the customer\'s go-ahead (the mail or its reference) on the Offer tab. Quality adds a line of quality risks, a Project Management member approves (not you). The change is approved and the work starts; you still send the offer (Offer tab, "Start the offer", then "New version") and record the customer\'s answer (an answer needs the offer sent first): the price is open until the customer accepts it or it is absorbed. Not urgent? The lead or an admin marks the change urgent first.'],

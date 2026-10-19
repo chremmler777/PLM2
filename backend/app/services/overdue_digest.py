@@ -34,8 +34,9 @@ from app.services import cm_switches, due_rules
 
 DIGEST_KIND = "overdue_digest"
 
-#: Sales' stage rows the digest watches (spec §0: "Sales tasks: Sales +
-#: Christoph's digest"), by the status that makes them owed.
+#: The stage rows the digest watches (spec §0: "Sales tasks: Sales +
+#: Christoph's digest"), by the status that makes them owed. D2: the
+#: hand-over (captured) is the lead's, the quote and the answer Sales'.
 SALES_ROWS = {"captured": "hand over to scoping", "quoting": "create the quote",
               "quoted": "record the customer answer"}
 
@@ -134,8 +135,13 @@ async def late_by_change(session: AsyncSession, changes: dict,
         due = (due_rules.add_wd(start, due_rules.CUSTOMER_CONTACT_WD)
                if c.status == "quoted" else due_rules.task_due(start, c, "sales"))
         if due_rules.is_late(due, now):
-            owner = f" ({c.sales_owner_name})" if c.sales_owner_id else ""
-            add(c.id, f"Sales{owner}: {what} (due {fmt_date(due)})")
+            if c.status == "captured":
+                # D2: the hand-over is the lead's (no lead: Project Management)
+                who = (f"Lead {c.lead_name}" if getattr(c, "lead_name", None)
+                       else "Project Management")
+            else:
+                who = "Sales" + (f" ({c.sales_owner_name})" if c.sales_owner_id else "")
+            add(c.id, f"{who}: {what} (due {fmt_date(due)})")
 
     for c in changes.values() if deadlines else ():
         kind = c.active_deadline

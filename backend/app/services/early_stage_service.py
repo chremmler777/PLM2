@@ -128,10 +128,11 @@ class EarlyStageService:
         # (P3: the engineering raiser) is its run team's to hand over.
         if (frm == "captured" and to_status == "scoping" and r["sales"]
                 and change.lead_id is None and cm_switches.on("SCOPING_V2")):
-            # A6-04 (R5, R18): scoping waits for a lead, and only Project
-            # Management assigns one; Sales hands over once it is set
-            return ("Project Management assigns a change lead first; then "
-                    "Sales hands this change over to scoping")
+            # A6-04 (R5, R18), D2: scoping waits for a lead, and only Project
+            # Management sets one (the project's lead PM leads by default)
+            return ("Project Management sets the change lead first (the "
+                    "project's lead PM leads by default: set one in the "
+                    "project team); then the change goes to scoping")
         if (frm == "captured" and to_status in ("scoping", "rejected") and r["sales"]
                 and (change.customer_relevant or change.lead_id is None)):
             return None

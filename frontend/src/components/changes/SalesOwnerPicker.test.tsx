@@ -24,7 +24,7 @@ describe('SalesOwnerPicker (ECR-solid C10)', () => {
       { id: 3, name: 'Cody Sales', is_default: true }, { id: 4, name: 'Jubei Sales' },
     ])
     render(wrap(<SalesOwnerPicker change={{ id: 7, sales_owner_id: null, sales_owner_name: null }} canEdit />))
-    expect(screen.getByTestId('sales-owner-name').textContent).toBe('No Sales owner: all of Sales')
+    expect(screen.getByTestId('sales-owner-name').textContent).toBe('No Sales contact: all of Sales')
     fireEvent.click(screen.getByTestId('sales-owner-edit'))
     const sel = () => screen.getByTestId('sales-owner-select') as HTMLSelectElement
     await waitFor(() => expect(sel().options.length).toBe(3))

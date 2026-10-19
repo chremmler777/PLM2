@@ -2045,17 +2045,17 @@ async def _require_sales_owner(db: AsyncSession, change, user_id: int,
     from app.services import mother_plants as mp
     if not customer or mp.is_mother_plant(change):
         raise HTTPException(status_code=400,
-                            detail="An internal change has no Sales owner")
+                            detail="An internal change has no Sales contact")
     owner = await _require_org_user(db, user_id,
                                     await _project_org_id(db, change.project_id),
-                                    role="Sales owner")
+                                    role="Sales contact")
     from app.services.project_team_service import is_live_member
     if not await is_live_member(db, owner.id, "Sales"):
         raise HTTPException(status_code=400,
-                            detail="The Sales owner must be a member of Sales")
+                            detail="The Sales contact must be a member of Sales")
     await ChangeService.append_changelog(
         db, change, "sales_owner_changed",
-        f"Sales owner {change.sales_owner_id} -> {owner.id}", actor.id,
+        f"Sales contact {change.sales_owner_id} -> {owner.id}", actor.id,
         field_name="sales_owner_id", old_value=change.sales_owner_id,
         new_value=owner.id)
 

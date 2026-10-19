@@ -69,7 +69,7 @@ flowchart TD
 
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces). Internal changes (P3, D1): Development, Process Engineer, Tool Engineer and Manufacturing Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management picks one first and Sales hands over once it is set (A6-04) |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Started by Sales or Project Management, each on the other's behalf (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces). **The hand-over is the change lead's** (DECIDED BY CHRISTOPH 2026-10-19, D2: Project Management owns the process; the project's lead PM leads by default); Sales may hand over its own complete capture on the lead's behalf. Internal changes (P3, D1): Development, Process Engineer, Tool Engineer and Manufacturing Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management sets one first (A6-04) |
 | `scoping` | Team decides: proceed / needs info / reject. Impacted set picked and locked (first action there: Development picks and confirms; the lead and PM may pick too), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
@@ -2158,8 +2158,9 @@ the accepted offer, else the latest sent one), and on
 `implementation_bookings` `work_date` (backfilled from `booked_at`) and
 `source` (`estimate` | `typed`, old rows `typed`).
 
-Stage responsibilities so far: `captured` = Sales (`can_start_change`;
-Project Management may act too), internal changes their engineering raiser
+Stage responsibilities so far: `captured` = the change lead (D2: the
+project's lead PM by default; Sales and Project Management start changes,
+`can_start_change`), internal changes their engineering raiser
 (P3: Development, Process Engineer, Tool Engineer; D1: Manufacturing Engineer;
 the raiser leads and hands over), a change with no lead Project Management (it picks the lead first),
 `scoping` = the lead, Project Management backing up, impact lock = **Development only — no
@@ -2225,13 +2226,38 @@ only, and Sales has no capture hop (scoping, reject) on it; the stage badge
 at capture reads "Lead", not "Sales" ("PM" while nobody leads it). A change with no lead shows "No lead
 assigned: Project Management picks one", and Project Management's kickoff row
 is its own ("Assign a lead, then hand over to scoping"), the one main row
-(A6-04): Sales sees it as backup ("Project Management assigns a lead; then you
-hand over to scoping"; the missing item reads "change lead (Project Management
-sets it)") and may not hand over until a lead is set (403 and no button,
-`SCOPING_V2`); rejecting at capture stays Sales'.
+(A6-04): Sales sees it as backup ("Project Management sets the lead; then
+the change goes to scoping"; the missing item reads "change lead (Project
+Management sets it; default: the project's lead PM)") and may not hand over
+until a lead is set (403 "Project Management sets the change lead first (the
+project's lead PM leads by default: set one in the project team) ...", no
+button, `SCOPING_V2`); rejecting at capture stays Sales'.
 
-**Sales owner (ECR-solid C10).** `change_requests.sales_owner_id` names who
-owns the customer side: the raiser when in Sales, else the project's Sales
+**Process owner: Project Management (DECIDED BY CHRISTOPH 2026-10-19, D2).**
+Sales is no longer the process owner. Project Management owns the ECR
+process from capture to close: the hand-over to scoping, the follow-up, the
+escalation and the fallback. Each project has a **lead PM**, the project
+team's Project Manager responsible; a change on that project gets that PM as
+its lead (process owner) by default (`ChangeService.create_change`), whoever
+started it. Sales and Project Management may each start a change on the
+other's behalf: a Sales raiser's change is led by the lead PM, a PM raiser's
+customer change gets the project's Sales contact. In My Tasks the hand-over
+(`kickoff`) of a customer change is the lead's main row; Project Management
+and Sales see it as backup with the lead's name (a lead who cannot act:
+Project Management's, A6-03). The implementation risk row (`escalate_risk`,
+"Take it to the customer, or escalate internally") is the lead's too, with
+Sales as backup (Sales may still escalate, `ImplementationService.
+may_escalate`). The overdue digest names the lead for a late hand-over
+("Lead <name>: hand over to scoping"). Sales keeps the customer-facing
+commercial part as the change's **Sales contact**: the quote deadline, the
+offer, sending it, the customer's answer (Project Management may step in),
+the customer-flip answer, the rejection letter and the customer side of a
+concession. The stage badge at capture reads "Lead" (no lead: "PM"), no
+longer "Sales". This replaces "Sales captures and hands over" (2026-08-12).
+
+**Sales contact (ECR-solid C10; called "Sales owner" before D2).**
+`change_requests.sales_owner_id` (the column keeps its name) names the
+change's commercial contact, not its process owner (D2): the raiser when in Sales, else the project's Sales
 responsible (project team), else nobody; internal and mother-plant changes
 have none (an internal change made customer-relevant gets the project's Sales
 contact; the other way clears it, also when the same PATCH names an owner:
@@ -2679,7 +2705,10 @@ changed in it from here):
    attach; a newer index never refused (supersede); rechecks per routed
    department and the lead's "Index D adds parts or departments?".
 2. **Capture:** Development, Process Engineer, Tool Engineer and
-   Manufacturing Engineer (D1) start internal changes and lead them (P3); a customer change is complete with
+   Manufacturing Engineer (D1) start internal changes and lead them (P3);
+   Project Management owns the process (D2): the project's lead PM leads
+   every customer change and hands it over, Sales (the Sales contact) keeps
+   quote deadline, offer and customer answer; a customer change is complete with
    the customer's typed file and the quote deadline; urgent needs the
    need-by with reason and evidence; no lead: Project Management picks one
    before the hand-over.

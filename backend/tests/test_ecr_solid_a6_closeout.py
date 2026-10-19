@@ -296,9 +296,10 @@ async def test_leadless_kickoff_is_pm_main_sales_backup_and_sales_cannot_hand_ov
     pm_row = (await _tasks(client, pm, cid, "kickoff"))[0]
     s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
     assert pm_row["role"] == "main"
-    assert pm_row["hint"] == "Assign a lead, then hand over to scoping"
+    assert pm_row["hint"] == ("Assign a lead (the project's lead PM leads by "
+                              "default), then hand over to scoping")
     assert (s_row["role"], s_row["main_name"]) == ("backup", "Project Management")
-    assert s_row["hint"].startswith("Project Management assigns a lead")
+    assert s_row["hint"].startswith("Project Management sets the lead")
     # NEGATIVE: Sales' hand-over is refused (and its button hidden) until a lead
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
     assert st["can_transition"]["scoping"] is False
@@ -306,11 +307,13 @@ async def test_leadless_kickoff_is_pm_main_sales_backup_and_sales_cannot_hand_ov
     assert st["can_transition"]["scoping"] is True
     res = await client.post(f"/api/v1/changes/{cid}/transition",
                             json={"to_status": "scoping"}, headers=sales)
-    assert res.status_code == 403 and "assigns a change lead" in res.json()["detail"]
-    # once a lead is set Sales' row is main again and the hop is Sales' to take
+    assert res.status_code == 403 and "sets the change lead" in res.json()["detail"]
+    # once a lead is set (D2) the row is the lead's; Sales backs it up and
+    # may still hand over on the lead's behalf
     await _set(session_factory, cid, lead_id=team["user"]["Project Manager"])
     s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
-    assert s_row["role"] == "main" and s_row.get("hint") is None
+    assert s_row["role"] == "backup" and s_row.get("hint") is None
+    assert (await _tasks(client, pm, cid, "kickoff"))[0]["role"] == "main"
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
     assert st["can_transition"]["scoping"] is True
 
