@@ -270,6 +270,31 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('assessment-submit')).toBeTruthy()
   })
 
+  it('A3-06: in costing a member answers a sent-back assessment again; the board says it was sent back', async () => {
+    const sent = { at: '2026-10-19T10:00:00', reason: 'Impacted items changed (B): mirror part added' }
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable={false} writable
+      change={change({ status: 'costing', assessments: [assessment({
+        details: { sent_back: sent } })] })} />)
+    expect(await screen.findByTestId('assessment-submit')).toBeTruthy()
+    expect(screen.getByTestId('bucket-sent-back-chip-2').textContent).toBe(t('bucket.sentBack'))
+    expect(screen.getByTestId('bucket-sent-back-2').textContent).toContain('mirror part added')
+  })
+
+  it('A3-06 negative: in costing no form without a send-back, and none for a read-only viewer', async () => {
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable={false} writable
+      change={change({ status: 'costing', assessments: [assessment()] })} />)
+    expect((await screen.findByTestId('bucket-readonly-2')).textContent).toBe(t('bucket.notOpenYet'))
+    expect(screen.queryByTestId('bucket-sent-back-chip-2')).toBeNull()
+    cleanup()
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable={false}
+      change={change({ status: 'costing', assessments: [assessment({
+        details: { sent_back: { reason: 'x changed' } } })] })} />)
+    expect(await screen.findByTestId('bucket-readonly-2')).toBeTruthy()
+    expect(screen.queryByTestId('assessment-submit')).toBeNull()
+    // the board still says it was sent back
+    expect(screen.getByTestId('bucket-sent-back-chip-2')).toBeTruthy()
+  })
+
   it('gives an ordinary member their own bucket and one line for the rest', async () => {
     buckets({ myDepartmentIds: [4] })
     // Their own bucket, already open. Another department's work is not theirs to

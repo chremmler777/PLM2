@@ -1096,6 +1096,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Only members of this department assess here',
   },
   'bucket.answer': { de: 'Bewertung', en: 'Assessment' },
+  // A3-06: an impact-yes answer sent back after an impact edit
+  'bucket.sentBack': { de: 'Zurückgegeben', en: 'Sent back' },
+  'bucket.sentBackBody': {
+    de: 'Zurückgegeben am {date}: {reason}. Den geänderten Umfang bewerten und erneut einreichen; die Kalkulation dieses Fachbereichs ist wieder offen und wartet auf diese Antwort.',
+    en: 'Sent back {date}: {reason}. Assess the changed set and submit again; this department’s costing is open again and waits on this answer.',
+  },
   'bucket.none': {
     de: 'Noch keine Fachbereiche eingebunden. Das Scoping-Meeting entscheidet die Verteilung.',
     en: 'No departments routed yet. The scoping meeting decides who assesses.',
@@ -2058,8 +2064,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'impact.afterLockTitle': { de: 'Umfang nach der Freigabe ändern', en: 'Change the impacted set after the lock' },
   'impact.afterLockWarning': {
-    de: 'Die Fachbereiche haben diesen Umfang bewertet. Betroffene Fachbereiche werden informiert und ihre Kalkulation öffnet sich wieder (in der Angebotserstellung geht die Änderung zurück in die Kalkulation).',
-    en: 'The departments assessed this set. The affected departments are told and their costing reopens (while the offer is being built, the change goes back to costing).' },
+    de: 'Die Fachbereiche haben diesen Umfang bewertet. Betroffene Fachbereiche werden informiert und ihre Kalkulation öffnet sich wieder; wer "betroffen: ja" geantwortet hat, bekommt seine Bewertung zurück und bewertet neu (in der Angebotserstellung geht die Änderung zuerst zurück in die Kalkulation).',
+    en: 'The departments assessed this set. The affected departments are told and their costing reopens; a department that answered impact yes gets its assessment back to assess again (while the offer is being built, the change first goes back to costing).' },
   'impact.afterQuoteLabel': { de: 'Warum ändert sich der Umfang? (Pflicht, protokolliert)', en: 'Why does the scope change? (required, audited)' },
   'impact.scopeChangedAfterQuote': {
     de: 'Umfang nach dem Angebot geändert: Das Angebot deckt ihn nicht mehr ab. Neue Angebotsversion oder genehmigte Übersteuerung nötig.',

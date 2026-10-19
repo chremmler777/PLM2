@@ -898,24 +898,36 @@ begin_impact_edit` / `_reopen_after_locked_edit`), in `in_assessment`,
 - each is told once (`impact_edited`, the assessment owner, else the
   department): *"Impacted items changed after your assessment: ART-B:
   <reason>. If it changes your figures, correct your costing; if it changes
-  your technical answer, tell Nathan (a submitted assessment is not
-  reopened); your costing is open again."* In `in_assessment` a submitted
-  department whose answer said **impact yes** is **sent back** (A3-06,
-  spec "technical impact yes reopens assessment"): its assessment row and
-  engine task are active again (due by the task rule), its answer kept for
-  the edit, logged `assessment_sent_back` with the reason; it reads *"Your
-  assessment is open again: assess the changed set and submit again"*. A
-  submitted impact-no department reads *"If it changes your answer, record
-  it as a risk on your assessment (Nathan sees it)"*; one that has not
-  submitted yet reads *"Check your answer before you submit"*; logged
-  `impact_edited_after_lock`.
+  your technical answer, tell Nathan (an answer of no impact is not
+  reopened); your costing is open again."* A submitted department whose
+  answer said **impact yes** is **sent back** (A3-06, spec "technical impact
+  yes reopens assessment"; **DECIDED BY CHRISTOPH 2026-10-19: in
+  `in_assessment`, `costing` and `quoting`**, replacing "built only in
+  in_assessment"): its assessment row and engine task are active again (due
+  by the task rule), its answer kept for the edit, the reason on the row
+  (`details.sent_back`: at, by, reason; dropped by its next submit, also when
+  a client echoes it) and logged `assessment_sent_back`; it reads *"Your
+  assessment is open again: assess the changed set and submit again"*. In
+  `costing` (quoting has stepped back to costing first, no offer went out)
+  only that department steps back: the change stays in costing, the task is
+  active behind the passed assessment stage (the instance does not move; its
+  new answer completes the task and nothing else), costing -> quoting waits on
+  it (`assessments_open`, "waiting on <dept>": an earlier override of that
+  rule no longer covers the changed waiting set), its costing reopened by the
+  edit is finalized again only after the new answer (finalize refuses while
+  sent back), it keeps a draft there, and its row is in My Tasks and the
+  cockpit. **The lead sees it**: told once when someone else edited
+  (`assessment_sent_back`: "<dept> assess the changed set again; the move to
+  quoting waits on their new answer"), "Sent back" on the department's
+  bucket with date and reason, and the hop names it. A submitted impact-no
+  department reads in assessment *"If it changes your answer, record it as a
+  risk on your assessment (Nathan sees it)"*, in costing the line above; one
+  that has not submitted yet reads *"Check your answer before you submit"*;
+  logged `impact_edited_after_lock`. From `quoted` on nothing is sent back:
+  the scope change below runs.
 Who may edit is unchanged (lead, PM members, admin; P1-5). Intake attach and
-supersede (§1) pass their own reason. **Not built:** the send-back in
-`costing` and `quoting` (A3-06; the routing engine has moved past the
-assessment stage there: it needs a step back to assessment; open decision
-for Christoph: build it in cut 1 as the spec's §4 says, or move it to the
-cut-2 list, which does not name it). There every text names an exit that exists (review L5 loop
-2): the reopened costing, the lead by name. Reopening a closed check item after
+supersede (§1) pass their own reason. Every notice names an exit that exists (review L5 loop
+2): the send-back, the reopened costing, the lead by name. Reopening a closed check item after
 its department submitted is refused the same way: in assessment *"ask the
 department to record it as a risk on its assessment"*; after assessment
 *"tell <lead>, who changes the impacted set (that reopens the costing) or
@@ -2756,7 +2768,10 @@ changed in it from here):
    proceed locks the impacted set.
 4. **Assessment and costing:** check items first, HARD at the department's
    own submit; per-department costing with a basis per position; "<Dept>
-   has no cost"; supplier waits.
+   has no cost"; supplier waits; an impact edit after the lock (reason
+   required) sends an impact-yes answer back to its department, in costing
+   and quoting too (A3-06: only that department steps back, the offer waits
+   on its new answer).
 5. **Approval and release deciders:** overrides need a named decider
    (Quality for implementation/release and validation rules; PM member or
    Management for price drops, Absorb and scope changes); HARD #3 (a failed

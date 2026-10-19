@@ -1334,7 +1334,8 @@ export default function ChangeDetailPage() {
               separate routing list or loose submit form lives inside it. */}
           <AssessmentBuckets change={change} departments={departments}
             myDepartmentIds={myActions?.memberships ?? []}
-            editable={canWrite && change.status === 'in_assessment'} isPm={isPmMember}
+            editable={canWrite && change.status === 'in_assessment'} writable={!!canWrite}
+            isPm={isPmMember}
             canSeeAll={canSeeCosts}
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
             routingDeviation={stage?.routing_deviation ?? null}

@@ -361,7 +361,11 @@ async def my_change_tasks(
         unlinked_active = (ChangeAssessment.wf_instance_task_id.is_(None)
                            & (ChangeAssessment.status == "active")
                            & ChangeAssessment.rasic_letter.in_(BLOCKING_LETTERS))
-        late = ((owed_task | unlinked_active)
+        # A3-06: an answer sent back in costing (its task active again
+        # behind the passed stage); the loop keeps only sent-back rows
+        sent_back = ((ChangeRequest.status == "costing") & (_WfT.status == "active")
+                     & _WfT.is_actionable.is_(True))
+        late = ((owed_task | unlinked_active | sent_back)
                 & ChangeRequest.status.notin_(
                     ("released", "closed", "rejected", "cancelled")))
         rows = await db.execute(
@@ -396,6 +400,11 @@ async def my_change_tasks(
             # when it is *effectively* active (task active, or an unlinked row
             # carrying its own "active" status from a routing deviation).
             if a.effective_status != "active":
+                continue
+            # A3-06: in costing a stepped task is owed only once sent back
+            if (c.status == "costing" and a.task is not None
+                    and a.task.step_id is not None
+                    and "sent_back" not in a.details_dict):
                 continue
             # Only R/A letters OWE a submit. A Consulted/Support row activates
             # with its stage so the department may chime in, but its 'noted'

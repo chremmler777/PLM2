@@ -166,10 +166,17 @@ function ObjectList({ objects, partName }: {
   )
 }
 
+/** A3-06: the server's send-back marker on an assessment (details.sent_back). */
+function sentBackOf(a: { details?: Record<string, unknown> | null } | null | undefined):
+  { at?: string; reason?: string } | null {
+  const raw = a?.details?.sent_back
+  return raw && typeof raw === 'object' ? raw as { at?: string; reason?: string } : null
+}
+
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
   canAddDepartment = false, routingDeviation = null, declinedIds, round,
-  onContinueCosting,
+  onContinueCosting, writable = false,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -194,6 +201,9 @@ export default function AssessmentBuckets({
   /** Per-department pipeline: a department whose costing is open (submitted
    *  feasible, owes a cost input) goes straight on to its costing. */
   onContinueCosting?: () => void
+  /** The viewer may write at all (not read-only): in costing an answer sent
+   *  back after an impact edit (A3-06) is open to its department again. */
+  writable?: boolean
 }) {
   const changeId = change.id
   const costingOpen = (id: number) => (change.status === 'in_assessment' || change.status === 'costing')
@@ -360,7 +370,13 @@ export default function AssessmentBuckets({
           : openDept === row.id)
         const areas = impactedCount(a?.details)
         const risks = checklistRisks(row.id)
-        const canSubmit = isMine && editable && (a?.status === 'active' || (owed && a?.status === 'pending'))
+        // A3-06: sent back after an impact edit; in costing only this
+        // department's answer is open again (the server's send-back marker)
+        const sentBack = sentBackOf(a)
+        const reopened = writable && change.status === 'costing' && !!sentBack
+          && a?.status === 'active' && !a?.submitted_at
+        const rowEditable = editable || reopened
+        const canSubmit = isMine && rowEditable && (a?.status === 'active' || (owed && a?.status === 'pending'))
         return (
           <section key={row.id} data-testid={`bucket-${row.id}`}
             className={`rounded-lg border ${
@@ -388,6 +404,13 @@ export default function AssessmentBuckets({
                 {stateLabel(state)}
               </span>
               {row.pendingRemoval && <PendingRemovalChip testId={`bucket-removal-${row.id}`} />}
+              {sentBack && !a?.submitted_at && (
+                <span data-testid={`bucket-sent-back-chip-${row.id}`}
+                  title={sentBack.reason ?? undefined}
+                  className="rounded bg-amber-900/60 text-amber-200 px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0">
+                  {t('bucket.sentBack')}
+                </span>
+              )}
               {a?.verdict && a.verdict !== 'pending' && (
                 <span data-testid={`bucket-verdict-${row.id}`}
                   className={`inline-flex flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
@@ -442,6 +465,14 @@ export default function AssessmentBuckets({
             {expanded && (
               <BucketErrorBoundary name={deptName(row.id)}>
               <div className="border-t border-slate-700 px-3 py-3 space-y-3">
+                {sentBack && !a?.submitted_at && (
+                  <p data-testid={`bucket-sent-back-${row.id}`}
+                    className="rounded border border-amber-700/60 bg-amber-950/20 px-2 py-1.5 text-xs text-amber-200">
+                    {t('bucket.sentBackBody')
+                      .replace('{date}', sentBack.at ? formatDate(sentBack.at) : '')
+                      .replace('{reason}', sentBack.reason ?? '')}
+                  </p>
+                )}
                 <div>
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
                     {t('bucket.objects')}
@@ -457,11 +488,11 @@ export default function AssessmentBuckets({
                     concerns={concerns as ChangeConcern[]}
                     attachments={change.attachments ?? []}
                     confirmerName={change.sales_owner_name ?? change.lead_name ?? null}
-                    editable={isMine && editable && !(a?.submitted_at)} />
+                    editable={isMine && rowEditable && !(a?.submitted_at)} />
                 )}
 
                 {/* This department's own holds, in the room where the work happens. */}
-                <ConcernStrip changeId={changeId} editable={isMine && editable}
+                <ConcernStrip changeId={changeId} editable={isMine && rowEditable}
                   scoped departments={departments} myDepartmentIds={myDepartmentIds}
                   onlyDepartmentId={row.id} isPm={isPm}
                   hideConcernIds={change.assessment_v2
@@ -570,7 +601,7 @@ export default function AssessmentBuckets({
                           ))}
                         </ul>
                       )}
-                      {isMine && editable ? drop : atts.length === 0 && (
+                      {isMine && rowEditable ? drop : atts.length === 0 && (
                         <p className="text-xs text-slate-500">{hint}</p>
                       )}
                     </div>

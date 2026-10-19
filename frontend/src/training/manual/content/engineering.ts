@@ -91,6 +91,7 @@ export const engineeringChapter: ContentChapter = {
             ['"Blocked? Ask a question"', 'when you cannot answer without someone else: one line, what it is about and who can answer (customer, our team, supplier). It holds only your own submit. A customer or supplier question goes to Sales with ready mail text; a question for our team to the lead, who answers it. You are told when it is answered; close it when the answer settles it.'],
             ['"Not our responsibility"', 'if it really is not yours. Give the reason and, if you can, who should assess instead. The lead decides.'],
             ['Customer mails', 'are shown in the bucket. The customer communication is Sales\'s, but you may file a mail you received.'],
+            ['"Sent back"', 'on your bucket: the lead or PM changed the impacted set after you answered "impact yes" (before the offer goes out). Your answer is kept; assess the changed set and submit again (it is in My Tasks). In costing only your department steps back: your costing is open again, you finalize it after the new answer, and the offer waits on you. An answer of "no impact" is not sent back: if the change affects you after all, tell the lead.'],
           ],
         },
         { shot: 'eng-bucket', alt: 'The Tool Engineer bucket on "Assessments" with "To assess" listing the mold, the checklist and the verdict form.' },

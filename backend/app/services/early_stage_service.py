@@ -42,6 +42,9 @@ POST_QUOTE_STATUSES = ("quoted", "approved")
 # C16 (spec §4, ASSESSMENT_V2): after the lock and before the offer, an
 # impact edit needs a reason too and reopens the affected departments.
 LOCKED_PRE_QUOTE = ("in_assessment", "costing", "quoting")
+# A3-06: where an impact-yes answer is sent back after an impact edit
+# (quoting steps back to costing first; from quoted on the scope change runs)
+SEND_BACK_STATUSES = ("in_assessment", "costing")
 # The hops whose rights §16 P1-4 sets.
 RUN_TEAM_TARGETS = ("rejected", "cancelled", "on_hold")
 # ECR-solid C1 (switch COMMERCIAL_V2): the mid-flow hops are the run team's
@@ -447,14 +450,21 @@ class EarlyStageService:
     async def _send_back_assessments(session: AsyncSession, change: ChangeRequest,
                                      department_ids: list[int], user_id: int,
                                      reason: str) -> list[int]:
-        """A3-06 (ASSESSMENT_V2, in assessment only: the engine has not moved
-        past the assessment stage): each department here with a submitted
+        """A3-06 (ASSESSMENT_V2): each department here with a submitted
         impact-yes answer gets its assessment row and its engine task back
         (active, due by the task rule), its answer kept for the edit, with the
-        reason on the record. Returns the departments sent back."""
+        reason on the record (details["sent_back"], dropped by its next
+        submit). In assessment and, Christoph 2026-10-19, in costing (quoting
+        has stepped back to costing before this): there the engine has moved
+        past the assessment stage, so only this department steps back: its
+        task is active again behind the stage (the instance does not move),
+        costing -> quoting waits on it like on any open assessment, and its
+        costing (reopened by the caller) is finalized again after its new
+        answer. Returns the departments sent back."""
         from app.services import cm_switches, due_rules
         from app.models.workflow import WfInstanceTask
-        if not cm_switches.on("ASSESSMENT_V2") or change.status != "in_assessment":
+        if (not cm_switches.on("ASSESSMENT_V2")
+                or change.status not in SEND_BACK_STATUSES):
             return []
         out: list[int] = []
         now = datetime.utcnow()
@@ -466,6 +476,10 @@ class EarlyStageService:
             a.submitted_by = None
             a.verdict = "pending"
             a.status = "active"
+            kept = a.details_dict
+            kept["sent_back"] = {"at": now.isoformat(), "by": user_id,
+                                 "reason": reason, "status": change.status}
+            a.details = json.dumps(kept)
             if a.wf_instance_task_id is not None:
                 task = await session.get(WfInstanceTask, a.wf_instance_task_id)
                 if task is not None and task.status != "active":
@@ -516,9 +530,9 @@ class EarlyStageService:
         # A3-06 (spec §4 minimal C16 "technical impact yes reopens
         # assessment"): in assessment, a department whose objects moved and
         # whose submitted answer said impact yes gets its assessment back
-        sent_back = (await EarlyStageService._send_back_assessments(
+        # Christoph 2026-10-19: in costing too (quoting stepped back above)
+        sent_back = await EarlyStageService._send_back_assessments(
             session, change, affected, user_id, f"Impacted items changed ({what}): {reason}")
-            if change.status == "in_assessment" else [])
         entry = await ChangeService.append_changelog(
             session, change, "impact_edited_after_lock",
             f"Impacted items changed after the lock ({what}): {reason}", user_id,
@@ -534,11 +548,11 @@ class EarlyStageService:
                              if a.department_id == did
                              and (a.effective_owner_id or a.responsible_id)} - {user_id})
             title = f"Impacted items changed after your assessment: {change.change_number}"[:255]
-            # R5/R37: a next step that exists. A submitted answer is not
-            # reopened (no per-department send-back yet: open question C16);
-            # in assessment the department records the effect as a risk on
-            # its assessment, later its reopened costing takes the figures
-            # and the lead the rest.
+            # R5/R37: a next step that exists. An impact-yes answer is sent
+            # back (A3-06); an impact-no one is not reopened: in assessment
+            # the department records the effect as a risk on its assessment,
+            # in costing its reopened costing takes the figures and the lead
+            # the rest.
             submitted = any(a.department_id == did and a.submitted_at is not None
                             for a in change.assessments)
             lead = change.lead_name or "the change lead"
@@ -552,8 +566,8 @@ class EarlyStageService:
                         f"assessment ({lead} sees it)")
             else:
                 step = ("If it changes your figures, correct your costing; if it "
-                        f"changes your technical answer, tell {lead} (a submitted "
-                        "assessment is not reopened)")
+                        f"changes your technical answer, tell {lead} (an answer "
+                        "of no impact is not reopened)")
             body = (f"{what}: {reason}. {step}"
                     + ("; your costing is open again" if did in reopened else "") + ".")
             key = f"impact_edit:{getattr(entry, 'id', 0)}:{did}"
@@ -565,6 +579,19 @@ class EarlyStageService:
                 await NotificationService.notify_departments_once(
                     session, [did], change=change, kind="impact_edited", subject_key=key,
                     title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
+        # A3-06: the lead sees who stepped back and why (the edit may have
+        # been a PM member's); the move on waits on these answers
+        if sent_back and change.lead_id and change.lead_id != user_id:
+            depts = ", ".join(names.get(d, f"#{d}") for d in sent_back)
+            nxt = ("the move to quoting waits on " if change.status == "costing"
+                   else "costing waits on ")
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="assessment_sent_back",
+                subject_key=f"sent_back:{getattr(entry, 'id', 0)}",
+                title=f"Assessment sent back: {depts} on {change.change_number}"[:255],
+                body=(f"{what}: {reason}. {depts} assess the changed set again; "
+                      f"{nxt}their new answer."),
+                link=f"/changes/{change.id}?tab=assessments")
 
     @staticmethod
     async def scope_change_state(session: AsyncSession,
@@ -718,7 +745,9 @@ class EarlyStageService:
         if not isinstance(draft, dict):
             raise ChangeError("A draft must be an object")
         a = await EarlyStageService._draft_row(session, change, assessment_id, user)
-        if change.status != "in_assessment":
+        if change.status != "in_assessment" and not (
+                change.status == "costing" and "sent_back" in a.details_dict):
+            # A3-06: a department sent back in costing drafts its new answer
             raise ChangeError("Drafts are kept while the change is in assessment")
         if a.submitted_at is not None or a.verdict != "pending":
             raise ChangeError("This assessment is already submitted")

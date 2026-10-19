@@ -5431,7 +5431,10 @@ class ChangeService:
         owed_ids = {a.id for a in owed} | {
             a.id for a in change.assessments
             if live and a.task is None and a.status == "active"
-            and a.rasic_letter in BLOCKING_LETTERS}
+            and a.rasic_letter in BLOCKING_LETTERS} | {
+            # A3-06: an answer sent back in costing is owed again
+            a.id for a in change.assessments
+            if change.status == "costing" and "sent_back" in a.details_dict}
         for a in change.assessments:
             if a.id not in owed_ids and (
                     change.status != "in_assessment"
@@ -6670,17 +6673,24 @@ class ChangeService:
             await ChangeService._validate_impacts(
                 session, department_id, details, stored=a.details_dict)
             details.pop("draft", None)
+            # A3-06: the new answer ends a send-back (a client echoing the
+            # marker does not keep it)
+            details.pop("sent_back", None)
             a.details = json.dumps(details)
         elif cm_switches.on("ASSESSMENT_V2"):
             # A bare verdict is judged on the answer the row already holds
             # (a reopened assessment's earlier answer); none -> refused.
-            kept = {k: v for k, v in a.details_dict.items() if k != "draft"}
+            kept = {k: v for k, v in a.details_dict.items()
+                    if k not in ("draft", "sent_back")}
             await ChangeService._validate_impacts(
                 session, department_id, kept, stored=a.details_dict)
-        if details is None and "draft" in a.details_dict:
-            # The submit is the answer; an unfinished draft ends with it.
+        if details is None and ("draft" in a.details_dict
+                                or "sent_back" in a.details_dict):
+            # The submit is the answer; an unfinished draft (and a send-back,
+            # A3-06) ends with it.
             kept = a.details_dict
             kept.pop("draft", None)
+            kept.pop("sent_back", None)
             a.details = json.dumps(kept) if kept else None
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
