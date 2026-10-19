@@ -1,4 +1,4 @@
-"""138: §11 close with the achieved value, C15 book hours (ECR-solid lane L7).
+"""140: §11 close with the achieved value, C15 book hours (ECR-solid lane L7).
 
 Schema
   change_requests.achieved_value / achieved_ref / achieved_by / achieved_at
@@ -15,15 +15,15 @@ value: a released internal change asks for it at close.
 
 Repeatable: every column is added once.
 
-Revision ID: 138
-Revises: 137
+Revision ID: 140
+Revises: 139
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "138"
-down_revision = "137"
+revision = "140"
+down_revision = "139"
 branch_labels = None
 depends_on = None
 

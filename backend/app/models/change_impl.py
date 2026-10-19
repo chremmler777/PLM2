@@ -59,11 +59,11 @@ class ImplementationBooking(Base):
     booked_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     booked_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow)
-    # ECR-solid C15 (migration 117): the day worked, and where the hours
+    # ECR-solid C15 (migration 119): the day worked, and where the hours
     # came from: 'estimate' (a confirmed department estimate) | 'typed'.
     work_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     source: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # C15 (migration 138): booked for a colleague (Belk for the toolmakers,
+    # C15 (migration 140): booked for a colleague (Belk for the toolmakers,
     # who have no account), and the lead's "Coordination" row.
     booked_for: Mapped[str | None] = mapped_column(String(120), nullable=True)
     activity: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -91,7 +91,7 @@ class ImplementationReport(Base):
     at_risk: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())
     risk_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # C23 (migration 130): "our part done" ends the department's cadence; a
+    # C23 (migration 132): "our part done" ends the department's cadence; a
     # later report without it starts it again.
     part_done: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())

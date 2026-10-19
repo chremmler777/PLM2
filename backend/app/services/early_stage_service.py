@@ -600,7 +600,7 @@ class EarlyStageService:
         covering_offer = next((o for o in offers if at and o.sent_at >= at), None)
         # A4-04 (C6): only an override of this rule covers it, never one that
         # lifted another (an Absorb, Quality's timing OK); a legacy row
-        # (guard_key NULL: decided before migration 118 bound overrides to
+        # (guard_key NULL: decided before migration 120 bound overrides to
         # their rule, 118 binds every later decision) still counts
         covering_dev = next(
             (d for d in change.transition_deviations

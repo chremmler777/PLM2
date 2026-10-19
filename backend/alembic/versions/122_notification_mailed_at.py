@@ -1,4 +1,4 @@
-"""120: a notification is mailed at most once (ECR-solid spec §0 Notifications).
+"""122: a notification is mailed at most once (ECR-solid spec §0 Notifications).
 
 Schema
   notifications.mailed_at   when the mail copy went out (or was skipped);
@@ -10,15 +10,15 @@ Data
 
 Repeatable: the column is added once; the backfill only fills NULLs.
 
-Revision ID: 120
-Revises: 119
+Revision ID: 122
+Revises: 121
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "120"
-down_revision = "119"
+revision = "122"
+down_revision = "121"
 branch_labels = None
 depends_on = None
 

@@ -1,6 +1,5 @@
-"""118 on SQLite (ECR-solid C6): the override columns on
-change_transition_deviations. Repeatable; existing rows keep guard_key NULL
-(they keep waiving what they always did); the downgrade drops the columns."""
+"""118 on SQLite: ppap_submissions.submitted_by is added nullable (existing
+rows untouched), the upgrade repeats safely, and the downgrade drops it."""
 import importlib.util
 from pathlib import Path
 
@@ -9,11 +8,11 @@ import sqlalchemy as sa
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 
 PRE = """
-CREATE TABLE change_transition_deviations (id INTEGER PRIMARY KEY, change_id INTEGER,
-    to_status VARCHAR(30), reason TEXT, status VARCHAR(15), proposed_by INTEGER,
-    proposed_at DATETIME, decided_by INTEGER, decided_at DATETIME, decision_note TEXT);
-INSERT INTO change_transition_deviations (id, change_id, to_status, reason, status, proposed_by)
-    VALUES (1, 5, 'released', 'legacy', 'approved', 2);
+CREATE TABLE users (id INTEGER PRIMARY KEY);
+CREATE TABLE ppap_submissions (id INTEGER PRIMARY KEY, revision_id INTEGER NOT NULL,
+    status VARCHAR(20), created_by INTEGER NOT NULL REFERENCES users(id));
+INSERT INTO users VALUES (1);
+INSERT INTO ppap_submissions VALUES (1, 7, 'submitted', 1);
 """
 
 
@@ -31,31 +30,27 @@ def _run(conn, fn):
         fn()
 
 
-def _cols(conn, table):
-    return {c["name"] for c in sa.inspect(conn).get_columns(table)}
+def _cols(conn):
+    return {c["name"] for c in sa.inspect(conn).get_columns("ppap_submissions")}
 
 
 def test_118_up_and_down_on_sqlite(tmp_path):
     from tests.test_change_starter_departments import _load_migration_032
     _load_migration_032()                  # puts the real alembic into sys.modules, once
-    m = _load("118_override_bound_to_rule.py")
-    assert (m.revision, m.down_revision) == ("118", "117")
+    m118 = _load("118_ppap_submitted_by.py")
+    assert (m118.revision, m118.down_revision) == ("118", "117")
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'm118.db'}")
     with engine.begin() as conn:
         for stmt in PRE.split(";"):
             if stmt.strip():
                 conn.exec_driver_sql(stmt)
     with engine.begin() as conn:
-        _run(conn, m.upgrade)
-        _run(conn, m.upgrade)              # repeatable
-        assert {"guard_key", "guard_reason", "reason_code"} <= _cols(
-            conn, "change_transition_deviations")
-        row = conn.execute(sa.text(
-            "SELECT status, guard_key FROM change_transition_deviations")).one()
-        assert tuple(row) == ("approved", None)   # legacy row untouched
-    with engine.begin() as conn:
-        _run(conn, m.downgrade)
-        _run(conn, m.downgrade)            # repeatable
-        assert "guard_key" not in _cols(conn, "change_transition_deviations")
+        _run(conn, m118.upgrade)
+        _run(conn, m118.upgrade)
+        assert "submitted_by" in _cols(conn)
         assert conn.execute(sa.text(
-            "SELECT count(*) FROM change_transition_deviations")).scalar() == 1
+            "SELECT status, submitted_by FROM ppap_submissions")).one() == ("submitted", None)
+    with engine.begin() as conn:
+        _run(conn, m118.downgrade)
+        assert "submitted_by" not in _cols(conn)
+        assert conn.execute(sa.text("SELECT count(*) FROM ppap_submissions")).scalar() == 1

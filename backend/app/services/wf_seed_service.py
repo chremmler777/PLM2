@@ -79,7 +79,7 @@ ASSESSMENT_STANDARD_BY_TYPE = {"physical_part": ECM_BEWERTUNG_PHYSICAL}
 
 
 # ECR-solid C21: who owns the industrialization and the trial of a check
-# workflow (both ECN templates). Migration 129 rewrites the live rows to this.
+# workflow (both ECN templates). Migration 131 rewrites the live rows to this.
 INDUSTRIALIZATION_STEPS = [
     ("Implement tool change", [
         ("Tool Engineer", "R"), ("Project Manager", "A"), ("Toolshop", "S"),
@@ -127,7 +127,7 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
                 ], {"four_eyes": True}),
             ]),
             ("Industrialization", [
-                # ECR-solid C21 (spec §8-9, migration 129 reseeds live rows):
+                # ECR-solid C21 (spec §8-9, migration 131 reseeds live rows):
                 # the Tool Engineer owns the tool change and the trial (P7: the
                 # Toolshop supports it), Process the parameter sheets; the
                 # retired Production, Production control, Purchasing and

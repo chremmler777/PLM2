@@ -1,4 +1,4 @@
-"""121: scoping flags are questions or check items (ECR-solid C33, spec §3).
+"""123: scoping flags are questions or check items (ECR-solid C33, spec §3).
 
 Schema
   change_concerns.flag_type          'question' | 'check'; NULL = legacy (a question)
@@ -20,15 +20,15 @@ Data
 
 Repeatable: columns are added once; the backfill only fills NULLs.
 
-Revision ID: 121
-Revises: 120
+Revision ID: 123
+Revises: 122
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "121"
-down_revision = "120"
+revision = "123"
+down_revision = "122"
 branch_labels = None
 depends_on = None
 

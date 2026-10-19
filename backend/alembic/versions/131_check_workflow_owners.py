@@ -1,4 +1,4 @@
-"""129: who owns the tool change and the trial in the check workflows
+"""131: who owns the tool change and the trial in the check workflows
 (ECR-solid C21, spec §8-9 "Reseed").
 
 Data (both "ECN Implementation (Tool)" and "(Article)" templates, every
@@ -22,14 +22,14 @@ instances started from now on (in plm_ecr_solid no change is past approved).
 
 Downgrade: none (the old owners were the audit finding).
 
-Revision ID: 129
-Revises: 128
+Revision ID: 131
+Revises: 130
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "129"
-down_revision = "128"
+revision = "131"
+down_revision = "130"
 branch_labels = None
 depends_on = None
 

@@ -1,4 +1,4 @@
-"""137: the Fix task and the parallel concession of a failed validation
+"""139: the Fix task and the parallel concession of a failed validation
 check (ECR-solid §10, lane L7, switch RELEASE_V2).
 
 Schema (change_validation_issues)
@@ -17,15 +17,15 @@ gets a Fix task only while its check is failed and no fix owner is set.
 
 Repeatable: every column is added once.
 
-Revision ID: 137
-Revises: 136
+Revision ID: 139
+Revises: 138
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "137"
-down_revision = "136"
+revision = "139"
+down_revision = "138"
 branch_labels = None
 depends_on = None
 

@@ -1,6 +1,6 @@
 """ECR-solid close-out area 6 (tasks, notifications, next-action panels).
 
-- A6-01: the task clock's go-live is stamped (migration 143), so a change in
+- A6-01: the task clock's go-live is stamped (migration 145), so a change in
   flight at go-live is not Late without CM_TASK_CLOCK_FROM, and the overdue
   digest's Sales rows count from the same floor as My Tasks."""
 from datetime import datetime, timedelta
@@ -80,12 +80,12 @@ async def test_digest_sales_row_counts_from_the_go_live(
 
 
 @pytest.mark.filterwarnings("ignore")
-def test_migration_143_stamps_once_and_downgrades(tmp_path):
+def test_migration_145_stamps_once_and_downgrades(tmp_path):
     from tests.test_change_starter_departments import _load_migration_032
-    from tests.test_migration_118_sqlite import _load, _run
+    from tests.test_migration_120_sqlite import _load, _run
     _load_migration_032()
-    m = _load("143_task_clock_go_live.py")
-    assert (m.revision, m.down_revision) == ("143", "142")
+    m = _load("145_task_clock_go_live.py")
+    assert (m.revision, m.down_revision) == ("145", "144")
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'm143.db'}")
     with engine.begin() as conn:
         conn.exec_driver_sql("CREATE TABLE organizations (id INTEGER PRIMARY KEY)")

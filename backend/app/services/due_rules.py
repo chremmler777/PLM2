@@ -79,7 +79,7 @@ def deadline_of(change) -> tuple[Optional[datetime], Optional[str]]:
     return min(out, key=lambda x: x[0])
 
 
-#: org_settings key migration 143 stamps with its run time (the go-live of
+#: org_settings key migration 145 stamps with its run time (the go-live of
 #: the task clock); the earliest stamp of any organization counts.
 CLOCK_SETTING_KEY = "cm_task_clock_from"
 _stamped_floor: Optional[datetime] = None
@@ -96,7 +96,7 @@ def _parse(raw: Optional[str]) -> Optional[datetime]:
 
 
 async def load_clock_floor(session) -> Optional[datetime]:
-    """Read the stamped go-live (org_settings, written by migration 143)
+    """Read the stamped go-live (org_settings, written by migration 145)
     so clock_floor() serves it; every entry point that dates computed rows
     (annotate_tasks, owed_items, the digests) calls this first. A6-01: a
     safe default, so changes in flight at go-live are not all Late on the
@@ -113,7 +113,7 @@ async def load_clock_floor(session) -> Optional[datetime]:
 
 def clock_floor() -> Optional[datetime]:
     """The task clock's go-live: settings.cm_task_clock_from when set (it
-    wins, so an installation can move it), else the stamp migration 143
+    wins, so an installation can move it), else the stamp migration 145
     wrote (load_clock_floor), else None."""
     from app.core.config import get_settings
     env = _parse(get_settings().cm_task_clock_from)

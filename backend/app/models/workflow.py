@@ -23,7 +23,7 @@ class Department(Base):
     flow_type: Mapped[str] = mapped_column(String(20))  # action | info
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     can_start_change: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
-    # P3 (migration 117): may start an INTERNAL change only (Development,
+    # P3 (migration 119): may start an INTERNAL change only (Development,
     # Process Engineer, Tool Engineer); the raiser then leads it.
     can_start_internal_change: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())

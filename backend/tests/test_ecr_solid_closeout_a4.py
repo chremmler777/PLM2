@@ -226,7 +226,7 @@ async def test_a_new_version_after_the_decline_replaces_the_row(
     ("price_open", False),               # NEGATIVE: an Absorb
     ("timing_unconfirmed", False),       # NEGATIVE: another rule's OK
     ("scope_change_uncovered", True),
-    (None, True),                        # legacy, before migration 118
+    (None, True),                        # legacy, before migration 120
 ])
 async def test_only_a_scope_override_covers_the_scope_change(
         quoted, session_factory, guard_key, covered):

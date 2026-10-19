@@ -1,4 +1,4 @@
-"""123: revision intake triage and its follow-ups (ECR-solid spec §1, C9, C11).
+"""125: revision intake triage and its follow-ups (ECR-solid spec §1, C9, C11).
 
 Schema
   revision_intakes.what_changed         areas: geometry, tolerance, material,
@@ -22,15 +22,15 @@ NULL and nothing waits on them.
 
 Repeatable: every column and the table are added once.
 
-Revision ID: 123
-Revises: 122
+Revision ID: 125
+Revises: 124
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "123"
-down_revision = "122"
+revision = "125"
+down_revision = "124"
 branch_labels = None
 depends_on = None
 

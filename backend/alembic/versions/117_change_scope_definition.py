@@ -1,15 +1,15 @@
-"""115: change_requests.scope_definition, the scope of the change in the
+"""117: change_requests.scope_definition, the scope of the change in the
 project manager's words (written in captured/scoping, read-only afterwards).
 
-Revision ID: 115
-Revises: 114
+Revision ID: 117
+Revises: 116
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "115"
-down_revision = "114"
+revision = "117"
+down_revision = "116"
 branch_labels = None
 depends_on = None
 

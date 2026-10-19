@@ -1,4 +1,4 @@
-"""133: the scope change card (ECR-solid §6 [R3]).
+"""135: the scope change card (ECR-solid §6 [R3]).
 
 Schema
   change_scope_changes   one row per "the customer wants to add or change
@@ -12,15 +12,15 @@ override covers it.
 
 Repeatable: the table is created once.
 
-Revision ID: 133
-Revises: 132
+Revision ID: 135
+Revises: 134
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "133"
-down_revision = "132"
+revision = "135"
+down_revision = "134"
 branch_labels = None
 depends_on = None
 

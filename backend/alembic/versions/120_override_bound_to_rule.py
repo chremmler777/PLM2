@@ -1,4 +1,4 @@
-"""118: an override is bound to its rule (ECR-solid C6, lane L2).
+"""120: an override is bound to its rule (ECR-solid C6, lane L2).
 
 Schema
   change_transition_deviations.guard_key     the soft rule the override waives
@@ -18,15 +18,15 @@ Data
 
 Repeatable: every column is added once.
 
-Revision ID: 118
-Revises: 117
+Revision ID: 120
+Revises: 119
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "118"
-down_revision = "117"
+revision = "120"
+down_revision = "119"
 branch_labels = None
 depends_on = None
 

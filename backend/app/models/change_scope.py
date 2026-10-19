@@ -1,4 +1,4 @@
-"""The scope change card (ECR-solid spec §6 [R3], migration 133).
+"""The scope change card (ECR-solid spec §6 [R3], migration 135).
 
 From 'quoted' on the customer may add or change something. One card per
 request, three steps with an owner each:
@@ -69,7 +69,7 @@ class ChangeScopeChange(Base):
     told_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     told_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # step 1 "Missing info is a question" (migration 135): the customer
+    # step 1 "Missing info is a question" (migration 137): the customer
     # question that holds the accept; {text, by, at} open, plus {answer, ref,
     # attachment_id, answered_by, answered_at} once Sales filed the answer
     question: Mapped[dict | None] = mapped_column(JSON, nullable=True)

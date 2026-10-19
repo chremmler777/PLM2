@@ -1,4 +1,4 @@
-"""132: supplements (ECR-solid §6 "After approval", §7).
+"""134: supplements (ECR-solid §6 "After approval", §7).
 
 Schema
   change_offers.kind   'offer' (the quote) | 'supplement' (sent after
@@ -9,15 +9,15 @@ Data: every existing row is an offer (server default).
 
 Repeatable: the column is added once.
 
-Revision ID: 132
-Revises: 131
+Revision ID: 134
+Revises: 133
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "132"
-down_revision = "131"
+revision = "134"
+down_revision = "133"
 branch_labels = None
 depends_on = None
 

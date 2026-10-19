@@ -477,7 +477,7 @@ class ChangeResponse(BaseModel):
     customer_flip_reason: Optional[str] = None
     flip_answer: Optional[str] = None
     flip_ref: Optional[str] = None
-    # The scope of the change, in the project manager's words (migration 115).
+    # The scope of the change, in the project manager's words (migration 117).
     scope_definition: Optional[str] = None
     # The part weight, quoted at costing and weighed at validation. Both halves
     # ride on every change response: the estimate is what Sales priced, the

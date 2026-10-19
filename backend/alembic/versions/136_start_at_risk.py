@@ -1,4 +1,4 @@
-"""134: start at risk (ECR-solid §7a, P8 decided: urgent only, switch ON).
+"""136: start at risk (ECR-solid §7a, P8 decided: urgent only, switch ON).
 
 Schema (change_requests)
   start_at_risk_evidence        the customer's go-ahead (filed mail or ref)
@@ -13,15 +13,15 @@ Data: none (no change started at risk before).
 
 Repeatable: each column is added once.
 
-Revision ID: 134
-Revises: 133
+Revision ID: 136
+Revises: 135
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "134"
-down_revision = "133"
+revision = "136"
+down_revision = "135"
 branch_labels = None
 depends_on = None
 

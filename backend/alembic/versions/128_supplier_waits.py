@@ -1,4 +1,4 @@
-"""126: waiting on a supplier (ECR-solid spec §4 / §5 / §8, C23, C25).
+"""128: waiting on a supplier (ECR-solid spec §4 / §5 / §8, C23, C25).
 
 Schema
   supplier_waits      one row per wait: change, department, phase
@@ -13,15 +13,15 @@ assessment row (details.costing_no_cost) like its finalization, no column.
 
 Repeatable: the table is created once.
 
-Revision ID: 126
-Revises: 125
+Revision ID: 128
+Revises: 127
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "126"
-down_revision = "125"
+revision = "128"
+down_revision = "127"
 branch_labels = None
 depends_on = None
 

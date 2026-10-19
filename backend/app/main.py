@@ -131,7 +131,7 @@ async def seed_test_data():
                 ("Scheduling", "info", 8, True),
                 ("Packaging Engineer", "action", 9, True),
                 ("Quality", "action", 10, True),
-                # ECR-solid (migration 117): Toolshop is its own department
+                # ECR-solid (migration 119): Toolshop is its own department
                 # (P7), Management gives the OK on price drops and Absorb (P4).
                 ("Toolshop", "action", 11, True),
                 ("Management", "action", 12, True),

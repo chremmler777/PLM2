@@ -1,4 +1,4 @@
-"""124: urgent and internal capture (ECR-solid spec §2) and the urgent
+"""126: urgent and internal capture (ECR-solid spec §2) and the urgent
 proceed question (§3).
 
 Schema (change_requests)
@@ -19,15 +19,15 @@ need-by, reason and evidence at the next kickoff (soft) or edit.
 
 Repeatable: every column is added once.
 
-Revision ID: 124
-Revises: 123
+Revision ID: 126
+Revises: 125
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "124"
-down_revision = "123"
+revision = "126"
+down_revision = "125"
 branch_labels = None
 depends_on = None
 

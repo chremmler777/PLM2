@@ -1,4 +1,4 @@
-"""128: the internal approval's case (ECR-solid spec §5, P9).
+"""130: the internal approval's case (ECR-solid spec §5, P9).
 
 Schema (change_requests)
   internal_rationale      why we spend it: saving | quality | capacity |
@@ -13,15 +13,15 @@ approval names its case when it is given.
 
 Repeatable: every column is added once.
 
-Revision ID: 128
-Revises: 127
+Revision ID: 130
+Revises: 129
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "128"
-down_revision = "127"
+revision = "130"
+down_revision = "129"
 branch_labels = None
 depends_on = None
 

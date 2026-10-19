@@ -1,4 +1,4 @@
-"""119: a concession records whether its yes was Quality's (ECR-solid C7, L2).
+"""121: a concession records whether its yes was Quality's (ECR-solid C7, L2).
 
 Schema
   change_validation_issues.customer_decided_as_quality
@@ -14,15 +14,15 @@ Data
 
 Repeatable: the column is added once; the backfill only fills NULLs.
 
-Revision ID: 119
-Revises: 118
+Revision ID: 121
+Revises: 120
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "119"
-down_revision = "118"
+revision = "121"
+down_revision = "120"
 branch_labels = None
 depends_on = None
 

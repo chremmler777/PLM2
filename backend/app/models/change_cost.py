@@ -198,7 +198,7 @@ class CostingPosition(Base):
     rate_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     rate_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # Spec §4 costing positions (C25, migration 127): the basis of the
+    # Spec §4 costing positions (C25, migration 129): the basis of the
     # number (COSTING_BASES; NULL legacy = read from kind and pricing), its
     # reference (estimate: earlier tool, supplier figure + date), the part it
     # is the same as and what differs; and, once an offer was sent or the
@@ -211,7 +211,7 @@ class CostingPosition(Base):
         ForeignKey("parts.id"), nullable=True)
     basis_differs: Mapped[str | None] = mapped_column(Text, nullable=True)
     # A3-07 (spec §4 [R3]): how many of what a money line stands for
-    # ("2 inserts"); NULL on lines entered before migration 140.
+    # ("2 inserts"); NULL on lines entered before migration 142.
     quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
     quantity_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     estimate_check: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -443,7 +443,7 @@ class CostingOffer(Base):
     chosen_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     chosen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # C25 (migration 127): the supplier's quote number, its date, how long it
+    # C25 (migration 129): the supplier's quote number, its date, how long it
     # holds. A quoted position finalizes only with a quote_ref and a file.
     quote_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     quoted_on: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -497,7 +497,7 @@ SUPPLIER_WAIT_ENDS = ("received", "price_on_estimate", "not_needed")
 
 
 class SupplierWait(Base):
-    """A department waits on a supplier (spec §4, migration 126): vendor,
+    """A department waits on a supplier (spec §4, migration 128): vendor,
     asked on, expected by. The one wait that pauses the late clock with the
     customer's (spec §0): the department's task is due at expected-by; the
     header says "Waiting on <vendor> since <date>"; close costing lists it

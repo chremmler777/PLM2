@@ -1,4 +1,4 @@
-"""125: how a department closed a check item in its assessment (ECR-solid
+"""127: how a department closed a check item in its assessment (ECR-solid
 spec §4 "Check items first").
 
 Schema (change_concerns)
@@ -12,15 +12,15 @@ keep their resolution note.
 
 Repeatable: the column is added once.
 
-Revision ID: 125
-Revises: 124
+Revision ID: 127
+Revises: 126
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "125"
-down_revision = "124"
+revision = "127"
+down_revision = "126"
 branch_labels = None
 depends_on = None
 

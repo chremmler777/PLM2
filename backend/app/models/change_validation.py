@@ -61,7 +61,7 @@ class ValidationCheck(Base):
         ForeignKey("users.id"), nullable=True)
     checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # ECR-solid §10 computed checks (migration 136): the limits a measurement
+    # ECR-solid §10 computed checks (migration 138): the limits a measurement
     # is held against, fixed by the first measurement (a retest never moves
     # them: a different spec is a concession, not a retest), and where they
     # come from (drawing, customer spec, process sheet + reference).
@@ -70,7 +70,7 @@ class ValidationCheck(Base):
     upper_limit: Mapped[float | None] = mapped_column(
         Numeric(12, 3, asdecimal=False), nullable=True)
     spec_source: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    # A5-02 (migration 142): the measurer's own limits make a PASS count
+    # A5-02 (migration 144): the measurer's own limits make a PASS count
     # only once Quality (never the setter) confirms them; a FAIL counts at
     # once. Quality correcting the limits sets and confirms them.
     limits_set_by: Mapped[int | None] = mapped_column(

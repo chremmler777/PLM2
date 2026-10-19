@@ -1,4 +1,4 @@
-"""135: a question on a scope change card (ECR-solid §6 step 1, "Missing
+"""137: a question on a scope change card (ECR-solid §6 step 1, "Missing
 info is a question").
 
 Schema (change_scope_changes)
@@ -11,15 +11,15 @@ Data: none (an existing card has no question; it is decided as before).
 
 Repeatable: the column is added once.
 
-Revision ID: 135
-Revises: 134
+Revision ID: 137
+Revises: 136
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "135"
-down_revision = "134"
+revision = "137"
+down_revision = "136"
 branch_labels = None
 depends_on = None
 

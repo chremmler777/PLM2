@@ -29,7 +29,7 @@ INTAKE_STATUSES = ("pending", "decided", "superseded", "rejected")
 CLOSED_STATUSES = ("superseded", "rejected")
 ROUTES = ("full_ecr", "attach_ecr", "engineering_review", "administrative")
 REVIEW_ANSWERS = ("no_impact", "impact")
-# ECR-solid §1 (migration 123): "what changed" at triage. 'none' = no visible
+# ECR-solid §1 (migration 125): "what changed" at triage. 'none' = no visible
 # change (needs a reason, makes no rechecks).
 WHAT_CHANGED_AREAS = ("geometry", "tolerance", "material", "colour_grain", "other")
 NO_VISIBLE_CHANGE = "none"
@@ -79,7 +79,7 @@ class RevisionIntake(Base):
     superseded_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("revision_intakes.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    # ECR-solid §1 (migration 123). What changed (required at triage, switch
+    # ECR-solid §1 (migration 125). What changed (required at triage, switch
     # SCOPING_V2): areas + a compare reference, or ['none'] + a reason.
     what_changed: Mapped[list | None] = mapped_column(JSON, nullable=True)
     what_changed_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -162,7 +162,7 @@ class ChangeReviewAnswer(Base):
 
 
 class ChangeRecheck(Base):
-    """ECR-solid §1 (migration 123): a new index landed on a part the change
+    """ECR-solid §1 (migration 125): a new index landed on a part the change
     already carried; each routed department that had submitted rechecks its
     assessment per changed area: 'no effect' (drawing ref / checklist row) or
     'effect' (what + evidence), plus anything else that changed."""

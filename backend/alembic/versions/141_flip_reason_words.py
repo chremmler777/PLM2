@@ -1,4 +1,4 @@
-"""139: the customer flip's reason in plain words (close-out A2-09, R37).
+"""141: the customer flip's reason in plain words (close-out A2-09, R37).
 
 Data only: a flip from Quality's PPAP 'yes' stored the raw key
 "ppap_decision yes: the customer must be told", which the flip card and the
@@ -7,13 +7,13 @@ question", the words new flips are stored with.
 
 Repeatable: only rows still carrying the raw key change.
 
-Revision ID: 139
-Revises: 138
+Revision ID: 141
+Revises: 140
 """
 from alembic import op
 
-revision = "139"
-down_revision = "138"
+revision = "141"
+down_revision = "140"
 branch_labels = None
 depends_on = None
 

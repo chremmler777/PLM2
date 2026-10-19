@@ -1,4 +1,4 @@
-"""141: the customer's go-ahead for a start at risk keeps its file id
+"""143: the customer's go-ahead for a start at risk keeps its file id
 (close-out A4-06, spec §7a "customer go-ahead evidence", R4/R17).
 
 Schema
@@ -11,14 +11,14 @@ Data
   none: an ask before this keeps its text ("Mail: <filename>") only; a new
   ask with a file stores its id, and that file is frozen (409 on delete).
 
-Revision ID: 141
-Revises: 140
+Revision ID: 143
+Revises: 142
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "141"
-down_revision = "140"
+revision = "143"
+down_revision = "142"
 branch_labels = None
 depends_on = None
 

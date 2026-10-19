@@ -37,7 +37,7 @@ class ChangeOffer(Base):
     version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String(15), default="draft", server_default="draft")
-    # ECR-solid §6 (migration 132): 'offer' (the quote) or 'supplement'
+    # ECR-solid §6 (migration 134): 'offer' (the quote) or 'supplement'
     # (after approval: the changed positions only; the status stays).
     kind: Mapped[str] = mapped_column(
         String(12), default="offer", server_default="offer")
@@ -56,7 +56,7 @@ class ChangeOffer(Base):
     received_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_until: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    # ECR-solid §7 (migration 131): what the customer's yes rests on (C12):
+    # ECR-solid §7 (migration 133): what the customer's yes rests on (C12):
     # {kind: file|mail|po, ref, attachment_id, po_match: yes|no, differs,
     # total, indexes}; and who recorded the answer on this version.
     accept_evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)

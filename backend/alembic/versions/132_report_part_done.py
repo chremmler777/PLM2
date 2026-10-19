@@ -1,4 +1,4 @@
-"""130: "our part done" on a progress report (ECR-solid C23, spec §8-9).
+"""132: "our part done" on a progress report (ECR-solid C23, spec §8-9).
 
 Schema
   implementation_reports.part_done   the department's part of the
@@ -10,15 +10,15 @@ Data: none; existing reports are not "done".
 
 Repeatable: the column is added once.
 
-Revision ID: 130
-Revises: 129
+Revision ID: 132
+Revises: 131
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "130"
-down_revision = "129"
+revision = "132"
+down_revision = "131"
 branch_labels = None
 depends_on = None
 

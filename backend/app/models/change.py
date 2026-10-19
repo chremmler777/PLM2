@@ -116,7 +116,7 @@ class ChangeRequest(Base):
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # What is in scope of the change, in the project manager's words
-    # (migration 115). Written during captured/scoping by Project Management,
+    # (migration 117). Written during captured/scoping by Project Management,
     # the change lead or an admin; read-only afterwards. Optional, no gate.
     scope_definition: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -188,7 +188,7 @@ class ChangeRequest(Base):
     internal_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     internal_approved_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     internal_approval_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Spec §5 (migration 128): the internal approval's case. Why we spend it
+    # Spec §5 (migration 130): the internal approval's case. Why we spend it
     # (INTERNAL_RATIONALES), the annual volume and saving it runs on, and
     # whether the saving is calculated or estimated; payback is computed.
     internal_rationale: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -264,7 +264,7 @@ class ChangeRequest(Base):
     # The offer version the customer said yes to. No FK: change_offers points
     # back at this table, and a cycle of constraints buys nothing here.
     accepted_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # ECR-solid (migration 117). The offer each signature was given on (C14,
+    # ECR-solid (migration 119). The offer each signature was given on (C14,
     # no FK for the same reason as accepted_offer_id); a price still open
     # after approval: an estimate above the approved one, a supplement not
     # yet accepted (HARD #9 blocks close while it is set).
@@ -277,15 +277,15 @@ class ChangeRequest(Base):
     # Sales tasks still show to all of Sales, with this name on them.
     sales_owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
-    # §7 (migration 131): "Still talking" with the customer: the next
+    # §7 (migration 133): "Still talking" with the customer: the next
     # contact date (the Sales task is due then, C4).
     customer_next_contact: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # §7a start at risk (migration 134, P8: urgent only): the customer's
+    # §7a start at risk (migration 136, P8: urgent only): the customer's
     # go-ahead, Quality's line of risks, the PM member's approval. Approved =
     # the change went to 'approved' without the customer's acceptance; the
     # price stays open until an offer is accepted or the money is absorbed.
     start_at_risk_evidence: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # migration 141 (A4-06): the go-ahead's file, frozen like the
+    # migration 143 (A4-06): the go-ahead's file, frozen like the
     # customer's answer (R4/R17); NULL for a reference
     start_at_risk_attachment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     start_at_risk_requested_by: Mapped[int | None] = mapped_column(
@@ -298,7 +298,7 @@ class ChangeRequest(Base):
     start_at_risk_approved_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     start_at_risk_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # ECR-solid §2 (migration 124): an urgent change (priority 'critical')
+    # ECR-solid §2 (migration 126): an urgent change (priority 'critical')
     # names its reason (URGENT_REASONS) and evidence; its need-by date is
     # release_due_date. An internal change says what is wrong today (a
     # number with its unit) and the target.
@@ -307,7 +307,7 @@ class ChangeRequest(Base):
     problem_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     problem_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     target_value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # §11 (migration 138, RELEASE_V2): an internal change closes with what it
+    # §11 (migration 140, RELEASE_V2): an internal change closes with what it
     # achieved, beside the target, and where that number comes from.
     achieved_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     achieved_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -325,11 +325,11 @@ class ChangeRequest(Base):
     need_by_told_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     need_by_told_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # ECR-solid §1 (migration 123): a full ECR started beside a live change
+    # ECR-solid §1 (migration 125): a full ECR started beside a live change
     # that carries the same part points at it, and it back (both ways).
     related_change_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_requests.id"), nullable=True)
-    # ppap_decision (spec §3, HARD #7, migration 122): on an internal change
+    # ppap_decision (spec §3, HARD #7, migration 124): on an internal change
     # Quality answers "parameters / tool / material / cycle time changed on
     # any part?" before proceed. no: basis (PPAP_BASES) + ref; yes: the parts,
     # and the change flips to a customer change.
@@ -876,7 +876,7 @@ class ChangeMeeting(Base):
     # internal. Proceed is refused until set; a flip against the change's
     # capture is audited and Sales is told.
     cost_carrier: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # C33 "Go with conditions" (migration 121): the check items open when
+    # C33 "Go with conditions" (migration 123): the check items open when
     # this meeting decided 'proceed', [{id, department_id, check_what, note}].
     go_conditions: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
@@ -1094,7 +1094,7 @@ class ChangeConcern(Base):
     resolved_by_meeting_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_meetings.id"), nullable=True)
 
-    # --- C33 (migration 121): question or check item, and its structure ----
+    # --- C33 (migration 123): question or check item, and its structure ----
     # 'question' | 'check' (FLAG_TYPES); NULL = legacy, read as a question.
     flag_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # What to check (CHECK_WHAT) and on which part; NULL part = whole change.
@@ -1121,7 +1121,7 @@ class ChangeConcern(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     confirmed_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
-    # Spec §4 (migration 125): how the owning department closed a check item
+    # Spec §4 (migration 127): how the owning department closed a check item
     # in its assessment (CHECK_OUTCOMES); NULL otherwise.
     check_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
@@ -1263,7 +1263,7 @@ class ChangeTransitionDeviation(Base):
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # ECR-solid C6 (migration 118): the soft rule this override waives, its
+    # ECR-solid C6 (migration 120): the soft rule this override waives, its
     # words when asked, and the reason pick. NULL guard_key = a row from
     # before the binding: it waives whatever holds its target (legacy).
     guard_key: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -223,7 +223,7 @@ class ValidationIssueService:
     async def quality_decided_ids(session: AsyncSession, issues: list) -> set:
         """The ids of `issues` whose yes was Quality's, in one query at most.
         The flag stored at decision time (acts-as aware, the same rule as a
-        Quality override) answers; a row from before migration 119 without
+        Quality override) answers; a row from before migration 121 without
         it falls back to the decider's real membership."""
         if not ValidationIssueService.quality_decides_concessions():
             return {i.id for i in issues}

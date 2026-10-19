@@ -1,4 +1,4 @@
-"""122: ppap_decision and the customer flip (ECR-solid spec §0, §3, HARD #7).
+"""124: ppap_decision and the customer flip (ECR-solid spec §0, §3, HARD #7).
 
 Schema (change_requests)
   ppap_decision            'no' | 'yes' (Quality, internal changes, before proceed)
@@ -15,15 +15,15 @@ nothing they already passed is re-gated.
 
 Repeatable: every column is added once.
 
-Revision ID: 122
-Revises: 121
+Revision ID: 124
+Revises: 123
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "122"
-down_revision = "121"
+revision = "124"
+down_revision = "123"
 branch_labels = None
 depends_on = None
 

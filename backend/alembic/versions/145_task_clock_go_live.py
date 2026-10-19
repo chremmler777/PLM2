@@ -1,4 +1,4 @@
-"""143: stamp the go-live of the ECR-solid task clock (close-out A6-01, R8,
+"""145: stamp the go-live of the ECR-solid task clock (close-out A6-01, R8,
 R21, R31).
 
 Data
@@ -11,16 +11,16 @@ Data
 
 Repeatable: an existing row is kept. Downgrade removes the key.
 
-Revision ID: 143
-Revises: 142
+Revision ID: 145
+Revises: 144
 """
 from datetime import datetime
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "143"
-down_revision = "142"
+revision = "145"
+down_revision = "144"
 branch_labels = None
 depends_on = None
 

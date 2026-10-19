@@ -115,7 +115,7 @@ Run these when discussing any stage's implementation:
   (see "Inside `scoping`").
 
 ### Capture (ECR-solid §2, 2026-10-15)
-Switch `SCOPING_V2` (`app/services/capture_rules.py`, migration 124); the
+Switch `SCOPING_V2` (`app/services/capture_rules.py`, migration 126); the
 soft kickoff guard above reads `kickoff_missing`, which adds:
 - **Customer change**: a typed customer file (attachment kind
   `customer_file`, which the start form gives every dropped file of a
@@ -155,7 +155,7 @@ soft kickoff guard above reads `kickoff_missing`, which adds:
 ### Inside `scoping`
 - **Scope (defined by PM)** (2026-10-14): the project manager writes down what
   is in scope of the change, as free text (`change_requests.scope_definition`,
-  migration 115). Editable while the change is `captured` or in `scoping` by
+  migration 117). Editable while the change is `captured` or in `scoping` by
   Project Management members, the change lead and admins (acts-as aware),
   audited in the changelog on every change (`scope_defined`), read only
   afterwards. Shown prominently on the Scoping tab and read only on Overview,
@@ -224,7 +224,7 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   *"Check item #n ..."*, an outsider's answer is refused naming the owning
   department (*"Only Process Engineer, Sales or Project Management may answer
   this question"*), and a PPAP flip's reason reads *"Quality answered yes to
-  the PPAP question"* (migration 139 rewords the stored raw key).
+  the PPAP question"* (migration 141 rewords the stored raw key).
 - **Make it a question** (toggle; the asker or a PM member can switch either
   way any time in scoping, `POST /concerns/{id}/type`): the UI asks *"Can we
   decide parts, assessors and go/no-go without this?"*. Only a *no* is a
@@ -238,7 +238,7 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   only) and **Add to #n** (the line is appended), `POST /concerns/{id}/join`.
   Check items have no limit. Cancel votes keep "one per person".
 - **Questions hold `proceed` (HARD #2); check items never do.** Legacy flags
-  (`flag_type` NULL, migration 121 backfills `question`) are questions, so
+  (`flag_type` NULL, migration 123 backfills `question`) are questions, so
   in-flight changes behave as before. A new scoping raise names its type
   (`flag_type`; refused without, L4 review 2: a question owes who answers
   and what it changes, R2/R3).
@@ -352,7 +352,7 @@ Scoping decides only *which parts, who assesses, go/no-go*.
   the open flags (the 2026-10-14 behaviour).
 
 ### HARD #7: ppap_decision and the customer flip (2026-10-15)
-Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 122).
+Switch `SCOPING_V2` (`app/services/ppap_decision_service.py`, migration 124).
 - **ppap_decision**: a change that goes on as internal owes Quality's
   answer before `proceed` (`applies`: one of ours, origin customer or
   internal, whose cost carrier is internal; while captured or scoped an
@@ -485,7 +485,7 @@ travels.
   readable and closable with their old rules; only raising them is gone.
 
 ### Check items first and questions in the assessment (ECR-solid §4, C8, 2026-10-15)
-Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 125).
+Switch `ASSESSMENT_V2` (served as `assessment_v2`; migration 127).
 - **Check items first.** The bucket opens with *"Checks for Process
   Engineer: 3 open"*: each item with its raise text, what to check, the part
   and the raiser. A member of an owning department closes it inline
@@ -749,7 +749,7 @@ for the whole team." Decision: a pipeline per department.
   list does not name it).
 
 ### "<Dept> has no cost" and waiting on a supplier (ECR-solid §4/§5, C18, 2026-10-15)
-Switch `ASSESSMENT_V2` (migration 126: `supplier_waits`).
+Switch `ASSESSMENT_V2` (migration 128: `supplier_waits`).
 - **"<Dept> has no cost"** (C18, `POST /costing/departments/{d}/no-cost`,
   members, PM, admin): one button beside Finalize instead of an invented
   zero, nothing preselected: *no work* / *absorbed* (the hours absorbed, an
@@ -782,7 +782,7 @@ Switch `ASSESSMENT_V2` (migration 126: `supplier_waits`).
   FZ (3 Nov)* changes nothing.
 
 ### Costing positions name their basis (ECR-solid §4, C25, 2026-10-15)
-Switch `ASSESSMENT_V2` (migration 127).
+Switch `ASSESSMENT_V2` (migration 129).
 - **Basis per line** (`costing_positions.basis`, served as the effective
   basis): own time, machine time and sampling are *hours × the department
   rate* (shown); an external line is a *vendor quote* or an *estimate* (+
@@ -790,11 +790,11 @@ Switch `ASSESSMENT_V2` (migration 127).
   `basis_ref`) or *same as* a part (`basis_part_id`) + what differs (size,
   cavities, material, slides; `basis_differs`). Positions of in-flight
   changes keep `basis` NULL and read it from kind and pricing.
-- **Quantity + unit** (A3-07, migration 140, `quantity`, `quantity_unit`):
+- **Quantity + unit** (A3-07, migration 142, `quantity`, `quantity_unit`):
   a new external (money) line says how many of what (*"2 inserts"*), on the
   add line and on the row; refused without it ("Say how many of what this
   line stands for"), and an edit cannot take it away. Hours lines carry
-  theirs (hours × rate). Lines entered before migration 140 keep NULL.
+  theirs (hours × rate). Lines entered before migration 142 keep NULL.
 - **Finalize** refuses (one sentence per kind, naming the lines): a quoted
   line whose counted offer has no supplier quote number (`quote_ref`, a
   reference id: 5+ characters that name something, "tbd" refused, A3-10) or
@@ -845,7 +845,7 @@ Switch `ASSESSMENT_V2` (migration 127).
   Quantity + unit per position stays an open question (cut 1 or 2).
 
 ### Close costing: ready to quote, the internal approval card (ECR-solid §5, 2026-10-15)
-Switch `ASSESSMENT_V2` (migration 128).
+Switch `ASSESSMENT_V2` (migration 130).
 - **Ready to quote**: closing costing (`costing -> quoting`) on a customer
   change tells the Sales owner once (`task_new`, `ready_to_quote:<id>`;
   without a Sales owner every Sales member), unless they closed it
@@ -941,7 +941,7 @@ task open; override as for any soft rule into validation. **Toolshop**
 wire, steel / material, polishing / texture).
 
 ### Progress cadence asks only who works (ECR-solid C23, 2026-10-15)
-Switch `ASSESSMENT_V2` (migration 130). `ImplementationService.
+Switch `ASSESSMENT_V2` (migration 132). `ImplementationService.
 implementing_department_ids`: a department implements when it priced real
 work (a position with money, hours, trials or a supplier offer; a cost line
 with hours or money: a seeded zero line is no work) or its assessment said
@@ -1145,7 +1145,7 @@ nothing preselected:
   mail says yes to vN at <total>"). The index match is computed
   (`index_changes`: the parts whose index moved since the version was
   frozen), a warning only. Stored on the offer (`change_offers.accept_evidence`,
-  `answered_at`/`answered_by`, migration 131). The release date is prefilled
+  `answered_at`/`answered_by`, migration 133). The release date is prefilled
   from the need-by, else from the offer's weeks from order. An expired offer
   still needs its override reason [KEEP]. A refusal names every missing part
   at once (release date, evidence, PO match, confirmed total). Started at
@@ -1234,7 +1234,7 @@ offer) and the approval by hand.
 
 With `COMMERCIAL_V2`, once a customer change is approved (up to release)
 every offer is a **supplement** (`change_offers.kind = 'supplement'`,
-migration 132; `OfferService.supplement_window`). "Send supplement" drafts
+migration 134; `OfferService.supplement_window`). "Send supplement" drafts
 one from the last version sent: recipient, terms and factors kept, and only
 the changed positions priced (`_supplement_lines`: each costing line now
 less what the accepted offer and the accepted supplements already priced for
@@ -1271,7 +1271,7 @@ supplements (the offer is closed after acceptance).
 ### The scope change card (ECR-solid §6 [R3], 2026-10-15)
 
 From `quoted` until validation the customer may add or change something
-(`change_scope_changes`, migration 133; `scope_change_service.py`; UI
+(`change_scope_changes`, migration 135; `scope_change_service.py`; UI
 `ScopeChangeCards.tsx` on the Offer and Costing tabs, no prices on it). One
 card, three steps, an owner each:
 
@@ -1280,7 +1280,7 @@ card, three steps, an owner each:
    filed on the change or its reference (5+ characters); a filed mail must
    be filed after the latest offer went out. The lead is told (no lead:
    Project Management); My Tasks `scope_change_decide` (Needs you).
-   **Missing info is a question** (migration 135, `change_scope_changes.question`):
+   **Missing info is a question** (migration 137, `change_scope_changes.question`):
    the lead (run team) or Sales asks the customer from the card ("Missing
    info? Ask the customer", 10+ characters); Sales owns it (My Tasks
    `scope_change_question` with the mail text to copy, Sales owner notified)
@@ -1342,7 +1342,7 @@ approved` (cards opened before approval, a PO that differs included, so
 automatic approval waits), `-> in_implementation` and `-> released` while a
 card is open (`post_accept` on a card means opened after approval). With
 cards, `scope_change_state` reads the cards; a change flagged before the
-cards keeps the old rule (a newer offer or an approved override of `scope_change_uncovered` covers it; A4-04: never an Absorb or another rule's OK; a legacy override from before migration 118, guard_key NULL, still counts).
+cards keeps the old rule (a newer offer or an approved override of `scope_change_uncovered` covers it; A4-04: never an Absorb or another rule's OK; a legacy override from before migration 120, guard_key NULL, still counts).
 Switch off: no cards.
 
 ### Start at risk (ECR-solid §7a, P8, 2026-10-15)
@@ -1351,11 +1351,11 @@ Switch `START_AT_RISK` (default ON; P8 decided: yes, urgent only). An urgent
 customer change (priority `critical`) in `costing`, `quoting` or `quoted`
 without the customer's yes may start before the PO
 (`start_at_risk_service.py`, columns `start_at_risk_*` on `change_requests`,
-migration 134; UI `StartAtRiskCard.tsx` on the Offer tab, no prices):
+migration 136; UI `StartAtRiskCard.tsx` on the Offer tab, no prices):
 
 1. Sales or the run team file the customer's go-ahead (a mail filed on the
    change or its reference); Quality is told. A filed go-ahead keeps its
-   file id (`start_at_risk_attachment_id`, migration 141, A4-06) and that
+   file id (`start_at_risk_attachment_id`, migration 143, A4-06) and that
    file is frozen (409 on delete, admin only). Quality's line writer gets no
    "approve" row (approve() refuses them, 4-eyes). A change that is not urgent
    says who marks it urgent ("<lead> (the lead) or an admin"); the priority
@@ -1696,7 +1696,7 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   drawing, customer spec, process sheet + reference); a retest never moves
   them ("a different spec is a concession, not a retest"). PASS only if both
   min and max lie inside; the verdict is computed, a posted status is
-  ignored. **Who sets the limits (A5-02, migration 142, `RELEASE_V2`):** the
+  ignored. **Who sets the limits (A5-02, migration 144, `RELEASE_V2`):** the
   department being judged does not set its own pass criterion alone. The
   limits store their setter ("limits set by <measurer>"); a FAIL counts at
   once, a PASS counts only once a Quality member (never the setter, never
@@ -1727,7 +1727,7 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   (`ValidationService.may_write`, the state's `can_write` per department);
   the retest follows the same rule. A check failed outside implementation
   and validation raises no issue.
-- **Fix task** (migration 137): a check that turns FAILED raises its issue
+- **Fix task** (migration 139): a check that turns FAILED raises its issue
   (VI-n) at once. Quality's task "Fix VI-n: pick who fixes and the retest
   date": process parameters (Process Engineer), tool at supplier (Tool
   Engineer + the supplier), or another department; the retest date is today
@@ -1801,7 +1801,7 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
 
 ### Release and close (ECR-solid §11, 2026-10-16)
 
-- **Achieved value** (migration 138): an internal change with a target
+- **Achieved value** (migration 140): an internal change with a target
   (§2 "what is wrong today" -> target) closes with what it achieved beside
   it and where the number comes from (`POST /changes/{id}/achieved`, the
   lead, Project Management or an admin, in validation or released; the
@@ -1826,7 +1826,7 @@ change that is open, until 7 days after it closed or was cancelled
 /changes/{id}/hours/{booking_id}` for your own). Bookings are the
 implementation bookings (one table) and store the day worked, the source
 (`estimate` = a confirmed estimate, `typed`) and the change's status then
-(migration 138). `estimate` is the server's word: only hours equal to the
+(migration 140). `estimate` is the server's word: only hours equal to the
 prefill are stored as a confirmed estimate. The stage-8 `POST
 .../implementation/bookings` (labour position, machine hours) follows the
 same rule (your own department, an admin any; active departments; at most
@@ -1930,7 +1930,7 @@ moved, the BOM tree and the viewer fall back past it. Import scripts
 
 ### Intake triage and its follow-ups (ECR-solid §1, C9, C11, 2026-10-15)
 Switch `SCOPING_V2` (`revision_intake_service.py`,
-`index_followup_service.py`, migration 123). Off: the paragraph above.
+`index_followup_service.py`, migration 125). Off: the paragraph above.
 - **What changed** (every route but administrative): the areas (geometry,
   tolerance, material, colour/grain, other / not sure) and a file or compare
   reference (>= 5 characters with a number or two words; "ok", "tbd",
@@ -2092,7 +2092,7 @@ approval sign-off. All other departments are deactivated for ECR
 (migration 043; renames: R&D → Development, Tooling Engineer → Tool Engineer,
 Planner/Scheduler → Scheduling).
 
-**ECR-solid additions (migration 117, 2026-10-14).** **Toolshop** is its own
+**ECR-solid additions (migration 119, 2026-10-14).** **Toolshop** is its own
 department (P7), separate from Tool Engineer: the toolmakers' hours and work,
 no tool-data or price rights. **Management** gives the OK on price drops and
 Absorb (P4) and therefore reads prices. One price rule serves every read:
@@ -2112,7 +2112,7 @@ update and proceed refuse R/A/S/C for either with the same words, and
 `build_routing` drops them from stage 1.
 Until it has members, a Project Management member gives that OK. Quality still
 signs without price.
-Migration 117 also adds the columns later lanes fill: `sales_owner_id`,
+Migration 119 also adds the columns later lanes fill: `sales_owner_id`,
 `price_open`, `pm_signed_offer_id` / `quality_signed_offer_id` (backfilled to
 the accepted offer, else the latest sent one), and on
 `implementation_bookings` `work_date` (backfilled from `booked_at`) and
@@ -2143,7 +2143,7 @@ a badge on the stage (`StageResponsibleBadge.tsx`).
 
 **Internal starters (ECR-solid P3, decided 2026-10-14).** Members of a
 `can_start_internal_change` department (Development, Process Engineer, Tool
-Engineer; migration 117) may start an INTERNAL change and lead it: the
+Engineer; migration 119) may start an INTERNAL change and lead it: the
 create endpoint sets the raiser as lead unless Project Management named one
 (an admin acting as an engineering department is not made the lead: the
 project PM default applies, else PM picks one).
@@ -2269,7 +2269,7 @@ issue on the check closed `accepted` via `customer_concession`, whose yes a
 Quality member recorded: Sales files the customer's mail into the issue,
 Quality accepts it; Sales, PM and admins get no "accept" on a concession;
 whether the yes was Quality's is stored with it,
-`customer_decided_as_quality`, migration 119, acts-as aware like a Quality
+`customer_decided_as_quality`, migration 121, acts-as aware like a Quality
 override; an accepted concession nobody in Quality decided does not count
 until a Quality member confirms it on the issue card), not even an admin
 lifts it (a real admin's own department rows do not count for it: it acts
@@ -2315,7 +2315,7 @@ in `ChangeService.solid_hard_refusal`, called by `transition()` and by
 Everything else is SOFT: `ChangeService._guard_reasons` returns every rule
 that holds a hop, each with a key (`cm_rules.GuardReason`). An **Override**
 (a transition deviation, `POST /changes/{id}/deviations {to_status, reason,
-guard_key?, reason_code}`) is bound to ONE rule (`guard_key`, migration 118);
+guard_key?, reason_code}`) is bound to ONE rule (`guard_key`, migration 120);
 a hop held by two rules needs two overrides, one bound to another rule lifts
 nothing (C6, `COMMERCIAL_V2`). A HARD rule holding the same move is named
 first and refuses the ask ("no override lifts this"), so no override is
@@ -2458,7 +2458,7 @@ one, and "Absorb" on an open price for who may ask it.
   Mon)": the weekday within the coming week, else the date), `urgent` and
   `late`. One start rule for the rows and the sweep (`due_rules.start_of`);
   the task clock's go-live is the earliest start, so changes in flight at
-  go-live are not all Late on day one: migration 143 stamps it (org_settings
+  go-live are not all Late on day one: migration 145 stamps it (org_settings
   `cm_task_clock_from` = the migration's run time, an existing value kept);
   `settings.cm_task_clock_from` (env, ISO date) wins when set. The overdue
   digest's Sales rows use the same start rule.
@@ -2529,7 +2529,7 @@ one, and "Absorb" on an open price for who may ask it.
   is done ("Ready: move it on" makes the move itself); on the tab where the
   work already is it names the step ("... (below)") instead of a second
   button. A first-use help line is dismissed once per browser.
-- **Mail (`mail_outbox.py`, migration 120).** The notice channel stays the
+- **Mail (`mail_outbox.py`, migration 122).** The notice channel stays the
   in-app notification (one per item: `notify_once`, involved people only).
   While `smtp_enabled` (default off) a one-minute loop mails each new one once,
   plain text ending "Answer in PLM2: <link>" (`plm2_public_url`, else

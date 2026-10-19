@@ -1,4 +1,4 @@
-"""142: who set a computed check's limits, and Quality's confirm of them
+"""144: who set a computed check's limits, and Quality's confirm of them
 (close-out A5-02, spec §4/§10, R4/R7: the department being judged does not
 set its own pass criterion alone).
 
@@ -15,14 +15,14 @@ Data
   confirmed, so an in-flight PASS counts once Quality confirms its limits
   (one click on the check); a FAIL counts at once as before.
 
-Revision ID: 142
-Revises: 141
+Revision ID: 144
+Revises: 143
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "142"
-down_revision = "141"
+revision = "144"
+down_revision = "143"
 branch_labels = None
 depends_on = None
 

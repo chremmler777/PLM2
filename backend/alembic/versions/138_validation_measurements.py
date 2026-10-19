@@ -1,4 +1,4 @@
-"""136: computed validation checks (ECR-solid §10, lane L7, switch RELEASE_V2).
+"""138: computed validation checks (ECR-solid §10, lane L7, switch RELEASE_V2).
 
 Schema
   validation_checks.lower_limit / upper_limit   the limits a measurement is
@@ -16,15 +16,15 @@ value; its next measurement sets the limits.
 
 Repeatable: every column and the table are added once.
 
-Revision ID: 136
-Revises: 135
+Revision ID: 138
+Revises: 137
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "136"
-down_revision = "135"
+revision = "138"
+down_revision = "137"
 branch_labels = None
 depends_on = None
 

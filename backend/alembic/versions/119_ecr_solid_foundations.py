@@ -1,4 +1,4 @@
-"""117: ECR-solid foundations (flow spec rev 6, lane L1).
+"""119: ECR-solid foundations (flow spec rev 6, lane L1).
 
 Schema
   change_requests.sales_owner_id       named Sales owner (C10)
@@ -21,8 +21,8 @@ Data
 Core expressions only (BOOLEAN on Postgres, INTEGER on SQLite). Repeatable:
 every column is added once, every backfill only fills NULLs.
 
-Revision ID: 117
-Revises: 116
+Revision ID: 119
+Revises: 118
 """
 from datetime import datetime
 
@@ -30,8 +30,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "117"
-down_revision = "116"
+revision = "119"
+down_revision = "118"
 branch_labels = None
 depends_on = None
 

@@ -92,7 +92,7 @@ class ValidationIssue(Base):
     customer_decided_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     # HARD #3 (C7): the yes was recorded by a Quality member (acts-as aware);
-    # NULL on rows written before migration 119 = read the real membership
+    # NULL on rows written before migration 121 = read the real membership
     customer_decided_as_quality: Mapped[bool | None] = mapped_column(
         Boolean, nullable=True)
     concession_until: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -114,7 +114,7 @@ class ValidationIssue(Base):
     follow_up_change_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_requests.id"), nullable=True)
 
-    # ECR-solid §10 (migration 137, RELEASE_V2). The Fix task: Quality
+    # ECR-solid §10 (migration 139, RELEASE_V2). The Fix task: Quality
     # picks who fixes (FIX_OWNERS) and a retest date; the check's own
     # department retests. A concession runs in parallel: requested by
     # Quality, the customer asked by the Sales owner (internal: "not for

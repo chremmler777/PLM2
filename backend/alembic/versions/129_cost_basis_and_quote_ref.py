@@ -1,4 +1,4 @@
-"""127: the basis of every costing position and the supplier's quote
+"""129: the basis of every costing position and the supplier's quote
 reference (ECR-solid spec §4 costing positions, C25).
 
 Schema
@@ -23,15 +23,15 @@ its finalize.
 
 Repeatable: every column is added once.
 
-Revision ID: 127
-Revises: 126
+Revision ID: 129
+Revises: 128
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "127"
-down_revision = "126"
+revision = "129"
+down_revision = "128"
 branch_labels = None
 depends_on = None
 

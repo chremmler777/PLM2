@@ -1,4 +1,4 @@
-"""131: the customer's answer with its evidence (ECR-solid §7, C4, C12).
+"""133: the customer's answer with its evidence (ECR-solid §7, C4, C12).
 
 Schema
   change_offers.accept_evidence     what the customer's yes rests on (JSON):
@@ -15,15 +15,15 @@ evidence was required"); in-flight quoted changes answer with the new form.
 
 Repeatable: each column is added once.
 
-Revision ID: 131
-Revises: 130
+Revision ID: 133
+Revises: 132
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "131"
-down_revision = "130"
+revision = "133"
+down_revision = "132"
 branch_labels = None
 depends_on = None
 

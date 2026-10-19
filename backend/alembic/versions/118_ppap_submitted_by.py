@@ -1,16 +1,16 @@
-"""116: ppap_submissions.submitted_by, so the four-eyes rule on PPAP
+"""118: ppap_submissions.submitted_by, so the four-eyes rule on PPAP
 approve/reject can tell the submitter from the approver. Existing submitted
 rows fall back to created_by in the app; nothing is backfilled.
 
-Revision ID: 116
-Revises: 115
+Revision ID: 118
+Revises: 117
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "116"
-down_revision = "115"
+revision = "118"
+down_revision = "117"
 branch_labels = None
 depends_on = None
 
