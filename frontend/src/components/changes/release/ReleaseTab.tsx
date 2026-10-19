@@ -41,6 +41,8 @@ export interface ReleaseTabProps {
   /** The viewer, for the 4-eyes rule on the route of an issue they raised. */
   viewerId?: number | null
   isAdmin?: boolean
+  /** A read-only account (no department) writes no lesson: the button is not offered. */
+  canWrite?: boolean
   /** Sales records the customer's decision on validation issues. */
   isSales?: boolean
   /** Deep link ?issue=<id>: the issue card to open and scroll to. */
@@ -133,7 +135,7 @@ function Collapsible({ title, children, testId }: { title: string; children: Rea
 
 export default function ReleaseTab({
   change, departments, myDepartmentIds, canSeeAll, canAcknowledge, canManage, onAdvance, advancing,
-  viewerId = null, isAdmin = false, isSales = false, focusIssueId = null,
+  viewerId = null, isAdmin = false, isSales = false, focusIssueId = null, canWrite = true,
 }: ReleaseTabProps) {
   const { data: release } = useQuery({
     queryKey: releaseKey(change.id),
@@ -223,7 +225,7 @@ export default function ReleaseTab({
         hint="What should go differently on the next change? Lessons land in the lessons learned register, linked to this change.">
         {release ? (
           <LessonsStep changeId={change.id} lessons={release.lessons}
-            canAdd={inValidation || change.status === 'released'} canComplete={canManage && inValidation} />
+            canAdd={canWrite && (inValidation || change.status === 'released')} canComplete={canManage && inValidation} />
         ) : null}
       </StepSection>
 

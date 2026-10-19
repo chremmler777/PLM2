@@ -310,6 +310,14 @@ describe('ReleaseTab', () => {
     expect(onAdvance).toHaveBeenCalledWith('released')
   })
 
+  it('CO2: a read-only account is not offered "+ Add lesson" in the lessons step', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge={false}
+      canManage={false} canWrite={false} onAdvance={vi.fn()} advancing={false} />)
+    await screen.findByTestId('release-blockers')
+    expect(screen.queryByTestId('lesson-add')).toBeNull()
+  })
+
   it('open validation issues join the release blockers and hold the validation step', async () => {
     vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
     vi.mocked(changesApi.validationState).mockResolvedValue({ departments: [{ department_id: 4, checks: [
