@@ -43,8 +43,9 @@ describe('WorkflowProgress approve and 3D evidence', () => {
 describe('WorkflowProgress rights (R24, R38)', () => {
   afterEach(cleanup)
   it('shows no Approve / Reject / Waive to a viewer the backend refuses', () => {
-    show(instance({}, task({ can_act: false })))
+    show(instance({ has_3d_evidence: false }, task({ can_act: false, requires_cad_evidence: true })))
     expect(screen.queryByTestId('wf-approve-5')).toBeNull()
+    expect(screen.queryByTestId('wf-approve-why-5')).toBeNull()
     expect(screen.queryByText('Reject')).toBeNull()
   })
 

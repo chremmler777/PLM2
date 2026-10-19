@@ -128,8 +128,8 @@ export default function WorkflowProgress({
               task={task}
               isCompletingTask={isCompletingTask}
               onApprove={() => onCompleteTask(task.id, 'approved')}
-              approveBlocked={task.requires_cad_evidence && instance.has_3d_evidence === false
-                ? NO_3D_EVIDENCE : null}
+              approveBlocked={task.can_act !== false && task.requires_cad_evidence
+                && instance.has_3d_evidence === false ? NO_3D_EVIDENCE : null}
               onReject={() => setNotesModal({ taskId: task.id, mode: 'rejected', notes: '' })}
               onWaive={() => setNotesModal({ taskId: task.id, mode: 'waived', notes: '' })}
             />
