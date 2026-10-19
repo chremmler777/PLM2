@@ -1,7 +1,10 @@
 """Cost sheet API (spec §15 / §15a): Finance's versioned rates.
 
-Read: everyone in the org (rates are public by design). Write: Sales or
-Finance members, or admins, acts-as aware (cost_sheet_service.can_edit). Thin
+Read the sheet (overview, versions, diff, export): admin, Project Manager,
+Sales, Finance and Management members (D-cost, Christoph 2026-10-19;
+cost_sheet_service.can_read). The lookups, machine classes and settings stay
+open to everyone who costs. Write: Sales or Finance members, or admins,
+acts-as aware (cost_sheet_service.can_edit). Thin
 routes over cost_sheet_service; every write commits here.
 """
 from datetime import date
@@ -154,6 +157,10 @@ async def overview(current_user: User = Depends(get_current_user),
                    db: AsyncSession = Depends(get_db)):
     """Everything the page needs to open: versions with validity, which is
     current and which is the draft, rights, stale state, and the lookups."""
+    try:
+        await svc.require_read(db, current_user)
+    except CostSheetError as e:
+        _raise(e)
     org = current_user.organization_id
     versions = await svc.list_versions(db, org)
     valid = svc.validity(versions)
@@ -200,6 +207,7 @@ async def review_task(current_user: User = Depends(get_current_user),
 async def get_version(version_id: int, current_user: User = Depends(get_current_user),
                       db: AsyncSession = Depends(get_db)):
     try:
+        await svc.require_read(db, current_user)
         v = await svc.get_version(db, current_user.organization_id, version_id)
     except CostSheetError as e:
         _raise(e)
@@ -215,6 +223,7 @@ async def diff(version_id: int, against: Optional[int] = None,
     was copied from)."""
     org = current_user.organization_id
     try:
+        await svc.require_read(db, current_user)
         v = await svc.get_version(db, org, version_id)
         old = (await svc.get_version(db, org, against) if against
                else await svc.previous_version(db, v))
@@ -230,6 +239,7 @@ async def export(version_id: int, format: Literal["csv", "xlsx"] = "xlsx",
                  current_user: User = Depends(get_current_user),
                  db: AsyncSession = Depends(get_db)):
     try:
+        await svc.require_read(db, current_user)
         v = await svc.get_version(db, current_user.organization_id, version_id)
     except CostSheetError as e:
         _raise(e)

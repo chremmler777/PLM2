@@ -207,20 +207,61 @@ async def test_add_months_clamps():
 
 # ---------------------------------------------------------------- API + rights
 
-async def test_read_is_open_write_needs_finance(client, eng_auth, admin_auth, world,
-                                                session_factory):
-    res = await client.get(API, headers=eng_auth)
-    assert res.status_code == 200
-    body = res.json()
-    assert body["can_edit"] is False and body["versions"] == []
-    assert any(d["name"] == "Finance" for d in body["departments"])
-    assert (await client.post(f"{API}/drafts", json={}, headers=eng_auth)).status_code == 403
+async def test_read_needs_a_cost_role_write_needs_finance(client, eng_auth, admin_auth, world,
+                                                         session_factory):
+    """D-cost (Christoph 2026-10-19): the rates themselves (overview, a
+    version, its diff, its export) are read by admin, Project Manager, Sales,
+    Finance and Management members only; the lookups, machine classes and
+    the machine list stay usable by everyone who costs."""
+    vid = await _published(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=70)])
+    # NEGATIVE: an engineer of another department reads no rate sheet
+    for url in (API, f"{API}/versions/{vid}", f"{API}/versions/{vid}/diff",
+                f"{API}/versions/{vid}/export?format=csv"):
+        res = await client.get(url, headers=eng_auth)
+        assert res.status_code == 403, url
+        assert res.json()["detail"] == ("The cost sheet is read by admin, Project "
+                                        "Manager, Sales, Finance and Management")
+    # ... but still costs: lookups, classes, settings, machine list
+    hit = (await client.get(f"{API}/lookup/rate", params={
+        "department_id": world["tool"]}, headers=eng_auth))
+    assert hit.status_code == 200 and hit.json()["rate"] == 70
+    assert (await client.get(f"{API}/machine-classes", headers=eng_auth)).status_code == 200
+    assert (await client.get(f"{API}/machines", headers=eng_auth)).status_code == 200
+    me = (await client.get("/api/v1/auth/me", headers=eng_auth)).json()
+    assert me["can_read_cost_sheet"] is False
+    # admin acting as a non-cost department is that department only
+    as_tool = {**admin_auth, HEADER: str(world["tool"])}
+    assert (await client.get(API, headers=as_tool)).status_code == 403
+    assert (await client.get(API, headers=admin_auth)).status_code == 200
+    assert (await client.get("/api/v1/auth/me", headers=admin_auth)).json()[
+        "can_read_cost_sheet"] is True
 
     async with session_factory() as s:
         s.add(UserDepartment(user_id=world["engineer_id"], department_id=world["fin"]))
         await s.commit()
-    assert (await client.get(API, headers=eng_auth)).json()["can_edit"] is True
+    res = await client.get(API, headers=eng_auth)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["can_edit"] is True and len(body["versions"]) == 1
+    assert any(d["name"] == "Finance" for d in body["departments"])
     assert (await client.post(f"{API}/drafts", json={}, headers=eng_auth)).status_code == 201
+
+
+@pytest.mark.parametrize("dept", ["Project Manager", "Management"])
+async def test_pm_and_management_read_but_do_not_edit(client, eng_auth, world,
+                                                     session_factory, dept):
+    async with session_factory() as s:
+        d = Department(name=dept, flow_type="action")
+        s.add(d)
+        await s.flush()
+        s.add(UserDepartment(user_id=world["engineer_id"], department_id=d.id))
+        await s.commit()
+    res = await client.get(API, headers=eng_auth)
+    assert res.status_code == 200 and res.json()["can_edit"] is False
+    assert (await client.get("/api/v1/auth/me", headers=eng_auth)).json()[
+        "can_read_cost_sheet"] is True
+    assert (await client.post(f"{API}/drafts", json={}, headers=eng_auth)).status_code == 403
 
 
 async def test_sales_keeps_the_rates(client, eng_auth, admin_auth, world, session_factory):
@@ -260,7 +301,7 @@ def _row(rows, department_id, plant_id):
 async def test_admin_acting_as_is_that_department_only(client, admin_auth, world):
     assert (await client.get(API, headers=admin_auth)).json()["can_edit"] is True
     as_tool = {**admin_auth, HEADER: str(world["tool"])}
-    assert (await client.get(API, headers=as_tool)).json()["can_edit"] is False
+    assert (await client.get(API, headers=as_tool)).status_code == 403   # D-cost
     assert (await client.post(f"{API}/drafts", json={}, headers=as_tool)).status_code == 403
     as_fin = {**admin_auth, HEADER: str(world["fin"])}
     assert (await client.post(f"{API}/drafts", json={}, headers=as_fin)).status_code == 201
@@ -482,7 +523,7 @@ async def test_machine_classes_and_settings(client, admin_auth, eng_auth, world)
                              headers=eng_auth)).status_code == 403
     assert (await client.put(f"{API}/settings", json={"review_months": 6},
                              headers=admin_auth)).json() == {"review_months": 6}
-    assert (await client.get(API, headers=eng_auth)).json()["stale"]["review_months"] == 6
+    assert (await client.get(API, headers=admin_auth)).json()["stale"]["review_months"] == 6
 
 
 async def test_export_csv_and_xlsx(client, admin_auth, world, session_factory):

@@ -2137,6 +2137,18 @@ update and proceed refuse R/A/S/C for either with the same words, and
 `build_routing` drops them from stage 1.
 Until it has members, a Project Management member gives that OK. Quality still
 signs without price.
+
+**Cost sheet read (DECIDED BY CHRISTOPH 2026-10-19, D-cost).** The rate sheet
+itself (`GET /cost-sheet`, `/versions/{id}`, `/diff`, `/export`) is read by
+admin, Project Manager, Sales, Finance and Management members only
+(`cost_sheet_service.can_read`: `can_edit` or `PriceViewer`; acts-as aware,
+so an admin acting as Tool Engineer is refused). Everyone else gets 403 with
+"The cost sheet is read by admin, Project Manager, Sales, Finance and
+Management". The lookups (`/lookup/rate|machine|sampling`), the machine
+classes, the settings and the machine list (`/cost-sheet/machines`) stay open:
+every department that costs prices its own positions from there. `/auth/me`
+returns `can_read_cost_sheet`; the "Cost sheet" nav item shows only when it is
+true. This replaces "rates are public by design".
 Migration 119 also adds the columns later lanes fill: `sales_owner_id`,
 `price_open`, `pm_signed_offer_id` / `quality_signed_offer_id` (backfilled to
 the accepted offer, else the latest sent one), and on

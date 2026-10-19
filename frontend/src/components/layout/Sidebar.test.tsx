@@ -15,7 +15,7 @@ const wfTasks = (n: number) => Array.from({ length: n }, (_, i) => ({
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('../../api/changes', () => ({ changesApi: { myTasks: vi.fn().mockResolvedValue([]) } }))
 
-const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn(), priceView: 'all' as string | null | undefined } as { role: string | null; username: string; logout: () => void; priceView?: string | null } }))
+const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn(), priceView: 'all' as string | null | undefined } as { role: string | null; username: string; logout: () => void; priceView?: string | null; canReadCostSheet?: boolean } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
 vi.mock('./ActsAsSwitch', () => ({ default: () => <div>mock-acts-as-switch</div> }))
 
@@ -64,6 +64,17 @@ describe('Sidebar nav groups', () => {
     authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn(), priceView: 'led' }
     wrap(<Sidebar />)
     expect(await screen.findByText('P&L')).toBeDefined()
+  })
+
+  it('shows Cost sheet only to the cost roles (D-cost)', async () => {
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn(), canReadCostSheet: false } as typeof authMock.current
+    wrap(<Sidebar />)
+    expect(await screen.findByText('Workflows')).toBeDefined()
+    expect(screen.queryByText('Cost sheet')).toBeNull()
+    cleanup()
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn(), canReadCostSheet: true } as typeof authMock.current
+    wrap(<Sidebar />)
+    expect(await screen.findByText('Cost sheet')).toBeDefined()
   })
 
   it('hides SETUP heading and Workflows for viewer role', async () => {

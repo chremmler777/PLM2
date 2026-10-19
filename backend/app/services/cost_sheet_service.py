@@ -100,6 +100,28 @@ async def require_edit(db: AsyncSession, user) -> None:
         raise CostSheetError("Only Sales, Finance or an admin may edit the cost sheet", 403)
 
 
+READ_DENIED = ("The cost sheet is read by admin, Project Manager, Sales, Finance "
+               "and Management")
+
+
+async def can_read(db: AsyncSession, user) -> bool:
+    """D-cost (Christoph 2026-10-19): the rate sheet itself (overview,
+    versions, diff, export) is read by the cost roles only: admin, Project
+    Manager, Sales and Management (the price viewers, PriceViewer) and
+    Finance (keeps the rates). Acts-as aware like can_edit. The lookups, the
+    machine classes and the machine list stay open: every department that
+    costs its own positions prices them from there."""
+    from app.services.price_redaction import PriceViewer
+    if await can_edit(db, user):          # admin, Sales, Finance
+        return True
+    return await PriceViewer(db, user)._base()   # PM, Management (and Sales, admin)
+
+
+async def require_read(db: AsyncSession, user) -> None:
+    if not await can_read(db, user):
+        raise CostSheetError(READ_DENIED, 403)
+
+
 # ---------------------------------------------------------------- settings
 
 async def get_setting(db: AsyncSession, org_id: int, key: str) -> Optional[str]:

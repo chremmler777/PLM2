@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, plm2_roles
 from app.models import get_db
 from app.models.workflow import Department
+from app.services.cost_sheet_service import can_read as cost_sheet_can_read
 from app.services.tool_rights import can_edit_tools
 from app.version import SOFTWARE_VERSION
 
@@ -68,6 +69,9 @@ async def me(request: Request, user=Depends(get_current_user), db: AsyncSession 
         # Management), "led" (only the changes they lead), "none". The P&L
         # link and page go by it instead of showing someone zeros.
         "price_view": await _price_view(db, user),
+        # D-cost: the Cost sheet page and nav item (admin, Project Manager,
+        # Sales, Finance, Management; acts-as aware).
+        "can_read_cost_sheet": await cost_sheet_can_read(db, user),
         # The user-facing version the training record is stamped with.
         "software_version": SOFTWARE_VERSION,
     }

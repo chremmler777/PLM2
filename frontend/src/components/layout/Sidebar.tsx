@@ -34,7 +34,7 @@ function isProjectPage(path: string): boolean {
 
 export default function Sidebar() {
   const location = useLocation();
-  const { logout, username, role, priceView } = useAuth();
+  const { logout, username, role, priceView, canReadCostSheet } = useAuth();
   const onProjectPage = isProjectPage(location.pathname);
   // Anything but an explicit "expanded" (missing, garbage, unreadable) means the rail.
   const [railCollapsed, setRailCollapsed] = useState(() => readStored(RAIL_KEY) !== 'expanded');
@@ -73,7 +73,9 @@ export default function Sidebar() {
 
   const setupItems: NavItem[] = [
     { path: '/workflows', label: 'Workflows', icon: Settings2 },
-    { path: '/cost-sheet', label: 'Cost sheet', icon: Receipt },
+    // D-cost: the rates are read by admin, Project Manager, Sales, Finance
+    // and Management only; everyone else costs through the lookups.
+    ...(canReadCostSheet ? [{ path: '/cost-sheet', label: 'Cost sheet', icon: Receipt }] : []),
   ];
 
   const showSetup = role === 'admin' || role === 'engineer';

@@ -221,8 +221,9 @@ export const salesChapter: ContentChapter = {
         {
           p:
             'Sales keeps the cost sheet: one hourly rate per department per plant, the machine and ' +
-            'sampling prices and the overhead. Finance and admins may change them too. Everybody ' +
-            'else reads them. The page is "Cost sheet", at the address ending in /cost-sheet.',
+            'sampling prices and the overhead. Finance and admins may change them too. Project ' +
+            'Manager and Management members read them; nobody else sees the sheet (their costing ' +
+            'lines still look the rates up). The page is "Cost sheet", at the address ending in /cost-sheet.',
         },
         {
           steps: [

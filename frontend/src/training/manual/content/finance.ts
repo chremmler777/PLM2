@@ -31,8 +31,9 @@ export const financeChapter: ContentChapter = {
         },
         {
           callout:
-            'Rates are public by design: everybody in the organization can read the cost sheet. ' +
-            'Only Sales, Finance or an admin can change it.',
+            'The cost sheet is read by admin, Project Manager, Sales, Finance and Management members; ' +
+            'only Sales, Finance or an admin can change it. Every other department still costs its ' +
+            'own positions: the costing line looks the rate up and names its source.',
         },
       ],
     },
@@ -42,8 +43,8 @@ export const financeChapter: ContentChapter = {
       blocks: [
         {
           p:
-            '"Cost sheet" is under Setup in the sidebar for accounts with the admin or engineer ' +
-            'role. Everybody else opens it at the address ending in /cost-sheet. The page reads: ' +
+            '"Cost sheet" is under Setup in the sidebar for admin, Project Manager, Sales, Finance ' +
+            'and Management members; nobody else sees it. The page reads: ' +
             'hourly rates per department and plant, ' +
             'machine and sampling prices and personnel overhead, kept by Sales. A change is priced ' +
             'with the version valid on the day it was created; booked hours with the version valid ' +

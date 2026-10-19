@@ -18,6 +18,9 @@ interface AuthContextType {
   /** Which prices the viewer reads (R23, /auth/me): all (admin, PM, Sales,
    *  Management), led (only the changes they lead), none. Null while loading. */
   priceView: 'all' | 'led' | 'none' | null;
+  /** D-cost (/auth/me): reads the cost sheet (admin, Project Manager, Sales,
+   *  Finance, Management; acts-as aware). The nav item and page go by it. */
+  canReadCostSheet: boolean;
   loading: boolean;
   logout: () => void;
 }
@@ -31,6 +34,7 @@ type MeResponse = {
   /** Local role: admin | engineer | viewer (engineer = department member). */
   role?: string | null;
   price_view?: 'all' | 'led' | 'none' | null;
+  can_read_cost_sheet?: boolean;
 };
 let meInFlight: Promise<{ data: MeResponse }> | null = null;
 function fetchMe(): Promise<{ data: MeResponse }> {
@@ -49,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [roles, setRoles] = useState<string[]>([]);
   const [localRole, setLocalRole] = useState<string | null>(null);
   const [priceView, setPriceView] = useState<AuthContextType['priceView']>(null);
+  const [canReadCostSheet, setCanReadCostSheet] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -62,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRoles(res.data.plm2_roles ?? []);
         setLocalRole(res.data.role ?? null);
         setPriceView(res.data.price_view ?? null);
+        setCanReadCostSheet(res.data.can_read_cost_sheet === true);
         setIsAuthenticated(true);
       })
       .catch(() => {
@@ -94,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAdmin,
     canWrite,
     priceView,
+    canReadCostSheet,
     loading,
     logout,
   };
