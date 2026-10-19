@@ -176,7 +176,9 @@ async def get_current_user(
                 if attempt >= 10:
                     raise
                 username = f"{base_username}-{attempt}"
-    in_department = await _in_active_department(db, user.id)
+    # An admin's role does not depend on memberships: no lookup on its requests
+    in_department = ("plm2_Admin" not in hub_roles
+                     and await _in_active_department(db, user.id))
     hub_role = _local_role(hub_roles, in_department)
     if user.hashed_password == _HUB_MANAGED and user.role != hub_role:
         # keep hub-provisioned users' local role in sync; never touch real local users
