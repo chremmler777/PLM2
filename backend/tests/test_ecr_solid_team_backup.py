@@ -195,6 +195,52 @@ async def test_late_assessment_tells_the_backup_once(client, seed, team, session
     assert carl == []          # NEGATIVE: not the whole department
 
 
+async def test_late_workflow_task_tells_the_backup_once(client, seed, team, session_factory):
+    """Review 2026-10-19: the engine task (the main path of an assessment,
+    and every check-workflow step) tells the named backup too, once; not the
+    rest of the department, not a backup who owns the task."""
+    from app.models.workflow import WfInstance, WfInstanceTask, WfTemplate
+    from app.services import cm_switches
+    from app.services.notification_sweep import run_notification_sweep
+    if not cm_switches.on("ASSESSMENT_V2"):
+        pytest.skip("one escalation rule needs ASSESSMENT_V2")
+    await _team(session_factory, seed, team)
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-BK-2", title="backup wf", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"],
+                          status="in_assessment")
+        t = WfTemplate(name="bk-tpl", version=1, is_active=True, created_by=seed["admin_id"])
+        s.add_all([c, t]); await s.flush()
+        inst = WfInstance(template_id=t.id, change_id=c.id, status="active",
+                          started_by=seed["admin_id"])
+        s.add(inst); await s.flush()
+        late = datetime.utcnow() - timedelta(days=10)
+        task = WfInstanceTask(instance_id=inst.id, stage_order=1,
+                              department_id=team["dept"]["Development"], rasic_letter="R",
+                              status="active", is_actionable=True, due_date=late)
+        owned = WfInstanceTask(instance_id=inst.id, stage_order=1,
+                               department_id=team["dept"]["Development"], rasic_letter="R",
+                               status="active", is_actionable=True, due_date=late,
+                               owner_id=team["user"]["ben"])
+        s.add_all([task, owned]); await s.commit()
+        tid, oid = task.id, owned.id
+    for _ in range(2):
+        async with session_factory() as s:
+            await run_notification_sweep(s); await s.commit()
+    async with session_factory() as s:
+        ben = (await s.execute(select(Notification).where(
+            Notification.user_id == team["user"]["ben"],
+            Notification.subject_key.like("task:%:overdue:backup")))).scalars().all()
+        carl = (await s.execute(select(Notification).where(
+            Notification.user_id == team["user"]["carl"],
+            Notification.kind == "overdue"))).scalars().all()
+    assert [n.subject_key for n in ben] == [f"task:{tid}:overdue:backup"]
+    assert "Dana" in ben[0].body
+    assert carl == []          # NEGATIVE: not the whole department
+    assert oid != tid          # NEGATIVE: Ben owns the other one: no backup notice
+
+
 async def test_pm_reassigns_a_department_task(client, seed, team, session_factory):
     cid, aid = await _assessment(session_factory, seed, team,
                                  datetime.utcnow() + timedelta(days=5))

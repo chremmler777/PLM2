@@ -2403,7 +2403,11 @@ the rest of the department backup with the backup's name); to the backup
 **too** once the task is overdue (the responsible keeps it as main; the
 backup's row turns main with "Overdue: you back up <responsible>",
 `TeamRoles.promote_overdue` after the due rules; the late sweep tells the
-backup once, `assessment:<id>:overdue:backup`); to the whole department only
+backup once, `assessment:<id>:overdue:backup` and, for an engine task (an
+assessment's main path, every check-workflow step), `task:<id>:overdue:backup`;
+the computed rows (costing input, sign-offs, release checks, Sales rows)
+reach the backup through My Tasks only, where the row turns main, with no
+extra notice); to the whole department only
 when neither is set (legacy, unchanged). The overdue rule also covers a row
 that names its owner: a Sales row held by the change's Sales contact
 (`create_quote`, `update_quote`, the customer answer, ...: Sales' named
@@ -2416,7 +2420,12 @@ or Sales contact main, the rest of Sales backup. **The Sales contact follows
 the team:** when admin or PM sets a new Sales responsible, the open changes
 of the project whose Sales contact was the old responsible move to the new
 one (changelog `sales_owner_changed`; a contact who was not the old
-responsible stays, closed and cancelled changes keep theirs). There is no absence flag: "absent"
+responsible stays, closed and cancelled changes keep theirs). The Sales
+contact is per change: a Sales raiser who is not the responsible stays the
+contact of its own change, and a PM changes it on the change (Sales contact
+picker) when the responsible should take it. Rejected and released changes
+follow too: neither is final (rejected goes on to scoping or closed, with
+Sales' "Send rejection letter"; released to closed). There is no absence flag: "absent"
 is an inactive account or one that left the department (an `away_until`
 was rejected in spec round 1 as unmaintained). Project Management can always
 reassign: it changes the responsible or the backup (every open task of that
@@ -2814,13 +2823,6 @@ view.
   leads every change on the project; department tasks route to them (§5
   "Project team: responsible and named backup"). Pickers preselecting the
   responsible remain a later step.
-- ⚠ **Process responsibles per project (planned, not built — 2026-08-11).**
-  Today department pickers preselect nothing (except Development, the master
-  engineering role, when the user holds it). The intended end state: each
-  project carries named *process responsibles* per role, auto-pulled into
-  changes on that project — pickers then default to the project's responsible
-  person/department instead of asking. Decided to note, deliberately not
-  implemented yet.
 
 ---
 

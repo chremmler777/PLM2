@@ -169,7 +169,23 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
 
     await to([c for _t, c in late_tasks])
     late_word = "late" if one_rule else "overdue"
+    from app.services.project_team_service import _pair
     for task, c in late_tasks:
+        if one_rule:
+            # D2b (review 2026-10-19): the engine task (an assessment's main
+            # path, every check-workflow step) tells the project's named
+            # backup too, once; not when the backup already owns it
+            resp, backup = await _pair(session, c.project_id, task.department_id)
+            if (resp is not None and backup is not None
+                    and backup[0] != task.owner_id):
+                counts["overdue"] += await _once(
+                    session, [backup[0]], kind="overdue",
+                    subject_key=f"task:{task.id}:overdue:backup",
+                    title=f"Late: task on {c.change_number}",
+                    body=(f"A task on {c.change_number} is late (was due "
+                          f"{fmt_date(task.due_date)}); you back up {resp[1]}: "
+                          "it is yours too now."),
+                    link="/my-tasks")
         ids = [i for i in targets.get(c.id, []) if i is not None and i != task.owner_id]
         if not ids:
             continue
@@ -233,7 +249,6 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             counts["overdue"] += n
         # D2b: a late department task goes to the project's named backup
         # too (once; not when the backup already owns it or is the lead)
-        from app.services.project_team_service import _pair
         resp, backup = await _pair(session, change.project_id, assessment.department_id)
         if (one_rule and resp is not None and backup is not None
                 and backup[0] != assessment.owner_id):
