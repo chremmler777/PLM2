@@ -81,13 +81,29 @@ async def test_hand_over_is_the_lead_pms_row_not_sales(
     # review 2026-10-19: the lead reads who supplies the missing facts
     assert "description" in row["missing"] and "quote deadline" in row["missing"]
     assert row["hint"].startswith("Engineer (Sales contact) supplies"), row["hint"]
-    # NEGATIVE: the Sales raiser (and Sales contact) no longer owns it: a
-    # backup row naming the lead PM, which says what the contact supplies
+    # The Sales raiser (and Sales contact) no longer hands over; its row is
+    # "Supply the customer's facts", its own (main, on the badge, with a due),
+    # naming the lead PM who hands over (review 2026-10-19)
     [row] = await _rows(client, sales, "kickoff", c["id"])
-    assert row["role"] == "backup"
-    assert row["main_name"] == "Pat PM"
-    assert not row["is_mine"]
+    assert row["kind_label"] == "Supply the customer's facts"
+    assert row["role"] == "main" and row["is_mine"], row
+    assert row["due_date"]
     assert row["hint"] == "You supply the customer's facts; Pat PM hands over"
+    # another Sales member backs the contact up and reads the same hint
+    async with session_factory() as s:
+        sam = User(organization_id=seed["org_id"], username="sam", email="sam@test.io",
+                   full_name="Sam Sales", hashed_password=get_password_hash("sam-secret-1"),
+                   role="engineer", is_active=True, mfa_enabled=False)
+        s.add(sam); await s.flush()
+        s.add(UserDepartment(user_id=sam.id, department_id=team["dept"]["Sales"]))
+        await s.commit()
+    sam = await login(client, "sam@test.io", admin=False)
+    [row] = await _rows(client, sam, "kickoff", c["id"])
+    assert row["kind_label"] == "Supply the customer's facts"
+    assert row["role"] == "backup" and row["main_name"] == "Engineer"
+    assert not row["is_mine"]
+    assert row["hint"] == ("Engineer (Sales contact) supplies the customer's facts; "
+                           "Pat PM hands over"), row["hint"]
 
 
 async def test_no_lead_pm_sets_the_lead_refusal_names_the_default(

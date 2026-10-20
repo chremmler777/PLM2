@@ -312,10 +312,14 @@ async def test_leadless_kickoff_is_pm_main_sales_backup_and_sales_cannot_hand_ov
     # may still hand over on the lead's behalf
     await _set(session_factory, cid, lead_id=team["user"]["Project Manager"])
     s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
-    assert s_row["role"] == "backup"
-    # the Sales contact reads what it supplies while facts are missing
-    assert (s_row.get("hint") is None if not s_row["missing"] else
-            s_row["hint"].startswith("You supply the customer's facts")), s_row
+    # the Sales contact's row while facts are missing is its own "Supply
+    # the customer's facts" (review 2026-10-19); with the facts in, a backup
+    # of the lead's hand-over
+    if s_row["missing"]:
+        assert s_row["kind_label"] == "Supply the customer's facts", s_row
+        assert s_row["hint"].startswith("You supply the customer's facts"), s_row
+    else:
+        assert s_row["role"] == "backup" and s_row.get("hint") is None, s_row
     assert (await _tasks(client, pm, cid, "kickoff"))[0]["role"] == "main"
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
     assert st["can_transition"]["scoping"] is True

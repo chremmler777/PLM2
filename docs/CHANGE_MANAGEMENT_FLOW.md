@@ -2340,8 +2340,13 @@ and Sales see it as backup with the lead's name (a lead who cannot act:
 Project Management's, A6-03). While the customer's facts are missing
 (description, quote deadline, customer file, need-by, urgent reason), each
 row names the other: the lead reads "<contact> (Sales contact) supplies the
-customer's facts; you hand over", the Sales contact "You supply the
-customer's facts; <lead> hands over", both with the missing list. The implementation risk row (`escalate_risk`,
+customer's facts; you hand over"; for Sales the row is **"Supply the
+customer's facts"** (review 2026-10-19), a Sales row: the Sales contact's
+main row (on the badge, with its due) reading "You supply the customer's
+facts; <lead> hands over", the rest of Sales its backup with the contact's
+name and "<contact> (Sales contact) supplies the customer's facts; <lead>
+hands over", each with the missing list. Once the facts are in, Sales sees
+the hand-over as backup of the lead again. The implementation risk row (`escalate_risk`,
 "Take it to the customer, or escalate internally") is the lead's too, with
 Sales as backup (Sales may still escalate, `ImplementationService.
 may_escalate`). The overdue digest names the lead for a late hand-over

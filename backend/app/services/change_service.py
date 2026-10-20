@@ -3793,6 +3793,7 @@ class ChangeService:
         from app.models.change_plan import ChangePlanFeedback, ChangePlanTask
         from app.models.change_validation import ChangeReleaseCheck
         from app.services import release_checklist
+        from app.services.cm_labels import KICKOFF_SUPPLY
         from app.services.offer_service import EXPIRY_WARNING_DAYS, OfferService
         dept_by_name = {n: i for i, n in (await db.execute(
             select(Department.id, Department.name))).all()}
@@ -3992,6 +3993,10 @@ class ChangeService:
                 # D2: the lead hands over, the Sales contact holds the
                 # customer's facts; each row names the other (R5)
                 supply = ""
+                # review 2026-10-19: for Sales the row is "Supply the
+                # customer's facts", a Sales row: the Sales contact's main
+                # row (on the badge), the rest of Sales backs the contact up
+                sales_supply = False
                 if (lead_kickoff and c.sales_owner_id is not None
                         and c.sales_owner_id != c.lead_id
                         and set(missing) & KICKOFF_SALES_SUPPLIES):
@@ -4000,7 +4005,13 @@ class ChangeService:
                                   "(Sales contact) supplies the customer's facts; "
                                   "you hand over")
                     elif c.sales_owner_id == user.id:
+                        sales_supply = True
                         supply = (f"You supply the customer's facts; "
+                                  f"{c.lead_name or 'the lead'} hands over")
+                    elif in_sales:
+                        sales_supply = True
+                        supply = (f"{c.sales_owner_name or 'The Sales contact'} "
+                                  "(Sales contact) supplies the customer's facts; "
                                   f"{c.lead_name or 'the lead'} hands over")
                 tasks.append({**await _base(c), "kind": "kickoff",
                               "missing": missing,
@@ -4014,15 +4025,20 @@ class ChangeService:
                                  {"hint": supply} if supply else {}),
                               # the lead hands it over; Project Management
                               # and Sales back the lead up (R5: one main per row)
-                              **({"main_user": (c.lead_id, c.lead_name or "")}
+                              **({"kind_label": KICKOFF_SUPPLY[0]}
+                                 if sales_supply else
+                                 {"main_user": (c.lead_id, c.lead_name or "")}
                                  if (run_team_kickoff or lead_kickoff)
                                  and not holds_lead(c, user)
                                  and c.id not in idle_lead else
                                  {"main_user": (None, "Project Management")}
                                  if pm_first else {}),
-                              # project team: then it is PM's role, not Sales'
-                              "role_department_id": (dept_by_name.get("Project Manager")
-                                                     if pm_row else None)})
+                              # project team: then it is PM's role, not Sales';
+                              # the facts are Sales' (the contact leads them)
+                              "role_department_id": (
+                                  dept_by_name.get("Sales") if sales_supply else
+                                  dept_by_name.get("Project Manager")
+                                  if pm_row else None)})
             elif c.status == "on_hold" and (holds_lead(c, user) or is_pm):
                 # C1: a hold is the run team's to resume or cancel; the lead
                 # owns it, Project Management backs up (no lead: PM's own).

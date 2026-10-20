@@ -142,10 +142,18 @@ async def test_sales_tasks_name_the_owner(client, seed, depts, session_factory, 
     res = await client.patch(f"/api/v1/changes/{c['id']}",
                              json={"lead_id": seed["admin_id"]}, headers=admin)
     assert res.status_code == 200, res.text
-    # D2 (2026-10-19): the hand-over is the lead's; the Sales contact and
-    # the rest of Sales back the lead up
+    # D2 (2026-10-19): the hand-over is the lead's; while the customer's
+    # facts are missing the Sales contact's own row is "Supply the
+    # customer's facts" (review 2026-10-19), with them in it backs the lead up
     mine = await kickoff(eng)
-    assert mine and mine[0]["role"] == "backup" and not mine[0]["is_mine"]
+    assert mine and mine[0]["missing"]
+    assert mine[0]["kind_label"] == "Supply the customer's facts"
+    assert mine[0]["role"] == "main" and mine[0]["is_mine"]
+    from tests.conftest import satisfy_capture_gate
+    await satisfy_capture_gate(client, admin, c["id"])
+    mine = await kickoff(eng)
+    assert mine and not mine[0]["missing"], mine
+    assert mine[0]["role"] == "backup" and not mine[0]["is_mine"]
     assert mine[0]["main_name"] == "Admin"
     rows = await kickoff(admin)
     assert rows and rows[0]["role"] == "main"

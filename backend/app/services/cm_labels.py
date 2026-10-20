@@ -72,6 +72,10 @@ SETTLED_AS = {
     "department": ("Settled by the department", "Von der Abteilung geklärt"),
 }
 
+# The kickoff row of Sales while the customer's facts are missing (D2: the
+# lead PM hands over, the Sales contact supplies the facts).
+KICKOFF_SUPPLY = ("Supply the customer's facts", "Kundenangaben liefern")
+
 # My Tasks row kinds (GET /changes/my-tasks), spec §16: human kind labels.
 TASK_KIND = {
     "kickoff": ("Hand over to scoping", "An Klärung übergeben"),
