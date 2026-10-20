@@ -373,6 +373,28 @@ describe('CockpitSummary', () => {
     expect(onShowImpact).toHaveBeenCalled()
   })
 
+  it('does not show the impact-confirmation blocker while the confirm step is switched off', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'scoping', customer_relevant: true, assessments: [], impact_confirmed_at: null,
+      impact_confirm_step: false,
+      impacted_items: [{ id: 1, part_id: 9 }] as ChangeDetail['impacted_items'],
+    })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onShowImpact={() => {}} />))
+    expect(screen.queryByText(/Impact confirmation pending/)).toBeNull()
+  })
+
+  it('still shows the impact-confirmation blocker in scoping while the confirm step is on', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'scoping', customer_relevant: true, assessments: [], impact_confirmed_at: null,
+      impact_confirm_step: true,
+      impacted_items: [{ id: 1, part_id: 9 }] as ChangeDetail['impacted_items'],
+    })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onShowImpact={() => {}} />))
+    expect(screen.getAllByText(/Impact confirmation pending/).length).toBeGreaterThan(0)
+  })
+
   it('does not show the impact-confirmation blocker once confirmed', () => {
     render(wrap(<CockpitSummary change={change({
       status: 'approved', assessments: [],
