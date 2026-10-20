@@ -152,14 +152,20 @@ export default function ScopingPanel(
   const deptIds = Object.keys(deptRasic).map(Number)
   const [deptTouched, setDeptTouched] = useState(false)
   // Who pays, as the room confirms it: required next to RASIC (spec §16).
-  // Never preselected: the room makes the call consciously; what capture
-  // said (and the last meeting's call) is shown beside it as a hint.
+  // Not asked twice: the form starts from what is already known (the last
+  // meeting's call, else what capture said), shown checked and changeable;
+  // only an unset carrier waits for a pick.
   const [carrierPick, setCarrier] = useState<CostCarrier | ''>('')
   // Where only one carrier is open to the viewer (a Process lead on an internal
   // change may not make it a customer change), there is no call to make: that
   // one counts as picked, instead of a click on the only option.
   const openCarriers = (['customer', 'internal'] as CostCarrier[]).filter((c) => !carrierBarred(c))
-  const carrier: CostCarrier | '' = carrierPick || (openCarriers.length === 1 ? openCarriers[0] : '')
+  const knownCarrier: CostCarrier | '' =
+    [...meetings].reverse().find((m: ChangeMeeting) => m.cost_carrier)?.cost_carrier
+      ?? capturedCarrier
+  const carrier: CostCarrier | '' = carrierPick
+    || (knownCarrier && !carrierBarred(knownCarrier) ? knownCarrier : '')
+    || (openCarriers.length === 1 ? openCarriers[0] : '')
   // The form is a record of one meeting: open while there is none, then one
   // click away. After a save it resets and folds up.
   const [formOpen, setFormOpen] = useState<boolean | null>(null)

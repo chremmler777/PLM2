@@ -771,21 +771,62 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(save.disabled).toBe(false)
   })
 
-  it('preselects no carrier, shows the captured value as a hint and calls out a flip', async () => {
+  it('prefills the carrier captured at capture (no second ask), shows it as a hint and calls out a flip', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)
     render(wrap(<ScopingPanel change={change({ customer_relevant: true })} />))
     const customer = await screen.findByTestId('meeting-carrier-customer') as HTMLInputElement
-    expect(customer.checked).toBe(false)
+    expect(customer.checked).toBe(true)
     expect((screen.getByTestId('meeting-carrier-internal') as HTMLInputElement).checked).toBe(false)
     expect(screen.getByTestId('meeting-carrier-captured').textContent).toBe('Captured as: Customer change')
-    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByTestId('meeting-save-missing')).toBeNull()
     expect(screen.queryByTestId('meeting-carrier-flip')).toBeNull()
+    // still changeable: picking the other one is a flip, called out
     fireEvent.click(screen.getByTestId('meeting-carrier-internal'))
     expect(screen.getByTestId('meeting-carrier-flip').textContent).toContain('Sales is notified')
     fireEvent.click(screen.getByTestId('meeting-save'))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].cost_carrier).toBe('internal')
+  })
+
+  it('sends the prefilled captured carrier when the room leaves it as is', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true })} />))
+    fireEvent.click(await screen.findByTestId('meeting-save'))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].cost_carrier).toBe('customer')
+  })
+
+  it('a later meeting prefills the last meeting\'s carrier over the captured one', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([{
+      id: 30, change_id: 7, meeting_date: '2026-07-01T12:00:00Z', participants: [], notes: null,
+      decision: 'needs_info', selected_department_ids: [], channel: 'meeting',
+      cost_carrier: 'internal', department_rasic: null,
+    }] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: true })} />))
+    await waitFor(() => expect(
+      (screen.getByTestId('meeting-carrier-internal') as HTMLInputElement).checked).toBe(true))
+    expect((screen.getByTestId('meeting-carrier-customer') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('prefills nothing when capture left the carrier unset', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: null })} />))
+    const customer = await screen.findByTestId('meeting-carrier-customer') as HTMLInputElement
+    expect(customer.checked).toBe(false)
+    expect((screen.getByTestId('meeting-carrier-internal') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('does not prefill a captured carrier the flip bars (internal held as customer)', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    render(wrap(<ScopingPanel change={change({ customer_relevant: false,
+      customer_flip_at: '2026-07-01T00:00:00', flip_answer: null })} />))
+    const internal = await screen.findByTestId('meeting-carrier-internal') as HTMLInputElement
+    expect(internal.disabled).toBe(true)
+    expect(internal.checked).toBe(false)
   })
 
   it('A2-01: an engineering lead is not offered the customer carrier on an internal change', async () => {
@@ -811,12 +852,14 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].cost_carrier).toBe('internal')
   })
 
-  it('CO2: a viewer who may move the carrier still has to choose (two open options)', async () => {
+  it('CO2: a viewer who may move the carrier starts from the captured one and may change it', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     render(wrap(<ScopingPanel change={change({ customer_relevant: false })} canMoveCarrier={true} />))
     const internal = await screen.findByTestId('meeting-carrier-internal') as HTMLInputElement
-    expect(internal.checked).toBe(false)
-    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(true)
+    expect(internal.checked).toBe(true)
+    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
+    expect((screen.getByTestId('meeting-carrier-customer') as HTMLInputElement).checked).toBe(true)
   })
 
   it('takes the meeting date as dd.mm.yyyy and sends it as ISO', async () => {
