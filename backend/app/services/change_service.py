@@ -161,6 +161,10 @@ class AssignForbidden(ChangeError):
     """The caller may not assign this department task (403, not 400)."""
 
 
+class AcceptForbidden(ChangeError):
+    """The caller may not accept this department task: not a member (403)."""
+
+
 class DeviationRequired(ChangeError):
     """A soft guard refused the hop and no approved transition deviation
     covers it: an approved deviation WOULD let it through. Still a 400, but
@@ -6834,15 +6838,18 @@ class ChangeService:
         if a.wf_instance_task_id is not None and a.rasic_letter in BLOCKING_LETTERS:
             # Linked R/A row: the engine task is the source of truth for
             # execution state — delegate ownership to it.
+            from app.services.workflow_service import TaskAcceptForbidden
             try:
                 await WorkflowService.accept_task(session, a.wf_instance_task_id, user)
+            except TaskAcceptForbidden as e:
+                raise AcceptForbidden(str(e))
             except ValueError as e:
                 raise ChangeError(str(e))
         else:
             # Legacy/unlinked fallback (e.g. routing-deviation rows).
             if user.effective_role != "admin" and not await WorkflowService.actor_in_department(
                     session, user, a.department_id):
-                raise ChangeError("Only members of the assessed department may accept")
+                raise AcceptForbidden("Only members of the assessed department may accept")
             if a.owner_id is not None and a.owner_id != user.id:
                 raise ChangeError("Assessment is already owned by another user")
             a.owner_id = user.id

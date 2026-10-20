@@ -110,6 +110,17 @@ async def test_accept_assessment_delegates_to_linked_task(
             ChangeAssessment.department_id == dep["Tool Engineer"]))).scalar_one()
         assert a.wf_instance_task_id is not None, "stage-1 R row must link to a task"
         assessment_id, task_id = a.id, a.wf_instance_task_id
+        other_id = (await s.execute(select(ChangeAssessment.id).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.department_id == dep["Process Engineer"]))).scalar_one()
+
+    # NEGATIVE (review 2026-10-19): a non-member's accept is a rights
+    # refusal, 403 like assign, not a 400
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/assessments/{other_id}/accept",
+        headers=eng_auth)
+    assert res.status_code == 403, res.text
+    assert "department" in res.json()["detail"]
 
     res = await client.post(
         f"/api/v1/changes/{change['id']}/assessments/{assessment_id}/accept",
@@ -160,6 +171,11 @@ async def test_accept_and_assign_assessment(client, eng_auth, admin_auth, seed,
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
     a = await _activate_first_assessment(session_factory, change["id"])
+    # NEGATIVE: not a member yet: 403 (rights), not 400
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/assessments/{a.id}/accept",
+        headers=eng_auth)
+    assert res.status_code == 403, res.text
     async with session_factory() as s:
         s.add(UserDepartment(user_id=seed["engineer_id"], department_id=a.department_id))
         await s.commit()

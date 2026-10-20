@@ -1896,7 +1896,9 @@ async def accept_assessment(
     try:
         a = await ChangeService.accept_assessment(db, change, assessment_id, current_user)
     except ChangeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        from app.services.change_service import AcceptForbidden
+        raise HTTPException(status_code=403 if isinstance(e, AcceptForbidden) else 400,
+                            detail=str(e))
     await db.commit()
     await db.refresh(a)
     return await _assessment_out(db, a, current_user)

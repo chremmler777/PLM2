@@ -299,8 +299,11 @@ async def accept_task(
     try:
         task = await WorkflowService.accept_task(db, task_id, current_user)
     except ValueError as e:
+        from app.services.workflow_service import TaskAcceptForbidden
         await db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=403 if isinstance(e, TaskAcceptForbidden) else 400,
+            detail=str(e))
     await db.commit()
     return await _task_response(db, task)
 

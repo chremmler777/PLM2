@@ -19,6 +19,11 @@ class TaskAssignForbidden(ValueError):
     router maps it; a ValueError, so older callers still answer 400)."""
 
 
+class TaskAcceptForbidden(ValueError):
+    """The caller may not accept this task: not a member of its department
+    (403, not 400; review 2026-10-19)."""
+
+
 class WorkflowService:
 
     @staticmethod
@@ -836,7 +841,7 @@ class WorkflowService:
         task = await WorkflowService._load_open_task(db, task_id)
         if user.effective_role != "admin" and not await WorkflowService.actor_in_department(
                 db, user, task.department_id):
-            raise ValueError("Only members of the task's department may accept it")
+            raise TaskAcceptForbidden("Only members of the task's department may accept it")
         if task.owner_id is not None and task.owner_id != user.id:
             raise ValueError("Task is already owned by another user")
         task.owner_id = user.id
