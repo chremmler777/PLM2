@@ -5,6 +5,8 @@ import { ProjectTeamCard } from './ProjectTeamCard'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+vi.mock('sonner', () => ({ toast: toastMocks }))
 
 const wrap = (ui: React.ReactElement) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
@@ -81,6 +83,16 @@ describe('ProjectTeamCard', () => {
     fireEvent.change(sel, { target: { value: '12' } })
     await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith(
       '/v1/projects/2/team', { department_id: 9, user_id: 12, slot: 'responsible' }))
+    // the swap is confirmed in words (review 2026-10-19)
+    await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith(
+      'Ben is now the responsible, Dana the backup'))
+  })
+
+  it('a plain pick says Saved, no swap wording', async () => {
+    wrap(<ProjectTeamCard projectId={2} />)
+    fireEvent.click(await screen.findByTestId('team-edit-9'))
+    fireEvent.change(screen.getByTestId('team-select-9'), { target: { value: '13' } })
+    await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('Saved'))
   })
 
   it('D2: the Project Manager row says the lead PM leads every change', async () => {

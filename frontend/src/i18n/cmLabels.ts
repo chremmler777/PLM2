@@ -2374,6 +2374,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'team.pickBackup': { de: 'Vertretung wählen', en: 'Pick a backup' },
   'team.changeBackup': { de: 'Vertretung ändern', en: 'Change backup' },
   'team.swapWithBackup': { de: 'Vertretung: tauscht beide', en: 'backup: swaps the two' },
+  'team.swapped': { de: '{x} ist jetzt zuständig, {y} die Vertretung', en: '{x} is now the responsible, {y} the backup' },
   'team.leadPmHint': { de: 'Lead-PM: führt jede Änderung dieses Projekts', en: 'The lead PM: leads every change on this project' },
   'team.routingHint': {
     de: 'Aufgaben einer Abteilung gehen an die/den Zuständige/n; an die Vertretung, wenn niemand zuständig oder inaktiv ist oder die Aufgabe überfällig ist; an die ganze Abteilung nur ohne beide.',

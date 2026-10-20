@@ -49,10 +49,11 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
     queryFn: async () => (await client.get(`/v1/projects/${projectId}/team`)).data,
   });
   const set = useMutation({
-    mutationFn: async ({ department_id, user_id, slot }: { department_id: number; user_id: number | null; slot: Slot }) =>
+    mutationFn: async ({ department_id, user_id, slot }: { department_id: number; user_id: number | null; slot: Slot; swapNote?: string }) =>
       (await client.put(`/v1/projects/${projectId}/team`, { department_id, user_id, slot })).data,
-    onSuccess: () => {
-      toast.success(t('team.saved'));
+    onSuccess: (_data, vars) => {
+      // a swap says so: nobody loses the responsible without a word
+      toast.success(vars.swapNote ?? t('team.saved'));
       setEditing(null);
       qc.invalidateQueries({ queryKey: ['project-team', projectId] });
     },
@@ -77,7 +78,15 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
         onBlur={() => { if (!set.isPending) setEditing(null); }}
         onChange={(e) => {
           const v = e.target.value;
-          set.mutate({ department_id: row.department_id, user_id: v ? Number(v) : null, slot });
+          const picked = v ? Number(v) : null;
+          const swap = slot === 'responsible' && picked !== null && picked === row.backup?.id
+            && row.responsible && row.responsible.id !== picked;
+          set.mutate({
+            department_id: row.department_id, user_id: picked, slot,
+            swapNote: swap
+              ? t('team.swapped').replace('{x}', row.backup!.name).replace('{y}', row.responsible!.name)
+              : undefined,
+          });
         }}
         className={selectCls}
       >
