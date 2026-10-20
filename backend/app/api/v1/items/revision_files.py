@@ -165,8 +165,18 @@ async def sign_no_geometry_change(
     the alternative 3D evidence to a CAD upload (spec: 3D-evidence decision).
 
     One-way and idempotency-hostile by design: a second sign is rejected.
+    Only the owner of the 3D data signs (WorkflowService.may_sign_no_geometry):
+    it also drops the Design stages and release duplicates of the check
+    workflow, other departments' tasks.
     """
     revision = await _load_revision(db, part_id, revision_id)
+    from app.services.workflow_service import WorkflowService
+    if not await WorkflowService.may_sign_no_geometry(db, revision, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner of the 3D data signs 'no geometry change': "
+                   "Development (Tool Engineer for a tool), the change lead or "
+                   "Project Management. An admin acts as one of them.")
     if _status_value(revision.status) in LOCKED_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -185,7 +195,6 @@ async def sign_no_geometry_change(
     await db.flush()
     # Christoph 2026-10-19 (ECN): its running check workflow drops the
     # Design stages and what the release checklist asks (RELEASE_V2)
-    from app.services.workflow_service import WorkflowService
     await WorkflowService.apply_no_geometry_change(db, revision, current_user.id)
 
     await ChangelogService.log_action(

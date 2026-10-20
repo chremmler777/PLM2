@@ -1400,7 +1400,10 @@ class ChangeService:
 
     @staticmethod
     async def implementation_progress(session: AsyncSession,
-                                      change: ChangeRequest) -> dict:
+                                      change: ChangeRequest, viewer=None) -> dict:
+        """Per impacted item: revision, check workflow, 3D evidence. With a
+        viewer, may_sign_no_geometry says whether the viewer may sign 'no
+        geometry change' on it (the endpoint's own rule; False without one)."""
         from app.models.part import RevisionFile
         from app.models.workflow import WfInstance, WfStage
 
@@ -1422,6 +1425,7 @@ class ChangeService:
                 "total_stages": None,
                 "has_cad_file": False,
                 "no_geometry_change": False,
+                "may_sign_no_geometry": False,
                 "ready": False,
                 # Who still owes a task in the revision's check workflow:
                 # the departments (with the task owner, when one accepted
@@ -1434,6 +1438,10 @@ class ChangeService:
                 if rev is not None:
                     entry["revision_name"] = rev.revision_name
                     entry["no_geometry_change"] = bool(rev.no_geometry_change)
+                    if viewer is not None and not rev.no_geometry_change:
+                        from app.services.workflow_service import WorkflowService
+                        entry["may_sign_no_geometry"] = \
+                            await WorkflowService.may_sign_no_geometry(session, rev, viewer)
                 n_files = (await session.execute(
                     select(func.count()).select_from(RevisionFile).where(
                         RevisionFile.revision_id == item.resulting_revision_id,

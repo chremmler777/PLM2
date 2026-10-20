@@ -113,12 +113,14 @@ export default function ImplementationPanel({ changeId }: Props) {
                 >
                   Upload CAD
                 </button>
-                <button
-                  onClick={() => setSignTarget(item)}
-                  className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs"
-                >
-                  {t('impl.signNoGeometry')}
-                </button>
+                {item.may_sign_no_geometry && (
+                  <button
+                    onClick={() => setSignTarget(item)}
+                    className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs"
+                  >
+                    {t('impl.signNoGeometry')}
+                  </button>
+                )}
               </div>
             )}
             {uploadFor === item.item_id && item.revision_id !== null && (

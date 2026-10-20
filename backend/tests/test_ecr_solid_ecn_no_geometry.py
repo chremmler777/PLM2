@@ -13,6 +13,14 @@ from app.services import cm_switches
 
 pytestmark = pytest.mark.asyncio
 
+
+@pytest.fixture(autouse=True)
+async def _engineer_owns_3d(session_factory, seed):
+    """Signing 'no geometry change' is the 3D owner's (Development on an
+    article, test_ecr_solid_no_geometry_rights.py); the seeded engineer signs."""
+    from tests.conftest import make_development_member
+    await make_development_member(session_factory, seed["engineer_id"])
+
 KEPT = {"Implement tool change", "Adjust process / parameter sheets"}
 
 

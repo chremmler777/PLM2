@@ -7,6 +7,14 @@ from tests.conftest import freeze_revision
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+async def _engineer_owns_3d(session_factory, seed):
+    """Signing 'no geometry change' is the 3D owner's (Development on an
+    article, test_ecr_solid_no_geometry_rights.py); the seeded engineer signs."""
+    from tests.conftest import make_development_member
+    await make_development_member(session_factory, seed["engineer_id"])
+
+
 async def test_sign_no_geometry_change(client, eng_auth, part, session_factory):
     res = await client.post(
         f"/api/v1/parts/{part['part_id']}/revisions/{part['revision_id']}/no-geometry-change",

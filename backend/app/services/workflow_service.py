@@ -213,6 +213,63 @@ class WorkflowService:
         return out, rev.no_geometry_change_by
 
     @staticmethod
+    async def no_geometry_signer_departments(db: AsyncSession,
+                                             revision: PartRevision) -> tuple[str, ...]:
+        """The departments that own the revision's 3D evidence: the R and A
+        departments of the CAD-evidence step of its ECN check workflow
+        template (the revision's running one, else the one for the part's
+        category): Development for an article, Tool Engineer and Development
+        for a tool."""
+        from app.models.part import Part
+        from app.services import wf_seed_service as seeds
+        name = (await db.execute(
+            select(WfTemplate.name)
+            .join(WfInstance, WfInstance.template_id == WfTemplate.id)
+            .where(WfInstance.part_revision_id == revision.id,
+                   WfTemplate.name.in_(list(seeds.ECN_TEMPLATE_NAMES)))
+            .order_by(WfInstance.id.desc()).limit(1))).scalar_one_or_none()
+        if name is None:
+            part = await db.get(Part, revision.part_id)
+            name = seeds.CHECK_WF_CATEGORY_TEMPLATE.get(
+                getattr(part, "item_category", None) or "article",
+                seeds.ECN_UMSETZUNG_ARTIKEL["name"])
+        spec = next(t for t in (seeds.ECN_UMSETZUNG_WERKZEUG, seeds.ECN_UMSETZUNG_ARTIKEL)
+                    if t["name"] == name)
+        out: list[str] = []
+        for _stage, steps in spec["stages"]:
+            for _step, rasic, flags in steps:
+                if flags.get("requires_cad_evidence"):
+                    out += [d for d, letter in rasic if letter in ("R", "A") and d not in out]
+        return tuple(out)
+
+    @staticmethod
+    async def may_sign_no_geometry(db: AsyncSession, revision: PartRevision,
+                                   user) -> bool:
+        """Review fix 2026-10-19: 'no geometry change' is the 3D evidence
+        and drops the Design stages and the release duplicates of the check
+        workflow, so only its owner signs: a real member of the department
+        that owns the 3D data (no_geometry_signer_departments), the lead of
+        the change the revision belongs to, or a Project Management member.
+        An admin's own department rows do not count (D7, real_member_of): an
+        admin signs by acting as one of those departments."""
+        if getattr(user, "effective_role", None) == "viewer":
+            return False
+        from app.models.change import ChangeImpactedItem, ChangeRequest
+        from app.services.change_people import holds_lead
+        from app.services.change_service import ChangeService
+        change_ids = {revision.originating_change_id} - {None}
+        change_ids |= set((await db.execute(
+            select(ChangeImpactedItem.change_id).where(
+                ChangeImpactedItem.resulting_revision_id == revision.id))).scalars().all())
+        if change_ids:
+            leads = (await db.execute(select(ChangeRequest).where(
+                ChangeRequest.id.in_(change_ids)))).scalars().all()
+            if any(holds_lead(c, user) for c in leads):
+                return True
+        names = await WorkflowService.no_geometry_signer_departments(db, revision)
+        return await ChangeService.real_member_of(db, user, "Project Manager", *names)
+
+    @staticmethod
     async def apply_no_geometry_change(db: AsyncSession, revision: PartRevision,
                                        user_id: int) -> int:
         """The revision was just signed 'no geometry change': its running ECN

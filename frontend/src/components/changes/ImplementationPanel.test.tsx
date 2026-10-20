@@ -29,7 +29,7 @@ const progress = {
       revision_id: 55, revision_name: 'ECR1.1',
       instance_id: 9, instance_status: 'active',
       current_stage_order: 1, total_stages: 4,
-      has_cad_file: false, no_geometry_change: false, ready: false,
+      has_cad_file: false, no_geometry_change: false, may_sign_no_geometry: true, ready: false,
     },
   ],
 }
@@ -54,6 +54,16 @@ describe('ImplementationPanel', () => {
     expect(screen.getByText(/3D evidence missing/)).toBeDefined()
     expect(screen.getByText(/Not ready to go/)).toBeDefined()
     expect(screen.getByRole('button', { name: /Sign no geometry change/ })).toBeDefined()
+  })
+
+  it('hides the sign button from a viewer who may not sign (backend 403, review fix)', async () => {
+    vi.mocked(changesApi.getImplementation).mockResolvedValue({
+      ...progress, items: [{ ...progress.items[0], may_sign_no_geometry: false }],
+    })
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByText(/ECR1\.1/)
+    expect(screen.queryByRole('button', { name: /Sign no geometry change/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Upload CAD/ })).toBeDefined()
   })
 
   it('names who a running check workflow still needs (final walk P2-4)', async () => {

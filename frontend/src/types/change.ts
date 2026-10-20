@@ -966,6 +966,9 @@ export interface ImplementationItem {
   total_stages: number | null;
   has_cad_file: boolean;
   no_geometry_change: boolean;
+  /** The viewer may sign 'no geometry change' (the 3D owner: Development,
+      Tool Engineer on a tool, the lead or Project Management). */
+  may_sign_no_geometry?: boolean;
   ready: boolean;
   /** Who still owes a task in the check workflow (department or user names),
       when the backend names them. */

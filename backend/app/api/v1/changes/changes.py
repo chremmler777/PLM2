@@ -1224,7 +1224,7 @@ async def get_implementation_progress(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    return await ChangeService.implementation_progress(db, change)
+    return await ChangeService.implementation_progress(db, change, viewer=current_user)
 
 
 @router.get("/{change_id}/recommended-departments")

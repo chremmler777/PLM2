@@ -1003,7 +1003,16 @@ stages it reaches later are created short; no backfill). The workflow
 panel shows each waived step with its reason; the sign dialog says what
 drops. Switch off: the full four-stage workflow as before. Only the two ECN
 templates (`ECN_TEMPLATE_NAMES`) are shortened; any other revision workflow
-is untouched.
+is untouched. **Who signs (review fix 2026-10-19):** since the signature
+waives other departments' steps, only the owner of the 3D data signs
+(`WorkflowService.may_sign_no_geometry`): a real member of the R or A
+department of the template's 3D step (Development on an article; Tool
+Engineer or Development on a tool), the lead of the change the revision
+belongs to, or a Project Management member. An admin's own department rows
+do not count (D7): an admin signs by acting as one of those departments.
+Anyone else gets 403 and nothing is waived; the implementation item serves
+`may_sign_no_geometry`, so the *Sign no geometry change* button shows only
+to those who may sign (Upload CAD stays for everyone).
 **Toolshop**
 (P7) has typical cost positions (toolmaker hours, in-house rework, EDM /
 wire, steel / material, polishing / texture).
