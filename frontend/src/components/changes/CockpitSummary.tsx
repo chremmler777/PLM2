@@ -562,6 +562,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // move offers a deviation.
   const demoted = hardBlockers.length > 0 && steps[0]?.kind === 'advance'
   const lead = hardBlockers.find((b) => b.go) ?? hardBlockers[0]
+  // Review 2026-10-19: "Resolve first" is the primary only when it leads
+  // somewhere. A blocker with no place to go (an incomplete capture) leaves
+  // the move as the one primary, named blocked in its title and the "First:"
+  // line; a refused move offers the override (no dead, disabled primary).
+  const resolvable = demoted && !!lead?.go
   const meetingDecides = DECIDED_BY_MEETING.includes(change.status) && !motherPlant
     && change.origin !== 'engineering_review'
   const { data: meetings = [] } = useQuery({
@@ -716,7 +721,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   }
 
   if (variant === 'compact') {
-    const primaryStep = !demoted && buttons[0] && steps[0] === buttons[0] ? buttons[0] : null
+    const primaryStep = !resolvable && buttons[0] && steps[0] === buttons[0] ? buttons[0] : null
     const firstWait = steps.find((st) => st.kind === 'wait')
     return (
       // A6-06: wraps rather than pushing the primary off the edge at 1280 px
@@ -749,7 +754,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <button type="button" className={btnSm.secondary} onClick={() => onAction?.('scoping')}>
               {meetingText}
             </button>
-          ) : demoted ? resolveButton('sm')
+          ) : resolvable ? resolveButton('sm')
             : primaryStep ? (
               <>
                 {/* A held step says why right beside it, not only in a tooltip. */}
@@ -1029,7 +1034,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             ))}
             {demoted && (
               <>
-                {resolveButton()}
+                {resolvable && resolveButton()}
                 {lead && (
                   <p data-testid="next-resolve-first" className="-mt-1 text-xs text-slate-400">
                     {t('next.resolveFirst').replace('{x}', lead.text)}
@@ -1038,7 +1043,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               </>
             )}
             {/* While the step waits there is no primary button at all. */}
-            {buttons.map((st) => stepButton(st, !demoted && steps[0] === st))}
+            {buttons.map((st) => stepButton(st, !resolvable && steps[0] === st))}
             {/* A warning beside a live step: read it, the step still goes. */}
             {buttons.flatMap((st) => {
               if (st.kind !== 'advance' || deniedFor(st)) return []

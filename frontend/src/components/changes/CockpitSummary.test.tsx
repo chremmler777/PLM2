@@ -71,7 +71,7 @@ describe('CockpitSummary', () => {
         { gate_key: 'budget', decision: 'no' },
         { gate_key: 'release', decision: 'no' },
       ]}
-      pendingDeviations={1}
+      pendingDeviations={1} onDecideDeviation={vi.fn()}
       onAdvance={onAdvance} advancing={false} />))
     expect(screen.getByText('Eva Eng')).toBeDefined()
     const budgetRow = screen.getByText(/Budget/).closest('li')
@@ -124,6 +124,20 @@ describe('CockpitSummary', () => {
     fireEvent.click(resolve)
     expect(onGo).toHaveBeenCalledWith('release')
     expect(screen.getByTestId('next-to-released').textContent).toBe('Release change')
+  })
+
+  it('a blocker with no place to go leaves the move the one primary, no dead "Resolve first" (review 2026-10-19)', () => {
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'in_validation' })}
+      gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false}
+      waits={[{ key: 'capture', text: 'Missing before release: customer file' }]} />))
+    expect(screen.queryByTestId('next-resolve-blockers')).toBeNull()
+    expect(screen.getByTestId('next-resolve-first').textContent).toContain('customer file')
+    const move = screen.getByTestId('next-to-released')
+    expect(move.className).toContain('bg-sky-700')
+    expect(move.title).toContain('1 blocker open')
+    fireEvent.click(move)
+    expect(onAdvance).toHaveBeenCalledWith('released')
   })
 
   it('A6-06: when the backend lets the next hop through, nothing listed counts as a blocker', () => {
@@ -198,7 +212,7 @@ describe('CockpitSummary', () => {
     const onShowOverview = vi.fn()
     render(wrap(<CockpitSummary variant="compact" change={change({ status: 'in_validation' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
-      onShowOverview={onShowOverview}
+      onShowOverview={onShowOverview} onGo={vi.fn()}
       waits={[{ key: 'checks', text: 'validation checks open', tab: 'release' }]} />))
     expect(screen.getByTestId('cockpit-compact')).toBeDefined()
     expect(screen.getByTestId('compact-blockers').textContent).toBe('1 blocker')
