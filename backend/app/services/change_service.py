@@ -150,6 +150,17 @@ class DeviationDecideForbidden(ChangeError):
     """The caller is not among the override's deciders (403, not 400)."""
 
 
+# What the Sales contact supplies for a customer hand-over (D2): the
+# customer's facts, not the lead
+KICKOFF_SALES_SUPPLIES = frozenset({
+    "description", "quote deadline", "customer file", "at least one attachment",
+    "need-by date", "urgent reason and evidence"})
+
+
+class AssignForbidden(ChangeError):
+    """The caller may not assign this department task (403, not 400)."""
+
+
 class DeviationRequired(ChangeError):
     """A soft guard refused the hop and no approved transition deviation
     covers it: an approved deviation WOULD let it through. Still a 400, but
@@ -3969,15 +3980,30 @@ class ChangeService:
                 # (EarlyStageService.transition_refusal)
                 pm_first = (not mp.is_mother_plant(c) and not is_pm
                             and (c.lead_id is None or c.id in idle_lead))
+                missing = await ChangeService.kickoff_missing(db, c)
+                # D2: the lead hands over, the Sales contact holds the
+                # customer's facts; each row names the other (R5)
+                supply = ""
+                if (lead_kickoff and c.sales_owner_id is not None
+                        and c.sales_owner_id != c.lead_id
+                        and set(missing) & KICKOFF_SALES_SUPPLIES):
+                    if holds_lead(c, user):
+                        supply = (f"{c.sales_owner_name or 'The Sales contact'} "
+                                  "(Sales contact) supplies the customer's facts; "
+                                  "you hand over")
+                    elif c.sales_owner_id == user.id:
+                        supply = (f"You supply the customer's facts; "
+                                  f"{c.lead_name or 'the lead'} hands over")
                 tasks.append({**await _base(c), "kind": "kickoff",
-                              "missing": await ChangeService.kickoff_missing(db, c),
+                              "missing": missing,
                               **({"hint": "Assign a lead (the project's lead PM "
                                           "leads by default), then hand over "
                                           "to scoping"}
                                  if c.lead_id is None and is_pm else
                                  {"hint": "Project Management sets the lead; "
                                           "then the change goes to scoping"}
-                                 if pm_first else {}),
+                                 if pm_first else
+                                 {"hint": supply} if supply else {}),
                               # the lead hands it over; Project Management
                               # and Sales back the lead up (R5: one main per row)
                               **({"main_user": (c.lead_id, c.lead_name or "")}
@@ -5474,6 +5500,8 @@ class ChangeService:
                 "assessment_id": a.id,
                 "department_id": a.department_id,
                 "_owned": a.effective_owner_id == user.id,
+                # D2b: overdue, the named backup has it too (promote_overdue)
+                "_overdue": a.due_date is not None and a.due_date < datetime.utcnow(),
             })
 
         # kind "late_assessment": the lead's flag for a department added to
@@ -5668,7 +5696,15 @@ class ChangeService:
         if change.status not in ("released", "closed", "cancelled"):
             from app.services import cm_labels
             have = {ChangeService._action_key(a) for a in actions}
-            for r in await ChangeService.stage_tasks(session, user, [change], dept_ids):
+            stage_rows = await ChangeService.stage_tasks(session, user, [change], dept_ids)
+            # the due rules of My Tasks, so an overdue row reaches the named
+            # backup here too (D2b, promote_overdue below)
+            from app.services import due_rules
+            dated = [dict(r) for r in stage_rows]   # the cockpit keeps its own fields
+            await due_rules.annotate_tasks(session, dated, [change])
+            for r, d in zip(stage_rows, dated):
+                r["overdue"] = bool(d.get("overdue"))
+            for r in stage_rows:
                 key = ChangeService._action_key(r)
                 if key in have:
                     continue
@@ -5690,6 +5726,7 @@ class ChangeService:
                 item["target_tab"] = (r.get("target_tab")
                                       or STAGE_TASK_TAB.get(kind, "overview"))
                 item["_owned"] = bool(r.get("mine"))
+                item["_overdue"] = bool(r.get("overdue"))
                 actions.append(item)
 
         # Project team (spec §18): each item carries the viewer's role on it.
@@ -5708,7 +5745,7 @@ class ChangeService:
             await team.annotate(a, change.project_id, owned=owned,
                                 sales_owner=owner)
             # D2b: an overdue item goes to the named backup too
-            await team.promote_overdue(a)
+            await team.promote_overdue(a, change.project_id)
             a.pop("role_department_id", None)
         return actions
 
@@ -6804,9 +6841,12 @@ class ChangeService:
             # .assign_task authorizes admin-or-department-member, with the
             # same change-lead carve-out as set_task_due_date, mirroring the
             # legacy "change lead may assign" allowance below.
+            from app.services.workflow_service import TaskAssignForbidden
             try:
                 await WorkflowService.assign_task(
                     session, a.wf_instance_task_id, assignee_id, actor)
+            except TaskAssignForbidden as e:
+                raise AssignForbidden(str(e))
             except ValueError as e:
                 raise ChangeError(str(e))
         else:
@@ -6818,7 +6858,7 @@ class ChangeService:
                            session, actor, a.department_id)
                        or await MeetingService.user_is_pm_member(session, actor))
             if not allowed:
-                raise ChangeError(
+                raise AssignForbidden(
                     "Only an admin, the change lead, Project Management or a "
                     "department member may assign")
             assignee = await session.get(User, assignee_id)

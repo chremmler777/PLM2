@@ -318,8 +318,11 @@ async def assign_task(
         task = await WorkflowService.assign_task(
             db, task_id, body.user_id, current_user)
     except ValueError as e:
+        from app.services.workflow_service import TaskAssignForbidden
         await db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=403 if isinstance(e, TaskAssignForbidden) else 400,
+            detail=str(e))
     await db.commit()
     return await _task_response(db, task)
 

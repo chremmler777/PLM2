@@ -43,7 +43,8 @@ export const salesChapter: ContentChapter = {
             'lead PM leads every change on the project and hands it over to scoping, follows it up ' +
             'and escalates. You keep the customer side: the quote deadline, the offer and the ' +
             'customer\'s answer. You may start a change for the PM (and the PM for you); the hand-over ' +
-            'row is then the lead\'s, and you see it as backup with the lead\'s name. ' +
+            'row is then the lead\'s, and you see it as backup with the lead\'s name and "You supply the ' +
+            'customer\'s facts" while the description, quote deadline or customer file is missing. ' +
             'A customer change has a Sales contact, shown on the Status card and in the change ' +
             'list: you when you started it, else the project\'s Sales contact. With neither it reads ' +
             '"No Sales contact: all of Sales", and anyone in Sales takes it with "Pick a Sales contact". All of Sales still ' +

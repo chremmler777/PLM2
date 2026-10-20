@@ -1787,7 +1787,10 @@ Switch `RELEASE_V2` (cm_switches; off = the plain tick and the 8D path only).
   "Confirm limits" or corrects them with a source reference (the latest
   measurement is judged again against the corrected limits). Until then the
   release reads "still open: <check> (limits set by X: APQP confirms)",
-  a linked issue stays open, and APQP has a "Needs you" row. Quality no
+  a linked issue stays open, and APQP has a "Needs you" row (in the
+  fallback the lead and Project Management have it, "APQP has no other
+  member here: <lead> coordinates"; My Tasks asks the same rule per row,
+  with that row's setter). Quality no
   longer confirms limits (it keeps the Fix task and the concession). In-flight
   limits got their setter from the first measurement and wait on the same
   click. Cut 2: the §4 spec capture prefills the limits.
@@ -2323,7 +2326,11 @@ other's behalf: a Sales raiser's change is led by the lead PM, a PM raiser's
 customer change gets the project's Sales contact. In My Tasks the hand-over
 (`kickoff`) of a customer change is the lead's main row; Project Management
 and Sales see it as backup with the lead's name (a lead who cannot act:
-Project Management's, A6-03). The implementation risk row (`escalate_risk`,
+Project Management's, A6-03). While the customer's facts are missing
+(description, quote deadline, customer file, need-by, urgent reason), each
+row names the other: the lead reads "<contact> (Sales contact) supplies the
+customer's facts; you hand over", the Sales contact "You supply the
+customer's facts; <lead> hands over", both with the missing list. The implementation risk row (`escalate_risk`,
 "Take it to the customer, or escalate internally") is the lead's too, with
 Sales as backup (Sales may still escalate, `ImplementationService.
 may_escalate`). The overdue digest names the lead for a late hand-over
@@ -2366,8 +2373,11 @@ card, `PUT /projects/{id}/team {department_id, user_id, slot}`, slot
 `responsible` (default) or `backup`; anyone else 403 and no change button,
 `GET /changes/permissions` → `can_manage_team`). Per department: one
 responsible and one named **backup** (`project_responsibles.backup_user_id`;
-both active members of the department, two different people, 400
-otherwise; clearing the responsible keeps the backup). The Project Manager
+both active members of the department, 400 otherwise; clearing the
+responsible keeps the backup). Two different people: picking the current
+backup as responsible (or the responsible as backup) **swaps** the two in
+one step (review 2026-10-19; the responsible picker marks the backup
+"backup: swaps the two"). The Project Manager
 responsible is the project's **lead PM** (D2). Routing of a department task
 on the project (`project_team_service._pair` / `_responsible`, read by every
 task list, the "Your actions" card, the engine-task list, notifications and
@@ -2378,14 +2388,27 @@ the rest of the department backup with the backup's name); to the backup
 backup's row turns main with "Overdue: you back up <responsible>",
 `TeamRoles.promote_overdue` after the due rules; the late sweep tells the
 backup once, `assessment:<id>:overdue:backup`); to the whole department only
-when neither is set (legacy, unchanged). There is no absence flag: "absent"
+when neither is set (legacy, unchanged). The overdue rule also covers a row
+that names its owner: a Sales row held by the change's Sales contact
+(`create_quote`, `update_quote`, the customer answer, ...: Sales' named
+backup turns main "Overdue: you back up <contact>") and a row naming the
+lead (the hand-over: PM's named backup). The change cockpit's "Your
+actions" applies the same rule (the due rules of My Tasks on its stage
+rows; an assessment by its due date). `customer_flip` ("Customer
+notification or offer?") is a Sales row like the others: the responsible
+or Sales contact main, the rest of Sales backup. **The Sales contact follows
+the team:** when admin or PM sets a new Sales responsible, the open changes
+of the project whose Sales contact was the old responsible move to the new
+one (changelog `sales_owner_changed`; a contact who was not the old
+responsible stays, closed and cancelled changes keep theirs). There is no absence flag: "absent"
 is an inactive account or one that left the department (an `away_until`
 was rejected in spec round 1 as unmaintained). Project Management can always
 reassign: it changes the responsible or the backup (every open task of that
 department on the project follows at once), and a PM member may assign a
 single department task to a member of that department (`POST
 /changes/{id}/assessments/{aid}/assign`, the engine task's assign; before:
-admin, the change lead or a department member). Projects without a team row
+admin, the change lead or a department member; anyone else gets 403, a
+non-member assignee 400). Projects without a team row
 and existing rows (no backup) route as before; nothing to backfill.
 
 **Run team (ECR-solid C1, 2026-10-14, switch `COMMERCIAL_V2`).** The run

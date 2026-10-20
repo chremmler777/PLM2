@@ -49,7 +49,9 @@ export const pmChapter: ContentChapter = {
             'close. The lead defaults to the Project Manager named on the project\'s "Project team" card ' +
             '(the lead PM), also for a change Sales started. Name that team for each project you run, a ' +
             'responsible and a backup per department: it decides whose badge each task counts on, and an ' +
-            'overdue task goes to the backup too.',
+            'overdue task goes to the backup too. Covering an absence: pick the backup as responsible ' +
+            'and the two swap in one step. A new Sales responsible takes over the open changes whose ' +
+            'Sales contact was the old one.',
         },
         {
           p:

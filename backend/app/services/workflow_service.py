@@ -14,6 +14,11 @@ ACTIONABLE_LETTERS = {"R", "A"}
 DEFAULT_TASK_DUE_DAYS = 7
 
 
+class TaskAssignForbidden(ValueError):
+    """The caller may not assign this task (a rights refusal: 403 where the
+    router maps it; a ValueError, so older callers still answer 400)."""
+
+
 class WorkflowService:
 
     @staticmethod
@@ -809,7 +814,9 @@ class WorkflowService:
                     change = await db.get(ChangeRequest, rev.originating_change_id)
                     allowed = change is not None and holds_lead(change, actor)
         if not allowed:
-            raise ValueError("Only members of the task's department (or an admin) may assign it")
+            raise TaskAssignForbidden(
+                "Only an admin, the change lead, Project Management or a member "
+                "of the task's department may assign it")
         assignee = await db.get(User, assignee_id)
         if assignee is None or not assignee.is_active:
             raise ValueError("Assignee not found or inactive")

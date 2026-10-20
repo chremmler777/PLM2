@@ -164,20 +164,52 @@ class ProjectTeamService:
         await ProjectTeamService._check_member(
             session, project_id, department_id, user_id, word)
         row = await ProjectTeamService._row(session, project_id, department_id)
-        other = (None if row is None else
-                 row.user_id if slot == "backup" else row.backup_user_id)
-        if other == user_id:
-            raise ProjectTeamError(
-                "The responsible and the backup must be two different people")
         if row is None:
             row = ProjectResponsible(project_id=project_id, department_id=department_id)
             session.add(row)
+        old_responsible = row.user_id
         if slot == "backup":
+            if row.user_id == user_id:      # the responsible becomes the backup:
+                row.user_id = row.backup_user_id    # swap in one step
             row.backup_user_id = user_id
         else:
+            if row.backup_user_id == user_id:   # the backup becomes responsible
+                row.backup_user_id = row.user_id
             row.user_id = user_id
         row.set_by = actor.id
         row.set_at = datetime.utcnow()
+        await session.flush()
+        if row.user_id != old_responsible:
+            await ProjectTeamService._follow_sales_contact(
+                session, project_id, department_id, old_responsible, row.user_id, actor)
+
+    @staticmethod
+    async def _follow_sales_contact(session: AsyncSession, project_id: int,
+                                    department_id: int, old_id: Optional[int],
+                                    new_id: Optional[int], actor: User) -> None:
+        """D2b: a new Sales responsible takes the open changes of the project
+        whose Sales contact was the old responsible (the offer row follows
+        the team, as every other department task does). A contact who was
+        not the old responsible stays; closed and cancelled changes keep
+        their history; the move is in each change's changelog."""
+        if old_id is None or new_id is None:
+            return
+        name = (await session.execute(select(Department.name).where(
+            Department.id == department_id))).scalar_one_or_none()
+        if name != SALES:
+            return
+        from app.models.change import ChangeRequest
+        from app.services.change_service import ChangeService
+        changes = (await session.execute(select(ChangeRequest).where(
+            ChangeRequest.project_id == project_id,
+            ChangeRequest.sales_owner_id == old_id,
+            ChangeRequest.status.not_in(("closed", "cancelled"))))).scalars().all()
+        for c in changes:
+            await ChangeService.append_changelog(
+                session, c, "sales_owner_changed",
+                f"Sales contact {old_id} -> {new_id} (project team: new Sales responsible)",
+                actor.id, field_name="sales_owner_id", old_value=old_id, new_value=new_id)
+            c.sales_owner_id = new_id
         await session.flush()
 
     @staticmethod
@@ -330,6 +362,8 @@ KIND_DEPARTMENT: dict[str, str] = {
     "update_quote": SALES, "offer_build": SALES,
     "needs_info": SALES, "validation_issue_customer": SALES,
     "validation_issue_quote": SALES,
+    # "Customer notification or offer?" (A2-08): the customer-facing call
+    "customer_flip": SALES,
     "bank_build": SCHEDULING,
 }
 
@@ -374,19 +408,23 @@ class TeamRoles:
         return await self.department_id(name) if name else None
 
     async def covering(self, project_id: Optional[int],
-                       department_id: Optional[int]) -> Optional[str]:
-        """D2b: the responsible's name when the viewer is the department's
-        named backup on this project and the responsible is live (an
-        overdue task then goes to the viewer too), else None."""
+                       department_id: Optional[int],
+                       main: Optional[str] = None) -> Optional[str]:
+        """D2b: the name of whom the viewer covers when the viewer is the
+        department's named backup on this project (an overdue task then goes
+        to the viewer too), else None. `main`: the row names its owner (the
+        change's Sales contact, the lead); else the live responsible."""
         if project_id is None or department_id is None:
             return None
         key = (project_id, department_id)
         if key not in self._pairs:
             self._pairs[key] = await _pair(self.session, project_id, department_id)
         resp, backup = self._pairs[key]
-        if resp is None or backup is None or backup[0] != self.user_id:
+        if backup is None or backup[0] != self.user_id:
             return None
-        return resp[1]
+        if main:
+            return main
+        return resp[1] if resp is not None else None
 
     async def role(self, project_id: Optional[int], department_id: Optional[int],
                    owned: bool = False) -> tuple[str, Optional[str]]:
@@ -415,6 +453,10 @@ class TeamRoles:
             mine = main_user[0] is not None and (owned or main_user[0] == self.user_id)
             row["role"] = "main" if mine else "backup"
             row["main_name"] = None if mine else main_user[1]
+            if main_user[0] is not None:
+                # D2b: overdue, the owing department's named backup covers
+                # the named owner (promote_overdue)
+                row["_team_dept"], row["_team_main"] = dept, main_user[1]
             return row
         if sales_owner is not None and sales_owner[0] not in self._live_sales:
             self._live_sales[sales_owner[0]] = await is_live_member(
@@ -429,6 +471,9 @@ class TeamRoles:
                 role, main = "main", None
             else:
                 role, main = "backup", sales_owner[1]
+            # D2b: overdue, Sales' named backup on the project covers the
+            # change's Sales contact (promote_overdue)
+            row["_team_dept"], row["_team_main"] = dept, sales_owner[1]
         else:
             role, main = await self.role(project_id, dept, owned)
             # D2b: the project team decided it; an overdue row may still go
@@ -438,14 +483,21 @@ class TeamRoles:
         row["main_name"] = main
         return row
 
-    async def promote_overdue(self, row: dict) -> dict:
+    async def promote_overdue(self, row: dict,
+                              project_id: Optional[int] = None) -> dict:
         """D2b: an overdue department task goes to the named backup too: the
-        backup's row turns main with `covering_for` = the responsible's name.
-        Call after due_rules.annotate_tasks (it sets `overdue`)."""
+        backup's row turns main with `covering_for` = the name of whom it
+        covers (the responsible, or the row's named owner). Call after
+        due_rules.annotate_tasks (it sets `overdue`); a row without it (the
+        change cockpit) may carry `_overdue`. `project_id`: when the row does
+        not carry it."""
         dept = row.pop("_team_dept", None)
-        if row.get("role") != "backup" or not row.get("overdue"):
+        main = row.pop("_team_main", None)
+        late = row.pop("_overdue", None) or row.get("overdue")
+        if row.get("role") != "backup" or not late:
             return row
-        name = await self.covering(row.get("project_id"), dept)
+        pid = project_id if project_id is not None else row.get("project_id")
+        name = await self.covering(pid, dept, main)
         if name is not None:
             row["role"], row["main_name"], row["covering_for"] = "main", None, name
         return row

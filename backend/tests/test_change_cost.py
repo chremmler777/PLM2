@@ -300,6 +300,13 @@ async def test_reference_endpoints(client, eng_auth, seed, session_factory):
         await s.commit()
         dep_id = dep.id
     rates = await client.get("/api/v1/changes/reference/rates", headers=eng_auth)
+    # D-cost: a non-cost-role caller reads its own departments' rates only
+    assert rates.json() == []                                     # NEGATIVE
+    from app.models.workflow import UserDepartment
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dep_id))
+        await s.commit()
+    rates = await client.get("/api/v1/changes/reference/rates", headers=eng_auth)
     assert any(r["hourly_rate"] == 50.0 for r in rates.json())
     acts = await client.get(f"/api/v1/changes/reference/activities?department_id={dep_id}",
                             headers=eng_auth)

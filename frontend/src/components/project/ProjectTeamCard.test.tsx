@@ -72,6 +72,17 @@ describe('ProjectTeamCard', () => {
       '/v1/projects/2/team', { department_id: 9, user_id: 13, slot: 'backup' }))
   })
 
+  it('D2b: the backup picked as responsible swaps the two in one step', async () => {
+    wrap(<ProjectTeamCard projectId={2} />)
+    fireEvent.click(await screen.findByTestId('team-edit-9'))
+    const sel = screen.getByTestId('team-select-9') as HTMLSelectElement
+    expect([...sel.options].map((o) => o.text)).toEqual(
+      ['Unassigned', 'Dana', 'Ben (backup: swaps the two)', 'Carl'])
+    fireEvent.change(sel, { target: { value: '12' } })
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith(
+      '/v1/projects/2/team', { department_id: 9, user_id: 12, slot: 'responsible' }))
+  })
+
   it('D2: the Project Manager row says the lead PM leads every change', async () => {
     wrap(<ProjectTeamCard projectId={2} />)
     expect((await screen.findByTestId('team-lead-pm-hint')).textContent).toContain('lead PM')

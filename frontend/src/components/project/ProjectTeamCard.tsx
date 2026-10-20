@@ -63,8 +63,9 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
 
   const picker = (row: TeamRow, slot: Slot) => {
     const current = slot === 'backup' ? row.backup : row.responsible;
-    // the responsible is never their own backup (and the other way round)
-    const other = slot === 'backup' ? row.responsible?.id : row.backup?.id;
+    // the responsible is never their own backup; the backup picked as
+    // responsible swaps the two in one step (the backend does the swap)
+    const other = slot === 'backup' ? row.responsible?.id : undefined;
     const testid = slot === 'backup' ? `team-backup-select-${row.department_id}` : `team-select-${row.department_id}`;
     return (
       <select
@@ -82,7 +83,10 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
       >
         <option value="">{t('team.unassigned')}</option>
         {row.members.filter((m) => m.id !== other).map((m) => (
-          <option key={m.id} value={m.id}>{m.name}</option>
+          <option key={m.id} value={m.id}>
+            {slot === 'responsible' && m.id === row.backup?.id
+              ? `${m.name} (${t('team.swapWithBackup')})` : m.name}
+          </option>
         ))}
       </select>
     );

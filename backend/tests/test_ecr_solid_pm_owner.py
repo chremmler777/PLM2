@@ -78,12 +78,16 @@ async def test_hand_over_is_the_lead_pms_row_not_sales(
     pat = await login(client, "pat@test.io", admin=False)
     [row] = await _rows(client, pat, "kickoff", c["id"])
     assert row["role"] == "main" and row["is_mine"]
+    # review 2026-10-19: the lead reads who supplies the missing facts
+    assert "description" in row["missing"] and "quote deadline" in row["missing"]
+    assert row["hint"].startswith("Engineer (Sales contact) supplies"), row["hint"]
     # NEGATIVE: the Sales raiser (and Sales contact) no longer owns it: a
-    # backup row naming the lead PM
+    # backup row naming the lead PM, which says what the contact supplies
     [row] = await _rows(client, sales, "kickoff", c["id"])
     assert row["role"] == "backup"
     assert row["main_name"] == "Pat PM"
     assert not row["is_mine"]
+    assert row["hint"] == "You supply the customer's facts; Pat PM hands over"
 
 
 async def test_no_lead_pm_sets_the_lead_refusal_names_the_default(
