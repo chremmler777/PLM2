@@ -64,3 +64,8 @@
 - [Part-data mail 2026-10-15](part-data-mail-2026-10-15.md) - KTX Apps Graph mail like TWOS, 1994 list (EC kickoff + Karl), 5-min digest, trial first
 - [Session state 2026-10-15](session-state-2026-10-15.md) - end of day: deployed 0536924c/alembic 115, ecr-solid migration 115 clash, open decisions, backlog
 - [Session state 2026-10-16](session-state-2026-10-16.md) - back fix deployed; Moldflow overview (mig 116) in build; ECR must renumber 117+
+- [Moldflow review structure](moldflow-review-structure.md) - always: DFM basis (confirmed/open) -> verdict -> note -> action plan
+- [Prod writes: mail impact + interrupted applies](feedback-prod-writes-mail-impact.md) — say if a write mails the list; interrupted ssh may have run; unique backup names
+- [autoskills] consult ~/.claude/skills/autoskills/registry/ for problem→skill history
+- [Version navigator](version-nav-2026-10-19.md) — Documents side tree + file completeness, live 2026-10-19; worksheet column is the open follow-up
+- [Data route 2026-10-19](data-route-2026-10-19.md) — feature/data-route built, not merged/deployed; local test at :5175/plm2/devlogin.html; open decisions
