@@ -222,7 +222,14 @@ async def test_read_needs_a_cost_role_write_needs_finance(client, eng_auth, admi
         assert res.status_code == 403, url
         assert res.json()["detail"] == ("The cost sheet is read by admin, Project "
                                         "Manager, Sales, Finance and Management")
-    # ... but still costs: lookups, classes, settings, machine list
+    # ... but still costs: its own department's rate, classes, settings,
+    # machine list (review fix: another department's rate is 403)
+    hit = (await client.get(f"{API}/lookup/rate", params={
+        "department_id": world["tool"]}, headers=eng_auth))
+    assert hit.status_code == 403
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=world["engineer_id"], department_id=world["tool"]))
+        await s.commit()
     hit = (await client.get(f"{API}/lookup/rate", params={
         "department_id": world["tool"]}, headers=eng_auth))
     assert hit.status_code == 200 and hit.json()["rate"] == 70
@@ -246,6 +253,57 @@ async def test_read_needs_a_cost_role_write_needs_finance(client, eng_auth, admi
     assert body["can_edit"] is True and len(body["versions"]) == 1
     assert any(d["name"] == "Finance" for d in body["departments"])
     assert (await client.post(f"{API}/drafts", json={}, headers=eng_auth)).status_code == 201
+
+
+async def test_single_lookups_follow_d_cost(client, eng_auth, admin_auth, world,
+                                            session_factory):
+    """Review fix (D-cost): the single lookups are no way around the
+    blanking of the bulk reads. A caller who does not read the cost sheet
+    gets the labour rate of its own departments only (403 for another, acts-as
+    aware), and the machine and sampling lookups say which row applies but
+    with rate, base rate, overhead and breakdown blanked (as the machine
+    list). The cost roles see everything."""
+    t, q, p1 = world["tool"], world["qa"], world["p1"]
+    await _published(session_factory, world["org_id"],
+                     rates=[dict(department_id=t, hourly_rate=70),
+                            dict(department_id=q, hourly_rate=55)],
+                     overheads=[dict(kind="percent", value=10)],
+                     machines=[dict(machine_class="<=200 t", hourly_rate=60),
+                               dict(machine_class="<=200 t", machine_ref="Engel 150",
+                                    hourly_rate=65)],
+                     sampling=[dict(machine_class="<=200 t", mode="flat", flat_price=900)])
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=world["engineer_id"], department_id=t))
+        await s.commit()
+    # NEGATIVE: another department's rate
+    res = await client.get(f"{API}/lookup/rate", params={"department_id": q,
+                                                         "plant_id": p1}, headers=eng_auth)
+    assert res.status_code == 403, res.text
+    # own department: the full hit
+    res = await client.get(f"{API}/lookup/rate", params={"department_id": t}, headers=eng_auth)
+    assert res.status_code == 200 and res.json()["rate"] == 77
+    # NEGATIVE: machine and sampling money blanked, the row still named
+    for url, params in ((f"{API}/lookup/machine", {"machine_class": "<=200 t",
+                                                   "machine_ref": "Engel 150"}),
+                        (f"{API}/lookup/sampling", {"machine_class": "<=200 t"})):
+        hit = (await client.get(url, params=params, headers=eng_auth)).json()
+        assert hit["version"] == 1 and hit["match"]
+        assert (hit["rate"], hit["base_rate"], hit["overhead"], hit["breakdown"]) == \
+            (None, None, None, {}), url
+    # admin acting as Quality-CS: that department only
+    as_qa = {**admin_auth, HEADER: str(q)}
+    assert (await client.get(f"{API}/lookup/rate", params={"department_id": t},
+                             headers=as_qa)).status_code == 403
+    assert (await client.get(f"{API}/lookup/rate", params={"department_id": q},
+                             headers=as_qa)).json()["rate"] == 60.5
+    # the cost roles read every rate
+    assert (await client.get(f"{API}/lookup/rate", params={"department_id": q},
+                             headers=admin_auth)).json()["rate"] == 60.5
+    hit = (await client.get(f"{API}/lookup/machine", params={
+        "machine_class": "<=200 t", "machine_ref": "Engel 150"}, headers=admin_auth)).json()
+    assert hit["rate"] == 65
+    assert (await client.get(f"{API}/lookup/sampling", params={
+        "machine_class": "<=200 t"}, headers=admin_auth)).json()["rate"] == 900
 
 
 @pytest.mark.parametrize("dept", ["Project Manager", "Management"])

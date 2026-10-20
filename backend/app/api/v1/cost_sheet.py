@@ -3,7 +3,8 @@
 Read the sheet (overview, versions, diff, export): admin, Project Manager,
 Sales, Finance and Management members (D-cost, Christoph 2026-10-19;
 cost_sheet_service.can_read). The lookups, machine classes and settings stay
-open to everyone who costs. Write: Sales or Finance members, or admins,
+open to everyone who costs, the lookups with D-cost applied (own departments'
+labour rate; machine and sampling money blanked for a non-reader). Write: Sales or Finance members, or admins,
 acts-as aware (cost_sheet_service.can_edit). Thin
 routes over cost_sheet_service; every write commits here.
 """
@@ -258,13 +259,42 @@ async def export(version_id: int, format: Literal["csv", "xlsx"] = "xlsx",
 
 
 # ---------------------------------------------------------------- lookups
+# D-cost (review fix 2026-10-19): the single lookups are no way around the
+# bulk reads. A caller who does not read the sheet (svc.can_read) gets the
+# labour rate of its own departments only (as /changes/reference/rates), and
+# the machine and sampling lookups name the row that applies with the money
+# blanked (as the machine list). Costing itself is priced server side.
+
+#: what a machine or sampling hit hides from a non-reader
+_HIT_MONEY = {"rate": None, "base_rate": None, "overhead": None, "breakdown": {}}
+
+
+async def _hit_for(db, user, hit):
+    if hit is None:
+        return None
+    out = hit.as_dict()
+    if not await svc.can_read(db, user):
+        out.update(_HIT_MONEY)
+    return out
+
 
 @router.get("/lookup/rate")
 async def lookup_rate(department_id: int, position: Optional[str] = None,
                       plant_id: Optional[int] = None, on_date: Optional[date] = None,
                       current_user: User = Depends(get_current_user),
                       db: AsyncSession = Depends(get_db)):
-    """The effective labour rate (overhead applied) valid on on_date."""
+    """The effective labour rate (overhead applied) valid on on_date; a
+    non-reader of the sheet asks for its own departments only (acts-as
+    aware)."""
+    if not await svc.can_read(db, current_user):
+        from app.services.workflow_service import WorkflowService
+        if department_id not in await WorkflowService.effective_department_ids(
+                db, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="You look up your own departments' rates; the cost sheet "
+                       "is read by admin, Project Manager, Sales, Finance and "
+                       "Management")
     hit = await svc.effective_labour_rate(db, current_user.organization_id, department_id,
                                           position, plant_id, on_date)
     return hit.as_dict() if hit else None
@@ -277,7 +307,7 @@ async def lookup_machine(machine_class: str, plant_id: Optional[int] = None,
                          db: AsyncSession = Depends(get_db)):
     hit = await svc.machine_rate_for(db, current_user.organization_id, machine_class,
                                      plant_id, on_date, machine_ref)
-    return hit.as_dict() if hit else None
+    return await _hit_for(db, current_user, hit)
 
 
 @router.get("/lookup/sampling")
@@ -287,7 +317,7 @@ async def lookup_sampling(machine_class: str, plant_id: Optional[int] = None,
                           db: AsyncSession = Depends(get_db)):
     hit = await svc.sampling_price_for(db, current_user.organization_id, machine_class,
                                        plant_id, on_date, run_hours)
-    return hit.as_dict() if hit else None
+    return await _hit_for(db, current_user, hit)
 
 
 # ---------------------------------------------------------------- writes

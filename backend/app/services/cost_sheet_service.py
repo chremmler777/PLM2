@@ -109,8 +109,9 @@ async def can_read(db: AsyncSession, user) -> bool:
     versions, diff, export) is read by the cost roles only: admin, Project
     Manager, Sales and Management (the price viewers, PriceViewer) and
     Finance (keeps the rates). Acts-as aware like can_edit. The lookups, the
-    machine classes and the machine list stay open: every department that
-    costs its own positions prices them from there."""
+    machine classes and the machine list stay open to every department that
+    costs its own positions, with the rates of others held back (own labour
+    rate only; machine and sampling money blanked)."""
     from app.services.price_redaction import PriceViewer
     if await can_edit(db, user):          # admin, Sales, Finance
         return True

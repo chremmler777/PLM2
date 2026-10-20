@@ -2237,12 +2237,14 @@ rows of the caller's own departments only (acts-as aware), and the machine
 list keeps every press with `has_own_rate` (the "own rate" mark of the
 machine picker) but blanks `rate_id`, `hourly_rate`, `entered_rate`,
 `local_rate`, `class_rate` and the note; a draft version there is 403 (a
-change prices on a published one). **DECIDED BY CLAUDE (ask Christoph):**
-the single lookups keep their rate, one department / class / plant at a
-time: that is the price a costing department's own position carries anyway
-(the position shows hours x rate). If the hidden sheet is not enough, strip
-the rate there for non-readers too; costing computes server-side and does
-not call the lookups from the UI.
+change prices on a published one). The single lookups follow the same rule
+(review fix 2026-10-19, replaces the earlier DECIDED BY CLAUDE "lookups keep
+their rate"): for a caller without `can_read`, `/lookup/rate` answers for the
+caller's own departments only (acts-as aware; another department is 403),
+and `/lookup/machine` and `/lookup/sampling` name the row that applies
+(version, match) with `rate`, `base_rate`, `overhead` and `breakdown`
+blanked, as the machine list. They stay callable by everyone who costs;
+costing prices server-side and the UI does not call them.
 Migration 119 also adds the columns later lanes fill: `sales_owner_id`,
 `price_open`, `pm_signed_offer_id` / `quality_signed_offer_id` (backfilled to
 the accepted offer, else the latest sent one), and on
