@@ -69,3 +69,4 @@
 - [autoskills] consult ~/.claude/skills/autoskills/registry/ for problem→skill history
 - [Version navigator](version-nav-2026-10-19.md) — Documents side tree + file completeness, live 2026-10-19; worksheet column is the open follow-up
 - [Data route 2026-10-19](data-route-2026-10-19.md) — feature/data-route built, not merged/deployed; local test at :5175/plm2/devlogin.html; open decisions
+- [Prod changes 2026-10-21](prod-changes-2026-10-21.md) — Infor rename, worksheet width, thumbnails framed on white, 2277 tool data + cycle times; 2277 CAD held
