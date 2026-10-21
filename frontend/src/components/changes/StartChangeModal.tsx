@@ -462,7 +462,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                   key={p.id}
                   className="flex items-center gap-2 rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm whitespace-nowrap overflow-hidden"
                 >
-                  <span className="font-mono text-slate-100 flex-shrink-0 w-36">{p.part_number}</span>
+                  <span className="font-mono text-slate-100 flex-shrink-0 w-44">{p.part_number}</span>
                   <span className="font-mono text-sky-300/80 flex-shrink-0 w-32">
                     {p.customer_part_number ?? <span className="text-slate-600">-</span>}
                   </span>
@@ -526,7 +526,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                       className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap overflow-hidden"
                       onClick={() => selectPart(p)}
                     >
-                      <span className="font-mono text-slate-100 flex-shrink-0 w-36">{p.part_number}</span>
+                      <span className="font-mono text-slate-100 flex-shrink-0 w-44">{p.part_number}</span>
                       <span className="font-mono text-sky-300/80 flex-shrink-0 w-32">
                         {p.customer_part_number ?? <span className="text-slate-600">-</span>}
                       </span>

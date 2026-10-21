@@ -240,7 +240,7 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
   def({ key: 'part.thumbnail', label: 'Image', group: 'Identity', display: 'thumbnail', filter: 'none', exportType: 'image',
     noteOwner: null, editableOn: null, frozenWidth: 44, value: () => null, edit: nowhere }),
   def({ key: 'part.part_number', label: 'KTX no.', group: 'Identity', display: 'mono', noteOwner: 'row',
-    editableOn: 'article', frozenWidth: 170, value: (r) => r.part_number, edit: onRow('part.part_number') }),
+    editableOn: 'article', frozenWidth: 210, value: (r) => r.part_number, edit: onRow('part.part_number') }),
   def({ key: 'part.customer_part_number', label: 'OEM no.', group: 'Identity', display: 'mono', noteOwner: 'row',
     editableOn: 'article', frozenWidth: 170, value: (r) => r.customer_part_number, edit: onArticle('part.customer_part_number') }),
   def({ key: 'part.tier1_part_number', label: 'Tier 1 no.', group: 'Identity', display: 'mono', noteOwner: 'row',
