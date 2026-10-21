@@ -154,3 +154,43 @@ async def test_missing_part_404(client, eng_auth, seed, monkeypatch, tmp_path):
     assert res.status_code == 404
     res = await client.delete("/api/v1/parts/999999/thumbnail", headers=eng_auth)
     assert res.status_code == 404
+
+
+def _png(w, h, box=None, bg=(15, 23, 42)):
+    import io
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (w, h), bg)
+    if box:
+        ImageDraw.Draw(img).rectangle(box, fill=(200, 200, 200))
+    out = io.BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
+def test_frame_to_part_crops_a_small_part_to_a_square():
+    import io
+    from PIL import Image
+    from app.services.thumbnail_service import frame_to_part
+    framed, ratio = frame_to_part(_png(400, 100, box=(190, 40, 209, 59)))
+    assert ratio == 20 / 400
+    img = Image.open(io.BytesIO(framed))
+    assert img.size[0] == img.size[1] == round(20 * 1.16)
+    assert img.getpixel((0, 0))[:3] == (255, 255, 255)
+    assert img.getpixel((img.size[0] // 2, img.size[1] // 2))[:3] == (200, 200, 200)
+
+
+def test_frame_to_part_keeps_a_picture_the_part_already_fills():
+    from app.services.thumbnail_service import frame_to_part
+    assert frame_to_part(_png(100, 100, box=(5, 5, 94, 94), bg=(255, 255, 255)))[0] is None
+    assert frame_to_part(_png(50, 50))[0] is None
+
+
+def test_frame_to_part_whitens_a_dark_background_of_a_tight_picture():
+    import io
+    from PIL import Image
+    from app.services.thumbnail_service import frame_to_part
+    framed, _ = frame_to_part(_png(100, 100, box=(5, 5, 94, 94)))
+    img = Image.open(io.BytesIO(framed))
+    assert img.size == (100, 100)
+    assert img.getpixel((1, 1))[:3] == (255, 255, 255)
+    assert img.getpixel((50, 50))[:3] == (200, 200, 200)

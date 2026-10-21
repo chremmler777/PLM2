@@ -5,9 +5,12 @@ script (scripts/import_1994_thumbnails.py), so there is exactly one place
 that decides what counts as an acceptable image."""
 from __future__ import annotations
 
+import io
 import os
 import uuid
 from datetime import datetime
+
+from PIL import Image, ImageChops, UnidentifiedImageError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +45,57 @@ def sniff_image(contents: bytes) -> tuple[str, str]:
     raise InvalidThumbnail("File must be a PNG, JPEG or WEBP image")
 
 
+#: Framing: background = the top-left pixel, part = pixels that differ by
+#: more than FRAME_TOLERANCE. The part is cut out as a square with
+#: FRAME_MARGIN of its long side on each edge (at most FRAME_MAX_SIDE px) and
+#: the background becomes white. A picture whose part already spans
+#: FRAME_TIGHT_ENOUGH of the frame is not cropped, only whitened.
+FRAME_TOLERANCE = 12
+FRAME_MARGIN = 0.08
+FRAME_MAX_SIDE = 400
+FRAME_TIGHT_ENOUGH = 0.7
+WHITE = (255, 255, 255)
+
+
+def frame_to_part(contents: bytes) -> tuple[bytes | None, float]:
+    """The image framed on the part over a white background (PNG bytes), or
+    None when nothing would change (already tight and white, or nothing
+    stands out from the background). Second value: how much of the frame's
+    long side the part spanned."""
+    try:
+        img = Image.open(io.BytesIO(contents)).convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        return None, 0.0
+    w, h = img.size
+    bg = img.getpixel((0, 0))
+    diff = ImageChops.difference(img, Image.new("RGB", img.size, bg)).convert("L")
+    part_mask = diff.point(lambda v: 255 if v > FRAME_TOLERANCE else 0)
+    box = part_mask.getbbox()
+    if box is None:
+        return None, 0.0
+    x0, y0, x1, y1 = box  # x1/y1 exclusive
+    long_part = max(x1 - x0, y1 - y0)
+    ratio = long_part / max(w, h)
+    crop = ratio < FRAME_TIGHT_ENOUGH
+    if not crop and bg == WHITE:
+        return None, ratio
+    if bg != WHITE:
+        img = Image.composite(img, Image.new("RGB", img.size, WHITE), part_mask)
+    if crop:
+        side = round(long_part * (1 + 2 * FRAME_MARGIN))
+        left = round((x0 + x1) / 2 - side / 2)
+        top = round((y0 + y1) / 2 - side / 2)
+        canvas = Image.new("RGB", (side, side), WHITE)
+        canvas.paste(img.crop((max(left, 0), max(top, 0), min(left + side, w), min(top + side, h))),
+                     (max(-left, 0), max(-top, 0)))
+        img = canvas
+    if max(img.size) > FRAME_MAX_SIDE:
+        img.thumbnail((FRAME_MAX_SIDE, FRAME_MAX_SIDE), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, "PNG", optimize=True)
+    return out.getvalue(), ratio
+
+
 def thumbnails_dir(part_id: int) -> str:
     return os.path.join(os.getcwd(), "uploads", "thumbnails", str(part_id))
 
@@ -55,8 +109,13 @@ async def set_thumbnail(session: AsyncSession, part: Part, contents: bytes, user
                         source_note: str | None = None) -> Part:
     """Validate `contents`, write it as the part's new thumbnail, remove the
     old file (if any) once the new one is committed, and log one changelog
-    entry. Raises InvalidThumbnail without touching disk or the part."""
+    entry. Raises InvalidThumbnail without touching disk or the part. A
+    part that sits small in a wide frame is cropped to fill the picture
+    (frame_to_part), whatever the source: viewer snapshot, upload, import."""
     ext, _media_type = sniff_image(contents)
+    framed, _ratio = frame_to_part(contents)
+    if framed is not None:
+        contents, ext = framed, "png"
     target_dir = thumbnails_dir(part.id)
     os.makedirs(target_dir, exist_ok=True)
     new_path = os.path.join(target_dir, f"{uuid.uuid4().hex}.{ext}")

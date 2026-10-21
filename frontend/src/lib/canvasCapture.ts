@@ -4,8 +4,10 @@
  * preserveDrawingBuffer. The grid and the axes helper are hidden for the
  * shot so the picture shows only the part, and the frame is cropped to a
  * square around the part so it fills the thumbnail instead of sitting small
- * in the middle of the wide viewer.
+ * in the middle of the wide viewer. The shot is rendered on white whatever
+ * the viewer's theme, so thumbnails look the same everywhere.
  */
+import { Color } from 'three';
 import type { Camera, Object3D, Scene, WebGLRenderer } from 'three';
 
 /** Objects with this name are left out of snapshots (the viewer grid). */
@@ -76,6 +78,8 @@ export async function captureFrame(gl: WebGLRenderer, scene: Scene, camera: Came
   });
   const src = gl.domElement;
   const out = document.createElement('canvas');
+  const background = scene.background;
+  scene.background = new Color('#ffffff');
   try {
     gl.render(scene, camera);
     // Full-size copy first: the part's pixels are found there, then cut out.
@@ -97,7 +101,9 @@ export async function captureFrame(gl: WebGLRenderer, scene: Scene, camera: Came
     ctx.fillRect(0, 0, side, side);
     ctx.drawImage(full, crop.x, crop.y, crop.side, crop.side, 0, 0, side, side);
   } finally {
+    scene.background = background;
     hidden.forEach((o) => { o.visible = true; });
+    gl.render(scene, camera); // put the viewer's own background back on screen
   }
   return encodeThumbnail(out);
 }
