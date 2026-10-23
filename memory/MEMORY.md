@@ -70,3 +70,4 @@
 - [Version navigator](version-nav-2026-10-19.md) — Documents side tree + file completeness, live 2026-10-19; worksheet column is the open follow-up
 - [Data route 2026-10-19](data-route-2026-10-19.md) — feature/data-route built, not merged/deployed; local test at :5175/plm2/devlogin.html; open decisions
 - [Prod changes 2026-10-21](prod-changes-2026-10-21.md) — Infor rename, worksheet width, thumbnails framed on white, 2277 tool data + cycle times; 2277 CAD held
+- [2277 972.A FEA_CM E2](2277-972a-fea-cm-e2-2026-10-23.md) — E2 id 2265 filed, 2277 mail list = 1994's 8, held 08-28 script would now mail
