@@ -9,7 +9,9 @@ structure and reference the parts; PLM2 has no assembly attach, so they stay on
 U: (noted in cad_data). 971_A and the 971 C/D AEKO variants of 10/13 are not
 touched. Also sets tool_cavities on 227701 (2) and 227702 (1+1).
 
-Project 2277 has no part data mail list, so nothing is mailed.
+Part numbers follow the Infor rename of 2026-10-23. Project 2277 now has the part
+data mail list (same 8 as 1994), so the filing queues the digest mail. The 100 MB
+upload limit is lifted for this script only (CATParts up to 245 MB, approved 10/23).
 Idempotent: skips a part whose revision already holds the file. Dry run by
 default.
 
@@ -29,6 +31,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.models.entities import Project
 from app.models.part import Part, PartRevision, RevisionFile
 from app.services.part_service import ChangelogService, RevisionService
+from app.services import revision_file_service
 from app.services.revision_file_service import store_revision_file
 
 SRC = r"U:\RFQ\RFQ25_260112_Brose Backpanel\20_Current\260917_Datain"
@@ -37,22 +40,20 @@ RECEIVED = date(2026, 9, 17)
 
 # part_number, customer_part_number, file, index, sha256, source folder
 FILES = [
-    ("20-2277-001-0", "206.881.971",
+    ("21-227701-0503-0000", "206.881.971",
      "206_881_971____PCA_TM__005_____SEAT_BACK_PANEL____B-RELEASE___20260828.CATPart", "005",
      "f7b4a173ed29540d0e545b6783630b03962899cca129c8eebe1e322a6b5deb3a", SRC),
-    ("20-2277-002-0", "206.881.971.B",
+    ("21-227702-0503-0100", "206.881.971.B",
      "206_881_971_B__PCA_TM__001_____SEAT_BACK_PANEL____B-RELEASE___20260828.CATPart", "001",
      "3e7c6e934df1add265327a870a12c638a07491a4dc7cde954e0d6686a5798193", SRC),
-    ("20-2277-003-0", "206.881.972.A",
-     "206_881_972_A__PCA_TM__003_____SEAT_BACK_PANEL____B-RELEASE___20260828.CATPart", "003",
-     "4d7080408917eb6bca3c37646ba1ca15ef92da30bac9bd4021e5e83032b8e369", SRC),
-    ("20-2277-004-0", "206.881.971_G02",
+    # 206.881.972.A TM 003 left out: TM 005 (FEA-CM 10/15) is already E2 since 2026-10-23.
+    ("21-227703-0503-0000", "206.881.971_G02",
      "206_881_971____G02_TM__005_____MAP_POCKET_________B-RELEASE___20260828.CATPart", "005",
      "741cfa018e1e566a121721abb67fd8c239e9e5069b8eb08efdc72b8e7bd67ed1", KVS),
-    ("20-2277-005-0", "206.881.971_G05",
+    ("21-227704-0001-0000", "206.881.971_G05",
      "206_881_971____G05_TM__005_____PIVOT_AXIS_________B-RELEASE___20260828.CATPart", "005",
      "35c9b98a17a30d89deaad1259e56ef1935ac491ece9219f5ede709ff4a1baa92", KVS),
-    ("20-2277-006-0", "206.881.971_G07",
+    ("21-227705-0503-0000", "206.881.971_G07",
      "206_881_971____G07_TM__002_____ROSSETTE___________B-RELEASE___20260828.CATPart", "002",
      "1a0be360861801a0a5d62ad0f673729c78f64a6d9b7814ba0c802e1ab378b3fe", KVS),
     ("50-2277-001-0", "206.881.971_G03",
@@ -142,6 +143,7 @@ async def main():
     engine = create_async_engine(os.environ["DATABASE_URL"])
     Session = async_sessionmaker(engine, expire_on_commit=False)
     batch = f"2277-brose-20260917-{uuid.uuid4().hex[:6]}"
+    revision_file_service.MAX_FILE_SIZE = 300 * 1024 * 1024  # this script only, approved 10/23
     async with Session() as s:
         project = (await s.execute(select(Project).where(Project.code == args.project))).scalar_one()
         for row in FILES:
