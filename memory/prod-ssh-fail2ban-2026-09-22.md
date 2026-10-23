@@ -1,6 +1,6 @@
 ---
 name: prod-ssh-fail2ban
-description: Prod SSH (ktx-server 10.105.205.55) sits behind fail2ban; never let ssh fail auth, always source ~/.ssh/agent.env first
+description: "Prod SSH (ktx-server 10.105.205.55) sits behind fail2ban; source ~/.ssh/agent.env + BatchMode=yes; global hook ktx-ssh-guard.py enforces it (ban again 2026-10-06)"
 metadata:
   type: project
 ---
@@ -23,3 +23,11 @@ not sourced. User: "failtoban, look in adminpanel, remember this."
    Safe reachability check: `nc -z -w3 10.105.205.55 22`. Unban via DENWERIT
    `sudo fail2ban-client unban <ip>`.
 Full procedure: `~/claude/adminpanel/CLAUDE.md` and `adminpanel/docs/plm2-prod-deploy-runbook.md` section 5.
+
+2026-10-06: banned again. Claude ran a plain `ssh ktx-server` without the agent (memory not
+checked first) -> client IP 10.105.100.57 banned (port 22 times out, 80/443 fine). Unban via
+DENWERIT: `sudo fail2ban-client unban 10.105.100.57` (the client IP, not the server's).
+Since then a GLOBAL PreToolUse hook enforces the procedure: ~/.claude/hooks/ktx-ssh-guard.py
+(in ~/.claude/settings.json, backup settings.json.bak-20261006). It denies ssh/scp/sftp/rsync to
+ktx-server/10.105.205.55 unless the command sources ~/.ssh/agent.env, ssh-add -l lists a key,
+and BatchMode=yes is set. nc -z / /dev/tcp probes pass.
