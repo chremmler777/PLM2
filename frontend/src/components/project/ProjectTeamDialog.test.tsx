@@ -40,6 +40,14 @@ const dt = (id: number) => {
     effectAllowed: '', dropEffect: '' }
 }
 
+/** Drag the person out of a slot onto another target (a slot or the row's people list). */
+function dragFromSlot(dept: number, slot: 'responsible' | 'backup', userId: number, target: HTMLElement) {
+  const transfer = dt(userId)
+  fireEvent.dragStart(screen.getByTestId(`team-slot-person-${slot}-${dept}`), { dataTransfer: transfer })
+  fireEvent.dragOver(target, { dataTransfer: transfer })
+  fireEvent.drop(target, { dataTransfer: transfer })
+}
+
 /** Drag a member card of one department onto a slot. */
 function drag(fromDept: number, userId: number, slot: 'responsible' | 'backup', toDept: number) {
   const card = screen.getByTestId(`team-member-${fromDept}-${userId}`).closest('li')!
@@ -89,6 +97,30 @@ describe('ProjectTeamDialog', () => {
       slots: [{ department_id: 9, responsible_id: 11, backup_id: 13 }] }))
   })
 
+  it('people already placed as Responsible or Backup are greyed out in the list and not draggable from it', async () => {
+    wrap(<ProjectTeamDialog projectId={2} open onClose={vi.fn()} />)
+    await screen.findByTestId('team-row-9')
+    const li = (id: number) => screen.getByTestId(`team-member-9-${id}`).closest('li')!
+    expect(li(11).dataset.placed).toBe('true')
+    expect(li(11).className).toContain('opacity-40')
+    expect(li(11).getAttribute('draggable')).toBe('false')
+    expect(li(12).dataset.placed).toBe('true')
+    expect(li(13).dataset.placed).toBeUndefined()
+    expect(li(13).getAttribute('draggable')).toBe('true')
+  })
+
+  it('dragging a person out of a slot back onto the people list clears that slot (draft only)', async () => {
+    wrap(<ProjectTeamDialog projectId={2} open onClose={vi.fn()} />)
+    await screen.findByTestId('team-row-9')
+    dragFromSlot(9, 'backup', 12, screen.getByTestId('team-people-9'))
+    expect(screen.getByTestId('team-slot-backup-9').textContent).toContain('Unassigned')
+    expect(screen.getByTestId('team-member-9-12').closest('li')!.dataset.placed).toBeUndefined()
+    expect(clientMocks.put).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('team-save'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/projects/2/team/batch', {
+      slots: [{ department_id: 9, responsible_id: 11, backup_id: null }] }))
+  })
+
   it('a drop of a non-member is refused and says why', async () => {
     wrap(<ProjectTeamDialog projectId={2} open onClose={vi.fn()} />)
     await screen.findByTestId('team-row-5')
@@ -101,7 +133,7 @@ describe('ProjectTeamDialog', () => {
   it('the backup dropped on Responsible swaps the two; the select is the keyboard fallback', async () => {
     wrap(<ProjectTeamDialog projectId={2} open onClose={vi.fn()} />)
     await screen.findByTestId('team-row-9')
-    drag(9, 12, 'responsible', 9)
+    dragFromSlot(9, 'backup', 12, screen.getByTestId('team-slot-responsible-9'))
     expect(screen.getByTestId('team-slot-responsible-9').textContent).toContain('Ben')
     expect(screen.getByTestId('team-slot-backup-9').textContent).toContain('Dana')
     fireEvent.change(screen.getByTestId('team-pick-responsible-5'), { target: { value: '7' } })

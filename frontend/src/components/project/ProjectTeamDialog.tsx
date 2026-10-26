@@ -84,6 +84,8 @@ function TeamDialogBody({ projectId, onClose }: { projectId: number; onClose(): 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [dragging, setDragging] = useState<number | null>(null);
+  // where a drag started when it came out of a slot (dropping back on the people list clears that slot)
+  const [dragFrom, setDragFrom] = useState<{ dept: number; slot: Slot } | null>(null);
   const [askDiscard, setAskDiscard] = useState(false);
 
   useEffect(() => { if (team && draft === null) setDraft(fromServer(team)); }, [team, draft]);
@@ -148,12 +150,14 @@ function TeamDialogBody({ projectId, onClose }: { projectId: number; onClose(): 
   const pmRow = (team ?? []).find((r) => r.department_name === PM_DEPARTMENT);
   const pmId = pmRow ? draft?.[pmRow.department_id]?.responsible ?? null : null;
 
-  const onDragStart = (e: DragEvent, userId: number) => {
+  const onDragStart = (e: DragEvent, userId: number, from: { dept: number; slot: Slot } | null = null) => {
     e.dataTransfer.setData(DRAG_TYPE, String(userId));
     e.dataTransfer.setData('text/plain', String(userId));
     e.dataTransfer.effectAllowed = 'move';
     setDragging(userId);
+    setDragFrom(from);
   };
+  const endDrag = () => { setDragging(null); setDragFrom(null); };
   const dropped = (e: DragEvent): number | null => {
     const raw = e.dataTransfer.getData(DRAG_TYPE) || e.dataTransfer.getData('text/plain');
     const n = Number(raw);
@@ -177,12 +181,21 @@ function TeamDialogBody({ projectId, onClose }: { projectId: number; onClose(): 
         data-missing={missing ? 'true' : undefined}
         aria-label={`${label}: ${row.department_name}`}
         onDragOver={canManage ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = canDrop ? 'move' : 'none'; } : undefined}
-        onDrop={canManage ? (e) => { e.preventDefault(); const id = dropped(e); setDragging(null); if (id !== null) assign(row, slot, id); } : undefined}
+        onDrop={canManage ? (e) => {
+          e.preventDefault(); const id = dropped(e); endDrag();
+          // from the row's other slot this moves the person (assign swaps the two)
+          if (id !== null) assign(row, slot, id);
+        } : undefined}
         className={`min-w-0 flex-1 rounded-lg border-2 border-dashed px-3 py-2 transition-colors ${tone}`}
       >
         <p className={`text-[11px] uppercase tracking-wide ${missing ? 'text-red-300' : 'text-slate-500'}`}>{label}</p>
         <div className="mt-0.5 flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100"
+            data-testid={value !== null ? `team-slot-person-${slot}-${row.department_id}` : undefined}
+            draggable={canManage && value !== null}
+            onDragStart={canManage && value !== null ? (e) => onDragStart(e, value, { dept: row.department_id, slot }) : undefined}
+            onDragEnd={endDrag}
+            style={canManage && value !== null ? { cursor: 'grab' } : undefined}>
             {value !== null ? nameOf(value) : (
               <span className={missing ? 'text-red-300' : 'text-slate-500'}>
                 {missing ? t('team.notDefined') : t('team.unassigned')}
@@ -277,17 +290,30 @@ function TeamDialogBody({ projectId, onClose }: { projectId: number; onClose(): 
                   {row.members.length === 0 ? (
                     <p className="text-xs text-slate-500">{t('team.noMembers')}</p>
                   ) : (
-                    <ul aria-label={`${t('team.membersOf')}: ${row.department_name}`} className="flex flex-wrap gap-2">
-                      {row.members.map((m) => (
-                        <li key={m.id} className="max-w-full"
-                          draggable={canManage}
-                          onDragStart={canManage ? (e) => onDragStart(e, m.id) : undefined}
-                          onDragEnd={() => setDragging(null)}
-                          style={canManage ? { cursor: 'grab' } : undefined}>
+                    <ul aria-label={`${t('team.membersOf')}: ${row.department_name}`}
+                      data-testid={`team-people-${row.department_id}`}
+                      // drop a person dragged out of this row's slot back here: the slot is cleared
+                      onDragOver={canManage && dragFrom?.dept === row.department_id ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
+                      onDrop={canManage ? (e) => {
+                        e.preventDefault(); const from = dragFrom; endDrag();
+                        if (from && from.dept === row.department_id) assign(row, from.slot, null);
+                      } : undefined}
+                      className={`flex flex-wrap gap-2 rounded-md p-1 transition-colors ${dragFrom?.dept === row.department_id ? 'bg-slate-800/80 ring-1 ring-dashed ring-slate-500' : ''}`}>
+                      {row.members.map((m) => {
+                        const d = draft[row.department_id];
+                        const placed = m.id === d?.responsible || m.id === d?.backup;
+                        return (
+                        <li key={m.id} className={`max-w-full ${placed ? 'opacity-40' : ''}`}
+                          data-placed={placed ? 'true' : undefined}
+                          draggable={canManage && !placed}
+                          onDragStart={canManage && !placed ? (e) => onDragStart(e, m.id) : undefined}
+                          onDragEnd={endDrag}
+                          style={canManage && !placed ? { cursor: 'grab' } : undefined}>
                           <PersonDetail data-testid={`team-member-${row.department_id}-${m.id}`}
                             name={m.name} email={m.email} badge={badge(row, m)} />
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
