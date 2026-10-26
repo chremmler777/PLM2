@@ -21,7 +21,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, ChevronDown, ChevronRight, ArrowUpRight } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { departmentsAdminApi } from '../api/workflows';
 import type { DepartmentAdmin, DepartmentPerson } from '../types/workflow';
@@ -168,7 +168,7 @@ function MailLink({ email, className = '' }: { email: string | null | undefined;
 function RoleBadge({ kind }: { kind: 'head' | 'manager' }) {
   const look = kind === 'head'
     ? 'bg-indigo-500/15 text-indigo-200 ring-indigo-400/30'
-    : 'bg-sky-500/10 text-sky-200 ring-sky-500/30';
+    : 'bg-yellow-400/15 text-yellow-100 ring-yellow-400/40';
   return (
     <span className={`rounded-md px-1.5 py-0.5 text-xs font-medium ring-1 ${look}`}>
       {t(kind === 'head' ? 'deptAdmin.head' : 'deptAdmin.manager')}
@@ -215,17 +215,42 @@ function DepartmentCard({ dept, isAdmin, busy, onPerson, onRetire }: {
         )}
       </div>
 
-      {/* The head: the department's headline. */}
-      {dept.head_id != null ? (
-        <div data-testid={`dept-head-banner-${dept.id}`}
-          className={`flex items-center gap-4 rounded-lg bg-indigo-500/10 px-4 py-3.5 ring-1 ${headGone ? 'ring-red-500/40' : 'ring-indigo-400/25'}`}>
+      {/* The manager: where escalations go - the card's headline, in yellow. */}
+      {dept.manager_id != null ? (
+        <div data-testid={`dept-manager-ro-${dept.id}`}
+          className={`flex items-center gap-4 rounded-lg bg-yellow-400/10 px-4 py-3.5 ring-1 ${dept.manager_active === false ? 'ring-red-500/40' : 'ring-yellow-400/40'}`}>
           <span aria-hidden="true"
-            className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-indigo-500/25 text-sm font-semibold text-indigo-100">
-            {initials(dept.head_name ?? '')}
+            className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-yellow-400/25 text-sm font-semibold text-yellow-100">
+            {initials(dept.manager_name ?? '')}
           </span>
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="truncate text-lg font-semibold text-slate-50">{dept.head_name}</span>
+              <span className="truncate text-lg font-semibold text-yellow-50">{dept.manager_name}</span>
+              <span className="rounded-md bg-yellow-400/25 px-1.5 py-0.5 text-xs font-medium text-yellow-100">
+                {t('deptAdmin.managerLine')}
+              </span>
+            </p>
+            <MailLink email={dept.manager_email} className="mt-0.5 text-sm" />
+          </div>
+        </div>
+      ) : (
+        <p data-testid={`dept-manager-ro-${dept.id}`}
+          className="rounded-lg border border-dashed border-yellow-700/50 px-4 py-2.5 text-sm text-slate-500">
+          {t('deptAdmin.noManager')}
+        </p>
+      )}
+
+      {/* The head: second line, who leads the department day to day. */}
+      {dept.head_id != null ? (
+        <div data-testid={`dept-head-banner-${dept.id}`}
+          className={`-mt-2 flex items-center gap-3 rounded-lg bg-indigo-500/10 px-4 py-2.5 ring-1 ${headGone ? 'ring-red-500/40' : 'ring-indigo-400/25'}`}>
+          <span aria-hidden="true"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-500/25 text-xs font-semibold text-indigo-100">
+            {initials(dept.head_name ?? '')}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="truncate font-medium text-slate-100">{dept.head_name}</span>
               <span className="rounded-md bg-indigo-400/20 px-1.5 py-0.5 text-xs font-medium text-indigo-100">
                 {t('deptAdmin.head')}
               </span>
@@ -234,32 +259,16 @@ function DepartmentCard({ dept, isAdmin, busy, onPerson, onRetire }: {
                   {dept.head_active === false ? t('deptAdmin.inactive') : t('deptAdmin.headNotMember')}
                 </span>
               )}
+              <MailLink email={dept.head_email} className="text-xs" />
             </p>
-            <MailLink email={dept.head_email} className="mt-0.5 text-sm" />
           </div>
         </div>
       ) : (
         <p data-testid={`dept-head-none-${dept.id}`}
-          className="rounded-lg border border-dashed border-slate-700 px-4 py-2.5 text-sm text-slate-500">
+          className="-mt-2 px-4 text-sm text-slate-500">
           {t('deptAdmin.noHead')}
         </p>
       )}
-
-      {/* The manager: where escalations go. */}
-      <div data-testid={`dept-manager-ro-${dept.id}`} className="flex items-start gap-3 text-sm">
-        <ArrowUpRight aria-hidden="true" size={16} className="mt-0.5 flex-shrink-0 text-slate-500" />
-        <div className="min-w-0">
-          <span className="text-slate-400">{t('deptAdmin.managerLine')}</span>
-          {dept.manager_id != null ? (
-            <span className="block">
-              <span className="font-medium text-slate-100">{dept.manager_name}</span>
-              <MailLink email={dept.manager_email} className="text-xs" />
-            </span>
-          ) : (
-            <span className="block text-slate-500">{t('deptAdmin.noManager')}</span>
-          )}
-        </div>
-      </div>
 
       <div>
         <p className="mb-2 flex items-baseline gap-2 text-sm font-medium text-slate-300">

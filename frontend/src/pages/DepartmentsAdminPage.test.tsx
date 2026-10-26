@@ -59,16 +59,17 @@ describe('DepartmentsAdminPage', () => {
     expect([...warn.querySelectorAll('li')].map((l) => l.dataset.code)).toEqual(['no_hub_role', 'no_members', 'no_manager'])
   })
 
-  it('the head is the card headline: name, mailto email, Head label; none named is calm, not a warning', async () => {
+  it('the manager is the yellow card headline, the head the second line: name, mailto email, label; no head named is calm, not a warning', async () => {
     wrap()
     const banner = await screen.findByTestId('dept-head-banner-1')
     expect(within(banner).getByText('Jubei')).toBeTruthy()
     expect(within(banner).getByText('Head')).toBeTruthy()
     expect(within(banner).getByText('jubei@ktx.test').getAttribute('href')).toBe('mailto:jubei@ktx.test')
-    // the head sits above the manager line in the card
+    // the manager (yellow) sits above the head line in the card
     const card = screen.getByTestId('dept-card-1')
     const mgr = within(card).getByTestId('dept-manager-ro-1')
-    expect(banner.compareDocumentPosition(mgr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(mgr.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(mgr.className).toContain('yellow')
     expect(mgr.textContent).toContain('Karl')
     expect(within(mgr).getByText('karl@ktx.test').getAttribute('href')).toBe('mailto:karl@ktx.test')
     // badges in the member list
