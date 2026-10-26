@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, plm2_roles
 from app.models import get_db
+from app.models.entities import User
 from app.models.workflow import Department
 from app.services.cost_sheet_service import can_read as cost_sheet_can_read
 from app.services.tool_rights import can_edit_tools
@@ -59,6 +60,14 @@ async def me(request: Request, user=Depends(get_current_user), db: AsyncSession 
         # Acts-as: enough to render the banner and decide whether the
         # switcher shows at all, without a second round-trip.
         "acting_as": ({"id": dept.id, "name": dept.name} if dept else None),
+        # Act as a person: this response is that person's (user_id, role,
+        # rights); the switcher and the banner read these two.
+        "acting_as_user": ({"id": user.id, "name": user.full_name or user.username}
+                           if getattr(request.state, "acts_as_user", None) is not None else None),
+        "real_user": ({"id": request.state.acts_as_real_user.id,
+                       "name": request.state.acts_as_real_user.full_name
+                       or request.state.acts_as_real_user.username}
+                      if getattr(request.state, "acts_as_user", None) is not None else None),
         "is_real_admin": user.is_real_admin,
         # admin | engineer (member of an active department: may write) | viewer
         "role": user.role,
@@ -78,17 +87,29 @@ async def me(request: Request, user=Depends(get_current_user), db: AsyncSession 
 
 
 @router.get("/acts-as/options")
-async def acts_as_options(user=Depends(get_current_user),
+async def acts_as_options(request: Request, user=Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)) -> dict:
-    """The active departments an admin may act as. 403 for everyone else —
-    the dropdown must not render for anyone who cannot use it."""
-    if not user.is_real_admin:
+    """The active departments and people an admin may act as. 403 for
+    everyone else — the dropdown must not render for anyone who cannot use
+    it. People: active hub accounts with an active department (the ones
+    whose view differs), by name."""
+    real = getattr(request.state, "acts_as_real_user", None) or user
+    if not real.is_real_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Only an admin may act as another department")
     rows = (await db.execute(
         select(Department).where(Department.is_active.is_(True))
         .order_by(Department.sort_order, Department.name))).scalars().all()
-    return {"departments": [{"id": d.id, "name": d.name} for d in rows]}
+    from app.services.hub_departments import member_clause
+    from app.models.workflow import UserDepartment
+    people = (await db.execute(
+        select(User).join(UserDepartment, UserDepartment.user_id == User.id)
+        .join(Department, Department.id == UserDepartment.department_id)
+        .where(User.is_active.is_(True), Department.is_active.is_(True),
+               User.id != real.id, member_clause())
+        .distinct().order_by(User.full_name, User.username))).scalars().all()
+    return {"departments": [{"id": d.id, "name": d.name} for d in rows],
+            "people": [{"id": u.id, "name": u.full_name or u.username} for u in people]}
 
 
 @router.post("/logout")

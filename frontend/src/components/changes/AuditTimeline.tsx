@@ -202,6 +202,11 @@ export default function AuditTimeline({ correlationId, changeId }: {
                   </span>
                   <span className="font-medium text-slate-200">
                     {e.real_user_name ?? e.user_name ?? t('audit.system')}
+                    {e.acting_as_user_name && (
+                      <span data-testid="audit-acting-person" className="ml-1 font-normal text-xs text-fuchsia-300/90">
+                        {t('audit.actingAsPerson').replace('{x}', e.acting_as_user_name)}
+                      </span>
+                    )}
                     {e.acting_as_department_name && (
                       <span data-testid="audit-acting" className="ml-1 font-normal text-xs text-amber-300/80">
                         {t('audit.actingAs').replace('{d}', e.acting_as_department_name)}

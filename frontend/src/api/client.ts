@@ -2,7 +2,7 @@
  * Axios HTTP client — shared-cookie SSO (AdminPanel hub).
  */
 import axios from 'axios';
-import { ACTS_AS_HEADER, getActsAsDepartmentId } from '../lib/actsAs';
+import { ACTS_AS_HEADER, ACTS_AS_USER_HEADER, getActsAsDepartmentId, getActsAsUserId } from '../lib/actsAs';
 import { assertContained } from '../training/sandbox/containment';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/plm2/api';
@@ -19,6 +19,12 @@ const client = axios.create({
  * have a value stored, and the backend 403s the header for them anyway.
  */
 export function attachActsAs<T extends { headers?: Record<string, unknown> }>(config: T): T {
+  const userId = getActsAsUserId();
+  if (userId != null) {
+    // a person: never together with a department (the server refuses both)
+    config.headers = { ...(config.headers ?? {}), [ACTS_AS_USER_HEADER]: String(userId) };
+    return config;
+  }
   const deptId = getActsAsDepartmentId();
   if (deptId != null) {
     config.headers = { ...(config.headers ?? {}), [ACTS_AS_HEADER]: String(deptId) };

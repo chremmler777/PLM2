@@ -11,12 +11,18 @@ from contextvars import ContextVar
 from typing import Optional
 
 HEADER = "X-Acts-As-Department"
+#: Act as a PERSON (Christoph 2026-10-26): the request runs as that user
+#: (their memberships, manager role, team slots; never admin), audited as
+#: the real admin. Real plm2_Admin only, like the department header.
+USER_HEADER = "X-Acts-As-User"
 
-# (real_user_id, acting_as_department_id) while a request runs under acts-as.
-_acts_as: ContextVar[Optional[tuple[int, int]]] = ContextVar("acts_as", default=None)
+# (real_user_id, acting_as_department_id) while a request runs under acts-as;
+# the department is None when an admin acts as a person (the audit row's
+# user_id is then that person, real_user_id the admin).
+_acts_as: ContextVar[Optional[tuple[int, Optional[int]]]] = ContextVar("acts_as", default=None)
 
 
-def set_acts_as(real_user_id: int, department_id: int):
+def set_acts_as(real_user_id: int, department_id: Optional[int]):
     """Returns the token to reset with once the request is done."""
     return _acts_as.set((real_user_id, department_id))
 

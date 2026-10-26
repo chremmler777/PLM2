@@ -21,6 +21,10 @@ interface AuthContextType {
   /** D-cost (/auth/me): reads the cost sheet (admin, Project Manager, Sales,
    *  Finance, Management; acts-as aware). The nav item and page go by it. */
   canReadCostSheet: boolean;
+  /** Act as a person: the person the admin currently sees PLM as (null = themselves). */
+  actingAsUser: { id: number; name: string } | null;
+  /** The token holds plm2_Admin: may use the act-as switch, also while acting as a person. */
+  realAdmin: boolean;
   loading: boolean;
   logout: () => void;
 }
@@ -35,6 +39,7 @@ type MeResponse = {
   role?: string | null;
   price_view?: 'all' | 'led' | 'none' | null;
   can_read_cost_sheet?: boolean;
+  acting_as_user?: { id: number; name: string } | null;
 };
 let meInFlight: Promise<{ data: MeResponse }> | null = null;
 function fetchMe(): Promise<{ data: MeResponse }> {
@@ -54,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [localRole, setLocalRole] = useState<string | null>(null);
   const [priceView, setPriceView] = useState<AuthContextType['priceView']>(null);
   const [canReadCostSheet, setCanReadCostSheet] = useState(false);
+  const [actingAsUser, setActingAsUser] = useState<AuthContextType['actingAsUser']>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -68,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLocalRole(res.data.role ?? null);
         setPriceView(res.data.price_view ?? null);
         setCanReadCostSheet(res.data.can_read_cost_sheet === true);
+        setActingAsUser(res.data.acting_as_user ?? null);
         setIsAuthenticated(true);
       })
       .catch(() => {
@@ -85,7 +92,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = '/';
   }, []);
 
-  const isAdmin = roles.includes('plm2_Admin');
+  const realAdmin = roles.includes('plm2_Admin');
+  // acting as a person: the UI is that person's (their role, never admin)
+  const isAdmin = realAdmin && actingAsUser === null;
   const role = isAdmin ? 'admin'
     : !isAuthenticated ? null
     : localRole === 'engineer' ? 'engineer' : 'viewer';
@@ -101,6 +110,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     canWrite,
     priceView,
     canReadCostSheet,
+    actingAsUser,
+    realAdmin,
     loading,
     logout,
   };

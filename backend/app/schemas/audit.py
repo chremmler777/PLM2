@@ -24,6 +24,7 @@ class AuditEntryResponse(BaseModel):
     real_user_name: Optional[str] = None
     acting_as_department_id: Optional[int] = None
     acting_as_department_name: Optional[str] = None
+    acting_as_user_name: Optional[str] = None
     display_values: Optional[dict] = None
 
     class Config:

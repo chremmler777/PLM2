@@ -91,6 +91,9 @@ class User(Base):
     # X-Acts-As-Department. `role` itself is never rewritten — writing to a
     # mapped column would be flushed straight into the users table.
     acts_as_department_id: ClassVar[Optional[int]] = None
+    # Act as a person (X-Acts-As-User): set on the TARGET's instance for one
+    # request, the real admin's id. Never persisted.
+    acting_real_user_id: ClassVar[Optional[int]] = None
 
     @property
     def effective_role(self) -> str:

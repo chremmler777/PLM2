@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.config import get_settings
-from app.auth.acts_as import HEADER as ACTS_AS_HEADER, set_acts_as
+from app.auth.acts_as import HEADER as ACTS_AS_HEADER, USER_HEADER as ACTS_AS_USER_HEADER, set_acts_as
 from app.models import User, get_db
 from app.models.entities import Organization
 from app.models.workflow import Department, UserDepartment
@@ -203,8 +203,51 @@ async def get_current_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "plm2_Viewer is read-only")
 
     request.state.hub_payload = payload
+    person = await _apply_acts_as_user(request, db, user)
+    if person is not None:
+        return person
     await _apply_acts_as(request, db, user)
     return user
+
+
+async def _apply_acts_as_user(request: Request, db: AsyncSession, user: User):
+    """X-Acts-As-User (Christoph 2026-10-26): a real admin sees PLM as that
+    person. The request runs as the target's own row: their memberships
+    (as stored), manager role, project-team slots and My Tasks; their role
+    is engineer with an active department, else viewer, never admin (and a
+    viewer stays read-only). Writes are audited as the real admin acting as
+    the person (audit real_user_id, no department). Absent -> None. A
+    non-admin sending it -> 403, an unknown or inactive person -> 400, both
+    headers at once -> 400."""
+    raw = request.headers.get(ACTS_AS_USER_HEADER)
+    if raw is None or not raw.strip():
+        return None
+    if not user.is_real_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Only an admin may act as another person")
+    if (request.headers.get(ACTS_AS_HEADER) or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Act as a department or a person, not both")
+    try:
+        target_id = int(raw)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid {ACTS_AS_USER_HEADER} header")
+    if target_id == user.id:
+        return None
+    target = await db.get(User, target_id)
+    if target is None or not target.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown or inactive user {target_id}")
+    role = "engineer" if await _in_active_department(db, target.id) else "viewer"
+    target.__dict__["_hub_role_cap"] = role
+    set_committed_value(target, "role", role)
+    if role == "viewer" and not _is_read_only(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"{target.full_name or target.username} is read-only in PLM")
+    target.acting_real_user_id = user.id
+    request.state.acts_as_user = target
+    request.state.acts_as_real_user = user
+    request.state.acts_as_token = set_acts_as(user.id, None)
+    return target
 
 
 async def _service_principal(request: Request, db: AsyncSession, provided: str) -> User:

@@ -179,6 +179,9 @@ async def _humanize(db: AsyncSession, rows, out) -> list:
     dept_ids = set(ids["department_id"]) | {
         r.acting_as_department_id for r in rows if r.acting_as_department_id}
     user_ids = {r.real_user_id for r in rows if r.real_user_id}
+    # acting as a person: the row's user_id is that person, named too
+    user_ids |= {r.user_id for r in rows if r.real_user_id and r.user_id
+                 and not r.acting_as_department_id and r.user_id != r.real_user_id}
     names = {k: {} for k in ids}
     if ids["task_id"]:
         for tid, dname, step in (await db.execute(
@@ -212,6 +215,9 @@ async def _humanize(db: AsyncSession, rows, out) -> list:
         row["real_user_name"] = user_names.get(r.real_user_id)
         row["acting_as_department_id"] = r.acting_as_department_id
         row["acting_as_department_name"] = dept_names.get(r.acting_as_department_id)
+        row["acting_as_user_name"] = (
+            user_names.get(r.user_id) if r.real_user_id and not r.acting_as_department_id
+            and r.user_id and r.user_id != r.real_user_id else None)
         if v is not None:
             shown = dict(v)
             for k, table in names.items():

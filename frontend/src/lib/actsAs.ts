@@ -25,8 +25,44 @@ export function getActsAsDepartmentId(): number | null {
 export function setActsAsDepartmentId(id: number | null): void {
   try {
     if (id == null) sessionStorage.removeItem(ACTS_AS_KEY)
-    else sessionStorage.setItem(ACTS_AS_KEY, String(id))
+    else {
+      sessionStorage.setItem(ACTS_AS_KEY, String(id))
+      sessionStorage.removeItem('plm2.actsAsUserId')
+    }
   } catch {
     /* ignore — see above */
+  }
+}
+
+/**
+ * Act as a PERSON (Christoph 2026-10-26): the admin sees PLM exactly as that
+ * person (their departments, manager role, My Tasks, team slots; never
+ * admin), every request carrying `X-Acts-As-User`; writes are audited as
+ * the admin acting as them. Per tab, like the department switch; the two
+ * exclude each other.
+ */
+export const ACTS_AS_USER_KEY = 'plm2.actsAsUserId'
+export const ACTS_AS_USER_HEADER = 'X-Acts-As-User'
+
+export function getActsAsUserId(): number | null {
+  try {
+    const raw = sessionStorage.getItem(ACTS_AS_USER_KEY)
+    if (!raw) return null
+    const id = Number(raw)
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+
+export function setActsAsUserId(id: number | null): void {
+  try {
+    if (id == null) sessionStorage.removeItem(ACTS_AS_USER_KEY)
+    else {
+      sessionStorage.setItem(ACTS_AS_USER_KEY, String(id))
+      sessionStorage.removeItem(ACTS_AS_KEY)
+    }
+  } catch {
+    /* ignore */
   }
 }

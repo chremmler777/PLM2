@@ -200,6 +200,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'actsAs.label': { de: 'Agieren als', en: 'Act as' },
   'actsAs.myself': { de: 'Ich selbst (Admin)', en: 'Myself (admin)' },
   'actsAs.acting': { de: 'Aktiv als', en: 'Acting as' },
+  'actsAs.person': { de: 'Als Person ansehen', en: 'View as person' },
+  'actsAs.noPerson': { de: 'Als Person ansehen…', en: 'View as person…' },
+  'actsAs.viewingAs': { de: 'Ansicht als {x}', en: 'Viewing as {x}' },
+  'actsAs.backToMe': { de: 'Zurück zu mir', en: 'Back to me' },
+  'audit.actingAsPerson': { de: 'als {x}', en: 'acting as {x}' },
   'actsAs.clear': { de: 'Rolle zurücksetzen', en: 'Stop acting as' },
   'role.pm': { de: 'Projektmanagement', en: 'Project Management' },
   // Badge-sized variant — the stage chips are tiny, so they carry the short form.

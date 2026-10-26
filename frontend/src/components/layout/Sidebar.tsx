@@ -34,7 +34,7 @@ function isProjectPage(path: string): boolean {
 
 export default function Sidebar() {
   const location = useLocation();
-  const { logout, username, role, priceView, canReadCostSheet } = useAuth();
+  const { logout, username, role, priceView, canReadCostSheet, realAdmin } = useAuth();
   const onProjectPage = isProjectPage(location.pathname);
   // Anything but an explicit "expanded" (missing, garbage, unreadable) means the rail.
   const [railCollapsed, setRailCollapsed] = useState(() => readStored(RAIL_KEY) !== 'expanded');
@@ -199,7 +199,7 @@ export default function Sidebar() {
             )}
           </div>
         )}
-        {role === 'admin' && <ActsAsSwitch collapsed={isCollapsed} />}
+        {(role === 'admin' || realAdmin) && <ActsAsSwitch collapsed={isCollapsed} />}
         <NotificationBell collapsed={isCollapsed} />
         <button
           type="button"
