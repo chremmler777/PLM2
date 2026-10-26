@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
+import LateInMyDepartments from '../components/LateInMyDepartments';
 import { rasicColors } from '../lib/constants';
 import { formatCalendarDate, formatDate } from '../lib/format';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
@@ -795,6 +796,9 @@ export default function MyTasksPage() {
       <EscalationsCard />
 
       <TaskList />
+
+      {/* department managers only (migration 149): view only */}
+      <LateInMyDepartments />
 
       <IntakeSection />
 

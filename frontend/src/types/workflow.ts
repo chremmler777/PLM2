@@ -8,6 +8,44 @@ export interface Department {
   flow_type: 'action' | 'info';
   is_active: boolean;
   sort_order: number;
+  /** Migration 149: the department's one optional manager (escalation overview). */
+  manager_id?: number | null;
+  manager_name?: string | null;
+}
+
+/** A person on the Departments admin page (name + email). */
+export interface DepartmentPerson {
+  id: number;
+  name: string;
+  username: string;
+  email: string;
+  is_active: boolean;
+}
+
+/** GET /departments/admin: a department with its manager and members. */
+export interface DepartmentAdmin {
+  id: number;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  manager_id: number | null;
+  manager_name: string | null;
+  manager_active: boolean | null;
+  members: DepartmentPerson[];
+}
+
+/** One late item of a managed department (My Tasks, "Late in my departments"). */
+export interface DepartmentEscalation {
+  kind: string;
+  change_id: number;
+  change_number: string;
+  change_title: string;
+  department_id: number;
+  department_name: string;
+  label: string;
+  owner_name: string | null;
+  due_date: string | null;
+  days_overdue: number;
 }
 
 export interface WfStepRasic {

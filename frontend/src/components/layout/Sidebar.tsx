@@ -9,7 +9,7 @@
 import { useState, type ComponentType } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  BookOpen, ChartColumn, CircleDollarSign, Factory, FolderKanban, GitPullRequestArrow, GraduationCap,
+  BookOpen, Building2, ChartColumn, CircleDollarSign, Factory, FolderKanban, GitPullRequestArrow, GraduationCap,
   LayoutDashboard, ListChecks, LogOut, Palette, PanelLeftClose, PanelLeftOpen, Receipt, Settings2,
   ShoppingCart, Workflow, type LucideProps,
 } from 'lucide-react';
@@ -76,6 +76,8 @@ export default function Sidebar() {
     // D-cost: the rates are read by admin, Project Manager, Sales, Finance
     // and Management only; everyone else costs through the lookups.
     ...(canReadCostSheet ? [{ path: '/cost-sheet', label: 'Cost sheet', icon: Receipt }] : []),
+    // managers and members per department (Christoph 2026-10-26): admins only
+    ...(role === 'admin' ? [{ path: '/admin/departments', label: 'Departments', icon: Building2 }] : []),
   ];
 
   const showSetup = role === 'admin' || role === 'engineer';

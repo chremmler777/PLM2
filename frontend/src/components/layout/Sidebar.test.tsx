@@ -47,6 +47,17 @@ describe('Sidebar nav groups', () => {
     expect(screen.queryByText('Users')).toBeNull()
   })
 
+  it('links the Departments admin page for an admin only', async () => {
+    authMock.current = { role: 'admin', username: 'tester', logout: vi.fn() }
+    wrap(<Sidebar />)
+    expect((await screen.findByText('Departments')).closest('a')?.getAttribute('href')).toBe('/admin/departments')
+    cleanup()
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
+    wrap(<Sidebar />)
+    await screen.findByText('SETUP')
+    expect(screen.queryByText('Departments')).toBeNull()
+  })
+
   it('shows SETUP and Workflows but not Users for engineer', async () => {
     authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)

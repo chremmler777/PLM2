@@ -6,6 +6,7 @@ import {
   Department, WfTemplate, WfTemplateList, WfTemplateSave,
   WfInstance, MyTask,
   StartWorkflowRequest, CompleteTaskRequest, CancelWorkflowRequest,
+  DepartmentAdmin, DepartmentEscalation,
 } from '../types/workflow';
 
 /**
@@ -96,3 +97,26 @@ export const getMyTasks = async (departmentId: number): Promise<MyTask[]> => {
   });
   return response.data;
 };
+
+// ============================================================================
+// Departments admin page (migration 149: managers; memberships)
+// ============================================================================
+
+export const departmentsAdminApi = {
+  list: async (): Promise<DepartmentAdmin[]> =>
+    (await client.get('/v1/departments/admin')).data,
+  setManager: async (departmentId: number, userId: number | null): Promise<DepartmentAdmin> =>
+    (await client.put(`/v1/departments/${departmentId}/manager`, { user_id: userId })).data,
+  setMembers: async (departmentId: number, userIds: number[]): Promise<DepartmentAdmin> =>
+    (await client.put(`/v1/departments/${departmentId}/members`, { user_ids: userIds })).data,
+  activate: async (departmentId: number): Promise<DepartmentAdmin> =>
+    (await client.post(`/v1/departments/${departmentId}/activate`)).data,
+  /** Every account (admin only), for the pickers. */
+  users: async (): Promise<{ id: number; username: string; email: string; full_name: string | null; is_active: boolean }[]> =>
+    (await client.get('/v1/users')).data,
+};
+
+/** My Tasks' "Late in my departments": empty departments = not a manager. */
+export const getMyDepartmentEscalations = async (): Promise<{
+  departments: { id: number; name: string }[]; items: DepartmentEscalation[];
+}> => (await client.get('/v1/changes/my-department-escalations')).data;

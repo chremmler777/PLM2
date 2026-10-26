@@ -33,6 +33,7 @@ import ProcessMapPage from './pages/ProcessMapPage';
 import TrainingPage from './pages/TrainingPage';
 import TrainingRunPage from './pages/TrainingRunPage';
 import TrainingHandoutPage from './pages/TrainingHandoutPage';
+import DepartmentsAdminPage from './pages/DepartmentsAdminPage';
 import AppLayout from './components/layout/AppLayout';
 
 // Defaults against refetch storms (a change page made 32 to 72 calls on load):
@@ -138,6 +139,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <WorkflowDesignerPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Admin only (the page says so to anyone else; the API answers 403). */}
+      <Route
+        path="/admin/departments"
+        element={
+          <ProtectedRoute>
+            <DepartmentsAdminPage />
           </ProtectedRoute>
         }
       />
