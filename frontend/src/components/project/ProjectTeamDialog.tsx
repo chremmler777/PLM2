@@ -43,6 +43,9 @@ export interface TeamRow {
   responsible_missing?: { id: number; name: string } | null;
   backup_missing?: { id: number; name: string } | null;
   members: TeamMember[];
+  /** The department's head (blue) and manager (yellow, escalations), as on the Departments page. */
+  head_id?: number | null;
+  manager?: { id: number; name: string; email?: string | null } | null;
 }
 type Slot = 'responsible' | 'backup';
 type Pair = { responsible: number | null; backup: number | null };
@@ -240,13 +243,23 @@ function TeamDialogBody({ projectId, projectLabel, onClose }: { projectId: numbe
   const badge = (row: TeamRow, m: TeamMember) => {
     const d = draft?.[row.department_id];
     const kind = m.id === d?.responsible ? 'lead' : m.id === d?.backup ? 'backup' : 'member';
+    const head = row.head_id != null && m.id === row.head_id;
+    // yellow is the manager's colour (Departments page), so the backup reads teal
     const cls = kind === 'lead' ? 'bg-sky-900/60 text-sky-200 ring-sky-700'
-      : kind === 'backup' ? 'bg-amber-900/40 text-amber-200 ring-amber-700/60'
+      : kind === 'backup' ? 'bg-teal-900/40 text-teal-200 ring-teal-700/60'
         : 'bg-slate-800 text-slate-400 ring-slate-600';
+    const pill = 'rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ring-1';
     return (
-      <span data-testid={`team-badge-${row.department_id}-${m.id}`} data-kind={kind}
-        className={`rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ring-1 ${cls}`}>
-        {t(`team.badge.${kind}`)}
+      <span className="inline-flex items-center gap-1">
+        {head && (
+          <span data-testid={`team-head-${row.department_id}-${m.id}`}
+            className={`${pill} bg-indigo-500/20 text-indigo-100 ring-indigo-400/40`}>
+            {t('deptAdmin.head')}
+          </span>
+        )}
+        <span data-testid={`team-badge-${row.department_id}-${m.id}`} data-kind={kind} className={`${pill} ${cls}`}>
+          {t(`team.badge.${kind}`)}
+        </span>
       </span>
     );
   };
@@ -287,6 +300,13 @@ function TeamDialogBody({ projectId, projectLabel, onClose }: { projectId: numbe
                 className="grid gap-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="min-w-0">
                   <h3 className="mb-2 text-sm font-semibold text-slate-100">{row.department_name}</h3>
+                  {row.manager && (
+                    <p data-testid={`team-manager-${row.department_id}`}
+                      className="mb-2 inline-flex items-center gap-2 rounded-md bg-yellow-400/10 px-2 py-1 text-xs text-yellow-100 ring-1 ring-yellow-400/40">
+                      <span className="font-semibold uppercase tracking-wide text-[10px]">{t('deptAdmin.manager')}</span>
+                      <span className="font-medium">{row.manager.name}</span>
+                    </p>
+                  )}
                   {row.members.length === 0 ? (
                     <p className="text-xs text-slate-500">{t('team.noMembers')}</p>
                   ) : (
@@ -299,7 +319,12 @@ function TeamDialogBody({ projectId, projectLabel, onClose }: { projectId: numbe
                         if (from && from.dept === row.department_id) assign(row, from.slot, null);
                       } : undefined}
                       className={`flex flex-wrap gap-2 rounded-md p-1 transition-colors ${dragFrom?.dept === row.department_id ? 'bg-slate-800/80 ring-1 ring-dashed ring-slate-500' : ''}`}>
-                      {row.members.map((m) => {
+                      {row.members
+                        // the manager need not be on the project team: listed above, not a pick,
+                        // unless they are the department's only member
+                        .filter((m) => !(row.manager && m.id === row.manager.id && row.members.length > 1
+                          && m.id !== draft[row.department_id]?.responsible && m.id !== draft[row.department_id]?.backup))
+                        .map((m) => {
                         const d = draft[row.department_id];
                         const placed = m.id === d?.responsible || m.id === d?.backup;
                         return (

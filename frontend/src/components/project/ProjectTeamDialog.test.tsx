@@ -97,6 +97,27 @@ describe('ProjectTeamDialog', () => {
       slots: [{ department_id: 9, responsible_id: 11, backup_id: 13 }] }))
   })
 
+  it('head blue, manager yellow (as on the Departments page); the manager is no pick unless placed or alone', async () => {
+    const team = [{ department_id: 21, department_name: 'Process Engineer', responsible: null, backup: null,
+      head_id: 31, manager: { id: 30, name: 'Chris D', email: 'cd@ktx.test' },
+      members: [{ id: 30, name: 'Chris D', email: 'cd@ktx.test' }, { id: 31, name: 'Holmes', email: 'h@ktx.test' },
+        { id: 32, name: 'Nathan', email: 'n@ktx.test' }] },
+      { department_id: 28, department_name: 'Development', responsible: null, backup: null,
+        manager: { id: 30, name: 'Chris D' }, members: [{ id: 30, name: 'Chris D', email: 'cd@ktx.test' }] }]
+    clientMocks.get.mockImplementation(async (url: string) =>
+      url.includes('/permissions') ? { data: { can_start_change: true, can_manage_team: true } }
+        : url.endsWith('/team') ? { data: team } : { data: [] })
+    wrap(<ProjectTeamDialog projectId={2} open onClose={vi.fn()} />)
+    const mgr = await screen.findByTestId('team-manager-21')
+    expect(mgr.textContent).toContain('Chris D')
+    expect(mgr.className).toContain('yellow')
+    expect(screen.getByTestId('team-head-21-31').className).toContain('indigo')
+    expect(screen.queryByTestId('team-member-21-30')).toBeNull()
+    expect(screen.getByTestId('team-member-21-31')).toBeTruthy()
+    // the only member of a department stays a pick even as its manager
+    expect(screen.getByTestId('team-member-28-30')).toBeTruthy()
+  })
+
   it('the dialog title names the project', async () => {
     wrap(<ProjectTeamDialog projectId={2} projectLabel="1994 Brose Seat Trim" open onClose={vi.fn()} />)
     expect(await screen.findByText('Project team: 1994 Brose Seat Trim')).toBeTruthy()

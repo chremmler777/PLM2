@@ -122,9 +122,16 @@ class ProjectTeamService:
             def missing(uid):
                 return ({"id": uid, "name": stale_names.get(uid, f"user {uid}")}
                         if uid is not None and uid not in names else None)
+            # 2026-10-26 (Christoph): the department's head (blue) and its
+            # manager (yellow, escalations) show in the team view; the manager
+            # need not be on the project team.
+            manager = (await session.get(User, d.manager_id)) if d.manager_id else None
             out.append({
                 "department_id": d.id,
                 "department_name": d.name,
+                "head_id": d.head_id,
+                "manager": ({"id": manager.id, "name": _name(manager), "email": manager.email}
+                            if manager is not None and manager.is_active else None),
                 "responsible_missing": missing(row.user_id) if row else None,
                 "backup_missing": missing(row.backup_user_id) if row else None,
                 "responsible": ({"id": main_id, "name": names[main_id]}
