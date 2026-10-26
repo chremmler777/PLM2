@@ -69,14 +69,14 @@ const fromServer = (team: TeamRow[]): Draft =>
   Object.fromEntries(team.map((r) => [r.department_id,
     { responsible: r.responsible?.id ?? null, backup: r.backup?.id ?? null }]));
 
-export default function ProjectTeamDialog({ projectId, open, onClose }: {
-  projectId: number; open: boolean; onClose(): void;
+export default function ProjectTeamDialog({ projectId, projectLabel, open, onClose }: {
+  projectId: number; projectLabel?: string; open: boolean; onClose(): void;
 }) {
   if (!open) return null;
-  return <TeamDialogBody projectId={projectId} onClose={onClose} />;
+  return <TeamDialogBody projectId={projectId} projectLabel={projectLabel} onClose={onClose} />;
 }
 
-function TeamDialogBody({ projectId, onClose }: { projectId: number; onClose(): void }) {
+function TeamDialogBody({ projectId, projectLabel, onClose }: { projectId: number; projectLabel?: string; onClose(): void }) {
   const qc = useQueryClient();
   const perms = useChangePermissions();
   const canManage = perms?.can_manage_team === true;
@@ -255,7 +255,7 @@ function TeamDialogBody({ projectId, onClose }: { projectId: number; onClose(): 
     <>
       <Dialog open onClose={requestClose} size="xl" data-testid="project-team-dialog" busy={save.isPending}
         closeOnBackdrop={!dirty}
-        title={t('team.title')} description={t(canManage ? 'team.dialogHint' : 'team.dialogHintRead')}
+        title={projectLabel ? `${t('team.title')}: ${projectLabel}` : t('team.title')} description={t(canManage ? 'team.dialogHint' : 'team.dialogHintRead')}
         footer={canManage ? (
           <>
             {dirty && <span data-testid="team-unsaved" className="mr-auto text-xs text-amber-300">

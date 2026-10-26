@@ -97,6 +97,11 @@ describe('ProjectTeamDialog', () => {
       slots: [{ department_id: 9, responsible_id: 11, backup_id: 13 }] }))
   })
 
+  it('the dialog title names the project', async () => {
+    wrap(<ProjectTeamDialog projectId={2} projectLabel="1994 Brose Seat Trim" open onClose={vi.fn()} />)
+    expect(await screen.findByText('Project team: 1994 Brose Seat Trim')).toBeTruthy()
+  })
+
   it('people already placed as Responsible or Backup are greyed out in the list and not draggable from it', async () => {
     wrap(<ProjectTeamDialog projectId={2} open onClose={vi.fn()} />)
     await screen.findByTestId('team-row-9')

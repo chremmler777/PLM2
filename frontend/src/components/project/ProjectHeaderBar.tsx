@@ -83,7 +83,7 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
           </span>
         )}
       </button>
-      <ProjectTeamDialog projectId={project.id} open={teamOpen} onClose={() => setTeamOpen(false)} />
+      <ProjectTeamDialog projectId={project.id} projectLabel={`${project.code} ${project.name}`} open={teamOpen} onClose={() => setTeamOpen(false)} />
       <div className="relative" ref={menuRef}>
         <button
           aria-label="Project actions"
