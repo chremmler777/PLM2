@@ -572,6 +572,30 @@ async def my_escalations(
     return await ChangeService.lead_escalations(db, current_user.id, current_user)
 
 
+@router.get("/my-department-escalations")
+async def my_department_escalations(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """My Tasks' "Late in my departments" (migration 149, Christoph
+    2026-10-26): for a department manager, every escalated item of the
+    departments they manage across all open changes (overdue_digest
+    late_in_departments, the digest's own late items). Read-only: managing
+    grants no write rights. The real user's managed departments, also
+    while an admin acts as a department; an admin sees every
+    organization. {departments: [] } = not a manager, the group hides."""
+    from app.services.overdue_digest import late_in_departments
+    depts = (await db.execute(select(Department.id, Department.name).where(
+        Department.manager_id == current_user.id, Department.is_active.is_(True))
+        .order_by(Department.sort_order, Department.name))).all()
+    if not depts:
+        return {"departments": [], "items": []}
+    items = await late_in_departments(
+        db, [d.id for d in depts],
+        viewer=None if current_user.is_real_admin else current_user)
+    return {"departments": [{"id": d.id, "name": d.name} for d in depts],
+            "items": items}
+
+
 @router.get("/routing-standards")
 async def list_routing_standards(db: AsyncSession = Depends(get_db),
                                  current_user: User = Depends(get_current_user)):

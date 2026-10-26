@@ -29,6 +29,16 @@ class Department(Base):
         Boolean, default=False, server_default=sa_false())
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Migration 149 (Christoph 2026-10-26): the department's one optional
+    # manager, for the escalation overview. Need not be a member; one user
+    # may manage several departments. Routes the overdue digest and My
+    # Tasks' "Late in my departments" group; grants NO write rights
+    # (writing stays membership + gates, app/dependencies/auth.py).
+    manager_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # lazy="raise": departments load everywhere; read the manager with an
+    # explicit selectinload (the departments list does) or by manager_id.
+    manager: Mapped["User | None"] = relationship(foreign_keys=[manager_id], lazy="raise")
 
 
 class UserDepartment(Base):

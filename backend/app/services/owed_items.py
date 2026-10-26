@@ -38,7 +38,7 @@ async def owed_items(session: AsyncSession, changes: list,
                      now: Optional[datetime] = None, *,
                      with_owners: bool = True) -> list[dict]:
     """Every watched computed item on these changes: {change, kind, key,
-    label, owner, owner_ids, due}. `owner` names who owes it in words,
+    label, owner, owner_ids, due, department_id}. `owner` names who owes it in words,
     `owner_ids` the people reminded on the due date (read only
     with_owners: the lead's group and the digest need the words only)."""
     if not cm_switches.on("ASSESSMENT_V2") or not changes:
@@ -60,14 +60,17 @@ async def owed_items(session: AsyncSession, changes: list,
     out: list[dict] = []
 
     async def add(c, kind: str, key: str, label: str, owner: str, owners,
-                  own: Optional[datetime], until: Optional[datetime] = None) -> None:
+                  own: Optional[datetime], until: Optional[datetime] = None,
+                  department_id: Optional[int] = None) -> None:
         """owners: a coroutine function for the owner ids, run only
         with_owners. until: a supplier wait's expected-by (spec §0: it
-        pauses the late clock, the item is due then at the earliest)."""
+        pauses the late clock, the item is due then at the earliest).
+        department_id: the department that owes it (migration 149: routes
+        it to that department's manager); None = no one department."""
         start = due_rules.start_of(kind, own, entered.get(c.id), c.created_at, now)
         due = due_rules.task_due(start, c, kind)
         out.append({"change": c, "kind": kind, "key": key, "label": label,
-                    "owner": owner,
+                    "owner": owner, "department_id": department_id,
                     "owner_ids": sorted(set(await owners())) if with_owners else [],
                     "due": max(due, until) if until is not None else due})
 
@@ -106,7 +109,7 @@ async def owed_items(session: AsyncSession, changes: list,
                           session, c, [did]),
                       max(submitted, default=None),
                       datetime.combine(wait.expected_by, datetime.min.time())
-                      if wait else None)
+                      if wait else None, department_id=did)
 
         # sign-offs where the gate is live (the sign_off rows' rule)
         signable = (c.customer_relevant and not mp.is_mother_plant(c)
@@ -137,7 +140,8 @@ async def owed_items(session: AsyncSession, changes: list,
                           default=None)
                 await add(c, "sign_off", f"chg:{c.id}:sign:{side}:{version}",
                           f"{'PM' if side == 'pm' else 'Quality'} sign-off",
-                          "Project Management" if side == "pm" else "Quality", who, own)
+                          "Project Management" if side == "pm" else "Quality", who, own,
+                          department_id=depts.get(dept))
 
         # the internal approval (the internal_approval rows' rule)
         if (not c.customer_relevant and c.status in ("costing", "quoted")
@@ -157,7 +161,9 @@ async def owed_items(session: AsyncSession, changes: list,
                       # internal_approver_ids' rule on the list read once
                       (lambda mine=mine, c=c: _ids(mine)) if mine
                       else (lambda c=c: _pm_ids(c)),
-                      ChangeService._last_costing_finalized(c))
+                      ChangeService._last_costing_finalized(c),
+                      # the approval is Project Management's (its fallback)
+                      department_id=depts.get("Project Manager"))
 
         # overrides waiting on their deciders
         for dev in c.transition_deviations:

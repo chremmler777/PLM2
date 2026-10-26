@@ -37,11 +37,21 @@ async def list_departments(
     """The departments/roles to offer. Active ones only by default: a retired
     role (migration 043) is no pick for a new routing, meeting or task.
     ``?include_retired=1`` lists them too, for the designer and history."""
-    q = select(Department).order_by(Department.sort_order, Department.name)
+    q = (select(Department).options(selectinload(Department.manager))
+         .order_by(Department.sort_order, Department.name))
     if not include_retired:
         q = q.where(Department.is_active.is_(True))
     result = await db.execute(q)
-    return result.scalars().all()
+    return [_department_out(d) for d in result.scalars().all()]
+
+
+def _department_out(d: Department) -> DepartmentResponse:
+    """A department with its manager's name (manager loaded)."""
+    m = d.manager
+    return DepartmentResponse(
+        id=d.id, name=d.name, flow_type=d.flow_type, is_active=d.is_active,
+        sort_order=d.sort_order, manager_id=d.manager_id,
+        manager_name=(m.full_name or m.username) if m is not None else None)
 
 
 @router.get("", response_model=list[WfTemplateListResponse])

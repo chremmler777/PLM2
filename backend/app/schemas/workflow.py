@@ -12,6 +12,10 @@ class DepartmentResponse(BaseModel):
     flow_type: str  # action | info
     is_active: bool
     sort_order: int
+    # Migration 149: the department's one optional manager (escalation
+    # overview); manager_name is its display name.
+    manager_id: int | None = None
+    manager_name: str | None = None
 
     class Config:
         from_attributes = True

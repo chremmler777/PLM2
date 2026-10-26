@@ -35,6 +35,7 @@ from app.api.v1.tool_revisions import router as tool_revisions_router
 # Module: workflows (RASIC templates and instances)
 from app.api.v1.workflows.workflow_templates import router as workflow_templates_router
 from app.api.v1.workflows.workflow_instances import router as workflow_instances_router
+from app.api.v1.workflows.departments_admin import router as departments_admin_router
 
 # Module: overview (dashboard, search, notifications)
 from app.api.v1.overview.dashboard import router as dashboard_router
@@ -126,6 +127,7 @@ api_router.include_router(project_team_router)
 api_router.include_router(mail_recipients_router)
 api_router.include_router(mail_notifications_router)
 api_router.include_router(workflow_templates_router)
+api_router.include_router(departments_admin_router)
 api_router.include_router(workflow_instances_router)
 api_router.include_router(catalog_parts_router)
 api_router.include_router(paints_router)
