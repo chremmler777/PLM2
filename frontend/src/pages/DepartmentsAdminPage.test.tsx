@@ -12,16 +12,20 @@ vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth.current }))
 const person = (id: number, name: string, is_active = true) =>
   ({ id, name, username: name.toLowerCase(), email: `${name.toLowerCase()}@ktx.test`, is_active })
 const DEPTS = [
-  { id: 1, name: 'Sales', is_active: true, sort_order: 1, hub_role: 'plm2_Sales', manager_id: 10,
-    manager_name: 'Karl', manager_active: true, warnings: [],
+  { id: 1, name: 'Sales', is_active: true, sort_order: 1, hub_role: 'plm2_Sales',
+    head_id: 11, head_name: 'Jubei', head_email: 'jubei@ktx.test', head_active: true,
+    manager_id: 10, manager_name: 'Karl', manager_email: 'karl@ktx.test', manager_active: true,
+    warnings: [{ code: 'member_inactive', level: 'amber', text: 'Member Gone is inactive' }],
     members: [person(10, 'Karl'), person(11, 'Jubei'), person(12, 'Roman'), person(13, 'Gone', false)] },
-  { id: 2, name: 'Quality', is_active: true, sort_order: 2, hub_role: null, manager_id: null,
-    manager_name: null, manager_active: null, members: [],
+  { id: 2, name: 'Quality', is_active: true, sort_order: 2, hub_role: null,
+    head_id: null, head_name: null, head_email: null, head_active: null,
+    manager_id: null, manager_name: null, manager_email: null, manager_active: null, members: [],
     warnings: [{ code: 'no_hub_role', level: 'red', text: 'No AdminPanel role mapped: nobody can become a member' },
       { code: 'no_members', level: 'red', text: 'No members' },
       { code: 'no_manager', level: 'amber', text: 'No manager defined' }] },
-  { id: 3, name: 'Scheduling', is_active: false, sort_order: 9, hub_role: null, manager_id: null,
-    manager_name: null, manager_active: null, members: [], warnings: [] },
+  { id: 3, name: 'Scheduling', is_active: false, sort_order: 9, hub_role: null,
+    head_id: null, head_name: null, head_email: null, head_active: null,
+    manager_id: null, manager_name: null, manager_email: null, manager_active: null, members: [], warnings: [] },
 ]
 
 const wrap = () => render(
@@ -45,12 +49,78 @@ describe('DepartmentsAdminPage', () => {
     wrap()
     expect((await screen.findByTestId('dept-manager-ro-1')).textContent).toContain('Karl')
     expect(screen.queryByTestId('dept-manager-1')).toBeNull()
+    expect(screen.queryByTestId('dept-head-1')).toBeNull()
+    expect(screen.queryByTestId('dept-admin-1')).toBeNull()
     expect(screen.queryByTestId('dept-retire-1')).toBeNull()
+    expect(screen.queryByRole('combobox')).toBeNull()
+    // the head banner reads the same for everyone
+    expect(screen.getByTestId('dept-head-banner-1').textContent).toContain('Jubei')
     const warn = screen.getByTestId('dept-warnings-2')
     expect([...warn.querySelectorAll('li')].map((l) => l.dataset.code)).toEqual(['no_hub_role', 'no_members', 'no_manager'])
   })
 
-  it('members are read-only chips with name and mailto email; no add or remove', async () => {
+  it('the head is the card headline: name, mailto email, Head label; none named is calm, not a warning', async () => {
+    wrap()
+    const banner = await screen.findByTestId('dept-head-banner-1')
+    expect(within(banner).getByText('Jubei')).toBeTruthy()
+    expect(within(banner).getByText('Head')).toBeTruthy()
+    expect(within(banner).getByText('jubei@ktx.test').getAttribute('href')).toBe('mailto:jubei@ktx.test')
+    // the head sits above the manager line in the card
+    const card = screen.getByTestId('dept-card-1')
+    const mgr = within(card).getByTestId('dept-manager-ro-1')
+    expect(banner.compareDocumentPosition(mgr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(mgr.textContent).toContain('Karl')
+    expect(within(mgr).getByText('karl@ktx.test').getAttribute('href')).toBe('mailto:karl@ktx.test')
+    // badges in the member list
+    expect(within(screen.getByTestId('dept-member-1-11')).getByText('Head')).toBeTruthy()
+    expect(within(screen.getByTestId('dept-member-1-10')).getByText('Manager')).toBeTruthy()
+    expect(screen.getByTestId('dept-count-1').textContent).toBe('4 members')
+    expect(screen.getByTestId('dept-head-none-2').textContent).toBe('No head named')
+    expect(screen.queryByTestId('dept-head-banner-2')).toBeNull()
+  })
+
+  it('warnings: amber chips, red only for the serious ones; the card border turns red', async () => {
+    wrap()
+    const amber = await screen.findByTestId('dept-warnings-1')
+    expect([...amber.querySelectorAll('li')].map((l) => l.dataset.level)).toEqual(['amber'])
+    expect(screen.getByTestId('dept-card-1').className).not.toContain('border-red')
+    const red = screen.getByTestId('dept-warnings-2')
+    expect([...red.querySelectorAll('li')].map((l) => l.dataset.level)).toEqual(['red', 'red', 'amber'])
+    expect(screen.getByTestId('dept-card-2').className).toContain('border-red')
+  })
+
+  it('a head who left is shown flagged until replaced', async () => {
+    const left = { ...DEPTS[0], head_id: 99, head_name: 'Former', head_email: 'former@ktx.test',
+      warnings: [{ code: 'head_not_member', level: 'red', text: 'Head Former is no longer a member' }] }
+    clientMocks.get.mockImplementation(async () => ({ data: [left] }))
+    wrap()
+    expect((await screen.findByTestId('dept-head-banner-1')).textContent).toContain('no longer a member')
+    const sel = screen.getByTestId('dept-head-1') as HTMLSelectElement
+    expect(sel.value).toBe('99')
+    expect([...sel.options].map((o) => o.text)).toContain('Former (no longer a member)')
+  })
+
+  it('the head select offers only active members; set and clear call the head API', async () => {
+    wrap()
+    const sel = await screen.findByTestId('dept-head-1') as HTMLSelectElement
+    expect(sel.value).toBe('11')
+    expect([...sel.options].map((o) => o.text)).toEqual(['No head named', 'Karl', 'Jubei', 'Roman'])
+    fireEvent.change(sel, { target: { value: '12' } })
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/1/head', { user_id: 12 }))
+    fireEvent.click(screen.getByTestId('dept-head-clear-1'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/1/head', { user_id: null }))
+  })
+
+  it('shows an error with retry when the overview fails, and an empty state', async () => {
+    clientMocks.get.mockImplementationOnce(async () => { throw new Error('boom') })
+    wrap()
+    expect((await screen.findByTestId('dept-error')).textContent).toContain('Could not load')
+    clientMocks.get.mockImplementation(async () => ({ data: [DEPTS[2]] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByTestId('dept-empty')).toBeTruthy()
+  })
+
+  it('members are read-only rows with name and mailto email; no add or remove', async () => {
     wrap()
     const chip = await screen.findByTestId('dept-member-1-11')
     expect(within(chip).getByText('jubei@ktx.test').getAttribute('href')).toBe('mailto:jubei@ktx.test')

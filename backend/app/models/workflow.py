@@ -41,6 +41,12 @@ class Department(Base):
     # login syncs user_departments to it (app/services/hub_departments.py).
     # NULL = no hub role mapped.
     hub_role: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    # Migration 151 (Christoph 2026-10-26): the department's one optional
+    # head, the senior member who leads it day to day (Russ: Manufacturing
+    # Engineer). An active member when named; shown on the Departments
+    # page, grants nothing. Separate from the manager (escalations).
+    head_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     # lazy="raise": departments load everywhere; read the manager with an
     # explicit selectinload (the departments list does) or by manager_id.
     manager: Mapped["User | None"] = relationship(foreign_keys=[manager_id], lazy="raise")

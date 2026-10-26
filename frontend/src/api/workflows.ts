@@ -106,6 +106,9 @@ export const departmentsAdminApi = {
   /** Read by everyone: hub role, manager, members (from AdminPanel), warnings. */
   list: async (): Promise<DepartmentAdmin[]> =>
     (await client.get('/v1/departments/overview')).data,
+  /** Admin only; the head is an active member of the department. */
+  setHead: async (departmentId: number, userId: number | null): Promise<DepartmentAdmin> =>
+    (await client.put(`/v1/departments/${departmentId}/head`, { user_id: userId })).data,
   /** Admin only; the manager is an active member of the department. */
   setManager: async (departmentId: number, userId: number | null): Promise<DepartmentAdmin> =>
     (await client.put(`/v1/departments/${departmentId}/manager`, { user_id: userId })).data,

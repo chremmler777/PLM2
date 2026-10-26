@@ -2,26 +2,32 @@
  * Departments page (Christoph 2026-10-26). Read by everyone; only a real
  * admin sees edit controls (the API refuses others with 403).
  *
+ * One card per active department, top to bottom: the name with its member
+ * count, warnings as chips, the HEAD banner (migration 151: the senior
+ * member who leads the department day to day, "give heads like Russ or
+ * Holmes a banner or a headline"), the manager line (migration 149: where
+ * escalations go, the overdue digest and My Tasks' "Late in my
+ * departments"), then the members with head / manager badges.
+ *
  * Membership comes from AdminPanel (migration 150: the department's hub
- * role on a person's token), so members are listed read-only with name and
- * email. The admin sets the one optional manager (migration 149, for the
- * escalation overview: the overdue digest and My Tasks' "Late in my
- * departments") from the department's own members, and activates or
- * retires a department. Warnings for everyone: no manager, manager inactive
- * or no longer a member, an inactive member, no members, no hub role.
+ * role on a person's token), so members are read-only. The admin names the
+ * head and the manager from the department's own active members and
+ * activates or retires a department; those controls sit in the card's
+ * footer so admins and everyone else read the same card. Warnings for
+ * everyone: head or manager inactive / no longer a member (red), no
+ * manager (amber), an inactive member (amber), no members, no hub role (red).
+ * No head is no warning.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, Building2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, ArrowUpRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { departmentsAdminApi } from '../api/workflows';
-import type { DepartmentAdmin } from '../types/workflow';
+import type { DepartmentAdmin, DepartmentPerson } from '../types/workflow';
 import { toastError } from '../lib/apiError';
 import { btnSm } from '../components/common/buttonStyles';
-import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import ConfirmDialog from '../components/common/ConfirmDialog';
-import PersonDetail from '../components/common/PersonDetail';
 import { t } from '../i18n/cmLabels';
 
 const KEY = ['departments', 'overview'];
@@ -30,7 +36,9 @@ export default function DepartmentsAdminPage() {
   const { role } = useAuth();
   const isAdmin = role === 'admin';
   const qc = useQueryClient();
-  const { data: depts, isLoading } = useQuery({ queryKey: KEY, queryFn: departmentsAdminApi.list });
+  const { data: depts, isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: KEY, queryFn: departmentsAdminApi.list,
+  });
   const [showRetired, setShowRetired] = useState(false);
   const [retire, setRetire] = useState<DepartmentAdmin | null>(null);
 
@@ -40,9 +48,9 @@ export default function DepartmentsAdminPage() {
     qc.invalidateQueries({ queryKey: ['workflow', 'departments'] });
   };
   const onError = (e: unknown) => toastError(e, t('deptAdmin.saveFailed'));
-  const manager = useMutation({
-    mutationFn: ({ id, userId }: { id: number; userId: number | null }) =>
-      departmentsAdminApi.setManager(id, userId),
+  const person = useMutation({
+    mutationFn: ({ id, field, userId }: { id: number; field: 'head' | 'manager'; userId: number | null }) =>
+      (field === 'head' ? departmentsAdminApi.setHead(id, userId) : departmentsAdminApi.setManager(id, userId)),
     onSuccess: (row) => { onSaved(row); toast.success(t('deptAdmin.saved')); },
     onError,
   });
@@ -55,36 +63,69 @@ export default function DepartmentsAdminPage() {
     },
     onError,
   });
+  const busy = person.isPending || active.isPending;
 
   const live = (depts ?? []).filter((d) => d.is_active);
   const retired = (depts ?? []).filter((d) => !d.is_active);
+  const summary = t('deptAdmin.summary')
+    .replace('{n}', String(live.length))
+    .replace('{h}', String(live.filter((d) => d.head_id != null).length))
+    .replace('{w}', String(live.filter((d) => d.warnings.length > 0).length));
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
-      <div>
+    <div className="mx-auto max-w-screen-2xl space-y-8 px-4 py-6 sm:px-6">
+      <header className="max-w-3xl">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-100">{t('deptAdmin.title')}</h1>
-        <p className="text-slate-400 text-sm mt-1">{t('deptAdmin.subtitle')}</p>
-      </div>
-      {isLoading ? <LoadingSkeleton count={4} /> : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">{t('deptAdmin.subtitle')}</p>
+        {depts && live.length > 0 && (
+          <p data-testid="dept-summary" className="mt-3 text-sm text-slate-300 tabular-nums">{summary}</p>
+        )}
+      </header>
+
+      {isLoading ? (
+        <div data-testid="dept-loading" aria-busy="true" className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-72 motion-safe:animate-pulse rounded-xl border border-slate-700/60 bg-slate-800/60" />
+          ))}
+        </div>
+      ) : isError ? (
+        <div role="alert" data-testid="dept-error"
+          className="flex flex-wrap items-center gap-3 rounded-xl border border-red-800/70 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+          <AlertTriangle aria-hidden="true" size={16} className="flex-shrink-0" />
+          <span className="mr-auto">{t('deptAdmin.loadFailed')}</span>
+          <button type="button" className={btnSm.secondary} disabled={isFetching} onClick={() => refetch()}>
+            {t('deptAdmin.retry')}
+          </button>
+        </div>
+      ) : live.length === 0 ? (
+        <p data-testid="dept-empty" className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-400">
+          {t('deptAdmin.empty')}
+        </p>
+      ) : (
+        <div className="grid items-start gap-5 lg:grid-cols-2 2xl:grid-cols-3">
           {live.map((d) => (
-            <DepartmentCard key={d.id} dept={d} isAdmin={isAdmin} busy={manager.isPending || active.isPending}
-              onManager={(userId) => manager.mutate({ id: d.id, userId })}
+            <DepartmentCard key={d.id} dept={d} isAdmin={isAdmin} busy={busy}
+              onPerson={(field, userId) => person.mutate({ id: d.id, field, userId })}
               onRetire={() => setRetire(d)} />
           ))}
         </div>
       )}
+
       {retired.length > 0 && (
-        <section data-testid="retired-departments">
-          <button type="button" aria-expanded={showRetired} onClick={() => setShowRetired((v) => !v)}
-            className="text-sm font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200">
-            {showRetired ? '▾' : '▸'} {t('deptAdmin.retired').replace('{n}', String(retired.length))}
+        <section data-testid="retired-departments" className="border-t border-slate-800 pt-6">
+          <button type="button" aria-expanded={showRetired} aria-controls="retired-list"
+            onClick={() => setShowRetired((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
+            {showRetired
+              ? <ChevronDown aria-hidden="true" size={16} />
+              : <ChevronRight aria-hidden="true" size={16} />}
+            {t('deptAdmin.retired').replace('{n}', String(retired.length))}
           </button>
           {showRetired && (
-            <ul className="mt-2 divide-y divide-slate-700 rounded-lg border border-slate-700 bg-slate-800">
+            <ul id="retired-list" className="mt-3 max-w-3xl divide-y divide-slate-700/70 rounded-xl border border-slate-700 bg-slate-800/60">
               {retired.map((d) => (
-                <li key={d.id} data-testid={`retired-${d.id}`} className="flex items-center justify-between gap-3 px-4 py-2">
-                  <span className="text-slate-300">{d.name}</span>
+                <li key={d.id} data-testid={`retired-${d.id}`} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="text-sm text-slate-300">{d.name}</span>
                   {isAdmin && (
                     <button type="button" className={btnSm.secondary} disabled={active.isPending}
                       onClick={() => active.mutate({ id: d.id, on: true })}>
@@ -97,6 +138,7 @@ export default function DepartmentsAdminPage() {
           )}
         </section>
       )}
+
       <ConfirmDialog open={retire !== null} danger data-testid="dept-retire-confirm"
         title={t('deptAdmin.retireTitle').replace('{x}', retire?.name ?? '')}
         body={t('deptAdmin.retireBody')}
@@ -107,102 +149,213 @@ export default function DepartmentsAdminPage() {
   );
 }
 
-function DepartmentCard({ dept, isAdmin, busy, onManager, onRetire }: {
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  return ((parts[0][0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+function MailLink({ email, className = '' }: { email: string | null | undefined; className?: string }) {
+  if (!email) return null;
+  return (
+    <a href={`mailto:${email}`} translate="no"
+      className={`block truncate text-sky-400 underline-offset-2 hover:text-sky-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded-sm ${className}`}>
+      {email}
+    </a>
+  );
+}
+
+function RoleBadge({ kind }: { kind: 'head' | 'manager' }) {
+  const look = kind === 'head'
+    ? 'bg-indigo-500/15 text-indigo-200 ring-indigo-400/30'
+    : 'bg-sky-500/10 text-sky-200 ring-sky-500/30';
+  return (
+    <span className={`rounded-md px-1.5 py-0.5 text-xs font-medium ring-1 ${look}`}>
+      {t(kind === 'head' ? 'deptAdmin.head' : 'deptAdmin.manager')}
+    </span>
+  );
+}
+
+function DepartmentCard({ dept, isAdmin, busy, onPerson, onRetire }: {
   dept: DepartmentAdmin;
   isAdmin: boolean;
   busy: boolean;
-  onManager(userId: number | null): void;
+  onPerson(field: 'head' | 'manager', userId: number | null): void;
   onRetire(): void;
 }) {
-  const selectId = `dept-manager-${dept.id}`;
-  const candidates = dept.members.filter((m) => m.is_active);
   const red = dept.warnings.some((w) => w.level === 'red');
+  const memberIds = new Set(dept.members.map((m) => m.id));
+  const headGone = dept.head_id != null && (dept.head_active === false || !memberIds.has(dept.head_id));
+  const n = dept.members.length;
+  const titleId = `dept-title-${dept.id}`;
   return (
-    <section data-testid={`dept-card-${dept.id}`}
-      className={`rounded-lg border bg-slate-800 p-4 space-y-4 ${red ? 'border-red-800' : 'border-slate-700'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-100">
-            <Building2 aria-hidden="true" size={16} className="text-slate-400" />{dept.name}
-          </h2>
-          <p className="text-xs text-slate-500">{dept.hub_role ?? t('deptAdmin.noHubRole')}</p>
+    <section data-testid={`dept-card-${dept.id}`} aria-labelledby={titleId}
+      className={`flex flex-col gap-5 rounded-xl border bg-slate-800 p-5 ${red ? 'border-red-800/80' : 'border-slate-700'}`}>
+      <div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 id={titleId} className="text-lg font-semibold tracking-tight text-slate-100 [text-wrap:balance]">{dept.name}</h2>
+          <span data-testid={`dept-count-${dept.id}`} className="text-sm text-slate-400 tabular-nums">
+            {n === 1 ? t('deptAdmin.memberCountOne') : t('deptAdmin.memberCount').replace('{n}', String(n))}
+          </span>
         </div>
-        {isAdmin && (
-          <button type="button" className={btnSm.ghost} disabled={busy} onClick={onRetire}
-            data-testid={`dept-retire-${dept.id}`}>
-            {t('deptAdmin.retire')}
-          </button>
+        {dept.hub_role == null && (
+          <p className="mt-0.5 text-xs text-slate-500">{t('deptAdmin.noHubRole')}</p>
         )}
-      </div>
-
-      {dept.warnings.length > 0 && (
-        <ul data-testid={`dept-warnings-${dept.id}`} className="space-y-1">
-          {dept.warnings.map((w) => (
-            <li key={w.code + w.text} data-code={w.code}
-              className={`flex items-start gap-1.5 text-xs ${w.level === 'red' ? 'text-red-300' : 'text-amber-300'}`}>
-              <AlertTriangle aria-hidden="true" size={13} className="mt-px flex-shrink-0" />{w.text}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div>
-        {isAdmin ? (
-          <>
-            <label htmlFor={selectId} className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">
-              {t('deptAdmin.manager')}
-            </label>
-            <div className="flex items-center gap-2">
-              <select id={selectId} data-testid={selectId} disabled={busy}
-                value={dept.manager_id ?? ''}
-                onChange={(e) => onManager(e.target.value ? Number(e.target.value) : null)}
-                className="h-8 min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none">
-                <option value="">{t('deptAdmin.noManager')}</option>
-                {/* a manager who left stays visible (and warned) until replaced */}
-                {dept.manager_id != null && !candidates.some((m) => m.id === dept.manager_id) && (
-                  <option value={dept.manager_id}>{dept.manager_name} ({t('deptAdmin.notMemberAny')})</option>
-                )}
-                {candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-              {dept.manager_id != null && (
-                <button type="button" data-testid={`dept-manager-clear-${dept.id}`} disabled={busy}
-                  onClick={() => onManager(null)} className={btnSm.ghost}>
-                  {t('deptAdmin.clear')}
-                </button>
-              )}
-            </div>
-          </>
-        ) : (
-          <p data-testid={`dept-manager-ro-${dept.id}`} className="text-sm">
-            <span className="block text-[11px] uppercase tracking-wide text-slate-400">{t('deptAdmin.manager')}</span>
-            <span className="text-slate-100">{dept.manager_name ?? <span className="text-slate-500">{t('deptAdmin.noManager')}</span>}</span>
-          </p>
-        )}
-      </div>
-
-      <div>
-        <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">
-          {t('deptAdmin.members')} ({dept.members.length})
-          <span className="ml-2 normal-case tracking-normal text-slate-500">{t('deptAdmin.fromHub')}</span>
-        </p>
-        {dept.members.length === 0 ? (
-          <p className="text-sm text-slate-500">{t('deptAdmin.noMembers')}</p>
-        ) : (
-          <ul className="flex flex-wrap gap-2">
-            {dept.members.map((m) => (
-              <li key={m.id} className="max-w-full">
-                <PersonDetail data-testid={`dept-member-${dept.id}-${m.id}`} name={m.name} email={m.email}
-                  inactive={!m.is_active}
-                  badge={m.id === dept.manager_id ? (
-                    <span className="rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ring-1 bg-sky-900/60 text-sky-200 ring-sky-700">
-                      {t('deptAdmin.manager')}
-                    </span>
-                  ) : undefined} />
+        {dept.warnings.length > 0 && (
+          <ul data-testid={`dept-warnings-${dept.id}`} className="mt-3 flex flex-wrap gap-1.5">
+            {dept.warnings.map((w) => (
+              <li key={w.code + w.text} data-code={w.code} data-level={w.level}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ring-1 ${w.level === 'red'
+                  ? 'bg-red-500/10 text-red-200 ring-red-500/40'
+                  : 'bg-amber-500/10 text-amber-200 ring-amber-500/30'}`}>
+                <AlertTriangle aria-hidden="true" size={13} className="flex-shrink-0" />{w.text}
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {/* The head: the department's headline. */}
+      {dept.head_id != null ? (
+        <div data-testid={`dept-head-banner-${dept.id}`}
+          className={`flex items-center gap-4 rounded-lg bg-indigo-500/10 px-4 py-3.5 ring-1 ${headGone ? 'ring-red-500/40' : 'ring-indigo-400/25'}`}>
+          <span aria-hidden="true"
+            className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-indigo-500/25 text-sm font-semibold text-indigo-100">
+            {initials(dept.head_name ?? '')}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate text-lg font-semibold text-slate-50">{dept.head_name}</span>
+              <span className="rounded-md bg-indigo-400/20 px-1.5 py-0.5 text-xs font-medium text-indigo-100">
+                {t('deptAdmin.head')}
+              </span>
+              {headGone && (
+                <span className="text-xs text-red-300">
+                  {dept.head_active === false ? t('deptAdmin.inactive') : t('deptAdmin.headNotMember')}
+                </span>
+              )}
+            </p>
+            <MailLink email={dept.head_email} className="mt-0.5 text-sm" />
+          </div>
+        </div>
+      ) : (
+        <p data-testid={`dept-head-none-${dept.id}`}
+          className="rounded-lg border border-dashed border-slate-700 px-4 py-3 text-sm text-slate-500">
+          {t('deptAdmin.noHead')}
+        </p>
+      )}
+
+      {/* The manager: where escalations go. */}
+      <div data-testid={`dept-manager-ro-${dept.id}`} className="flex items-start gap-3 text-sm">
+        <ArrowUpRight aria-hidden="true" size={16} className="mt-0.5 flex-shrink-0 text-slate-500" />
+        <div className="min-w-0">
+          <span className="text-slate-400">{t('deptAdmin.managerLine')}</span>
+          {dept.manager_id != null ? (
+            <span className="block">
+              <span className="font-medium text-slate-100">{dept.manager_name}</span>
+              <MailLink email={dept.manager_email} className="text-xs" />
+            </span>
+          ) : (
+            <span className="block text-slate-500">{t('deptAdmin.noManager')}</span>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-2 flex items-baseline gap-2 text-sm font-medium text-slate-300">
+          {t('deptAdmin.members')}
+          <span className="text-xs font-normal text-slate-500">{t('deptAdmin.fromHub')}</span>
+        </p>
+        {n === 0 ? (
+          <p className="text-sm text-slate-500">{t('deptAdmin.noMembers')}</p>
+        ) : (
+          <ul className="divide-y divide-slate-700/60 rounded-lg border border-slate-700/70 bg-slate-900/40">
+            {dept.members.map((m) => (
+              <MemberRow key={m.id} deptId={dept.id} m={m}
+                head={m.id === dept.head_id} manager={m.id === dept.manager_id} />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {isAdmin && (
+        <div data-testid={`dept-admin-${dept.id}`}
+          className="mt-auto grid gap-3 border-t border-slate-700/70 pt-4 sm:grid-cols-2">
+          <PersonSelect deptId={dept.id} field="head" busy={busy}
+            label={t('deptAdmin.head')} none={t('deptAdmin.noHead')}
+            value={dept.head_id} valueName={dept.head_name} members={dept.members}
+            onChange={(id) => onPerson('head', id)} />
+          <PersonSelect deptId={dept.id} field="manager" busy={busy}
+            label={t('deptAdmin.manager')} none={t('deptAdmin.noManager')}
+            value={dept.manager_id} valueName={dept.manager_name} members={dept.members}
+            onChange={(id) => onPerson('manager', id)} />
+          <div className="sm:col-span-2 flex justify-end">
+            <button type="button" className={btnSm.ghost} disabled={busy} onClick={onRetire}
+              data-testid={`dept-retire-${dept.id}`}>
+              {t('deptAdmin.retire')}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
+  );
+}
+
+function MemberRow({ deptId, m, head, manager }: {
+  deptId: number; m: DepartmentPerson; head: boolean; manager: boolean;
+}) {
+  return (
+    <li data-testid={`dept-member-${deptId}-${m.id}`}
+      className={`flex items-center gap-3 px-3 py-2 ${m.is_active ? '' : 'opacity-60'}`}>
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-slate-100">{m.name}</span>
+        <MailLink email={m.email} className="text-xs" />
+      </div>
+      <span className="flex flex-shrink-0 items-center gap-1.5">
+        {!m.is_active && <span className="text-xs text-slate-400">{t('deptAdmin.inactive')}</span>}
+        {head && <RoleBadge kind="head" />}
+        {manager && <RoleBadge kind="manager" />}
+      </span>
+    </li>
+  );
+}
+
+function PersonSelect({ deptId, field, label, none, value, valueName, members, busy, onChange }: {
+  deptId: number;
+  field: 'head' | 'manager';
+  label: string;
+  none: string;
+  value: number | null;
+  valueName: string | null;
+  members: DepartmentPerson[];
+  busy: boolean;
+  onChange(userId: number | null): void;
+}) {
+  const id = `dept-${field}-${deptId}`;
+  const candidates = members.filter((m) => m.is_active);
+  return (
+    <div className="min-w-0">
+      <label htmlFor={id} className="mb-1 block text-xs font-medium text-slate-400">{label}</label>
+      <div className="flex items-center gap-1.5">
+        <select id={id} name={id} data-testid={id} disabled={busy}
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+          className="h-9 min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 disabled:opacity-60">
+          <option value="">{none}</option>
+          {/* a person who left stays visible (and warned) until replaced */}
+          {value != null && !candidates.some((m) => m.id === value) && (
+            <option value={value}>{valueName} ({t('deptAdmin.notMemberAny')})</option>
+          )}
+          {candidates.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        {value != null && (
+          <button type="button" data-testid={`dept-${field}-clear-${deptId}`} disabled={busy}
+            aria-label={`${t('deptAdmin.clear')} ${label}`}
+            onClick={() => onChange(null)} className={btnSm.ghost}>
+            {t('deptAdmin.clear')}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

@@ -7,8 +7,9 @@ page lists members read-only. Everyone logged in reads it; only a real
 admin writes (the authenticated row's role, as the per-user PUT /users/{id}
 /departments: acting as a department does not lock an admin out).
 
-- GET  /departments/overview          every department: hub role, manager,
-                                       members, warnings
+- GET  /departments/overview          every department: hub role, head,
+                                       manager, members, warnings
+- PUT  /departments/{id}/head         {"user_id": int | null}: name / clear
 - PUT  /departments/{id}/manager      {"user_id": int | null}: name / clear
 - POST /departments/{id}/activate     a retired department back in use
 - POST /departments/{id}/deactivate   retire it (grants nothing, its members
@@ -20,7 +21,14 @@ open); one person may manage several departments. Managing grants no
 write rights: it routes the overdue digest and My Tasks' "Late in my
 departments" group.
 
-Warnings (read by everyone): no manager; the manager inactive or no longer
+The head (migration 151, Christoph 2026-10-26) is the senior member who
+leads the department day to day (Russ: Manufacturing Engineer), shown as
+the card's headline; it routes nothing and grants nothing. It too must be
+an active member when named. No head is no warning (most departments have
+none).
+
+Warnings (read by everyone): the head inactive or no longer a member; no
+manager; the manager inactive or no longer
 a member; a member inactive; no members; no hub role mapped. Placeholder /
 local accounts are never listed as members (member_clause)."""
 from typing import Optional
@@ -42,7 +50,7 @@ _admin = require_role("admin")
 
 
 class ManagerSet(BaseModel):
-    """null clears the manager."""
+    """null clears the manager (or the head)."""
     user_id: Optional[int] = None
 
 
@@ -58,11 +66,25 @@ async def _department(db: AsyncSession, department_id: int) -> Department:
     return dept
 
 
-def _warnings(d: Department, manager: Optional[User], members: list[dict]) -> list[dict]:
+def _name(u: User) -> str:
+    return u.full_name or u.username
+
+
+def _warnings(d: Department, manager: Optional[User], head: Optional[User],
+              members: list[dict]) -> list[dict]:
     """[{code, level, text}] for the page; level amber or red."""
     out = []
     if not d.is_active:
         return out
+    member_ids = {m["id"] for m in members}
+    if d.head_id is not None:
+        if head is None or not head.is_active:
+            name = _name(head) if head else f"user {d.head_id}"
+            out.append({"code": "head_inactive", "level": "red",
+                        "text": f"Head {name} is inactive or deleted"})
+        elif d.head_id not in member_ids:
+            out.append({"code": "head_not_member", "level": "red",
+                        "text": f"Head {_name(head)} is no longer a member"})
     if d.hub_role is None:
         out.append({"code": "no_hub_role", "level": "red",
                     "text": "No AdminPanel role mapped: nobody can become a member"})
@@ -93,19 +115,25 @@ async def _out(db: AsyncSession, depts: list[Department]) -> list[dict]:
             .where(UserDepartment.department_id.in_(ids), member_clause())
             .order_by(User.full_name, User.username))).all():
         members[dept_id].append(_person(u))
-    mgr_ids = {d.manager_id for d in depts if d.manager_id is not None}
-    managers = {u.id: u for u in (await db.execute(
-        select(User).where(User.id.in_(mgr_ids)))).scalars().all()} if mgr_ids else {}
+    people_ids = ({d.manager_id for d in depts} | {d.head_id for d in depts}) - {None}
+    people = {u.id: u for u in (await db.execute(
+        select(User).where(User.id.in_(people_ids)))).scalars().all()} if people_ids else {}
     out = []
     for d in depts:
-        m = managers.get(d.manager_id)
+        m = people.get(d.manager_id)
+        h = people.get(d.head_id)
         out.append({"id": d.id, "name": d.name, "is_active": d.is_active,
                     "sort_order": d.sort_order, "hub_role": d.hub_role,
+                    "head_id": d.head_id,
+                    "head_name": _name(h) if h else None,
+                    "head_email": h.email if h else None,
+                    "head_active": h.is_active if h else None,
                     "manager_id": d.manager_id,
-                    "manager_name": (m.full_name or m.username) if m else None,
+                    "manager_name": _name(m) if m else None,
+                    "manager_email": m.email if m else None,
                     "manager_active": m.is_active if m else None,
                     "members": members[d.id],
-                    "warnings": _warnings(d, m, members[d.id])})
+                    "warnings": _warnings(d, m, h, members[d.id])})
     return out
 
 
@@ -119,29 +147,44 @@ async def departments_overview(current_user: User = Depends(get_current_user),
     return await _out(db, list(depts))
 
 
+async def _set_person(db: AsyncSession, dept: Department, field: str, label: str,
+                      user_id: Optional[int], actor: User) -> dict:
+    """Name or clear the head / manager (field head_id / manager_id): an
+    active member of the department, or None."""
+    if user_id is not None:
+        ok = (await db.execute(
+            select(User.id).join(UserDepartment, UserDepartment.user_id == User.id)
+            .where(User.id == user_id, User.is_active.is_(True),
+                   UserDepartment.department_id == dept.id, member_clause()))).first()
+        if ok is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The {label} must be an active member of {dept.name}")
+    old = getattr(dept, field)
+    setattr(dept, field, user_id)
+    await AuditService.record(
+        db, entity_type="department", entity_id=dept.id, action=f"{label}_set",
+        user_id=actor.id, old_values={field: old}, new_values={field: user_id})
+    await db.commit()
+    return (await _out(db, [dept]))[0]
+
+
+@router.put("/{department_id}/head")
+async def set_department_head(department_id: int, body: ManagerSet,
+                              current_user: User = Depends(_admin),
+                              db: AsyncSession = Depends(get_db)):
+    """Name or clear the department's head: an active member of it."""
+    return await _set_person(db, await _department(db, department_id), "head_id", "head",
+                             body.user_id, current_user)
+
+
 @router.put("/{department_id}/manager")
 async def set_department_manager(department_id: int, body: ManagerSet,
                                  current_user: User = Depends(_admin),
                                  db: AsyncSession = Depends(get_db)):
     """Name or clear the department's manager: an active member of it."""
-    dept = await _department(db, department_id)
-    if body.user_id is not None:
-        ok = (await db.execute(
-            select(User.id).join(UserDepartment, UserDepartment.user_id == User.id)
-            .where(User.id == body.user_id, User.is_active.is_(True),
-                   UserDepartment.department_id == dept.id, member_clause()))).first()
-        if ok is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"The manager must be an active member of {dept.name}")
-    old = dept.manager_id
-    dept.manager_id = body.user_id
-    await AuditService.record(
-        db, entity_type="department", entity_id=dept.id, action="manager_set",
-        user_id=current_user.id, old_values={"manager_id": old},
-        new_values={"manager_id": body.user_id})
-    await db.commit()
-    return (await _out(db, [dept]))[0]
+    return await _set_person(db, await _department(db, department_id), "manager_id",
+                             "manager", body.user_id, current_user)
 
 
 async def _set_active(db: AsyncSession, dept: Department, active: bool, actor: User) -> dict:

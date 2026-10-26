@@ -28,8 +28,15 @@ export interface DepartmentAdmin {
   name: string;
   is_active: boolean;
   sort_order: number;
+  /** The senior member who leads it day to day (migration 151); null = none named. */
+  head_id: number | null;
+  head_name: string | null;
+  head_email: string | null;
+  head_active: boolean | null;
+  /** Who escalations go to (migration 149). */
   manager_id: number | null;
   manager_name: string | null;
+  manager_email: string | null;
   manager_active: boolean | null;
   /** The AdminPanel role that makes a member (migration 150); null = none mapped. */
   hub_role: string | null;
