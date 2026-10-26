@@ -71,3 +71,4 @@
 - [Data route 2026-10-19](data-route-2026-10-19.md) — feature/data-route built, not merged/deployed; local test at :5175/plm2/devlogin.html; open decisions
 - [Prod changes 2026-10-21](prod-changes-2026-10-21.md) — Infor rename, worksheet width, thumbnails framed on white, 2277 tool data + cycle times; 2277 CAD held
 - [2277 972.A E2 + final Infor numbers](2277-972a-fea-cm-e2-2026-10-23.md) — 10-23: E2 id 2265 filed, 2277 mail list = 1994s 8, 18 articles got final numbers (0503/0001), held 08-28 script would now mail
+- [2277 971.C as E3](2277-971c-e3-2026-10-26.md) — 971.C filed on part 2268 as E3 id 2274, not a new part; 971.D held
