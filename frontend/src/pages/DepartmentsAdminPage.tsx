@@ -240,7 +240,7 @@ function DepartmentCard({ dept, isAdmin, busy, onPerson, onRetire }: {
         </div>
       ) : (
         <p data-testid={`dept-head-none-${dept.id}`}
-          className="rounded-lg border border-dashed border-slate-700 px-4 py-3 text-sm text-slate-500">
+          className="rounded-lg border border-dashed border-slate-700 px-4 py-2.5 text-sm text-slate-500">
           {t('deptAdmin.noHead')}
         </p>
       )}
@@ -280,7 +280,7 @@ function DepartmentCard({ dept, isAdmin, busy, onPerson, onRetire }: {
 
       {isAdmin && (
         <div data-testid={`dept-admin-${dept.id}`}
-          className="mt-auto grid gap-3 border-t border-slate-700/70 pt-4 sm:grid-cols-2">
+          className="mt-auto space-y-2.5 border-t border-slate-700/70 pt-4">
           <PersonSelect deptId={dept.id} field="head" busy={busy}
             label={t('deptAdmin.head')} none={t('deptAdmin.noHead')}
             value={dept.head_id} valueName={dept.head_name} members={dept.members}
@@ -289,7 +289,7 @@ function DepartmentCard({ dept, isAdmin, busy, onPerson, onRetire }: {
             label={t('deptAdmin.manager')} none={t('deptAdmin.noManager')}
             value={dept.manager_id} valueName={dept.manager_name} members={dept.members}
             onChange={(id) => onPerson('manager', id)} />
-          <div className="sm:col-span-2 flex justify-end">
+          <div className="flex justify-end pt-1">
             <button type="button" className={btnSm.ghost} disabled={busy} onClick={onRetire}
               data-testid={`dept-retire-${dept.id}`}>
               {t('deptAdmin.retire')}
@@ -334,9 +334,9 @@ function PersonSelect({ deptId, field, label, none, value, valueName, members, b
   const id = `dept-${field}-${deptId}`;
   const candidates = members.filter((m) => m.is_active);
   return (
-    <div className="min-w-0">
-      <label htmlFor={id} className="mb-1 block text-xs font-medium text-slate-400">{label}</label>
-      <div className="flex items-center gap-1.5">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <label htmlFor={id} className="w-20 flex-shrink-0 text-sm text-slate-400">{label}</label>
+      <div className="flex min-w-[12rem] flex-1 items-center gap-1.5">
         <select id={id} name={id} data-testid={id} disabled={busy}
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
