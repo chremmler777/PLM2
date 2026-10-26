@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.auth.security import get_password_hash
-from app.models.change import ChangeAssessment, ChangeRequest
+from app.models.change import ChangeAssessment, ChangeChangelog, ChangeRequest
 from app.models.entities import AuditLog, User
 from app.models.workflow import Department, UserDepartment
 from app.services import due_rules
@@ -124,6 +124,12 @@ async def test_writes_are_audited_as_the_admin_acting_as_the_person(client, seed
                                 params={"entity_type": "change", "entity_id": cid})).json()
     e = entries[0]
     assert e["real_user_name"] == "Admin" and e["acting_as_user_name"] == "Russ Addison"
+    # the change's own history names the admin behind the person too
+    async with session_factory() as s:
+        log = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid))).scalars().first()
+    assert log.performed_by == russ["id"]
+    assert log.notes and log.notes.startswith("Entered by Admin acting as Russ Addison")
 
 
 async def test_options_list_people_for_the_admin(client, seed, russ):

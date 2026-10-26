@@ -226,6 +226,16 @@ class ChangeService:
                 notes = f"{line}: {notes}" if notes else line
                 if isinstance(new_value, dict):
                     new_value = {**new_value, "stands_in_for": si}
+        # An admin acting as a PERSON (X-Acts-As-User, 2026-10-26): the row is
+        # that person's, so the change history says who really typed it.
+        from app.auth.acts_as import current_acts_as
+        acting = current_acts_as()
+        if acting and acting[1] is None and acting[0] != performed_by:
+            real = await session.get(User, acting[0])
+            person = await session.get(User, performed_by)
+            line = (f"Entered by {(real.full_name or real.username) if real else acting[0]} "
+                    f"acting as {(person.full_name or person.username) if person else performed_by}")
+            notes = f"{line}: {notes}" if notes else line
         prev = await ChangeService._last_entry_hash(session, change.id)
         old_s = json.dumps(old_value) if old_value is not None else None
         new_s = json.dumps(new_value) if new_value is not None else None
