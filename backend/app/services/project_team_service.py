@@ -80,7 +80,7 @@ class ProjectTeamService:
     @staticmethod
     async def list_team(session: AsyncSession, project_id: int) -> list[dict]:
         """[{department_id, department_name, responsible: {id,name}|None,
-        members: [{id, name, role: "main"|"backup"}]}] for every active
+        members: [{id, name, email, role: "main"|"backup"}]}] for every active
         department. `responsible` is null when nobody was set for the role
         (legacy: every member below reads role "main"); `members` is every
         active department member of the project's organization, candidates
@@ -106,7 +106,7 @@ class ProjectTeamService:
             # D2b: the named backup owns the work while nobody is responsible
             owner_id = main_id if main_id is not None else backup_id
             member_rows = [
-                {"id": m.id, "name": names[m.id],
+                {"id": m.id, "name": names[m.id], "email": m.email,
                  "role": "main" if owner_id is None or m.id == owner_id else "backup",
                  **({"named_backup": True} if m.id == backup_id else {})}
                 for m in members

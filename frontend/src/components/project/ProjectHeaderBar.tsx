@@ -7,9 +7,11 @@ import { useNavigate } from 'react-router-dom';
 import MilestoneStrip from '../MilestoneStrip';
 import StartChangeButton from '../changes/StartChangeButton';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
-import { ProjectTeamCard } from './ProjectTeamCard';
+import { Users } from 'lucide-react';
+import ProjectTeamDialog from './ProjectTeamDialog';
 import { ProjectMailListCard } from './ProjectMailListCard';
 import { CUSTOMER_NAMING_LABELS, type Project } from './projectTypes';
+import { t } from '../../i18n/cmLabels';
 
 export default function ProjectHeaderBar({ project, onStartChange, onAddPart, back }: {
   project: Project;
@@ -20,6 +22,7 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
 }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +63,19 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
         <span className="font-semibold">{project.name}</span>
         {customer && <span className="text-slate-400"> · {customer}</span>}
       </h1>
-      <div className="ml-auto relative" ref={menuRef}>
+      <button
+        type="button"
+        data-testid="project-team-button"
+        aria-label={t('team.openFull')}
+        title={t('team.openFull')}
+        onClick={() => setTeamOpen(true)}
+        className="ml-auto px-2 py-1 rounded text-slate-300 hover:text-slate-100 hover:bg-slate-700 text-sm whitespace-nowrap inline-flex items-center gap-1.5"
+      >
+        <Users aria-hidden="true" size={16} strokeWidth={1.75} />
+        {t('team.open')}
+      </button>
+      <ProjectTeamDialog projectId={project.id} open={teamOpen} onClose={() => setTeamOpen(false)} />
+      <div className="relative" ref={menuRef}>
         <button
           aria-label="Project actions"
           aria-expanded={menuOpen}
@@ -82,9 +97,10 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
             <div className="px-3 py-2">
               <CustomerNamingSelect projectId={project.id} value={project.customer_naming ?? null} />
             </div>
-            <div className="px-3 pt-2 pb-2 border-t border-slate-700">
-              <ProjectTeamCard projectId={project.id} />
-            </div>
+            <button role="menuitem" data-testid="menu-project-team"
+              onClick={() => { setMenuOpen(false); setTeamOpen(true); }} className={`${menuItem} flex items-center gap-2`}>
+              <Users aria-hidden="true" size={14} className="text-slate-400" />{t('team.title')}…
+            </button>
             <div className="px-3 pt-2 pb-2 border-t border-slate-700">
               <ProjectMailListCard projectId={project.id} />
             </div>
