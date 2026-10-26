@@ -181,7 +181,9 @@ async def get_current_user(
     if user.hashed_password == _HUB_MANAGED and settings.hub_department_sync:
         from app.services.hub_departments import sync_memberships
         depts, _changed = await sync_memberships(db, user.id, hub_roles)
-        in_department = bool(depts)
+        # a department without a hub_role is left as stored, so it counts too
+        in_department = bool(depts) or ("plm2_Admin" not in hub_roles
+                                        and await _in_active_department(db, user.id))
     else:
         # An admin's role does not depend on memberships: no lookup on its requests
         in_department = ("plm2_Admin" not in hub_roles

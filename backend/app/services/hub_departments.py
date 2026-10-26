@@ -45,11 +45,16 @@ async def wanted_department_ids(session: AsyncSession, hub_roles: list[str]) -> 
 
 async def sync_memberships(session: AsyncSession, user_id: int,
                            hub_roles: list[str]) -> tuple[set[int], bool]:
-    """Make the user's user_departments exactly the token's departments.
+    """Make the user's memberships of the MAPPED departments (hub_role set)
+    exactly the token's departments. A department without a hub_role is not
+    the hub's to manage, so its rows are left as stored.
     Returns (department ids, changed); commits only when it changed."""
     wanted = await wanted_department_ids(session, hub_roles)
-    have = set((await session.execute(select(UserDepartment.department_id).where(
-        UserDepartment.user_id == user_id))).scalars().all())
+    have = set((await session.execute(
+        select(UserDepartment.department_id)
+        .join(Department, Department.id == UserDepartment.department_id)
+        .where(UserDepartment.user_id == user_id, Department.hub_role.is_not(None))
+    )).scalars().all())
     if have == wanted:
         return wanted, False
     gone = have - wanted
