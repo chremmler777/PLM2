@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.items.part_paint import _project_in_org
 from app.dependencies import get_current_user
+from app.dependencies.auth import read_only
 from app.models import User, get_db
 from app.models.entities import Project
 from app.models.part import Part
@@ -93,6 +94,7 @@ def _safe(text: str) -> str:
 
 
 @router.post("/projects/{project_id}/worksheet/export")
+@read_only
 async def export_worksheet(project_id: int, body: ExportIn, current_user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
     await _project_in_org(db, project_id, current_user.organization_id)

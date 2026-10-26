@@ -171,3 +171,13 @@ async def test_export_merges_tool_cells_and_marks_tool_groups(client, eng_auth, 
     assert ws["B2"].alignment.vertical == "center"
     assert ws["A4"].border.top.style == "medium" and ws["B4"].border.top.style == "medium"
     assert ws["A3"].border.top.style is None
+
+
+async def test_viewer_may_export_but_not_write(client, seed):
+    # The export is a POST only because the visible table is too big for a URL.
+    from tests.conftest import _mint_cookie
+    viewer = _mint_cookie("eng@test.io", admin=False)
+    r = await _export(client, viewer, seed["project_id"])
+    assert r.status_code == 200, r.text
+    blocked = await client.post("/api/v1/plants/projects", json={}, headers=viewer)
+    assert blocked.status_code == 403

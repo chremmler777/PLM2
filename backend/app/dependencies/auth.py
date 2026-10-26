@@ -27,6 +27,19 @@ SERVICE_USERNAME = "plm2-service"
 SERVICE_EMAIL = "plm2-service@service.local"
 
 
+def read_only(endpoint):
+    """Mark a POST endpoint that only reads (e.g. an export whose input is too
+    big for a query string), so viewers and the service token may call it."""
+    endpoint.__plm2_read_only__ = True
+    return endpoint
+
+
+def _is_read_only(request: Request) -> bool:
+    if request.method in SAFE_METHODS:
+        return True
+    return getattr(request.scope.get("endpoint"), "__plm2_read_only__", False)
+
+
 def plm2_roles(payload: dict) -> list[str]:
     system = get_settings().role_system
     return [
@@ -76,7 +89,7 @@ async def get_current_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "No plm2 role in token")
 
     # plm2_Viewer is read-only: block non-safe methods unless the caller is plm2_Admin.
-    if "plm2_Admin" not in hub_roles and request.method not in SAFE_METHODS:
+    if "plm2_Admin" not in hub_roles and not _is_read_only(request):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "plm2_Viewer is read-only")
 
     # NOTE: the AdminPanel hub token currently mints {sub, username, department,
@@ -152,7 +165,7 @@ async def _service_principal(request: Request, db: AsyncSession, provided: str) 
     # byte and leaks the token's prefix to a timing attack.
     if not hmac.compare_digest(provided, expected):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid service token")
-    if request.method not in SAFE_METHODS:
+    if not _is_read_only(request):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Service token is read-only")
 
     user = (await db.execute(
