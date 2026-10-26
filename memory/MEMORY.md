@@ -73,3 +73,4 @@
 - [2277 972.A E2 + final Infor numbers](2277-972a-fea-cm-e2-2026-10-23.md) — 10-23: E2 id 2265 filed, 2277 mail list = 1994s 8, 18 articles got final numbers (0503/0001), held 08-28 script would now mail
 - [2277 971.C as E3](2277-971c-e3-2026-10-26.md) — 971.C filed on part 2268 as E3 id 2274, not a new part; 971.D held
 - [Viewer export + 2277 cavities](viewer-export-and-2277-cavities-2026-10-26.md) — @read_only POST marker for viewer exports (deployed 10-26); 227703/04/05 cavities filled
+- [2277 back panels = 3200 t Engel](feedback-2277-backpanel-press-3200.md) — 227701/227702 both EN 3200-1, cav 2 and 1+1; RFQ2 press pick always goes wrong
