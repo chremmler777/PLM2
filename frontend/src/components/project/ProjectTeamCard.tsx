@@ -17,12 +17,10 @@ import { toastError } from '../../lib/apiError';
 import { btnSm } from '../common/buttonStyles';
 import { t } from '../../i18n/cmLabels';
 import { useChangePermissions } from '../../hooks/queries/useCanStartChange';
-import PersonDetail from '../common/PersonDetail';
 
 interface TeamMember {
   id: number;
   name: string;
-  email?: string | null;
   role: 'main' | 'backup';
   named_backup?: boolean;
 }
@@ -41,13 +39,7 @@ const PM_DEPARTMENT = 'Project Manager';
 
 const selectCls = 'h-7 min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs text-slate-100 focus:border-sky-500 focus:outline-none';
 
-/**
- * detailed (2026-10-26, the Team dialog): per department a block with the
- * responsible and the backup (same pickers and rules) and every member with
- * name, email and a lead / backup / member badge. Without it: the compact
- * card (kept for its tests and any narrow place).
- */
-export function ProjectTeamCard({ projectId, detailed = false }: { projectId: number; detailed?: boolean }) {
+export function ProjectTeamCard({ projectId }: { projectId: number }) {
   const qc = useQueryClient();
   const perms = useChangePermissions();
   const canManage = perms?.can_manage_team === true;
@@ -118,74 +110,6 @@ export function ProjectTeamCard({ projectId, detailed = false }: { projectId: nu
       {t('team.change')}
     </button>
   );
-
-  if (detailed) {
-    const badge = (row: TeamRow, m: TeamMember) => {
-      const kind = m.id === row.responsible?.id ? 'lead' : m.id === row.backup?.id ? 'backup' : 'member';
-      const cls = kind === 'lead' ? 'bg-sky-900/60 text-sky-200 ring-sky-700'
-        : kind === 'backup' ? 'bg-amber-900/40 text-amber-200 ring-amber-700/60'
-          : 'bg-slate-800 text-slate-400 ring-slate-600';
-      return (
-        <span data-testid={`team-badge-${row.department_id}-${m.id}`} data-kind={kind}
-          className={`rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ring-1 ${cls}`}>
-          {t(`team.badge.${kind}`)}
-        </span>
-      );
-    };
-    const slotLine = (row: TeamRow, slot: Slot) => {
-      const isEditing = editing?.dept === row.department_id && editing.slot === slot;
-      const who = slot === 'backup' ? row.backup : row.responsible;
-      return (
-        <div className="flex items-center gap-2"
-          data-testid={slot === 'backup' ? `team-backup-${row.department_id}` : `team-responsible-${row.department_id}`}>
-          <span className="w-28 flex-shrink-0 text-xs uppercase tracking-wide text-slate-500">
-            {t(slot === 'backup' ? 'team.backup' : 'team.responsible')}
-          </span>
-          {isEditing ? picker(row, slot) : (
-            <>
-              <span className="min-w-0 flex-1 truncate text-slate-100">
-                {who ? who.name : <span className="text-slate-500">{t('team.unassigned')}</span>}
-              </span>
-              {changeButton(row, slot)}
-            </>
-          )}
-        </div>
-      );
-    };
-    // the people's order: lead, backup, then the rest by name
-    const order = (row: TeamRow) => [...row.members].sort((a, b) => {
-      const rank = (m: TeamMember) => (m.id === row.responsible?.id ? 0 : m.id === row.backup?.id ? 1 : 2);
-      return rank(a) - rank(b) || a.name.localeCompare(b.name);
-    });
-    return (
-      <div data-testid="project-team-detailed" className="space-y-3">
-        {team.map((row) => (
-          <section key={row.department_id} data-testid={`team-row-${row.department_id}`}
-            className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 space-y-2">
-            <h3 className="text-sm font-semibold text-slate-100">{row.department_name}</h3>
-            {slotLine(row, 'responsible')}
-            {slotLine(row, 'backup')}
-            {row.department_name === PM_DEPARTMENT && (
-              <p className="text-xs text-slate-500" data-testid="team-lead-pm-hint">{t('team.leadPmHint')}</p>
-            )}
-            {row.members.length === 0 ? (
-              <p className="text-xs text-slate-500">{t('team.noMembers')}</p>
-            ) : (
-              <ul aria-label={`${t('team.membersOf')}: ${row.department_name}`} className="flex flex-wrap gap-2 pt-1">
-                {order(row).map((m) => (
-                  <li key={m.id} className="max-w-full">
-                    <PersonDetail data-testid={`team-member-${row.department_id}-${m.id}`}
-                      name={m.name} email={m.email} badge={badge(row, m)} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ))}
-        <p className="text-xs text-slate-500" data-testid="team-routing-hint">{t('team.routingHint')}</p>
-      </div>
-    );
-  }
 
   return (
     <div data-testid="project-team-card">

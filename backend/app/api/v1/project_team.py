@@ -26,6 +26,18 @@ class TeamMemberSet(BaseModel):
     slot: Literal["responsible", "backup"] = "responsible"
 
 
+class TeamSlotsIn(BaseModel):
+    department_id: int
+    responsible_id: Optional[int] = None
+    backup_id: Optional[int] = None
+
+
+class TeamSave(BaseModel):
+    """PUT /projects/{id}/team/batch: the dialog's draft, per touched
+    department its wanted Responsible and Backup (null clears)."""
+    slots: list[TeamSlotsIn]
+
+
 async def _get_project(db: AsyncSession, project_id: int, current_user: User) -> Project:
     result = await db.execute(
         select(Project).join(Plant).where(
@@ -36,6 +48,18 @@ async def _get_project(db: AsyncSession, project_id: int, current_user: User) ->
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return project
+
+
+@router.get("/team-gaps")
+async def team_gaps(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """{project_id: open Responsible slots} for the caller's organization's
+    projects: the projects list's red "Team incomplete" marker."""
+    ids = list((await db.execute(select(Project.id).join(Plant).where(
+        Plant.organization_id == current_user.organization_id))).scalars().all())
+    return {str(k): v for k, v in (await ProjectTeamService.team_gaps(db, ids)).items()}
 
 
 @router.get("/{project_id}/team", response_model=list[dict])
@@ -71,6 +95,31 @@ async def set_team_member(
                 db, project_id, body.department_id, body.user_id, current_user,
                 slot=body.slot)
     except ProjectTeamError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    await db.commit()
+    return await ProjectTeamService.list_team(db, project_id)
+
+
+@router.put("/{project_id}/team/batch", response_model=list[dict])
+async def save_team(
+    project_id: int,
+    body: TeamSave,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The Team dialog's Save: the draft's slots in one step, all or
+    nothing, then one notice (and mail) per newly named person. Rights: PM
+    members or admin."""
+    await _get_project(db, project_id, current_user)
+    if not await ProjectTeamService.user_can_manage(db, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Project Management or an admin may set the project team")
+    try:
+        await ProjectTeamService.save_team(
+            db, project_id, [x.model_dump() for x in body.slots], current_user)
+    except ProjectTeamError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     await db.commit()
     return await ProjectTeamService.list_team(db, project_id)

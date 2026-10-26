@@ -8,7 +8,7 @@ import MilestoneStrip from '../MilestoneStrip';
 import StartChangeButton from '../changes/StartChangeButton';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
 import { Users } from 'lucide-react';
-import ProjectTeamDialog from './ProjectTeamDialog';
+import ProjectTeamDialog, { openSlots, useProjectTeam } from './ProjectTeamDialog';
 import { ProjectMailListCard } from './ProjectMailListCard';
 import { CUSTOMER_NAMING_LABELS, type Project } from './projectTypes';
 import { t } from '../../i18n/cmLabels';
@@ -23,6 +23,9 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
+  // red dot: departments with members and no responsible (team not defined)
+  const { data: team } = useProjectTeam(project.id);
+  const gaps = openSlots(team);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,13 +69,19 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
       <button
         type="button"
         data-testid="project-team-button"
-        aria-label={t('team.openFull')}
-        title={t('team.openFull')}
+        aria-label={gaps > 0 ? `${t('team.openFull')}, ${t('team.incompleteN').replace('{n}', String(gaps))}` : t('team.openFull')}
+        title={gaps > 0 ? t('team.incompleteN').replace('{n}', String(gaps)) : t('team.openFull')}
         onClick={() => setTeamOpen(true)}
         className="ml-auto px-2 py-1 rounded text-slate-300 hover:text-slate-100 hover:bg-slate-700 text-sm whitespace-nowrap inline-flex items-center gap-1.5"
       >
         <Users aria-hidden="true" size={16} strokeWidth={1.75} />
         {t('team.open')}
+        {gaps > 0 && (
+          <span data-testid="project-team-gaps" aria-hidden="true"
+            className="min-w-[1.1rem] rounded-full bg-red-600 px-1 text-center text-[11px] font-bold leading-4 text-white tabular-nums">
+            {gaps}
+          </span>
+        )}
       </button>
       <ProjectTeamDialog projectId={project.id} open={teamOpen} onClose={() => setTeamOpen(false)} />
       <div className="relative" ref={menuRef}>

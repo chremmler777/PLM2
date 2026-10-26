@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { t } from '../i18n/cmLabels';
 import client from '../api/client';
 
 interface Project {
@@ -166,6 +167,11 @@ export default function ProjectsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const { data: projects, isLoading } = useProjects();
   const { data: plants } = usePlants();
+  // red "Team incomplete": departments with members and no responsible (2026-10-26)
+  const { data: teamGaps = {} } = useQuery<Record<string, number>>({
+    queryKey: ['project-team-gaps'],
+    queryFn: async () => (await client.get('/v1/projects/team-gaps')).data,
+  });
 
   // Largest project number first (VW426 near top, GO1 near the bottom).
   const sortedProjects = [...(projects ?? [])].sort(
@@ -215,6 +221,14 @@ export default function ProjectsPage() {
                     <span className="text-xs text-slate-500 truncate hidden md:inline">{p.description}</span>
                   )}
                 </div>
+                {teamGaps[String(p.id)] > 0 && (
+                  <span data-testid={`team-incomplete-${p.id}`}
+                    title={t('team.incompleteN').replace('{n}', String(teamGaps[String(p.id)]))}
+                    className="ml-auto shrink-0 rounded-full border border-red-700 bg-red-950/50 px-2 py-0.5 text-xs font-medium text-red-300">
+                    {t('team.incomplete')}
+                    <span className="sr-only">: {t('team.incompleteN').replace('{n}', String(teamGaps[String(p.id)]))}</span>
+                  </span>
+                )}
                 <span
                   className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
                     p.status === 'active' ? 'bg-green-900/60 text-green-300' : 'bg-slate-700 text-slate-400'

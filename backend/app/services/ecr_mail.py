@@ -60,6 +60,9 @@ MAIL_KINDS = frozenset({
     # §0 Immediate: a decision needed (A6-02); an override's answer (sent
     # only when it is a no or the change is urgent)
     "decision_needed", "deviation_decided",
+    # the project team dialog's Save: newly Responsible / Backup (a
+    # "no longer" notice, team_removed, stays a badge)
+    "team_assigned",
 })
 #: graph_send raises "Graph sendMail <status>: ..." for a non-202 answer.
 #: 401/403 (our app), 408/429 (throttling) and 5xx stop the run; any other

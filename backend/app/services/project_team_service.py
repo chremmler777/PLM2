@@ -111,9 +111,21 @@ class ProjectTeamService:
                  **({"named_backup": True} if m.id == backup_id else {})}
                 for m in members
             ]
+            # 2026-10-26: a slot that points to someone inactive or no
+            # longer a member reads unassigned above, and says so here
+            stale = [uid for uid in ((row.user_id, row.backup_user_id) if row else ())
+                     if uid is not None and uid not in names]
+            stale_names = {u.id: _name(u) for u in (await session.execute(
+                select(User).where(User.id.in_(stale)))).scalars().all()} if stale else {}
+
+            def missing(uid):
+                return ({"id": uid, "name": stale_names.get(uid, f"user {uid}")}
+                        if uid is not None and uid not in names else None)
             out.append({
                 "department_id": d.id,
                 "department_name": d.name,
+                "responsible_missing": missing(row.user_id) if row else None,
+                "backup_missing": missing(row.backup_user_id) if row else None,
                 "responsible": ({"id": main_id, "name": names[main_id]}
                                 if main_id is not None else None),
                 "backup": ({"id": backup_id, "name": names[backup_id]}
@@ -226,6 +238,136 @@ class ProjectTeamService:
         if row.user_id is None and row.backup_user_id is None:
             await session.delete(row)
         await session.flush()
+
+    @staticmethod
+    async def save_team(session: AsyncSession, project_id: int, slots: list[dict],
+                        actor: User) -> dict:
+        """The Team dialog's Save (Christoph 2026-10-26: drag and drop edits a
+        draft, nothing is stored until Save). slots: [{department_id,
+        responsible_id, backup_id}] -- the wanted state of each department
+        the draft touched (None clears). Same rules as one slot at a time:
+        both active members of the department, two different people; the
+        Sales contact follows a new Sales responsible. All or nothing: one
+        refused slot refuses the save (ProjectTeamError).
+
+        Then tells the people (one notice per person per save, several slots
+        grouped): newly Responsible or Backup -> "team_assigned" (mailed,
+        ecr_mail MAIL_KINDS); no longer in a department's slots ->
+        "team_removed" (in PLM only). The actor is not told about their own
+        save. Returns {assigned: {user_id: [(dept, slot)]}, removed: {...}}."""
+        before: dict[int, tuple] = {}
+        for d in slots:
+            dept_id = d["department_id"]
+            want = (d.get("responsible_id"), d.get("backup_id"))
+            if want[0] is not None and want[0] == want[1]:
+                raise ProjectTeamError("The responsible and the backup must be two different people")
+            for uid, word in ((want[0], "responsible"), (want[1], "backup")):
+                if uid is not None:
+                    await ProjectTeamService._check_member(
+                        session, project_id, dept_id, uid, word)
+            row = await ProjectTeamService._row(session, project_id, dept_id)
+            before[dept_id] = (row.user_id, row.backup_user_id) if row else (None, None)
+        names = dict((await session.execute(select(Department.id, Department.name).where(
+            Department.id.in_([d["department_id"] for d in slots])))).all())
+        assigned: dict[int, list[tuple[str, str]]] = {}
+        removed: dict[int, list[str]] = {}
+        for d in slots:
+            dept_id = d["department_id"]
+            resp, backup = d.get("responsible_id"), d.get("backup_id")
+            old_resp, old_backup = before[dept_id]
+            if (resp, backup) == (old_resp, old_backup):
+                continue
+            row = await ProjectTeamService._row(session, project_id, dept_id)
+            if resp is None and backup is None:
+                if row is not None:
+                    await session.delete(row)
+            else:
+                if row is None:
+                    row = ProjectResponsible(project_id=project_id, department_id=dept_id)
+                    session.add(row)
+                row.user_id, row.backup_user_id = resp, backup
+                row.set_by = actor.id
+                row.set_at = datetime.utcnow()
+            await session.flush()
+            if resp != old_resp:
+                await ProjectTeamService._follow_sales_contact(
+                    session, project_id, dept_id, old_resp, resp, actor)
+            dept = names.get(dept_id, "a department")
+            if resp is not None and resp != old_resp:
+                assigned.setdefault(resp, []).append((dept, "Responsible"))
+            if backup is not None and backup != old_backup:
+                assigned.setdefault(backup, []).append((dept, "Backup"))
+            for uid in {old_resp, old_backup} - {resp, backup, None}:
+                removed.setdefault(uid, []).append(dept)
+        await ProjectTeamService._tell_team(session, project_id, assigned, removed, actor)
+        return {"assigned": assigned, "removed": removed}
+
+    @staticmethod
+    async def _tell_team(session: AsyncSession, project_id: int, assigned: dict,
+                         removed: dict, actor: User) -> None:
+        """One notice per person per save (save_team)."""
+        from app.services.notification_service import NotificationService
+        project = await session.get(Project, project_id)
+        what = f"{project.code} {project.name}" if project else f"project {project_id}"
+        link = f"/projects/{project_id}"
+        stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")
+        for uid, roles in assigned.items():
+            if uid == actor.id:
+                continue
+            parts = [f"{slot} for {dept}" for dept, slot in roles]
+            await NotificationService.notify_once(
+                session, [uid], kind="team_assigned",
+                subject_key=f"team:{project_id}:{stamp}",
+                title=f"You are {', '.join(parts)} on project {what}",
+                body=(f"{_name(actor)} named you {' and '.join(parts)} on project "
+                      f"{what}. The department's tasks on this project come to you"
+                      + (" (as Backup: when the responsible is away, and once a task is late)."
+                         if all(s == "Backup" for _, s in roles) else ".")),
+                link=link)
+        for uid, depts in removed.items():
+            if uid == actor.id or uid in assigned:
+                continue
+            await NotificationService.notify_once(
+                session, [uid], kind="team_removed",
+                subject_key=f"team:{project_id}:{stamp}",
+                title=f"You are no longer in the project team for {', '.join(depts)} on {what}",
+                link=link)
+
+    @staticmethod
+    async def team_gaps(session: AsyncSession, project_ids: list[int]) -> dict[int, int]:
+        """{project id: open Responsible slots}: active departments with
+        active members in the project's organization and no live
+        responsible on it (the red "Team incomplete" marker; an empty
+        Backup is no gap, the members cover). Projects without a gap are
+        left out."""
+        if not project_ids:
+            return {}
+        org_of = dict((await session.execute(
+            select(Project.id, Plant.organization_id).join(Plant, Plant.id == Project.plant_id)
+            .where(Project.id.in_(project_ids)))).all())
+        staffed: dict = {}   # org -> {dept: {user ids}}
+        for dept_id, uid, org in (await session.execute(
+                select(UserDepartment.department_id, User.id, User.organization_id)
+                .join(User, User.id == UserDepartment.user_id)
+                .join(Department, Department.id == UserDepartment.department_id)
+                .where(User.is_active.is_(True), Department.is_active.is_(True)))).all():
+            staffed.setdefault(org, {}).setdefault(dept_id, set()).add(uid)
+        filled: dict[int, set] = {}
+        for pid, dept_id, uid in (await session.execute(
+                select(ProjectResponsible.project_id, ProjectResponsible.department_id,
+                       ProjectResponsible.user_id)
+                .where(ProjectResponsible.project_id.in_(project_ids),
+                       ProjectResponsible.user_id.is_not(None)))).all():
+            org = org_of.get(pid)
+            if uid in staffed.get(org, {}).get(dept_id, set()):
+                filled.setdefault(pid, set()).add(dept_id)
+        out = {}
+        for pid in project_ids:
+            depts = staffed.get(org_of.get(pid), {})
+            gap = len(set(depts) - filled.get(pid, set()))
+            if gap:
+                out[pid] = gap
+        return out
 
     @staticmethod
     async def responsible_user_id(session: AsyncSession, project_id: Optional[int],
