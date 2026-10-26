@@ -36,6 +36,11 @@ class Department(Base):
     # (writing stays membership + gates, app/dependencies/auth.py).
     manager_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Migration 150 (Christoph 2026-10-26): the AdminPanel role (system
+    # "plm2", e.g. "plm2_Sales") that makes a hub account a member; the
+    # login syncs user_departments to it (app/services/hub_departments.py).
+    # NULL = no hub role mapped.
+    hub_role: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     # lazy="raise": departments load everywhere; read the manager with an
     # explicit selectinload (the departments list does) or by manager_id.
     manager: Mapped["User | None"] = relationship(foreign_keys=[manager_id], lazy="raise")

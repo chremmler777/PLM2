@@ -9,20 +9,19 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 const auth = vi.hoisted(() => ({ current: { role: 'admin' as string | null } }))
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth.current }))
 
+const person = (id: number, name: string, is_active = true) =>
+  ({ id, name, username: name.toLowerCase(), email: `${name.toLowerCase()}@ktx.test`, is_active })
 const DEPTS = [
-  { id: 1, name: 'Process Engineer', is_active: true, sort_order: 1, manager_id: 10,
-    manager_name: 'Christoph D', manager_active: true,
-    members: [{ id: 11, name: 'Holmes', username: 'holmes', email: 'holmes@ktx.test', is_active: true }] },
-  { id: 2, name: 'Tool Engineer', is_active: true, sort_order: 2, manager_id: null,
-    manager_name: null, manager_active: null, members: [] },
-  { id: 3, name: 'Old Role', is_active: false, sort_order: 9, manager_id: null,
-    manager_name: null, manager_active: null, members: [] },
-]
-const USERS = [
-  { id: 10, username: 'cd', email: 'cd@ktx.test', full_name: 'Christoph D', is_active: true },
-  { id: 11, username: 'holmes', email: 'holmes@ktx.test', full_name: 'Holmes', is_active: true },
-  { id: 12, username: 'payne', email: 'payne@ktx.test', full_name: 'Payne', is_active: true },
-  { id: 13, username: 'gone', email: 'gone@ktx.test', full_name: 'Gone', is_active: false },
+  { id: 1, name: 'Sales', is_active: true, sort_order: 1, hub_role: 'plm2_Sales', manager_id: 10,
+    manager_name: 'Karl', manager_active: true, warnings: [],
+    members: [person(10, 'Karl'), person(11, 'Jubei'), person(12, 'Roman'), person(13, 'Gone', false)] },
+  { id: 2, name: 'Quality', is_active: true, sort_order: 2, hub_role: null, manager_id: null,
+    manager_name: null, manager_active: null, members: [],
+    warnings: [{ code: 'no_hub_role', level: 'red', text: 'No AdminPanel role mapped: nobody can become a member' },
+      { code: 'no_members', level: 'red', text: 'No members' },
+      { code: 'no_manager', level: 'amber', text: 'No manager defined' }] },
+  { id: 3, name: 'Scheduling', is_active: false, sort_order: 9, hub_role: null, manager_id: null,
+    manager_name: null, manager_active: null, members: [], warnings: [] },
 ]
 
 const wrap = () => render(
@@ -34,57 +33,48 @@ describe('DepartmentsAdminPage', () => {
   beforeEach(() => {
     auth.current = { role: 'admin' }
     clientMocks.get.mockImplementation(async (url: string) =>
-      url === '/v1/departments/admin' ? { data: DEPTS } : url === '/v1/users' ? { data: USERS } : { data: [] })
-    clientMocks.put.mockImplementation(async (url: string) => ({ data: { ...DEPTS[0], id: Number(url.split('/')[3]) } }))
-    clientMocks.post.mockResolvedValue({ data: { ...DEPTS[2], is_active: true } })
+      url === '/v1/departments/overview' ? { data: DEPTS } : { data: [] })
+    clientMocks.put.mockImplementation(async () => ({ data: DEPTS[0] }))
+    clientMocks.post.mockImplementation(async (url: string) =>
+      ({ data: url.includes('/3/') ? { ...DEPTS[2], is_active: true } : { ...DEPTS[1], is_active: false } }))
   })
   afterEach(() => { cleanup(); vi.clearAllMocks() })
 
-  it('shows a no-access note to a non-admin and calls nothing', () => {
+  it('everyone reads it: members, manager and warnings, without edit controls', async () => {
     auth.current = { role: 'engineer' }
     wrap()
-    expect(screen.getByTestId('departments-no-access')).toBeTruthy()
-    expect(clientMocks.get).not.toHaveBeenCalled()
+    expect((await screen.findByTestId('dept-manager-ro-1')).textContent).toContain('Karl')
+    expect(screen.queryByTestId('dept-manager-1')).toBeNull()
+    expect(screen.queryByTestId('dept-retire-1')).toBeNull()
+    const warn = screen.getByTestId('dept-warnings-2')
+    expect([...warn.querySelectorAll('li')].map((l) => l.dataset.code)).toEqual(['no_hub_role', 'no_members', 'no_manager'])
   })
 
-  it('one card per active department with its manager; only active users to pick', async () => {
+  it('members are read-only chips with name and mailto email; no add or remove', async () => {
+    wrap()
+    const chip = await screen.findByTestId('dept-member-1-11')
+    expect(within(chip).getByText('jubei@ktx.test').getAttribute('href')).toBe('mailto:jubei@ktx.test')
+    expect(within(chip).queryByRole('button')).toBeNull()
+    expect(screen.queryByPlaceholderText('Add person')).toBeNull()
+  })
+
+  it('the manager select offers only the active members of the department', async () => {
     wrap()
     const sel = await screen.findByTestId('dept-manager-1') as HTMLSelectElement
     expect(sel.value).toBe('10')
-    expect([...sel.options].map((o) => o.text)).toEqual(['No manager', 'Christoph D', 'Holmes', 'Payne'])
-    expect(screen.getByTestId('dept-card-2')).toBeTruthy()
-    expect(screen.queryByTestId('dept-card-3')).toBeNull()
-  })
-
-  it('sets and clears a manager', async () => {
-    wrap()
-    fireEvent.change(await screen.findByTestId('dept-manager-2'), { target: { value: '12' } })
-    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/2/manager', { user_id: 12 }))
+    expect([...sel.options].map((o) => o.text)).toEqual(['No manager', 'Karl', 'Jubei', 'Roman'])
+    fireEvent.change(sel, { target: { value: '12' } })
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/1/manager', { user_id: 12 }))
     fireEvent.click(screen.getByTestId('dept-manager-clear-1'))
     await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/1/manager', { user_id: null }))
   })
 
-  it('members show name and mailto email; remove and add replace the list', async () => {
+  it('admin retires a department after confirming; retired ones are collapsed with Activate', async () => {
     wrap()
-    const chip = await screen.findByTestId('dept-member-1-11')
-    expect(within(chip).getByText('holmes@ktx.test').getAttribute('href')).toBe('mailto:holmes@ktx.test')
-    fireEvent.click(within(chip).getByRole('button', { name: 'Remove Holmes from Process Engineer' }))
-    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/1/members', { user_ids: [] }))
-    fireEvent.change(screen.getByTestId('dept-add-1'), { target: { value: 'pay' } })
-    fireEvent.click(await screen.findByTestId('dept-add-option-1-12'))
-    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/departments/1/members', { user_ids: [11, 12] }))
-  })
-
-  it('the add picker offers no inactive user and no current member', async () => {
-    wrap()
-    fireEvent.change(await screen.findByTestId('dept-add-1'), { target: { value: 'o' } })
-    expect(screen.queryByTestId('dept-add-option-1-13')).toBeNull()   // Gone, inactive
-    expect(screen.queryByTestId('dept-add-option-1-11')).toBeNull()   // Holmes, member
-  })
-
-  it('retired departments collapsed at the bottom, activated by the toggle', async () => {
-    wrap()
-    const btn = await screen.findByRole('button', { name: /Retired departments \(1\)/ })
+    fireEvent.click(await screen.findByTestId('dept-retire-2'))
+    fireEvent.click(within(await screen.findByTestId('dept-retire-confirm')).getByRole('button', { name: 'Retire' }))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/departments/2/deactivate'))
+    const btn = screen.getByRole('button', { name: /Retired departments/ })
     expect(screen.queryByTestId('retired-3')).toBeNull()
     fireEvent.click(btn)
     fireEvent.click(within(screen.getByTestId('retired-3')).getByRole('button', { name: 'Activate' }))

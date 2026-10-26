@@ -31,7 +31,10 @@ export interface DepartmentAdmin {
   manager_id: number | null;
   manager_name: string | null;
   manager_active: boolean | null;
+  /** The AdminPanel role that makes a member (migration 150); null = none mapped. */
+  hub_role: string | null;
   members: DepartmentPerson[];
+  warnings: { code: string; level: 'amber' | 'red'; text: string }[];
 }
 
 /** One late item of a managed department (My Tasks, "Late in my departments"). */

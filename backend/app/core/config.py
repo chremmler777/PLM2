@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     # NOTIFY_SENDER, NOTIFY_TRIAL_RECIPIENT, links on NOTIFY_BASE_URL).
     # Off until switched on (env ECR_MAIL_ENABLED).
     ecr_mail_enabled: bool = False
+    # Migration 150: a hub account's departments come from its AdminPanel
+    # department roles, synced on login (app/services/hub_departments.py).
+    # Off (env HUB_DEPARTMENT_SYNC=false): memberships stay as stored.
+    hub_department_sync: bool = True
+    # Placeholder / local accounts (admin, testuser, ...) are no department
+    # members: member lists, pickers and the per-user PUT consider hub
+    # accounts only. The test suite, whose seeded users are local, turns
+    # this on (tests/conftest.py).
+    local_users_as_members: bool = False
     # Hub accounts carry their bare username as e-mail ("christoph.demmler"):
     # the mail outbox appends "@<this>" to such an address; empty = an
     # address without "@" is not mailed (the notice stays in PLM2).

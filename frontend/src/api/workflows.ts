@@ -103,17 +103,16 @@ export const getMyTasks = async (departmentId: number): Promise<MyTask[]> => {
 // ============================================================================
 
 export const departmentsAdminApi = {
+  /** Read by everyone: hub role, manager, members (from AdminPanel), warnings. */
   list: async (): Promise<DepartmentAdmin[]> =>
-    (await client.get('/v1/departments/admin')).data,
+    (await client.get('/v1/departments/overview')).data,
+  /** Admin only; the manager is an active member of the department. */
   setManager: async (departmentId: number, userId: number | null): Promise<DepartmentAdmin> =>
     (await client.put(`/v1/departments/${departmentId}/manager`, { user_id: userId })).data,
-  setMembers: async (departmentId: number, userIds: number[]): Promise<DepartmentAdmin> =>
-    (await client.put(`/v1/departments/${departmentId}/members`, { user_ids: userIds })).data,
   activate: async (departmentId: number): Promise<DepartmentAdmin> =>
     (await client.post(`/v1/departments/${departmentId}/activate`)).data,
-  /** Every account (admin only), for the pickers. */
-  users: async (): Promise<{ id: number; username: string; email: string; full_name: string | null; is_active: boolean }[]> =>
-    (await client.get('/v1/users')).data,
+  deactivate: async (departmentId: number): Promise<DepartmentAdmin> =>
+    (await client.post(`/v1/departments/${departmentId}/deactivate`)).data,
 };
 
 /** My Tasks' "Late in my departments": empty departments = not a manager. */

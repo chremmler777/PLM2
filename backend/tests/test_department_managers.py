@@ -54,104 +54,114 @@ async def _digests(s):
         Notification.kind == "overdue_digest"))).scalars().all()}
 
 
-# --- manager set / clear -------------------------------------------------
+# --- manager set / clear (Departments page) --------------------------------
 
-async def test_admin_sets_and_clears_a_manager_who_need_not_be_a_member(
-        client, session_factory, seed):
-    async with session_factory() as s:
-        d = await _dept(s, "Tool Engineer")
-        await s.commit()
+async def test_admin_sets_and_clears_a_manager_from_the_members(client, session_factory, seed):
+    dept_id = await make_department_member(session_factory, seed["engineer_id"], "Tool Engineer")
     admin = await login(client, "admin@test.io")
-    res = await client.put(f"/api/v1/departments/{d.id}/manager", headers=admin,
+    res = await client.put(f"/api/v1/departments/{dept_id}/manager", headers=admin,
                            json={"user_id": seed["engineer_id"]})
     assert res.status_code == 200, res.text
     assert res.json()["manager_id"] == seed["engineer_id"]
     assert res.json()["manager_name"] == "Engineer"
     # the departments list everyone reads carries it
     lst = await client.get("/api/v1/workflow-templates/departments", headers=admin)
-    row = next(r for r in lst.json() if r["id"] == d.id)
+    row = next(r for r in lst.json() if r["id"] == dept_id)
     assert (row["manager_id"], row["manager_name"]) == (seed["engineer_id"], "Engineer")
-    # not made a member by it
-    async with session_factory() as s:
-        assert await s.get(UserDepartment, (seed["engineer_id"], d.id)) is None
-    res = await client.put(f"/api/v1/departments/{d.id}/manager", headers=admin,
+    res = await client.put(f"/api/v1/departments/{dept_id}/manager", headers=admin,
                            json={"user_id": None})
     assert res.status_code == 200 and res.json()["manager_id"] is None
 
 
-async def test_one_person_manages_several_departments(client, session_factory, seed):
-    async with session_factory() as s:
-        ids = [(await _dept(s, n)).id for n in ("Process Engineer", "Tool Engineer")]
-        await s.commit()
-    admin = await login(client, "admin@test.io")
-    for i in ids:
-        res = await client.put(f"/api/v1/departments/{i}/manager", headers=admin,
-                               json={"user_id": seed["admin_id"]})
-        assert res.status_code == 200, res.text
-    lst = (await client.get("/api/v1/departments/admin", headers=admin)).json()
-    assert {r["id"] for r in lst if r["manager_id"] == seed["admin_id"]} == set(ids)
-
-
-async def test_manager_set_refused_for_non_admin_inactive_user_unknown_department(
-        client, session_factory, seed):
-    await make_department_member(session_factory, seed["engineer_id"], "Development")
+async def test_manager_must_be_an_active_member(client, session_factory, seed):
     async with session_factory() as s:
         d = await _dept(s, "Tool Engineer")
         await s.commit()
-    eng = await login(client, "eng@test.io")
     admin = await login(client, "admin@test.io")
-    res = await client.put(f"/api/v1/departments/{d.id}/manager", headers=eng,
+    # the engineer is no member of Tool Engineer
+    res = await client.put(f"/api/v1/departments/{d.id}/manager", headers=admin,
                            json={"user_id": seed["engineer_id"]})
-    assert res.status_code == 403, res.text
+    assert res.status_code == 400 and "member of Tool Engineer" in res.json()["detail"]
     res = await client.put(f"/api/v1/departments/{d.id}/manager", headers=admin,
                            json={"user_id": seed["inactive_id"]})
-    assert res.status_code == 400, res.text
+    assert res.status_code == 400
+
+
+async def test_one_person_manages_several_departments(client, session_factory, seed):
+    ids = [await make_department_member(session_factory, seed["engineer_id"], n)
+           for n in ("Process Engineer", "Tool Engineer")]
+    admin = await login(client, "admin@test.io")
+    for i in ids:
+        res = await client.put(f"/api/v1/departments/{i}/manager", headers=admin,
+                               json={"user_id": seed["engineer_id"]})
+        assert res.status_code == 200, res.text
+    lst = (await client.get("/api/v1/departments/overview", headers=admin)).json()
+    assert {r["id"] for r in lst if r["manager_id"] == seed["engineer_id"]} == set(ids)
+
+
+async def test_page_is_read_by_everyone_written_by_admins_only(client, session_factory, seed):
+    dept_id = await make_department_member(session_factory, seed["engineer_id"], "Development")
+    eng = await login(client, "eng@test.io")
+    assert (await client.get("/api/v1/departments/overview", headers=eng)).status_code == 200
+    res = await client.put(f"/api/v1/departments/{dept_id}/manager", headers=eng,
+                           json={"user_id": seed["engineer_id"]})
+    assert res.status_code == 403, res.text
+    assert (await client.post(f"/api/v1/departments/{dept_id}/deactivate",
+                              headers=eng)).status_code == 403
+    admin = await login(client, "admin@test.io")
     res = await client.put("/api/v1/departments/9999/manager", headers=admin,
                            json={"user_id": seed["admin_id"]})
     assert res.status_code == 404
-    assert (await client.get("/api/v1/departments/admin", headers=eng)).status_code == 403
+    # members are not edited here any more (AdminPanel owns them)
+    res = await client.put(f"/api/v1/departments/{dept_id}/members", headers=admin,
+                           json={"user_ids": []})
+    assert res.status_code in (404, 405)
+
+
+async def test_overview_warnings(client, session_factory, seed):
+    from app.auth.security import get_password_hash
     async with session_factory() as s:
-        assert (await s.get(Department, d.id)).manager_id is None
-
-
-# --- members / activation (the Departments page) -------------------------
-
-async def test_admin_places_people_in_a_department(client, session_factory, seed):
-    async with session_factory() as s:
-        d = await _dept(s, "Process Engineer")
+        lonely = await _dept(s, "Quality")                       # no members, no manager
+        lonely.hub_role = "plm2_Quality"
+        staffed = await _dept(s, "Tool Engineer", manager_id=seed["admin_id"])  # manager no member
+        staffed.hub_role = "plm2_ToolEngineer"
+        unmapped = await _dept(s, "Logistics")                   # no hub role
+        old = User(organization_id=seed["org_id"], username="old", email="old@test.io",
+                   full_name="Old Timer", hashed_password=get_password_hash("x-secret-12"),
+                   role="engineer", is_active=False, mfa_enabled=False)
+        s.add(old); await s.flush()
+        s.add_all([UserDepartment(user_id=seed["engineer_id"], department_id=staffed.id),
+                   UserDepartment(user_id=old.id, department_id=staffed.id),
+                   UserDepartment(user_id=seed["engineer_id"], department_id=unmapped.id)])
         await s.commit()
-    admin = await login(client, "admin@test.io")
-    res = await client.put(f"/api/v1/departments/{d.id}/members", headers=admin,
-                           json={"user_ids": [seed["engineer_id"], seed["admin_id"]]})
-    assert res.status_code == 200, res.text
-    assert {m["id"] for m in res.json()["members"]} == {seed["engineer_id"], seed["admin_id"]}
-    # the per-user endpoint sees the same membership
-    per_user = await client.get(f"/api/v1/users/{seed['engineer_id']}/departments",
-                                headers=admin)
-    assert [x["id"] for x in per_user.json()] == [d.id]
-    res = await client.put(f"/api/v1/departments/{d.id}/members", headers=admin,
-                           json={"user_ids": [seed["admin_id"]]})
-    assert [m["id"] for m in res.json()["members"]] == [seed["admin_id"]]
-    # NEGATIVE: an inactive person is not added; a non-admin may not
-    res = await client.put(f"/api/v1/departments/{d.id}/members", headers=admin,
-                           json={"user_ids": [seed["admin_id"], seed["inactive_id"]]})
-    assert res.status_code == 400, res.text
     eng = await login(client, "eng@test.io")
-    res = await client.put(f"/api/v1/departments/{d.id}/members", headers=eng,
-                           json={"user_ids": [seed["engineer_id"]]})
-    assert res.status_code == 403
+    rows = {r["name"]: r for r in (await client.get("/api/v1/departments/overview", headers=eng)).json()}
+    codes = lambda n: {w["code"] for w in rows[n]["warnings"]}  # noqa: E731
+    assert codes("Quality") == {"no_members", "no_manager"}
+    assert codes("Tool Engineer") == {"manager_not_member", "member_inactive"}
+    assert "no_hub_role" in codes("Logistics")
+    assert [m["email"] for m in rows["Tool Engineer"]["members"]] == ["eng@test.io", "old@test.io"]
 
 
-async def test_admin_activates_a_retired_department(client, session_factory, seed):
+async def test_placeholder_accounts_are_never_listed_as_members(
+        client, session_factory, seed, monkeypatch):
+    dept_id = await make_department_member(session_factory, seed["engineer_id"], "Sales")
+    monkeypatch.setattr(get_settings(), "local_users_as_members", False)
+    eng = await login(client, "eng@test.io")
+    row = next(r for r in (await client.get("/api/v1/departments/overview", headers=eng)).json()
+               if r["id"] == dept_id)
+    assert row["members"] == []     # the seeded engineer is a local account
+
+
+async def test_admin_activates_and_deactivates_a_department(client, session_factory, seed):
     async with session_factory() as s:
         d = await _dept(s, "Old Role", active=False)
         await s.commit()
-    eng = await login(client, "eng@test.io")
-    assert (await client.post(f"/api/v1/departments/{d.id}/activate",
-                              headers=eng)).status_code == 403
     admin = await login(client, "admin@test.io")
     res = await client.post(f"/api/v1/departments/{d.id}/activate", headers=admin)
     assert res.status_code == 200 and res.json()["is_active"] is True
+    res = await client.post(f"/api/v1/departments/{d.id}/deactivate", headers=admin)
+    assert res.status_code == 200 and res.json()["is_active"] is False
 
 
 # --- overdue digest: split by manager, fallback kept ---------------------

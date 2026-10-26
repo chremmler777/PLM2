@@ -22,6 +22,11 @@ from app.auth.security import get_password_hash
 # only need warnings and errors.
 logging.getLogger().setLevel(logging.WARNING)
 
+# The seeded users are local accounts; outside the tests only hub accounts
+# count as department members (migration 150, hub_departments.member_clause).
+# Tests about that rule turn it off with monkeypatch.
+get_settings().local_users_as_members = True
+
 ADMIN_PASSWORD = "admin-secret-1"
 ENGINEER_PASSWORD = "eng-secret-12"
 # ECR-solid §7 (COMMERCIAL_V2): a customer answer carries its evidence; the

@@ -52,7 +52,7 @@ def plm2_roles(payload: dict) -> list[str]:
 
 def _local_role(hub_roles: list[str], in_department: bool = False) -> str:
     """plm2_Admin -> admin. Anyone else writes only as a member of an active
-    PLM department (assigned by an admin): engineer, gated by those
+    PLM department (its AdminPanel department roles, migration 150): engineer, gated by those
     departments. No department -> read-only viewer. There is deliberately no
     plm2_Engineer hub role: write access is granted in one place."""
     if "plm2_Admin" in hub_roles:
@@ -176,9 +176,16 @@ async def get_current_user(
                 if attempt >= 10:
                     raise
                 username = f"{base_username}-{attempt}"
-    # An admin's role does not depend on memberships: no lookup on its requests
-    in_department = ("plm2_Admin" not in hub_roles
-                     and await _in_active_department(db, user.id))
+    # Migration 150: a hub account's departments are its token's department
+    # roles (written only when they differ); local accounts keep theirs.
+    if user.hashed_password == _HUB_MANAGED and settings.hub_department_sync:
+        from app.services.hub_departments import sync_memberships
+        depts, _changed = await sync_memberships(db, user.id, hub_roles)
+        in_department = bool(depts)
+    else:
+        # An admin's role does not depend on memberships: no lookup on its requests
+        in_department = ("plm2_Admin" not in hub_roles
+                         and await _in_active_department(db, user.id))
     hub_role = _local_role(hub_roles, in_department)
     if user.hashed_password == _HUB_MANAGED and user.role != hub_role:
         # keep hub-provisioned users' local role in sync; never touch real local users

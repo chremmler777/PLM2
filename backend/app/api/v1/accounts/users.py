@@ -122,10 +122,22 @@ async def set_user_departments(
     current_user: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Replace a user's department memberships (admin only)."""
+    """Replace a user's department memberships (admin only). Migration 150:
+    a hub account's memberships come from its AdminPanel department roles
+    (409); a placeholder / local account is no member (400) unless
+    settings.local_users_as_members."""
+    from app.core.config import get_settings
+    from app.services.hub_departments import is_hub_account
     result = await db.execute(select(User).where(User.id == user_id))
-    if not result.scalar_one_or_none():
+    target = result.scalar_one_or_none()
+    if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if is_hub_account(target):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Department membership comes from AdminPanel")
+    if body.department_ids and not get_settings().local_users_as_members:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="A local account is no department member")
 
     if body.department_ids:
         dept_result = await db.execute(

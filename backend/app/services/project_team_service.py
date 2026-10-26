@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entities import Plant, Project, User
 from app.models.workflow import Department, ProjectResponsible, UserDepartment
+from app.services.hub_departments import member_clause
 
 
 class ProjectTeamError(Exception):
@@ -55,7 +56,7 @@ async def is_live_member(session: AsyncSession, user_id: Optional[int],
                Department.name == department_name,
                # a retired department grants nothing (R25)
                Department.is_active.is_(True),
-               User.is_active.is_(True))
+               User.is_active.is_(True), member_clause())
     )).first() is not None
 
 
@@ -72,7 +73,7 @@ class ProjectTeamService:
                                  org_id: Optional[int]) -> list[User]:
         q = (select(User).join(UserDepartment, UserDepartment.user_id == User.id)
              .where(UserDepartment.department_id == department_id,
-                    User.is_active.is_(True)))
+                    User.is_active.is_(True), member_clause()))
         if org_id is not None:
             q = q.where(User.organization_id == org_id)
         return list((await session.execute(q)).scalars().all())
@@ -147,9 +148,9 @@ class ProjectTeamService:
             raise ProjectTeamError(
                 f"The {word} must be an active user of this organization")
         is_member = (await session.execute(
-            select(UserDepartment.user_id).where(
+            select(UserDepartment.user_id).join(User, User.id == UserDepartment.user_id).where(
                 UserDepartment.user_id == user_id,
-                UserDepartment.department_id == department_id)
+                UserDepartment.department_id == department_id, member_clause())
         )).scalar_one_or_none() is not None
         if not is_member:
             raise ProjectTeamError(

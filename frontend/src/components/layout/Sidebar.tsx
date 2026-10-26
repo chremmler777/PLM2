@@ -76,8 +76,9 @@ export default function Sidebar() {
     // D-cost: the rates are read by admin, Project Manager, Sales, Finance
     // and Management only; everyone else costs through the lookups.
     ...(canReadCostSheet ? [{ path: '/cost-sheet', label: 'Cost sheet', icon: Receipt }] : []),
-    // managers and members per department (Christoph 2026-10-26): admins only
-    ...(role === 'admin' ? [{ path: '/admin/departments', label: 'Departments', icon: Building2 }] : []),
+    // managers and members per department (Christoph 2026-10-26): read by
+    // everyone, the manager set by admins
+    { path: '/admin/departments', label: 'Departments', icon: Building2 },
   ];
 
   const showSetup = role === 'admin' || role === 'engineer';
