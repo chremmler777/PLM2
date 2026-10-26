@@ -69,7 +69,7 @@ export default function ActsAsSwitch({ collapsed = false }: { collapsed?: boolea
       <label htmlFor="acts-as" className="sr-only">{t('actsAs.label')}</label>
       <select id="acts-as" data-testid="acts-as-select" value={current ?? ''}
         onChange={(e) => apply(e.target.value ? Number(e.target.value) : null)}
-        className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-200">
+        className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-slate-200">
         <option value="">{t('actsAs.myself')}</option>
         {active.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
       </select>
@@ -78,7 +78,7 @@ export default function ActsAsSwitch({ collapsed = false }: { collapsed?: boolea
           <label htmlFor="acts-as-user" className="sr-only">{t('actsAs.person')}</label>
           <select id="acts-as-user" data-testid="acts-as-user-select" value={currentUser ?? ''}
             onChange={(e) => applyUser(e.target.value ? Number(e.target.value) : null)}
-            className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-200">
+            className="w-full bg-slate-800 border border-slate-700 rounded-md px-2 py-1.5 text-sm text-slate-200">
             <option value="">{t('actsAs.noPerson')}</option>
             {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
