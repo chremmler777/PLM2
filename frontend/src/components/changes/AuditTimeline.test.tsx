@@ -223,4 +223,22 @@ describe('AuditTimeline', () => {
     expect((await screen.findByTestId('audit-reason-5')).textContent)
       .toBe('(reason: Hole cannot move, rescope with Tooling)')
   })
+
+  it('does not repeat the acting-as line as a reason (esc P3-3)', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 6, action: 'back_to_scoping', old_values: null, timestamp: '2026-09-25T12:17:30',
+        new_values: null, acting_as_user_name: 'Dale Perry', real_user_name: 'Christoph' }),
+      entry({ id: 7, action: 'gate_decided', old_values: null, timestamp: '2026-09-25T13:17:30',
+        new_values: null, acting_as_user_name: 'Dale Perry', real_user_name: 'Christoph' }),
+    ])
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 1, action: 'back_to_scoping', action_description: 'Back to scoping', performed_by: 1,
+        performed_at: '2026-09-25T12:17:31', notes: 'Entered by Christoph acting as Dale Perry: Hole moves' },
+      { id: 2, action: 'gate_decided', action_description: 'Gate', performed_by: 1,
+        performed_at: '2026-09-25T13:17:31', notes: 'Entered by Christoph acting as Dale Perry' },
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    expect((await screen.findByTestId('audit-reason-6')).textContent).toBe('(reason: Hole moves)')
+    expect(screen.queryByTestId('audit-reason-7')).toBeNull()
+  })
 })

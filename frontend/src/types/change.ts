@@ -1669,6 +1669,8 @@ export interface StageDept {
   department_name?: string | null;
   assessment_id?: number;
   rasic_letter?: string;
+  /** esc P2-3: who owns the waiting row (took it, else the team's responsible). */
+  owner_name?: string | null;
 }
 
 export interface StageWait {

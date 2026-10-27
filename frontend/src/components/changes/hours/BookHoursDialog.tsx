@@ -72,8 +72,9 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
     setPrefilled(null)
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    // the confirm comes prefilled with what is left of the estimate
-    if (open && confirm && pre?.prefill_hours && prefilled == null) {
+    // the confirm comes prefilled with what is left of the estimate; F13:
+    // so does a plain Book hours that names "your estimate" (one prefill)
+    if (open && pre?.prefill_hours && prefilled == null && (confirm || hours === '')) {
       setHours(String(pre.prefill_hours)); setPrefilled(pre.prefill_hours)
     }
   }, [open, confirm, pre?.prefill_hours]) // eslint-disable-line react-hooks/exhaustive-deps

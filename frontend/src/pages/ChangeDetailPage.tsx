@@ -563,6 +563,9 @@ export default function ChangeDetailPage() {
         if (!(canEditPlan || canPublishTiming)) return 'Needs the Project Manager, Logistics or Sales';
         // The Timing tab holds its "Validate timing" until every team has
         // confirmed: the cockpit does not offer a step the tab refuses.
+        if (planFeedback && planFeedback.plan_exists === false && !planFeedback.validated_at) {
+          return t('timing.createPlanFirst');
+        }
         const waiting = (planFeedback?.required ?? []).filter((r) => !(r.verdict === 'confirmed' && !r.stale));
         if (planFeedback && !planFeedback.validated_at && (!planFeedback.all_confirmed || waiting.length > 0)) {
           return waiting.length > 0

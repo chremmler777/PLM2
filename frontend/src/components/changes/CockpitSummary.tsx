@@ -188,12 +188,18 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
   // round closes into costing.
   if (s === 'in_assessment' && assessment) {
     const n = assessment.waiting_on.length
+    // esc P2-3: name who is waited on ("Waiting on Kenny Rice (Packaging Engineer)")
+    const waitText = n > 0 && n <= 3
+      ? t('next.waitingOnNames').replace('{x}', assessment.waiting_on.map((d) =>
+        d.owner_name ? `${d.owner_name} (${d.department_name ?? `#${d.department_id}`})`
+          : (d.department_name ?? `#${d.department_id}`)).join(', '))
+      : t('next.waitingOn').replace('{n}', String(n)).replace('{s}', n === 1 ? '' : 's')
     if (assessment.not_feasible.length > 0 && assessment.override !== 'approved') {
       // Three equal ways out, none of them pre-chosen: no primary button.
       const who = assessment.not_feasible.map((d) => d.department_name ?? `#${d.department_id}`).join(', ')
       return [
         { kind: 'wait', key: 'not-feasible', text: t('next.notFeasible').replace('{x}', who) },
-        ...(n > 0 ? [{ kind: 'wait' as const, key: 'waiting', text: t('next.waitingOn').replace('{n}', String(n)).replace('{s}', n === 1 ? '' : 's') }] : []),
+        ...(n > 0 ? [{ kind: 'wait' as const, key: 'waiting', text: waitText }] : []),
         { kind: 'advance', to: 'rejected', label: t('next.reject') },
         { kind: 'advance', to: 'scoping', label: t('next.backToScoping') },
         assessment.override === 'pending'
@@ -203,7 +209,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
     }
     if (n > 0 || !assessment.all_submitted) {
       return [
-        { kind: 'wait', key: 'waiting', text: t('next.waitingOn').replace('{n}', String(n)).replace('{s}', n === 1 ? '' : 's') },
+        { kind: 'wait', key: 'waiting', text: waitText },
         { kind: 'advance', to: 'rejected', label: t('next.reject') },
       ]
     }

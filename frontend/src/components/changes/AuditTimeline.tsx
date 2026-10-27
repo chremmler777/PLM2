@@ -125,7 +125,14 @@ export default function AuditTimeline({ correlationId, changeId }: {
     const at = parseApiDateTime(e.timestamp).getTime()
     const row = changelog.find((c) => c.action === e.action && !!c.notes?.trim()
       && Math.abs(parseApiDateTime(c.performed_at).getTime() - at) < 5000)
-    return row?.notes?.trim() ?? null
+    const notes = row?.notes?.trim() ?? null
+    // esc P3-3: the row already names who acted for whom; the history's
+    // "Entered by X acting as Y" lead is not repeated as a reason
+    if (notes && e.acting_as_user_name) {
+      const rest = notes.replace(/^Entered by .+? acting as [^:]+(: )?/, '').trim()
+      return rest || null
+    }
+    return notes
   }
 
   const entityTypes = useMemo(

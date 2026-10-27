@@ -112,7 +112,7 @@ export default function ProceedFixList({
                       onChange={(e) => e.target.value && reassign.mutate(
                         { id: c.id, department_id: Number(e.target.value) })}>
                       <option value="">{t('proceed.reassign')}</option>
-                      {departments.filter((d) => d.id !== c.department_id).map((d) => (
+                      {departments.filter((d) => d.id !== c.department_id && d.is_active !== false).map((d) => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>

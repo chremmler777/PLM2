@@ -870,10 +870,17 @@ describe('CockpitSummary early stages (spec §16)', () => {
   })
   const inAssessment = change({ status: 'in_assessment' })
 
+  it('names the responsible it waits on (esc P2-3)', () => {
+    render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false}
+      assessment={round({ waiting_on: [{ department_id: 30, department_name: 'Packaging Engineer', owner_name: 'Kenny Rice' }] })} />))
+    expect(screen.getByTestId('next-wait-waiting').textContent).toBe('Waiting on Kenny Rice (Packaging Engineer)')
+  })
+
   it('has no primary while departments are still answering', () => {
     render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
       onAdvance={() => {}} advancing={false} assessment={round()} />))
-    expect(screen.getByTestId('next-wait-waiting').textContent).toContain('Waiting on 1 department')
+    expect(screen.getByTestId('next-wait-waiting').textContent).toContain('Waiting on Quality')
     expect(screen.queryByTestId('next-to-costing')).toBeNull()
     expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-700')
   })
