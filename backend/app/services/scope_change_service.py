@@ -561,13 +561,15 @@ class ScopeChangeService:
         """The mail text Sales copies for the card's question (spec §0 [R4])."""
         if not card.question:
             return None
+        # F9: no CR / article / project number of ours in the customer copy
+        from app.services.customer_refs import customer_title
+        name = customer_title(change.title)
         where = f" for part {card.part_number}" if card.part_number else ""
         return "\n".join([
-            f"Subject: {change.change_number} {change.title}: question on your "
-            "change wish",
+            f"Subject: {name}: question on your change wish",
             "", "Hello,", "",
-            f"For your wish \"{card.what}\"{where} on {change.change_number} "
-            f"({change.title}) we need your answer before we can cost it:",
+            f"For your wish \"{card.what}\"{where} on {name} "
+            "we need your answer before we can cost it:",
             "", card.question["text"],
             "", "Thank you, and best regards"])
 

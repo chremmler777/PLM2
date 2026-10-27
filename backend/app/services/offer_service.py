@@ -831,8 +831,10 @@ class OfferService:
         data = default_data()
         # The customer's company is Sales' to type: the project name is not
         # a legal addressee (warning recipient_missing until it is set).
-        data["subject"] = (f"Offer for engineering change {change.change_number}: "
-                           f"{change.title}")
+        # F9: customer numbers first, our CR / part / project numbers stay internal
+        from app.services import customer_refs
+        data["subject"] = ("Offer for engineering change: " + customer_refs.customer_heading(
+            change.title, await customer_refs.change_customer_numbers(session, change)))[:255]
         data["intro"] = ("Thank you for your request. Please find below our "
                          "offer for the engineering change described.")
         data["scope_text"] = (change.description or "").strip()
@@ -976,8 +978,11 @@ class OfferService:
         data["changeover"] = default_data()["changeover"]
         data["piece_price"] = default_data()["piece_price"]
         data["timing"] = {**default_data()["timing"], "include": False}
-        data["subject"] = (f"Supplement to the offer for engineering change "
-                           f"{change.change_number}: {change.title}")[:255]
+        from app.services import customer_refs
+        data["subject"] = ("Supplement to the offer for engineering change: "
+                           + customer_refs.customer_heading(
+                               change.title,
+                               await customer_refs.change_customer_numbers(session, change)))[:255]
         return data
 
     @staticmethod

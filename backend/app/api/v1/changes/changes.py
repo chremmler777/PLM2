@@ -3387,6 +3387,10 @@ async def list_concerns(
     part_numbers = dict((await db.execute(
         select(Part.id, Part.part_number).where(Part.id.in_(part_ids)))).all()) \
         if part_ids else {}
+    # F9: the customer copy names the customer's part number, never ours
+    customer_pns = dict((await db.execute(
+        select(Part.id, Part.customer_part_number).where(Part.id.in_(part_ids)))).all()) \
+        if part_ids else {}
     confirm_ids = {c.confirm_by_id for c in change.concerns if c.confirm_by_id}
     if confirm_ids - set(names):
         for uid, full_name in await db.execute(
@@ -3423,7 +3427,7 @@ async def list_concerns(
             row.can_confirm = await MeetingService.can_confirm(
                 db, change, c, current_user, viewer)
             row.customer_copy = MeetingService.customer_copy(
-                change, c, part_numbers.get(c.part_id))
+                change, c, customer_pns.get(c.part_id))
             row.owner_department_names = [concern_depts.get(d, f"#{d}")
                                           for d in c.owner_department_ids]
             if c.is_check:

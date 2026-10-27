@@ -175,3 +175,20 @@ async def test_t12_issue_waits_on_apqp_while_the_limits_are_unconfirmed(
         nxt = await ChangeService.next_step_missing(s, change)
         row = next(i for i in nxt["items"] if i["key"] == "validation_issues")
         assert row["who"].startswith("VI-1: APQP confirms the limits")
+
+
+def test_f9_customer_copy_drops_our_numbers():
+    from types import SimpleNamespace
+    from app.services import customer_refs
+    from app.services.meeting_service import MeetingService
+    title = "20-3101-001-1 - 1383 BOTTOM COVER LEFT G01 LCI"
+    assert customer_refs.customer_title(title) == "BOTTOM COVER LEFT G01 LCI"
+    assert customer_refs.customer_title("20-3075-305-1 +1 - 1302  ASSY IP DECOR") == "ASSY IP DECOR"
+    assert customer_refs.customer_heading(title, ["51 12 7 123456", None, "51 12 7 123456"]) \
+        == "51 12 7 123456 BOTTOM COVER LEFT G01 LCI"
+    change = SimpleNamespace(change_number="CR-2026-0013", title=title)
+    concern = SimpleNamespace(kind="needs_info", answer_from="customer", check_what="weight",
+                              note="Which grain?", scope_effect=None)
+    text = MeetingService.customer_copy(change, concern, "51 12 7 123456")
+    assert "CR-2026-0013" not in text and "20-3101-001-1" not in text and "1383" not in text
+    assert "for part 51 12 7 123456" in text and "BOTTOM COVER LEFT" in text

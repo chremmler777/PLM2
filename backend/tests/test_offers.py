@@ -99,7 +99,7 @@ async def test_v1_is_seeded_from_costing_and_register(client, offer_world):
     assert d["recipient"]["company"] == ""
     assert "recipient_missing" in {w["code"] for w in o["warnings"]}
     assert d["scope_text"] == "Rib +0.5 mm" and d["customer_note"] == ""
-    assert d["subject"] == "Offer for engineering change C-O-1: offer me"
+    assert d["subject"] == "Offer for engineering change: offer me"   # F9: no CR number
     line = next(l for l in d["cost_lines"]
                 if l["key"] == f"pos:{offer_world['position_id']}")
     assert line["amount"] == line["source_amount"] == 1000

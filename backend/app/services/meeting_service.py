@@ -1040,17 +1040,21 @@ class MeetingService:
         if (concern.kind != "needs_info"
                 or concern.answer_from not in ("customer", "supplier")):
             return None
+        # F9: the customer's part number and the title without our numbers
+        # (CR, article, project code); part_number is the customer's
+        from app.services.customer_refs import customer_title
         topic = MeetingService.CHECK_WHAT_WORDS.get(concern.check_what or "", "")
         where = f" for part {part_number}" if part_number else ""
         whose = ("your change request" if concern.answer_from == "customer"
                  else "our change")
+        name = customer_title(change.title)
         lines = [
-            f"Subject: {change.change_number} {change.title}: question"
+            f"Subject: {name}: question"
             + (f" on {topic}" if topic and topic != "other" else ""),
             "",
             "Hello,",
             "",
-            f"For {whose} {change.change_number} ({change.title}){where} "
+            f"For {whose} ({name}){where} "
             "we need your answer:",
             "",
             concern.note.strip(),
