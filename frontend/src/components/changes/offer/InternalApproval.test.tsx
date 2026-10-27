@@ -6,10 +6,11 @@ import { changesApi } from '../../../api/changes'
 import type { ChangeDetail } from '../../../types/change'
 
 let total = 4800
+let currency = 'EUR'
 vi.mock('../../../api/changes', () => ({
   changesApi: {
     approveInternalCosts: vi.fn().mockResolvedValue({}),
-    getSummation: vi.fn(() => Promise.resolve({ totals: { grand_total: total }, currency: 'EUR' })),
+    getSummation: vi.fn(() => Promise.resolve({ totals: { grand_total: total }, currency })),
     listCostPositions: vi.fn(() => Promise.resolve([
       { id: 1, label: 'Insert re-cut', kind: 'external', estimated: true }])),
   },
@@ -24,7 +25,7 @@ const wrap = (ui: React.ReactElement) => (
 )
 const change = { id: 7, status: 'costing', assessment_v2: true } as unknown as ChangeDetail
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); total = 4800 })
+afterEach(() => { cleanup(); vi.clearAllMocks(); total = 4800; currency = 'EUR' })
 
 describe('InternalApproval card (spec §5)', () => {
   it('approved and owed again: the record stays, the card asks to re-approve (A3-05)', () => {
@@ -34,6 +35,16 @@ describe('InternalApproval card (spec §5)', () => {
     expect(screen.getByTestId('internal-approved')).toBeTruthy()
     expect(screen.getByTestId('internal-reapprove')).toBeTruthy()
     expect(screen.getByRole('button', { name: /approve internal costs/i })).toBeTruthy()
+  })
+
+  it('T8: the saving per year reads in the costing currency (USD on a Toccoa change)', async () => {
+    currency = 'USD'
+    const approved = { ...change, internal_approved_at: '2026-10-14T10:00:00Z',
+      internal_approved_amount: 1564.5, internal_saving: 3200,
+      internal_saving_basis: 'estimate', internal_rationale: 'saving' } as unknown as ChangeDetail
+    render(wrap(<InternalApproval change={approved} canApprove={false} />))
+    await waitFor(() => expect(screen.getByTestId('internal-approved').textContent).toMatch(/3,200\.00.*USD|USD.*3,200/))
+    expect(screen.getByTestId('internal-approved').textContent).not.toContain('EUR')
   })
 
   it('approved and nothing owed: no button (A3-05 negative)', () => {

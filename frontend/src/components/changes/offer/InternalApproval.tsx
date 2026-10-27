@@ -57,7 +57,9 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
     queryKey: ['change-summation', change.id],
     queryFn: () => changesApi.getSummation(change.id),
     // T8: the approved amount reads in the costing's currency too
-    enabled: v2 && canApprove && (open || !!change.internal_approved_at), retry: false,
+    // (T8 retest: for every reader of the approved record, not only the
+    // approver; a 403 leaves it unread)
+    enabled: v2 && ((canApprove && open) || !!change.internal_approved_at), retry: false,
   })
   const { data: positions = [] } = useQuery({
     queryKey: ['costing-positions', change.id],
@@ -96,7 +98,7 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
         {change.internal_rationale && (
           <p className="text-xs text-slate-400" data-testid="internal-case">
             {t(`internal.rationale.${change.internal_rationale}`)}
-            {change.internal_saving != null && ` · ${t('internal.saving')}: ${formatMoney(change.internal_saving)}`
+            {change.internal_saving != null && ` · ${t('internal.saving')}: ${formatMoney(change.internal_saving, summation?.currency ?? undefined)}`
               + ` (${t(`internal.basis.${change.internal_saving_basis ?? 'estimate'}`)})`}
             {change.internal_volume != null && ` · ${t('internal.volume')}: ${change.internal_volume}`}
           </p>
