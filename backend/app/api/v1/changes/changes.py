@@ -3032,8 +3032,8 @@ async def get_summation(
     if not await NegotiationService.may_read(db, change, current_user):
         raise HTTPException(
             status_code=403,
-            detail="Only Project Management, Sales, the change lead or an "
-                   "admin may read the cost summation")
+            detail="Only Project Management, Sales, Finance, Management, the "
+                   "change lead or an admin may read the cost summation")
     return await CostService.summation(db, change)
 
 

@@ -240,7 +240,11 @@ class PriceViewer:
                 # P4 (ECR-solid): Management gives the OK on price drops and
                 # Absorb, so it reads prices; Quality still signs without.
                 or await ChangeService._user_in_department(
-                    self.session, u, "Management"))
+                    self.session, u, "Management")
+                # F17 (test 2026-10-27): Finance keeps the cost sheet's
+                # rates and reads what they price, the costing summation too
+                or await ChangeService._user_in_department(
+                    self.session, u, "Finance"))
         return self._user_level
 
     async def may_read(self, change) -> bool:

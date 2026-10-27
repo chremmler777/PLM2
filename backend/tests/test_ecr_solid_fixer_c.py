@@ -192,3 +192,21 @@ def test_f9_customer_copy_drops_our_numbers():
     text = MeetingService.customer_copy(change, concern, "51 12 7 123456")
     assert "CR-2026-0013" not in text and "20-3101-001-1" not in text and "1383" not in text
     assert "for part 51 12 7 123456" in text and "BOTTOM COVER LEFT" in text
+
+
+async def test_f17_finance_reads_the_costing_summation(client, session_factory, seed):
+    from tests.conftest import ENGINEER_PASSWORD, login
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-F17", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"],
+                          customer_relevant=True, status="costing")
+        s.add(c); await s.commit()
+        cid = c.id
+    eng = await login(client, "eng@test.io", ENGINEER_PASSWORD)
+    # NEGATIVE: an engineer outside the cost roles
+    assert (await client.get(f"/api/v1/changes/{cid}/summation", headers=eng)).status_code == 403
+    await make_department_member(session_factory, seed["engineer_id"], "Finance")
+    eng = await login(client, "eng@test.io", ENGINEER_PASSWORD)
+    res = await client.get(f"/api/v1/changes/{cid}/summation", headers=eng)
+    assert res.status_code == 200, res.text
