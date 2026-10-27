@@ -86,3 +86,53 @@ async def test_t2_customer_change_keeps_its_later_stages(session_factory, seed):
             WfInstanceTask.instance_id == iid,
             WfInstanceTask.stage_order == 2))).scalars().all()
         assert {t.status for t in tasks} == {"active"}
+
+
+async def _approved_change(session_factory, seed, *, planned: bool, validated: bool):
+    from datetime import date, datetime
+    from app.models.change_cost import ChangeGate
+    from app.models.change_plan import ChangePlanTask
+    async with session_factory() as s:
+        c = ChangeRequest(change_number=f"C-T9-{planned}{validated}", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=False, status="approved",
+                          bank_build_mode="running_change" if validated else None,
+                          timing_validated_at=datetime.utcnow() if validated else None)
+        s.add(c); await s.flush()
+        s.add(ChangeGate(change_id=c.id, gate_key="release"))
+        if planned:
+            s.add(ChangePlanTask(change_id=c.id, plan="detailed", name="Tool",
+                                 start_date=date.today(), created_by=seed["admin_id"]))
+        await s.commit()
+        return c.id
+
+
+async def _lead_actions(session_factory, seed, cid):
+    from app.models.entities import User
+    from app.services.change_service import ChangeService
+    await make_department_member(session_factory, seed["engineer_id"], "Process Engineer")
+    async with session_factory() as s:
+        change = await ChangeService.get_change(s, cid)
+        return await ChangeService.my_actions(s, change, await s.get(User, seed["engineer_id"]))
+
+
+async def test_t9_approved_change_shows_one_next_step(session_factory, seed):
+    """No plan yet: the lead's one step is the plan (with its due), the
+    release gate is not offered beside it."""
+    cid = await _approved_change(session_factory, seed, planned=False, validated=False)
+    acts = await _lead_actions(session_factory, seed, cid)
+    kinds = [a["kind"] for a in acts]
+    assert "gate" not in kinds
+    watch = [a for a in acts if a["kind"] == "plan_watch"]
+    assert len(watch) == 1 and watch[0].get("due_date")
+    assert "detailed plan" in watch[0]["hint"]
+
+
+async def test_t9_release_gate_is_the_step_once_the_rest_is_done(session_factory, seed):
+    cid = await _approved_change(session_factory, seed, planned=True, validated=True)
+    acts = await _lead_actions(session_factory, seed, cid)
+    kinds = [a["kind"] for a in acts]
+    assert kinds.count("gate") == 1 and "plan_watch" not in kinds
+    gate = next(a for a in acts if a["kind"] == "gate")
+    assert gate.get("due_date")

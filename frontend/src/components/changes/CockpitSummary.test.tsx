@@ -395,6 +395,31 @@ describe('CockpitSummary', () => {
     expect(screen.getAllByText(/Impact confirmation pending/).length).toBeGreaterThan(0)
   })
 
+  it('T9: an approved change has one next step: the release gate waits until plan and timing are done', () => {
+    const { unmount } = render(wrap(<CockpitSummary change={change({
+      status: 'approved', customer_relevant: false, assessments: [], gates: [],
+      impact_confirmed_at: '2026-07-01T00:00:00', timing_validated_at: null, bank_build_mode: null,
+    } as Partial<ChangeDetail>)}
+      gates={[{ gate_key: 'release', decision: null }] as never} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onResolveGate={vi.fn()}
+      actions={[{ kind: 'plan_watch', label: 'Approved: next step', target_tab: 'timing',
+        hint: 'Create the detailed plan (Timing tab): then the teams confirm it',
+        due_date: '2026-10-29T23:59:00' }]} />))
+    expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+    expect(document.body.textContent).toContain('Create the detailed plan')
+    expect(screen.getByTestId('action-due-plan_watch').textContent).toContain('due')
+    unmount()
+    // timing validated, bank build decided: now the gate is the blocker
+    render(wrap(<CockpitSummary change={change({
+      status: 'approved', customer_relevant: false, assessments: [],
+      impact_confirmed_at: '2026-07-01T00:00:00', timing_validated_at: '2026-10-27T00:00:00',
+      bank_build_mode: 'running_change',
+    } as Partial<ChangeDetail>)}
+      gates={[{ gate_key: 'release', decision: null }] as never} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onResolveGate={vi.fn()} />))
+    expect(screen.queryByText(/Nothing blocking/)).toBeNull()
+  })
+
   it('does not show the impact-confirmation blocker once confirmed', () => {
     render(wrap(<CockpitSummary change={change({
       status: 'approved', assessments: [],

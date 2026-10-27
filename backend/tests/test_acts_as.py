@@ -165,10 +165,18 @@ async def test_acting_admin_who_leads_cannot_decide_gates(client, admin_auth, se
     cid = res.json()["id"]
     # Approved: the D1 "Technical release?" gate (on every change from
     # creation) guards the next hop, into implementation.
+    from datetime import date, datetime
     from app.models.change import ChangeRequest
+    from app.models.change_plan import ChangePlanTask
     async with session_factory() as s:
         c = await s.get(ChangeRequest, cid)
         c.status = "approved"
+        # T9: the release gate is the approved change's step once plan,
+        # bank build and timing are done (one next step at a time)
+        c.bank_build_mode = "running_change"
+        c.timing_validated_at = datetime.utcnow()
+        s.add(ChangePlanTask(change_id=cid, plan="detailed", name="Tool",
+                             start_date=date.today(), created_by=seed["admin_id"]))
         await s.commit()
     # "Your actions" must not prompt for a gate the PUT then refuses.
     acting = await client.get(f"/api/v1/changes/{cid}/my-actions",

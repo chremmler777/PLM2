@@ -387,12 +387,22 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // A gate only blocks when it guards a transition that's currently available
   // and no approved deviation covers it; gates seeded 'na' but guarding a
   // later transition are just "outstanding later".
+  // T9: an approved change has one next step at a time (backend
+  // _approved_waiting: plan, bank build, publish, timing, then the release
+  // gate). While an earlier one is owed the release gate is the step after
+  // it: listed muted, not a blocker the header sends the lead to first.
+  const approvedStepOwed = change.status === 'approved' && !motherPlant
+    && (!change.timing_validated_at || !change.bank_build_mode
+      || (change.customer_relevant && !change.plan_published_at))
+  const gateHeldBack = (g: Gate) => approvedStepOwed
+    && GATE_TARGET_STATUS[g.gate_key] === 'in_implementation'
   const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key])
-    && !deviationCovers(GATE_TARGET_STATUS[g.gate_key], g.gate_key))
+    && !deviationCovers(GATE_TARGET_STATUS[g.gate_key], g.gate_key) && !gateHeldBack(g))
   // A gate nobody has set ("NA") guarding a later step is noise, not news:
   // only a later gate that was actually answered No is worth a line.
-  const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key])
-    && g.decision === 'no')
+  const laterGates = openGates.filter((g) => (!next.includes(GATE_TARGET_STATUS[g.gate_key])
+    && g.decision === 'no') || (gateHeldBack(g)
+    && !deviationCovers(GATE_TARGET_STATUS[g.gate_key], g.gate_key)))
   // Overdue assessments hold the change only while it is assessed: once it
   // moved on (costing, quoted ...) the flag is stale history, not a blocker.
   const overdue = change.status === 'in_assessment'
@@ -836,6 +846,15 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                   className={actionCls}
                   onClick={() => runAction(a)}>
                   {pluralizeLabel(a.label)}
+                  {/* T9: the one next step names who owes it and by when */}
+                  {a.kind === 'plan_watch' && a.hint && (
+                    <span className="block text-xs text-sky-300/80">{a.hint}</span>
+                  )}
+                  {a.due_date && (
+                    <span data-testid={`action-due-${a.kind}`} className="block text-xs text-sky-300/80">
+                      {t('actions.due').replace('{d}', formatCalendarDate(a.due_date))}
+                    </span>
+                  )}
                 </button>
               )
               // The lead's late flag has two ways out: chase the department,

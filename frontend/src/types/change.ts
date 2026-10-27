@@ -918,6 +918,8 @@ export interface MyAction {
   hint?: string | null;
   /** advance: the onward status the step moves the change to. */
   to_status?: ChangeStatus | null;
+  /** T9: the approved change's one next step carries its due (ISO). */
+  due_date?: string | null;
   /** Project team (spec §18): backup items show in a muted "As backup" group. */
   role?: TeamRole;
   main_name?: string | null;

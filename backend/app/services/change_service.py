@@ -5612,8 +5612,10 @@ class ChangeService:
             return "Waiting for the teams to confirm the plan; then validate the timing"
         if any(GATE_TARGET_STATUS.get(g.gate_key) == "in_implementation"
                and g.decision != "yes" for g in c.gates):
-            return "Decide the release gate (or override it), then start implementation"
+            return ChangeService.APPROVED_GATE_HINT
         return None
+
+    APPROVED_GATE_HINT = "Decide the release gate (or override it), then start implementation"
 
     @staticmethod
     def _advance_held(c) -> bool:
@@ -5947,6 +5949,8 @@ class ChangeService:
             await due_rules.annotate_tasks(session, dated, [change])
             for r, d in zip(stage_rows, dated):
                 r["overdue"] = bool(d.get("overdue"))
+                if r["kind"] == "plan_watch" and d.get("due_date") is not None:
+                    r["_due"] = d["due_date"]
             for r in stage_rows:
                 key = ChangeService._action_key(r)
                 if key in have:
@@ -5970,7 +5974,13 @@ class ChangeService:
                                       or STAGE_TASK_TAB.get(kind, "overview"))
                 item["_owned"] = bool(r.get("mine"))
                 item["_overdue"] = bool(r.get("overdue"))
+                item.pop("_due", None)
+                if r.get("_due") is not None:
+                    item["due_date"] = r["_due"].isoformat()
                 actions.append(item)
+
+        if change.status == "approved":
+            actions = await ChangeService._one_approved_step(session, change, actions)
 
         # Project team (spec §18): each item carries the viewer's role on it.
         # "main" items are theirs; "backup" items (the project has another
@@ -5990,6 +6000,41 @@ class ChangeService:
             # D2b: an overdue item goes to the named backup too
             await team.promote_overdue(a, change.project_id)
             a.pop("role_department_id", None)
+        return actions
+
+    @staticmethod
+    async def _one_approved_step(session: AsyncSession, change: ChangeRequest,
+                                 actions: list[dict]) -> list[dict]:
+        """T9 (test 2026-10-27): an approved change shows ONE next step, in
+        the order _approved_waiting walks (plan, bank build, publish,
+        the teams' confirmation and timing, then the release gate). The
+        release gate is not offered while an earlier step is owed (it was
+        listed beside the plan and the bank build); "validate the timing"
+        and "decide the release gate" replace the lead's plan_watch row
+        (the same step twice). The step that stays carries the plan_watch's
+        due."""
+        from app.models.change_plan import ChangePlanTask
+        planned = (await session.execute(
+            select(ChangePlanTask.id).where(
+                ChangePlanTask.change_id == change.id,
+                ChangePlanTask.plan == "detailed").limit(1))).scalar_one_or_none() is not None
+        waiting = ChangeService._approved_waiting(change, planned)
+        gate_is_next = waiting == ChangeService.APPROVED_GATE_HINT
+
+        def release_gate(a: dict) -> bool:
+            return (a["kind"] == "gate"
+                    and GATE_TARGET_STATUS.get(a.get("gate_key")) == "in_implementation")
+
+        if waiting is not None and not gate_is_next:
+            actions = [a for a in actions if not release_gate(a)]
+        watch = next((a for a in actions if a["kind"] == "plan_watch"), None)
+        concrete = next((a for a in actions if a["kind"] == "timing_validate"
+                         or release_gate(a)), None)
+        if watch is not None and concrete is not None:
+            if watch.get("due_date") and not concrete.get("due_date"):
+                concrete["due_date"] = watch["due_date"]
+            concrete.setdefault("_owned", watch.get("_owned", False))
+            actions = [a for a in actions if a is not watch]
         return actions
 
     @staticmethod

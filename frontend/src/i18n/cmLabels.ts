@@ -324,6 +324,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.gate': { de: 'Gate', en: 'Gate' },
   'cockpit.resolveGate': { de: 'Gate auf dem D1-Tab entscheiden', en: 'Decide this gate on the D1 tab' },
   'actions.title': { de: 'Deine Aufgaben', en: 'Your actions' },
+  'actions.due': { de: 'fällig {d}', en: 'due {d}' },
   'actions.none': { de: 'Für dich gibt es hier gerade nichts zu tun.', en: 'Nothing needs you here right now.' },
   'actions.notYourDepartment': { de: 'Nicht deine Abteilung', en: 'Not your department' },
   'actions.asBackup': { de: 'Als Vertretung', en: 'As backup' },
