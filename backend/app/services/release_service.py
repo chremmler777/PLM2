@@ -111,11 +111,14 @@ class ReleaseService:
                 RevisionFile.is_deleted.is_(False),
                 RevisionFile.file_type.in_(("drawing", "cad"))))).all()}
         out = []
-        for part_number, rev_name, rev_id in (await session.execute(
-                select(Part.part_number, PartRevision.revision_name, PartRevision.id)
+        for part_number, rev_name, rev_id, no_geo in (await session.execute(
+                select(Part.part_number, PartRevision.revision_name, PartRevision.id,
+                       PartRevision.no_geometry_change)
                 .join(Part, Part.id == PartRevision.part_id)
                 .where(PartRevision.id.in_(rev_ids)).order_by(Part.part_number))).all():
-            if rev_id not in have:
+            # T18 / N9: a revision signed 'no geometry change' keeps its
+            # drawing and 3D data: nothing new to file or release
+            if rev_id not in have and not no_geo:
                 out.append(f"{part_number} {rev_name}")
         return out
 
@@ -686,6 +689,11 @@ class ReleaseService:
                     RevisionFile.revision_id == rev.id,
                     RevisionFile.is_deleted.is_(False)))).scalars().all())
             has = [t for t in ("drawing", "cad") if t in types]
+            if rev.no_geometry_change:
+                lines_files.append(
+                    f"{part.part_number} {rev.revision_name}: no geometry change "
+                    "signed, drawing and 3D unchanged (answer n/a or done with that)")
+                continue
             lines_files.append(
                 f"{part.part_number} {rev.revision_name}: "
                 + (" and ".join({"drawing": "drawing", "cad": "3D"}[t] for t in has)
@@ -695,6 +703,11 @@ class ReleaseService:
             out["index_updated"] = "; ".join(lines_index)
         if lines_files:
             out["drawing_released"] = "; ".join(lines_files)
+        # T18 / N9: the Tool Engineer said no tool change in the assessment
+        from app.services.workflow_service import WorkflowService
+        if await WorkflowService.change_says_no_tool_change(session, change):
+            out["equipment_updated"] = ("The Tool Engineer's assessment says no tool "
+                                        "change: answer n/a with that reason")
         return out
 
     @staticmethod

@@ -279,11 +279,20 @@ class WorkflowService:
         Engineer assessment on the change answered "no tool change" (impact
         no). Returns the waive note, or None (no change, no Tool Engineer
         answer, or one says the tool changes)."""
-        from app.models.change import ChangeAssessment
-        from app.models.workflow import Department
         change = await WorkflowService._task_change(db, instance)
         if change is None or instance.change_id is not None:
             return None
+        if not await WorkflowService.change_says_no_tool_change(db, change):
+            return None
+        return ("Not applicable: the Tool Engineer's assessment says no tool "
+                "change")
+
+    @staticmethod
+    async def change_says_no_tool_change(db: AsyncSession, change) -> bool:
+        """Every Tool Engineer assessment on the change answered 'no tool
+        change' (impact no); False without such an answer (T18)."""
+        from app.models.change import ChangeAssessment
+        from app.models.workflow import Department
         rows = (await db.execute(
             select(ChangeAssessment)
             .join(Department, Department.id == ChangeAssessment.department_id)
@@ -293,7 +302,7 @@ class WorkflowService:
         if not answered or len(answered) != len([a for a in rows
                                                  if a.rasic_letter in ("R", "A")
                                                  or a.submitted_at is not None]):
-            return None
+            return False
         for a in answered:
             d = a.details_dict
             if d.get("impacted") is False:
@@ -302,9 +311,8 @@ class WorkflowService:
             if isinstance(impacts, list) and impacts and not any(
                     i.get("impacted") for i in impacts if isinstance(i, dict)):
                 continue
-            return None
-        return ("Not applicable: the Tool Engineer's assessment says no tool "
-                "change")
+            return False
+        return True
 
     @staticmethod
     async def no_geometry_signer_departments(db: AsyncSession,

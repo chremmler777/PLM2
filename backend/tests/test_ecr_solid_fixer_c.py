@@ -433,3 +433,41 @@ async def test_n11_cancel_vote_tells_the_lead_and_the_cancel_tells_the_voter(
             Notification.kind == "change_ended"))).scalars()]
         assert seed["engineer_id"] in ended
 
+
+async def test_n9_no_geometry_drawing_row_and_no_tool_change_row_say_so(
+        session_factory, seed, part):
+    """Retest T18 / N9: the drawing row of a revision signed 'no geometry
+    change' says so and does not refuse 'done' for missing files; the
+    equipment row says the Tool Engineer found no tool change."""
+    from app.models.change import ChangeAssessment, ChangeImpactedItem
+    from app.models.part import PartRevision
+    from app.services.change_service import ChangeService
+    from app.services.release_service import ReleaseService
+    from datetime import datetime
+    tool = await make_department_member(session_factory, seed["engineer_id"], "Tool Engineer")
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-N9", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"],
+                          customer_relevant=True, status="in_validation")
+        s.add(c); await s.flush()
+        s.add(ChangeImpactedItem(change_id=c.id, part_id=part["part_id"],
+                                 resulting_revision_id=part["revision_id"],
+                                 created_by=seed["admin_id"]))
+        a = ChangeAssessment(change_id=c.id, department_id=tool, verdict="feasible",
+                             rasic_letter="R", submitted_at=datetime.utcnow(),
+                             submitted_by=seed["engineer_id"])
+        a.details = '{"impacted": false}'
+        s.add(a)
+        await s.commit()
+        cid = c.id
+    async with session_factory() as s:
+        change = await ChangeService.get_change(s, cid)
+        assert await ReleaseService.files_missing(s, change)       # NEGATIVE: not signed
+        (await s.get(PartRevision, part["revision_id"])).no_geometry_change = True
+        await s.commit()
+        change = await ChangeService.get_change(s, cid)
+        assert await ReleaseService.files_missing(s, change) == []
+        hints = await ReleaseService.revision_hints(s, change)
+        assert "no geometry change signed" in hints["drawing_released"]
+        assert "no tool change" in hints["equipment_updated"]
