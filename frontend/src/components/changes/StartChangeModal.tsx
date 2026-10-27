@@ -13,6 +13,7 @@ import type { ChangeType } from '../../types/change';
 import { useChangePermissions, useInternalOnlyStarter } from '../../hooks/queries/useCanStartChange';
 import { FALLBACK_MOTHER_PLANTS } from '../../api/motherPlant';
 import DateInput from '../gantt/DateInput';
+import InfoButton from '../common/InfoButton';
 import { useDialogFocus } from '../../hooks/useDialogFocus';
 import MotherPlantFields, {
   emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
@@ -839,11 +840,23 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             )}
             {/* §2: urgent needs its need-by, reason and evidence */}
             <div>
-              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                <input type="checkbox" checked={urgentOn} data-testid="start-urgent"
-                  onChange={(e) => setUrgentOn(e.target.checked)} />
-                {t('urgent.toggle')}
-              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={urgentOn} data-testid="start-urgent"
+                    onChange={(e) => setUrgentOn(e.target.checked)} />
+                  {t('urgent.toggle')}
+                </label>
+                <InfoButton label={t('urgent.infoLabel')}>
+                  <p className="font-medium text-slate-200">{t('urgent.infoTitle')}</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    <li>{t('urgent.info1')}</li>
+                    <li>{t('urgent.info2')}</li>
+                    <li>{t('urgent.info3')}</li>
+                    <li>{t('urgent.info4')}</li>
+                  </ul>
+                  <p className="mt-1">{t('urgent.info5')}</p>
+                </InfoButton>
+              </div>
               {urgentOn && (
                 <div className="mt-2 space-y-1">
                   <UrgentFields value={urgent} onChange={setUrgent} idPrefix="start-urgent" />

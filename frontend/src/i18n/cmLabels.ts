@@ -2886,6 +2886,23 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Dringend braucht Bedarfstermin, Grund und Beleg; Aufgaben sind dann in 1 Arbeitstag fällig.',
     en: 'Urgent needs a need-by date, a reason and evidence; tasks are then due in 1 working day.' },
   'urgent.reasonPick': { de: 'Grund', en: 'Reason' },
+  'urgent.infoLabel': { de: 'Was bedeutet dringend?', en: 'What does urgent do?' },
+  'urgent.infoTitle': { de: 'Dringend = schneller, nicht kürzer', en: 'Urgent = faster, not shorter' },
+  'urgent.info1': {
+    de: 'Braucht Bedarfstermin, Grund und Beleg (Mail, 8D-Nr. oder Datei).',
+    en: 'Needs a need-by date, a reason and evidence (mail, 8D no. or file).' },
+  'urgent.info2': {
+    de: 'Aufgaben und Bewertungen sind in 1 statt 2 Arbeitstagen fällig; Eskalation einen Tag früher.',
+    en: 'Tasks and assessments are due in 1 working day instead of 2; escalation comes a day earlier.' },
+  'urgent.info3': {
+    de: 'Sales-Kontakt und PM des Projekts werden sofort informiert.',
+    en: 'The Sales contact and the project PM are told right away.' },
+  'urgent.info4': {
+    de: 'Beim Weitergeben fragt PLM: Ist der Bedarfstermin realistisch? Ja, nur mit Start auf Risiko (Kundenänderung: PM und Qualität unterschreiben), oder nein mit neuem Termin; dann informiert Sales den Kunden.',
+    en: 'At proceed PLM asks: is the need-by realistic? Yes, only with start at risk (customer change: PM and Quality sign), or no with a new date; then Sales tells the customer.' },
+  'urgent.info5': {
+    de: 'Kein Schritt wird übersprungen. Nur Start auf Risiko beginnt vor der Bestellung.',
+    en: 'No step is skipped. Only start at risk begins before the PO.' },
   'urgent.reason.line_stop': { de: 'Bandstillstand beim Kunden', en: 'Customer line stop' },
   'urgent.reason.safety': { de: 'Sicherheit', en: 'Safety' },
   'urgent.reason.quality_escape': { de: 'Qualitätsschlupf', en: 'Quality escape' },
