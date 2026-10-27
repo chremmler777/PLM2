@@ -190,5 +190,20 @@ async def test_f4_the_tool_change_task_tells_its_owner_with_the_change(
     async with session_factory() as s:
         rows = (await s.execute(select(Notification).where(
             Notification.user_id == fe["dale"], Notification.kind == "task_new"))).scalars().all()
-    assert [r.title for r in rows] == ["Your task: Implement tool change (C-FE-1)"]
-    assert "due" in rows[0].body and "grain" in rows[0].body
+    # N3: Dale was told of the review he does as the fallback, then of the tool change
+    assert [r.title for r in rows] == ["Your task: Design review (C-FE-1)",
+                                       "Your task: Implement tool change (C-FE-1)"]
+    assert "due" in rows[1].body and "grain" in rows[1].body
+
+
+async def test_n3_the_review_notice_goes_to_the_fallback_reviewer(
+        client, fe, session_factory, seed):
+    """Retest-s1 N3: the Design review notice reaches Dale (the fallback
+    reviewer), not the designer the 4-eyes rule refuses."""
+    from app.models.notification import Notification
+    await _design_done(client, fe, session_factory)
+    async with session_factory() as s:
+        told = [(n.user_id, n.title) for n in (await s.execute(select(Notification).where(
+            Notification.kind == "task_new"))).scalars()
+                if "Design review" in (n.title or "")]
+    assert [u for u, _ in told] == [fe["dale"]], told

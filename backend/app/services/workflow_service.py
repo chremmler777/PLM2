@@ -637,7 +637,36 @@ class WorkflowService:
                         link="/my-tasks", kind="task_new")
                 if special.get("Sales") is not None:
                     fyi_departments.discard(special["Sales"])
-        standard_departments = actionable_departments - added_departments - lead_holds
+        # retest-s1 N3 / t2 N6: a 4-eyes step the department cannot staff
+        # (four_eyes_fallback) is the fallback reviewer's: told to them, not
+        # to the department whose only member did the previous stage
+        fallback_depts: set[int] = set()
+        fb_told: set[int] = set()
+        for t in tasks_created:
+            if not t.is_actionable:
+                continue
+            fb = await WorkflowService.four_eyes_fallback(db, t)
+            if fb is None:
+                continue
+            fallback_depts.add(t.department_id)
+            if fb["user_id"] in fb_told:
+                continue
+            fb_told.add(fb["user_id"])
+            from app.services.notification_service import NotificationService
+            fpart, frev = await WorkflowService._instance_part_context(db, instance)
+            fchange = await WorkflowService._task_change(db, instance)
+            step_name = next((st.step_name for st in steps if st.id == t.step_id),
+                             stage.name or "review")
+            ref = f" ({fchange.change_number})" if fchange is not None else ""
+            await NotificationService.notify_users(
+                db, [fb["user_id"]],
+                title=f"Your task: {step_name}{ref}"[:200],
+                body=(f"4-eyes fallback: you review {getattr(fpart, 'part_number', None) or fpart.name} "
+                      f"{frev.revision_name}; {fb.get('department_name') or 'the department'} "
+                      "has no second member."),
+                link="/my-tasks", kind="task_new")
+        standard_departments = (actionable_departments - added_departments - lead_holds
+                                - fallback_depts)
         if standard_departments:
             from app.services.notification_service import NotificationService
 
