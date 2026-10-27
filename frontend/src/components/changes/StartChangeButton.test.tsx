@@ -34,8 +34,27 @@ describe('StartChangeButton', () => {
     const btn = await screen.findByTestId('start-change') as HTMLButtonElement
     await waitFor(() => expect(btn.disabled).toBe(true))
     expect(btn.getAttribute('title')).toBe(t('start.salesOnly'))
+    // F19: the reason is written beside the button, not only in a tooltip.
+    expect(screen.getByTestId('start-change-reason').textContent).toBe(t('start.salesOnly'))
     fireEvent.click(btn)
     expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it('tells a read-only user how to get a department role', async () => {
+    clientMocks.get.mockImplementation(async (url: string) => (url === '/v1/auth/me'
+      ? { data: { effective_role: 'viewer' } }
+      : { data: { can_start_change: false } }))
+    wrap()
+    await waitFor(() => expect(screen.getByTestId('start-change-reason').textContent)
+      .toBe(t('start.viewerOnly')))
+  })
+
+  it('shows no reason line when the user may start', async () => {
+    clientMocks.get.mockResolvedValue({ data: { can_start_change: true } })
+    wrap()
+    const btn = await screen.findByTestId('start-change') as HTMLButtonElement
+    await waitFor(() => expect(btn.disabled).toBe(false))
+    expect(screen.queryByTestId('start-change-reason')).toBeNull()
   })
 
   it('stays usable when the answer says nothing about the permission', async () => {

@@ -99,6 +99,7 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
               label="Start change request"
               onClick={() => { setMenuOpen(false); onStartChange(); }}
               className={menuItem}
+              block
             />
             <button role="menuitem" onClick={() => { setMenuOpen(false); onAddPart(); }} className={menuItem}>
               + Add Part

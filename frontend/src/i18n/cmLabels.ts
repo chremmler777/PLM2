@@ -1361,8 +1361,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Open question:',
   },
   'start.salesOnly': {
-    de: 'Kundenänderungen legt das Projektmanagement an (der Vertrieb ist der Kundenkontakt); Entwicklung, Prozess, Werkzeugtechnik und Fertigungstechnik legen interne an',
-    en: 'Project Management captures customer changes (Sales is the customer contact); Development, Process, Tool and Manufacturing Engineer raise internal ones',
+    de: 'Kundenänderungen legt das Projektmanagement an. Interne Änderungen starten Entwicklung, Prozess, Werkzeugtechnik und Fertigungstechnik.',
+    en: 'Project Management captures customer changes. Development, Process, Tool and Manufacturing Engineer start internal ones.',
+  },
+  'start.viewerOnly': {
+    de: 'Sie können PLM2 lesen. Um in Änderungen mitzuarbeiten, brauchen Sie eine Abteilungsrolle - fragen Sie Christoph.',
+    en: 'You can read PLM2. To work in changes you need a department role - ask Christoph.',
   },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },
