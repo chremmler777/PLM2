@@ -1,7 +1,7 @@
 """Workflow instance execution service (Phase 3c)."""
 from datetime import datetime, timedelta
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -223,6 +223,46 @@ class WorkflowService:
                                 f"in the {seeds.ASKED_ON_RELEASE[step_name]}")
         return out, rev.no_geometry_change_by
 
+    #: T2: on an internal change these departments have no later-stage
+    #: engine task (the lead holds PM's part, Sales has no customer).
+    INTERNAL_NO_LATER_TASK = ("Project Manager", "Sales")
+
+    @staticmethod
+    async def internal_later_stage_departments(
+            db: AsyncSession, instance: WfInstance, stage: WfStage) -> dict[int, str]:
+        """T2 (test 2026-10-27): an internal change's later routing stages
+        (Summation & Budget, Customer activities) hold nothing for Project
+        Management or Sales as engine tasks: the lead holds PM's part (T11)
+        and approves the money through the internal approval (HARD #8), and
+        there is no customer for Sales to quote. Their R/A tasks there are
+        born waived with the returned note: no "new task" notice, nothing
+        My Tasks never shows, nothing left open on the instance. Other
+        departments' later-stage tasks are unchanged. Returns
+        {department_id: note}; empty for a part-revision instance, a
+        customer change or the first stage."""
+        if instance.change_id is None:
+            return {}
+        from app.models.change import ChangeRequest
+        from app.models.workflow import Department
+        customer = (await db.execute(
+            select(ChangeRequest.customer_relevant).where(
+                ChangeRequest.id == instance.change_id))).scalar_one_or_none()
+        if customer is None or customer:
+            return {}
+        first = (await db.execute(
+            select(func.min(WfStage.stage_order)).where(
+                WfStage.template_id == instance.template_id))).scalar_one_or_none()
+        if first is None or stage.stage_order <= first:
+            return {}
+        rows = (await db.execute(select(Department.id, Department.name).where(
+            Department.name.in_(WorkflowService.INTERNAL_NO_LATER_TASK)))).all()
+        label = stage.name or f"stage {stage.stage_order}"
+        return {i: (f"Not asked on an internal change ('{label}'): "
+                    + ("the lead holds Project Management's part, the money is "
+                       "the internal approval" if n == "Project Manager"
+                       else "no customer, nothing for Sales to quote"))
+                for i, n in rows}
+
     @staticmethod
     async def no_tool_change_note(db: AsyncSession, instance: WfInstance) -> str | None:
         """T18 (test 2026-10-26; the short flow itself NEEDS CHRISTOPH): the
@@ -403,10 +443,24 @@ class WorkflowService:
             for st in stage.steps:
                 if st.step_name == TOOL_CHANGE_STEP:
                     drops[st.id] = tool_note
+        internal_skip = await WorkflowService.internal_later_stage_departments(
+            db, instance, stage)
         born_waived: list[WfInstanceTask] = []
 
         def _add_task(step_id, department_id: int, letter: str) -> None:
             is_actionable = letter in ACTIONABLE_LETTERS
+            if step_id is not None and department_id in internal_skip:
+                # T2: born waived, nobody told (deviation adds keep theirs)
+                if is_actionable:
+                    task = WfInstanceTask(
+                        instance_id=instance.id, stage_order=stage.stage_order,
+                        step_id=step_id, department_id=department_id,
+                        rasic_letter=letter, status="waived", decision="waived",
+                        is_actionable=True, completed_at=datetime.utcnow(),
+                        notes=internal_skip[department_id])
+                    db.add(task)
+                    born_waived.append(task)
+                return
             if step_id in drops:
                 # not asked here (Christoph 2026-10-19): on the record as
                 # waived with where it is asked, nobody told, nothing noted
@@ -864,6 +918,10 @@ class WorkflowService:
                     await WorkflowService._audit(db, instance, "wf_completed",
                                                  actor_id, None)
 
+                    if instance.change_id is not None:
+                        # a change's own routing: its status machine says
+                        # what happens next (T2), no "all stages approved"
+                        break
                     from app.services.notification_service import NotificationService
 
                     part, revision = await WorkflowService._instance_part_context(db, instance)
