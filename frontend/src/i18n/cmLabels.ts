@@ -2233,8 +2233,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'reject.closeTitle': { de: 'ECR schließen', en: 'Close the ECR' },
   'reject.closeConsequence': {
-    de: 'Bestätigt, dass das Absageschreiben beim Kunden ist. Die Änderung wird geschlossen und ist danach nur noch lesbar.',
-    en: 'Confirms the rejection letter went to the customer. The change closes and becomes read only.',
+    de: 'Bestätigt, dass das Absageschreiben beim Kunden ist. Die Änderung wird geschlossen: danach können nur noch 7 Tage lang Stunden gebucht werden.',
+    en: 'Confirms the rejection letter went to the customer. The change closes: only hours can still be booked, for 7 days.',
   },
   'reject.closeConfirm': { de: 'Gesendet, ECR schließen', en: 'Sent, close ECR' },
   'concern.noneScoping': {
@@ -2448,7 +2448,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'change.moreActions': { de: "Weitere Aktionen", en: "More actions" },
   'change.tabs': { de: "Bereiche der Änderung", en: "Change sections" },
   'change.governance': { de: "Governance", en: "Governance" },
-  'change.closedBanner': { de: "Geschlossen{d}. Die Änderung und ihre Unterlagen sind schreibgeschützt.", en: "Closed{d}. The change and its records are read only." },
+  'change.closedBanner': { de: "Geschlossen{d}. Die Änderung und ihre Unterlagen sind schreibgeschützt; Stunden können noch 7 Tage nach dem Schließen gebucht werden.", en: "Closed{d}. The change and its records are read only; hours can still be booked for 7 days after close." },
+  'change.closeConsequence': { de: "Schließen ist endgültig. Danach können nur noch 7 Tage lang Stunden gebucht werden.", en: "Closing is final. After it only hours can still be booked, for 7 days." },
   'change.canceledBanner': { de: "Storniert. Die Änderung und ihre Unterlagen sind schreibgeschützt.", en: "Canceled. The change and its records are read only." },
   'confirm.approveBody': {
     de: "Die Go-Entscheidung wird festgehalten und die Detailplanung beginnt auf dem Timing-Tab.",

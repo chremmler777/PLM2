@@ -775,7 +775,7 @@ export default function ChangeDetailPage() {
     if (confirmTo === 'closed') {
       return {
         to: confirmTo, title: transitionLabel('closed'),
-        consequence: 'Closing is final. The change and its records become read only.',
+        consequence: t('change.closeConsequence'),
         open: [], confirmLabel: transitionLabel('closed'), final: true,
       };
     }

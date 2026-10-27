@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ScopingPanel from './ScopingPanel'
 import { t } from '../../i18n/cmLabels'
@@ -376,6 +376,11 @@ describe('ScopingPanel refused decision', () => {
     render(wrap(<ScopingPanel change={change()} />))
     fireEvent.click(await screen.findByRole('button', { name: t('meeting.proceed') }))
     fireEvent.click(await screen.findByTestId('confirm-go'))
+    // The refusal is said once: in its dialog while that is open ...
+    expect((await screen.findByTestId('confirm-open')).textContent).toContain('Rita RD')
+    expect(screen.queryByTestId('decide-error')).toBeNull()
+    // ... and as the line on the panel once the dialog is closed.
+    fireEvent.click(within(screen.getByTestId('confirm-in_assessment')).getByRole('button', { name: 'Not yet' }))
     const alert = await screen.findByTestId('decide-error')
     expect(alert.textContent).toContain('Rita RD')
     expect(alert.textContent).toContain('tool cannot hold tolerance')

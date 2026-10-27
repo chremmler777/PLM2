@@ -853,7 +853,9 @@ export default function ScopingPanel(
           changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]} />
       </section>
 
-      {decideError && (
+      {/* A refused proceed is shown in its warning dialog; the line here
+          stays as the record once that dialog is closed, never both at once. */}
+      {decideError && !refusal && (
         <p role="alert" data-testid="decide-error"
           className="rounded border border-red-800/60 bg-red-950/40 px-2 py-1 text-xs text-red-200">
           {decideError}
