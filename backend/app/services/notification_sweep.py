@@ -84,6 +84,53 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     one_rule = cm_switches.on("ASSESSMENT_V2")
     counts = {"due_soon": 0, "overdue": 0, "deadline_at_risk": 0, "deadline_overdue": 0}
 
+    from app.services.project_team_service import _pair, _responsible
+    owners: dict = {}
+
+    async def owner_of(owner_id, project_id, department_id):
+        """esc P1-1/P1-2: who is told an item is due or late: whoever took
+        it, else the department's project-team responsible (claimed or
+        not), else, the responsible inactive or gone, the named backup
+        (_responsible). None: the department owns it as a whole."""
+        if owner_id is not None:
+            return owner_id
+        key = (project_id, department_id)
+        if key not in owners:
+            r = await _responsible(session, project_id, department_id)
+            owners[key] = r[0] if r is not None else None
+        return owners[key]
+
+    # the one rule (and its "the change lead sees it" wording) is for a
+    # change's tasks; another workflow's tasks keep the earlier timing
+    change_tasks: list = []
+    if one_rule:
+        q, cid = change_task_query()
+        change_tasks = (await session.execute(
+            q.add_columns(ChangeRequest.project_id)
+            .join(ChangeRequest, ChangeRequest.id == cid)
+            .where(ChangeRequest.status.not_in(TERMINAL_STATUSES)))).all()
+    of_change = {t.id for t, _c, _p in change_tasks}
+    for task, _cid, project_id in change_tasks:
+        owner = await owner_of(task.owner_id, project_id, task.department_id)
+        if owner is None:
+            continue
+        # reminded on the due date; "late" only at due + 1 wd
+        if escalated(task.due_date, now):
+            counts["overdue"] += await _once(
+                session, [owner], kind="overdue",
+                subject_key=f"task:{task.id}:overdue",
+                title="Task late",
+                body=f"Your task is late (was due {fmt_date(task.due_date)}); "
+                     "your department and the change lead see it now.",
+                link="/my-tasks")
+        elif task.due_date.date() <= now.date():
+            counts["due_soon"] += await _once(
+                session, [owner], kind="due_soon",
+                subject_key=f"task:{task.id}:due_soon",
+                title="Task due today",
+                body=f"Your task is due today ({fmt_date(task.due_date)}).",
+                link="/my-tasks")
+
     tasks = (await session.execute(
         select(WfInstanceTask).where(
             WfInstanceTask.status == "active",
@@ -91,33 +138,8 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
             WfInstanceTask.owner_id.is_not(None),
             WfInstanceTask.due_date.is_not(None),
         ))).scalars().all()
-    # the one rule (and its "the change lead sees it" wording) is for a
-    # change's tasks; another workflow's tasks keep the earlier timing
-    q, cid = change_task_query()
-    of_change = set((await session.execute(
-        q.with_only_columns(WfInstanceTask.id).where(cid.is_not(None))
-    )).scalars().all()) if one_rule and tasks else set()
-
     for task in tasks:
-        if one_rule and task.id in of_change:
-            # reminded on the due date; "late" only at due + 1 wd
-            if escalated(task.due_date, now):
-                n = await _once(
-                    session, [task.owner_id], kind="overdue",
-                    subject_key=f"task:{task.id}:overdue",
-                    title="Task late",
-                    body=f"Your task is late (was due {fmt_date(task.due_date)}); "
-                         "your department and the change lead see it now.",
-                    link="/my-tasks")
-                counts["overdue"] += n
-            elif task.due_date.date() <= now.date():
-                n = await _once(
-                    session, [task.owner_id], kind="due_soon",
-                    subject_key=f"task:{task.id}:due_soon",
-                    title="Task due today",
-                    body=f"Your task is due today ({fmt_date(task.due_date)}).",
-                    link="/my-tasks")
-                counts["due_soon"] += n
+        if task.id in of_change:
             continue
         if task.due_date < now:
             n = await _once(
@@ -169,15 +191,16 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
 
     await to([c for _t, c in late_tasks])
     late_word = "late" if one_rule else "overdue"
-    from app.services.project_team_service import _pair
     for task, c in late_tasks:
+        owner = (await owner_of(task.owner_id, c.project_id, task.department_id)
+                 if one_rule else task.owner_id)
         if one_rule:
             # D2b (review 2026-10-19): the engine task (an assessment's main
             # path, every check-workflow step) tells the project's named
             # backup too, once; not when the backup already owns it
             resp, backup = await _pair(session, c.project_id, task.department_id)
             if (resp is not None and backup is not None
-                    and backup[0] != task.owner_id):
+                    and backup[0] != owner):
                 counts["overdue"] += await _once(
                     session, [backup[0]], kind="overdue",
                     subject_key=f"task:{task.id}:overdue:backup",
@@ -186,7 +209,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                           f"{fmt_date(task.due_date)}); you back up {resp[1]}: "
                           "it is yours too now."),
                     link="/my-tasks")
-        ids = [i for i in targets.get(c.id, []) if i is not None and i != task.owner_id]
+        ids = [i for i in targets.get(c.id, []) if i is not None and i != owner]
         if not ids:
             continue
         claim = " and unclaimed" if task.owner_id is None else ""
@@ -209,8 +232,8 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     # notification. Under the one rule an owned row (first editor owns) is
     # reminded on its due date like a task.
     wanted = ChangeAssessment.due_date < now
-    if one_rule:            # owned rows due today get their reminder
-        wanted = wanted | ChangeAssessment.owner_id.is_not(None)
+    if one_rule:            # rows due today get their reminder (esc P1-1)
+        wanted = ChangeAssessment.due_date < now + timedelta(days=1)
     assessments = (await session.execute(
         select(ChangeAssessment, ChangeRequest)
         .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
@@ -225,19 +248,22 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
     await to([c for a, c in assessments if escalated(a.due_date, now)])
     for assessment, change in assessments:
         due = assessment.due_date
+        owner = (await owner_of(assessment.owner_id, change.project_id,
+                                assessment.department_id)
+                 if one_rule else assessment.owner_id)
         if not escalated(due, now):
-            if (one_rule and assessment.owner_id is not None
+            if (one_rule and owner is not None
                     and due.date() <= now.date()):
                 counts["due_soon"] += await _once(
-                    session, [assessment.owner_id], kind="due_soon",
+                    session, [owner], kind="due_soon",
                     subject_key=f"assessment:{assessment.id}:due_soon",
                     title="Assessment due today",
                     body=f"Your assessment is due today ({fmt_date(due)}).",
                     link="/my-tasks")
             continue
-        if assessment.owner_id is not None:
+        if owner is not None:
             n = await _once(
-                session, [assessment.owner_id], kind="overdue",
+                session, [owner], kind="overdue",
                 subject_key=f"assessment:{assessment.id}:overdue",
                 title=f"Assessment {late_word}",
                 body=(f"Your assessment is late (was due {fmt_date(due)}); "
@@ -251,7 +277,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         # too (once; not when the backup already owns it or is the lead)
         resp, backup = await _pair(session, change.project_id, assessment.department_id)
         if (one_rule and resp is not None and backup is not None
-                and backup[0] != assessment.owner_id):
+                and backup[0] != owner):
             counts["overdue"] += await _once(
                 session, [backup[0]], kind="overdue",
                 subject_key=f"assessment:{assessment.id}:overdue:backup",
@@ -260,7 +286,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                       f"{fmt_date(due)}); you back up {resp[1]}: it is yours too now."),
                 link="/my-tasks")
         ids = [i for i in targets.get(change.id, [])
-               if i is not None and i != assessment.owner_id]
+               if i is not None and i != owner]
         if ids:
             n = await _once(
                 session, ids, kind="overdue",
