@@ -268,7 +268,7 @@ async def test_submit_assessment_blocked_for_non_member(
         f"/api/v1/changes/{c['id']}/assessments",
         json={"department_id": dept_id, "details": await checklist_details(client, dept_id), "verdict": "feasible"}, headers=eng_auth,
     )
-    assert res.status_code == 400, res.text
+    assert res.status_code == 403, res.text
 
     await client.put(f"/api/v1/users/{seed['engineer_id']}/departments",
                      json={"department_ids": [dept_id]}, headers=admin_auth)

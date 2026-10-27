@@ -198,7 +198,7 @@ async def test_non_blocking_assessment_submit_needs_membership(
     body = {"department_id": tool_dept, "verdict": "feasible",
             "details": await checklist_details(client, tool_dept)}
     res = await client.post(url, headers=await _auth(client, "q"), json=body)
-    assert res.status_code == 400
+    assert res.status_code == 403   # esc P3-2: another department's submit is a 403
     assert "member" in res.json()["detail"]
     res = await client.post(url, headers=await _off(client, "tool"), json=body)
     assert res.status_code == 200, res.text
@@ -213,7 +213,7 @@ async def test_bare_assessment_submit_needs_membership(
     body = {"department_id": sales_dept, "verdict": "feasible",
             "details": await checklist_details(client, sales_dept)}
     res = await client.post(url, headers=await _auth(client, "q"), json=body)
-    assert res.status_code == 400
+    assert res.status_code == 403   # esc P3-2
     async with session_factory() as s:
         from sqlalchemy import select
         rows = (await s.execute(select(ChangeAssessment).where(
