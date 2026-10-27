@@ -131,8 +131,11 @@ class PpapDecisionService:
         ).scalar_one_or_none()
         if quality is None:
             return
-        ids = [i for i in await department_members_of_change_org(session, change, [quality])
-               if i != actor_id]
+        # T7 / retest N7: the project team's Quality owner (responsible,
+        # backup while out; members where the team names nobody)
+        from app.services.change_people import team_owner_ids
+        ids = await team_owner_ids(session, change.project_id, [quality],
+                                   exclude=[actor_id] if actor_id else [], real_only=True)
         await NotificationService.notify_once(
             session, ids, kind="ppap_decision", subject_key=f"ppap_decision:{change.id}",
             title=f"PPAP decision needed: {change.change_number}"[:255],

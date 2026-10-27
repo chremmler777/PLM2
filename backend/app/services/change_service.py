@@ -5099,6 +5099,12 @@ class ChangeService:
         from app.services.implementation_service import ImplementationService
         from app.services.notification_service import NotificationService
         dept_ids = await ImplementationService.implementing_department_ids(session, change)
+        if not change.customer_relevant and dept_ids:
+            # T7 retest: on an internal change the lead holds PM's part and
+            # there is no customer: PM and Sales are not told the stage
+            skip = set((await session.execute(select(Department.id).where(
+                Department.name.in_(("Project Manager", "Sales"))))).scalars().all())
+            dept_ids = [d for d in dept_ids if d not in skip]
         if not dept_ids:
             return 0
         if to_status == "in_implementation":

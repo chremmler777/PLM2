@@ -625,6 +625,16 @@ class ValidationIssueService:
         return set((await session.execute(q)).scalars().all())
 
     @staticmethod
+    async def _team_owners(session, change: ChangeRequest, dept_ids) -> set[int]:
+        """T7: who owns these departments' work on the change's project
+        (change_people.team_owner_ids, real accounts only)."""
+        from app.services.change_people import team_owner_ids
+        ids = [i for i in dept_ids if i is not None]
+        if not ids:
+            return set()
+        return set(await team_owner_ids(session, change.project_id, ids, real_only=True))
+
+    @staticmethod
     async def audience(session: AsyncSession, change: ChangeRequest,
                        issue: ValidationIssue, level: int) -> tuple[set, str]:
         """(user ids, who in words) a level change notifies: members of the
@@ -638,19 +648,22 @@ class ValidationIssueService:
             # pick) and the check's department (it retests), not to PM, who
             # has no task on it
             quality = await svc._dept_id(session, QUALITY_DEPARTMENT)
-            return (await svc._dept_members(
-                session, [quality, issue.department_id], org),
+            return (await svc._team_owners(
+                session, change, [quality, issue.department_id]),
                 "Quality, owner department")
-        users = await svc._dept_members(session, [pm], org)
+        # T7 / retest N7: the project team's owner per department (the
+        # responsible; the backup while out; members where the team names
+        # nobody), not every member of the department
+        users = await svc._team_owners(session, change, [pm])
         words = ["Project Manager"]
         if level <= 1:
-            users |= await svc._dept_members(session, [issue.department_id], org)
+            users |= await svc._team_owners(session, change, [issue.department_id])
             words.insert(0, "owner department")
             return users, ", ".join(words)
         if change.lead_id:
             users.add(change.lead_id)
         words.append("change lead")
-        users |= await svc._dept_members(session, [sales], org)
+        users |= await svc._team_owners(session, change, [sales])
         words.append("Sales")
         if level >= 3:
             mgmt = await svc._dept_id(session, MANAGEMENT_DEPARTMENT)
@@ -2325,8 +2338,9 @@ class ValidationIssueService:
         retest_dept = chk.department_id if chk is not None else issue.department_id
         users: set[int] = set()
         for did in {issue.fix_department_id, retest_dept} - {None}:
-            members = await department_members_of_change_org(
-                session, change, [did], real_only=True)
+            # T7 / N7: the team's owner of the department, not its backup too
+            members = sorted(await ValidationIssueService._team_owners(
+                session, change, [did]))
             if not members:
                 if change.lead_id:
                     members = [change.lead_id]

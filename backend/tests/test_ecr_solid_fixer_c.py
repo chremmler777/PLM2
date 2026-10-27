@@ -343,3 +343,31 @@ async def test_n8_customer_pm_step_stays_with_pm(session_factory, seed, part):
     task, notes = await _pm_step_instance(session_factory, seed, part, customer=True)
     assert task.owner_id is None
     assert seed["engineer_id"] not in {n.user_id for n in notes if n.kind == "task_new"}
+
+
+async def test_n7_ppap_and_issue_notices_reach_the_team_owner_only(session_factory, seed):
+    """Retest T7 / N7: the PPAP decision notice and a failed check's issue
+    audience reach the project team's Quality responsible, not its backup
+    nor members the team does not name."""
+    from tests.test_ecr_solid_notice_owners import _dept_with
+    from app.models.workflow import ProjectResponsible
+    from app.services.ppap_decision_service import PpapDecisionService
+    from app.services.validation_issue_service import ValidationIssueService
+    from types import SimpleNamespace
+    async with session_factory() as s:
+        q, (sonja, eric, udo) = await _dept_with(s, seed, "Quality", ["sonja", "eric", "udo"])
+        s.add(ProjectResponsible(project_id=seed["project_id"], department_id=q,
+                                 user_id=sonja, backup_user_id=eric))
+        c = ChangeRequest(change_number="C-N7", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=False, status="scoping")
+        s.add(c); await s.commit()
+        await PpapDecisionService.notify_owed(s, c, seed["admin_id"])
+        await s.commit()
+        told = sorted((await s.execute(select(Notification.user_id).where(
+            Notification.kind == "ppap_decision"))).scalars().all())
+        assert told == [sonja]
+        issue = SimpleNamespace(check_id=1, department_id=q)
+        users, _ = await ValidationIssueService.audience(s, c, issue, 1)
+        assert users == {sonja}
