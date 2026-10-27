@@ -3329,7 +3329,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'team.open': { de: 'Team', en: 'Team' },
   'team.openFull': { de: 'Projektteam öffnen', en: 'Open project team' },
   'team.dialogHint': { de: 'Pro Abteilung: Zuständige/r, Vertretung und alle Mitglieder.', en: 'Per department: the responsible, the backup and every member.' },
-  'team.badge.lead': { de: 'Zuständig', en: 'Lead' },
+  'team.badge.lead': { de: 'Zuständig', en: 'Responsible' },
   'team.badge.backup': { de: 'Vertretung', en: 'Backup' },
   'team.badge.member': { de: 'Mitglied', en: 'Member' },
   'team.responsible': { de: 'Zuständig', en: 'Responsible' },

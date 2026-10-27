@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { mailAddress } from '../../lib/mailAddress';
 
 export default function PersonDetail({ name, email, badge, inactive, onRemove, removeLabel, 'data-testid': testId }: {
   name: string;
@@ -15,6 +16,7 @@ export default function PersonDetail({ name, email, badge, inactive, onRemove, r
   removeLabel?: string;
   'data-testid'?: string;
 }) {
+  const mail = mailAddress(email);
   return (
     <span data-testid={testId}
       className={`inline-flex max-w-full items-start gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 ${inactive ? 'opacity-60' : ''}`}>
@@ -23,9 +25,9 @@ export default function PersonDetail({ name, email, badge, inactive, onRemove, r
           <span className="truncate text-sm font-medium text-slate-100">{name}</span>
           {badge}
         </span>
-        {email && (
-          <a href={`mailto:${email}`} className="block truncate text-xs text-sky-400 hover:text-sky-300 hover:underline">
-            {email}
+        {mail && (
+          <a href={`mailto:${mail}`} className="block truncate text-xs text-sky-400 hover:text-sky-300 hover:underline">
+            {mail}
           </a>
         )}
       </span>

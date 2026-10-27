@@ -29,6 +29,7 @@ import { toastError } from '../lib/apiError';
 import { btnSm } from '../components/common/buttonStyles';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { t } from '../i18n/cmLabels';
+import { mailAddress } from '../lib/mailAddress';
 
 const KEY = ['departments', 'overview'];
 
@@ -155,7 +156,8 @@ function initials(name: string): string {
   return ((parts[0][0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
 
-function MailLink({ email, className = '' }: { email: string | null | undefined; className?: string }) {
+function MailLink({ email: raw, className = '' }: { email: string | null | undefined; className?: string }) {
+  const email = mailAddress(raw);
   if (!email) return null;
   return (
     <a href={`mailto:${email}`} translate="no"

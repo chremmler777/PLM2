@@ -67,6 +67,8 @@ describe('ProjectTeamDialog', () => {
     expect((await screen.findByTestId('team-project-responsible')).textContent).toContain('Project responsible (PM)')
     expect(screen.getByTestId('team-project-responsible').textContent).toContain('Petra PM')
     expect(screen.getByTestId('team-badge-9-11').dataset.kind).toBe('lead')
+    // esc P3-7: the project responsible reads "Responsible", not "Lead" (the change lead).
+    expect(screen.getByTestId('team-badge-9-11').textContent).toBe('Responsible')
     expect(screen.getByTestId('team-badge-9-12').dataset.kind).toBe('backup')
     expect(screen.getByTestId('team-badge-9-13').dataset.kind).toBe('member')
     expect(within(screen.getByTestId('team-member-9-13')).getByText('carl@ktx.test').getAttribute('href'))
