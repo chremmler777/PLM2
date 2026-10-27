@@ -732,6 +732,10 @@ class MeetingService:
             raise ChangeError(
                 "Pick a part of this change's impacted set, or leave it for "
                 "the whole change")
+        if flag_type == "check" and cm_switches.SCOPING_QUESTIONS_ONLY:
+            raise ChangeError(
+                "Scoping takes blocking questions only, answered before proceed: "
+                "a technical check belongs in the department's assessment")
         if flag_type == "check":
             if department_id is None:
                 raise ChangeError(
@@ -849,6 +853,11 @@ class MeetingService:
                 raise ChangeError(f"Unknown or inactive department {department_id}")
             concern.department_id = department_id
         before = "check" if concern.is_check else "question"
+        if (flag_type == "check" and before != "check"
+                and cm_switches.SCOPING_QUESTIONS_ONLY):
+            raise ChangeError(
+                "Scoping takes blocking questions only, answered before proceed: "
+                "a technical check belongs in the department's assessment")
         if flag_type == "question" and before != "question":
             # the same limit as a raise: one open question per asker,
             # raised-for department and check-what (spec §3 [R4])

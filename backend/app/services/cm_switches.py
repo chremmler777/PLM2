@@ -29,6 +29,12 @@ def impact_confirm_step(change) -> bool:
 # lead; a cancel vote stays open to everyone. Off = anyone may ask again.
 SCOPING_QUESTIONS_PM_ONLY = True
 
+# Scoping takes blocking questions only (Christoph 2026-10-27: "check items I
+# would not even put in there, otherwise it becomes a whole debate"): no new
+# check items; technical checks belong in the departments' assessments. Old
+# check items keep working. Off = check items again.
+SCOPING_QUESTIONS_ONLY = True
+
 # No proceed out of scoping without the PM's written scope (Christoph
 # 2026-10-27: "scope needs to be defined, otherwise I don't let it go").
 SCOPE_REQUIRED = True

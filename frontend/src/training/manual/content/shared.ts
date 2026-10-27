@@ -246,7 +246,7 @@ export const flowChapter: ContentChapter = {
         {
           steps: [
             { title: 'The impacted set', body: 'Development picks the impacted items on the "Impacted" tab (the lead and PM may pick too) and confirms them with "Confirm impact (Development)". Nothing is assessed until it is confirmed.' },
-            { title: 'Check items, questions and cancel votes', body: 'Scoping only decides which parts, who assesses and go or no-go. Anyone adds a point in one line with "Add check item": the department checks it later in its own assessment. Only what the scope cannot be decided without becomes a question ("Make it a question"): say who can answer and what the answer changes. Questions and cancel votes block "Proceed"; check items go along as conditions. The asker or PM closes a question.' },
+            { title: 'Questions and cancel votes', body: 'Scoping only decides the scope, which parts, who assesses and go or no-go. Bring your points to the meeting: the PM records the questions the scope cannot be decided without ("Add question": who can answer and what the answer changes). Every question blocks "Proceed" until it is answered and closed, else the meeting decides "Not yet". Technical checks are not raised here: each department works them in its own assessment. Anyone may "Propose to cancel"; the PM decides.' },
             { title: 'The scoping meeting', body: 'PM records it with the departments and their letters (R, A, S, C, I) and the cost carrier. The decision is "Proceed & start assessment", "Not yet" or "Reject".' },
           ],
         },

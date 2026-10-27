@@ -7,6 +7,12 @@ import ProceedFixList from './ProceedFixList'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import { unroutedCheckOwners } from '../../../lib/scopingRules'
+
+// These tests work the check-item mechanics; scoping takes questions only
+// since 2026-10-27 (ScopingQuestionsOnly.test.tsx covers that)
+vi.mock('../../../lib/scopingRules', async (orig) => ({
+  ...(await orig<typeof import('../../../lib/scopingRules')>()), SCOPING_QUESTIONS_ONLY: false,
+}))
 import type { ChangeConcern, ChangeMeeting } from '../../../types/change'
 
 vi.mock('../../../api/changes', () => ({

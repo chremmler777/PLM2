@@ -20,7 +20,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import AnswerForm from './AnswerForm'
 import { CheckRow } from './ScopingFlags'
-import { splitUnroutedOwners, unroutedCheckOwners } from '../../../lib/scopingRules'
+import { SCOPING_QUESTIONS_ONLY, splitUnroutedOwners, unroutedCheckOwners } from '../../../lib/scopingRules'
 import {
   isCheckItem, type Attachment, type ChangeConcern, type ChangeMeeting, type RasicLetter,
 } from '../../../types/change'
@@ -98,7 +98,7 @@ export default function ProceedFixList({
                       {t('proceed.answerNow')}
                     </button>
                   )}
-                  {c.can_switch && (
+                  {c.can_switch && !SCOPING_QUESTIONS_ONLY && (
                     <button type="button" className="text-sky-300 hover:text-sky-200"
                       data-testid={`proceed-make-check-${c.id}`} disabled={makeCheck.isPending}
                       onClick={() => makeCheck.mutate(c.id)}>

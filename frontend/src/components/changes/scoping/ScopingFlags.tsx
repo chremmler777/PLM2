@@ -24,7 +24,7 @@ import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import { formatCalendarDate } from '../../../lib/format'
-import { defaultFlagDepartment } from '../../../lib/scopingRules'
+import { SCOPING_QUESTIONS_ONLY, defaultFlagDepartment } from '../../../lib/scopingRules'
 import { isRoutable } from '../../../lib/departments'
 import { getActsAsDepartmentId } from '../../../lib/actsAs'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -93,7 +93,8 @@ export default function ScopingFlags({
 }) {
   const [note, setNote] = useState('')
   const [deptPicked, setDeptPicked] = useState<number | undefined>(undefined)
-  const [asQuestion, setAsQuestion] = useState(false)
+  const [asQuestionPicked, setAsQuestion] = useState(false)
+  const asQuestion = SCOPING_QUESTIONS_ONLY || asQuestionPicked
   // A2-03: proceed routes a check item's owner as C, so a check item is
   // raised only for a department that can be routed (not Management, not
   // retired); a question may be asked of any active department.
@@ -213,11 +214,13 @@ export default function ScopingFlags({
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-            <label className="flex items-center gap-1.5 cursor-pointer text-slate-300">
-              <input type="checkbox" checked={asQuestion} data-testid="quick-add-question"
-                onChange={(e) => setAsQuestion(e.target.checked)} />
-              {t('flag.makeQuestion')}
-            </label>
+            {!SCOPING_QUESTIONS_ONLY && (
+              <label className="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                <input type="checkbox" checked={asQuestion} data-testid="quick-add-question"
+                  onChange={(e) => setAsQuestion(e.target.checked)} />
+                {t('flag.makeQuestion')}
+              </label>
+            )}
             {!asQuestion && <span className="text-slate-500">{t('flag.defaultHint')}</span>}
             {asQuestion && (
               <span className="text-amber-300/90" data-testid="quick-add-scope-test">
@@ -264,6 +267,8 @@ export default function ScopingFlags({
         </div>
       )}
 
+      {/* questions only: the list stays for the old check items still open */}
+      {(!SCOPING_QUESTIONS_ONLY || checks.length > 0) && (
       <section className="space-y-1.5" data-testid="check-items">
         <h4 className="text-[11px] uppercase tracking-wide text-slate-500">
           {t('flag.checks')} ({checks.length})
@@ -285,6 +290,7 @@ export default function ScopingFlags({
           </details>
         ))}
       </section>
+      )}
     </div>
   )
 }

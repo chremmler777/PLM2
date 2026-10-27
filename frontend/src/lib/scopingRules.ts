@@ -215,3 +215,8 @@ export function ownerUnroutableLine(
   return t('proceed.ownerUnroutable').replace('{d}', d?.name ?? `#${id}`)
     .replace('{why}', why).replace('{n}', String(n))
 }
+
+/** Scoping takes blocking questions only (Christoph 2026-10-27; mirrors
+ *  backend cm_switches.SCOPING_QUESTIONS_ONLY): no new check items and no
+ *  "Make it a check item"; old check items keep working. */
+export const SCOPING_QUESTIONS_ONLY = true

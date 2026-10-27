@@ -24,6 +24,7 @@ import { formatDate, formatCalendarDate } from '../../lib/format'
 import AnswerForm from './scoping/AnswerForm'
 import CustomerCopy from './scoping/CustomerCopy'
 import type { Attachment, ChangeConcern } from '../../types/change'
+import { SCOPING_QUESTIONS_ONLY } from '../../lib/scopingRules'
 
 export default function NeedsInfoCard({
   changeId, concern: c, attachments, canAnswer, canSettle, editable, onChanged, origin,
@@ -175,7 +176,7 @@ export default function NeedsInfoCard({
         {structured && !solved && c.customer_copy && (canAnswer || c.can_answer) && (
           <CustomerCopy text={c.customer_copy} testId={`needs-info-copy-${c.id}`} />
         )}
-        {structured && !solved && editable && c.can_switch && (
+        {structured && !solved && editable && c.can_switch && !SCOPING_QUESTIONS_ONLY && (
           <button type="button" data-testid={`needs-info-make-check-${c.id}`}
             className="text-xs text-sky-300 hover:text-sky-200" disabled={makeCheck.isPending}
             title={t('flag.scopeTest')}

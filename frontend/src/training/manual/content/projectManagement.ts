@@ -132,16 +132,15 @@ export const pmChapter: ContentChapter = {
             { title: 'Record it', body: '"+ Record a meeting" on the "Scoping" tab: channel, "Meeting date", "Participants". Attendance only, not responsibility.' },
             { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supportive", "Consulted", "Informed (notified only)" or "Not involved". The standard routing is pre-selected; the room overrules it. An "Informed" department gets the notification and no task.' },
             { title: 'Confirm the cost carrier', body: '"Cost carrier" is required before the assessment can start. Flipping it is audited and Sales is notified.' },
-            { title: 'Decide', body: '"Proceed & start assessment", "Not yet" or "Reject". Proceed starts the assessment for every R and A department. With open check items the button reads "Proceed: 3 check items go to departments": they go along as conditions, each due with its department\'s assessment. A meeting saved without its decision stays open: the header then reads "Decide the scoping meeting of 19 Oct", not "Record".' },
+            { title: 'Decide', body: '"Proceed & start assessment", "Not yet" or "Reject". Proceed starts the assessment for every R and A department. A meeting saved without its decision stays open: the header then reads "Decide the scoping meeting of 19 Oct", not "Record".' },
           ],
         },
         {
           callout:
-            'Scoping is triage, not analysis. Open questions and cancel votes block "Proceed"; check ' +
-            'items and risks do not. The proceed dialog lists the open questions: "Answer now", or ' +
-            '"Make it a check item" if the scope can be decided without it. A department that owns ' +
-            'check items but has no letter (or only I) shows "Route Quality: C" (or R); if you pick ' +
-            'nothing, proceed routes it as C, so no check item leaves without an owner. ' +
+            'Scoping is triage, not analysis. You record the questions in the meeting; only ' +
+            'blocking ones, the scope cannot be decided without them (technical checks belong in ' +
+            'the departments\' assessments). Open questions and cancel votes block "Proceed": the ' +
+            'proceed dialog lists them with "Answer now"; otherwise decide "Not yet". ' +
             '"Not yet" closes nobody\'s ' +
             'question and, while questions are open, needs no reason. Your "Wrap up scoping" task ' +
             'says what it waits on and who owes it ("Not yet: waiting for 2 answers (Sales Thu, Process ' +

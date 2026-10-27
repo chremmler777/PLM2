@@ -70,3 +70,18 @@ async def test_proceed_waits_for_the_scope(client, admin_auth, seed, session_fac
     assert (await client.put(url, json={"scope_definition": "Insert only"},
                              headers=admin_auth)).status_code == 200
     assert (await _decide(client, admin_auth, cid, mid, "proceed")).status_code == 200
+
+
+async def test_scoping_takes_no_check_items(client, admin_auth, seed, session_factory):
+    """Christoph 2026-10-27: blocking questions only; a check belongs in the
+    department's assessment. A question cannot be switched to a check item."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq5")
+    _, quality_id, _ = await _user(client, session_factory, seed, "pmq-q5", "Quality")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth, json={
+        "kind": "needs_info", "note": "Check the gauge", "department_id": quality_id,
+        "flag_type": "check", "check_what": "other"})
+    assert res.status_code == 400 and "questions only" in res.json()["detail"]
+    qid = (await _ask(client, admin_auth, cid, quality_id)).json()["id"]
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{qid}/type",
+                            headers=admin_auth, json={"flag_type": "check"})
+    assert res.status_code == 400 and "questions only" in res.json()["detail"], res.text

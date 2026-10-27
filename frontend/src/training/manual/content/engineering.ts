@@ -27,7 +27,7 @@ export const engineeringChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Scoping', 'Development picks the impacted set. Add what your department must check with "Add check item"; it comes back in your assessment. Ask a question only if the scope cannot be decided without it.'],
+              ['Scoping', 'Development picks the impacted set. Bring your points to the meeting; the PM records a question only if the scope cannot be decided without it. What your department must check, you check in your assessment.'],
               ['In Assessment', 'Answer every checklist row, flag risks on the rows, give a verdict.'],
               ['Costing', 'Price your part: your own time, estimates or vendor quotes, a lead time on every line.'],
               ['Timing', 'Confirm the detailed plan for your department, or raise a concern.'],
@@ -88,7 +88,7 @@ export const engineeringChapter: ContentChapter = {
         },
         {
           points: [
-            ['Your check items', 'from scoping are listed on top of your bucket ("Checks for Process Engineer: 3 open"), due with your assessment; your bucket reads "Check items first", not "On hold" (they are your work, nobody else\'s). You cannot submit while one is open. Close each with what you found, nothing is pre-selected: "Answered" (a number with its unit, or a reference such as a drawing number), "Not relevant" (the checklist row or drawing that shows it, "outside our scope" and who owns it, or "same as" another item) or "Assumed" (the value, its unit and the risk if it is wrong; Sales confirms it later). The same goes for an item you raised for your own department: a free note does not close it. The person who raised it or the lead may reopen it while you are still assessing.'],
+            ['Your check items', '(older changes only; scoping takes questions only since 27 Oct) from scoping are listed on top of your bucket ("Checks for Process Engineer: 3 open"), due with your assessment; your bucket reads "Check items first", not "On hold" (they are your work, nobody else\'s). You cannot submit while one is open. Close each with what you found, nothing is pre-selected: "Answered" (a number with its unit, or a reference such as a drawing number), "Not relevant" (the checklist row or drawing that shows it, "outside our scope" and who owns it, or "same as" another item) or "Assumed" (the value, its unit and the risk if it is wrong; Sales confirms it later). The same goes for an item you raised for your own department: a free note does not close it. The person who raised it or the lead may reopen it while you are still assessing.'],
             ['"Blocked? Ask a question"', 'when you cannot answer without someone else: one line, what it is about and who can answer (customer, our team, supplier). It holds only your own submit. A customer or supplier question goes to Sales with ready mail text; a question for our team to the lead, who answers it. You are told when it is answered; close it when the answer settles it.'],
             ['"Not our responsibility"', 'if it really is not yours. Give the reason and, if you can, who should assess instead. The lead decides.'],
             ['Customer mails', 'are shown in the bucket. The customer communication is Sales\'s, but you may file a mail you received.'],

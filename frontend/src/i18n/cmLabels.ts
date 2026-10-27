@@ -2786,8 +2786,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'proceed.go': { de: 'Freigeben: {n} Prüfpunkte gehen an die Fachbereiche', en: 'Proceed: {n} check items go to departments' },
   'proceed.goPlain': { de: 'Freigeben & Bewertung starten', en: 'Proceed & start assessment' },
   'proceed.questionsOpen': {
-    de: 'Offene Fragen halten die Freigabe. Beantworten und schließen, oder zum Prüfpunkt machen, wenn der Umfang ohne sie entschieden werden kann.',
-    en: 'Open questions hold proceed. Answer and close them, or make one a check item if the scope can be decided without it.' },
+    de: 'Offene Fragen halten die Freigabe: beantworten und schließen, oder Noch nicht.',
+    en: 'Open questions hold proceed: answer and close them, or Not yet.' },
   'proceed.heldBelow': {
     de: 'Die Freigabe wartet auf die Punkte unten, jeder mit seinem Verantwortlichen.',
     en: 'Proceed waits for the points below, each with its owner.' },

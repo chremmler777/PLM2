@@ -25,6 +25,9 @@ def _any_member_may_ask(monkeypatch):
     test_scoping_pm_questions.py."""
     from app.services import cm_switches
     monkeypatch.setattr(cm_switches, "SCOPING_QUESTIONS_PM_ONLY", False)
+    # check items too (scoping takes questions only since 2026-10-27; the
+    # refusal is tested in test_scoping_pm_questions.py)
+    monkeypatch.setattr(cm_switches, "SCOPING_QUESTIONS_ONLY", False)
 
 pytestmark = pytest.mark.asyncio
 

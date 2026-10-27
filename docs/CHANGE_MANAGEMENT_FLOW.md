@@ -209,6 +209,15 @@ soft kickoff guard above reads `kickoff_missing`, which adds:
   counter-proposal.
 
 ### Scoping is triage: questions and check items (C33, C13, 2026-10-15)
+
+> **2026-10-27 (Christoph), supersedes the check-item parts below:** scoping
+> takes blocking questions only, recorded by Project Management or the change
+> lead in the meeting (switches `SCOPING_QUESTIONS_PM_ONLY`,
+> `SCOPING_QUESTIONS_ONLY`). No new check items, no "Make it a check item";
+> old check items keep working. Questions are answered and closed before
+> proceed, else "Not yet". Technical checks belong in the departments'
+> assessments. Anyone may still propose to cancel. Proceed also waits for the
+> PM's written scope (`SCOPE_REQUIRED`).
 Switch `SCOPING_V2` (`app/services/cm_switches.py`, default ON, served to the
 UI as `scoping_v2` on every change). Live test 1 showed the room
 over-analysing: departments flagged points they should assess on their own.
