@@ -497,3 +497,22 @@ async def test_n4_hub_admin_records_its_own_departments_validation_check(session
         c = await s.get(ChangeRequest, cid)
         assert await ValidationService.may_write(s, c, dev, await s.get(User, hub_id))
         assert not await ValidationService.may_write(s, c, dev, await s.get(User, seed["admin_id"]))
+
+
+async def test_n6_lessons_step_is_in_the_leads_my_tasks(client, session_factory, seed):
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-LL", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=False, status="in_validation")
+        s.add(c); await s.commit()
+        cid = c.id
+    await make_department_member(session_factory, seed["engineer_id"], "Process Engineer")
+    from tests.conftest import ENGINEER_PASSWORD, login
+    eng = await login(client, "eng@test.io", ENGINEER_PASSWORD)
+    tasks = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=eng)).json()
+             if t["change_id"] == cid and t["kind"] == "lessons_step"]
+    acts = [a for a in (await client.get(f"/api/v1/changes/{cid}/my-actions",
+                                         headers=eng)).json()["actions"]
+            if a["kind"] == "lessons_step"]
+    assert len(tasks) == 1 and len(acts) == 1

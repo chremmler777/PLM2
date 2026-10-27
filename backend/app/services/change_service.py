@@ -4458,6 +4458,14 @@ class ChangeService:
                         row["role_department_id"] = by_name.get("Project Manager")
                     tasks.append(row)
 
+            # retest-s1 N6: the lead's last step before release (lessons
+            # learned) is a task too, as on the change page (lessons_step)
+            if (c.status == "in_validation" and c.lessons_done_at is None
+                    and holds_lead(c, user)):
+                tasks.append({**await _base(c), "kind": "lessons_step",
+                              "label": "Record lessons learned and complete the step",
+                              "target_tab": "release"})
+
             # Costing is a queue too: a department that called the change feasible
             # owes a number until it finalizes it. Per department (2026-10-14):
             # the task appears right after its own assessment submit, while

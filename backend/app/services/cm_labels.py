@@ -134,6 +134,7 @@ TASK_KIND = {
     "validation_check": ("Confirm validation", "Validierung bestätigen"),
     "advance": ("Ready: move it on", "Bereit: weiterschalten"),
     "plan_watch": ("Approved: next step", "Freigegeben: nächster Schritt"),
+    "lessons_step": ("Record lessons learned", "Lessons Learned erfassen"),
     "routing_deviation_decision": ("Decide added department",
                                    "Hinzugefügte Abteilung entscheiden"),
     "not_feasible": ("Not feasible: decide", "Nicht machbar: entscheiden"),
