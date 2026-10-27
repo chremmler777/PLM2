@@ -17,7 +17,7 @@ next to this file as `rollout-announcement-<yyyy-mm-dd>.md`.
 
 The eleven departments: Sales, Project Management, Development, Tool
 Engineer, Manufacturing Engineer, Process Engineer, APQP, Packaging Engineer,
-Scheduling, Quality, Finance.
+Logistics, Quality, Finance.
 
 In the text these appear as `[go-live date]`, `[session dates]` and
 `[access contact]`. Nothing else in the text needs editing.
@@ -53,7 +53,7 @@ Open it in the browser and sign in with your KTX account. Nothing to install.
 
 | Step | Who acts |
 |---|---|
-| Captured | Sales starts the request (Project Management may too) |
+| Captured | Project Management captures customer changes (Sales passes the customer's request on); an engineering department starts its own internal change |
 | Scoping | Project Management with the team; Development locks what is impacted |
 | Assessment | The routed engineering departments answer the checklist and give a verdict |
 | Costing | The departments enter their costs and lead times; Project Management closes costing |

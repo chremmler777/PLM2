@@ -331,6 +331,12 @@ export const engineeringChapter: ContentChapter = {
             'confirm. The assessment is routed on this set. After you confirm, only the lead, PM ' +
             'or an admin can change it, and their edit clears your confirmation.',
         },
+        {
+          callout:
+            'Admin rights do not answer for Development or any other department: an admin records ' +
+            'another department\'s step (for example a Development validation row) only via "Act as" that department, with a reason.',
+          tone: 'note',
+        },
         { h3: 'Triage of a new customer index' },
         {
           p:

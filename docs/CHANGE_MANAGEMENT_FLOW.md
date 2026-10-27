@@ -69,7 +69,7 @@ flowchart TD
 
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Started by Sales or Project Management, each on the other's behalf (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces). **The hand-over is the change lead's** (DECIDED BY CHRISTOPH 2026-10-19, D2: Project Management owns the process; the project's lead PM leads by default); Sales may hand over its own complete capture on the lead's behalf. Internal changes (P3, D1): Development, Process Engineer, Tool Engineer and Manufacturing Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management sets one first (A6-04) |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes"; a `mother_plant` change is started by Project Management or an admin only, `MotherPlantService.may_start`) | Captured by Project Management (DECIDED BY CHRISTOPH 2026-10-26, migration 152: only Project Manager carries `can_start_change`; the flag, not a hardcoded role, is what the API enforces). Sales is the customer contact and no longer starts changes; it passes the customer's request to Project Management. **The hand-over is the change lead's** (DECIDED BY CHRISTOPH 2026-10-19, D2: Project Management owns the process; the project's lead PM leads by default). Internal changes (P3, D1): Development, Process Engineer, Tool Engineer and Manufacturing Engineer start them (`can_start_internal_change`) and the raiser leads and hands over. Without a lead, Project Management sets one first (A6-04) |
 | `scoping` | Team decides: proceed / needs info / reject. Impacted set picked and locked (first action there: Development picks and confirms; the lead and PM may pick too), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
@@ -2252,8 +2252,8 @@ the accepted offer, else the latest sent one), and on
 `source` (`estimate` | `typed`, old rows `typed`).
 
 Stage responsibilities so far: `captured` = the change lead (D2: the
-project's lead PM by default; Sales and Project Management start changes,
-`can_start_change`), internal changes their engineering raiser
+project's lead PM by default; Project Management captures every customer change,
+`can_start_change`, migration 152; Sales is the customer contact and does not start changes), internal changes their engineering raiser
 (P3: Development, Process Engineer, Tool Engineer; D1: Manufacturing Engineer;
 the raiser leads and hands over), a change with no lead Project Management (it picks the lead first),
 `scoping` = the lead, Project Management backing up, impact lock = **Development only — no
@@ -2286,15 +2286,14 @@ A customer change from them is refused (403, "Your department starts
 internal changes only"); the start dialog preselects "Internal change" and
 greys the customer option. `GET /changes/permissions` answers
 `can_start_internal_change`. A caller from any other department gets 403
-naming who starts what ("Your department does not start changes: Sales,
-Project Manager start customer changes; Development, Process Engineer, Tool
+naming who starts what ("Your department does not start changes:
+Project Management starts customer changes; Development, Process Engineer, Tool
 Engineer, Manufacturing Engineer start internal changes. Ask one of them to raise it.", read from the
 department flags). A `POST /changes` that omits `customer_relevant` raises
-what the caller's department starts: a customer change for a Sales or PM
+what the caller's department starts: a customer change for a PM
 member (with its Sales contact), else an internal one (the UI always sends the
-flag). Everyone else's rules are unchanged (Sales and
-PM start any change; an internal one raised by Sales is led by the project's
-PM). Turning an internal change into a customer change (`PATCH
+flag). Everyone else's rules are unchanged (PM starts any change).
+Sales starts no change since 2026-10-26 (migration 152). Turning an internal change into a customer change (`PATCH
 customer_relevant=true`, capture or scoping) is a starter's call: a Sales or
 Project Management member or an admin, whether or not they lead the change.
 The engineering lead (or a lead from any department that does not start
@@ -2332,9 +2331,10 @@ process from capture to close: the hand-over to scoping, the follow-up, the
 escalation and the fallback. Each project has a **lead PM**, the project
 team's Project Manager responsible; a change on that project gets that PM as
 its lead (process owner) by default (`ChangeService.create_change`), whoever
-started it. Sales and Project Management may each start a change on the
-other's behalf: a Sales raiser's change is led by the lead PM, a PM raiser's
-customer change gets the project's Sales contact. In My Tasks the hand-over
+started it. Project Management captures every customer change (2026-10-26,
+migration 152; Sales passes the customer's request on and stays the customer
+contact): a PM raiser's customer change gets the project's Sales contact.
+Changes Sales raised before 2026-10-26 keep their raiser, contact and lead. In My Tasks the hand-over
 (`kickoff`) of a customer change is the lead's main row; Project Management
 and Sales see it as backup with the lead's name (a lead who cannot act:
 Project Management's, A6-03). While the customer's facts are missing
@@ -2421,7 +2421,7 @@ the team:** when admin or PM sets a new Sales responsible, the open changes
 of the project whose Sales contact was the old responsible move to the new
 one (changelog `sales_owner_changed`; a contact who was not the old
 responsible stays, closed and cancelled changes keep theirs). The Sales
-contact is per change: a Sales raiser who is not the responsible stays the
+contact is per change: a Sales raiser (changes from before 2026-10-26) who is not the responsible stays the
 contact of its own change, and a PM changes it on the change (Sales contact
 picker) when the responsible should take it. Rejected and released changes
 follow too: neither is final (rejected goes on to scoping or closed, with

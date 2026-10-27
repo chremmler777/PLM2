@@ -61,7 +61,7 @@ export const salesChapter: ContentChapter = {
         {
           p:
             'Project Management captures the change ("New Change Request" on the "Changes" page, or ' +
-            '"Start change request" on the part); the button is not offered to Sales. Send the ' +
+            '"Start change request" on the part); for Sales the button stays grey with the reason under it. Send the ' +
             'customer\'s request to the project\'s PM, then supply what only you have: the ' +
             'customer\'s documents and the quote deadline. What the PM fills in on "New change ' +
             'request", so you know what to send along:',
@@ -83,7 +83,7 @@ export const salesChapter: ContentChapter = {
             'assessments, two offers and two revisions for one piece of work.',
           tone: 'warn',
         },
-        { shot: 'sales-start-form', alt: 'The "New change request" form with two affected items, the lead marked, a short description and the quote deadline.' },
+        { shot: 'sales-start-form', alt: 'The PM\'s "New change request" form (what Sales sends along) with two affected items, the lead marked, a short description and the quote deadline.' },
       ],
     },
     {

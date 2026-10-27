@@ -99,7 +99,7 @@ export const pmChapter: ContentChapter = {
         {
           points: [
             ['"Priority"', 'orders everybody\'s task list: "Low", "Medium", "High", "Critical". Only the change lead sets it. Critical is for a stopped line or a safety issue.'],
-            ['"Quote deadline"', 'is when the customer expects the offer. Sales, the customer contact, sets it at capture. It is active until the offer is sent.'],
+            ['"Quote deadline"', 'is when the customer expects the offer. You enter it at capture with the date Sales, the customer contact, passes on (Sales may set it later). It is active until the offer is sent.'],
             ['"Release deadline"', 'is born when the customer accepts. It is active from then on.'],
           ],
         },
@@ -314,6 +314,12 @@ export const pmChapter: ContentChapter = {
             'Escalation levels rise on their own. Project Management (or an admin) can lower a ' +
             'level with a reason ("Lower to L1" on an L2 issue), and you close an issue by hand ' +
             'only when it has no linked check.',
+        },
+        {
+          callout:
+            'Admin rights do not answer for another department: an admin records another ' +
+            'department\'s step (a check, a validation row, an assessment) only via "Act as" that department, with a reason.',
+          tone: 'note',
         },
         { shot: 'pm-route-dialog', alt: 'The "Decide the route for VI-1" dialog with "Internal rework" selected, one fix action and a reason.' },
       ],
