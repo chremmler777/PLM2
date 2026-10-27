@@ -3483,6 +3483,8 @@ async def raise_concern(
             flag_type=body.flag_type, check_what=body.check_what,
             part_id=body.part_id, answer_from=body.answer_from,
             scope_effect=body.scope_effect)
+    except MeetingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

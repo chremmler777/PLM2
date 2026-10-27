@@ -435,7 +435,9 @@ class MeetingService:
         department's own assessment submit. So it is required, and it must be
         the raiser's own department (admins may raise for any).
 
-        Authz is deliberately open: ANY authenticated user may flag a concern.
+        Authz: a scoping QUESTION is the PM's or the lead's (Christoph
+        2026-10-27, raised in the meeting); everything else is open: ANY
+        authenticated user may flag a concern, above all a cancel vote.
         This is the one thing the feature exists for — an objection that only
         the lead or a PM could file is not a parallel team voice, it is the
         meeting again. The scoping-meeting gate (_authz) belongs to meetings,
@@ -469,6 +471,19 @@ class MeetingService:
             raise ChangeError(
                 "Risks belong to the assessment phase. During scoping, flag "
                 "a concern (needs_info or reject_proposal) instead")
+        if (not in_assessment and kind == "needs_info"
+                and cm_switches.SCOPING_QUESTIONS_PM_ONLY):
+            # Christoph 2026-10-27: scoping is a team task led by the PM. The
+            # team brings its points to the meeting and the PM (or the lead)
+            # records the questions; afterwards each department asks from its
+            # own assessment. A cancel vote stays open to everyone.
+            from app.services.change_people import holds_lead
+            if not (holds_lead(change, user)
+                    or await MeetingService.user_is_pm(session, user)):
+                raise MeetingForbidden(
+                    "Scoping questions are raised in the meeting by Project "
+                    "Management or the change lead: bring your point to the "
+                    "meeting or tell the PM. Propose to cancel stays open to you")
         if kind == "risk":
             # The vocabulary is per department (app/services/risk_types.py):
             # a Tool Engineer's "not steel-safe" is not a Sales risk. The

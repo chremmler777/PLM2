@@ -75,7 +75,7 @@ export function QuestionFields({ from, setFrom, effect, setEffect, idPrefix }: {
 
 export default function ScopingFlags({
   changeId, concerns, impactedItems, departments, myDepartmentIds,
-  changeDepartmentIds, editable, onChanged,
+  changeDepartmentIds, editable, canRaise = true, onChanged,
 }: {
   changeId: number
   concerns: ChangeConcern[]
@@ -85,6 +85,10 @@ export default function ScopingFlags({
   /** Departments on this change (recommended / picked): preselect among them. */
   changeDepartmentIds: number[]
   editable: boolean
+  /** Christoph 2026-10-27: questions and check items are raised in the
+   *  meeting by the PM or the lead; everyone else reads them and brings
+   *  their points to the meeting. */
+  canRaise?: boolean
   onChanged: () => void
 }) {
   const [note, setNote] = useState('')
@@ -168,9 +172,13 @@ export default function ScopingFlags({
 
   return (
     <div className="space-y-3" data-testid="scoping-flags">
-      {editable && (
+      {editable && !canRaise && (
+        <p className="text-xs text-slate-400" data-testid="quick-add-pm-only">{t('flag.pmOnlyHint')}</p>
+      )}
+      {editable && canRaise && (
         <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 space-y-2"
           data-testid="quick-add">
+          <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('flag.meetingTitle')}</p>
           <div className="flex flex-wrap items-center gap-2">
             <input value={note} onChange={(e) => setNote(e.target.value)}
               aria-label={t('flag.placeholder')} placeholder={t('flag.placeholder')}

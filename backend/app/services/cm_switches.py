@@ -24,6 +24,11 @@ def impact_confirm_step(change) -> bool:
     return bool(IMPACT_CONFIRM_STEP_ENABLED)
 
 
+# Scoping is a team task led by the PM (Christoph 2026-10-27): questions and
+# check items are raised in the meeting by Project Management or the change
+# lead; a cancel vote stays open to everyone. Off = anyone may ask again.
+SCOPING_QUESTIONS_PM_ONLY = True
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call

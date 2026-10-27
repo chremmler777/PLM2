@@ -104,6 +104,20 @@ describe('ScopingFlags quick add', () => {
     await waitFor(() => expect(changesApi.joinConcern).toHaveBeenCalledWith(7, 14, { department_id: 3 }))
   })
 
+  it('2026-10-27: a team member sees no quick add, only the meeting hint; the PM sees it titled', () => {
+    render(wrap(
+      <ScopingFlags changeId={7} concerns={[]} impactedItems={[]} departments={DEPTS}
+        myDepartmentIds={[3]} changeDepartmentIds={[3]} editable canRaise={false} onChanged={() => {}} />))
+    expect(screen.queryByTestId('quick-add')).toBeNull()
+    expect(screen.getByTestId('quick-add-pm-only').textContent).toBe(t('flag.pmOnlyHint'))
+    cleanup()
+    render(wrap(
+      <ScopingFlags changeId={7} concerns={[]} impactedItems={[]} departments={DEPTS}
+        myDepartmentIds={[3]} changeDepartmentIds={[3]} editable onChanged={() => {}} />))
+    expect(screen.getByTestId('quick-add').textContent).toContain(t('flag.meetingTitle'))
+    expect(screen.queryByTestId('quick-add-pm-only')).toBeNull()
+  })
+
   it('A2-03: a check item is raised only for a routable department; a question may name Management', () => {
     render(wrap(
       <ScopingFlags changeId={7} concerns={[]} impactedItems={[]}

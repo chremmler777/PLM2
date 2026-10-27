@@ -842,7 +842,7 @@ export default function ScopingPanel(
             impactedItems={(change as { impacted_items?: ImpactedItem[] }).impacted_items ?? []}
             departments={departments} myDepartmentIds={myDepartmentIds}
             changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]}
-            editable={writable} onChanged={invalidate} />
+            editable={writable} canRaise={canRecordMeeting} onChanged={invalidate} />
         )}
 
         {/* Everything else the team flagged, in one strip. */}

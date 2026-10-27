@@ -14,6 +14,14 @@ from tests.test_ecr_solid_scoping_v2 import (
     _check, _decide, _meeting, _question, _raise, _scoping, _user,
 )
 
+
+@pytest.fixture(autouse=True)
+def _any_member_may_ask(monkeypatch):
+    """Department askers work the routing rules; who may raise in scoping
+    (PM / lead only since 2026-10-27) is tested in test_scoping_pm_questions.py."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_QUESTIONS_PM_ONLY", False)
+
 pytestmark = pytest.mark.asyncio
 
 

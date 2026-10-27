@@ -16,6 +16,15 @@ from tests.conftest import (
     QUESTION, insert_legacy_concern, login, make_department_member, satisfy_capture_gate,
 )
 
+
+@pytest.fixture(autouse=True)
+def _any_member_may_ask(monkeypatch):
+    """These tests work the question mechanics with department askers; who
+    may raise in scoping (PM / lead only since 2026-10-27) is tested in
+    test_scoping_pm_questions.py."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_QUESTIONS_PM_ONLY", False)
+
 pytestmark = pytest.mark.asyncio
 HEADER = "X-Acts-As-Department"
 

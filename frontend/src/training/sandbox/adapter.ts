@@ -111,6 +111,8 @@ on('get', /^\/v1\/plants\/projects$/, (s) => s.projects)
 
 on('get', /^\/v1\/parts\/project\/(\d+)$/, (s, _c, m) => s.parts[Number(m[1])] ?? [])
 
+// the Start change picker's grouping by PM: none in the sandbox, all "no PM"
+on('get', /^\/v1\/projects\/pm-responsibles$/, () => ({}))
 on('get', /^\/v1\/projects\/(\d+)\/team$/, (s, _c, m) => s.team[Number(m[1])] ?? [])
 
 on('post', /^\/v1\/changes$/, (s, config) => {

@@ -13,6 +13,15 @@ from tests.checklist_helpers import checklist_details, details_in  # noqa: F401
 
 from tests.conftest import QUESTION, insert_legacy_concern
 
+
+@pytest.fixture(autouse=True)
+def _any_member_may_ask(monkeypatch):
+    """These tests work the question mechanics with department askers; who
+    may raise in scoping (PM / lead only since 2026-10-27) is tested in
+    test_scoping_pm_questions.py."""
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "SCOPING_QUESTIONS_PM_ONLY", False)
+
 pytestmark = pytest.mark.asyncio
 
 RISK = {"kind": "risk", "risk_type": "dimensional_issue", "severity": 2}

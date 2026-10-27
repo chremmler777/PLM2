@@ -2703,6 +2703,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'taskcard.gotIt': { de: 'Verstanden', en: 'Got it' },
   // --- C33: scoping is triage (questions and check items) -------------------
   'flag.title': { de: 'Fragen und Prüfpunkte', en: 'Questions and check items' },
+  'flag.meetingTitle': { de: 'Aus dem Meeting (PM)', en: 'From the meeting (PM)' },
+  'flag.pmOnlyHint': { de: 'Fragen und Prüfpunkte erfasst der PM im Scoping-Meeting: bring deinen Punkt ins Meeting oder sag es dem PM. Abbruch vorschlagen kannst du unten.', en: 'Questions and check items are recorded by the PM in the scoping meeting: bring your point to the meeting or tell the PM. You can still propose to cancel below.' },
   'flag.placeholder': { de: 'Was ist zu prüfen? Eine Zeile', en: 'What should be checked? One line' },
   'flag.raisedFor': { de: 'Für', en: 'Raised for' },
   'flag.checkWhat': { de: 'Prüfen', en: 'Check' },
