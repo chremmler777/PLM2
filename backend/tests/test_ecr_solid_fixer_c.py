@@ -408,3 +408,28 @@ async def test_n2_approval_and_validation_tell_the_new_task_owners(session_facto
             Notification.subject_key == f"chg:{c.id}:release_checks"))).scalars()}
         assert alexa in told
 
+
+async def test_n11_cancel_vote_tells_the_lead_and_the_cancel_tells_the_voter(
+        session_factory, seed):
+    from app.models.entities import User
+    from app.services.change_service import ChangeService
+    from app.services.meeting_service import MeetingService
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-N11", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"],
+                          customer_relevant=True, status="scoping")
+        s.add(c); await s.commit()
+        change = await ChangeService.get_change(s, c.id)
+        await MeetingService.raise_concern(s, change, await s.get(User, seed["engineer_id"]),
+                                           "reject_proposal", "Customer will drop the part")
+        await s.commit()
+        told = [(n.user_id, n.title) for n in (await s.execute(select(Notification))).scalars()]
+        assert any(u == seed["admin_id"] and t.startswith("Cancel proposed") for u, t in told)
+        await ChangeService.notify_handover_and_end(s, change, "scoping", "cancelled",
+                                                    seed["admin_id"])
+        await s.commit()
+        ended = [n.user_id for n in (await s.execute(select(Notification).where(
+            Notification.kind == "change_ended"))).scalars()]
+        assert seed["engineer_id"] in ended
+

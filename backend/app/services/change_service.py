@@ -5049,11 +5049,15 @@ class ChangeService:
                 title=f"Handed over for scoping: {change.change_number}"[:200],
                 body=f"'{change.title}': decide parts, who assesses and go / no-go.",
                 link=f"{link}?tab=scoping")
+        voters: set[int] = set()
         if to_status in ("cancelled", "rejected"):
             for c in (await session.execute(select(ChangeConcern).where(
                     ChangeConcern.change_id == change.id,
                     ChangeConcern.kind == "reject_proposal"))).scalars().all():
                 if c.is_open:
+                    # T19 / N11: who proposed it hears how it ended
+                    if c.raised_by is not None:
+                        voters.add(c.raised_by)
                     c.withdrawn_at = datetime.utcnow()
                     c.withdrawn_by = user_id
                     c.settled_as = "pm"
@@ -5072,7 +5076,7 @@ class ChangeService:
                 to_status == "closed" and old == "rejected"):
             from app.services.change_people import team_owner_ids
             ids = {i for i in (change.lead_id, change.sales_owner_id, change.raised_by)
-                   if i is not None}
+                   if i is not None} | voters
             ids |= set(await team_owner_ids(
                 session, change.project_id,
                 set((await session.execute(select(ChangeAssessment.department_id).where(

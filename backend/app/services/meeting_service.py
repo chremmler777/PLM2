@@ -600,6 +600,17 @@ class MeetingService:
             # F8: a customer question at scoping is the Sales contact's task
             # too: told once when raised
             await MeetingService._tell_question_asked(session, change, concern, user)
+        if kind == "reject_proposal" and change.lead_id and change.lead_id != user.id:
+            # T19 / retest N11: a cancel vote holds proceed: the lead decides
+            # on it (meeting), so the lead is told once
+            from app.services.notification_service import NotificationService
+            who = user.full_name or user.username
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="task_new",
+                subject_key=f"concern:{concern.id}:cancel_vote",
+                title=f"Cancel proposed: {change.change_number}"[:255],
+                body=f"{who} proposes to cancel '{change.title}': {concern.note}",
+                link=f"/changes/{change.id}?tab=scoping")
         return concern
 
     @staticmethod
