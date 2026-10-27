@@ -95,6 +95,12 @@ DEPARTMENT_CATEGORIES = {
         ("freight", "Fracht", "Freight", "money"),
         ("bank_build_planning", "Vorproduktionsplanung", "Bank build planning", "time"),
     ],
+    # esc P2-2: Logistics took over Scheduling
+    "Logistics": [
+        ("storage", "Lagerung", "Storage", "money"),
+        ("freight", "Fracht", "Freight", "money"),
+        ("bank_build_planning", "Vorproduktionsplanung", "Bank build planning", "time"),
+    ],
     "Project Manager": [
         ("project_coordination", "Projektkoordination", "Project coordination", "time"),
     ],

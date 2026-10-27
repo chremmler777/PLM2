@@ -27,7 +27,7 @@ async def rel_world(session_factory, seed):
     async with session_factory() as s:
         depts = {}
         for name in ("Development", "Tool Engineer", "APQP", "Project Manager",
-                     "Scheduling", "Sales", "Quality", "Process Engineer"):
+                     "Logistics", "Sales", "Quality", "Process Engineer"):
             d = Department(name=name, flow_type="action", is_active=True)
             s.add(d)
             await s.flush()
@@ -107,7 +107,7 @@ async def test_sixteen_checks_seeded_with_owners(client, rel_world):
     by_key = {c["key"]: c for c in st["checks"]}
     assert by_key["index_updated"]["department_name"] == "Development"
     assert by_key["index_updated"]["department_id"] == rel_world["depts"]["Development"]
-    assert by_key["erp_updated"]["department_name"] == "Scheduling"
+    assert by_key["erp_updated"]["department_name"] == "Logistics"
     # no Packaging Engineer department in this database: owner by name only
     assert by_key["packaging_updated"]["department_id"] is None
     assert by_key["packaging_updated"]["department_name"] == "Packaging Engineer"

@@ -82,7 +82,7 @@ async def test_admin_only_department_falls_back_to_pm(
     """An admin belongs to every department in a small plant: counting the
     admin left Scheduling's ERP row with no button for PM and nobody's task."""
     cid = rel_world["change_id"]
-    await _add_member(session_factory, seed["admin_id"], rel_world["depts"]["Scheduling"])
+    await _add_member(session_factory, seed["admin_id"], rel_world["depts"]["Logistics"])
     pm = await _auth(client, "pm")
     rows = {c["key"]: c for c in (await _state(client, pm, cid))["checks"]}
     assert rows["erp_updated"]["can_answer"] is True
@@ -91,13 +91,13 @@ async def test_admin_only_department_falls_back_to_pm(
     # PM has the task, named as the run team's (not Scheduling's backup)
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=pm)).json()
     sched = [t for t in tasks if t["kind"] == "release_check" and t["change_id"] == cid
-             and t["department_id"] == rel_world["depts"]["Scheduling"]]
+             and t["department_id"] == rel_world["depts"]["Logistics"]]
     assert len(sched) == 1 and "no member here" in sched[0]["hint"]
     assert sched[0]["role"] == "main"
     actions = (await client.get(f"/api/v1/changes/{cid}/my-actions",
                                 headers=pm)).json()["actions"]
     assert any(a["kind"] == "release_check"
-               and a["department_id"] == rel_world["depts"]["Scheduling"]
+               and a["department_id"] == rel_world["depts"]["Logistics"]
                for a in actions)
     # an owned row stays the department's; PM gets no task for it
     assert not any(t["kind"] == "release_check" and t["change_id"] == cid

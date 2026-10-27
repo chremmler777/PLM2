@@ -222,6 +222,8 @@ export interface PlanFeedback {
   revision: number
   required: PlanFeedbackRow[]
   all_confirmed: boolean
+  /** F2: a detailed plan exists (else the lead creates it first). */
+  plan_exists?: boolean
   validated_at: string | null
   validated_by_name: string | null
 }

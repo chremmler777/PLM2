@@ -134,14 +134,15 @@ async def seed_test_data():
                 ("Manufacturing Engineer", "action", 5, True),
                 ("Process Engineer", "action", 6, True),
                 ("Development", "action", 7, True),
-                ("Scheduling", "info", 8, True),
+                ("Scheduling", "info", 8, False),
                 ("Packaging Engineer", "action", 9, True),
                 ("Quality", "action", 10, True),
                 # ECR-solid (migration 119): Toolshop is its own department
                 # (P7), Management gives the OK on price drops and Absorb (P4).
                 ("Toolshop", "action", 11, True),
                 ("Management", "action", 12, True),
-                ("Logistics", "action", 13, False),
+                # esc P2-2 (2026-10-26): Logistics replaced Scheduling
+                ("Logistics", "action", 13, True),
                 ("Production", "action", 14, False),
                 ("Purchasing", "action", 15, False),
                 ("Production control", "action", 16, False),

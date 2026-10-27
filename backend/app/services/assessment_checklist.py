@@ -139,6 +139,18 @@ _CAPAB = ("capability_study", "MFU / PFU (Maschinen-/Prozessfähigkeit)",
           "Machine / process capability study", None)
 _TRIALS = ("trials_required", "Versuche erforderlich", "Trials required", None)
 
+# The retired Scheduling's items; Logistics asks them now (esc P2-2).
+_SCHEDULING_ROWS = [
+        ("stock_finished", "Lagerbestand Fertigteile betroffen",
+         "Finished-part stock affected", None),
+        ("stock_semi_finished", "Lagerbestand Halbfertigteile betroffen",
+         "Semi-finished stock affected", None),
+        ("stock_components", "Lagerbestand Einzelteile betroffen",
+         "Component stock affected", None),
+        ("bank_build_needed", "Vorproduktion (Bank Build) nötig",
+         "Bank build needed", None),
+    ]
+
 # Department name -> its own items, in the same tuple shape.
 DEPARTMENT_ITEMS = {
     "Development": [
@@ -196,16 +208,7 @@ DEPARTMENT_ITEMS = {
         ("reference_sample", "Rückstellmuster", "Reference sample", None),
         _DIM, _VIS,
     ],
-    "Scheduling": [
-        ("stock_finished", "Lagerbestand Fertigteile betroffen",
-         "Finished-part stock affected", None),
-        ("stock_semi_finished", "Lagerbestand Halbfertigteile betroffen",
-         "Semi-finished stock affected", None),
-        ("stock_components", "Lagerbestand Einzelteile betroffen",
-         "Component stock affected", None),
-        ("bank_build_needed", "Vorproduktion (Bank Build) nötig",
-         "Bank build needed", None),
-    ],
+    "Scheduling": list(_SCHEDULING_ROWS),
     "Sales": [
         ("part_price_change", "Teilepreis / Neukalkulation",
          "Part price / recalculation", None),
@@ -240,6 +243,8 @@ DEPARTMENT_ITEMS = {
         ("labelling_change", "Etikettierung ändern", "Labelling change", None),
         ("interim_storage", "Zwischenlagern und Q-Gate", "Interim storage and Q gate", None),
         ("freight_cost_change", "Zusätzliche Frachtkosten", "Extra freight cost", None),
+        # esc P2-2 (2026-10-26): Logistics took over Scheduling's questions
+        *[row for row in _SCHEDULING_ROWS],
     ],
     "Production": [
         _CAPAB, _TRIALS,

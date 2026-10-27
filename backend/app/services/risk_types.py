@@ -78,6 +78,12 @@ DEPARTMENT_TYPES = {
         ("bank_build", "Vorproduktion (Bank Build)", "Bank build"),
         ("material_availability", "Materialverfügbarkeit", "Material availability"),
     ],
+    # esc P2-2: Logistics took over Scheduling
+    "Logistics": [
+        ("capacity", "Kapazität", "Capacity"),
+        ("bank_build", "Vorproduktion (Bank Build)", "Bank build"),
+        ("material_availability", "Materialverfügbarkeit", "Material availability"),
+    ],
 }
 
 # The pre-per-department vocabulary. Rows raised under it stay valid, and a

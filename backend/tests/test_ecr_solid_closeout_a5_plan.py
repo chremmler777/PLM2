@@ -25,12 +25,12 @@ async def test_a5_03_negative_lead_or_pm_confirms_a_memberless_department(
     async with session_factory() as s:
         (await s.get(User, world["users"]["sched"])).is_active = False
         await s.commit()
-    sched, tool = world["depts"]["Scheduling"], world["depts"]["Tool Engineer"]
+    sched, tool = world["depts"]["Logistics"], world["depts"]["Tool Engineer"]
     pm = await _auth(client, "pm")
     fb = await _feedback(client, cid, pm)
     row = next(r for r in fb["required"] if r["department_id"] == sched)
     assert row["no_member"] is True and row["can_answer"] is True
-    assert row["hint"] == "Scheduling has no member here: Project Management coordinates"
+    assert row["hint"] == "Logistics has no member here: Project Management coordinates"
     # no lead: PM's task, worded
     tasks = await _plan_tasks(client, pm, cid)
     assert [t["department_id"] for t in tasks] == [sched]
@@ -52,7 +52,7 @@ async def test_a5_03_negative_lead_or_pm_confirms_a_memberless_department(
     assert await _plan_tasks(client, pm, cid) == []
     tasks = await _plan_tasks(client, apqp, cid)
     assert [t["department_id"] for t in tasks] == [sched]
-    assert tasks[0]["hint"].startswith("Scheduling has no member here: Plan apqp coordinates")
+    assert tasks[0]["hint"].startswith("Logistics has no member here: Plan apqp coordinates")
     res = await client.post(f"/api/v1/changes/{cid}/plan/feedback", headers=apqp,
                             json={"department_id": sched, "verdict": "confirmed"})
     assert res.status_code == 200, res.text

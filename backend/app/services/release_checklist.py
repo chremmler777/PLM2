@@ -71,9 +71,9 @@ RELEASE_CHECKS: list[tuple[str, str, str]] = [
     ("packaging_updated",
      "Packaging instruction updated", "Packaging Engineer"),
     ("erp_updated",
-     "ERP, BOM and routing updated", "Scheduling"),
+     "ERP, BOM and routing updated", "Logistics"),
     ("stock_handled",
-     "Old stock handled as agreed (bank consumed or scrapped)", "Scheduling"),
+     "Old stock handled as agreed (bank consumed or scrapped)", "Logistics"),
     ("customer_informed",
      "Customer informed of the implementation date / first shipment", "Sales"),
     ("spare_parts",
@@ -381,7 +381,17 @@ def keys_for(change, answered_keys=()) -> list[str]:
     done = set(answered_keys)
     status = getattr(change, "status", None)
     ended = ended_at(change)
-    return [k for k in ORDER if applies(k, status, ended, k in done, done)]
+    # T13 (test 2026-10-26): an internal change has no customer to inform
+    # and no PPAP / PSW for the customer: those rows are not asked (an
+    # answer already given stays)
+    skip = (CUSTOMER_ONLY_KEYS if getattr(change, "customer_relevant", True) is False
+            else frozenset())
+    return [k for k in ORDER if applies(k, status, ended, k in done, done)
+            and (k not in skip or k in done)]
+
+
+#: Rows that exist only where there is a customer (T13).
+CUSTOMER_ONLY_KEYS = frozenset({"customer_informed", "customer_approval"})
 
 
 def retired_keys_for(change, answered_keys=()) -> list[str]:

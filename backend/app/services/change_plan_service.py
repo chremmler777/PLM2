@@ -22,7 +22,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from app.utils.clock import business_today
+from app.utils.clock import business_date_of, business_today
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -86,7 +86,7 @@ PROGRESS_FIELDS = ("progress_pct", "actual_start", "actual_finish")
 FREE_FIELDS = ("notes",)
 WRITABLE_FIELDS = STRUCTURAL_FIELDS + DATE_FIELDS + PROGRESS_FIELDS + FREE_FIELDS
 
-EDITOR_DEPARTMENTS = ("Sales", "Project Manager", "Scheduling")
+EDITOR_DEPARTMENTS = ("Sales", "Project Manager", "Logistics")
 DEVIATION_DEPARTMENTS = ("Sales", "Project Manager")
 
 # Template constants (spec §4, quote plan seed), in calendar days.
@@ -98,6 +98,8 @@ BANK_BUILD_DAYS = 10
 FALLBACK_IMPLEMENTATION_DAYS = 20
 MIN_BUFFER_DAYS = 5
 TOOL_DEPARTMENT = "Tool Engineer"
+#: esc P2-2: Scheduling is retired (migration 152 era); Logistics builds the bank
+BANK_BUILD_DEPARTMENT = "Logistics"
 NAME_MAX = 200
 
 MSPDI_NS = eng.MSPDI_NS
@@ -314,7 +316,7 @@ class ChangePlanService:
     @staticmethod
     async def is_editor(session: AsyncSession, change: ChangeRequest,
                         user: User) -> bool:
-        """Admin, the change lead, Sales, Project Management, Scheduling:
+        """Admin, the change lead, Sales, Project Management, Logistics:
         the people who own the promise to the customer and the shop plan.
         Acts-as aware through _user_in_department."""
         from app.services.change_people import holds_lead
@@ -389,7 +391,7 @@ class ChangePlanService:
         ChangePlanService._check_plan(plan)
         if not await ChangePlanService.is_editor(session, change, user):
             raise PlanForbidden(
-                "Only Sales, Project Management, Scheduling, the change lead "
+                "Only Sales, Project Management, Logistics, the change lead "
                 "or an admin may edit the plan")
         ChangePlanService._require_window(change, plan)
         if structural and ChangePlanService.baselined(change, plan):
@@ -691,6 +693,9 @@ class ChangePlanService:
         today = business_today()
         anchor = cal.snap(max(today, _as_date(change.required_by_date) or today)
                           + timedelta(days=ORDER_OFFSET_DAYS))
+        po = ChangePlanService.order_date(change)
+        if po is not None:
+            anchor = cal.snap(po)      # F15: the customer's yes is the order
 
         tasks: list[ChangePlanTask] = []
         pending_links: list[tuple] = []
@@ -772,14 +777,18 @@ class ChangePlanService:
             await flush()
 
         downtimes = [t for t in work_tail if t.kind == "downtime"]
-        if downtimes:
+        # F5: a decided changeover is no idea any more: a running change
+        # needs no bank, planned scrap builds it (a committed block)
+        decided = getattr(change, "bank_build_mode", None)
+        if downtimes and decided != "running_change":
             first = min(t.start_date for t in downtimes)
             bank_days = td(cal, BANK_BUILD_DAYS)
             bank_start = (cal.date_at(cal.idx(first) - bank_days) if cal.working
                           else first - timedelta(days=BANK_BUILD_DAYS))
-            add("Bank build (idea)", "bank_build", bank_start, bank_days,
-                lane="Scheduling", dept_id=ids_by_name.get("Scheduling"),
-                is_idea=True)
+            add("Bank build" if decided else "Bank build (idea)", "bank_build",
+                bank_start, bank_days,
+                lane=BANK_BUILD_DEPARTMENT, dept_id=ids_by_name.get(BANK_BUILD_DEPARTMENT),
+                is_idea=not decided)
 
         sampling = add("Sampling / trial", "sampling", after(*work_tail),
                        td(cal, SAMPLING_DAYS), lane=TOOL_DEPARTMENT,
@@ -858,6 +867,13 @@ class ChangePlanService:
                        "replaced": bool(existing)})
 
     @staticmethod
+    def order_date(change) -> Optional[date]:
+        """F15: the day the customer said yes (the PO), once accepted."""
+        if getattr(change, "customer_response", None) == "accepted":
+            return business_date_of(getattr(change, "customer_response_at", None))
+        return None
+
+    @staticmethod
     async def _copy(session, change, source: list, plan: str,
                     user_id: int) -> list[ChangePlanTask]:
         """Copy blocks into another plan, remapping ids in parents and links.
@@ -870,11 +886,15 @@ class ChangePlanService:
             ChangePlanService._store_calendar(
                 change, plan, cal, auto=ChangePlanService.auto(change, src_plan))
         id_map: dict[int, ChangePlanTask] = {}
+        po = ChangePlanService.order_date(change) if plan == "detailed" else None
         for t in source:
+            # F15: the detailed plan's order milestone is the PO date
+            start = (po if po is not None and t.kind == "milestone"
+                     and (t.name or "").startswith("Customer order") else t.start_date)
             n = ChangePlanTask(
                 change_id=change.id, plan=plan, name=t.name, lane=t.lane,
                 department_id=t.department_id, kind=t.kind, is_idea=t.is_idea,
-                start_date=t.start_date, duration_days=t.duration_days,
+                start_date=start, duration_days=t.duration_days,
                 predecessors=[], sort_order=t.sort_order, progress_pct=0,
                 constraint_type=t.constraint_type,
                 constraint_date=t.constraint_date,
@@ -1496,10 +1516,15 @@ class ChangePlanService:
         tasks = await ChangePlanService.tasks(session, change, task.plan)
         links = await ChangePlanService.links(session, change, task.plan)
         gone = {"plan": task.plan, "task_id": task.id, "name": task.name}
+        # F5: an idea drives no committed block, so dropping one changes
+        # nothing anybody confirmed: the confirmations stay current
+        was_idea = bool(task.is_idea) and not any(
+            t.parent_id == task.id for t in tasks)
         await ChangePlanService._remove_task(
             session, change, task.plan, task, tasks, links)
         await ChangePlanService._rollup(session, change, gone["plan"])
-        await ChangePlanService._bump(change, gone["plan"])
+        if not was_idea:
+            await ChangePlanService._bump(change, gone["plan"])
         await ChangeService.append_changelog(
             session, change, "plan_task_removed",
             f"{gone['plan'].capitalize()} plan: block '{gone['name']}' removed",
@@ -1676,7 +1701,7 @@ class ChangePlanService:
         ChangePlanService._check_plan(plan)
         if not await ChangePlanService.is_editor(session, change, user):
             raise PlanForbidden(
-                "Only Sales, Project Management, Scheduling, the change lead "
+                "Only Sales, Project Management, Logistics, the change lead "
                 "or an admin may edit the plan")
         ChangePlanService._require_window(
             change, plan, f"The {plan} plan calendar")
@@ -2343,16 +2368,16 @@ class ChangePlanService:
                                        implementing: list | None = None,
                                        dept_by_name: dict | None = None) -> list[int]:
         """Every department with an R or A assessment on the change, plus
-        Scheduling (it builds the bank) and Sales (it tells the customer).
+        Logistics (it builds the bank) and Sales (it tells the customer).
         RELEASE_V2 (§8-9): the departments with impact yes or work priced on
-        the change, Scheduling, and Sales on a customer change.
+        the change, Logistics, and Sales on a customer change.
         A mother-plant change (spec §14) has no assessments and no customer
-        here: the informed departments and Scheduling confirm."""
+        here: the informed departments and Logistics confirm."""
         from app.services import cm_switches
         from app.services import mother_plants as mp
         ids = {a.department_id for a in change.assessments
                if a.rasic_letter in BLOCKING_LETTERS}
-        names = ("Scheduling", "Sales")
+        names = ("Logistics", "Sales")
         if cm_switches.on("RELEASE_V2") and not mp.is_mother_plant(change):
             # §8-9: the departments with work to plan (impact yes or hours /
             # cost on the change) confirm their plan blocks; an R/A
@@ -2366,12 +2391,12 @@ class ChangePlanService:
             # nobody priced or said "impact yes" (a paperwork change): the
             # R/A departments still confirm, so the plan never waits on nobody
             ids = work or ids
-            names = ("Scheduling", "Sales") if change.customer_relevant else ("Scheduling",)
+            names = ("Logistics", "Sales") if change.customer_relevant else ("Logistics",)
         if mp.is_mother_plant(change):
             from app.services.mother_plant_service import MotherPlantService
             ids |= set(await MotherPlantService.informed_department_ids(
                 session, change))
-            names = ("Scheduling",)
+            names = ("Logistics",)
         for name in names:
             # `dept_by_name`: preloaded for a list (My Tasks, R34)
             did = (dept_by_name.get(name) if dept_by_name is not None
@@ -2451,8 +2476,14 @@ class ChangePlanService:
                 **({"can_answer": await ChangePlanService.may_answer_feedback(
                     session, change, did, viewer, unstaffed)} if viewer is not None else {}),
             })
+        # F2: before the detailed plan exists nobody can confirm anything:
+        # the next step is the lead's "Create the detailed plan"
+        plan_exists = (await session.execute(
+            select(ChangePlanTask.id).where(ChangePlanTask.change_id == change.id,
+                                            ChangePlanTask.plan == "detailed")
+            .limit(1))).first() is not None
         return {
-            "revision": revision, "required": out,
+            "revision": revision, "required": out, "plan_exists": plan_exists,
             "all_confirmed": bool(out) and all(
                 e["verdict"] == "confirmed" and not e["stale"] for e in out),
             "validated_at": change.timing_validated_at,
@@ -2503,7 +2534,7 @@ class ChangePlanService:
                               user: User) -> None:
         if not await ChangePlanService.may_validate_timing(session, change, user):
             raise PlanForbidden(
-                "Only Project Management, Scheduling, Sales, the change lead "
+                "Only Project Management, Logistics, Sales, the change lead "
                 "or an admin may validate the timing")
         if change.status not in TIMING_VALIDATION_WINDOW:
             raise ChangeError(

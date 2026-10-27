@@ -93,7 +93,7 @@ INDUSTRIALIZATION_STEPS = [
         ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
     ], {}),
     ("Update master data & logistics", [
-        ("Scheduling", "R"), ("Project Manager", "A"),
+        ("Logistics", "R"), ("Project Manager", "A"),
     ], {}),
 ]
 READY_TO_GO_STEPS = [

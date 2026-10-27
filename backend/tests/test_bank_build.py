@@ -23,13 +23,13 @@ async def roles(session_factory, seed):
     from app.auth.security import get_password_hash
     async with session_factory() as s:
         depts, users = {}, {}
-        for name, starter in [("Scheduling", False), ("Sales", True)]:
+        for name, starter in [("Logistics", False), ("Sales", True)]:
             d = Department(name=name, flow_type="action", is_active=True,
                            can_start_change=starter)
             s.add(d)
             await s.flush()
             depts[name] = d.id
-        for name, email in [("Scheduling", "sched@test.io"),
+        for name, email in [("Logistics", "sched@test.io"),
                             ("Sales", "sales@test.io"),
                             ("Outsider", "outsider@test.io")]:
             u = User(organization_id=seed["org_id"], username=email.split("@")[0],
@@ -46,7 +46,7 @@ async def roles(session_factory, seed):
 
 
 async def _auth(client, name):
-    return await login(client, {"Scheduling": "sched@test.io",
+    return await login(client, {"Logistics": "sched@test.io",
                                 "Sales": "sales@test.io",
                                 "Outsider": "outsider@test.io"}[name],
                        ENGINEER_PASSWORD)
@@ -88,7 +88,7 @@ async def _actions(client, auth, cid):
 
 async def test_scheduling_sets_running_change(client, admin_auth, seed, roles,
                                               session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     res = await client.put(f"/api/v1/changes/{cid}/bank-build",
                            json={"mode": "running_change",
@@ -98,8 +98,8 @@ async def test_scheduling_sets_running_change(client, admin_auth, seed, roles,
     assert body["bank_build_mode"] == "running_change"
     assert body["bank_build_note"] == "run in at week 34"
     assert body["scrap_quote_price"] is None
-    assert body["bank_build_set_by"] == roles["user"]["Scheduling"]
-    assert body["bank_build_set_by_name"] == "Scheduling"
+    assert body["bank_build_set_by"] == roles["user"]["Logistics"]
+    assert body["bank_build_set_by_name"] == "Logistics"
     assert body["bank_build_set_at"] is not None
     assert body["plan_published_at"] is None
     assert "bank_build_decided" in await _actions(client, admin_auth, cid)
@@ -107,7 +107,7 @@ async def test_scheduling_sets_running_change(client, admin_auth, seed, roles,
 
 async def test_planned_scrap_needs_a_scrap_quote(client, admin_auth, seed, roles,
                                                  session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     res = await client.put(f"/api/v1/changes/{cid}/bank-build",
                            json={"mode": "planned_scrap"}, headers=sched)
@@ -131,7 +131,7 @@ async def test_planned_scrap_needs_a_scrap_quote(client, admin_auth, seed, roles
 
 async def test_zero_scrap_price_is_not_a_quote(client, admin_auth, seed, roles,
                                                session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     res = await client.put(f"/api/v1/changes/{cid}/bank-build",
                            json={"mode": "planned_scrap",
@@ -141,7 +141,7 @@ async def test_zero_scrap_price_is_not_a_quote(client, admin_auth, seed, roles,
 
 async def test_redeciding_overwrites_and_running_change_clears_the_price(
         client, admin_auth, seed, roles, session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     res = await client.put(f"/api/v1/changes/{cid}/bank-build",
                            json={"mode": "planned_scrap",
@@ -159,7 +159,7 @@ async def test_redeciding_overwrites_and_running_change_clears_the_price(
 
 async def test_unknown_mode_is_refused(client, admin_auth, seed, roles,
                                        session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     res = await client.put(f"/api/v1/changes/{cid}/bank-build",
                            json={"mode": "maybe_later"}, headers=sched)
@@ -182,7 +182,7 @@ async def test_non_member_is_refused(client, admin_auth, seed, roles,
 
 async def test_wrong_status_is_refused(client, admin_auth, seed, roles,
                                        session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     cid = await _change(client, admin_auth, seed, status="costing",
                         session_factory=session_factory)
     res = await client.put(f"/api/v1/changes/{cid}/bank-build",
@@ -197,7 +197,7 @@ async def test_wrong_status_is_refused(client, admin_auth, seed, roles,
 
 async def test_publish_requires_a_decided_plan_and_is_sales_gated(
         client, admin_auth, seed, roles, session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     sales = await _auth(client, "Sales")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
 
@@ -228,7 +228,7 @@ async def test_publish_requires_a_decided_plan_and_is_sales_gated(
 
 async def test_republish_refreshes_the_stamp(client, admin_auth, seed, roles,
                                              session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     sales = await _auth(client, "Sales")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     await client.put(f"/api/v1/changes/{cid}/bank-build",
@@ -255,7 +255,7 @@ async def test_republish_refreshes_the_stamp(client, admin_auth, seed, roles,
 
 async def test_my_tasks_hands_the_change_from_scheduling_to_sales(
         client, admin_auth, seed, roles, session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     sales = await _auth(client, "Sales")
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
 
@@ -284,7 +284,7 @@ async def test_my_tasks_hands_the_change_from_scheduling_to_sales(
 
 async def test_internal_change_owes_the_customer_no_plan(
         client, admin_auth, seed, roles, session_factory):
-    sched = await _auth(client, "Scheduling")
+    sched = await _auth(client, "Logistics")
     sales = await _auth(client, "Sales")
     cid = await _change(client, admin_auth, seed, customer_relevant=False,
                         session_factory=session_factory)

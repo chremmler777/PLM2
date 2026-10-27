@@ -39,8 +39,8 @@ async def test_ecn_check_steps_route_no_retired_department(session_factory, seed
     """F-06 / ECR-solid C21: the ECN check workflows route their acting rows
     (R/A) to live departments: the tool change and the trial to the Tool
     Engineer (trial: Quality accountable), the parameter sheets to Process,
-    the master data to Scheduling. Production, Production control,
-    Purchasing and Logistics are retired."""
+    the master data to Logistics (esc P2-2). Production, Production control,
+    Purchasing and Scheduling are retired."""
     from app.models.workflow import Department, WfStage, WfStep, WfStepRasic, WfTemplate
     from app.services.wf_seed_service import seed_check_standards
 
@@ -63,8 +63,9 @@ async def test_ecn_check_steps_route_no_retired_department(session_factory, seed
             assert ("Sampling / trial", "Tool Engineer", "R") in acting
             assert ("Sampling / trial", "Quality", "A") in acting
             assert ("Adjust process / parameter sheets", "Process Engineer", "R") in acting
-            assert ("Update master data & logistics", "Scheduling", "R") in acting
-            assert not {d for _, d, _ in acting} & {"Production", "Logistics"}, name
+            assert ("Update master data & logistics", "Logistics", "R") in acting
+            # esc P2-2 (2026-10-26): Logistics is live again (it replaced Scheduling)
+            assert not {d for _, d, _ in acting} & {"Production", "Scheduling"}, name
             every = (await s.execute(
                 select(Department.name)
                 .join(WfStepRasic, WfStepRasic.department_id == Department.id)
@@ -72,7 +73,7 @@ async def test_ecn_check_steps_route_no_retired_department(session_factory, seed
                 .join(WfStage, WfStep.stage_id == WfStage.id)
                 .join(WfTemplate, WfStage.template_id == WfTemplate.id)
                 .where(WfTemplate.name == name))).scalars().all()
-            assert not set(every) & {"Production", "Logistics", "Production control",
+            assert not set(every) & {"Production", "Scheduling", "Production control",
                                      "Purchasing"}, name
 
 

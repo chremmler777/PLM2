@@ -40,7 +40,7 @@ async def world(session_factory, seed):
     from app.models.entities import User
     async with session_factory() as s:
         depts = {}
-        for name in ("Sales", "Project Manager", "Scheduling", "Tool Engineer",
+        for name in ("Sales", "Project Manager", "Logistics", "Tool Engineer",
                      "APQP", "Packaging Engineer"):
             d = Department(name=name, flow_type="action", is_active=True)
             s.add(d)
@@ -48,7 +48,7 @@ async def world(session_factory, seed):
             depts[name] = d.id
         users = {}
         for key, dept in (("sales", "Sales"), ("pm", "Project Manager"),
-                          ("sched", "Scheduling"), ("tool", "Tool Engineer"),
+                          ("sched", "Logistics"), ("tool", "Tool Engineer"),
                           ("apqp", "APQP"), ("pack", "Packaging Engineer")):
             email = f"plan-{key}@test.io"
             u = User(organization_id=seed["org_id"], username=f"plan-{key}",
@@ -393,7 +393,7 @@ async def _approved_with_detailed(client, world, session_factory):
     return cid, sales
 
 
-_MEMBER = {"Tool Engineer": "tool", "Scheduling": "sched", "Sales": "sales",
+_MEMBER = {"Tool Engineer": "tool", "Logistics": "sched", "Sales": "sales",
            "APQP": "apqp", "Packaging Engineer": "pack", "Project Manager": "pm"}
 
 
@@ -414,7 +414,7 @@ async def test_feedback_goes_stale_when_the_plan_moves(client, world, session_fa
     cid, sales = await _approved_with_detailed(client, world, session_factory)
     fb = (await client.get(f"/api/v1/changes/{cid}/plan/feedback", headers=sales)).json()
     required = {r["department_name"] for r in fb["required"]}
-    assert required == {"Tool Engineer", "Scheduling", "Sales"}
+    assert required == {"Tool Engineer", "Logistics", "Sales"}
     assert fb["all_confirmed"] is False
 
     # only a member answers for a department
@@ -1794,3 +1794,52 @@ async def test_add_blocks_after_baseline_system_path(client, world, session_fact
     res = await client.post(f"/api/v1/changes/{cid}/plan/tasks", json={
         "plan": "detailed", "name": "x", "start_date": "2026-11-01"}, headers=sales)
     assert res.status_code == 400
+
+
+# --- F5 (test 2026-10-26): a decided bank build is no idea; dropping an idea
+# --- keeps the teams' confirmations
+
+async def test_f5_decided_bank_build_is_not_seeded_as_an_idea(client, world, session_factory):
+    await _add_positions(session_factory, world)
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    await _set(session_factory, cid, bank_build_mode="running_change")
+    t = _by_name((await _seed(client, sales, cid)).json())
+    assert not any(n.startswith("Bank build") for n in t)
+    await _set(session_factory, cid, bank_build_mode="planned_scrap")
+    t = _by_name((await _seed(client, sales, cid, replace=True)).json())
+    assert "Bank build (idea)" not in t
+    assert t["Bank build"]["is_idea"] is False and t["Bank build"]["lane"] == "Logistics"
+
+
+async def test_f5_deleting_an_idea_block_keeps_confirmations(client, world, session_factory):
+    await _add_positions(session_factory, world)
+    cid, sales = await _approved_with_detailed(client, world, session_factory)
+    out = (await _plan(client, sales, cid, plan="detailed"))
+    rev = out["revision"]
+    idea = _by_name(out)["Bank build (idea)"]
+    res = await client.delete(f"/api/v1/changes/{cid}/plan/tasks/{idea['id']}", headers=sales)
+    assert res.status_code in (200, 204), res.text
+    assert (await _plan(client, sales, cid, plan="detailed"))["revision"] == rev
+    # NEGATIVE: a committed block's removal still invalidates them
+    gauge = _by_name((await _plan(client, sales, cid, plan="detailed")))["Gauge update"]
+    res = await client.delete(f"/api/v1/changes/{cid}/plan/tasks/{gauge['id']}", headers=sales)
+    assert res.status_code in (200, 204), res.text
+    assert (await _plan(client, sales, cid, plan="detailed"))["revision"] == rev + 1
+
+
+async def test_f15_detailed_order_milestone_takes_the_po_date(client, world, session_factory):
+    cid = world["change_id"]
+    sales = await _auth(client, "sales")
+    await _seed(client, sales, cid)
+    po = datetime.combine(business_today() - timedelta(days=3), datetime.min.time()) \
+        + timedelta(hours=15)
+    await _set(session_factory, cid, status="approved", customer_response="accepted",
+               customer_response_at=po)
+    res = await _seed(client, sales, cid, plan="detailed")
+    assert res.status_code == 200, res.text
+    order = _by_name(res.json())["Customer order / go-ahead"]
+    assert order["start_date"] == (business_today() - timedelta(days=3)).isoformat() or \
+        order["start_date"] <= business_today().isoformat()
+    quote = _by_name(await _plan(client, sales, cid))["Customer order / go-ahead"]
+    assert order["start_date"] < quote["start_date"]

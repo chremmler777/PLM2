@@ -21,7 +21,7 @@ Roles, split by what the person does in a change (ruling 2026-09-25):
                         Process Engineer, APQP, Packaging Engineer, Toolshop
                         (books toolmakers' hours, says whether toolmakers
                         spend time, A6-11)
-    scheduling          Scheduling
+    scheduling          Logistics (was Scheduling)
     quality             Quality
     finance             Finance
 
@@ -119,8 +119,8 @@ CURRICULA: dict[str, Curriculum] = {
     ),
     "scheduling": Curriculum(
         role="scheduling",
-        label="Scheduling",
-        departments=("Scheduling",),
+        label="Logistics",  # esc P2-2: Logistics replaced Scheduling (key stays)
+        departments=("Logistics",),
         code_version=1,
         tasks=("sch_answer_checklist_row",),
     ),

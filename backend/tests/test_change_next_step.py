@@ -137,7 +137,7 @@ async def test_approved_names_the_release_gate(client, admin_auth, seed, session
     lead = next(i["who"] for i in step["items"] if i["key"] == "gate")
     assert lead
     # A6-07: the bank build names Scheduling, not the lead
-    assert next(i["who"] for i in step["items"] if i["key"] == "bank_build") == "Scheduling"
+    assert next(i["who"] for i in step["items"] if i["key"] == "bank_build") == "Logistics"
     assert {"key": "gate", "kind": "soft", "detail": "release",
             "rule": "gate:release", "who": lead} in step["items"]
     assert {"key": "timing_validated", "kind": "soft",

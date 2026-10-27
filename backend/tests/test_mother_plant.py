@@ -47,7 +47,7 @@ async def mp(session_factory, seed):
         depts = {}
         for name, starter in [("Sales", True), ("Project Manager", False),
                               ("Quality", False), ("Development", False),
-                              ("Tool Engineer", False), ("Scheduling", False),
+                              ("Tool Engineer", False), ("Logistics", False),
                               ("Manufacturing Engineer", False)]:
             d = Department(name=name, flow_type="action", is_active=True,
                            can_start_change=starter)
@@ -57,7 +57,7 @@ async def mp(session_factory, seed):
         users = {}
         for key, dept in [("sales", "Sales"), ("pm", "Project Manager"),
                           ("quality", "Quality"), ("dev", "Development"),
-                          ("tool", "Tool Engineer"), ("sched", "Scheduling"),
+                          ("tool", "Tool Engineer"), ("sched", "Logistics"),
                           ("me", "Manufacturing Engineer")]:
             email = f"mp-{key}@test.io"
             u = User(organization_id=seed["org_id"], username=f"mp-{key}",
@@ -442,7 +442,7 @@ async def test_timing_confirmed_by_informed_departments_and_scheduling(
     fb = (await client.get(f"{URL}/{cid}/plan/feedback",
                            headers=await _auth(client, "pm"))).json()
     assert {r["department_name"] for r in fb["required"]} == {
-        "Tool Engineer", "Development", "Scheduling"}
+        "Tool Engineer", "Development", "Logistics"}
     tool_tasks = [t for t in (await client.get(
         f"{URL}/my-tasks", headers=await _auth(client, "tool"))).json()
         if t["change_id"] == cid and t["kind"] == "plan_feedback"]
