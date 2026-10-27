@@ -593,7 +593,43 @@ class WorkflowService:
                                 t.accepted_at = a.accepted_at or a.submitted_at
             await db.flush()
 
-        standard_departments = actionable_departments - added_departments
+        # T11 / retest N8: on an internal change the lead holds Project
+        # Management's part of a check workflow step: the PM task is the
+        # lead's (owner, told), not the PM team's; Sales (no customer) is
+        # not told of it either
+        lead_holds: set[int] = set()
+        if instance.change_id is None:
+            from app.models.workflow import Department
+            ichange = await WorkflowService._task_change(db, instance)
+            if (ichange is not None and ichange.customer_relevant is False
+                    and ichange.lead_id is not None):
+                special = dict((await db.execute(select(Department.name, Department.id).where(
+                    Department.name.in_(("Project Manager", "Sales"))))).all())
+                pm_id = special.get("Project Manager")
+                if pm_id in actionable_departments:
+                    now = datetime.utcnow()
+                    for t in tasks_created:
+                        if t.department_id == pm_id and t.is_actionable and t.owner_id is None:
+                            t.owner_id = ichange.lead_id
+                            t.accepted_at = now
+                    await db.flush()
+                    lead_holds.add(pm_id)
+                    from app.services.notification_service import NotificationService
+                    part, revision = await WorkflowService._instance_part_context(db, instance)
+                    what = ", ".join(dict.fromkeys(
+                        s.step_name for s in steps for t in tasks_created
+                        if t.step_id == s.id and t.department_id == pm_id and t.is_actionable))
+                    what = what or (stage.name or f"stage {stage.stage_order}")
+                    await NotificationService.notify_users(
+                        db, [ichange.lead_id],
+                        title=f"Your task: {what} ({ichange.change_number})"[:200],
+                        body=(f"{ichange.change_number} '{ichange.title}': {what}. "
+                              "On an internal change you as the lead hold "
+                              "Project Management's part."),
+                        link="/my-tasks", kind="task_new")
+                if special.get("Sales") is not None:
+                    fyi_departments.discard(special["Sales"])
+        standard_departments = actionable_departments - added_departments - lead_holds
         if standard_departments:
             from app.services.notification_service import NotificationService
 

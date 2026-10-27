@@ -294,3 +294,52 @@ async def test_n1_internal_change_asks_sales_no_release_check(client, session_fa
                                          headers=eng)).json()["actions"]
             if a["kind"] == "release_check"]
     assert len(acts) == 1
+
+
+async def _pm_step_instance(session_factory, seed, part, *, customer: bool):
+    from app.models.part import PartRevision
+    from app.services.workflow_service import WorkflowService
+    pm = await make_department_member(session_factory, seed["admin_id"], "Project Manager")
+    sales = await make_department_member(session_factory, seed["admin_id"], "Sales")
+    async with session_factory() as s:
+        tmpl = WfTemplate(name=f"n8-{customer}", version=1, is_active=True,
+                          created_by=seed["admin_id"])
+        s.add(tmpl); await s.flush()
+        st = WfStage(template_id=tmpl.id, stage_order=1, name="Industrialization")
+        s.add(st); await s.flush()
+        step = WfStep(stage_id=st.id, step_name="Update master data & logistics",
+                      position_in_stage=1)
+        s.add(step); await s.flush()
+        s.add(WfStepRasic(step_id=step.id, department_id=pm, rasic_letter="A"))
+        s.add(WfStepRasic(step_id=step.id, department_id=sales, rasic_letter="I"))
+        c = ChangeRequest(change_number=f"C-N8-{customer}", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=customer, status="in_implementation")
+        s.add(c); await s.flush()
+        (await s.get(PartRevision, part["revision_id"])).originating_change_id = c.id
+        await s.commit()
+        tmpl_id = tmpl.id
+    async with session_factory() as s:
+        inst = await WorkflowService.start_workflow(s, part["revision_id"], tmpl_id,
+                                                    seed["admin_id"])
+        await s.commit()
+        task = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.department_id == pm))).scalar_one()
+        notes = (await s.execute(select(Notification))).scalars().all()
+        return task, notes
+
+
+async def test_n8_internal_pm_step_is_the_leads(session_factory, seed, part):
+    task, notes = await _pm_step_instance(session_factory, seed, part, customer=False)
+    assert task.owner_id == seed["engineer_id"]
+    assert {n.user_id for n in notes if n.kind == "task_new"} == {seed["engineer_id"]}
+    assert not [n for n in notes if n.kind == "fyi_stage"]      # no Sales FYI
+
+
+async def test_n8_customer_pm_step_stays_with_pm(session_factory, seed, part):
+    """NEGATIVE: on a customer change Project Management holds its step."""
+    task, notes = await _pm_step_instance(session_factory, seed, part, customer=True)
+    assert task.owner_id is None
+    assert seed["engineer_id"] not in {n.user_id for n in notes if n.kind == "task_new"}
