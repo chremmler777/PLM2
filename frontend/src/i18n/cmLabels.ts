@@ -1690,8 +1690,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'bankbuild.title': { de: 'Bankbau-Plan', en: 'Bank build plan' },
   'bankbuild.intro': {
     de: 'Wie kommt die Änderung in die Serie? Die Logistik entscheidet, '
-      + 'der Vertrieb veröffentlicht den Plan beim Kunden.',
-    en: 'How does the change reach the line? Logistics decides, Sales publishes '
+      + 'die Projektleitung veröffentlicht den Plan beim Kunden.',
+    en: 'How does the change reach the line? Logistics decides, the change lead publishes '
       + 'the plan to the customer.',
   },
   'bankbuild.introInternal': {
@@ -1771,8 +1771,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Timing not validated',
   },
   'wait.onPlanPublish': {
-    de: 'Wartet auf Vertrieb - Plan noch nicht an den Kunden veröffentlicht',
-    en: 'Sales: plan not yet published to the customer',
+    de: 'Wartet auf die Projektleitung - Plan noch nicht an den Kunden veröffentlicht',
+    en: 'Lead: plan not yet published to the customer',
   },
 
   // Stage 8 — how the work is going while it is being done.

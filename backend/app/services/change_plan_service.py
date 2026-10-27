@@ -891,13 +891,24 @@ class ChangePlanService:
                 change, plan, cal, auto=ChangePlanService.auto(change, src_plan))
         id_map: dict[int, ChangePlanTask] = {}
         po = ChangePlanService.order_date(change) if plan == "detailed" else None
+        # retest-s1 F5: a bank build decided before the detailed plan is
+        # made is no idea in the copy either (the template's rule): a
+        # running change needs no bank, planned scrap commits the block
+        decided = (getattr(change, "bank_build_mode", None)
+                   if plan == "detailed" else None)
+        if decided == "running_change":
+            source = [t for t in source if not (t.kind == "bank_build" and t.is_idea)]
         for t in source:
             # F15: the detailed plan's order milestone is the PO date
             start = (po if po is not None and t.kind == "milestone"
                      and (t.name or "").startswith("Customer order") else t.start_date)
+            commit = bool(decided) and t.kind == "bank_build" and t.is_idea
             n = ChangePlanTask(
-                change_id=change.id, plan=plan, name=t.name, lane=t.lane,
-                department_id=t.department_id, kind=t.kind, is_idea=t.is_idea,
+                change_id=change.id, plan=plan,
+                name=("Bank build" if commit and t.name == "Bank build (idea)" else t.name),
+                lane=t.lane,
+                department_id=t.department_id, kind=t.kind,
+                is_idea=False if commit else t.is_idea,
                 start_date=start, duration_days=t.duration_days,
                 predecessors=[], sort_order=t.sort_order, progress_pct=0,
                 constraint_type=t.constraint_type,

@@ -333,7 +333,7 @@ export const flowChapter: ContentChapter = {
           p:
             'Approved opens the "Timing" tab. The detailed plan starts as a copy of the quote plan. ' +
             'Logistics decides the bank build. Every responsible team confirms the plan or raises a ' +
-            'concern. Then "Validate timing" sets the baseline and Sales publishes the plan to the ' +
+            'concern. Then "Validate timing" sets the baseline and the change lead publishes the plan to the ' +
             'customer.',
         },
         {

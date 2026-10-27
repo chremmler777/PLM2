@@ -1812,6 +1812,25 @@ async def test_f5_decided_bank_build_is_not_seeded_as_an_idea(client, world, ses
     assert t["Bank build"]["is_idea"] is False and t["Bank build"]["lane"] == "Logistics"
 
 
+async def test_f5_detailed_copy_of_the_quote_plan_follows_the_decided_bank_build(
+        client, world, session_factory):
+    """Retest-s1 F5: the detailed plan copied from a quote plan with a
+    'Bank build (idea)' drops it for a running change and commits it for
+    planned scrap."""
+    await _add_positions(session_factory, world)
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    q = _by_name((await _seed(client, sales, cid)).json())
+    assert "Bank build (idea)" in q
+    await _set(session_factory, cid, status="approved", bank_build_mode="running_change")
+    res = await _seed(client, sales, cid, plan="detailed")
+    assert res.status_code in (200, 201), res.text
+    assert not any(n.startswith("Bank build") for n in _by_name(res.json()))
+    await _set(session_factory, cid, bank_build_mode="planned_scrap")
+    t = _by_name((await _seed(client, sales, cid, plan="detailed", replace=True)).json())
+    assert "Bank build (idea)" not in t and t["Bank build"]["is_idea"] is False
+
+
 async def test_f5_deleting_an_idea_block_keeps_confirmations(client, world, session_factory):
     await _add_positions(session_factory, world)
     cid, sales = await _approved_with_detailed(client, world, session_factory)

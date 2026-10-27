@@ -20,7 +20,7 @@ For Logistics. One page for the session and the desk; the full chapter is in PLM
 - **The bank build ends before the tool downtime starts.** The plan warns if it does not.
 - **Your own plan edit makes your confirmation stale too.** Confirm after the last edit.
 - **After the baseline every move is a deviation.** Write a reason the customer could read. The move and the blocks it pushed are decided as one group.
-- **Only Logistics, PM, the change lead or an admin set the bank build plan.** Sales publishes it.
+- **Only Logistics, PM, the change lead or an admin set the bank build plan.** The change lead publishes it.
 
 ## KTX Weissenburg / Solingen changes
 

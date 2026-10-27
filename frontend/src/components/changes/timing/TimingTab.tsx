@@ -255,10 +255,10 @@ export default function TimingTab({
                 <>
                   <button type="button" className={primary} disabled={publish.isPending}
                     onClick={() => publish.mutate()} data-testid="timing-publish">Publish plan to customer</button>
-                  <span className="text-xs text-slate-400">Records that Sales sent the validated timing to the customer. Export it above to attach.</span>
+                  <span className="text-xs text-slate-400">Records that the validated timing went to the customer. Export it above to attach.</span>
                 </>
               ) : (
-                <p className="text-sm text-slate-400">Sales publishes the validated plan to the customer.</p>
+                <p className="text-sm text-slate-400">The change lead publishes the validated plan to the customer.</p>
               )}
             </div>
           )}
