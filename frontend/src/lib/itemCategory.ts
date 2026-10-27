@@ -3,9 +3,10 @@
  *
  * `item_category` on a Part is the coarse controlled-item class (article, tool,
  * assembly_equipment, eoat, gauge). It does not separate the article families,
- * which WinCarat encodes in the part-number prefix instead: 10/11/20/22 are
- * physical parts, 40 is resin/material, 65 is returnables/dunnage. People think
- * in those families ("the dunnage change"), so grouping splits articles by
+ * which WinCarat encodes in the part-number prefix instead: 10/11/20/21/22 are
+ * physical parts (21 = the group scheme 21-<tool6>-XXXX-VVXX for molded
+ * articles, 1994/2277 from 2026-10-21), 40 is resin/material, 65 is
+ * returnables/dunnage. People think in those families ("the dunnage change"), so grouping splits articles by
  * prefix and leaves every other category as-is.
  */
 
@@ -20,7 +21,7 @@ interface PartLike {
 }
 
 const ARTICLE_PREFIX_GROUP: Record<string, ItemGroupKey> = {
-  '10': 'article', '11': 'article', '20': 'article', '22': 'article',
+  '10': 'article', '11': 'article', '20': 'article', '21': 'article', '22': 'article',
   '40': 'material',   // resin / material
   '65': 'dunnage',    // returnables / dunnage
 };

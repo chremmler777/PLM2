@@ -9,6 +9,7 @@ describe('itemGroup', () => {
     // 10/11/20/22 are the physical-part families WinCarat uses.
     expect(itemGroup(part('20-3454-001-0'))).toBe('article')
     expect(itemGroup(part('10-3457-001-0'))).toBe('article')
+    expect(itemGroup(part('21-199402-0503-0100'))).toBe('article')  // group scheme (1994/2277)
     expect(itemGroup(part('40-9001-000-0'))).toBe('material')   // resin
     expect(itemGroup(part('65-1000-000-0'))).toBe('dunnage')    // returnables
   })

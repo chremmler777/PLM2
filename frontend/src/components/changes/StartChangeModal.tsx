@@ -39,7 +39,7 @@ export const ENABLED_CHANGE_TYPES: ChangeType[] = ['physical_part'];
 // later. A change type with no entry here imposes no prefix filter.
 const partPrefix = (partNumber: string): string => partNumber.split('-')[0];
 const TYPE_PART_PREFIXES: Partial<Record<ChangeType, Set<string>>> = {
-  physical_part: new Set(['10', '11', '20', '22']),
+  physical_part: new Set(['10', '11', '20', '21', '22']),  // 21 = group scheme molded articles
 };
 
 // Types whose picker offers articles only. A physical-part change never targets
