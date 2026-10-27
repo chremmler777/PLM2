@@ -20,7 +20,7 @@ import { changesApi } from '../../api/changes'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
-import { formatDate } from '../../lib/format'
+import { formatDate, formatCalendarDate } from '../../lib/format'
 import AnswerForm from './scoping/AnswerForm'
 import CustomerCopy from './scoping/CustomerCopy'
 import type { Attachment, ChangeConcern } from '../../types/change'
@@ -222,7 +222,7 @@ export default function NeedsInfoCard({
                   .replace('{r}', c.assumed_risk ?? '-')}
                 {' · '}
                 {t('answer.confirmLine').replace('{who}', c.confirm_by_name ?? '-')
-                  .replace('{d}', c.confirm_due ? formatDate(c.confirm_due) : '-')}
+                  .replace('{d}', c.confirm_due ? formatCalendarDate(c.confirm_due) : '-')}
               </span>
             ) : (
               <span className="text-emerald-300">

@@ -23,7 +23,7 @@ import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
-import { formatDate } from '../../../lib/format'
+import { formatCalendarDate } from '../../../lib/format'
 import { defaultFlagDepartment } from '../../../lib/scopingRules'
 import { isRoutable } from '../../../lib/departments'
 import { getActsAsDepartmentId } from '../../../lib/actsAs'
@@ -321,7 +321,7 @@ export function CheckRow({ changeId, c, editable, onChanged }: {
           {co.length > 0 && ` · ${t('flag.coOwner')} ${co.join(', ')}`}
         </span>
         <span className="ml-auto text-slate-400" data-testid={`check-due-${c.id}`}>
-          {c.owner_due ? t('flag.due').replace('{d}', formatDate(c.owner_due)) : t('flag.dueAtAssessment')}
+          {c.owner_due ? t('flag.due').replace('{d}', formatCalendarDate(c.owner_due)) : t('flag.dueAtAssessment')}
         </span>
       </div>
       {withdrawing && (

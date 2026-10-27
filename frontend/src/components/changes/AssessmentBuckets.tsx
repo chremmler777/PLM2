@@ -29,7 +29,7 @@ import BucketErrorBoundary from './BucketErrorBoundary'
 import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
-import { formatDate } from '../../lib/format'
+import { formatDate, formatCalendarDate } from '../../lib/format'
 import { isRoutable } from '../../lib/departments'
 import { btnSm } from '../common/buttonStyles'
 import type {
@@ -465,7 +465,7 @@ export default function AssessmentBuckets({
                     a.overdue ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>
                     {a.overdue && <TriangleAlert aria-hidden="true" size={12} />}
                     {/* due_date is a timestamp (utcnow() + N days), not a calendar date. */}
-                    {formatDate(a.due_date)}
+                    {formatCalendarDate(a.due_date)}
                     {a.overdue && ` ${t('tasks.overdue')}`}
                   </span>
                 )}

@@ -16,7 +16,7 @@ import { btnSm } from '../common/buttonStyles'
 import { toastError } from '../../lib/apiError'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
-import { formatDate } from '../../lib/format'
+import { formatDate, formatCalendarDate } from '../../lib/format'
 import { STATUS_LABELS } from '../../lib/changeStatus'
 import DateInput from '../gantt/DateInput'
 import type { Attachment, ChangeRequest, ChangeStatus } from '../../types/change'
@@ -110,7 +110,7 @@ export function NeedByLine({ change }: { change: ChangeRequest }) {
   return (
     <p data-testid="need-by-line" className="text-xs font-medium text-red-200">
       {t('urgent.line')}
-      {due ? ` · ${t('urgent.needBy').replace('{d}', formatDate(due))
+      {due ? ` · ${t('urgent.needBy').replace('{d}', formatCalendarDate(due))
         .replace('{n}', String(left))}` : ` · ${t('urgent.noNeedBy')}`}
       {` · ${t('urgent.now').replace('{s}', status)}`}
       {change.start_at_risk_on === false && change.customer_relevant && (
@@ -195,7 +195,7 @@ export function NeedByCheck({ change, value, onChange, customer = !!change.custo
   return (
     <fieldset data-testid="need-by-check" className="mt-3 space-y-1 text-xs">
       <legend className="text-sm text-slate-200">
-        {t('urgent.realistic').replace('{d}', formatDate(change.release_due_date))}
+        {t('urgent.realistic').replace('{d}', formatCalendarDate(change.release_due_date))}
       </legend>
       <div className="flex flex-wrap gap-3">
         {options.map((v) => (

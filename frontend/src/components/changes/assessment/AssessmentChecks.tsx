@@ -19,7 +19,7 @@ import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
-import { formatDate } from '../../../lib/format'
+import { formatCalendarDate } from '../../../lib/format'
 import CustomerCopy from '../scoping/CustomerCopy'
 import AnswerForm from '../scoping/AnswerForm'
 import {
@@ -107,7 +107,7 @@ function Head({ c }: { c: ChangeConcern }) {
         {c.part_number ? ` · ${c.part_number}` : ''}
         {c.raised_by_name ? ` · ${t('flag.byRaiser').replace('{x}', c.raised_by_name)}` : ''}
         {/* R5: an open check item names its due (the department's assessment due) */}
-        {c.is_open && c.owner_due ? ` · ${t('flag.due').replace('{d}', formatDate(c.owner_due))}` : ''}
+        {c.is_open && c.owner_due ? ` · ${t('flag.due').replace('{d}', formatCalendarDate(c.owner_due))}` : ''}
       </span>
     </p>
   )
@@ -275,7 +275,7 @@ function ClosedCheck({ changeId, c, onDone, attachments }: {
       {c.answer_kind === 'assumed' && !c.confirmed_at && (
         <p className="text-amber-200" data-testid={`achk-confirmline-${c.id}`}>
           {t('answer.confirmLine').replace('{who}', c.confirm_by_name ?? '-')
-            .replace('{d}', c.confirm_due ? formatDate(c.confirm_due) : '-')}
+            .replace('{d}', c.confirm_due ? formatCalendarDate(c.confirm_due) : '-')}
         </p>
       )}
       {c.answer_kind === 'assumed' && !c.confirmed_at && c.can_confirm && (
@@ -311,7 +311,7 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
           ? t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))
           : q.can_answer && !q.answered_at
             ? t('achk.asksYou').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
-              + (q.answer_due ? `: ${t('achk.answerBy').replace('{d}', formatDate(q.answer_due))}` : '')
+              + (q.answer_due ? `: ${t('achk.answerBy').replace('{d}', formatCalendarDate(q.answer_due))}` : '')
             : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
               .replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
       </p>

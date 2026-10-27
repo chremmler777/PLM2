@@ -17,7 +17,7 @@ import { btnSm } from '../common/buttonStyles'
 import { toastError } from '../../lib/apiError'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
-import { formatDate } from '../../lib/format'
+import { formatDate, formatCalendarDate } from '../../lib/format'
 import DateInput from '../gantt/DateInput'
 import type {
   Assessment, Attachment, ChangeRecheck, IndexFollowup, RecheckAreaAnswer,
@@ -304,7 +304,7 @@ function DeadlineQuestion({ f, changeId, mayAnswer, salesOwnerName, attachments,
       {f.deadline_answer && (
         <p className="text-[11px] text-slate-400" data-testid="deadline-answered">
           {f.deadline_answer === 'not_asked'
-            ? t('followup.deadlineAssumed').replace('{d}', formatDate(f.deadline_confirm_by))
+            ? t('followup.deadlineAssumed').replace('{d}', formatCalendarDate(f.deadline_confirm_by))
             : t('followup.deadlineAnswered').replace('{x}',
               `${t(`followup.deadline.${f.deadline_answer}`)}${f.deadline_ref ? ` (${f.deadline_ref})` : ''}`)}
         </p>
