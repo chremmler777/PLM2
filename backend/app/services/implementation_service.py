@@ -482,6 +482,9 @@ class ImplementationService:
                            "department_id": department_id,
                            "risk_note": risk_note})
         else:
+            if part_done:
+                await ImplementationService._tool_change_done(
+                    session, change, department_id, actor)
             await ChangeService.append_changelog(
                 session, change,
                 "implementation_part_done" if part_done else "implementation_reported",
@@ -491,6 +494,47 @@ class ImplementationService:
                            "department_id": department_id,
                            "part_done": part_done})
         return report
+
+    @staticmethod
+    async def _tool_change_done(session: AsyncSession, change: ChangeRequest,
+                                department_id: int, actor: User) -> int:
+        """F16: the Tool Engineer's "our part done" IS the tool change done:
+        its open "Implement tool change" tasks (R) of the change's check
+        workflows are approved by the reporter, so the SOFT "Tool change not
+        done" guard clears without an override. A step not reached yet
+        stays open (the guard keeps naming it). Returns how many closed."""
+        from sqlalchemy import select
+        from app.models.workflow import (
+            Department, WfInstance, WfInstanceTask, WfStep)
+        from app.services.wf_seed_service import TOOL_CHANGE_STEP
+        from app.services.workflow_service import WorkflowService
+        dept = await session.get(Department, department_id)
+        if dept is None or dept.name != "Tool Engineer":
+            return 0
+        rev_ids = [i.resulting_revision_id for i in change.impacted_items
+                   if i.resulting_revision_id is not None]
+        if not rev_ids:
+            return 0
+        task_ids = (await session.execute(
+            select(WfInstanceTask.id)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .join(WfStep, WfStep.id == WfInstanceTask.step_id)
+            .where(WfInstance.part_revision_id.in_(rev_ids),
+                   WfInstance.status == "active",
+                   WfStep.step_name == TOOL_CHANGE_STEP,
+                   WfInstanceTask.department_id == department_id,
+                   WfInstanceTask.rasic_letter == "R",
+                   WfInstanceTask.status == "active"))).scalars().all()
+        n = 0
+        for tid in task_ids:
+            try:
+                await WorkflowService.complete_task(
+                    session, tid, "approved",
+                    "Tool change done (Tool Engineer: our part done)", actor.id)
+                n += 1
+            except ValueError:
+                continue  # not this reporter's to close: stays open, the guard says so
+        return n
 
     @staticmethod
     async def create_escalation(

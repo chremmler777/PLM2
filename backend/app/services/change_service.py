@@ -6167,6 +6167,9 @@ class ChangeService:
                 WfInstanceTask.instance_id == WfInstance.id,
                 WfInstanceTask.step_id == WfStep.id,
                 WfInstanceTask.is_actionable.is_(True),
+                # F16: the Tool Engineer's R is the tool change; Project
+                # Management's A on the step does not hold the tool
+                WfInstanceTask.rasic_letter == "R",
                 WfInstanceTask.status.not_in(("approved", "noted"))))
             .where(WfInstance.part_revision_id.in_(rev_ids),
                    WfInstance.status.in_(("active", "completed")),

@@ -232,6 +232,10 @@ export interface MyTask {
   /** R38: a member-less department's step this user coordinates. */
   coordinated?: boolean;
   hint?: string | null;
+  /** F4: the open change that created this revision (its check workflow step). */
+  change_id?: number | null;
+  change_number?: string | null;
+  change_title?: string | null;
 }
 
 // Instance request types

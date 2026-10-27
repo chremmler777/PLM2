@@ -489,14 +489,35 @@ class WorkflowService:
 
             part, revision = await WorkflowService._instance_part_context(db, instance)
             stage_label = stage.name or f"stage {stage.stage_order}"
-            # Project team (spec §18): the responsible first, backups as info.
-            await NotificationService.notify_team(
-                db, part.project_id,
-                list(standard_departments),
-                title=f"Workflow task: {part.name} {revision.revision_name}",
-                body=f"Your department has a new task in '{stage_label}'.",
-                link="/my-tasks", kind="task_new",
-            )
+            # F4 (R18): a check workflow step of a change names the change
+            # and the step, and is due like any task
+            change = (await WorkflowService._task_change(db, instance)
+                      if instance.change_id is None else None)
+            steps_by_dept: dict[int, list[str]] = {}
+            for t in tasks_created:
+                if t.is_actionable and t.department_id in standard_departments:
+                    name = next((s.step_name for s in steps if s.id == t.step_id), None)
+                    if name and name not in steps_by_dept.setdefault(t.department_id, []):
+                        steps_by_dept[t.department_id].append(name)
+            due = min((t.due_date for t in tasks_created
+                       if t.is_actionable and t.due_date is not None), default=None)
+            due_txt = f", due {due:%a %d %b}" if due is not None else ""
+            for dept_id in sorted(standard_departments):
+                what = ", ".join(steps_by_dept.get(dept_id) or [stage_label])
+                if change is not None:
+                    title = f"Your task: {what} ({change.change_number})"
+                    body = (f"{change.change_number} '{change.title}', part "
+                            f"{part.part_number if getattr(part, 'part_number', None) else part.name} "
+                            f"{revision.revision_name}: {what}{due_txt}.")
+                else:
+                    title = f"Workflow task: {part.name} {revision.revision_name}"
+                    body = f"Your department has a new task in '{stage_label}'{due_txt}."
+                # Project team (spec §18): the owner of the work only (F7)
+                await NotificationService.notify_team(
+                    db, part.project_id, [dept_id],
+                    title=title[:200], body=body, link="/my-tasks", kind="task_new",
+                    subject_key=f"inst:{instance.id}:stage:{stage.stage_order}:task",
+                )
         if added_departments:
             from app.services.notification_service import NotificationService
 

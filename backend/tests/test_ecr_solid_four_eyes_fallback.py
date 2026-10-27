@@ -175,3 +175,20 @@ async def test_negative_no_fallback_when_development_has_a_second_member(
     res = await client.post(f"/api/v1/workflow-instances/{fe['inst']}/tasks/{t2}/complete",
                             headers=dale, json={"decision": "approved"})
     assert res.status_code == 400
+
+
+async def test_f4_the_tool_change_task_tells_its_owner_with_the_change(
+        client, fe, session_factory):
+    """F4: the stage's task notice names the step and the change, once."""
+    from app.models.notification import Notification
+    await _design_done(client, fe, session_factory)
+    t2 = await _open(session_factory, fe["inst"], 2)
+    dale = await login(client, "dale.te@test.io", ENGINEER_PASSWORD)
+    res = await client.post(f"/api/v1/workflow-instances/{fe['inst']}/tasks/{t2}/complete",
+                            headers=dale, json={"decision": "approved"})
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        rows = (await s.execute(select(Notification).where(
+            Notification.user_id == fe["dale"], Notification.kind == "task_new"))).scalars().all()
+    assert [r.title for r in rows] == ["Your task: Implement tool change (C-FE-1)"]
+    assert "due" in rows[0].body and "grain" in rows[0].body
