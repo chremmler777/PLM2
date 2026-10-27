@@ -740,3 +740,24 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
     expect(opened()).toBe('/changes/7?tab=overview')
   })
 })
+
+describe('MyTasksPage for a read-only user', () => {
+  afterEach(cleanup)
+
+  it('says reading is allowed and how to get a department role (esc P3-4)', async () => {
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve(
+      url === '/v1/auth/me' ? { data: { effective_role: 'viewer' } } : { data: [] }))
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    expect((await screen.findByTestId('viewer-read-only-notice')).textContent).toBe(t('start.viewerOnly'))
+  })
+
+  it('keeps the plain empty line for a department member', async () => {
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve(
+      url === '/v1/auth/me' ? { data: { effective_role: 'engineer' } } : { data: [] }))
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    expect(await screen.findByText(t('tasks.emptyMine'))).toBeDefined()
+    expect(screen.queryByTestId('viewer-read-only-notice')).toBeNull()
+  })
+})

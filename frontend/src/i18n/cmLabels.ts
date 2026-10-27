@@ -98,6 +98,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Nichts offen. Fehlt eine Aufgabe, prüfe mit einem Admin deine Abteilungen.',
     en: 'Nothing open. If a task is missing, check your departments with an admin.',
   },
+  'tasks.emptyViewer': { de: 'Nichts offen.', en: 'Nothing open.' },
   'tasks.emptyDept': { de: 'Keine offenen Aufgaben in dieser Abteilung.', en: 'No open tasks in this department.' },
   'tasks.kind.assessment': { de: 'Bewertung', en: 'Assessment' },
   'tasks.kind.kickoff': { de: 'An das Scoping übergeben', en: 'Hand over to scoping' },
@@ -3348,5 +3349,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'team.incompleteN': { de: '{n} Abteilung(en) ohne Zuständige/n', en: '{n} department(s) without a responsible' },
   'team.missingUser': { de: '{x} ist inaktiv oder kein Mitglied mehr', en: '{x} is inactive or no longer a member' },
   'team.noMembers': { de: 'Keine Mitglieder in dieser Abteilung', en: 'No members in this department' },
+  // --- backend fixer 2026-10-26 (new keys only) ---
+  'tasks.openChange': { de: 'Änderung öffnen', en: 'Open change' },
+  // --- end backend fixer block ---
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

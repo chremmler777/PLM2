@@ -31,6 +31,7 @@ import FormPanel from '../forms/FormPanel';
 import IntakeSection from '../components/intake/IntakeSection';
 import CostSheetReviewTask from '../components/costSheet/CostSheetReviewTask';
 import { useMyTaskCounts } from '../hooks/queries/useOpenTaskCount';
+import { useIsReadOnlyViewer } from '../hooks/queries/useEffectiveRole';
 
 interface MyLessonAction {
   id: number;
@@ -549,6 +550,7 @@ type Row =
 function TaskList() {
   const navigate = useNavigate();
   const { data: departments = [], isLoading: loadingDepts } = useDepartments();
+  const readOnlyViewer = useIsReadOnlyViewer();
   const [selectedDeptId, setSelectedDeptId] = useState<number>(0);
   const { data: wfTasks, isLoading: loadingWf } = useMyTasks(selectedDeptId);
   const { data: changeTasks, isLoading: loadingChange } = useQuery({
@@ -641,8 +643,12 @@ function TaskList() {
       {(loadingWf || loadingChange) && allRows.length === 0 ? (
         <LoadingSkeleton count={4} />
       ) : rows.length === 0 ? (needsYou.length > 0 ? null :
-        <EmptyState data-testid="task-list-empty"
-          title={selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')} />)
+        // esc P3-4: a read-only user (no department) is told why nothing comes.
+        (readOnlyViewer && selectedDeptId === 0
+          ? <EmptyState data-testid="task-list-empty" title={t('tasks.emptyViewer')}
+              hint={<span data-testid="viewer-read-only-notice">{t('start.viewerOnly')}</span>} />
+          : <EmptyState data-testid="task-list-empty"
+              title={selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')} />))
       : (
         <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
@@ -739,6 +745,12 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
     <tr data-testid="task-row" data-role={task.role ?? 'main'}
       className={rowClass(task)}>
       <td className="px-4 py-3 align-top">
+        {task.change_number && (
+          <span data-testid="task-change-ref" className="block font-mono text-slate-100 whitespace-nowrap">
+            {task.change_number}
+            {task.change_title && <span className="ml-2 font-sans text-slate-300">{task.change_title}</span>}
+          </span>
+        )}
         <span className="font-mono text-slate-100 whitespace-nowrap">{task.part_number}</span>
         <span className="block text-slate-200">{task.part_name}</span>
         <span className="block text-xs text-slate-400">{t('tasks.revision')} {task.revision_name}</span>
@@ -765,10 +777,10 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
       <td className="px-4 py-3 align-top text-right">
         <button
           type="button"
-          onClick={() => navigate(`/projects/${task.project_id}`)}
+          onClick={() => navigate(task.change_id ? `/changes/${task.change_id}?tab=implementation` : `/projects/${task.project_id}`)}
           className={btnSm.secondary}
         >
-          {t('tasks.viewPart')}
+          {task.change_id ? t('tasks.openChange') : t('tasks.viewPart')}
         </button>
       </td>
     </tr>
