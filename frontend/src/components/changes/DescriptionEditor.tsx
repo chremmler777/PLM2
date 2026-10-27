@@ -8,7 +8,8 @@ import { t } from '../../i18n/cmLabels'
 import type { ChangeRequest } from '../../types/change'
 
 
-// The description is Sales' capture text. It freezes at kickoff: from scoping on
+// The description is the capture text (Project Management captures; Sales
+// supplies the customer's facts). It freezes at kickoff: from scoping on
 // the project team's thinking lives in the mail thread attached to the change,
 // so the text a decision was made on cannot move underneath it.
 const EDITABLE_STATUSES = ['captured']

@@ -110,14 +110,48 @@ function answerRowTask(opts: {
 
 const sales: TrainingTask[] = [
   {
-    key: 'sales_start_change',
+    key: 'sales_set_quote_deadline',
+    title: 'Set the quote deadline',
+    screen: { kind: 'change-status', changeId: SEED.changeCaptured },
+    brief:
+      'Project Management captured CR-TRAIN-0001 (Grille Carrier). You are the customer ' +
+      'contact: the customer expects the quote within two weeks. Set the quote deadline.',
+    why:
+      'The quote deadline is the date every department is measured against. Project ' +
+      'Management captures the change; the customer\'s dates come from you.',
+    check: (s) => {
+      const c = findChange(s, SEED.changeCaptured)
+      if (!c) return failWith('The change is missing from this exercise. Start the task over.')
+      if (!c.required_by_date) {
+        return failWith('The quote deadline is not set yet.')
+      }
+      const days = (Date.parse(c.required_by_date) - Date.now()) / 86_400_000
+      if (days < 0 || days > 15) {
+        return failWith(
+          'The quote deadline should fall within the next two weeks.',
+          { required_by_date: c.required_by_date },
+        )
+      }
+      return pass({ required_by_date: c.required_by_date })
+    },
+  },
+]
+
+// ---------------------------------------------------------------------------
+// Project Management
+// ---------------------------------------------------------------------------
+
+const projectManagement: TrainingTask[] = [
+  {
+    key: 'pm_start_change',
     title: 'Start a change request',
     screen: { kind: 'start-change' },
     brief:
-      'The customer sent a new drawing for the Rear Cladding (TR.807.425) in project ' +
-      'T100: the clip tower is reinforced. Start the change request, with the reason ' +
-      "from the customer's mail. The PEAK variant (TR.807.426) comes from the same " +
-      'tool and changes with it, so it belongs on the same request.',
+      'You are the project manager of T100. Sales forwarded the customer\'s new drawing ' +
+      'for the Rear Cladding (TR.807.425): the clip tower is reinforced. Capture the ' +
+      "change request, with the reason from the customer's mail. The PEAK variant " +
+      '(TR.807.426) comes from the same tool and changes with it, so it belongs on the ' +
+      'same request.',
     why:
       'One change request per tool family keeps one set of assessments and one ' +
       'revision per part. A request without its reason arrives at every department ' +
@@ -157,25 +191,16 @@ const sales: TrainingTask[] = [
       return pass({ change_id: c.id, parts: parts.length })
     },
   },
-]
-
-// ---------------------------------------------------------------------------
-// Project Management
-// ---------------------------------------------------------------------------
-
-const projectManagement: TrainingTask[] = [
   {
     key: 'pm_set_priority',
-    title: 'Set priority and the quote deadline',
+    title: 'Set the priority',
     screen: { kind: 'change-status', changeId: SEED.changeCaptured },
     brief:
-      'CR-TRAIN-0001 (Grille Carrier) was escalated by the customer this morning. Set ' +
-      'its priority to High, and give it a quote deadline: the customer expects the ' +
-      'quote within two weeks.',
+      'CR-TRAIN-0001 (Grille Carrier) was escalated by the customer this morning. You lead ' +
+      'it: set its priority to High.',
     why:
-      'Priority orders everybody\'s task list, and the quote deadline is the date every ' +
-      'department is measured against. A change without them waits behind work that ' +
-      'is less urgent.',
+      'Priority orders everybody\'s task list. A change at the wrong priority waits behind ' +
+      'work that is less urgent, or pushes urgent work aside.',
     check: (s) => {
       const c = findChange(s, SEED.changeCaptured)
       if (!c) return failWith('The change is missing from this exercise. Start the task over.')
@@ -187,17 +212,7 @@ const projectManagement: TrainingTask[] = [
           { priority: c.priority },
         )
       }
-      if (!c.required_by_date) {
-        return failWith('The quote deadline is not set yet.')
-      }
-      const days = (Date.parse(c.required_by_date) - Date.now()) / 86_400_000
-      if (days < 0 || days > 15) {
-        return failWith(
-          'The quote deadline should fall within the next two weeks.',
-          { required_by_date: c.required_by_date },
-        )
-      }
-      return pass({ priority: c.priority, required_by_date: c.required_by_date })
+      return pass({ priority: c.priority })
     },
   },
 ]

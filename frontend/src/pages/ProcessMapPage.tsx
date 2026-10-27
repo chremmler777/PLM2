@@ -75,9 +75,9 @@ const STAGES: Stage[] = [
     what: 'Every new customer index (customer package, customer data, upload, a proposal the customer adopted) is captured as an intake; the index stays pending and the active one is unchanged. Development picks the route alone, within 1 working day: full ECR (a new change, lead item = the part), attach to an open change, engineering review (light track, lane R) or administrative (active now, reason required). Triage says what changed (areas and a compare reference, or no visible change with a reason). A live change that carries the part is the suggestion (attach); a full ECR anyway needs a reason pick and links both changes; every other live change carrying the part is named and its lead told. A newer index is never refused: attached to the change, it supersedes the old one there. A full ECR is handed over at once: the customer\'s files linked, the Sales contact set, in scoping; the lead schedules scoping while Sales sets the quote deadline. On a part the change already carries, the new index drives the follow-up: a recheck per department that had submitted (per area no effect with its reference, or effect with what and evidence; an effect before the offer is sent reopens that department\'s costing, after it it is a scope change), the lead\'s "adds parts or departments?" and Sales\' "deadline holds?". On an internal change triage asks "customer-driven?": yes makes it a customer change.',
   },
   {
-    key: 'captured', name: 'Capture', badge: 'Sales', state: 'built',
+    key: 'captured', name: 'Capture', badge: 'PM', state: 'built',
     sub: 'Request, customer file, quote deadline; internal: evidence, wrong today', task: 'tasks: kickoff · set_quote_deadline · customer_flip',
-    responsible: 'Project Management owns the process (D2): the project\'s lead PM leads every change and hands it over (no lead PM: PM sets the lead first). Sales or PM start it, each on the other\'s behalf (can_start_change). Development, Process Engineer, Tool Engineer and Manufacturing Engineer start internal changes and lead them. A customer change has a named Sales contact for quote deadline, offer and customer answer (the Sales raiser, else the project Sales contact). A change from KTX Weissenburg / Solingen is started by Project Management only',
+    responsible: 'Project Management captures the change and owns the process (D2, 2026-10-26): the project\'s lead PM leads every change and hands it over (no lead PM: PM sets the lead first). Sales is the customer contact, not the capturer: the customer\'s facts, quote deadline, offer and customer answer. Development, Process Engineer, Tool Engineer and Manufacturing Engineer start internal changes and lead them. A customer change has a named Sales contact (the project team\'s Sales responsible, else its backup, else PM picks a Sales member). A change from KTX Weissenburg / Solingen is started by Project Management only',
     artifacts: 'kickoff check (soft, override bound to the rule): description, change lead; a customer change: the customer\'s own file (typed) and the quote deadline; an internal change: one evidence file or photo, "what is wrong today" (number with unit) and the target; urgent: need-by date, reason pick and evidence (hard on create and edit); origin: customer change, internal change (the plant pays) or change from KTX Weissenburg / Solingen',
     what: 'The originator enters the request: project, affected items, description, documents, one-line reason, customer change, internal change (the plant pays, no quote, no quote deadline) or change from KTX Weissenburg / Solingen, quote deadline (customer changes). The scoping meeting confirms the cost carrier; it can still turn a change internal or customer there. No meetings here. Handing over to scoping needs a description and a change lead; a customer change the customer\'s own file and the quote deadline; an internal change one evidence file or photo, what is wrong today (a number with its unit) and the target. "Create and hand over" does it in one click when complete; the check is soft, an override bound to that rule lifts it. Urgent is not an override: an urgent change needs its need-by date, a reason pick and evidence, or it is not created. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is started by Project Management only, captured with its reference and SOP date, and runs in its own side track.',
   },
@@ -106,7 +106,7 @@ const STAGES: Stage[] = [
   {
     key: 'quoting', name: 'Offer', badge: 'Sales', state: 'built',
     sub: '1 plan · 2 price · 3 document', task: 'task: create_quote (build the offer)',
-    responsible: 'Sales, the change lead or an admin write and send it (Offer tab); PM and Scheduling may also edit the quote plan',
+    responsible: 'Sales, the change lead or an admin write and send it (Offer tab); PM and Logistics may also edit the quote plan',
     artifacts: 'quote plan (rough Gantt); offer draft; offer PDF; sending v1 moves to quoted',
     what: 'Sales (or the change lead) builds the offer in three steps. Plan: a rough timeline seeded from costing. Price: cost basis, optional factors, every open risk as an optional row (hidden by default; a severity-3 risk shown without a surcharge raises a warning), changeover (running change or customer pays scrap) and the piece-price effect. Document: detailed CBD or a rough description, free fields, terms, preview and PDF. Sending version 1 moves the change to quoted on its own. Reopen costing (PM, Sales or lead, reason required) sends it back to costing when a number has to change.',
   },
@@ -122,17 +122,17 @@ const STAGES: Stage[] = [
     key: 'approved', name: 'Approved: timing', badge: 'Team', state: 'built',
     sub: 'Detailed plan, team confirms, baseline',
     task: 'tasks: bank_build · publish_plan · plan_feedback · timing_validate · plan_watch',
-    responsible: 'Sales records the customer answer (approval follows on its own) / an engineering approver (never the raiser) approves internal; the run team (change lead, PM, admin) starts implementation; then PM + Scheduling + all teams',
+    responsible: 'Sales records the customer answer (approval follows on its own) / an engineering approver (never the raiser) approves internal; the run team (change lead, PM, admin) starts implementation; then PM + Logistics + all teams',
     artifacts: 'detailed plan; team confirmations; baseline; bank build decision; published plan (a stamp, not a gate); MS Project / CSV export',
-    what: 'The go decision, then timing validation. From here every price change goes to the customer as a supplement (changed positions only; the status stays; the price is open until the customer accepts it or it is absorbed; a re-sign follows the customer\'s yes); a part added after approval is its own linked change. The quote deadline froze into its permanent on-time or late fact when the offer was sent; now the release deadline is live. The detailed plan is seeded from the quote plan; the departments with work on the change (impact yes, or hours or cost priced), Scheduling, and Sales on a customer change confirm it or raise a concern at the current plan revision (an edit makes confirmations stale; a change nobody priced falls back to its R and A departments). Sales, PM, Scheduling or the lead validate the timing, which sets the baseline on every block; it can be validated again during implementation, which sets a new baseline. Side steps, not gates: Scheduling, PM or the lead decide the bank build (running change, or planned scrap with a scrap quote price), and Sales publishes the plan to the customer. Into implementation (soft): timing validated (first start), impact confirmed, a check workflow for every impacted item category, no newer customer index pending, and D1 Technical release? = Yes.',
+    what: 'The go decision, then timing validation. From here every price change goes to the customer as a supplement (changed positions only; the status stays; the price is open until the customer accepts it or it is absorbed; a re-sign follows the customer\'s yes); a part added after approval is its own linked change. The quote deadline froze into its permanent on-time or late fact when the offer was sent; now the release deadline is live. The detailed plan is seeded from the quote plan; the departments with work on the change (impact yes, or hours or cost priced), Logistics, and Sales on a customer change confirm it or raise a concern at the current plan revision (an edit makes confirmations stale; a change nobody priced falls back to its R and A departments). Sales, PM, Logistics or the lead validate the timing, which sets the baseline on every block; it can be validated again during implementation, which sets a new baseline. Side steps, not gates: Logistics, PM or the lead decide the bank build (running change, or planned scrap with a scrap quote price), and Sales publishes the plan to the customer. Into implementation (soft): timing validated (first start), impact confirmed, a check workflow for every impacted item category, no newer customer index pending, and D1 Technical release? = Yes.',
   },
   {
     key: 'in_implementation', name: 'Implementation', badge: 'Team', state: 'built',
     sub: 'Tracker: progress %, actual start / finish',
     task: 'tasks: progress report · plan_deviation · fix',
-    responsible: 'Implementing departments + vendors; PM, Sales, Scheduling or the lead move dates; the run team (change lead, PM, admin) starts validation',
+    responsible: 'Implementing departments + vendors; PM, Sales, Logistics or the lead move dates; the run team (change lead, PM, admin) starts validation',
     artifacts: 'tracker; progress reports; deviations locked or escalated; recovery groups from validation issues',
-    what: 'Departments track progress and actual dates on their own blocks, report twice a week ("waiting on supplier" pauses it, "our part done" ends it) and book hours in the one Book hours dialog (any open change until 7 days after close, the day worked back 21 days, for a colleague; the lead\'s coordination row); their last action asks once, prefilled with their estimate. After the baseline, PM, Sales, Scheduling, the lead or an admin move dates, and every move is a deviation with a reason: PM, Sales, the lead or an admin lock it (accepted internally) or escalate it to the customer through Sales, also a move they made themselves. Open deviations do not stop the work or the step into validation, but they hold the release. Into validation (soft): every impacted item has its resulting revision and every tool change is done (the Tool Engineer, per tool). A validation issue on a fix route comes back here with a recovery group in the plan. A revision signed no geometry change runs a short check workflow: no Design and Design check, and inspection plan / PPAP, master data, sampling and final release are asked only on the release checklist and in validation (the tool change and the process sheets stay).',
+    what: 'Departments track progress and actual dates on their own blocks, report twice a week ("waiting on supplier" pauses it, "our part done" ends it) and book hours in the one Book hours dialog (any open change until 7 days after close, the day worked back 21 days, for a colleague; the lead\'s coordination row); their last action asks once, prefilled with their estimate. After the baseline, PM, Sales, Logistics, the lead or an admin move dates, and every move is a deviation with a reason: PM, Sales, the lead or an admin lock it (accepted internally) or escalate it to the customer through Sales, also a move they made themselves. Open deviations do not stop the work or the step into validation, but they hold the release. Into validation (soft): every impacted item has its resulting revision and every tool change is done (the Tool Engineer, per tool). A validation issue on a fix route comes back here with a recovery group in the plan. A revision signed no geometry change runs a short check workflow: no Design and Design check, and inspection plan / PPAP, master data, sampling and final release are asked only on the release checklist and in validation (the tool change and the process sheets stay).',
   },
   {
     key: 'in_validation', name: 'Validation', badge: 'Team', state: 'partial',
@@ -156,7 +156,7 @@ const RULES = [
   'Project Management owns the process (D2): the project\'s lead PM leads every change from capture to close (hand-over, follow-up, escalation, fallback). Sales is the customer contact (the change\'s Sales contact): quote deadline, offer and customer answer, mails tracked on the change and filed into each validation issue; escalations to the customer go through Sales. The project team names a responsible and a backup per department (D2b): a department task goes to the responsible, to the backup when the responsible is inactive or the task is overdue (also a Sales task held by the change\'s Sales contact), to the whole department only when neither is named; PM reassigns, and a new Sales responsible takes the open changes of the old one.',
   'Two deadlines, one active: quote-by until quoted (freezes the on-time fact; after capture it moves only by Push back with a reason); release-due entered at acceptance, at internal approval or from the SOP of KTX Weissenburg / Solingen, moved only with a reason, recorded in the audit trail.',
   'P&L offer vs doing: planned frozen at the go decision (customer acceptance, or the engineering approver\'s internal cost approval), actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',
-  'The detailed plan leads from approval on: after the baseline PM, Sales, Scheduling, the lead or an admin move dates, and every move is a deviation with a reason. Open deviations do not stop the work, but they hold the release (soft) until each one is locked or escalated.',
+  'The detailed plan leads from approval on: after the baseline PM, Sales, Logistics, the lead or an admin move dates, and every move is a deviation with a reason. Open deviations do not stop the work, but they hold the release (soft) until each one is locked or escalated.',
   'A failed check or an open validation issue holds the release (hard: no override, not even an admin; the exit is a fix and retest, or a concession); an open plan deviation holds it too (soft: an approved override of that rule releases anyway). Each issue carries an escalation level: L1 department, L2 project, L3 management and customer.',
   'Hard rules have no override and name their only way out. Every soft rule has one Override, bound to that rule only: a reason pick and a note, and the OK of somebody else (the lead, PM or an admin; Quality for starting implementation, release and validation; PM or Management for prices).',
   'Moves back carry a reason: back to scoping after a not-feasible verdict, reopen costing, reopen a rejected change, back from validation to implementation. A change can be rejected at capture, scoping, assessment and quoted, not in costing or quoting; a rejected customer change closes only once the rejection letter is attached and marked sent.',
@@ -603,7 +603,7 @@ function MotherPlantLane() {
       {[
         'Started by Project Management only; other starters see who does it instead of the origin choice.',
         'Never: assessment, costing, offer, quote deadline. Open receipts show in Blocked by as information, not a gate.',
-        'Timing as usual, confirmed by the informed departments and Scheduling, then the baseline; an "Inform KTX Weissenburg" (or Solingen) stamp instead of the customer publish.',
+        'Timing as usual, confirmed by the informed departments and Logistics, then the baseline; an "Inform KTX Weissenburg" (or Solingen) stamp instead of the customer publish.',
         'L3 escalation: the PM informs the contact there. P&L: actual local costs only.',
       ].map((l, i) => (
         <text key={l} x={58} y={y + NH + 26 + i * 14} fill="#c4b5fd" fontSize={11}>{l}</text>
@@ -926,7 +926,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         <Edge testId="procmap-edge-mp-join" color={MP}
           d={`M ${LX + LW} ${Y.approved + 54} L ${CX0} ${Y.approved + 54}`} />
         <Decision y={Y.confirm} name="Every team confirmed?"
-          lines={['R/A departments, Scheduling, Sales', 'at the current revision']}
+          lines={['R/A departments, Logistics, Sales', 'at the current revision']}
           testId="procmap-decision-confirm" />
         <Edge testId="procmap-edge-confirm-concern" color={LOOP} dashed both
           d={`M ${CX0 + CW} ${mid(Y.confirm, DH)} L ${RX} ${mid(Y.confirm, DH)}`}
@@ -935,14 +935,14 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           name="Concern raised" sub="plan revised, revision bumps"
           task="confirmations go stale" testId="procmap-node-plan-concern" />
         <Gate y={Y.timingGate} x={WIDE_X} w={WIDE_W} hard
-          name="Timing validated (hard; Sales, PM, Scheduling or lead) | baseline set: all confirmed, no plan errors or idea blocks"
+          name="Timing validated (hard; Sales, PM, Logistics or lead) | baseline set: all confirmed, no plan errors or idea blocks"
           testId="procmap-gate-timing" />
         {/* Side steps at approved, not gates: the bank build decision, then
             the published plan. Neither holds the start of implementation. */}
         <Edge testId="procmap-edge-side-steps" dashed
           d={`M ${WIDE_X + WIDE_W} ${mid(Y.timingGate, GH)} L ${RX} ${mid(Y.timingGate, GH)}`} />
         <Box x={RX} y={mid(Y.timingGate, GH) - 31} w={RW} h={62} stroke="#94a3b8" dashed
-          badge="Scheduling" name="Bank build" sub="running change or planned scrap"
+          badge="Logistics" name="Bank build" sub="running change or planned scrap"
           task="to-do, not a gate; scrap: quote price" testId="procmap-node-bank-build" />
         <Edge testId="procmap-edge-bankbuild-publish" dashed
           d={`M ${rcx} ${mid(Y.timingGate, GH) + 31} L ${rcx} ${mid(Y.timingGate, GH) + 51}`} />
@@ -975,7 +975,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           label="after baseline: deviations" lx={rcx - 8} ly={Y.implementation + NH + 24}
           anchor="end" />
         <Decision y={Y.dates} name="Dates held?"
-          lines={['moved by PM, Sales, Scheduling, lead']} testId="procmap-decision-dates" />
+          lines={['moved by PM, Sales, Logistics, lead']} testId="procmap-decision-dates" />
         <Edge testId="procmap-edge-dates-deviation" color={LOOP} both dashed
           d={`M ${CX0 + CW} ${mid(Y.dates, DH)} L ${RX} ${mid(Y.dates, DH)}`}
           label="moved" lx={CX0 + CW + 8} ly={mid(Y.dates, DH) - 7} />

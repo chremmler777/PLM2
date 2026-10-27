@@ -11,8 +11,8 @@ import { assertCurriculumCovered, TASKS, TASKS_BY_ROLE } from './tasks'
 //: Spelled out literally, like backend tests/test_training.py: a rename on one
 //: side must be a deliberate two-file change.
 const EXPECTED: Record<string, string[]> = {
-  project_management: ['pm_set_priority'],
-  sales: ['sales_start_change'],
+  project_management: ['pm_start_change', 'pm_set_priority'],
+  sales: ['sales_set_quote_deadline'],
   engineering: ['eng_answer_checklist_row', 'eng_submit_assessment'],
   scheduling: ['sch_answer_checklist_row'],
   quality: ['qa_answer_checklist_row'],
@@ -65,7 +65,7 @@ describe('the curriculum', () => {
   })
 
   it('names the keys this build cannot score', () => {
-    expect(assertCurriculumCovered(['sales_start_change', 'nope'])).toEqual(['nope'])
+    expect(assertCurriculumCovered(['pm_start_change', 'nope'])).toEqual(['nope'])
   })
 
   it('passes no task against an untouched sandbox', () => {
@@ -83,8 +83,8 @@ describe('the curriculum', () => {
   })
 })
 
-describe('sales_start_change', () => {
-  const task = TASKS.sales_start_change
+describe('pm_start_change', () => {
+  const task = TASKS.pm_start_change
   const body = (ids: number[], reason = 'Customer drawing: reinforced clip tower') => ({
     project_id: SEED.project, title: 'x', change_type: 'physical_part', reason,
     customer_relevant: true, impacted_part_ids: ids, lead_part_id: ids[0], title_auto: true,
@@ -110,18 +110,37 @@ describe('pm_set_priority', () => {
   const task = TASKS.pm_set_priority
   const url = `/v1/changes/${SEED.changeCaptured}`
 
-  it('passes with High and a deadline within two weeks', async () => {
+  it('passes with High, no quote deadline needed (Sales sets it)', async () => {
     const s = createSandbox()
+    expect(task.check(s).passed).toBe(false)
     await send(s, 'patch', url, { priority: 'high' })
-    expect(task.check(s).hint).toMatch(/deadline/)
-    await send(s, 'patch', url, { required_by_date: inTwoWeeks(), required_by_reason: null })
     expect(task.check(s).passed).toBe(true)
   })
 
   it('does not take Critical for High', async () => {
     const s = createSandbox()
-    await send(s, 'patch', url, { priority: 'critical', required_by_date: inTwoWeeks() })
+    await send(s, 'patch', url, { priority: 'critical' })
     expect(task.check(s).hint).toMatch(/Critical/)
+  })
+})
+
+describe('sales_set_quote_deadline', () => {
+  const task = TASKS.sales_set_quote_deadline
+  const url = `/v1/changes/${SEED.changeCaptured}`
+
+  it('passes with a quote deadline within two weeks', async () => {
+    const s = createSandbox()
+    expect(task.check(s).hint).toMatch(/not set/)
+    await send(s, 'patch', url, { required_by_date: inTwoWeeks(), required_by_reason: null })
+    expect(task.check(s).passed).toBe(true)
+  })
+
+  it('refuses a deadline beyond two weeks', async () => {
+    const s = createSandbox()
+    const far = new Date()
+    far.setDate(far.getDate() + 30)
+    await send(s, 'patch', url, { required_by_date: far.toISOString(), required_by_reason: null })
+    expect(task.check(s).hint).toMatch(/two weeks/)
   })
 })
 

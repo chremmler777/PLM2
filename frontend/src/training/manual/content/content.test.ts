@@ -63,12 +63,12 @@ describe('the draft training content', () => {
     for (const s of shots) expect(s).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
   })
 
-  it('gives every role two to four practice tasks, within the ceiling of five', () => {
+  it('gives every role two to five practice tasks, the ceiling of five', () => {
     expect(Object.keys(PRACTICE_TASKS_BY_ROLE).sort()).toEqual([...ROLES].sort())
     for (const r of ROLES) {
       const n = PRACTICE_TASKS_BY_ROLE[r as keyof typeof PRACTICE_TASKS_BY_ROLE].length
       expect(n, r).toBeGreaterThanOrEqual(2)
-      expect(n, r).toBeLessThanOrEqual(4)
+      expect(n, r).toBeLessThanOrEqual(5)
     }
   })
 

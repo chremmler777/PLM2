@@ -380,7 +380,8 @@ export default function ChangeDetailPage() {
   // department sees its own bucket and nobody else's figures. The backend's
   // price rule decides (stage-state), else this mirror of it.
   // The cost carrier moves the way PATCH customer_relevant allows (P3/C10):
-  // to customer by Sales, PM or an admin, back by the lead or an admin.
+  // to customer by PM, Sales (the customer contact) or an admin, back by the
+  // lead or an admin.
   const changePerms = useChangePermissions();
   const canMoveCarrier = mayMoveCarrier(!!change?.customer_relevant, {
     isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember,
@@ -388,11 +389,11 @@ export default function ChangeDetailPage() {
   });
   const canSeeCosts = stage?.can_see_prices
     ?? (isAdmin || isChangeLead || isSalesMember || isPmMember || isManagementMember);
-  // The description is written during capture, and capture is Sales' job — the
-  // backend PATCH gate allows lead / Sales / admin, so the editor must too.
-  // Project Management writes it where it captures (spec §14: a mother-plant
-  // change the PM started) or while nobody leads the change yet, the
-  // backend's "pm_capture" right.
+  // The description is written during capture, and capture is Project
+  // Management's job (2026-10-26); Sales supplies the customer's facts. The
+  // backend PATCH gate allows lead / Sales / admin plus "pm_capture" (a
+  // mother-plant change, any change in capture, a scoping change nobody
+  // leads yet), so the editor must too.
   const canEditDescription = mayEditCapture(change,
     { isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember });
   // Sales (plus lead/admin) publishes the plan and acknowledges the weight delta.

@@ -2,13 +2,13 @@
 
 For Project Managers. One page for the session and the desk; the full chapter is in PLM2 under **Training**, "Manual", chapter 03. Address: https://apps.ad.us.ktx.group/plm2/
 
-**Your job:** lead the change from scoping to closed. Every step has its owner; you make sure nothing waits without a reason.
+**Your job:** capture the change and lead it to closed. Every step has its owner; you make sure nothing waits without a reason.
 
 ## Stage by stage
 
 | Stage | You | Where |
 |---|---|---|
-| Captured | Check the capture, set the lead, "Hand over to scoping" | cockpit "Next step", "Status" |
+| Captured | "New Change Request": all parts from the same tool, one-line reason, who carries the cost, documents (Sales brings the customer's facts and the quote deadline); set the lead, "Hand over to scoping" | "Changes", cockpit "Next step", "Status" |
 | Scoping | Impacted set ("Apply selection"), Development confirms; "+ Record a meeting" with the letters R, A, S, C, I and the cost carrier; decide | "Impacted", "Scoping" |
 | In Assessment | Chase open departments; "Add a department to the assessment" if one was forgotten; "Take off routing" if one should not assess (waits for approval); "Close assessment → Costing" | "Assessments", "Blocked by" |
 | Costing | Check every department priced its part, "Close costing" | "Costing", "Cost summary" |
@@ -35,7 +35,8 @@ For Project Managers. One page for the session and the desk; the full chapter is
 
 ## Your practical check
 
-1. Set priority and the quote deadline.
+1. Start a change request.
+2. Set the priority.
 
 Coming, once the training copy can run them:
 

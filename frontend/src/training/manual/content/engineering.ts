@@ -54,8 +54,8 @@ export const engineeringChapter: ContentChapter = {
           p:
             'Development, Process Engineer, Tool Engineer and Manufacturing Engineer may start an internal change, one the ' +
             'plant pays for: "Start change", then "Internal change". You lead it and hand it over to ' +
-            'scoping ("Hand over to scoping" in My Tasks). A customer change is started by Sales or ' +
-            'Project Management; if your change turns out to be one, ask Sales or Project Management ' +
+            'scoping ("Hand over to scoping" in My Tasks). A customer change is captured by Project ' +
+            'Management; if your change turns out to be one, ask Project Management or Sales ' +
             'to switch its cost carrier to "Customer change" (Overview, during capture or scoping). ' +
             'In scoping your department is preset R: it assesses the change it raised; the room can ' +
             'leave it out only with a reason, which is logged.',

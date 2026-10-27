@@ -1,14 +1,14 @@
 import { SEED } from '../../sandbox/state'
 import type { ContentChapter, PracticeTaskSpec } from './types'
 
-//: Chapter 03, Project Management. pm-takeover, pm-priority, pm-scoping and
+//: Chapter 03, Project Management. pm-takeover (capturing and handing over), pm-priority, pm-scoping and
 //: pm-plan replace the stubs of the same id in ../chapters.tsx.
 
 export const pmChapter: ContentChapter = {
   id: 'pm',
   number: '03',
   title: 'Project Management',
-  summary: 'Leading a change: scoping, deadlines, costing, the plan, validation issues, closing.',
+  summary: 'Capturing and leading a change: scoping, deadlines, costing, the plan, validation issues, closing.',
   roles: ['project_management'],
   sections: [
     {
@@ -17,7 +17,7 @@ export const pmChapter: ContentChapter = {
       blocks: [
         {
           lede:
-            'You lead the change from scoping to closed. You do not do every step, but you make ' +
+            'You capture the change and lead it to closed. You do not do every step, but you make ' +
             'sure every step has its owner and nothing waits without a reason.',
         },
         {
@@ -32,7 +32,7 @@ export const pmChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Captured', 'You own the process from here to close. As the project\'s lead PM you lead every change on the project by default; the hand-over row is yours: "Hand over to scoping". No lead PM on the project: set the lead first (and name the lead PM in the project team). As the lead, set the priority and check the quote deadline.'],
+              ['Captured', 'You capture the request ("New Change Request"), with the customer\'s facts from Sales, and own the process from here to close. As the project\'s lead PM you lead every change on the project by default; the hand-over row is yours: "Hand over to scoping". No lead PM on the project: set the lead first (and name the lead PM in the project team). As the lead, set the priority; Sales sets the quote deadline.'],
               ['Scoping', 'Check the impacted set Development picks (you may pick too), run the scoping meeting, decide.'],
               ['In Assessment', 'Chase the open departments, add a forgotten one, decide on "Not our responsibility", then "Close assessment → Costing".'],
               ['Costing', 'Watch every department price its part, then "Close costing".'],
@@ -47,11 +47,12 @@ export const pmChapter: ContentChapter = {
           p:
             'You are usually the change lead: Project Management owns the change process from capture to ' +
             'close. The lead defaults to the Project Manager named on the project\'s "Project team" card ' +
-            '(the lead PM), also for a change Sales started. Name that team for each project you run, a ' +
+            '(the lead PM). Name that team for each project you run, a ' +
             'responsible and a backup per department: it decides whose badge each task counts on, and an ' +
             'overdue task goes to the backup too. Covering an absence: pick the backup as responsible ' +
-            'and the two swap in one step. A new Sales responsible takes over the open changes whose ' +
-            'Sales contact was the old one.',
+            'and the two swap in one step. A customer change\'s Sales contact is the project team\'s ' +
+            'Sales responsible, else its backup, else you pick a Sales member. A new Sales responsible ' +
+            'takes over the open changes whose Sales contact was the old one.',
         },
         {
           p:
@@ -65,19 +66,28 @@ export const pmChapter: ContentChapter = {
     },
     {
       id: 'pm-takeover',
-      title: 'Taking over a captured change',
+      title: 'Capturing a change and handing it over',
       blocks: [
+        {
+          p:
+            'Project Management captures every change request since 2026-10-26: Sales sends you the ' +
+            'customer\'s request and stays the customer contact. "New Change Request" on the ' +
+            '"Changes" page, or "Start change request" on the part: every part from the same tool, ' +
+            'the one-line reason, who carries the cost, the customer\'s documents. Sales sets the ' +
+            'quote deadline.',
+        },
         {
           steps: [
             { title: 'Read the capture', body: 'Reason, affected items, the customer\'s documents. The "Next step" card lists what is still missing before scoping can start.' },
             { title: 'Check the lead', body: 'On the "Status" card: "Lead", or "No lead assigned". Picking the lead is yours: "Pick a lead", or "Me". Scoping waits for a lead.' },
-            { title: 'Hand over', body: '"Hand over to scoping". Sales and the lead can still correct the capture fields afterwards.' },
+            { title: 'Hand over', body: '"Hand over to scoping". The lead and Sales (the customer\'s facts) can still correct the capture fields afterwards.' },
           ],
         },
         {
           p:
-            'If the request is dead on arrival, Sales can reject it straight from capture, with a ' +
-            'reason. It does not have to pass through scoping.',
+            'If the request is dead on arrival, the lead or Project Management rejects it straight ' +
+            'from capture, with a reason. It does not have to pass through scoping. Sales sends the ' +
+            'customer the rejection letter.',
         },
         { shot: 'pm-next-step-capture', alt: 'The "Next step" card on a captured change listing "Missing before scoping can start:" and the button "Hand over to scoping".' },
       ],
@@ -89,7 +99,7 @@ export const pmChapter: ContentChapter = {
         {
           points: [
             ['"Priority"', 'orders everybody\'s task list: "Low", "Medium", "High", "Critical". Only the change lead sets it. Critical is for a stopped line or a safety issue.'],
-            ['"Quote deadline"', 'is when the customer expects the offer. Sales sets it at capture. It is active until the offer is sent.'],
+            ['"Quote deadline"', 'is when the customer expects the offer. Sales, the customer contact, sets it at capture. It is active until the offer is sent.'],
             ['"Release deadline"', 'is born when the customer accepts. It is active from then on.'],
           ],
         },
@@ -344,22 +354,41 @@ export const pmChapter: ContentChapter = {
 
 export const pmTasks: PracticeTaskSpec[] = [
   {
+    key: 'pm_start_change',
+    role: 'project_management',
+    title: 'Start a change request',
+    status: 'ready',
+    screen: { kind: 'start-change' },
+    brief:
+      'You are the project manager of T100. Sales forwarded the customer\'s new drawing for the ' +
+      'Rear Cladding (TR.807.425): the clip tower is reinforced. Capture the change request, ' +
+      'with the reason from the customer\'s mail. The PEAK variant (TR.807.426) comes from the ' +
+      'same tool and changes with it, so it belongs on the same request.',
+    why:
+      'One change request per tool family keeps one set of assessments and one revision per ' +
+      'part. A request without its reason arrives at every department as a question.',
+    fixture: ['Project T100 with the Rear Cladding, its PEAK variant and the Grille Carrier (exists today).'],
+    pass: [
+      { assert: 'a new change includes part TR.807.425 as lead item', hint: 'The Rear Cladding should lead the request: it is the part the drawing is for.' },
+      { assert: 'the change includes TR.807.426', hint: 'The PEAK variant is missing. It comes from the same tool.' },
+      { assert: 'the reason has at least 5 characters', hint: 'The reason is missing or too short to act on.' },
+    ],
+  },
+  {
     key: 'pm_set_priority',
     role: 'project_management',
-    title: 'Set priority and the quote deadline',
+    title: 'Set the priority',
     status: 'ready',
     screen: { kind: 'change-status', changeId: SEED.changeCaptured },
     brief:
-      'CR-TRAIN-0001 (Grille Carrier) was escalated by the customer this morning. Set its ' +
-      'priority to High, and give it a quote deadline: the customer expects the quote within ' +
-      'two weeks.',
+      'CR-TRAIN-0001 (Grille Carrier) was escalated by the customer this morning. You lead it: ' +
+      'set its priority to High.',
     why:
-      'Priority orders everybody\'s task list, and the quote deadline is the date every ' +
-      'department is measured against.',
-    fixture: ['CR-TRAIN-0001 captured, priority medium, no quote deadline (exists today).'],
+      'Priority orders everybody\'s task list. A change at the wrong priority waits behind work ' +
+      'that is less urgent.',
+    fixture: ['CR-TRAIN-0001 captured, priority medium (exists today).'],
     pass: [
       { assert: 'change.priority is high', hint: 'The priority is not High yet. Critical is for a stopped line or a safety issue.' },
-      { assert: 'change.required_by_date is set, 0 to 15 days from today', hint: 'The quote deadline should fall within the next two weeks.' },
     ],
   },
   {

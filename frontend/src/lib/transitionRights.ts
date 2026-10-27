@@ -39,18 +39,17 @@ export function mayTransition(
   const from = change.status
   // Resuming a hold (often "no PO yet") is the run team's (C1).
   if (from === 'on_hold') return leadPmAdmin
-  // Sales may hand over a customer capture on the lead's behalf (D2: the
-  // lead, PM by default, owns it); an internal change with a lead (P3: the
-  // engineering raiser) is its run team's to hand over or reject.
-  const salesCaptures = v.isSales && (change.customer_relevant !== false || change.lead_id == null)
+  // Capture is Project Management's (Christoph 2026-10-26): the lead (the
+  // project's lead PM by default), PM or an admin hands it over or rejects it
+  // at capture. Sales supplies the customer's facts but takes no capture hop.
   if (to === 'scoping') {
-    // Kickoff from capture: the lead (PM) hands over; Sales may on its behalf.
-    if (from === 'captured') return leadPmAdmin || salesCaptures
+    // Kickoff from capture: the lead (PM) hands over.
+    if (from === 'captured') return leadPmAdmin
     // Reopening a rejected change and recalling an assessment: lead/PM/admin.
     return leadPmAdmin
   }
-  // Sales may reject at capture (the customer withdrew before scoping).
-  if (to === 'rejected' && from === 'captured') return leadPmAdmin || salesCaptures
+  // Rejecting at capture is the run team's too (lead, PM, admin).
+  if (to === 'rejected' && from === 'captured') return leadPmAdmin
   // Costing back from quote creation is a reopen, gated elsewhere; from
   // assessment it closes the round: lead/PM/admin.
   if (to === 'costing' && from !== 'in_assessment') return true
@@ -63,26 +62,29 @@ export function mayTransition(
 
 /**
  * May the viewer move the cost carrier the way it would go next (P3 / C10,
- * mirrors PATCH customer_relevant)? Internal to customer is a starter's call:
- * Sales, Project Management or an admin (`canStartChange`, the backend's
- * permissions answer), whether or not they lead the change; an engineering
- * lead may not. Customer to internal drops the Sales contact [R4]: the lead
- * with a starter's or Project Management's rights, or an admin.
+ * mirrors PATCH customer_relevant)? Internal to customer: Project Management
+ * or an admin (`canStartChange`, the backend's permissions answer) and Sales
+ * (the customer contact, who no longer captures since 2026-10-26 but keeps
+ * this right), whether or not they lead the change; an engineering lead may
+ * not. Customer to internal drops the Sales contact [R4]: the lead with a
+ * starter's, Project Management's or Sales' rights, or an admin.
  */
 export function mayMoveCarrier(
   customerRelevant: boolean,
   v: Viewer & { canStartChange: boolean },
 ): boolean {
   if (v.isAdmin) return true
-  if (customerRelevant) return v.isChangeLead && (v.canStartChange || v.isPm)
-  return v.canStartChange && (v.isChangeLead || v.isPm || v.isSales)
+  if (customerRelevant) return v.isChangeLead && (v.canStartChange || v.isPm || v.isSales)
+  return (v.canStartChange || v.isSales) && (v.isChangeLead || v.isPm || v.isSales)
 }
 
 /**
  * May the viewer edit the capture fields (description, "what is wrong
  * today", the target, ...)? Mirrors the backend PATCH rights (lead, Sales,
- * "pm_capture"): Project Management only where it captures, a mother-plant
- * change, or while nobody leads the change yet in capture or scoping.
+ * "pm_capture"): Project Management where it captures (Project Management
+ * captures, migration 152): a mother-plant change, any change still in
+ * capture (whoever leads it), or a scoping change nobody leads yet. Sales
+ * keeps its edit right: it supplies the customer's facts.
  */
 export function mayEditCapture(
   change: Partial<Pick<ChangeRequest, 'origin' | 'status' | 'lead_id'>> | null | undefined,
@@ -91,7 +93,8 @@ export function mayEditCapture(
   if (v.isAdmin || v.isChangeLead || v.isSales) return true
   if (!v.isPm || !change) return false
   return change.origin === 'mother_plant'
-    || (['captured', 'scoping'].includes(change.status ?? '') && change.lead_id == null)
+    || change.status === 'captured'
+    || (change.status === 'scoping' && change.lead_id == null)
 }
 
 export type EndState = 'rejected' | 'cancelled' | 'closed'

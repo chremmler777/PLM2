@@ -2,13 +2,13 @@
 
 For Sales. One page for the session and the desk; the full chapter is in PLM2 under **Training**, "Manual", chapter 04. Address: https://apps.ad.us.ktx.group/plm2/
 
-**Your job:** you are the customer contact; Project Management (the change lead) owns the change from capture to close. You start the request, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.
+**Your job:** you are the customer contact; Project Management (the change lead) captures the change and owns it from capture to close. You send the customer's request to the PM, supply the customer's facts and the quote deadline, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.
 
 ## Stage by stage
 
 | Stage | You | Where |
 |---|---|---|
-| Captured | "New Change Request": all parts from the same tool, one-line reason, "Customer change", quote deadline, documents | "Changes" |
+| Captured | Project Management captures it; you supply the customer's documents and the quote deadline ("Supply the customer's facts") | "My Tasks", "Overview" |
 | Scoping | Answer the team's questions, file the customer's reply; rejection letter if rejected | "Scoping" |
 | Quote creation | "Start the offer": "Timing", "Price", "Risks", "Document"; "Send offer" with the receipt date | "Offer" |
 | Quoted | "+ Record round"; "New version" with what changed; "Customer accepted" with the release deadline, or "Customer declined" | "Offer", "Negotiation" |
@@ -19,7 +19,7 @@ For Sales. One page for the session and the desk; the full chapter is in PLM2 un
 ## Rules to remember
 
 - **One request per tool family.**
-- **KTX Weissenburg / Solingen changes are started by Project Management.** Send those requests to PM.
+- **Project Management captures every change, KTX Weissenburg / Solingen included.** Send the customer's requests to the PM.
 - **The offer is valid 30 days from the customer's receipt.** Enter the real receipt date.
 - **From v2 on, say what changed.** Sending is refused without it.
 - **Your vendor choice is binding.** Against the department's star you give a reason.
@@ -41,7 +41,7 @@ KTX Group US Corp., Toccoa letterhead; offer number is the change number, Q and 
 
 ## Your practical check
 
-1. Start a change request.
+1. Set the quote deadline.
 
 Coming, once the training copy can run them:
 

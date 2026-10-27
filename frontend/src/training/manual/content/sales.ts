@@ -1,14 +1,15 @@
+import { SEED } from '../../sandbox/state'
 import type { ContentChapter, PracticeTaskSpec } from './types'
 import { MEXICO_NOT_IN_USE_TEXT } from '../../../lib/plantNotInUse'
 
-//: Chapter 04, Sales. sales-start, sales-documents and sales-quote replace
+//: Chapter 04, Sales. sales-start (the customer's facts at capture), sales-documents and sales-quote replace
 //: the stubs of the same id in ../chapters.tsx.
 
 export const salesChapter: ContentChapter = {
   id: 'sales',
   number: '04',
   title: 'Sales',
-  summary: 'Starting a change request, the offer, negotiation, the customer\'s answer, every customer contact after it, and the rates on the cost sheet.',
+  summary: 'The customer\'s facts at capture, the offer, negotiation, the customer\'s answer, every customer contact after it, and the rates on the cost sheet.',
   roles: ['sales'],
   sections: [
     {
@@ -18,15 +19,15 @@ export const salesChapter: ContentChapter = {
         {
           lede:
             'You are the customer contact. Project Management owns the change from capture to close ' +
-            '(the project\'s lead PM leads it); you start the request (or PM does on your behalf), you ' +
-            'build and send the offer, you log every round, and anything the customer has to hear ' +
-            'after acceptance goes through you.',
+            '(the project\'s lead PM leads it) and captures every change request; you bring the ' +
+            'customer\'s facts and the quote deadline, you build and send the offer, you log every ' +
+            'round, and anything the customer has to hear after acceptance goes through you.',
         },
         {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Captured', 'Start the request with its reason, parts, documents and quote deadline. The lead (the project\'s lead PM) hands it over; "Create and hand over" does it for them when the capture is complete.'],
+              ['Captured', 'Project Management captures the request. You pass the customer\'s request on to the PM and supply the customer\'s facts: the customer\'s file or mail and the quote deadline. The lead (the project\'s lead PM) hands it over to scoping.'],
               ['Scoping', 'Answer the team\'s questions for the customer. Send the rejection letter if the change is rejected.'],
               ['Costing', 'Nothing to enter. You see every department\'s numbers and may start the rough timing.'],
               ['Quote creation', 'Build the offer: timing, price, risks, document. Send v1.'],
@@ -42,11 +43,11 @@ export const salesChapter: ContentChapter = {
             'Project Management owns the change process, from capture to close: the project\'s ' +
             'lead PM leads every change on the project and hands it over to scoping, follows it up ' +
             'and escalates. You keep the customer side: the quote deadline, the offer and the ' +
-            'customer\'s answer. You may start a change for the PM (and the PM for you); the hand-over ' +
-            'row is then the lead\'s, and you see it as backup with the lead\'s name and "You supply the ' +
-            'customer\'s facts" while the description, quote deadline or customer file is missing. ' +
-            'A customer change has a Sales contact, shown on the Status card and in the change ' +
-            'list: you when you started it, else the project\'s Sales contact. With neither it reads ' +
+            'customer\'s answer. You do not start changes: send the customer\'s request to the PM, ' +
+            'who captures it. The hand-over row is the lead\'s; you see "Supply the customer\'s facts" ' +
+            '("You supply the customer\'s facts") while the description, quote deadline or customer ' +
+            'file is missing. A customer change has a Sales contact, shown on the Status card and in ' +
+            'the change list: the project team\'s Sales responsible, else its backup. With neither it reads ' +
             '"No Sales contact: all of Sales", and anyone in Sales takes it with "Pick a Sales contact". All of Sales still ' +
             'sees the Sales tasks, with the contact\'s name on them, and anyone in Sales may act. ' +
             'Hand a change to a colleague with "change" beside "Sales contact".',
@@ -55,12 +56,15 @@ export const salesChapter: ContentChapter = {
     },
     {
       id: 'sales-start',
-      title: 'Starting a change request',
+      title: 'The customer\'s facts at capture',
       blocks: [
         {
           p:
-            '"New Change Request" on the "Changes" page, or "Start change request" on the part ' +
-            'itself. The form is "New change request".',
+            'Project Management captures the change ("New Change Request" on the "Changes" page, or ' +
+            '"Start change request" on the part); the button is not offered to Sales. Send the ' +
+            'customer\'s request to the project\'s PM, then supply what only you have: the ' +
+            'customer\'s documents and the quote deadline. What the PM fills in on "New change ' +
+            'request", so you know what to send along:',
         },
         {
           steps: [
@@ -70,7 +74,7 @@ export const salesChapter: ContentChapter = {
             { title: 'Quote deadline', body: 'When the customer expects the offer. Optional on the form. The hand-over to scoping asks for it, and for a change lead; without them the hand-over needs an approved override.' },
             { title: 'Customer documents', body: 'Drop the drawing, the mail, the specification. They are filed as the customer\'s files; one customer file (or a filed customer mail) is required before scoping.' },
             { title: 'Urgent', body: 'Tick "Urgent" only with a need-by date, the reason (line stop, safety, quality escape, launch date, customer demand, other) and the evidence (mail, 8D number, file). Without them the change is not created. Tasks on an urgent change are due in 1 working day; the header shows "Need-by 24 Oct, 8 wd left, now: Scoping".' },
-            { title: 'Create change', body: 'The form tells you if it is "Ready to hand over to scoping" or what is missing. When it is ready, "Create and hand over" puts it into scoping in the same click; "Create as draft" keeps it with you.' },
+            { title: 'Create change', body: 'The form tells the PM if it is "Ready to hand over to scoping" or what is missing. When it is ready, "Create and hand over" puts it into scoping in the same click; "Create as draft" keeps it with the lead.' },
           ],
         },
         {
@@ -264,7 +268,7 @@ export const salesChapter: ContentChapter = {
             ['A new version without saying what changed.', 'Refused. The note is how the next reader understands the negotiation.'],
             ['Accepting by mail and not recording it.', 'Until "Customer accepted" is recorded, the change cannot be approved and the release deadline does not exist.'],
             ['Hiding a severity-3 risk.', 'The customer will not read about it. If it bites, the offer said nothing.'],
-            ['Starting a KTX Weissenburg or Solingen change.', 'Project Management starts those. Send the request to PM.'],
+            ['Waiting for a change you expect to start yourself.', 'Project Management captures every change, KTX Weissenburg and Solingen included. Send the customer\'s request to the PM.'],
             ['Marking a team question solved yourself.', 'You answer; the asker judges the answer.'],
           ],
         },
@@ -275,24 +279,20 @@ export const salesChapter: ContentChapter = {
 
 export const salesTasks: PracticeTaskSpec[] = [
   {
-    key: 'sales_start_change',
+    key: 'sales_set_quote_deadline',
     role: 'sales',
-    title: 'Start a change request',
+    title: 'Set the quote deadline',
     status: 'ready',
-    screen: { kind: 'start-change' },
+    screen: { kind: 'change-status', changeId: SEED.changeCaptured },
     brief:
-      'The customer sent a new drawing for the Rear Cladding (TR.807.425) in project T100: the ' +
-      'clip tower is reinforced. Start the change request, with the reason from the ' +
-      'customer\'s mail. The PEAK variant (TR.807.426) comes from the same tool and changes ' +
-      'with it, so it belongs on the same request.',
+      'Project Management captured CR-TRAIN-0001 (Grille Carrier). You are the customer ' +
+      'contact: the customer expects the quote within two weeks. Set the quote deadline.',
     why:
-      'One change request per tool family keeps one set of assessments and one revision per ' +
-      'part. A request without its reason arrives at every department as a question.',
-    fixture: ['Project T100 with the Rear Cladding, its PEAK variant and the Grille Carrier (exists today).'],
+      'The quote deadline is the date every department is measured against. Project ' +
+      'Management captures the change; the customer\'s dates come from you.',
+    fixture: ['CR-TRAIN-0001 captured, no quote deadline (exists today).'],
     pass: [
-      { assert: 'a new change includes part TR.807.425 as lead item', hint: 'The Rear Cladding should lead the request: it is the part the drawing is for.' },
-      { assert: 'the change includes TR.807.426', hint: 'The PEAK variant is missing. It comes from the same tool.' },
-      { assert: 'the reason has at least 5 characters', hint: 'The reason is missing or too short to act on.' },
+      { assert: 'change.required_by_date is set, 0 to 15 days from today', hint: 'The quote deadline should fall within the next two weeks.' },
     ],
   },
   {

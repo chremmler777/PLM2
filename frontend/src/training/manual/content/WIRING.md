@@ -85,7 +85,7 @@ After the polish:
 | `pm-validate-timing` | `pm-plan` | "Timing" tab, the three steps | Approved, detailed plan created, every team confirmed, no idea block |
 | `pm-deviations` | `pm-plan` | "Timing" tab, "Deviations from the baseline" | In implementation, one open group: a block moved +3 d and one successor it pushed |
 | `pm-route-dialog` | `pm-issues` | "Release" tab, validation issue, "Decide the route" dialog | VI-1 raised by another user, contained, root cause recorded; "Internal rework" with one fix action typed |
-| `sales-start-form` | `sales-start` | "Changes", "New Change Request" form | Sales viewer; a project with two parts from one tool, both picked, a short description and a quote deadline |
+| `sales-start-form` | `sales-start` | "Changes", "New Change Request" form | Project Management viewer (PM captures since 2026-10-26); a project with two parts from one tool, both picked, a short description and a quote deadline |
 | `sales-question-card` | `sales-documents` | "Scoping" tab, open question | Scoping, one open question asked by an engineer, not answered |
 | `sales-offer-price` | `sales-quote` | "Offer" tab, "Price" step | Quote creation, costing closed, draft offer v1 with one factor switched on |
 | `sales-offer-pdf` | `sales-quote` | Offer PDF, page 1 | A sent version with a receipt date (dates read like "26 Sep 2026", signed by the Sales sender) |
@@ -129,8 +129,8 @@ handout, as plain text: no button, not in the record (`practiceOf(role)` in
 
 | Role | Active today (key) | Coming (written spec, needs the sandbox) |
 |---|---|---|
-| project_management | `pm_set_priority` | `pm_scoping_proceed`, `pm_decide_deviation`, `pm_route_issue` |
-| sales | `sales_start_change` | `sales_send_offer`, `sales_new_version`, `sales_issue_customer_decision` |
+| project_management | `pm_start_change`, `pm_set_priority` | `pm_scoping_proceed`, `pm_decide_deviation`, `pm_route_issue` |
+| sales | `sales_set_quote_deadline` | `sales_send_offer`, `sales_new_version`, `sales_issue_customer_decision` |
 | engineering | `eng_answer_checklist_row`, `eng_submit_assessment` | `eng_costing_vendor_quotes`, `eng_contain_issue` |
 | scheduling | `sch_answer_checklist_row` | `sch_bank_build_plan`, `sch_resolve_bank_idea`, `sch_timing_concern`, `sch_release_stock` |
 | quality | `qa_answer_checklist_row` | `qa_quality_signoff`, `qa_flag_row_risk`, `qa_add_lesson` |

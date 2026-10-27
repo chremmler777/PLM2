@@ -44,7 +44,7 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
     evidence: ['revision intake', 'pending index', 'route + reason'],
   },
   {
-    key: 'capture', name: 'Capture', owner: 'Sales (PM may start)', target: 'procmap-node-captured',
+    key: 'capture', name: 'Capture', owner: 'PM (Sales: customer contact)', target: 'procmap-node-captured',
     gates: [{ text: 'triage route: full ECR or attach' }],
     evidence: ['request + attachment', 'quote-by date', 'origin: customer, internal or plant change'],
   },

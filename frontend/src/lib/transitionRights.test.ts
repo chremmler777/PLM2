@@ -13,9 +13,11 @@ describe('mayTransition (spec §16 P1 4)', () => {
       expect(mayTransition({ status: 'in_assessment' }, to, { ...none, isAdmin: true })).toBe(true)
     }
   })
-  it('lets Sales kick off and reject at capture', () => {
-    expect(mayTransition({ status: 'captured' }, 'scoping', { ...none, isSales: true })).toBe(true)
-    expect(mayTransition({ status: 'captured' }, 'rejected', { ...none, isSales: true })).toBe(true)
+  it('keeps the capture hops with the run team: Sales neither kicks off nor rejects at capture (2026-10-26)', () => {
+    expect(mayTransition({ status: 'captured' }, 'scoping', { ...none, isSales: true })).toBe(false)
+    expect(mayTransition({ status: 'captured' }, 'rejected', { ...none, isSales: true })).toBe(false)
+    expect(mayTransition({ status: 'captured' }, 'scoping', { ...none, isPm: true })).toBe(true)
+    expect(mayTransition({ status: 'captured' }, 'rejected', { ...none, isChangeLead: true })).toBe(true)
     expect(mayTransition({ status: 'captured' }, 'scoping', none)).toBe(false)
   })
   it('follows the backend list when there is one', () => {
@@ -53,7 +55,7 @@ describe('mayTransition (spec §16 P1 4)', () => {
     expect(mayTransition(internal, 'scoping', { ...none, isSales: true })).toBe(false)
     expect(mayTransition(internal, 'rejected', { ...none, isSales: true })).toBe(false)
     expect(mayTransition(internal, 'scoping', { ...none, isChangeLead: true })).toBe(true)
-    expect(mayTransition({ ...internal, lead_id: null }, 'scoping', { ...none, isSales: true })).toBe(true)
+    expect(mayTransition({ ...internal, lead_id: null }, 'scoping', { ...none, isSales: true })).toBe(false)
   })
 })
 
@@ -62,6 +64,8 @@ describe('mayMoveCarrier (P3 / C10)', () => {
   const engineer = { ...none, canStartChange: false }
   it('lets Sales and PM make an internal change a customer change without leading it', () => {
     expect(mayMoveCarrier(false, { ...starter, isSales: true })).toBe(true)
+    // Sales no longer starts changes (can_start_change false) but keeps the flip
+    expect(mayMoveCarrier(false, { ...engineer, isSales: true })).toBe(true)
     expect(mayMoveCarrier(false, { ...starter, isPm: true })).toBe(true)
     expect(mayMoveCarrier(false, { ...none, canStartChange: false, isAdmin: true })).toBe(true)
   })
@@ -75,6 +79,7 @@ describe('mayMoveCarrier (P3 / C10)', () => {
     expect(mayMoveCarrier(true, { ...engineer, isChangeLead: true, isPm: true })).toBe(true)
     expect(mayMoveCarrier(true, { ...none, canStartChange: false, isAdmin: true })).toBe(true)
     expect(mayMoveCarrier(true, { ...starter, isSales: true })).toBe(false)
+    expect(mayMoveCarrier(true, { ...engineer, isSales: true, isChangeLead: true })).toBe(true)
     expect(mayMoveCarrier(true, { ...starter, isPm: true })).toBe(false)
   })
 })
@@ -110,6 +115,14 @@ describe('mayEditCapture (PATCH rights: lead, Sales, pm_capture)', () => {
     expect(mayEditCapture({ origin: 'internal', status: 'captured', lead_id: null },
       { ...none, isPm: true })).toBe(true)
     expect(mayEditCapture({ origin: 'mother_plant', status: 'approved', lead_id: 3 },
+      { ...none, isPm: true })).toBe(true)
+  })
+  it('lets PM edit any change still in capture, led or not (migration 152)', () => {
+    expect(mayEditCapture({ origin: 'customer', status: 'captured', lead_id: 22 },
+      { ...none, isPm: true })).toBe(true)
+    expect(mayEditCapture({ origin: 'customer', status: 'scoping', lead_id: 22 },
+      { ...none, isPm: true })).toBe(false)
+    expect(mayEditCapture({ origin: 'customer', status: 'scoping', lead_id: null },
       { ...none, isPm: true })).toBe(true)
   })
   it('lets the lead, Sales and an admin edit', () => {

@@ -39,14 +39,14 @@ export const HANDOUTS: Handout[] = [
     title: 'Project Management',
     audience: 'Project Managers',
     chapter: '03',
-    job: 'lead the change from scoping to closed. Every step has its owner; you make sure nothing waits without a reason.',
+    job: 'capture the change and lead it to closed. Every step has its owner; you make sure nothing waits without a reason.',
     blocks: [
       {
         h2: 'Stage by stage',
         table: {
           head: ['Stage', 'You', 'Where'],
           rows: [
-            ['Captured', 'Check the capture, set the lead, "Hand over to scoping"', 'cockpit "Next step", "Status"'],
+            ['Captured', '"New Change Request": all parts from the same tool, one-line reason, who carries the cost, documents (Sales brings the customer\'s facts and the quote deadline); set the lead, "Hand over to scoping"', '"Changes", cockpit "Next step", "Status"'],
             ['Scoping', 'Impacted set ("Apply selection"), Development confirms; "+ Record a meeting" with the letters R, A, S, C, I and the cost carrier; decide', '"Impacted", "Scoping"'],
             ['In Assessment', 'Chase open departments; "Add a department to the assessment" if one was forgotten; "Take off routing" if one should not assess (waits for approval); "Close assessment → Costing"', '"Assessments", "Blocked by"'],
             ['Costing', 'Check every department priced its part, "Close costing"', '"Costing", "Cost summary"'],
@@ -85,14 +85,14 @@ export const HANDOUTS: Handout[] = [
     title: 'Sales',
     audience: 'Sales',
     chapter: '04',
-    job: 'you are the customer contact; Project Management (the change lead) owns the change from capture to close. You start the request, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.',
+    job: 'you are the customer contact; Project Management (the change lead) captures the change and owns it from capture to close. You send the customer\'s request to the PM, supply the customer\'s facts and the quote deadline, build, sign and send the offer, log every round, tell the customer what they must hear later, and keep the rates on the cost sheet.',
     blocks: [
       {
         h2: 'Stage by stage',
         table: {
           head: ['Stage', 'You', 'Where'],
           rows: [
-            ['Captured', '"New Change Request": all parts from the same tool, one-line reason, "Customer change", quote deadline, documents', '"Changes"'],
+            ['Captured', 'Project Management captures it; you supply the customer\'s documents and the quote deadline ("Supply the customer\'s facts")', '"My Tasks", "Overview"'],
             ['Scoping', 'Answer the team\'s questions, file the customer\'s reply; rejection letter if rejected', '"Scoping"'],
             ['Quote creation', '"Start the offer": "Timing", "Price", "Risks", "Document"; "Send offer" with the receipt date', '"Offer"'],
             ['Quoted', '"+ Record round"; "New version" with what changed; "Customer accepted" with the release deadline, or "Customer declined"', '"Offer", "Negotiation"'],
@@ -106,7 +106,7 @@ export const HANDOUTS: Handout[] = [
         h2: 'Rules to remember',
         points: [
           ['One request per tool family.', ''],
-          ['KTX Weissenburg / Solingen changes are started by Project Management.', 'Send those requests to PM.'],
+          ['Project Management captures every change, KTX Weissenburg / Solingen included.', 'Send the customer\'s requests to the PM.'],
           ['The offer is valid 30 days from the customer\'s receipt.', 'Enter the real receipt date.'],
           ['From v2 on, say what changed.', 'Sending is refused without it.'],
           ['Your vendor choice is binding.', 'Against the department\'s star you give a reason.'],

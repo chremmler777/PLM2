@@ -278,7 +278,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         change_type: changeType,
         reason: reason.trim() || undefined,
         // No lead_id: the backend picks the default lead (the project's PM).
-        // Sending the starter as lead made every Sales starter the lead.
+        // Sending the starter as lead made every starter the lead.
         // One request: the items ride along, the first is the lead, and the
         // composed title follows the lead from here on.
         impacted_part_ids: picked.map((p) => p.id),

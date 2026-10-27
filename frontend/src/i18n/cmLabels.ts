@@ -419,8 +419,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.customerChange': { de: 'Kundenänderung', en: 'Customer change' },
   'start.internalChange': { de: 'Interne Änderung', en: 'Internal change' },
   'start.customerSalesOnly': {
-    de: 'Kundenänderungen legt der Vertrieb oder das Projektmanagement an. Sie starten interne Änderungen und führen sie.',
-    en: 'Customer changes are started by Sales or Project Management. You start internal changes and lead them.',
+    de: 'Kundenänderungen legt das Projektmanagement an. Sie starten interne Änderungen und führen sie.',
+    en: 'Customer changes are captured by Project Management. You start internal changes and lead them.',
   },
   'start.customerRelevantYesHint': {
     de: 'Läuft über den Angebotsprozess: Kunde muss den Preis akzeptieren, bevor freigegeben wird.',
@@ -1361,8 +1361,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Open question:',
   },
   'start.salesOnly': {
-    de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an; Entwicklung, Prozess, Werkzeugtechnik und Fertigungstechnik legen interne an',
-    en: 'Only Sales or Project Management raises change requests; Development, Process, Tool and Manufacturing Engineer raise internal ones',
+    de: 'Kundenänderungen legt das Projektmanagement an (der Vertrieb ist der Kundenkontakt); Entwicklung, Prozess, Werkzeugtechnik und Fertigungstechnik legen interne an',
+    en: 'Project Management captures customer changes (Sales is the customer contact); Development, Process, Tool and Manufacturing Engineer raise internal ones',
   },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },
@@ -2366,7 +2366,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.salesOwnerPick': { de: 'Vertriebskontakt wählen', en: 'Pick a Sales contact' },
   'cockpit.salesOwnerDefault': { de: '(Projektkontakt)', en: '(project contact)' },
   'cockpit.salesOwnerSaved': { de: 'Vertriebskontakt gesetzt', en: 'Sales contact set' },
-  'cockpit.salesOwnerHint': { de: 'Angebot, Angebotstermin und Kundenantwort; die Änderung führt der Lead (Projektmanagement). Vertrieb oder Projektmanagement setzen ihn; Vertriebsaufgaben sieht der ganze Vertrieb', en: 'Quote deadline, offer and customer answer; the lead (Project Management) runs the change. Sales or Project Management sets it; all of Sales sees the Sales tasks' },
+  'cockpit.salesOwnerHint': { de: 'Angebot, Angebotstermin und Kundenantwort; die Änderung führt der Lead (Projektmanagement). Standard ist die Vertriebs-Verantwortung im Projektteam, sonst deren Vertretung; Vertrieb oder Projektmanagement ändern ihn; Vertriebsaufgaben sieht der ganze Vertrieb', en: 'Quote deadline, offer and customer answer; the lead (Project Management) runs the change. By default the project team\'s Sales responsible, else its backup; Sales or Project Management change it; all of Sales sees the Sales tasks' },
 
   // Project team (spec 2026-09-25): one responsible per department per project.
   'team.title': { de: 'Projektteam', en: 'Project team' },

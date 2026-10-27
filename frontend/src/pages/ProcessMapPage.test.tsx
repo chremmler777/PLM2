@@ -39,6 +39,9 @@ describe('ProcessMapPage', () => {
     }
     expect(screen.getByTestId('procmap-node-quoting').textContent).toContain('Sales')
     expect(screen.getByTestId('procmap-node-scoping').textContent).toContain('PM')
+    // 2026-10-26: capture is Project Management's
+    expect(screen.getByTestId('procmap-node-captured').textContent).toContain('PM')
+    expect(screen.getByTestId('procmap-node-captured').textContent).not.toContain('Sales')
     // The open work at approved is the teams' timing confirmation.
     expect(screen.getByTestId('procmap-node-approved').textContent).toContain('Team')
     expect(screen.getByTestId('procmap-node-approved').textContent).not.toContain('Customer')
@@ -97,7 +100,7 @@ describe('ProcessMapPage', () => {
       .toContain('all R/A submitted, none not feasible, no routing change pending')
     const timing = screen.getByTestId('procmap-gate-timing').textContent ?? ''
     expect(timing).toContain('Timing validated')
-    expect(timing).toContain('Sales, PM, Scheduling or lead')
+    expect(timing).toContain('Sales, PM, Logistics or lead')
     // validate_timing refuses outright (no deviation): drawn red like the impact lock.
     expect(screen.getByTestId('procmap-gate-timing').querySelector('polygon')?.getAttribute('stroke'))
       .toBe('#f87171')
@@ -182,9 +185,10 @@ describe('ProcessMapPage', () => {
     expect(rules).toContain('an override or a routing change is decided by somebody other than its proposer')
     expect(rules).toContain('Plan (date) deviations have no four-eyes rule')
     expect(rules).not.toContain('whoever proposes a deviation or raises a validation issue does not decide it')
-    // Dates after the baseline: Scheduling moves them too; deciding stays with PM, Sales, lead, admin.
-    expect(rules).toContain('PM, Sales, Scheduling, the lead or an admin move dates')
-    expect(screen.getByTestId('procmap-decision-dates').textContent).toContain('Scheduling')
+    // Dates after the baseline: Logistics (Scheduling merged in, migration 150) moves them too; deciding stays with PM, Sales, lead, admin.
+    expect(rules).toContain('PM, Sales, Logistics, the lead or an admin move dates')
+    expect(document.body.textContent).not.toContain('Scheduling')
+    expect(screen.getByTestId('procmap-decision-dates').textContent).toContain('Logistics')
     // ECR-solid L2: a failed check or open issue holds the release HARD; a
     // plan deviation softly. The P&L freezes at the go decision.
     expect(rules).toContain('holds the release (hard: no override, not even an admin')
@@ -426,11 +430,15 @@ describe('ProcessMapPage', () => {
     wrap()
     expect(screen.getByTestId('procmap-role-in_assessment').textContent)
       .toBe('Routed departments (Sales exempt)')
-    // D2: Project Management owns the process; Sales or PM start a change,
-    // each on the other's behalf; the mother-plant origin is PM only.
+    // D2 + 2026-10-26: Project Management captures and owns the process;
+    // Sales is the customer contact; the mother-plant origin is PM only.
     const capture = screen.getByTestId('procmap-role-captured').textContent ?? ''
-    expect(capture).toContain('Project Management owns the process (D2)')
-    expect(capture).toContain('Sales or PM start it, each on the other\'s behalf')
+    expect(capture).toContain('Project Management captures the change and owns the process')
+    expect(capture).toContain('the project\'s lead PM leads every change')
+    expect(capture).toContain('Sales is the customer contact')
+    expect(capture).toContain('the project team\'s Sales responsible, else its backup')
+    expect(capture).not.toContain('Sales or PM start it')
+    expect(capture).not.toContain('Sales raiser')
     expect(capture).not.toContain('Sales owner')
     expect(capture).toContain('KTX Weissenburg / Solingen is started by Project Management only')
     expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)

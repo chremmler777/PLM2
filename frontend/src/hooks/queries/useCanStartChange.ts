@@ -2,13 +2,14 @@
  * May the signed-in caller raise a change request?
  *
  * The rule lives in the backend (membership in a can_start_change department —
- * Sales and Project Management today — or admin), so the UI asks rather than
+ * Project Management since migration 152, or admin; internal changes also
+ * the can_start_internal_change engineering departments), so the UI asks rather than
  * hardcoding a role list. Because it goes through the shared client, acting-as
  * is followed automatically.
  *
  * Fails open: while the answer is loading, or if the endpoint is unavailable,
  * the button stays enabled and the POST's 403 is surfaced in the modal. A
- * transport hiccup must never lock Sales out of their own job.
+ * transport hiccup must never lock Project Management out of its own job.
  */
 import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';

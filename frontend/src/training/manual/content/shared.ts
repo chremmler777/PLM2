@@ -180,7 +180,7 @@ export const flowChapter: ContentChapter = {
           table: {
             head: ['Stage (as the page shows it)', 'What happens, who acts'],
             rows: [
-              ['Captured', 'Sales starts the request with the reason, the parts and the customer\'s documents.'],
+              ['Captured', 'Project Management captures the request with the reason, the parts and the customer\'s documents; Sales supplies the customer\'s facts and the quote deadline.'],
               ['Scoping', 'PM meets the team, Development picks and locks the impacted set, the room decides who assesses.'],
               ['In Assessment', 'The routed departments answer the checklist, flag risks and give a verdict.'],
               ['Costing', 'The departments price their part with a lead time on every line. PM closes costing.'],
@@ -207,8 +207,9 @@ export const flowChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'Sales starts the request with "New Change Request" on the "Changes" page, or "Start ' +
-            'change request" on a part. Project Management may start one too. A change from KTX ' +
+            'Project Management captures the request with "New Change Request" on the "Changes" page, ' +
+            'or "Start change request" on a part, and owns the process from there; Sales is the ' +
+            'customer contact and brings the customer\'s facts. A change from KTX ' +
             'Weissenburg or KTX Solingen is started by Project Management only; everybody else reads ' +
             '"Changes from KTX Weissenburg / Solingen are started by Project Management (PM)."',
         },
