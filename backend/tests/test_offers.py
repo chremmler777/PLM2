@@ -967,3 +967,31 @@ async def test_a_supplier_quote_running_out_before_the_offer_warns(
     got = (await client.get(_url(cid), headers=sales)).json()
     assert all("supplier_quote_expires" not in {x["code"] for x in g["warnings"]}
                for g in got)
+
+
+async def test_f3_hours_without_a_labour_rate_need_a_send_reason(
+        client, offer_world, session_factory):
+    """F3 / T1 (test 2026-10-26, SOFT): costing hours without a labour rate
+    are not in the price; Send names the missing rate and needs a reason
+    pick + sentence; never an invented rate."""
+    cid = offer_world["change_id"]
+    async with session_factory() as s:
+        pos = await s.get(CostingPosition, offer_world["position_id"])
+        pos.hours = 14
+        await s.commit()
+    sales = await _auth(client, "sales")
+    o = await _create(client, sales, cid)
+    await client.patch(_url(cid, f"/{o['id']}"),
+                       json={"data": {"timing": {"include": False}}}, headers=sales)
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 400, res.text
+    assert "without a labour rate" in res.text and "Tool Engineer" in res.text
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={
+        "rate_reason_code": "rate_requested",
+        "rate_reason": "Finance asked 26 Oct, offer due today"}, headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_f3_negative_priced_costing_sends_without_a_reason(client, offer_world):
+    sales = await _auth(client, "sales")
+    await _sent_v1(client, sales, offer_world["change_id"])

@@ -226,3 +226,5 @@ export interface OfferSendList {
 }
 
 export const HIGH_RISK_SEND_REASONS = ['covered_in_price', 'customer_aware', 'low_likelihood', 'other'] as const
+/** F3: hours without a labour rate go out only with one of these (offer_service.NO_RATE_SEND_REASONS). */
+export const NO_RATE_SEND_REASONS = ['rate_requested', 'hours_absorbed', 'covered_in_price', 'other'] as const

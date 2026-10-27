@@ -13,7 +13,7 @@ import { formatCalendarDate } from '../../../lib/format'
 import Dialog from '../../common/Dialog'
 import Button from '../../common/Button'
 import DateInput from '../../gantt/DateInput'
-import { HIGH_RISK_SEND_REASONS } from '../../../types/changeOffer'
+import { HIGH_RISK_SEND_REASONS, NO_RATE_SEND_REASONS } from '../../../types/changeOffer'
 import type { OfferDiffRow, OfferOut, OfferSendList } from '../../../types/changeOffer'
 import { t } from '../../../i18n/cmLabels'
 import { addDaysIso, diffLabel, diffValue, fmtMoney, inputCls, todayIso } from './offerFormat'
@@ -118,6 +118,11 @@ export default function SendOfferDialog({
   const [riskNote, setRiskNote] = useState('')
   const highRisks = offer?.send_list?.high_risks.length ?? 0
   const riskOk = highRisks === 0 || (!!riskCode && riskNote.trim().length >= 15)
+  // F3 (SOFT): hours without a labour rate are not in the price; send only with a reason
+  const unrated = (offer?.warnings ?? []).filter((w) => w.code === 'no_rate_department')
+  const [rateCode, setRateCode] = useState('')
+  const [rateNote, setRateNote] = useState('')
+  const rateOk = unrated.length === 0 || (!!rateCode && rateNote.trim().length >= 15)
   const today = todayIso()
   const earliest = addDaysIso(today, -60)
   const receivedOk = !!received && received <= today && received >= earliest
@@ -134,6 +139,7 @@ export default function SendOfferDialog({
         received_at: received,
         ...(note.trim() ? { change_note: note.trim() } : {}),
         ...(highRisks ? { risk_reason_code: riskCode, risk_reason: riskNote.trim() } : {}),
+        ...(unrated.length ? { rate_reason_code: rateCode, rate_reason: rateNote.trim() } : {}),
       })
     },
     onSuccess: () => {
@@ -146,7 +152,7 @@ export default function SendOfferDialog({
     onError: (e: unknown) => toastError(e, 'Could not send the offer'),
   })
 
-  const blocked = !offer || !receivedOk || (needsNote && !note.trim()) || !riskOk || send.isPending
+  const blocked = !offer || !receivedOk || (needsNote && !note.trim()) || !riskOk || !rateOk || send.isPending
   if (!offer) return null
 
   return (
@@ -207,6 +213,20 @@ export default function SendOfferDialog({
           </select>
           <textarea rows={2} data-testid="send-risk-note" value={riskNote} aria-label={t('send.riskNote')}
             onChange={(e) => setRiskNote(e.target.value)} placeholder={t('send.riskNote')}
+            className={`${inputCls} w-full`} />
+        </div>
+      )}
+
+      {unrated.length > 0 && (
+        <div data-testid="send-no-rate" className="mt-3 space-y-1">
+          <p className="text-xs text-rose-300">{t('send.noRateHelp')}</p>
+          <select data-testid="send-rate-code" aria-label={t('send.riskReason')} value={rateCode}
+            onChange={(e) => setRateCode(e.target.value)} className={`${inputCls} w-full`}>
+            <option value="">{t('send.riskReason')}…</option>
+            {NO_RATE_SEND_REASONS.map((c) => <option key={c} value={c}>{t(`send.rateReason.${c}`)}</option>)}
+          </select>
+          <textarea rows={2} data-testid="send-rate-note" value={rateNote} aria-label={t('send.riskNote')}
+            onChange={(e) => setRateNote(e.target.value)} placeholder={t('send.riskNote')}
             className={`${inputCls} w-full`} />
         </div>
       )}

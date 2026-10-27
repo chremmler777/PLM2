@@ -98,6 +98,10 @@ RECEIVED_MAX_PAST_DAYS = 60
 SEND_KEY = "_send"
 HIGH_RISK_SEND_REASONS = ("covered_in_price", "customer_aware", "low_likelihood",
                           "other")
+#: F3 / T1 (test 2026-10-26, SOFT): hours in the costing without a labour
+#: rate are not in the price; the offer goes out only with a reason.
+NO_RATE_SEND_REASONS = ("rate_requested", "hours_absorbed", "covered_in_price", "other")
+NO_RATE_RULE = "offer_hours_without_rate"
 
 
 def _bool(v, default: bool = False) -> bool:
@@ -1136,14 +1140,36 @@ class OfferService:
         return [fresh_by_key[k] for k in siblings if k in fresh_by_key]
 
     @staticmethod
+    async def unrated_hours(session: AsyncSession, change: ChangeRequest) -> list[str]:
+        """F3: what the costing prices without a rate, one line per missing
+        rate ("No cost sheet rate for Process Engineer: 14 h unpriced");
+        never an invented rate."""
+        from app.services.cost_service import CostService
+        summ = await CostService.summation(session, change)
+        return [w["message"] for w in summ.get("warnings") or []
+                if w.get("code") == "no_rate_department"]
+
+    @staticmethod
     async def send(session: AsyncSession, change: ChangeRequest,
                    offer: ChangeOffer, user: User, *,
                    received_at: Optional[date] = None,
                    change_note: Optional[str] = None,
                    risk_reason_code: Optional[str] = None,
-                   risk_reason: Optional[str] = None) -> ChangeOffer:
+                   risk_reason: Optional[str] = None,
+                   rate_reason_code: Optional[str] = None,
+                   rate_reason: Optional[str] = None) -> ChangeOffer:
         await OfferService._require_write(session, change, user)
         OfferService._require_draft(offer)
+        unrated = await OfferService.unrated_hours(session, change)
+        if unrated:
+            from app.services.cm_rules import override_note_refusal
+            why = override_note_refusal(rate_reason_code, rate_reason,
+                                        codes=NO_RATE_SEND_REASONS)
+            if why:
+                raise ChangeError(
+                    "Hours without a labour rate are not in this offer's price: "
+                    + "; ".join(unrated) + ". Ask Finance to add the rate to the "
+                    f"cost sheet, or send it anyway with a reason ({why})")
         internal = await OfferService._internal_cost(session, change)
         totals = await OfferService._store_totals(session, change, offer, internal)
         note = (change_note or offer.change_note or "").strip() or None
@@ -1232,6 +1258,10 @@ class OfferService:
             if not any(f.get("label") == line for f in free):
                 data["free_fields"] = free + [{"label": line, "value": "", "amount": 0}]
         data[SNAPSHOT_KEY] = snapshot
+        if unrated:
+            # F3: on the record with the version (and in the history below)
+            data["no_rate_send"] = {"missing": unrated, "reason_code": rate_reason_code,
+                                    "reason": rate_reason.strip()}
         if listed is not None:
             # R34: the internal cost the version went out on, so the PM's
             # sign-off row reads its margin without a costing summation

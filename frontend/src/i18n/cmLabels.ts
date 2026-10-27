@@ -3357,6 +3357,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'team.noMembers': { de: 'Keine Mitglieder in dieser Abteilung', en: 'No members in this department' },
   // --- backend fixer 2026-10-26 (new keys only) ---
   'tasks.openChange': { de: 'Änderung öffnen', en: 'Open change' },
+  'timing.createPlanFirst': { de: 'Zuerst den Detailplan anlegen (Lead, Reiter Timing); dann bestätigen die Teams', en: 'Create the detailed plan first (lead, Timing tab); then the teams confirm it' },
+  'send.noRateHelp': { de: 'Stunden ohne Stundensatz sind nicht im Preis (Liste unten). Finance pflegt den Satz im Cost Sheet; oder mit Grund senden (protokolliert).', en: 'Hours without a labour rate are not in the price (listed below). Finance adds the rate to the cost sheet; or send with a reason (logged).' },
+  'send.rateReason.rate_requested': { de: 'Satz bei Finance angefragt, Angebot kann nicht warten', en: 'Rate asked of Finance, the offer cannot wait' },
+  'send.rateReason.hours_absorbed': { de: 'Stunden werden nicht berechnet', en: 'Hours are not charged' },
+  'send.rateReason.covered_in_price': { de: 'Im Preis anderweitig enthalten', en: 'Covered in the price another way' },
+  'send.rateReason.other': { de: 'Sonstiges', en: 'Other' },
+  'next.waitingOnNames': { de: 'Wartet auf {x}', en: 'Waiting on {x}' },
   // --- end backend fixer block ---
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

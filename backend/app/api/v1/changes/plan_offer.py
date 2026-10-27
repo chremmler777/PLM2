@@ -200,6 +200,10 @@ class OfferSendIn(BaseModel):
     # with a reason pick (offer_service.HIGH_RISK_SEND_REASONS) + a sentence.
     risk_reason_code: Optional[str] = None
     risk_reason: Optional[str] = None
+    # F3 (SOFT): hours without a labour rate go out only with a reason pick
+    # (offer_service.NO_RATE_SEND_REASONS) + a sentence
+    rate_reason_code: Optional[str] = None
+    rate_reason: Optional[str] = None
 
 
 class OfferReceivedIn(BaseModel):
@@ -772,7 +776,9 @@ async def send_offer(
                                 received_at=body.received_at,
                                 change_note=body.change_note,
                                 risk_reason_code=body.risk_reason_code,
-                                risk_reason=body.risk_reason)
+                                risk_reason=body.risk_reason,
+                                rate_reason_code=body.rate_reason_code,
+                                rate_reason=body.rate_reason)
     except _ERRORS as e:
         raise _http(e)
     out = await _offer_out(db, change, offer)
