@@ -516,3 +516,17 @@ async def test_n6_lessons_step_is_in_the_leads_my_tasks(client, session_factory,
                                          headers=eng)).json()["actions"]
             if a["kind"] == "lessons_step"]
     assert len(tasks) == 1 and len(acts) == 1
+
+
+async def test_esc_p3_6_team_change_leaves_history(session_factory, seed):
+    from app.models.entities import AuditLog, User
+    from app.services.project_team_service import ProjectTeamService
+    q = await make_department_member(session_factory, seed["engineer_id"], "Quality")
+    async with session_factory() as s:
+        await ProjectTeamService.set_responsible(
+            s, seed["project_id"], q, seed["engineer_id"], await s.get(User, seed["admin_id"]))
+        await s.commit()
+        rows = (await s.execute(select(AuditLog).where(
+            AuditLog.entity_type == "project_team"))).scalars().all()
+        assert len(rows) == 1 and rows[0].action == "team_changed"
+        assert '"responsible_id": %d' % seed["engineer_id"] in rows[0].new_values

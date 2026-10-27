@@ -317,6 +317,15 @@ class ProjectTeamService:
                 row.set_by = actor.id
                 row.set_at = datetime.utcnow()
             await session.flush()
+            # esc P3-6: a team change leaves history (hash-chained audit row)
+            from app.services.audit_service import AuditService
+            await AuditService.record(
+                session, entity_type="project_team", entity_id=project_id,
+                action="team_changed", user_id=actor.id,
+                old_values={"department_id": dept_id, "department": names.get(dept_id),
+                            "responsible_id": old_resp, "backup_id": old_backup},
+                new_values={"department_id": dept_id, "department": names.get(dept_id),
+                            "responsible_id": resp, "backup_id": backup})
             if resp != old_resp:
                 await ProjectTeamService._follow_sales_contact(
                     session, project_id, dept_id, old_resp, resp, actor)
