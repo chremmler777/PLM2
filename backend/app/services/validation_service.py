@@ -98,7 +98,12 @@ class ValidationService:
         from app.services.change_people import (
             hard3_blind, holds_lead, staffed_department_ids,
         )
-        if change.status != VALIDATION_STATUS or hard3_blind(actor):
+        from app.services.hub_departments import is_hub_account
+        # retest N4 (the T5 rule): a hub admin's AdminPanel department roles
+        # are real memberships and count; only a local admin account's
+        # blanket rows stay blind (it acts as the department)
+        if change.status != VALIDATION_STATUS or (
+                hard3_blind(actor) and not is_hub_account(actor)):
             # HARD #3: a real admin's own department rows do not count (it
             # acts as the department to record for it)
             return {d: False for d in ids}

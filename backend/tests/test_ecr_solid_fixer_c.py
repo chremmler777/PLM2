@@ -471,3 +471,29 @@ async def test_n9_no_geometry_drawing_row_and_no_tool_change_row_say_so(
         hints = await ReleaseService.revision_hints(s, change)
         assert "no geometry change signed" in hints["drawing_released"]
         assert "no tool change" in hints["equipment_updated"]
+
+
+async def test_n4_hub_admin_records_its_own_departments_validation_check(session_factory, seed):
+    """Retest N4 (T5's rule): Christoph (hub admin, real Development
+    member) records Development's validation check without acting as; a
+    local admin account's blanket membership still does not count."""
+    from app.models.entities import User
+    from app.services.hub_departments import HUB_MANAGED
+    from app.services.validation_service import ValidationService
+    async with session_factory() as s:
+        hub = User(organization_id=seed["org_id"], username="christoph",
+                   email="christoph@test.io", full_name="Christoph", role="admin",
+                   is_active=True, mfa_enabled=False, hashed_password=HUB_MANAGED)
+        s.add(hub)
+        c = ChangeRequest(change_number="C-N4", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=True, status="in_validation")
+        s.add(c); await s.commit()
+        hub_id, cid = hub.id, c.id
+    dev = await make_department_member(session_factory, hub_id, "Development")
+    await make_department_member(session_factory, seed["admin_id"], "Development")
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        assert await ValidationService.may_write(s, c, dev, await s.get(User, hub_id))
+        assert not await ValidationService.may_write(s, c, dev, await s.get(User, seed["admin_id"]))
