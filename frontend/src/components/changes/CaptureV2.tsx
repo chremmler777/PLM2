@@ -55,7 +55,7 @@ export const emptyUrgent: UrgentDraft = { needBy: '', reason: '', evidence: '' }
 export const urgentMissing = (d: UrgentDraft): string[] => [
   ...(d.needBy && d.needBy.slice(0, 10) >= todayIso() ? [] : [t('next.item.need_by')]),
   ...(d.reason ? [] : [t('urgent.missingReason')]),
-  ...(okRef(d.evidence) ? [] : [t('urgent.missingEvidence')]),
+  // evidence optional since the PM captures (Christoph 2026-10-27)
 ]
 
 export function UrgentFields({ value, onChange, idPrefix = 'urgent' }: {

@@ -155,7 +155,7 @@ class DeviationDecideForbidden(ChangeError):
 # customer's facts, not the lead
 KICKOFF_SALES_SUPPLIES = frozenset({
     "description", "quote deadline", "customer file", "at least one attachment",
-    "need-by date", "urgent reason and evidence"})
+    "need-by date", "urgent reason"})
 
 
 class RightsForbidden(ChangeError):
@@ -1711,7 +1711,7 @@ class ChangeService:
                      "what is wrong today": "problem",
                      "target": "target",
                      "need-by date": "need_by",
-                     "urgent reason and evidence": "urgent_reason"}.get(m, m),
+                     "urgent reason": "urgent_reason"}.get(m, m),
                     "soft", rule="capture_incomplete")
         elif to == "approved" and change.status == "scoping":
             # Mother plant: MotherPlantService.approval_blocker, all hard.

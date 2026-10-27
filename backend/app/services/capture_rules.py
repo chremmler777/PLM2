@@ -5,8 +5,9 @@ SCOPING_V2).
   a filed customer mail) and the quote deadline.
 - Internal change complete: description, one evidence file or photo, and
   "what is wrong today" as a number with its unit, with the target.
-- Urgent (priority 'critical'): the need-by date (release_due_date), a
-  reason pick (URGENT_REASONS) and its evidence; refused without them.
+- Urgent (priority 'critical'): the need-by date (release_due_date) and a
+  reason pick (URGENT_REASONS); refused without them. Evidence is optional
+  since the PM captures (Christoph 2026-10-27).
   Mother-plant changes keep their own SOP and are left out.
 - Urgent proceed: "Need-by realistic? yes / only with start at risk / no
   (proposed date)"; on a customer change anything but yes gives Sales "Tell
@@ -65,15 +66,13 @@ def urgent_refusal(change: ChangeRequest) -> Optional[str]:
     if change.urgent_reason not in URGENT_REASONS:
         return ("Urgent: pick the reason (line stop, safety, quality escape, "
                 "launch date, customer demand, other)")
-    from app.services.cm_rules import reference_refusal
-    return reference_refusal(change.urgent_evidence, "Urgent: the evidence",
-                             "the customer mail of 15 Oct or the 8D number")
+    return None
 
 
 async def missing(session: AsyncSession, change: ChangeRequest) -> list[str]:
     """The §2 parts of a complete capture kickoff_missing adds (switch on):
     the customer file of a customer change, the problem and target of an
-    internal one, the urgent need-by, reason and evidence."""
+    internal one, the urgent need-by and reason."""
     if not cm_switches.on("SCOPING_V2") or not _plain(change):
         return []
     out: list[str] = []
@@ -90,12 +89,10 @@ async def missing(session: AsyncSession, change: ChangeRequest) -> list[str]:
         if change.target_value is None:
             out.append("target")
     if is_urgent(change):
-        from app.services.cm_rules import reference_refusal
         if change.release_due_date is None:
             out.append("need-by date")
-        if (change.urgent_reason not in URGENT_REASONS
-                or reference_refusal(change.urgent_evidence)):
-            out.append("urgent reason and evidence")
+        if change.urgent_reason not in URGENT_REASONS:
+            out.append("urgent reason")
     return out
 
 

@@ -87,22 +87,20 @@ async def test_internal_change_needs_problem_and_target(
     assert (body["problem_value"], body["problem_unit"], body["target_value"]) == (3.5, "% scrap", 1.0)
 
 
-async def test_urgent_needs_need_by_reason_and_evidence(client, admin_auth, seed):
-    for drop, word in (("release_due_date", "need-by"), ("urgent_reason", "reason"),
-                       ("urgent_evidence", "evidence")):
+async def test_urgent_needs_need_by_and_reason_evidence_optional(client, admin_auth, seed):
+    for drop, word in (("release_due_date", "need-by"), ("urgent_reason", "reason")):
         body = {k: v for k, v in URGENT.items() if k != drop}
         r = await _create(client, admin_auth, seed, f"urgent no {drop}",
                           customer_relevant=True, **body)
         assert r.status_code == 400 and word in r.json()["detail"], (drop, r.text)
-    r = await _create(client, admin_auth, seed, "urgent weak", customer_relevant=True,
-                      **{**URGENT, "urgent_evidence": "ok"})
+    # a need-by in the past: refused
+    r = await _create(client, admin_auth, seed, "urgent bad", customer_relevant=True,
+                      **{**URGENT, "release_due_date": "2026-10-01T12:00:00"})
     assert r.status_code == 400
-    # a need-by in the past, junk evidence: refused
-    for bad in ({"release_due_date": "2026-10-01T12:00:00"}, {"urgent_evidence": "asdfg"},
-                {"urgent_evidence": "n/a n/a"}):
-        r = await _create(client, admin_auth, seed, "urgent bad", customer_relevant=True,
-                          **{**URGENT, **bad})
-        assert r.status_code == 400, bad
+    # evidence is optional since the PM captures (Christoph 2026-10-27)
+    r = await _create(client, admin_auth, seed, "urgent no evidence", customer_relevant=True,
+                      **{k: v for k, v in URGENT.items() if k != "urgent_evidence"})
+    assert r.status_code == 200, r.text
     r = await _create(client, admin_auth, seed, "urgent ok", customer_relevant=True, **URGENT)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -287,7 +285,7 @@ async def test_release_date_moves_on_a_legacy_critical_change(
         "release_due_reason": "Tool trial moved, mail 2026-10-15"}, headers=admin_auth)
     assert r.status_code == 200, r.text
     assert r.json()["release_due_date"].startswith("2026-11-15")
-    # making the urgency itself move still asks for reason and evidence
-    r = await client.patch(f"/api/v1/changes/{cid}", json={"urgent_reason": "other"},
+    # making the urgency itself move still asks for a valid reason
+    r = await client.patch(f"/api/v1/changes/{cid}", json={"urgent_reason": "bogus"},
                            headers=admin_auth)
     assert r.status_code == 400

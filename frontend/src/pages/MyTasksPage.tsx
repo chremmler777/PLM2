@@ -326,6 +326,7 @@ const KICKOFF_ITEM: Record<string, string> = {
   // §2 capture
   'customer file': 'next.item.customer_file', 'what is wrong today': 'next.item.problem',
   target: 'next.item.target', 'need-by date': 'next.item.need_by',
+  'urgent reason': 'next.item.urgent_reason',
   'urgent reason and evidence': 'next.item.urgent_reason',
 };
 

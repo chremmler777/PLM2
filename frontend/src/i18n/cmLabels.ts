@@ -2883,14 +2883,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // §2 capture: urgent, internal problem and target; §3 urgent proceed
   'urgent.toggle': { de: 'Dringend', en: 'Urgent' },
   'urgent.toggleHint': {
-    de: 'Dringend braucht Bedarfstermin, Grund und Beleg; Aufgaben sind dann in 1 Arbeitstag fällig.',
-    en: 'Urgent needs a need-by date, a reason and evidence; tasks are then due in 1 working day.' },
+    de: 'Dringend braucht Bedarfstermin und Grund; Aufgaben sind dann in 1 Arbeitstag fällig.',
+    en: 'Urgent needs a need-by date and a reason; tasks are then due in 1 working day.' },
   'urgent.reasonPick': { de: 'Grund', en: 'Reason' },
   'urgent.infoLabel': { de: 'Was bedeutet dringend?', en: 'What does urgent do?' },
   'urgent.infoTitle': { de: 'Dringend = schneller, nicht kürzer', en: 'Urgent = faster, not shorter' },
   'urgent.info1': {
-    de: 'Braucht Bedarfstermin, Grund und Beleg (Mail, 8D-Nr. oder Datei).',
-    en: 'Needs a need-by date, a reason and evidence (mail, 8D no. or file).' },
+    de: 'Braucht Bedarfstermin und Grund; ein Beleg (Mail, 8D-Nr.) ist optional.',
+    en: 'Needs a need-by date and a reason; evidence (mail, 8D no.) is optional.' },
   'urgent.info2': {
     de: 'Aufgaben und Bewertungen sind in 1 statt 2 Arbeitstagen fällig; Eskalation einen Tag früher.',
     en: 'Tasks and assessments are due in 1 working day instead of 2; escalation comes a day earlier.' },
@@ -2909,7 +2909,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'urgent.reason.launch_date': { de: 'Anlauftermin gefährdet', en: 'Launch date at risk' },
   'urgent.reason.customer_demand': { de: 'Kundenforderung', en: 'Customer demand' },
   'urgent.reason.other': { de: 'Anderer', en: 'Other' },
-  'urgent.evidence': { de: 'Beleg', en: 'Evidence' },
+  'urgent.evidence': { de: 'Beleg (optional)', en: 'Evidence (optional)' },
   'urgent.missingReason': { de: 'Grund für dringend', en: 'urgent reason' },
   'urgent.missingEvidence': { de: 'Beleg für dringend', en: 'urgent evidence' },
   'urgent.evidencePlaceholder': { de: 'Mail, 8D-Nr. oder Datei', en: 'Mail, 8D no. or file' },
