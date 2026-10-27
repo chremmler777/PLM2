@@ -5987,6 +5987,15 @@ class ChangeService:
 
         if change.status == "approved":
             actions = await ChangeService._one_approved_step(session, change, actions)
+        if change.status == "released":
+            # the row My Tasks gives the lead after release ("Ready: move it
+            # on" -> Close change) is an action here too: the same builder
+            async def _ident(c):
+                return {"change_id": c.id}
+            for r in await ChangeService.advance_tasks(session, user, [change], _ident):
+                item = {k: v for k, v in r.items() if k not in ("change_id", "since", "main_user")}
+                item["_owned"] = True
+                actions.append(item)
 
         # Project team (spec §18): each item carries the viewer's role on it.
         # "main" items are theirs; "backup" items (the project has another

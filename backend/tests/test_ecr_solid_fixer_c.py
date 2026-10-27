@@ -210,3 +210,29 @@ async def test_f17_finance_reads_the_costing_summation(client, session_factory, 
     eng = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await client.get(f"/api/v1/changes/{cid}/summation", headers=eng)
     assert res.status_code == 200, res.text
+
+
+async def test_released_lead_action_matches_my_tasks(client, session_factory, seed):
+    """After release the lead's My Tasks row 'Ready: move it on' (Close
+    change) is an action on the change page too (it was empty there)."""
+    from app.models.entities import User
+    from app.services.change_service import ChangeService
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-REL", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=True, status="released")
+        s.add(c); await s.commit()
+        cid = c.id
+    await make_department_member(session_factory, seed["engineer_id"], "Process Engineer")
+    from tests.conftest import ENGINEER_PASSWORD, login
+    eng = await login(client, "eng@test.io", ENGINEER_PASSWORD)
+    tasks = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=eng)).json()
+             if t["change_id"] == cid]
+    acts = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=eng)).json()["actions"]
+    task_adv = [t for t in tasks if t["kind"] == "advance"]
+    act_adv = [a for a in acts if a["kind"] == "advance"]
+    assert len(task_adv) == len(act_adv)
+    if act_adv:
+        assert act_adv[0]["to_status"] == "closed" and act_adv[0]["label"] == "Close change"
+    assert task_adv, tasks
