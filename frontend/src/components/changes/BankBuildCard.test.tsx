@@ -183,5 +183,12 @@ describe('BankBuildCard on a mother-plant change', () => {
     expect(intro).not.toContain('customer')
     expect(screen.queryByTestId('bank-build-publish-state')).toBeNull()
   })
+
+  it('an internal change: no Sales publish copy and no publish block (T2)', () => {
+    wrap({ change: change({ customer_relevant: false, bank_build_mode: 'running_change' }), canPublish: true })
+    expect(screen.getByTestId('bank-build-intro').textContent).toBe(t('bankbuild.introInternal'))
+    expect(screen.queryByTestId('bank-build-publish-state')).toBeNull()
+    expect(screen.queryByTestId('bank-build-publish')).toBeNull()
+  })
 })
 

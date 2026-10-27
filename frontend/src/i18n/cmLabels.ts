@@ -1693,6 +1693,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'How does the change reach the line? Logistics decides, Sales publishes '
       + 'the plan to the customer.',
   },
+  'bankbuild.introInternal': {
+    de: 'Wie kommt die Änderung in die Serie? Die Logistik entscheidet.',
+    en: 'How does the change reach the line? Logistics decides.',
+  },
   'bankbuild.mode.running_change': { de: 'Fließende Änderung', en: 'Running change' },
   'bankbuild.mode.running_change.hint': {
     de: 'Umstellung in der laufenden Produktion - kein Ausschuss geplant.',
@@ -2752,6 +2756,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'answer.assumed': { de: 'Angenommen', en: 'Assumed' },
   'answer.ref': { de: 'Nachweis (Referenz)', en: 'Evidence (reference)' },
   'answer.refPlaceholder': { de: 'Zeichnungs-Nr., Prozessblatt, Mail-Ref.', en: 'Drawing no., process sheet, mail ref' },
+  'answer.customerRefPlaceholder': { de: 'Kundenmail, PO oder Besprechungsnotiz', en: 'Customer mail, PO or meeting note' },
   'answer.mail': { de: 'Abgelegte Kundenmail', en: 'Filed customer mail' },
   'answer.mailPick': { de: 'Mail wählen …', en: 'Pick a filed mail…' },
   'answer.noMails': { de: 'Noch keine Kundenmail abgelegt: Mail ablegen oder Dokument hier hochladen.', en: 'No customer mail filed yet: file it, or upload the document here.' },

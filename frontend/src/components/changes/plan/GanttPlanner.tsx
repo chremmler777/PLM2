@@ -524,7 +524,7 @@ export default function GanttPlanner({
             <p className="mx-auto mt-1 max-w-md text-xs text-slate-400">
               {plan === 'quote'
                 ? 'Start from the costing: every department effort and supplier lead time becomes a block, followed by sampling, validation, customer approval and a buffer. Or add the first task yourself.'
-                : 'Start from the quote plan the customer saw, then refine it with every team. Or add the first task yourself.'}
+                : 'Start from the quote plan, then refine it with every team. Or add the first task yourself.'}
             </p>
             <div className="mt-4 flex justify-center gap-2">
               {!hideSeed && (

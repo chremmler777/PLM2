@@ -283,7 +283,7 @@ export function NeedByTellCard({ change, isSales, attachments }: {
           )}
           {mailId === '' && (
             <input value={ref} onChange={(e) => setRef(e.target.value)} data-testid="need-by-tell-ref"
-              aria-label={t('answer.ref')} placeholder={t('answer.refPlaceholder')}
+              aria-label={t('answer.ref')} placeholder={t('answer.customerRefPlaceholder')}
               className={`${input} flex-1 min-w-[12rem]`} />
           )}
           <button type="button" className={btnSm.primary} data-testid="need-by-tell-save"

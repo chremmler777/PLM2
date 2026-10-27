@@ -35,7 +35,7 @@ interface Props {
   change: Pick<ChangeRequest,
     'id' | 'status' | 'bank_build_mode' | 'bank_build_note' | 'scrap_quote_price' | 'scrap_price_set'
     | 'bank_build_set_by_name' | 'bank_build_set_at'
-    | 'plan_published_by_name' | 'plan_published_at'> & { mother_plant_name?: string | null }
+    | 'plan_published_by_name' | 'plan_published_at'> & { mother_plant_name?: string | null; customer_relevant?: boolean }
   /** Logistics / PM / change lead / admin — the page derives it. */
   canSetMode?: boolean
   /** Sales / change lead / admin. */
@@ -53,7 +53,8 @@ interface Props {
 export default function BankBuildCard({
   change, canSetMode = false, canPublish = false, hidePublish: hide = false, motherPlant = false,
 }: Props) {
-  const hidePublish = hide || motherPlant
+  // An internal change has no customer to publish to.
+  const hidePublish = hide || motherPlant || change.customer_relevant === false
   const qc = useQueryClient()
   const [mode, setMode] = useState<BankBuildMode | null>(change.bank_build_mode ?? null)
   const [note, setNote] = useState(change.bank_build_note ?? '')
@@ -102,7 +103,7 @@ export default function BankBuildCard({
         <p className="text-xs text-slate-400 mt-0.5" data-testid="bank-build-intro">
           {motherPlant
             ? `How does the change reach the line? Logistics decides; ${plantName(change.mother_plant_name)} hears about it with the validated timing.`
-            : t('bankbuild.intro')}
+            : change.customer_relevant === false ? t('bankbuild.introInternal') : t('bankbuild.intro')}
         </p>
       </div>
 

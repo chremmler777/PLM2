@@ -210,7 +210,7 @@ export default function TimingTab({
                 <span className="text-xs text-slate-400">Copies every block of the quote plan, links and ideas included. Then refine it with the teams.</span>
               </div>
             ) : (
-              <p className="text-sm text-slate-400">The detailed plan is not created yet. PM, Logistics or Sales start it from the quote plan.</p>
+              <p className="text-sm text-slate-400">The detailed plan is not created yet. {internal ? 'The lead, PM or Logistics start it' : 'PM, Logistics or Sales start it'} from the quote plan.</p>
             )
           ) : !baseline ? (
             canValidate ? (
@@ -227,7 +227,9 @@ export default function TimingTab({
               </div>
             ) : (
               <p className="text-sm text-slate-400">
-                {waiting.length > 0 ? 'Waiting for every team to confirm. PM, Logistics or Sales then validate the timing.' : 'Every team confirmed. PM, Logistics or Sales validate the timing next.'}
+                {waiting.length > 0
+                  ? `Waiting for every team to confirm. ${internal ? 'The lead, PM or Logistics' : 'PM, Logistics or Sales'} then validate the timing.`
+                  : `Every team confirmed. ${internal ? 'The lead, PM or Logistics' : 'PM, Logistics or Sales'} validate the timing next.`}
               </p>
             )
           ) : motherPlant ? (

@@ -341,7 +341,7 @@ function DeadlineQuestion({ f, changeId, mayAnswer, salesOwnerName, attachments,
               )}
               {mailId === '' && answer === 'holds' && (
                 <input value={ref} onChange={(e) => setRef(e.target.value)} data-testid="dl-ref"
-                  aria-label={t('answer.ref')} placeholder={t('answer.refPlaceholder')}
+                  aria-label={t('answer.ref')} placeholder={t('answer.customerRefPlaceholder')}
                   className={`${input} flex-1 min-w-[12rem]`} />
               )}
               {answer === 'new_date' && (
