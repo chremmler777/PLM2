@@ -189,6 +189,11 @@ async def get_my_tasks(
     seen = {r["task_id"] for r in rows}
     rows += [r for r in await WorkflowService.get_coordinated_tasks(db, current_user)
              if r["task_id"] not in seen]
+    # F1: the 4-eyes reviews this user takes as the fallback reviewer
+    seen = {r["task_id"] for r in rows}
+    rows += [r for r in await WorkflowService.get_four_eyes_fallback_tasks(db, current_user)
+             if r["task_id"] not in seen]
+    await WorkflowService.add_change_refs(db, rows)
     return WorkflowService.sort_my_tasks(rows)
 
 

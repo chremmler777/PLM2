@@ -601,9 +601,18 @@ class WorkflowService:
         actor = await db.get(User, completed_by_id)
         if actor is None:
             raise ValueError("Actor not found")
-        if actor.effective_role != "admin" and not await WorkflowService.actor_in_department(
-                db, actor, task.department_id) and not await WorkflowService.coordinates_task(
-                db, task, actor):
+        fallback = None
+        in_department = await WorkflowService.actor_in_department(
+            db, actor, task.department_id)
+        if not in_department and decision == "approved":
+            # DECIDED BY CLAUDE 2026-10-26 (Christoph confirms): a 4-eyes
+            # review whose department has nobody but the previous stage's
+            # doer goes to the project's Tool Engineer (four_eyes_fallback)
+            fallback = await WorkflowService.four_eyes_fallback(db, task)
+            if fallback is not None and fallback["user_id"] != actor.id:
+                fallback = None
+        if actor.effective_role != "admin" and not in_department and fallback is None \
+                and not await WorkflowService.coordinates_task(db, task, actor):
             raise ValueError(
                 "Only members of the task's department (or an admin) may complete it; "
                 "for a department with no member here the change's coordinator does")
@@ -659,6 +668,19 @@ class WorkflowService:
             db, instance, f"task_{decision}", completed_by_id,
             {"task_id": task.id, "step": step.step_name if step else None,
              "notes": notes})
+        if fallback is not None:
+            change = await WorkflowService._task_change(db, instance)
+            line = (f"4-eyes fallback: {fallback['name']} reviews, "
+                    f"{fallback['department_name']} has no second member")
+            await WorkflowService._audit(
+                db, instance, "four_eyes_fallback", completed_by_id,
+                {"task_id": task.id, "line": line})
+            if change is not None:
+                from app.services.change_service import ChangeService
+                await ChangeService.append_changelog(
+                    db, change, "four_eyes_fallback", line, completed_by_id,
+                    new_value={"task_id": task.id,
+                               "step": step.step_name if step else None})
 
         # Rejection propagates to instance immediately
         if decision == "rejected":
@@ -1001,6 +1023,115 @@ class WorkflowService:
         from app.services.change_people import coordinates
         return await coordinates(db, change, user)
 
+    # ------------------------------------------------------------------
+    # F1 2026-10-26, DECIDED BY CLAUDE (Christoph confirms): a 4-eyes step
+    # (Design review) whose department has no second active member (prod:
+    # Development = Christoph alone) is no dead end. The fallback reviewer
+    # is the project team's Tool Engineer responsible, else its named
+    # backup, else the change lead; never whoever did the previous stage.
+    # ------------------------------------------------------------------
+    FOUR_EYES_FALLBACK_DEPARTMENT = "Tool Engineer"
+
+    @staticmethod
+    async def _task_change(db: AsyncSession, instance: WfInstance):
+        """The change that runs this instance: its engine change, or the
+        change that created the instance's revision; None otherwise."""
+        from app.models.change import ChangeRequest
+        if instance.change_id is not None:
+            return await db.get(ChangeRequest, instance.change_id)
+        if instance.part_revision_id is not None:
+            rev = await db.get(PartRevision, instance.part_revision_id)
+            if rev is not None and rev.originating_change_id is not None:
+                return await db.get(ChangeRequest, rev.originating_change_id)
+        return None
+
+    @staticmethod
+    async def four_eyes_fallback(db: AsyncSession, task: WfInstanceTask) -> dict | None:
+        """{user_id, name, department_name} of who reviews this open 4-eyes
+        task for its department, or None (no 4-eyes step, or the department
+        has a member besides the previous stage's doers)."""
+        from app.models.entities import User
+        from app.models.workflow import Department, UserDepartment
+        from app.services.hub_departments import member_clause
+        from app.services.project_team_service import _pair
+        if task.status != "active" or not task.is_actionable:
+            return None
+        step = task.step if "step" in task.__dict__ else (
+            await db.get(WfStep, task.step_id) if task.step_id else None)
+        if step is None or not step.four_eyes:
+            return None
+        prev = {u for u in (await db.execute(
+            select(WfInstanceTask.completed_by).where(
+                WfInstanceTask.instance_id == task.instance_id,
+                WfInstanceTask.stage_order == task.stage_order - 1,
+                WfInstanceTask.status.in_(("approved", "waived")))
+        )).scalars().all() if u is not None}
+        members = set((await db.execute(
+            select(UserDepartment.user_id)
+            .join(User, User.id == UserDepartment.user_id)
+            .join(Department, Department.id == UserDepartment.department_id)
+            .where(UserDepartment.department_id == task.department_id,
+                   User.is_active.is_(True), Department.is_active.is_(True),
+                   member_clause()))).scalars().all())
+        if members - prev:
+            return None
+        instance = await db.get(WfInstance, task.instance_id)
+        change = await WorkflowService._task_change(db, instance)
+        project_id = change.project_id if change is not None else None
+        if project_id is None and instance.part_revision_id is not None:
+            part, _ = await WorkflowService._instance_part_context(db, instance)
+            project_id = part.project_id
+        dept = await db.get(Department, task.department_id)
+        te_id = (await db.execute(select(Department.id).where(
+            Department.name == WorkflowService.FOUR_EYES_FALLBACK_DEPARTMENT,
+            Department.is_active.is_(True)))).scalar_one_or_none()
+        resp, backup = await _pair(db, project_id, te_id)
+        candidates = [resp, backup]
+        if change is not None and change.lead_id is not None:
+            lead = await db.get(User, change.lead_id)
+            if lead is not None and lead.is_active:
+                candidates.append((lead.id, lead.full_name or lead.username))
+        for c in candidates:
+            if c is not None and c[0] not in prev:
+                return {"user_id": c[0], "name": c[1],
+                        "department_name": dept.name if dept else "The department"}
+        return None
+
+    @staticmethod
+    async def get_four_eyes_fallback_tasks(db: AsyncSession, user) -> list[dict]:
+        """The open 4-eyes revision steps this user reviews as the fallback
+        (four_eyes_fallback), shaped like get_my_tasks rows."""
+        from app.services.change_people import is_acting
+        if user is None or is_acting(user):
+            return []
+        q = (select(WfInstanceTask)
+             .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+             .join(WfStep, WfStep.id == WfInstanceTask.step_id)
+             .where(WfInstanceTask.status == "active",
+                    WfInstanceTask.is_actionable.is_(True),
+                    WfStep.four_eyes.is_(True),
+                    WfInstance.change_id.is_(None),
+                    WfInstance.part_revision_id.is_not(None),
+                    WfInstance.status == "active")
+             .options(selectinload(WfInstanceTask.instance)
+                      .selectinload(WfInstance.part_revision)
+                      .selectinload(PartRevision.part),
+                      selectinload(WfInstanceTask.step).selectinload(WfStep.stage),
+                      selectinload(WfInstanceTask.department)))
+        from app.services.project_team_service import TeamRoles
+        roles = TeamRoles(db, user.id)
+        out = []
+        for t in (await db.execute(q)).scalars().all():
+            fb = await WorkflowService.four_eyes_fallback(db, t)
+            if fb is None or fb["user_id"] != user.id:
+                continue
+            row = await WorkflowService._my_task_row(t, roles, user.id)
+            row.update({"coordinated": True, "role": "main", "main_name": None,
+                        "hint": (f"4-eyes fallback: you review, "
+                                 f"{fb['department_name']} has no second member")})
+            out.append(row)
+        return out
+
     @staticmethod
     async def task_rights(db: AsyncSession, instance: WfInstance, user) -> dict:
         """task id -> {can_act, coordinator_hint} for the open actionable
@@ -1023,6 +1154,14 @@ class WorkflowService:
                                        await coordinator_name(db, change))
             can = admin or t.department_id in mine or (
                 change is not None and await WorkflowService.coordinates_task(db, t, user))
+            fb = await WorkflowService.four_eyes_fallback(db, t)
+            if fb is not None:
+                hint = (f"4-eyes fallback: {fb['name']} reviews, "
+                        f"{fb['department_name']} has no second member")
+                if t.department_id not in mine:
+                    # the fallback reviewer acts; a department member who
+                    # did the previous stage never does (the 4-eyes rule)
+                    can = can or fb["user_id"] == user.id
             out[t.id] = {"can_act": bool(can), "coordinator_hint": hint}
         return out
 
@@ -1130,6 +1269,27 @@ class WorkflowService:
             "role": role,
             "main_name": main_name if role == "backup" else None,
         }
+
+    @staticmethod
+    async def add_change_refs(db: AsyncSession, rows: list[dict]) -> list[dict]:
+        """F4 (R18): a check workflow step of a revision an open change
+        created names that change (change_id, change_number, change_title),
+        so My Tasks reads "CR-2026-0013 Design review", not a bare part."""
+        from app.models.change import ChangeRequest
+        rev_ids = {r["revision_id"] for r in rows
+                   if r.get("revision_id") is not None and not r.get("change_number")}
+        if not rev_ids:
+            return rows
+        found = {rid: (cid, num, title) for rid, cid, num, title in (await db.execute(
+            select(PartRevision.id, ChangeRequest.id, ChangeRequest.change_number,
+                   ChangeRequest.title)
+            .join(ChangeRequest, ChangeRequest.id == PartRevision.originating_change_id)
+            .where(PartRevision.id.in_(rev_ids)))).all()}
+        for r in rows:
+            hit = found.get(r.get("revision_id"))
+            if hit is not None and not r.get("change_number"):
+                r["change_id"], r["change_number"], r["change_title"] = hit
+        return rows
 
     @staticmethod
     def sort_my_tasks(results: list[dict]) -> list[dict]:
