@@ -89,9 +89,14 @@ async def test_acting_as_sales_may_capture_but_not_confirm_impact(
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part["part_id"], "is_lead": True}, headers=sales)
     await satisfy_capture_gate(client, sales, cid)
+    # the hand-over is the run team's (Project Management captures,
+    # migration 152), not Sales', acting or not
     assert (await client.post(f"/api/v1/changes/{cid}/transition",
                               json={"to_status": "scoping"},
-                              headers=sales)).status_code == 200
+                              headers=sales)).status_code == 403
+    assert (await client.post(f"/api/v1/changes/{cid}/transition",
+                              json={"to_status": "scoping"},
+                              headers=admin_auth)).status_code == 200
 
     # Sales is not Development -> the impact lock is out of reach, admin or not
     res = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=sales)

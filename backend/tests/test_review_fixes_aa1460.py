@@ -80,7 +80,12 @@ async def test_pm_writes_capture_fields_only_while_nobody_leads(
     r = await client.patch(f"{URL}/{cid}", headers=pm, json={"description": "d1"})
     assert r.status_code == 200, r.text
     await _set(session_factory, cid, lead_id=mp["users"]["quality"])
+    # Project Management captures (migration 152): in capture it writes them
+    # whoever leads; in scoping only while nobody leads
     r = await client.patch(f"{URL}/{cid}", headers=pm, json={"description": "d2"})
+    assert r.status_code == 200, r.text
+    await _set(session_factory, cid, status="scoping")
+    r = await client.patch(f"{URL}/{cid}", headers=pm, json={"description": "d3"})
     assert r.status_code == 403
     assert r.json()["detail"] == (
         "Only the change lead, Sales, Project Management or an admin may "

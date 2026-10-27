@@ -379,9 +379,11 @@ class ProjectTeamService:
 
     @staticmethod
     async def responsible_user_id(session: AsyncSession, project_id: Optional[int],
-                                  department_name: str) -> Optional[int]:
+                                  department_name: str, *,
+                                  backup: bool = False) -> Optional[int]:
         """The project's responsible for this department, or None (unset, or
-        no project / department)."""
+        no project / department). backup=True: else the named backup (D2b),
+        when a live member (the Sales contact default, migration 152)."""
         if project_id is None:
             return None
         dept_id = (await session.execute(
@@ -390,13 +392,16 @@ class ProjectTeamService:
         if dept_id is None:
             return None
         row = await ProjectTeamService._row(session, project_id, dept_id)
-        if row is None or row.user_id is None:
+        if row is None:
             return None
         # A responsible who is inactive or left the department no longer
-        # counts. (The named backup is not a default: a change's lead or
-        # Sales contact is the responsible or nobody.)
-        return (row.user_id if await is_live_member(
-            session, row.user_id, department_name) else None)
+        # counts. (The named backup is a default only where the caller asks:
+        # the Sales contact, Christoph 2026-10-26; a change's lead is the
+        # responsible or nobody.)
+        for uid in ((row.user_id, row.backup_user_id) if backup else (row.user_id,)):
+            if uid is not None and await is_live_member(session, uid, department_name):
+                return uid
+        return None
 
     @staticmethod
     async def role_for_user(session: AsyncSession, project_id: Optional[int],

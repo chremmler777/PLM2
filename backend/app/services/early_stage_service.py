@@ -105,9 +105,11 @@ class EarlyStageService:
 
         - reject, cancel, hold, recall to scoping, close the assessment:
           the change lead, Project Management members, admin;
-        - kick off (captured -> scoping): Sales, PM, lead, admin;
-        - Sales may also reject at capture, and a quoted change the customer
-          declined (the commercial answer is theirs);
+        - kick off (captured -> scoping) and reject at capture: the run
+          team (Project Management captures, Christoph 2026-10-26,
+          migration 152; Sales no longer does);
+        - Sales may reject a quoted change the customer declined (the
+          commercial answer is theirs);
         - ECR-solid C1 (switch COMMERCIAL_V2): approve, start implementation,
           start validation, reopen a rejection and every resume from hold
           are the run team's too (RUN_TEAM_MIDFLOW_HOPS).
@@ -127,18 +129,9 @@ class EarlyStageService:
         r = await EarlyStageService._roles(session, change, user)
         if r["run_team"]:
             return None
-        # Sales captures customer changes; an internal change with a lead
-        # (P3: the engineering raiser) is its run team's to hand over.
-        if (frm == "captured" and to_status == "scoping" and r["sales"]
-                and change.lead_id is None and cm_switches.on("SCOPING_V2")):
-            # A6-04 (R5, R18), D2: scoping waits for a lead, and only Project
-            # Management sets one (the project's lead PM leads by default)
-            return ("Project Management sets the change lead first (the "
-                    "project's lead PM leads by default: set one in the "
-                    "project team); then the change goes to scoping")
-        if (frm == "captured" and to_status in ("scoping", "rejected") and r["sales"]
-                and (change.customer_relevant or change.lead_id is None)):
-            return None
+        # Project Management captures (migration 152): the hand-over and a
+        # rejection at capture are the run team's alone; Sales supplies the
+        # customer's facts but no longer hands over.
         if frm == "quoted" and to_status == "rejected" and r["sales"]:
             return None
         if frm == "on_hold" and to_status != "cancelled":
@@ -156,9 +149,6 @@ class EarlyStageService:
                         else "recall this change to scoping"),
             "costing": "close the assessment",
         }.get(to_status, f"move this change to '{to_status}'")
-        if frm == "captured" and to_status in ("scoping", "rejected"):
-            return ("Only Sales, Project Management, the change lead or an "
-                    f"admin may {verb}")
         return f"Only the change lead, Project Management or an admin may {verb}"
 
     @staticmethod

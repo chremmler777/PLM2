@@ -23,8 +23,8 @@ ACTS_AS = "X-Acts-As-Department"
 #: Spelled out literally, like frontend/src/training/tasks.test.ts: a rename on
 #: one side must be a deliberate two-file change.
 EXPECTED_TASKS = {
-    "project_management": ("pm_set_priority",),
-    "sales": ("sales_start_change",),
+    "project_management": ("pm_start_change", "pm_set_priority"),
+    "sales": ("sales_set_quote_deadline",),
     "engineering": ("eng_answer_checklist_row", "eng_submit_assessment"),
     "scheduling": ("sch_answer_checklist_row",),
     "quality": ("qa_answer_checklist_row",),
@@ -127,7 +127,7 @@ async def test_department_member_owes_its_role(client, eng_sales):
     sales = st["roles"][0]
     assert sales["status"] is None and sales["cleared"] is False
     assert sales["open_reason"]
-    assert [t["key"] for t in sales["tasks"]] == ["sales_start_change"]
+    assert [t["key"] for t in sales["tasks"]] == ["sales_set_quote_deadline"]
 
 
 async def test_acting_as_owes_exactly_that_departments_role(client, seed, depts):
@@ -166,22 +166,22 @@ async def test_attest_refusals(client, eng_sales, seed):
 # --------------------------------------------------------------- attempts
 
 async def test_attempt_needs_an_attestation_and_a_known_task(client, eng_sales):
-    assert (await _attempt(client, eng_sales, "sales_start_change")).status_code == 409
+    assert (await _attempt(client, eng_sales, "sales_set_quote_deadline")).status_code == 409
     await _attest(client, eng_sales)
     assert (await _attempt(client, eng_sales, "pm_set_priority")).status_code == 422
-    assert (await _attempt(client, eng_sales, "sales_start_change", result="maybe")
+    assert (await _attempt(client, eng_sales, "sales_set_quote_deadline", result="maybe")
             ).status_code == 422
 
 
 async def test_fail_then_pass_goes_active_and_stamps_the_version(
         client, eng_sales, session_factory):
     await _attest(client, eng_sales)
-    res = await _attempt(client, eng_sales, "sales_start_change", result="failed")
+    res = await _attempt(client, eng_sales, "sales_set_quote_deadline", result="failed")
     assert res.status_code == 201
     assert res.json()["attempt_no"] == 1
     assert res.json()["role_state"]["status"] == "pending_tasks"
 
-    res = await _attempt(client, eng_sales, "sales_start_change")
+    res = await _attempt(client, eng_sales, "sales_set_quote_deadline")
     body = res.json()
     assert body["attempt_no"] == 2
     state = body["role_state"]
@@ -191,7 +191,7 @@ async def test_fail_then_pass_goes_active_and_stamps_the_version(
     assert passed_at
 
     # A retake never moves the pass.
-    again = (await _attempt(client, eng_sales, "sales_start_change")).json()
+    again = (await _attempt(client, eng_sales, "sales_set_quote_deadline")).json()
     assert again["role_state"]["tasks_passed_at"] == passed_at
 
     async with session_factory() as s:
@@ -218,7 +218,7 @@ async def test_engineering_needs_every_task(client, session_factory, seed, depts
 
 async def _pass_sales(client, auth):
     await _attest(client, auth)
-    await _attempt(client, auth, "sales_start_change")
+    await _attempt(client, auth, "sales_set_quote_deadline")
 
 
 async def test_publish_is_for_admin_quality_or_pm(
@@ -261,7 +261,7 @@ async def test_publish_supersedes_and_carries_the_attestation(
     assert rows[1].carried_from_id == rows[0].id
 
     # No new attestation is asked: the tasks alone clear version 2.
-    r = await _attempt(client, eng_sales, "sales_start_change")
+    r = await _attempt(client, eng_sales, "sales_set_quote_deadline")
     assert r.json()["role_state"]["status"] == "active"
 
 
@@ -425,11 +425,11 @@ async def test_attempt_detail_is_capped(client, eng_sales):
     await _attest(client, eng_sales)
     big = {"hint": "x" * 5000}
     res = await client.post("/api/v1/training/attempts", headers=eng_sales, json={
-        "role": "sales", "task_key": "sales_start_change", "result": "failed",
+        "role": "sales", "task_key": "sales_set_quote_deadline", "result": "failed",
         "detail": big})
     assert res.status_code == 422 and "KB" in res.text
     ok = await client.post("/api/v1/training/attempts", headers=eng_sales, json={
-        "role": "sales", "task_key": "sales_start_change", "result": "failed",
+        "role": "sales", "task_key": "sales_set_quote_deadline", "result": "failed",
         "detail": {"hint": "x" * 1000}})
     assert ok.status_code == 201, ok.text
 
@@ -510,7 +510,7 @@ async def test_acting_as_is_practice_only(client, seed, depts):
     assert st["practice_only"] is True
     res = await _attest(client, acting)
     assert res.status_code == 403 and "practice only" in res.text
-    res = await _attempt(client, acting, "sales_start_change")
+    res = await _attempt(client, acting, "sales_set_quote_deadline")
     assert res.status_code == 403 and "practice only" in res.text
     assert (await _status(client, admin))["practice_only"] is False
 

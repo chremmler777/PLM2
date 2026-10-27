@@ -173,7 +173,7 @@ class MeetingService:
         raiser_waive_reason: Optional[str] = None,
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
-        # Meetings belong to scoping: capture is Sales writing the request
+        # Meetings belong to scoping: capture is Project Management writing the request
         # down, the scoping decision is the project team's. A change turned
         # down at capture is rejected via the direct transition endpoint
         # (with a rejection_reason), not via a meeting.

@@ -270,12 +270,15 @@ async def test_non_starter_hears_who_starts_what(client, seed, depts, session_fa
 
 
 async def test_omitted_carrier_follows_the_raiser(client, seed, depts, session_factory):
-    sid, smail = await _user(session_factory, seed, "Sally", depts["Sales"])
-    sales = await login(client, smail, admin=False)
-    res = await client.post("/api/v1/changes", json=_body(seed), headers=sales)
+    # Project Management captures (migration 152): its omitted carrier is a
+    # customer change; the raiser is no Sales contact (no project Sales
+    # responsible here: none)
+    pid, pmail = await _user(session_factory, seed, "Pat", depts["Project Manager"])
+    pm = await login(client, pmail, admin=False)
+    res = await client.post("/api/v1/changes", json=_body(seed), headers=pm)
     assert res.status_code in (200, 201), res.text
     assert res.json()["customer_relevant"] is True
-    assert res.json()["sales_owner_id"] == sid
+    assert res.json()["sales_owner_id"] is None
     did, dmail = await _user(session_factory, seed, "Devon", depts["Development"])
     dev = await login(client, dmail, admin=False)
     res = await client.post("/api/v1/changes", json=_body(seed),

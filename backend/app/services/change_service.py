@@ -1135,8 +1135,9 @@ class ChangeService:
         if customer_relevant is not None:
             change.customer_relevant = customer_relevant
         change.origin = origin
-        # C10: the named Sales contact of a customer change (the caller passes
-        # the raiser when in Sales), else the project's Sales responsible.
+        # C10: the named Sales contact of a customer change: the one the
+        # caller passes (a follow-up change keeps its parent's), else the
+        # project's Sales responsible, else its backup (migration 152).
         change.sales_owner_id = await ChangeService.default_sales_owner_id(
             session, project_id, bool(customer_relevant), origin, sales_owner_id)
         if origin == mp.MOTHER_PLANT:
@@ -1186,16 +1187,20 @@ class ChangeService:
         origin: Optional[str], preferred: Optional[int] = None,
     ) -> Optional[int]:
         """C10: who owns the customer side. None on an internal or
-        mother-plant change; else `preferred` (the raiser in Sales), else the
-        project's Sales responsible (ProjectTeamService), else None (Sales
-        tasks then go to all of Sales without a name)."""
+        mother-plant change; else `preferred` (a follow-up change keeps its
+        parent's contact), else the project's Sales responsible, else its
+        named backup (project team; Christoph 2026-10-26: Project Management
+        captures, the project's Sales is the customer contact), else None
+        (Project Management picks a Sales member; Sales tasks meanwhile go to
+        all of Sales without a name)."""
         from app.services import mother_plants as mp
         if not customer_relevant or origin == mp.MOTHER_PLANT:
             return None
         if preferred is not None:
             return preferred
         from app.services.project_team_service import ProjectTeamService
-        return await ProjectTeamService.responsible_user_id(session, project_id, "Sales")
+        return await ProjectTeamService.responsible_user_id(
+            session, project_id, "Sales", backup=True)
 
     @staticmethod
     async def get_change(
@@ -1928,8 +1933,9 @@ class ChangeService:
                 i["due"] = due.isoformat()
 
     #: Whose a why-blocked row is when the rule names nobody itself (R5): a
-    #: department in words, "sales" = the Sales contact, "capture" = the Sales
-    #: owner or the raiser; everything else falls to the lead.
+    #: department in words, "sales" = the Sales contact, "capture" = the
+    #: capture's owner: the lead (Project Management captures and leads,
+    #: migration 152), else the raiser; everything else falls to the lead.
     _ROW_OWNER = {
         "description": "capture", "attachment": "capture", "quote_deadline": "sales",
         "quoted_price": "sales", "customer_accepted": "sales",
@@ -1958,7 +1964,7 @@ class ChangeService:
                 else "Project Management")
         sales = (f"Sales: {names[change.sales_owner_id]}"
                  if names.get(change.sales_owner_id) else "Sales")
-        capture = (sales if names.get(change.sales_owner_id)
+        capture = (lead if names.get(change.lead_id)
                    else f"Raiser: {names[change.raised_by]}" if names.get(change.raised_by)
                    else lead)
         for i in items:
@@ -1983,7 +1989,8 @@ class ChangeService:
         from app.services.cm_rules import GuardReason as R
         from app.services import cm_switches
         out: list = []
-        # Capture is Sales' job, scoping is the project team's: kickoff means
+        # Capture is Project Management's job (migration 152), scoping is the
+        # project team's: kickoff means
         # handing over a request someone can actually work on. That needs the
         # what (description), the evidence (at least one attachment) and — for
         # customer-relevant changes — the quote deadline. Impact is NOT required
@@ -3316,14 +3323,16 @@ class ChangeService:
     @staticmethod
     async def user_can_start_change(session: AsyncSession, user: User) -> bool:
         """Capture is not open to everyone: a change may only be raised by an
-        admin or a member of a department flagged can_start_change (Sales in
-        the seeded data). The flag has existed on wf_departments since
-        migration 032; this is where it finally bites."""
+        admin or a member of a department flagged can_start_change (Project
+        Manager in the seeded data: Project Management captures, migration
+        152, Christoph 2026-10-26; Sales is the customer contact). The flag
+        has existed on wf_departments since migration 032."""
         if user.effective_role == "admin":
             return True
         # Nothing flagged anywhere means the org has not designated who
         # captures yet — locking every non-admin out of the entry point would
-        # be worse than leaving it open. Migration 041 flags Sales.
+        # be worse than leaving it open. Migrations 048 / 152 flag Project
+        # Manager only.
         configured = (await session.execute(
             select(func.count()).select_from(Department).where(
                 Department.can_start_change.is_(True)))).scalar() or 0
@@ -3358,8 +3367,8 @@ class ChangeService:
 
     @staticmethod
     async def in_starter_department(session: AsyncSession, user: User) -> bool:
-        """Member of a department flagged can_start_change (Sales, Project
-        Manager): membership only, no admin and no "nothing flagged"
+        """Member of a department flagged can_start_change (Project Manager
+        since migration 152): membership only, no admin and no "nothing flagged"
         shortcut. Decides the cost carrier a caller gets when it omits it."""
         from app.services.workflow_service import WorkflowService
         dept_ids = await WorkflowService.effective_department_ids(session, user)
@@ -3982,17 +3991,21 @@ class ChangeService:
             flipped_kickoff = (c.customer_relevant and c.customer_flip_at is not None
                                and c.lead_id is not None and not mp.is_mother_plant(c))
             # D2 (DECIDED BY CHRISTOPH 2026-10-19): Project Management owns
-            # the process from capture on. A customer change with a lead (the
-            # project's lead PM by default) is the lead's to hand over; Sales,
-            # who may start and hand it over on PM's behalf, backs the lead up.
+            # the process from capture on, and captures (2026-10-26,
+            # migration 152). A customer change with a lead (the project's
+            # lead PM by default) is the lead's to hand over; Sales supplies
+            # the customer's facts and no longer hands over.
             lead_kickoff = (c.customer_relevant and c.lead_id is not None
                             and not mp.is_mother_plant(c))
-            if c.status == "captured" and (
-                    (holds_lead(c, user) or is_pm) if run_team_kickoff else (
-                        can_capture or (is_pm and mp.is_mother_plant(c))
-                        # A6-04: no lead: picking one is Project Management's
-                        or (is_pm and c.lead_id is None)
-                        or (lead_kickoff and holds_lead(c, user)))):
+            kickoff_mine = ((holds_lead(c, user) or is_pm) if run_team_kickoff else (
+                can_capture or (is_pm and mp.is_mother_plant(c))
+                # A6-04: no lead: picking one is Project Management's
+                or (is_pm and c.lead_id is None)
+                or (lead_kickoff and holds_lead(c, user))))
+            # Sales' only part at capture: "Supply the customer's facts"
+            sales_side = (lead_kickoff and not kickoff_mine
+                          and (in_sales or c.sales_owner_id == user.id))
+            if c.status == "captured" and (kickoff_mine or sales_side):
                 # a mother-plant change is captured by Project Management;
                 # with no lead yet, Project Management's part is to pick one
                 pm_row = (mp.is_mother_plant(c) or run_team_kickoff or lead_kickoff
@@ -4027,7 +4040,7 @@ class ChangeService:
                         supply = (f"{c.sales_owner_name or 'The Sales contact'} "
                                   "(Sales contact) supplies the customer's facts; "
                                   f"{c.lead_name or 'the lead'} hands over")
-                tasks.append({**await _base(c), "kind": "kickoff",
+                kickoff_row = {**await _base(c), "kind": "kickoff",
                               "missing": missing,
                               **({"hint": "Assign a lead (the project's lead PM "
                                           "leads by default), then hand over "
@@ -4052,7 +4065,10 @@ class ChangeService:
                               "role_department_id": (
                                   dept_by_name.get("Sales") if sales_supply else
                                   dept_by_name.get("Project Manager")
-                                  if pm_row else None)})
+                                  if pm_row else None)}
+                # Sales with nothing of the customer's owed has no row
+                if kickoff_mine or sales_supply:
+                    tasks.append(kickoff_row)
             elif c.status == "on_hold" and (holds_lead(c, user) or is_pm):
                 # C1: a hold is the run team's to resume or cancel; the lead
                 # owns it, Project Management backs up (no lead: PM's own).
@@ -5644,7 +5660,7 @@ class ChangeService:
                 })
 
         # kind "impact_confirm": picking and locking the impacted set is the
-        # first step INSIDE scoping — capture is Sales writing the request
+        # first step INSIDE scoping — capture is Project Management writing the request
         # down, the impacted set is Development's call (the lead and PM may
         # pick too; Development confirms). So it is offered
         # in 'scoping' only, and offered even when the set is still empty
@@ -6992,19 +7008,23 @@ class ChangeService:
         to_customer: bool,
     ) -> Optional[str]:
         """P3 / [R4]: who may move the cost carrier (PATCH customer_relevant
-        and the scoping room's carrier). To customer: a starter (Sales,
-        Project Management, admin), lead or not, never an engineering lead.
-        Back to internal drops the Sales contact: an admin, a starter or a
-        Project Management member. None = allowed."""
+        and the scoping room's carrier). To customer: a starter (Project
+        Management, admin) or Sales, lead or not, never an engineering lead.
+        Back to internal drops the Sales contact: an admin, a starter, Sales
+        or a Project Management member. None = allowed. Sales no longer
+        starts changes (migration 152) but keeps its say on who pays: it is
+        named here, no longer through can_start_change."""
         if bool(change.customer_relevant) == to_customer:
             return None
+        starter_or_sales = (
+            await ChangeService.user_can_start_change(session, user)
+            or await ChangeService.member_of(session, user, "Sales"))
         if to_customer:
-            if await ChangeService.user_can_start_change(session, user):
+            if starter_or_sales:
                 return None
             return ("Only Sales, Project Management or an admin may make this "
                     "a customer change")
-        if user.effective_role == "admin" \
-                or await ChangeService.user_can_start_change(session, user):
+        if user.effective_role == "admin" or starter_or_sales:
             return None
         from app.services.meeting_service import MeetingService
         if await MeetingService.user_is_pm_member(session, user):

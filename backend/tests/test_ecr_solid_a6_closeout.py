@@ -287,42 +287,45 @@ async def test_active_lead_keeps_the_escalation_pm_gets_none(
 # ---------------------------------------------------------------------------
 # A6-04 the kickoff row has one owner
 # ---------------------------------------------------------------------------
-async def test_leadless_kickoff_is_pm_main_sales_backup_and_sales_cannot_hand_over(
+async def test_leadless_kickoff_is_pm_main_and_sales_cannot_hand_over(
         client, seed, team, session_factory):
+    """Project Management captures (Christoph 2026-10-26, migration 152):
+    the hand-over is the lead's / PM's alone; Sales' only kickoff row is the
+    Sales contact's "Supply the customer's facts" once a lead is set."""
     sales = await _as(client, "Sales")
-    cid = await _create(client, sales, seed, "no lead yet")
-    await _set(session_factory, cid, lead_id=None)
+    cid = await _create(client, sales, seed, "no lead yet")   # an older change
+    await _set(session_factory, cid, lead_id=None,
+               sales_owner_id=team["user"]["Sales"])
+    from app.models.workflow import Department
+    async with session_factory() as s:      # migration 152: Sales starts nothing
+        (await s.get(Department, team["dept"]["Sales"])).can_start_change = False
+        (await s.get(Department, team["dept"]["Project Manager"])).can_start_change = True
+        await s.commit()
     pm = await _as(client, "Project Manager")
     pm_row = (await _tasks(client, pm, cid, "kickoff"))[0]
-    s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
     assert pm_row["role"] == "main"
     assert pm_row["hint"] == ("Assign a lead (the project's lead PM leads by "
                               "default), then hand over to scoping")
-    assert (s_row["role"], s_row["main_name"]) == ("backup", "Project Management")
-    assert s_row["hint"].startswith("Project Management sets the lead")
-    # NEGATIVE: Sales' hand-over is refused (and its button hidden) until a lead
+    # NEGATIVE: no lead: Sales has no row and no hand-over
+    assert await _tasks(client, sales, cid, "kickoff") == []
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
     assert st["can_transition"]["scoping"] is False
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=pm)).json()
     assert st["can_transition"]["scoping"] is True
     res = await client.post(f"/api/v1/changes/{cid}/transition",
                             json={"to_status": "scoping"}, headers=sales)
-    assert res.status_code == 403 and "sets the change lead" in res.json()["detail"]
-    # once a lead is set (D2) the row is the lead's; Sales backs it up and
-    # may still hand over on the lead's behalf
+    assert res.status_code == 403 and "Project Management" in res.json()["detail"]
+    # once a lead is set (D2) the hand-over is the lead's; the Sales contact
+    # supplies the customer's facts (review 2026-10-19) and still does not
+    # hand over
     await _set(session_factory, cid, lead_id=team["user"]["Project Manager"])
-    s_row = (await _tasks(client, sales, cid, "kickoff"))[0]
-    # the Sales contact's row while facts are missing is its own "Supply
-    # the customer's facts" (review 2026-10-19); with the facts in, a backup
-    # of the lead's hand-over
-    if s_row["missing"]:
-        assert s_row["kind_label"] == "Supply the customer's facts", s_row
-        assert s_row["hint"].startswith("You supply the customer's facts"), s_row
-    else:
-        assert s_row["role"] == "backup" and s_row.get("hint") is None, s_row
+    [s_row] = await _tasks(client, sales, cid, "kickoff")
+    assert s_row["missing"]
+    assert s_row["kind_label"] == "Supply the customer's facts", s_row
+    assert s_row["hint"].startswith("You supply the customer's facts"), s_row
     assert (await _tasks(client, pm, cid, "kickoff"))[0]["role"] == "main"
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=sales)).json()
-    assert st["can_transition"]["scoping"] is True
+    assert st["can_transition"]["scoping"] is False
 
 
 async def test_sales_member_flipping_to_customer_owns_the_customer_side(

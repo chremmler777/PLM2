@@ -112,8 +112,8 @@ async def create_change(
     mother_plant = body.origin == mp.MOTHER_PLANT
     if body.customer_relevant is None and not mother_plant:
         # An API caller that leaves the cost carrier out raises what its
-        # department starts: Sales / PM a customer change (with its Sales
-        # owner), everyone else an internal one. The UI always sends it.
+        # department starts: Project Management a customer change,
+        # everyone else an internal one. The UI always sends it.
         body.customer_relevant = await ChangeService.in_starter_department(
             db, current_user)
     internal = not mother_plant and not body.customer_relevant
@@ -133,7 +133,7 @@ async def create_change(
             detail=("Only Project Management (or an admin) may raise a "
                     f"change from {mp.plant_name(body)}" if mother_plant else
                     "Your department starts internal changes only: a customer "
-                    "change is raised by Sales or Project Management"
+                    "change is captured by Project Management"
                     if may_internal else
                     await ChangeService.who_starts_changes(db)))
     # The project must be one the caller can see (their organization; an
@@ -158,12 +158,10 @@ async def create_change(
         lead_id = current_user.id
     if lead_id is not None:
         await _require_org_user(db, lead_id, project_org)
-    # C10: a customer change raised by Sales is owned by its raiser: a real
-    # Sales member (an admin acting as Sales is not one), the same test the
-    # PATCH and the task list apply.
-    from app.services.project_team_service import is_live_member
-    raiser_owner = (current_user.id if not internal and not mother_plant
-                    and await is_live_member(db, current_user.id, "Sales") else None)
+    # C10 (Christoph 2026-10-26, migration 152): Project Management captures;
+    # the Sales contact is the project's Sales responsible, else its backup
+    # (ChangeService.default_sales_owner_id), else Project Management picks
+    # a Sales member. The raiser is no Sales contact.
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,
@@ -174,7 +172,6 @@ async def create_change(
             origin=body.origin, mother_plant_name=body.mother_plant_name,
             mother_plant_ref=body.mother_plant_ref,
             mother_plant_sop=body.mother_plant_sop,
-            sales_owner_id=raiser_owner,
         )
         # §2 (SCOPING_V2): the urgent need-by, reason and evidence, and the
         # internal problem and target, travel with the capture.
@@ -289,7 +286,8 @@ async def my_change_tasks(
     assessments. A change parked in a stage IS the open task of that stage's
     responsible role, so each stage contributes its own row kind:
 
-      kickoff           captured, for a can_start_change department (Sales)
+      kickoff           captured, for a can_start_change department (Project
+                        Manager); Sales gets "Supply the customer's facts"
       scoping_wrapup    scoping, for Project Manager — drive it to a decision
       impact_confirm    scoping and unlocked, for Development
       assessment        in_assessment, the department's own pending answer
@@ -1545,8 +1543,9 @@ async def transition_change(
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     # Spec §16 P1-4: reject, cancel, hold, recall and closing the assessment
-    # are the change lead's, Project Management's or an admin's; kickoff
-    # (and a rejection at capture) also Sales'.
+    # are the change lead's, Project Management's or an admin's, kickoff
+    # and a rejection at capture too (Project Management captures, migration
+    # 152); Sales rejects a quoted change the customer declined.
     from app.services.early_stage_service import EarlyStageService
     refusal = await EarlyStageService.transition_refusal(
         db, change, current_user, body.to_status)
@@ -1983,9 +1982,10 @@ _PATCH_RIGHTS = {
     # the lead steers the change
     "priority": ("lead",),
     "customer_relevant": ("lead",),
-    # capture fields: Sales writes the request, the lead owns it. PM writes
-    # them too where it is who captures (a mother-plant change) or
-    # while nobody leads the change yet (captured/scoping): "pm_capture".
+    # capture fields: the lead owns them, Sales supplies the customer's
+    # facts. Project Management writes them while it captures (every change
+    # in capture, migration 152; a mother-plant change throughout) and in
+    # scoping while nobody leads the change yet: "pm_capture".
     "title": ("lead", "sales", "pm_capture"),
     "reason": ("lead", "sales", "pm_capture"),
     "description": ("lead", "sales", "pm_capture"),
@@ -2019,8 +2019,8 @@ _PATCH_ROLE_DEPT = {"sales": "Sales", "quality": "Quality",
 
 def _patch_rights(change, key, value) -> tuple:
     """The roles that may move `key` to `value`. P3/C10: making an internal
-    change a customer change is a starter's call (Sales, Project Management,
-    admin: update_change also checks user_can_start_change), whether or not
+    change a customer change is Sales', Project Management's or an admin's
+    call (update_change also checks carrier_move_refusal), whether or not
     they lead it; the way back stays the lead's."""
     if key == "customer_relevant" and value is True and not change.customer_relevant:
         return ("lead", "pm", "sales")
@@ -2059,9 +2059,10 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
                 held[role] = await MeetingService.user_is_pm_member(db, user)
             elif role == "pm_capture":
                 from app.services import mother_plants as mp
-                pm_window = mp.is_mother_plant(change) or (
-                    change.status in ("captured", "scoping")
-                    and change.lead_id is None)
+                pm_window = (mp.is_mother_plant(change)
+                             or change.status == "captured"
+                             or (change.status == "scoping"
+                                 and change.lead_id is None))
                 held[role] = pm_window and await has("pm")
             else:
                 held[role] = await ChangeService._user_in_department(
@@ -2135,9 +2136,9 @@ async def update_change(
                 detail=f"The change is {change.status}: its D1 data "
                        f"({', '.join(moving_d1)}) is read only")
     # P3 / [R4]: an engineering lead starts internal changes only; making
-    # one a customer change is a starter's call (Sales, Project Management,
-    # admin), lead or not; the way back drops the Sales contact, so it needs a
-    # starter's or Project Management's rights too. Asked first, so the
+    # one a customer change is Sales', Project Management's or an admin's
+    # call, lead or not; the way back drops the Sales contact, so it needs
+    # those rights too. Asked first, so the
     # engineering lead hears who can do it. The scoping room's cost carrier
     # follows the same rule (MeetingService).
     if fields.get("customer_relevant") is not None:

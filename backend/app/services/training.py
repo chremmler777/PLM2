@@ -86,15 +86,19 @@ CURRICULA: dict[str, Curriculum] = {
         # A6-11: Management gives the price-drop and Absorb OKs on the
         # same screens Project Management decides on
         departments=("Project Manager", "Management"),
-        code_version=1,
-        tasks=("pm_set_priority",),
+        # v2 (Christoph 2026-10-26, migration 152): Project Management
+        # captures, so the start-change exercise is PM's now
+        code_version=2,
+        tasks=("pm_start_change", "pm_set_priority"),
     ),
     "sales": Curriculum(
         role="sales",
         label="Sales",
         departments=("Sales",),
-        code_version=1,
-        tasks=("sales_start_change",),
+        # v2: Sales no longer starts changes; it is the customer contact
+        # and sets the quote deadline
+        code_version=2,
+        tasks=("sales_set_quote_deadline",),
     ),
     "engineering": Curriculum(
         role="engineering",

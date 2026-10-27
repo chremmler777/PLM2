@@ -259,13 +259,22 @@ async def test_transition_rights_capture(client, auth, seed, depts, session_fact
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "scoping"}, headers=tool)
     assert res.status_code == 403
-    assert "Sales" in res.json()["detail"]
+    assert "Project Management" in res.json()["detail"]
+    # Project Management captures (migration 152): Sales neither hands over
+    # nor rejects at capture
     sales = acting(auth, depts["Sales"])
     st = await _state(client, sales, c["id"])
-    assert st["can_transition"]["scoping"] and st["can_transition"]["rejected"]
+    assert not st["can_transition"]["scoping"]
+    assert not st["can_transition"]["rejected"]
     assert not st["can_transition"]["cancelled"]
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
                             json={"to_status": "scoping"}, headers=sales)
+    assert res.status_code == 403
+    pm = acting(auth, depts["Project Manager"])
+    st = await _state(client, pm, c["id"])
+    assert st["can_transition"]["scoping"] and st["can_transition"]["rejected"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "scoping"}, headers=pm)
     assert res.status_code == 200, res.text
 
 
