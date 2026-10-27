@@ -865,6 +865,10 @@ class ChangePlanService:
             f"({len(created)} blocks)", user.id,
             new_value={"plan": plan, "tasks": len(created), "source": source,
                        "replaced": bool(existing)})
+        if plan == "detailed":
+            # N2: each team now owes its confirmation of the plan
+            from app.services import task_notices
+            await task_notices.on_detailed_plan(session, change, user.id)
 
     @staticmethod
     def order_date(change) -> Optional[date]:

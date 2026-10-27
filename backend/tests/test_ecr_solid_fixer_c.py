@@ -371,3 +371,40 @@ async def test_n7_ppap_and_issue_notices_reach_the_team_owner_only(session_facto
         issue = SimpleNamespace(check_id=1, department_id=q)
         users, _ = await ValidationIssueService.audience(s, c, issue, 1)
         assert users == {sonja}
+
+
+async def test_n2_approval_and_validation_tell_the_new_task_owners(session_factory, seed):
+    """Retest N2: approval tells the lead (plan) and Logistics (bank build);
+    validation tells each release-check owner not told by the stage notice."""
+    from app.services import task_notices
+    logi = await make_department_member(session_factory, seed["admin_id"], "Logistics")
+    apqp = await make_department_member(session_factory, seed["admin_id"], "APQP")
+    async with session_factory() as s:
+        from app.models.entities import User
+        u = User(organization_id=seed["org_id"], username="alexa", email="alexa@test.io",
+                 full_name="Alexa", role="engineer", is_active=True, mfa_enabled=False,
+                 hashed_password="!")
+        s.add(u); await s.flush()
+        from app.models.workflow import UserDepartment
+        s.add(UserDepartment(user_id=u.id, department_id=logi))
+        s.add(UserDepartment(user_id=u.id, department_id=apqp))
+        c = ChangeRequest(change_number="C-N2", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"],
+                          customer_relevant=False, status="approved")
+        s.add(c); await s.commit()
+        alexa = u.id
+        await task_notices.on_approved(s, c, seed["admin_id"])
+        await s.commit()
+        rows = (await s.execute(select(Notification))).scalars().all()
+        assert {(n.user_id, n.subject_key) for n in rows} >= {
+            (seed["engineer_id"], f"chg:{c.id}:approved:lead"),
+            (alexa, f"chg:{c.id}:bank_build")}
+        c.status = "in_validation"
+        await s.commit()
+        await task_notices.on_validation(s, c, seed["admin_id"])
+        await s.commit()
+        told = {n.user_id for n in (await s.execute(select(Notification).where(
+            Notification.subject_key == f"chg:{c.id}:release_checks"))).scalars()}
+        assert alexa in told
+

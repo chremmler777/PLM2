@@ -2814,6 +2814,12 @@ class ChangeService:
             await internal_approval_owed(session, change, user_id)
         if to_status in ("in_implementation", "in_validation"):
             await ChangeService.notify_stage_entered(session, change, to_status)
+        # N2 / T16: the tasks these hops open are told to their owners
+        from app.services import task_notices
+        if to_status == "approved":
+            await task_notices.on_approved(session, change, user_id)
+        if to_status == "in_validation":
+            await task_notices.on_validation(session, change, user_id)
         if to_status == "closed" and old == "released":
             await ChangeService.notify_closed(session, change, user_id)
         await ChangeService.notify_handover_and_end(session, change, old, to_status, user_id)
@@ -8551,6 +8557,17 @@ class ChangeService:
             session, change, "pnl_frozen",
             "Planned P&L frozen at internal approval", actor.id,
             new_value={"pnl": pnl})
+        # N2: the lead's next step (record the approval) is told
+        if change.lead_id is not None and change.lead_id != actor.id:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="task_new",
+                subject_key=f"chg:{change.id}:internal_approved:"
+                            f"{change.internal_approved_amount:.2f}",
+                title=f"Costs approved: {change.change_number}: record the approval"[:255],
+                body=(f"'{change.title}': internal costs approved "
+                      f"({change.internal_approved_amount:.2f}). Move it to approved."),
+                link=f"/changes/{change.id}?tab=overview")
         return change
 
     @staticmethod
