@@ -52,3 +52,21 @@ async def test_switch_off_lets_anyone_ask(client, admin_auth, seed, session_fact
 
     res = await _ask(client, quality, cid, quality_id)
     assert res.status_code == 200, res.text
+
+
+async def test_proceed_waits_for_the_scope(client, admin_auth, seed, session_factory):
+    """Christoph 2026-10-27: no proceed out of scoping without a written scope."""
+    from tests.test_scoping_live_test_1 import _decide, _dept_ids, _meeting
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq4")
+    url = f"/api/v1/changes/{cid}/scope-definition"
+    assert (await client.put(url, json={"scope_definition": " "},
+                             headers=admin_auth)).status_code == 200
+    mid = await _meeting(client, admin_auth, cid, await _dept_ids(session_factory))
+    res = await _decide(client, admin_auth, cid, mid, "proceed")
+    assert res.status_code == 400 and "No scope defined" in res.json()["detail"]
+    nxt = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    keys = [i["key"] for i in (nxt.get("next_step") or {}).get("items", [])]
+    assert "scope_definition" in keys, nxt.get("next_step")
+    assert (await client.put(url, json={"scope_definition": "Insert only"},
+                             headers=admin_auth)).status_code == 200
+    assert (await _decide(client, admin_auth, cid, mid, "proceed")).status_code == 200

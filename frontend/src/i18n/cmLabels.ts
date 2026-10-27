@@ -287,6 +287,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Folgetermin, sobald die fehlenden Infos da sind',
     en: 'Follow-up meeting once the missing info is in',
   },
+  'next.item.scope_definition': { de: 'Umfang festlegen (PM, Scoping-Tab)', en: 'Define the scope (PM, Scoping tab)' },
   'next.item.impacted_items': { de: 'Betroffene Teile festlegen', en: 'Define the impacted items' },
   'next.item.impact_confirmed': { de: 'Betroffene Teile bestätigen (Entwicklung)', en: 'Confirm the impacted items (Development)' },
   'next.item.lead': { de: 'Verantwortlichen (Lead) zuweisen', en: 'Assign a lead' },
@@ -2216,7 +2217,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Pick the impacted parts first, on the Impacted tab',
   },
   'scope.title': { de: 'Umfang (vom PM festgelegt)', en: 'Scope (defined by PM)' },
-  'scope.empty': { de: 'Noch kein Umfang festgelegt.', en: 'No scope defined yet.' },
+  'scope.empty': { de: 'Noch kein Umfang festgelegt: ohne Umfang geht es nicht weiter.', en: 'No scope defined yet: proceed waits for it.' },
   'scope.placeholder': {
     de: 'Was gehört zu dieser Änderung, was nicht?',
     en: 'What is in scope of this change, and what is not?',
@@ -2873,6 +2874,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.hint.scopingHeld': { de: 'Freigabe wartet auf: {x}', en: 'Proceed waits for: {x}' },
   'proceed.hold.ppap_decision': { de: 'PPAP-Entscheidung ({who})', en: 'PPAP decision ({who})' },
   'proceed.hold.customer_flip': { de: 'Kundeninfo oder Angebot? ({who})', en: 'notification or offer? ({who})' },
+  'proceed.hold.scope_definition': { de: 'Umfang ({who})', en: 'scope ({who})' },
   'proceed.hold.impacted_items': { de: 'betroffene Teile ({who})', en: 'impacted parts ({who})' },
   'cockpit.proceedWaits': {
     de: 'Freigabe wartet auf: {x}. Scoping ansehen →',

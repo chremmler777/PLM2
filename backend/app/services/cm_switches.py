@@ -29,6 +29,10 @@ def impact_confirm_step(change) -> bool:
 # lead; a cancel vote stays open to everyone. Off = anyone may ask again.
 SCOPING_QUESTIONS_PM_ONLY = True
 
+# No proceed out of scoping without the PM's written scope (Christoph
+# 2026-10-27: "scope needs to be defined, otherwise I don't let it go").
+SCOPE_REQUIRED = True
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call

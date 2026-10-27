@@ -411,6 +411,11 @@ async def satisfy_capture_gate(client, auth, change_id: int, *,
         files={"file": ("capture.txt", b"capture evidence", "text/plain")},
         data={"kind": "customer_file"}, headers=auth)
     assert res.status_code in (200, 201), res.text
+    # 2026-10-27: no proceed out of scoping without the PM's scope (as admin)
+    res = await client.put(f"/api/v1/changes/{change_id}/scope-definition",
+                           json={"scope_definition": "Scope: the captured parts"},
+                           headers=_mint_cookie("admin@test.io"))
+    assert res.status_code == 200, res.text
 
 
 async def record_ppap_no(client, change_id: int):

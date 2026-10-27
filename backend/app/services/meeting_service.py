@@ -2156,6 +2156,13 @@ class MeetingService:
                         "text": f"The change became a customer change; proceed "
                                 f"waits for {who}: customer notification only, "
                                 "or offer needed?"})
+        if (cm_switches.SCOPE_REQUIRED
+                and not (change.scope_definition or "").strip()):
+            out.append({"key": "scope_definition",
+                        "owner": change.lead_name or "Project Management",
+                        "text": "No scope defined: Project Management writes "
+                                "what is in scope (Scope on the Scoping tab) "
+                                "before proceeding"})
         if not change.impacted_items and change.impact_confirmed_at is None:
             out.append({"key": "impacted_items",
                         "owner": change.lead_name or "Project Management",

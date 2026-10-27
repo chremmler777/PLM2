@@ -234,6 +234,9 @@ async def test_customer_change_the_room_sets_internal_owes_ppap_and_proceeds(
                               json={"part_id": part.json()["id"], "is_lead": True},
                               headers=admin_auth)).status_code == 200
     await _to_status(session_factory, cid, "scoping")
+    assert (await client.put(f"/api/v1/changes/{cid}/scope-definition",
+                             json={"scope_definition": "Insert only"},
+                             headers=admin_auth)).status_code == 200
     _, qid, quality = await _user(client, session_factory, seed, "q6", "Quality")
     _, _, pm = await _user(client, session_factory, seed, "pm6", "Project Manager")
     mid = await _meeting(client, admin_auth, cid, qid, carrier="internal")
@@ -259,7 +262,7 @@ async def test_customer_change_the_room_sets_internal_owes_ppap_and_proceeds(
 
 
 async def test_proceed_names_every_hold_at_once(client, admin_auth, seed, session_factory):
-    """No parts and no PPAP decision: one refusal names both."""
+    """No parts, no PPAP decision, no scope: one refusal names all three."""
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "pp holds", "reason": "r",
         "change_type": "physical_part", "customer_relevant": False,
@@ -271,8 +274,9 @@ async def test_proceed_names_every_hold_at_once(client, admin_auth, seed, sessio
     res = await _proceed(client, admin_auth, cid, mid)
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert "held by 2 things" in detail
+    assert "held by 3 things" in detail
     assert "PPAP decision" in detail and "No impacted parts picked" in detail
+    assert "No scope defined" in detail
     # R18: the lead owns the empty set: a row of its own; Quality's 'yes'
     # says who adds the parts first
     assert len(await _tasks(client, admin_auth, cid, "pick_impacted")) == 1

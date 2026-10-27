@@ -1759,7 +1759,7 @@ class ChangeService:
                     ChangeChangelog.field_name == "status"))).scalar()
             holds = {h["key"]: h for h in await MeetingService.proceed_holds(
                 session, change, entered=entered or change.created_at)}
-            for key in ("ppap_decision", "customer_flip"):
+            for key in ("ppap_decision", "customer_flip", "scope_definition"):
                 if key in holds:
                     add(key, "hard", who=holds[key]["owner"])
             # §3 "Not routed" (SOFT, A2-03): check items whose owner the

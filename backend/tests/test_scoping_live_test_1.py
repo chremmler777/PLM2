@@ -317,7 +317,9 @@ async def test_pm_defines_the_scope_in_scoping_read_only_afterwards(
         rows = (await s.execute(select(ChangeChangelog).where(
             ChangeChangelog.change_id == cid,
             ChangeChangelog.action == "scope_defined"))).scalars().all()
-    assert [r.action_description for r in rows] == ["Scope defined", "Scope changed"]
+    # (the first row is satisfy_capture_gate's: proceed needs a scope)
+    assert [r.action_description for r in rows] == [
+        "Scope defined", "Scope changed", "Scope changed"]
     got = (await client.get(f"/api/v1/changes/{cid}", headers=tool)).json()
     assert got["scope_definition"] == "Tool insert + gauge"
 

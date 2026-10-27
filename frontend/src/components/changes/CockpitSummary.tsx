@@ -431,7 +431,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // every hold of proceed the checklist names (backend proceed_holds), so the
   // header count and the PM's row agree (R5)
   // (check items with no routed owner do not hold: proceed routes them C, A2-03)
-  const PROCEED_HOLD_KEYS = ['ppap_decision', 'customer_flip', 'impacted_items']
+  const PROCEED_HOLD_KEYS = ['ppap_decision', 'customer_flip', 'impacted_items', 'scope_definition']
   const proceedHolds = change.status === 'scoping'
     ? nextItems.filter((i) => i.kind === 'hard' && PROCEED_HOLD_KEYS.includes(i.key))
     : []
