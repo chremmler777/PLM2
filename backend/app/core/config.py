@@ -131,7 +131,9 @@ class Settings(BaseSettings):
     # Hub accounts carry their bare username as e-mail ("christoph.demmler"):
     # the mail outbox appends "@<this>" to such an address; empty = an
     # address without "@" is not mailed (the notice stays in PLM2).
-    mail_default_domain: str = ""
+    # esc P3-7 (2026-10-26): KTX hub usernames are first.last@us.ktx.group;
+    # MAIL_DEFAULT_DOMAIN= (empty) in the env switches it off again.
+    mail_default_domain: str = "us.ktx.group"
     # Go-live of the ECR-solid task clock (ISO date, e.g. "2026-11-02"):
     # a computed My Tasks row never counts from before it, so changes in
     # flight at go-live are not all Late on day one. Empty = no floor.

@@ -1901,7 +1901,12 @@ async def submit_assessment(
         # e.g. the department-membership guard. Catch broadly so those map to
         # 400 instead of leaking as an unhandled 500. ChangeError is itself a
         # ValueError subclass, so existing behaviour is unchanged.
-        raise HTTPException(status_code=400, detail=str(e))
+        # esc P3-2: another department's submit is a rights refusal: 403
+        from app.services.change_service import RightsForbidden
+        from app.services.workflow_service import TaskRightsForbidden
+        raise HTTPException(
+            status_code=403 if isinstance(e, (RightsForbidden, TaskRightsForbidden)) else 400,
+            detail=str(e))
     await db.commit()
     await db.refresh(a)
     return await _assessment_out(db, a, current_user)
@@ -1961,7 +1966,9 @@ async def set_assessment_due_date(
         a = await ChangeService.set_assessment_due_date(
             db, change, assessment_id, body.due_date, current_user)
     except ChangeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        from app.services.change_service import RightsForbidden
+        raise HTTPException(status_code=403 if isinstance(e, RightsForbidden) else 400,
+                            detail=str(e))
     await db.commit()
     await db.refresh(a)
     return await _assessment_out(db, a, current_user)
@@ -2014,7 +2021,7 @@ _PATCH_RIGHTS = {
     "target_value": ("lead", "sales", "pm_capture"),
 }
 _PATCH_ROLE_DEPT = {"sales": "Sales", "quality": "Quality",
-                    "scheduling": "Scheduling"}
+                    "scheduling": "Logistics"}
 
 
 def _patch_rights(change, key, value) -> tuple:
@@ -2081,7 +2088,7 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
                 {"lead": "the change lead", "pm": "Project Management",
                  "pm_capture": "Project Management",
                  "sales": "Sales", "quality": "Quality",
-                 "scheduling": "Scheduling"}[r]
+                 "scheduling": "Logistics"}[r]
                 for r in rights))
             raise HTTPException(
                 status_code=403,
@@ -2104,9 +2111,12 @@ async def _require_sales_owner(db: AsyncSession, change, user_id: int,
     if not await is_live_member(db, owner.id, "Sales"):
         raise HTTPException(status_code=400,
                             detail="The Sales contact must be a member of Sales")
+    old = await db.get(User, change.sales_owner_id) if change.sales_owner_id else None
     await ChangeService.append_changelog(
         db, change, "sales_owner_changed",
-        f"Sales contact {change.sales_owner_id} -> {owner.id}", actor.id,
+        # esc P3-6: names, not ids
+        f"Sales contact {(old.full_name or old.username) if old else 'none'} -> "
+        f"{owner.full_name or owner.username}", actor.id,
         field_name="sales_owner_id", old_value=change.sales_owner_id,
         new_value=owner.id)
 
@@ -2349,7 +2359,7 @@ async def put_bank_build(
     if not await ChangeService.user_can_decide_bank_build(db, current_user, change):
         raise HTTPException(
             status_code=403,
-            detail="Only a Scheduling or Project Manager department member, "
+            detail="Only a Logistics or Project Manager department member, "
                    "the change lead, or an admin may decide the bank build")
     try:
         await ChangeService.set_bank_build(

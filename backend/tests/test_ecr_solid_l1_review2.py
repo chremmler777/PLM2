@@ -265,7 +265,7 @@ async def test_non_starter_hears_who_starts_what(client, seed, depts, session_fa
     res = await client.post("/api/v1/changes", json=_body(seed, False), headers=q)
     assert res.status_code == 403
     detail = res.json()["detail"]
-    assert "Sales, Project Manager" in detail and "customer" in detail
+    assert "Sales, Project Management start customer changes" in detail and "customer" in detail
     assert "Development, Process Engineer" in detail and "internal" in detail
 
 

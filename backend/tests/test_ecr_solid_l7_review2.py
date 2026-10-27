@@ -166,7 +166,7 @@ async def test_negative_route_starts_no_concession_and_no_follow_up_on_a_failed_
     # a follow-up change does not lift the failed check (no dead end)
     res = await client.post(_iurl(fix, f"/{iid}/route"), headers=pm, json={
         "route": "follow_up_change", "reason": "later", "actions": []})
-    assert res.status_code == 400 and "HARD #3" in res.json()["detail"], res.text
+    assert res.status_code == 400 and "holds this change's release" in res.json()["detail"] and "HARD #" not in res.json()["detail"], res.text
     async with session_factory() as s:
         c = await s.get(ChangeRequest, fix["change_id"])
         assert c.status == "in_validation"

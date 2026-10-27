@@ -1248,12 +1248,12 @@ class ValidationIssueService:
             if route == "follow_up_change" and chk is not None \
                     and chk.status == "failed":
                 raise ChangeError(
-                    f"{issue.ref}'s failed check holds this change's release "
-                    "(HARD #3): fix and retest it here, or a concession "
+                    f"{issue.ref}'s failed check holds this change's release"
+                    ": fix and retest it here, or a concession "
                     "(Quality); a follow-up change does not lift it")
             if route == "follow_up_change":
                 svc._require(v.quality,
-                             f"{issue.ref} holds this change's release (HARD #3): "
+                             f"{issue.ref} holds this change's release: "
                              "moving it to a follow-up change is Quality's call")
         reason = _txt(spec.get("reason"), "A reason for the route")
         if issue.severity == 3 and not issue.containment:

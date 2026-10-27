@@ -63,7 +63,10 @@ ABSORB_RULE = "price_open"
 PM_MGMT_RULES = frozenset({"scope_change_uncovered", "price_drop", ABSORB_RULE})
 #: Validation rules are Quality's call wherever they hold.
 QUALITY_RULES = frozenset({"validation_open", "validation_failed",
-                           "validation_issues_open"})
+                           "validation_issues_open",
+                           # F12 (spec §0 Override: implementation rules are
+                           # Quality's): validating on a tool not reworked
+                           "tool_change_open"})
 #: Soft rules that are decided, never overridden: they have their own
 #: decision (the routing change: Project Management approves or refuses the
 #: added department), so an override would be a second road to it.

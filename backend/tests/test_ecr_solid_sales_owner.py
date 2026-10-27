@@ -77,7 +77,7 @@ async def test_sales_no_longer_captures(client, seed, depts, session_factory):
             "change_type": "physical_part", "customer_relevant": customer},
             headers=eng)
         assert res.status_code == 403, res.text
-        assert "Project Manager" in res.json()["detail"]
+        assert "Project Management starts customer changes" in res.json()["detail"]
     perms = (await client.get("/api/v1/changes/permissions", headers=eng)).json()
     assert perms["can_start_change"] is False
     assert perms["can_start_internal_change"] is False

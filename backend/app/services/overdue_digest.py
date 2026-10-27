@@ -137,6 +137,19 @@ async def late_entries(session: AsyncSession, changes: dict, now: datetime, *,
                     "department": names.get(dept_id) if dept_id else None,
                     "label": lbl, "owner_name": owner, "due": due, "text": text})
 
+    from app.services.project_team_service import _responsible
+    resp_cache: dict = {}
+
+    async def responsible_name(cid, dept_id) -> Optional[str]:
+        """esc P2-3: an unclaimed row names the department's project-team
+        responsible (else its backup), who owns it."""
+        c = changes.get(cid)
+        key = (getattr(c, "project_id", None), dept_id)
+        if key not in resp_cache:
+            r = await _responsible(session, key[0], dept_id)
+            resp_cache[key] = r[1] if r else None
+        return resp_cache[key]
+
     for a in (await session.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id.in_(changes),
             ChangeAssessment.status == "active",
@@ -146,9 +159,11 @@ async def late_entries(session: AsyncSession, changes: dict, now: datetime, *,
         if not escalated(a.due_date, now):
             continue
         dept = names.get(a.department_id, 'a department')
+        owner = a.owner_name or await responsible_name(a.change_id, a.department_id)
+        who = f", {owner}" if owner else ""
         add(a.change_id, "assessment", a.department_id, f"{dept} assessment",
-            a.owner_name, a.due_date,
-            f"{dept} assessment (due {fmt_date(a.due_date)})")
+            owner, a.due_date,
+            f"{dept} assessment{who} (due {fmt_date(a.due_date)})")
     from app.services.notification_sweep import change_task_query
     q, change_of = change_task_query()
     for t, cid in (await session.execute(
@@ -157,7 +172,8 @@ async def late_entries(session: AsyncSession, changes: dict, now: datetime, *,
         if not escalated(t.due_date, now):
             continue
         dept = names.get(t.department_id, 'a department')
-        owner = t.owner_name if t.owner_id is not None and t.owner_name else None
+        owner = (t.owner_name if t.owner_id is not None and t.owner_name
+                 else await responsible_name(cid, t.department_id))
         who = f", {owner}" if owner else ""
         add(cid, "wf_task", t.department_id, f"{dept} task", owner, t.due_date,
             f"{dept}{who} (due {fmt_date(t.due_date)})")
@@ -262,7 +278,10 @@ async def send_overdue_digest(session: AsyncSession,
             select(User).where(User.id.in_(list(mine))))).scalars().all()})
     if not users:
         return 0
-    key = f"digest:{now.date().isoformat()}"
+    # esc P3-1: the digest day is the business day (Toccoa), not the UTC
+    # date: two digests on one local evening otherwise
+    from app.utils.clock import business_date_of
+    key = f"digest:{business_date_of(now).isoformat()}"
     had = set((await session.execute(select(Notification.user_id).where(
         Notification.kind == DIGEST_KIND, Notification.subject_key == key,
         Notification.user_id.in_(list(users))))).scalars().all())

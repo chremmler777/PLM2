@@ -533,6 +533,13 @@ class EarlyStageService:
             select(Department.id, Department.name).where(
                 Department.id.in_(affected)))).all()) if affected else {}
         for did in affected:
+            # F6: only a department that actually answered (submitted, or a
+            # draft somebody started) is told its answer may be stale; a
+            # later-stage placeholder row has nothing to check
+            if not any(a.department_id == did and (
+                    a.submitted_at is not None or a.effective_owner_id is not None)
+                    for a in change.assessments):
+                continue
             owners = sorted({a.effective_owner_id or a.responsible_id
                              for a in change.assessments
                              if a.department_id == did
@@ -566,8 +573,11 @@ class EarlyStageService:
                     session, owners, kind="impact_edited", subject_key=key,
                     title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
             else:
-                await NotificationService.notify_departments_once(
-                    session, [did], change=change, kind="impact_edited", subject_key=key,
+                from app.services.change_people import team_owner_ids
+                await NotificationService.notify_once(
+                    session, await team_owner_ids(session, change.project_id, [did],
+                                                  exclude=(user_id,)),
+                    kind="impact_edited", subject_key=key,
                     title=title, body=body, link=f"/changes/{change.id}?tab=assessments")
         # A3-06: the lead sees who stepped back and why (the edit may have
         # been a PM member's); the move on waits on these answers
@@ -1010,12 +1020,24 @@ class EarlyStageService:
                            and change.routing.deviation_status == "pending_approval")
         rights = await EarlyStageService.transition_refusal(
             session, change, user, "costing") is None
+        # esc P2-3: who owns each waiting row: whoever took it, else the
+        # project team's responsible (else its backup)
+        from app.services.project_team_service import _responsible
+        waiting_rows = []
+        for a in waiting:
+            row = dept(a)
+            owner = a.effective_owner_name
+            if not owner:
+                r = await _responsible(session, change.project_id, a.department_id)
+                owner = r[1] if r else None
+            row["owner_name"] = owner
+            waiting_rows.append(row)
         return {
             "first_stage": first,
             "total": len(blocking),
             "submitted": len(submitted),
             "all_submitted": all_submitted,
-            "waiting_on": [dept(a) for a in waiting],
+            "waiting_on": waiting_rows,
             "not_feasible": not_feasible,
             "declined_pending": declined,
             "verdicts": verdicts,
@@ -1168,8 +1190,16 @@ class EarlyStageService:
         if unanswered:
             # The kind keeps its old name for the UI; the question is the
             # asking side's, answered by them, Sales or Project Management.
+            n_cust = sum(1 for c in unanswered if c.answer_from == "customer")
+            # F8: a customer question waits on Sales (the Sales contact)
+            sales = (f"Sales ({change.sales_owner_name})"
+                     if getattr(change, "sales_owner_name", None) else "Sales")
+            text = (f"Waiting on {sales}: {n_cust} customer question(s)"
+                    if n_cust == len(unanswered)
+                    else f"Waiting on an answer to {len(unanswered)} open question(s)"
+                    + (f", {n_cust} with {sales}" if n_cust else ""))
             waits.append({"kind": "waiting_on_sales_answer",
-                          "text": f"Waiting on an answer to {len(unanswered)} open question(s)",
+                          "text": text,
                           "concern_ids": [c.id for c in unanswered],
                           "target_tab": "scoping"})
         if (change.status == "scoping" and change.impact_confirmed_at is None
@@ -1194,8 +1224,10 @@ class EarlyStageService:
                               "target_tab": "scoping"})
         if change.status == "in_assessment" and assessment is not None:
             if assessment["waiting_on"]:
-                names = ", ".join(d["department_name"] or str(d["department_id"])
-                                  for d in assessment["waiting_on"])
+                names = ", ".join(
+                    (f"{d['owner_name']} ({d['department_name']})" if d.get("owner_name")
+                     else d["department_name"] or str(d["department_id"]))
+                    for d in assessment["waiting_on"])
                 waits.append({"kind": "assessment_waiting",
                               "text": (f"Assessment: waiting on {names} "
                                        f"({assessment['submitted']}/{assessment['total']})"),

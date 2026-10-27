@@ -19,6 +19,12 @@ class TaskAssignForbidden(ValueError):
     router maps it; a ValueError, so older callers still answer 400)."""
 
 
+class TaskRightsForbidden(ValueError):
+    """esc P3-2: a rights refusal (not a member of the task's department, not
+    the one who sets its due date). A ValueError, so older callers still
+    answer 400; the change endpoints answer 403."""
+
+
 class TaskAcceptForbidden(ValueError):
     """The caller may not accept this task: not a member of its department
     (403, not 400; review 2026-10-19)."""
@@ -218,6 +224,40 @@ class WorkflowService:
         return out, rev.no_geometry_change_by
 
     @staticmethod
+    async def no_tool_change_note(db: AsyncSession, instance: WfInstance) -> str | None:
+        """T18 (test 2026-10-26; the short flow itself NEEDS CHRISTOPH): the
+        "Implement tool change" step is not applicable when every Tool
+        Engineer assessment on the change answered "no tool change" (impact
+        no). Returns the waive note, or None (no change, no Tool Engineer
+        answer, or one says the tool changes)."""
+        from app.models.change import ChangeAssessment
+        from app.models.workflow import Department
+        change = await WorkflowService._task_change(db, instance)
+        if change is None or instance.change_id is not None:
+            return None
+        rows = (await db.execute(
+            select(ChangeAssessment)
+            .join(Department, Department.id == ChangeAssessment.department_id)
+            .where(ChangeAssessment.change_id == change.id,
+                   Department.name == "Tool Engineer"))).scalars().all()
+        answered = [a for a in rows if a.submitted_at is not None]
+        if not answered or len(answered) != len([a for a in rows
+                                                 if a.rasic_letter in ("R", "A")
+                                                 or a.submitted_at is not None]):
+            return None
+        for a in answered:
+            d = a.details_dict
+            if d.get("impacted") is False:
+                continue
+            impacts = d.get("impacts")
+            if isinstance(impacts, list) and impacts and not any(
+                    i.get("impacted") for i in impacts if isinstance(i, dict)):
+                continue
+            return None
+        return ("Not applicable: the Tool Engineer's assessment says no tool "
+                "change")
+
+    @staticmethod
     async def no_geometry_signer_departments(db: AsyncSession,
                                              revision: PartRevision) -> tuple[str, ...]:
         """The departments that own the revision's 3D evidence: the R and A
@@ -356,6 +396,13 @@ class WorkflowService:
                                      for d in snap_departments}
 
         drops, signer = await WorkflowService.no_geometry_drops(db, instance)
+        tool_note = await WorkflowService.no_tool_change_note(db, instance)
+        if tool_note is not None:
+            from app.services.wf_seed_service import TOOL_CHANGE_STEP
+            drops = dict(drops)
+            for st in stage.steps:
+                if st.step_name == TOOL_CHANGE_STEP:
+                    drops[st.id] = tool_note
         born_waived: list[WfInstanceTask] = []
 
         def _add_task(step_id, department_id: int, letter: str) -> None:
@@ -633,8 +680,9 @@ class WorkflowService:
             if fallback is not None and fallback["user_id"] != actor.id:
                 fallback = None
         if actor.effective_role != "admin" and not in_department and fallback is None \
+                and not await WorkflowService.internal_lead_acts(db, task, actor) \
                 and not await WorkflowService.coordinates_task(db, task, actor):
-            raise ValueError(
+            raise TaskRightsForbidden(
                 "Only members of the task's department (or an admin) may complete it; "
                 "for a department with no member here the change's coordinator does")
 
@@ -702,6 +750,25 @@ class WorkflowService:
                     db, change, "four_eyes_fallback", line, completed_by_id,
                     new_value={"task_id": task.id,
                                "step": step.step_name if step else None})
+
+        if decision == "approved" and task.step_id is not None:
+            # T10 (test 2026-10-26): a department that is both R and A on one
+            # step (Development on the article's design steps) answers it
+            # once: its other open letter on the step closes with it
+            for sib in (await db.execute(select(WfInstanceTask).where(
+                    WfInstanceTask.instance_id == task.instance_id,
+                    WfInstanceTask.step_id == task.step_id,
+                    WfInstanceTask.department_id == task.department_id,
+                    WfInstanceTask.id != task.id,
+                    WfInstanceTask.status == "active",
+                    WfInstanceTask.is_actionable.is_(True)))).scalars().all():
+                sib.status = sib.decision = "approved"
+                sib.completed_by = completed_by_id
+                sib.completed_at = task.completed_at
+                sib.notes = f"Same department as the {task.rasic_letter}: answered once"
+                if sib.owner_id is None:
+                    sib.owner_id = completed_by_id
+            await db.flush()
 
         # Rejection propagates to instance immediately
         if decision == "rejected":
@@ -967,7 +1034,7 @@ class WorkflowService:
                     change = await db.get(ChangeRequest, rev.originating_change_id)
                     allowed = change is not None and holds_lead(change, actor)
         if not allowed:
-            raise ValueError(
+            raise TaskRightsForbidden(
                 "Only an admin, the workflow starter, or the change lead may set due dates")
         old = task.due_date.isoformat() if task.due_date else None
         task.due_date = due_date
@@ -1064,6 +1131,12 @@ class WorkflowService:
             rev = await db.get(PartRevision, instance.part_revision_id)
             if rev is not None and rev.originating_change_id is not None:
                 return await db.get(ChangeRequest, rev.originating_change_id)
+            from app.models.change import ChangeImpactedItem
+            cid = (await db.execute(select(ChangeImpactedItem.change_id).where(
+                ChangeImpactedItem.resulting_revision_id == instance.part_revision_id)
+                .limit(1))).scalar_one_or_none()
+            if cid is not None:
+                return await db.get(ChangeRequest, cid)
         return None
 
     @staticmethod
@@ -1119,6 +1192,21 @@ class WorkflowService:
         return None
 
     @staticmethod
+    async def internal_lead_acts(db: AsyncSession, task: WfInstanceTask, user) -> bool:
+        """T11 (test 2026-10-26): on an internal change the raiser leads it
+        (P3) and so holds Project Management's accountability (A) on its
+        check workflow steps: the lead completes them."""
+        from app.models.workflow import Department
+        from app.services.change_people import holds_lead
+        dept = await db.get(Department, task.department_id)
+        if dept is None or dept.name != "Project Manager":
+            return False
+        instance = await db.get(WfInstance, task.instance_id)
+        change = await WorkflowService._task_change(db, instance)
+        return (change is not None and change.customer_relevant is False
+                and holds_lead(change, user))
+
+    @staticmethod
     async def get_four_eyes_fallback_tasks(db: AsyncSession, user) -> list[dict]:
         """The open 4-eyes revision steps this user reviews as the fallback
         (four_eyes_fallback), shaped like get_my_tasks rows."""
@@ -1151,6 +1239,32 @@ class WorkflowService:
                         "hint": (f"4-eyes fallback: you review, "
                                  f"{fb['department_name']} has no second member")})
             out.append(row)
+        # T11: the PM-accountable steps of the internal changes this user leads
+        from app.models.change import ChangeRequest, TERMINAL_STATUSES
+        from app.models.workflow import Department
+        q2 = (select(WfInstanceTask)
+              .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+              .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+              .join(ChangeRequest, ChangeRequest.id == PartRevision.originating_change_id)
+              .join(Department, Department.id == WfInstanceTask.department_id)
+              .where(WfInstanceTask.status == "active",
+                     WfInstanceTask.is_actionable.is_(True),
+                     WfInstance.change_id.is_(None), WfInstance.status == "active",
+                     Department.name == "Project Manager",
+                     ChangeRequest.lead_id == user.id,
+                     ChangeRequest.customer_relevant.is_(False),
+                     ChangeRequest.status.not_in(TERMINAL_STATUSES))
+              .options(selectinload(WfInstanceTask.instance)
+                       .selectinload(WfInstance.part_revision)
+                       .selectinload(PartRevision.part),
+                       selectinload(WfInstanceTask.step).selectinload(WfStep.stage),
+                       selectinload(WfInstanceTask.department)))
+        for t in (await db.execute(q2)).scalars().all():
+            row = await WorkflowService._my_task_row(t, roles, user.id)
+            row.update({"coordinated": True, "role": "main", "main_name": None,
+                        "hint": "Internal change: you lead it, so this Project "
+                                "Management step is yours"})
+            out.append(row)
         return out
 
     @staticmethod
@@ -1175,6 +1289,8 @@ class WorkflowService:
                                        await coordinator_name(db, change))
             can = admin or t.department_id in mine or (
                 change is not None and await WorkflowService.coordinates_task(db, t, user))
+            if not can and await WorkflowService.internal_lead_acts(db, t, user):
+                can = True
             fb = await WorkflowService.four_eyes_fallback(db, t)
             if fb is not None:
                 hint = (f"4-eyes fallback: {fb['name']} reviews, "

@@ -3,6 +3,7 @@ guards, hash-chained audit, assessments, impacted items, sign-off, ECN spawn,
 release."""
 import hashlib
 import json
+import re
 import logging
 from collections import defaultdict
 from datetime import datetime
@@ -157,6 +158,10 @@ KICKOFF_SALES_SUPPLIES = frozenset({
     "need-by date", "urgent reason and evidence"})
 
 
+class RightsForbidden(ChangeError):
+    """esc P3-2: the caller has no right to this act (403, not 400)."""
+
+
 class AssignForbidden(ChangeError):
     """The caller may not assign this department task (403, not 400)."""
 
@@ -203,6 +208,22 @@ class ChangeService:
         )
         return result.scalar_one_or_none()
 
+    _DEPT_REF = re.compile(r"\b[Dd]ept(?:artment)? (\d+)\b")
+
+    @staticmethod
+    async def _named_departments(session: AsyncSession, text: str) -> str:
+        """esc P3-6 / F misc: a history line names the department ("Process
+        Engineer: our part done"), never its id ("Dept 27: ...")."""
+        if not text:
+            return text
+        ids = {int(m) for m in ChangeService._DEPT_REF.findall(text)}
+        if not ids:
+            return text
+        names = dict((await session.execute(select(Department.id, Department.name)
+                                            .where(Department.id.in_(ids)))).all())
+        return ChangeService._DEPT_REF.sub(
+            lambda m: names.get(int(m.group(1)), m.group(0)), text)
+
     @staticmethod
     async def append_changelog(
         session: AsyncSession, change: ChangeRequest, action: str,
@@ -236,6 +257,7 @@ class ChangeService:
             line = (f"Entered by {(real.full_name or real.username) if real else acting[0]} "
                     f"acting as {(person.full_name or person.username) if person else performed_by}")
             notes = f"{line}: {notes}" if notes else line
+        description = await ChangeService._named_departments(session, description)
         prev = await ChangeService._last_entry_hash(session, change.id)
         old_s = json.dumps(old_value) if old_value is not None else None
         new_s = json.dumps(new_value) if new_value is not None else None
@@ -420,7 +442,7 @@ class ChangeService:
         else:
             from app.services.cm_rules import (
                 decider_group, RUN, PM_MGMT, QUALITY, APPROVER, rule_label)
-            from app.services.change_people import department_members_of_change_org
+            from app.services.change_people import team_owner_ids
             group = decider_group(dev.guard_key, dev.to_status, change.customer_relevant)
             names = {RUN: ("Project Manager",), PM_MGMT: ("Project Manager", "Management"),
                      QUALITY: ("Quality",), APPROVER: ()}[group]
@@ -430,7 +452,9 @@ class ChangeService:
                 dept_ids = [i for (i,) in (await session.execute(
                     select(Department.id).where(Department.name.in_(names),
                                                 Department.is_active.is_(True)))).all()]
-                ids.update(await department_members_of_change_org(session, change, dept_ids))
+                # F7: the project team's owner of each deciding department
+                ids.update(await team_owner_ids(session, change.project_id, dept_ids,
+                                                exclude=(proposer_id,)))
             if group == APPROVER:
                 # the same set that may decide (is_internal_approver): the
                 # configured approvers, else Project Management members
@@ -526,7 +550,12 @@ class ChangeService:
         signs or approves only by acting as the department, which puts the
         department on the record (R25, R37)."""
         from app.services.change_people import hard3_blind
-        if hard3_blind(user):
+        from app.services.hub_departments import is_hub_account
+        # T5 (test 2026-10-26): a hub admin's departments are its AdminPanel
+        # department roles (migration 150), real memberships: they count
+        # (Christoph, admin + Development, signs 'no geometry change'). Only
+        # a local admin account's blanket rows stay blind.
+        if hard3_blind(user) and not is_hub_account(user):
             return False
         return await ChangeService.member_of(session, user, *names)
 
@@ -1154,8 +1183,34 @@ class ChangeService:
         await ChangeService.append_changelog(
             session, change, "created", f"Change {number} created", raised_by,
         )
+        if change.priority == "critical":
+            await ChangeService.notify_urgent(session, change, raised_by)
         logger.info(f"Created change {number} in project {project_id}")
         return change
+
+    @staticmethod
+    async def notify_urgent(session: AsyncSession, change: ChangeRequest,
+                            actor_id: int) -> int:
+        """T15 (test 2026-10-26): an urgent change is told at once to the
+        Sales contact and the project team's PM (else its backup, else the
+        PM members), once per change; never the actor."""
+        from app.services.change_people import team_owner_ids
+        from app.services.notification_service import NotificationService
+        pm = [d for (d,) in (await session.execute(select(Department.id).where(
+            Department.name == "Project Manager", Department.is_active.is_(True)))).all()]
+        ids = set(await team_owner_ids(session, change.project_id, pm, exclude=(actor_id,)))
+        if change.sales_owner_id not in (None, actor_id):
+            ids.add(change.sales_owner_id)
+        if change.lead_id not in (None, actor_id):
+            ids.add(change.lead_id)
+        need = (f", need-by {change.release_due_date:%d %b}"
+                if change.release_due_date else "")
+        return await NotificationService.notify_once(
+            session, sorted(ids), kind="task_new", subject_key=f"chg:{change.id}:urgent",
+            title=f"Urgent change: {change.change_number}"[:200],
+            body=f"'{change.title}'{need}" + (f": {change.urgent_reason}"
+                                              if getattr(change, "urgent_reason", None) else "."),
+            link=f"/changes/{change.id}", include_read=True)
 
     @staticmethod
     async def owing_change_ids(session: AsyncSession, user: User,
@@ -1945,8 +2000,11 @@ class ChangeService:
         "validation_failed": "Quality",
         "ppap_decision": "Quality", "customer_flip": "sales",
         "scope_change": "Project Management",
-        # A6-07: the bank build is Scheduling's (else PM, spec §8-9)
-        "bank_build": "Scheduling",
+        # A6-07: the bank build is Logistics' (was Scheduling, esc P2-2)
+        "bank_build": "Logistics",
+        # T6: the rejection letter and its sending are the Sales contact's
+        # on a customer change (only Sales may confirm it)
+        "rejection_letter": "sales_customer", "rejection_sent": "sales_customer",
     }
 
     @staticmethod
@@ -1971,7 +2029,9 @@ class ChangeService:
             if "who" in i:
                 continue
             owner = ChangeService._ROW_OWNER.get(i["key"])
-            i["who"] = {"sales": sales, "capture": capture, None: lead}.get(owner, owner)
+            i["who"] = {"sales": sales, "capture": capture, None: lead,
+                        "sales_customer": sales if change.customer_relevant else lead,
+                        }.get(owner, owner)
 
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
@@ -2492,7 +2552,7 @@ class ChangeService:
                 if await ChangeService.internal_approval_outgrown(session, change):
                     raise ChangeError(
                         "Costs rose after the internal approval: the approver "
-                        "approves the new total first (HARD #8)")
+                        "approves the new total first")
         if to_status in ("quoting", "quoted") and not change.customer_relevant:
             raise ChangeError(
                 "Internal changes skip the quote — record internal cost approval instead")
@@ -2553,7 +2613,7 @@ class ChangeService:
 
         if to_status == "cancelled":
             if not cancellation_reason:
-                raise ChangeError("cancellation_reason is required to cancel")
+                raise ChangeError("Give a reason for cancelling")
             change.cancellation_reason = cancellation_reason
             change.cancelled_at = datetime.utcnow()
             # Cancelling kills the references: every active engine instance
@@ -2750,6 +2810,7 @@ class ChangeService:
             await ChangeService.notify_stage_entered(session, change, to_status)
         if to_status == "closed" and old == "released":
             await ChangeService.notify_closed(session, change, user_id)
+        await ChangeService.notify_handover_and_end(session, change, old, to_status, user_id)
         if mother_plant and old == "scoping" and to_status == "approved":
             # After the status flips: the detailed plan is only writable in
             # approved.
@@ -3389,13 +3450,18 @@ class ChangeService:
                    Department.can_start_internal_change)
             .where(Department.is_active.is_(True))
             .order_by(Department.sort_order, Department.id))).all()
-        cust = [n for n, c, _ in rows if c]
-        internal = [n for n, c, i in rows if i and not c]
+        # esc P3-8: departments by their team name, the verb agreeing
+        team = {"Project Manager": "Project Management"}
+        cust = [team.get(n, n) for n, c, _ in rows if c]
+        internal = [team.get(n, n) for n, c, i in rows if i and not c]
+
+        def verb(names):
+            return "starts" if len(names) == 1 else "start"
         parts = []
         if cust:
-            parts.append(f"{', '.join(cust)} start customer changes")
+            parts.append(f"{', '.join(cust)} {verb(cust)} customer changes")
         if internal:
-            parts.append(f"{', '.join(internal)} start internal changes")
+            parts.append(f"{', '.join(internal)} {verb(internal)} internal changes")
         return ("Your department does not start changes: "
                 + ("; ".join(parts) if parts else "only an admin may")
                 + ". Ask one of them to raise it.")
@@ -3599,7 +3665,7 @@ class ChangeService:
     # that plan to the customer. Neither act is a hard transition gate:
     # 'approved' -> 'in_implementation' stays open, and the pressure comes from
     # the my-tasks rows and the wait states derived off these columns.
-    SCHEDULING_DEPARTMENT = "Scheduling"
+    SCHEDULING_DEPARTMENT = "Logistics"  # esc P2-2: Logistics replaced Scheduling
 
     @staticmethod
     async def user_can_decide_bank_build(
@@ -4160,6 +4226,10 @@ class ChangeService:
                     # Tells the UI which half of the job is left: write the
                     # explanation, or confirm it went out.
                     "has_letter": await ChangeService.has_rejection_letter(db, c),
+                    # T6: the change's Sales contact owns it, the rest of
+                    # Sales backs up
+                    **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                       if c.sales_owner_id not in (None, user.id) else {}),
                 })
             # The quoting stage IS Sales' open task: costing is wrapped up and the
             # offer has to be written from it. has_price says which half is left —
@@ -4194,7 +4264,10 @@ class ChangeService:
                         "hint": "Decide running change vs planned scrap and "
                                 "outline the plan",
                     })
-                if (in_sales and c.customer_relevant
+                # F10 (spec §7: "lead confirms in publish_plan"): the lead
+                # publishes the plan; the Sales contact tells the customer
+                # with it. Its row is the lead's plan_watch (advance_tasks).
+                if (in_sales and c.customer_relevant and c.lead_id is None
                         and c.bank_build_mode is not None
                         and c.plan_published_at is None):
                     tasks.append({
@@ -4292,10 +4365,10 @@ class ChangeService:
                 elif mp.is_mother_plant(c):
                     # no assessments: the informed departments and Scheduling
                     required |= informed_depts.get(c.id, set())
-                    required |= {dept_by_name[n] for n in ("Scheduling",)
+                    required |= {dept_by_name[n] for n in ("Logistics",)
                                  if n in dept_by_name}
                 else:
-                    required |= {dept_by_name[n] for n in ("Scheduling", "Sales")
+                    required |= {dept_by_name[n] for n in ("Logistics", "Sales")
                                  if n in dept_by_name}
                 latest = feedback.get(c.id, {})
                 revision = int(c.plan_revision or 0)
@@ -4612,6 +4685,26 @@ class ChangeService:
                     **({"target_tab": "assessments"}
                        if c.status == "in_assessment" else {}),
                 })
+            customer_qs = [q for q in questions if q.answer_from == "customer"]
+            if not live and in_sales and customer_qs:
+                # F8 (spec §0 [R4]): each customer question is a Sales task
+                # with the mail copy text, the change's Sales contact's
+                from app.services.meeting_service import MeetingService as _MS
+                newest = customer_qs[-1]
+                tasks.append({
+                    **await _base(c), "kind": "obtain_info",
+                    "customer_copy": _MS.customer_copy(c, newest),
+                    "reason": newest.note, "question_count": len(customer_qs),
+                    "concern_id": newest.id, "department_id": newest.department_id,
+                    "since": newest.raised_at,
+                    "role_department_id": dept_by_name.get("Sales"),
+                    "asker_name": newest.raised_by_name,
+                    "asking_side": "Sales",
+                    **({"main_user": (c.sales_owner_id, c.sales_owner_name or "")}
+                       if c.sales_owner_id not in (None, user.id) else {}),
+                    "mine": c.sales_owner_id == user.id,
+                })
+                questions = [q for q in questions if q.answer_from != "customer"]
             if not live and questions:
                 am_author = getattr(user, "acts_as_department_id", None) is None
                 answerable = [
@@ -4905,8 +4998,8 @@ class ChangeService:
                 involved = process in await ImplementationService.implementing_department_ids(
                     session, change)
             if involved:
-                users |= set(await department_members_of_change_org(
-                    session, change, [process]))
+                from app.services.change_people import team_owner_ids
+                users |= set(await team_owner_ids(session, change.project_id, [process]))
         users.discard(user_id)
         body = f"'{change.title}' is closed."
         if change.achieved_value is not None:
@@ -4919,6 +5012,71 @@ class ChangeService:
             subject_key=f"chg:{change.id}:closed",
             title=f"Closed: {change.change_number}"[:255], body=body,
             link=f"/changes/{change.id}?tab=release")
+
+    @staticmethod
+    async def notify_handover_and_end(session: AsyncSession, change: ChangeRequest,
+                                      old: str, to_status: str, user_id: int) -> int:
+        """T6/T17/T19 (test 2026-10-26, R18/R33): a stage event that hands
+        work to someone tells them once; an end tells the people involved.
+        - captured -> scoping: the lead (scoping) and the Sales contact;
+        - -> rejected (customer change): the Sales contact owes the letter;
+        - -> cancelled / rejected / closed from rejected: the lead, the Sales
+          contact, the raiser and the project-team owners of the departments
+          that assessed; open cancel votes are closed with the change.
+        Never the actor."""
+        from app.services.notification_service import NotificationService
+        link = f"/changes/{change.id}"
+        n = 0
+        if old == "captured" and to_status == "scoping":
+            ids = [i for i in (change.lead_id, change.sales_owner_id)
+                   if i is not None and i != user_id]
+            n += await NotificationService.notify_once(
+                session, ids, kind="task_new", subject_key=f"chg:{change.id}:handover",
+                title=f"Handed over for scoping: {change.change_number}"[:200],
+                body=f"'{change.title}': decide parts, who assesses and go / no-go.",
+                link=f"{link}?tab=scoping")
+        if to_status in ("cancelled", "rejected"):
+            for c in (await session.execute(select(ChangeConcern).where(
+                    ChangeConcern.change_id == change.id,
+                    ChangeConcern.kind == "reject_proposal"))).scalars().all():
+                if c.is_open:
+                    c.withdrawn_at = datetime.utcnow()
+                    c.withdrawn_by = user_id
+                    c.settled_as = "pm"
+                    c.resolution_note = f"Change {to_status}"
+            await session.flush()
+        if to_status == "rejected" and change.customer_relevant \
+                and change.sales_owner_id not in (None, user_id):
+            n += await NotificationService.notify_once(
+                session, [change.sales_owner_id], kind="task_new",
+                subject_key=f"chg:{change.id}:send_rejection",
+                title=f"Send the rejection letter: {change.change_number}"[:200],
+                body=(change.rejection_reason or "The change is rejected")
+                + ": attach the letter sent to the customer, then confirm it went out.",
+                link=link)
+        if to_status in ("cancelled", "rejected") or (
+                to_status == "closed" and old == "rejected"):
+            from app.services.change_people import team_owner_ids
+            ids = {i for i in (change.lead_id, change.sales_owner_id, change.raised_by)
+                   if i is not None}
+            ids |= set(await team_owner_ids(
+                session, change.project_id,
+                set((await session.execute(select(ChangeAssessment.department_id).where(
+                    ChangeAssessment.change_id == change.id,
+                    ChangeAssessment.submitted_at.is_not(None)))).scalars().all())))
+            ids.discard(user_id)
+            if to_status == "rejected" and change.customer_relevant:
+                ids.discard(change.sales_owner_id)   # told above, with the task
+            why = (change.cancellation_reason if to_status == "cancelled"
+                   else change.rejection_reason)
+            word = {"cancelled": "Cancelled", "rejected": "Rejected"}.get(to_status, "Closed")
+            n += await NotificationService.notify_once(
+                session, sorted(ids), kind="change_ended",
+                subject_key=f"chg:{change.id}:{to_status}",
+                title=f"{word}: {change.change_number}"[:200],
+                body=f"'{change.title}' is {to_status}" + (f": {why}" if why else "."),
+                link=link)
+        return n
 
     @staticmethod
     async def notify_stage_entered(session: AsyncSession, change: ChangeRequest,
@@ -5322,20 +5480,44 @@ class ChangeService:
             orphaned = await ChangeService.leadless_ids(
                 db, [c for c in cand if not holds_lead(c, user)])
         mine = [c for c in cand if holds_lead(c, user) or c.id in orphaned]
+        # F14: the project team's named PM backup sees the lead's onward step
+        # as backup (it turns theirs once late), as on scoping
+        backing: set = set()
+        if is_pm_member:
+            from app.services.project_team_service import _pair
+            pm_id = (await db.execute(select(Department.id).where(
+                Department.name == "Project Manager"))).scalar_one_or_none()
+            for c in cand:
+                if c in mine or c.lead_id is None:
+                    continue
+                _resp, backup = await _pair(db, c.project_id, pm_id)
+                if backup is not None and backup[0] == user.id:
+                    backing.add(c.id)
+            mine += [c for c in cand if c.id in backing]
         if not mine:
             return []
         # A6-05 (R5, R18): an approved change waits on the bank build, the
         # plan and the teams' confirmation; its lead watches who owes the
         # next step instead of having no row at all
         out = []
+        approved = [c.id for c in mine if c.status == "approved"]
+        planned: set = set()
+        if approved:
+            from app.models.change_plan import ChangePlanTask
+            planned = set((await db.execute(
+                select(ChangePlanTask.change_id).where(
+                    ChangePlanTask.change_id.in_(approved),
+                    ChangePlanTask.plan == "detailed").distinct())).scalars().all())
         for c in [c for c in mine if c.status == "approved"]:
-            waiting = ChangeService._approved_waiting(c)
+            waiting = ChangeService._approved_waiting(c, c.id in planned)
             if waiting is not None:
                 out.append({**await base(c), "kind": "plan_watch", "hint": waiting,
-                            "target_tab": "timing"})
+                            "target_tab": "timing",
+                            **({"main_user": (c.lead_id, c.lead_name or "")}
+                               if c.id in backing else {})})
         mine = [c for c in mine if c.status != "approved"
                 or (not ChangeService._advance_held(c)
-                    and ChangeService._approved_waiting(c) is None)]
+                    and ChangeService._approved_waiting(c, c.id in planned) is None)]
         if not mine:
             return out
         # owed since the change last moved (the last blocker cleared): its
@@ -5351,7 +5533,9 @@ class ChangeService:
                 continue
             out.append({**await base(c), "kind": "advance", "to_status": nxt["to"],
                         "label": ChangeService.ADVANCE_VERBS.get(nxt["to"]),
-                        "target_tab": "overview", "since": last.get(c.id)})
+                        "target_tab": "overview", "since": last.get(c.id),
+                        **({"main_user": (c.lead_id, c.lead_name or "")}
+                           if c.id in backing else {})})
         return out
 
     @staticmethod
@@ -5372,8 +5556,9 @@ class ChangeService:
                     Department.name == "Project Manager",
                     Department.is_active.is_(True)))).all()]
             from app.services.change_people import department_members_of_change_org
-            out[c.id] = await department_members_of_change_org(
-                db, c, pm_ids, real_only=True)
+            # F7: the project team's PM (backup, else the members)
+            from app.services.change_people import team_owner_ids
+            out[c.id] = await team_owner_ids(db, c.project_id, pm_ids, real_only=True)
         return out
 
     @staticmethod
@@ -5406,19 +5591,23 @@ class ChangeService:
     }
 
     @staticmethod
-    def _approved_waiting(c) -> Optional[str]:
+    def _approved_waiting(c, plan_exists: bool = True) -> Optional[str]:
         """Who owes the next step of an approved change, in words, from the
         loaded change (A6-05); None when only the lead's own step is left
-        (the release gate, or "Ready: move it on")."""
+        (the release gate, or "Ready: move it on"). F2: without a detailed
+        plan the lead's step comes first: nobody can confirm a plan that
+        does not exist."""
         from app.services import mother_plants as mp
+        if not plan_exists:
+            return "Create the detailed plan (Timing tab): then the teams confirm it"
         if c.bank_build_mode is None:
-            return "Waiting for Scheduling: decide the bank build"
+            return "Waiting for Logistics: decide the bank build"
         if mp.is_mother_plant(c):
             if c.timing_validated_at is None:
                 return "Waiting for the teams to confirm the plan; then validate the timing"
             return None
         if c.customer_relevant and c.plan_published_at is None:
-            return "Waiting for Sales: publish the plan"
+            return "Publish the plan (Timing tab): the customer is told the dates"
         if c.timing_validated_at is None:
             return "Waiting for the teams to confirm the plan; then validate the timing"
         if any(GATE_TARGET_STATUS.get(g.gate_key) == "in_implementation"
@@ -6170,7 +6359,8 @@ class ChangeService:
                 # F16: the Tool Engineer's R is the tool change; Project
                 # Management's A on the step does not hold the tool
                 WfInstanceTask.rasic_letter == "R",
-                WfInstanceTask.status.not_in(("approved", "noted"))))
+                # T18: a step waived as not applicable is no open tool change
+                WfInstanceTask.status.not_in(("approved", "noted", "waived"))))
             .where(WfInstance.part_revision_id.in_(rev_ids),
                    WfInstance.status.in_(("active", "completed")),
                    WfStep.step_name == TOOL_CHANGE_STEP,
@@ -6653,7 +6843,7 @@ class ChangeService:
             raise ChangeError("Actor not found")
         if actor.effective_role != "admin" and not await WorkflowService.actor_in_department(
                 session, actor, department_id):
-            raise ChangeError(
+            raise RightsForbidden(
                 "Only members of the assessed department (or an admin) may "
                 "submit its assessment")
         # Soft hold: a department that flagged an open concern on this change
@@ -6684,7 +6874,7 @@ class ChangeService:
                     f"them before submitting its assessment: {points}")
             raise ChangeError(
                 "Not yet: this department's open questions and check items hold "
-                "its submit (HARD #10): "
+                "its submit: "
                 + "; ".join(ChangeService._hold_line(change, c) for c in held))
         # The row write below completes the engine task and may advance the
         # stage and repair it: take the instance lock first, the one lock
@@ -6956,11 +7146,13 @@ class ChangeService:
                 await WorkflowService.set_task_due_date(
                     session, a.wf_instance_task_id, due_date, actor)
             except ValueError as e:
-                raise ChangeError(str(e))
+                from app.services.workflow_service import TaskRightsForbidden
+                raise (RightsForbidden if isinstance(e, TaskRightsForbidden)
+                       else ChangeError)(str(e))
         else:
             from app.services.change_people import holds_lead
             if actor.effective_role != "admin" and not holds_lead(change, actor):
-                raise ChangeError("Only the change lead or an admin may set due dates")
+                raise RightsForbidden("Only the change lead or an admin may set due dates")
             a.due_date = due_date
         await session.flush()
         await ChangeService.append_changelog(
@@ -7184,10 +7376,12 @@ class ChangeService:
                 session, change, new_date, reason, user_id)
 
         plain_changed = False
+        plain_fields: list[str] = []
         for k, v in fields.items():
             if k in allowed and v is not None and getattr(change, k) != v:
                 setattr(change, k, v)
                 plain_changed = True
+                plain_fields.append(k)
         # C10: an internal change has no Sales contact, whatever the PATCH sent.
         if not change.customer_relevant:
             change.sales_owner_id = None
@@ -7196,6 +7390,8 @@ class ChangeService:
             why = capture_rules.urgent_refusal(change)
             if why:
                 raise ChangeError(why)
+            if change.priority == "critical":
+                await ChangeService.notify_urgent(session, change, user_id)
 
         # Handle affected_plant_ids (replace-set semantics; [] clears all)
         if ("affected_plant_ids" in fields and fields["affected_plant_ids"] is not None
@@ -7234,9 +7430,12 @@ class ChangeService:
         change.updated_at = datetime.utcnow()
         await session.flush()
         if plain_changed:
+            # esc P3-6: the history names what changed
+            words = ", ".join(k.replace("_", " ") for k in plain_fields)
             await ChangeService.append_changelog(
-                session, change, "metadata_updated", "Change metadata updated",
-                user_id,
+                session, change, "metadata_updated",
+                f"Change metadata updated: {words}" if words else "Change metadata updated",
+                user_id, field_name=",".join(plain_fields)[:100] or None,
             )
         return change
 

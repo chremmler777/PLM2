@@ -256,8 +256,11 @@ async def test_seeded_ecn_template_end_to_end(
         rev.no_geometry_change = True
         await s.commit()
 
-    # Complete every actionable stage-1 task with the engineer.
+    # Complete every actionable stage-1 task with the engineer (T10: a
+    # department's R closes its A on the same step: answered once).
     for tid, _name in s1:
+        if tid not in {t for t, _ in await _stage_actionable(session_factory, inst_id, 1)}:
+            continue
         async with session_factory() as s:
             await WorkflowService.complete_task(
                 s, tid, "approved", None, seed["engineer_id"])

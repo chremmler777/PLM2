@@ -867,7 +867,7 @@ class ValidationService:
                     ValidationService._confirmers_words(session, change, row.limits_set_by))
         if hard3_blind(actor):
             return (f"An admin confirms limits only acting as "
-                    f"{LIMITS_CONFIRMER_DEPARTMENT} (HARD #3: no admin shortcut)")
+                    f"{LIMITS_CONFIRMER_DEPARTMENT} (no admin shortcut: it holds the release)")
         from app.services.workflow_service import WorkflowService
         mine = set(await WorkflowService.effective_department_ids(session, actor))
         apqp = await ValidationService._limits_department_id(session)
@@ -975,7 +975,7 @@ class ValidationService:
                 session, change, [department_id], actor)).get(department_id):
             return ("A failed check is retested by its own department (Project "
                     "Management or the lead only when it has no member here): "
-                    "no admin shortcut (HARD #3; the other exit is a "
+                    "no admin shortcut (the other exit is a "
                     "concession, Quality's decision)")
         if not note_rule:       # a measurement names it in its own fields
             return None

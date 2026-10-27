@@ -1792,6 +1792,11 @@ async def test_reject_without_records_keeps_rows_of_approved_deviations(
         for entry in await _deviation_entries(session_factory, c["id"]):
             e = await s.get(ChangeChangelog, entry.id)
             e.new_value = None
+            # esc P3-6: lines are written with names now; a row from before
+            # the records was written "dept <id>": put it back that way
+            for name in ("Manufacturing Engineer", "Sales"):
+                e.action_description = e.action_description.replace(
+                    f"added {name} as", f"added dept {departments[name]} as")
             assert "added dept" in e.action_description
         await s.commit()
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",

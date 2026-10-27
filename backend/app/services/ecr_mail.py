@@ -118,6 +118,16 @@ def address(email: Optional[str]) -> Optional[str]:
     return e if part_data_mail.valid_address(e) else None
 
 
+def display_address(email: Optional[str]) -> Optional[str]:
+    """esc P3-7: the e-mail an API shows (mailto links): a bare hub
+    username with the default domain; anything else as stored."""
+    e = (email or "").strip()
+    if not e or "@" in e:
+        return email
+    domain = (get_settings().mail_default_domain or "").strip().lstrip("@")
+    return f"{e}@{domain}" if domain else email
+
+
 def compose(n: Notification, to: str) -> Mail:
     text = (n.body or "").rstrip()
     footer = FOOTER.format(url=plm2_url(n.link))

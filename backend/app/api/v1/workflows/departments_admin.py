@@ -55,8 +55,11 @@ class ManagerSet(BaseModel):
 
 
 def _person(u: User) -> dict:
+    from app.services.ecr_mail import display_address
     return {"id": u.id, "name": u.full_name or u.username, "username": u.username,
-            "email": u.email, "is_active": u.is_active}
+            # esc P3-7: a bare hub username reads as a mail address
+            "email": display_address(u.email),
+            "is_active": u.is_active}
 
 
 async def _department(db: AsyncSession, department_id: int) -> Department:

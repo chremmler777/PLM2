@@ -89,7 +89,7 @@ async def set_team_member(
     try:
         if body.user_id is None:
             await ProjectTeamService.clear_responsible(
-                db, project_id, body.department_id, slot=body.slot)
+                db, project_id, body.department_id, slot=body.slot, actor=current_user)
         else:
             await ProjectTeamService.set_responsible(
                 db, project_id, body.department_id, body.user_id, current_user,

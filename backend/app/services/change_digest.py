@@ -114,7 +114,8 @@ async def send_change_digest(session: AsyncSession,
             involved.setdefault(uid, []).append(c)
     if not involved:
         return 0
-    key = f"change-digest:{now.date().isoformat()}"
+    from app.utils.clock import business_date_of   # esc P3-1: the business day
+    key = f"change-digest:{business_date_of(now).isoformat()}"
     had = set((await session.execute(select(Notification.user_id).where(
         Notification.kind == DIGEST_KIND, Notification.subject_key == key,
         Notification.user_id.in_(list(involved))))).scalars().all())

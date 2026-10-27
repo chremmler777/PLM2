@@ -17,6 +17,7 @@ booking ("not booked"). Its split by origin and Sales contact is cut 2.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -70,6 +71,7 @@ async def estimate_by_department(session: AsyncSession, change_ids: list[int]
     """(change, department) -> hours the department costed for its own work:
     its own-labour positions plus its cost lines' demand hours."""
     out: dict[tuple[int, int], float] = {}
+    absorbed: set = set()
     if not change_ids:
         return out
     for cid, did, h in (await session.execute(
@@ -88,6 +90,20 @@ async def estimate_by_department(session: AsyncSession, change_ids: list[int]
             .group_by(ChangeAssessment.change_id, ChangeAssessment.department_id))).all():
         if h:
             out[(cid, did)] = out.get((cid, did), 0.0) + float(h)
+    # F13 / T14: "<Dept> has no cost: absorbed" carries the hours it works
+    # for free; they are its estimate too (one per department)
+    for cid, did, raw in (await session.execute(
+            select(ChangeAssessment.change_id, ChangeAssessment.department_id,
+                   ChangeAssessment.details)
+            .where(ChangeAssessment.change_id.in_(change_ids),
+                   ChangeAssessment.details.like('%costing_no_cost%')))).all():
+        try:
+            nc = (json.loads(raw) or {}).get("costing_no_cost") or {}
+        except (TypeError, ValueError):
+            continue
+        if nc.get("reason") == "absorbed" and nc.get("hours") and (cid, did) not in absorbed:
+            absorbed.add((cid, did))
+            out[(cid, did)] = out.get((cid, did), 0.0) + float(nc["hours"])
     return {k: round(v, 2) for k, v in out.items() if v}
 
 

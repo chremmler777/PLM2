@@ -366,12 +366,23 @@ async def test_approved_lead_watches_who_owes_the_next_step(client, seed, team, 
     await _set(session_factory, cid, status="approved", lead_id=pm_id,
                customer_response="accepted")
     pm = await _as(client, "Project Manager")
+    # F2: no detailed plan yet: the lead's own step comes first
     row = (await _tasks(client, pm, cid, "plan_watch"))[0]
-    assert row["hint"] == "Waiting for Scheduling: decide the bank build"
+    assert row["hint"].startswith("Create the detailed plan")
+    from datetime import date
+    from app.models.change_plan import ChangePlanTask
+    async with session_factory() as s:
+        s.add(ChangePlanTask(change_id=cid, plan="detailed", name="Work", kind="work",
+                             start_date=date.today(), duration_days=3, predecessors=[],
+                             sort_order=1, progress_pct=0, created_by=pm_id,
+                             updated_by=pm_id))
+        await s.commit()
+    row = (await _tasks(client, pm, cid, "plan_watch"))[0]
+    assert row["hint"] == "Waiting for Logistics: decide the bank build"
     assert row["role"] == "main"
     await _set(session_factory, cid, bank_build_mode="running_change")
     row = (await _tasks(client, pm, cid, "plan_watch"))[0]
-    assert row["hint"] == "Waiting for Sales: publish the plan"
+    assert row["hint"].startswith("Publish the plan")  # F10: the lead publishes
     # NEGATIVE: Sales (not the lead) gets no watch row
     assert not await _tasks(client, sales, cid, "plan_watch")
 
@@ -578,3 +589,35 @@ async def test_routing_change_refusal_uses_the_users_words(client, seed, team, s
         texts = [str(r) for r in await ChangeService._guard_reasons(s, c, "costing")]
     assert any(t.startswith("Routing change waits for its decision") for t in texts)
     assert not any("deviation" in t.lower() for t in texts)
+
+
+async def test_f14_the_pm_backup_sees_the_leads_step_as_backup(
+        client, seed, team, session_factory):
+    """F14 (test 2026-10-26): the project team's PM backup gets a row while
+    the change waits on the lead's step (backup, with the lead's name)."""
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import ProjectResponsible, UserDepartment
+    sales = await _as(client, "Sales")
+    cid = await _create(client, sales, seed, "f14 backup")
+    pm_id = team["user"]["Project Manager"]
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username="pmbackup",
+                 email="pmbackup@test.io", full_name="PM Backup",
+                 hashed_password=get_password_hash("x-secret-123"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u); await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=team["dept"]["Project Manager"]))
+        s.add(ProjectResponsible(project_id=seed["project_id"],
+                                 department_id=team["dept"]["Project Manager"],
+                                 user_id=pm_id, backup_user_id=u.id))
+        await s.commit()
+    await _set(session_factory, cid, status="approved", lead_id=pm_id,
+               customer_response="accepted")
+    from tests.conftest import login
+    backup = await login(client, "pmbackup@test.io", "x-secret-123", admin=False)
+    row = (await _tasks(client, backup, cid, "plan_watch"))[0]
+    assert (row["role"], row["main_name"]) == ("backup", "Project Manager person")
+    # NEGATIVE: a PM member who is not the backup gets no row
+    other = await _as(client, "Sales")
+    assert not await _tasks(client, other, cid, "plan_watch")

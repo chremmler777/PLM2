@@ -29,6 +29,11 @@ class ProjectTeamError(Exception):
     """400: the target user cannot be set for this role."""
 
 
+def display_address(email):
+    from app.services.ecr_mail import display_address as _d
+    return _d(email)
+
+
 def _name(u: User) -> str:
     return u.full_name or u.username
 
@@ -107,7 +112,7 @@ class ProjectTeamService:
             # D2b: the named backup owns the work while nobody is responsible
             owner_id = main_id if main_id is not None else backup_id
             member_rows = [
-                {"id": m.id, "name": names[m.id], "email": m.email,
+                {"id": m.id, "name": names[m.id], "email": display_address(m.email),
                  "role": "main" if owner_id is None or m.id == owner_id else "backup",
                  **({"named_backup": True} if m.id == backup_id else {})}
                 for m in members
@@ -130,7 +135,7 @@ class ProjectTeamService:
                 "department_id": d.id,
                 "department_name": d.name,
                 "head_id": d.head_id,
-                "manager": ({"id": manager.id, "name": _name(manager), "email": manager.email}
+                "manager": ({"id": manager.id, "name": _name(manager), "email": display_address(manager.email)}
                             if manager is not None and manager.is_active else None),
                 "responsible_missing": missing(row.user_id) if row else None,
                 "backup_missing": missing(row.backup_user_id) if row else None,
@@ -184,24 +189,21 @@ class ProjectTeamService:
         await ProjectTeamService._check_member(
             session, project_id, department_id, user_id, word)
         row = await ProjectTeamService._row(session, project_id, department_id)
-        if row is None:
-            row = ProjectResponsible(project_id=project_id, department_id=department_id)
-            session.add(row)
-        old_responsible = row.user_id
+        resp, backup = (row.user_id, row.backup_user_id) if row else (None, None)
         if slot == "backup":
-            if row.user_id == user_id:      # the responsible becomes the backup:
-                row.user_id = row.backup_user_id    # swap in one step
-            row.backup_user_id = user_id
+            if resp == user_id:          # the responsible becomes the backup:
+                resp = backup            # swap in one step
+            backup = user_id
         else:
-            if row.backup_user_id == user_id:   # the backup becomes responsible
-                row.backup_user_id = row.user_id
-            row.user_id = user_id
-        row.set_by = actor.id
-        row.set_at = datetime.utcnow()
-        await session.flush()
-        if row.user_id != old_responsible:
-            await ProjectTeamService._follow_sales_contact(
-                session, project_id, department_id, old_responsible, row.user_id, actor)
+            if backup == user_id:        # the backup becomes responsible
+                backup = resp
+            resp = user_id
+        # esc P3-5: one slot is a save of one department: same rules, same
+        # notice to whoever is newly named (or no longer is)
+        await ProjectTeamService.save_team(
+            session, project_id,
+            [{"department_id": department_id, "responsible_id": resp, "backup_id": backup}],
+            actor)
 
     @staticmethod
     async def _follow_sales_contact(session: AsyncSession, project_id: int,
@@ -224,20 +226,38 @@ class ProjectTeamService:
             ChangeRequest.project_id == project_id,
             ChangeRequest.sales_owner_id == old_id,
             ChangeRequest.status.not_in(("closed", "cancelled"))))).scalars().all()
+        names = {u.id: _name(u) for u in (await session.execute(
+            select(User).where(User.id.in_([old_id, new_id])))).scalars().all()}
         for c in changes:
+            # esc P3-6: names, not ids
             await ChangeService.append_changelog(
                 session, c, "sales_owner_changed",
-                f"Sales contact {old_id} -> {new_id} (project team: new Sales responsible)",
+                f"Sales contact {names.get(old_id, old_id)} -> {names.get(new_id, new_id)} "
+                "(project team: new Sales responsible)",
                 actor.id, field_name="sales_owner_id", old_value=old_id, new_value=new_id)
             c.sales_owner_id = new_id
         await session.flush()
 
     @staticmethod
     async def clear_responsible(session: AsyncSession, project_id: int,
-                                department_id: int, slot: str = "responsible") -> None:
-        """Clear one slot; the row goes once neither is set (legacy)."""
+                                department_id: int, slot: str = "responsible",
+                                actor: Optional[User] = None) -> None:
+        """Clear one slot; the row goes once neither is set (legacy). With
+        the actor (the team PUT, esc P3-5): through save_team, so who is no
+        longer named is told."""
         row = await ProjectTeamService._row(session, project_id, department_id)
         if row is None:
+            return
+        if actor is not None:
+            resp, backup = row.user_id, row.backup_user_id
+            if slot == "backup":
+                backup = None
+            else:
+                resp = None
+            await ProjectTeamService.save_team(
+                session, project_id,
+                [{"department_id": department_id, "responsible_id": resp,
+                  "backup_id": backup}], actor)
             return
         if slot == "backup":
             row.backup_user_id = None
@@ -493,7 +513,7 @@ class ProjectTeamService:
 PM = "Project Manager"
 SALES = "Sales"
 DEVELOPMENT = "Development"
-SCHEDULING = "Scheduling"
+SCHEDULING = "Logistics"  # esc P2-2: Logistics replaced Scheduling
 
 # Rows that carry the owing department in department_id.
 DEPARTMENT_ROW_KINDS = frozenset({
