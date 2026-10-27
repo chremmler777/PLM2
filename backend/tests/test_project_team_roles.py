@@ -229,7 +229,8 @@ async def test_release_check_by_backup_records_stand_in(client, seed, team, sess
 
 # --- notifications: responsible first, backups as info ------------------------
 
-async def test_notify_team_marks_backups_as_info(session_factory, seed, team):
+async def test_notify_team_tells_only_the_responsible(session_factory, seed, team):
+    """F7 / R33 (2026-10-26): the owner of the work only, no backup info copy."""
     from app.services.notification_service import NotificationService
     sales = team["dept"]["Sales"]
     await _set_responsible(session_factory, seed["project_id"], sales, team["user"]["sales.one"])
@@ -237,10 +238,10 @@ async def test_notify_team_marks_backups_as_info(session_factory, seed, team):
         n = await NotificationService.notify_team(
             s, seed["project_id"], [sales], title="T", body="B", link="/x")
         await s.commit()
-        assert n == 2
+        assert n == 1
         rows = {r.user_id: r for r in (await s.execute(select(Notification))).scalars()}
     assert rows[team["user"]["sales.one"]].body == "B"
-    assert rows[team["user"]["sales.two"]].body == "B\nInfo: you are backup here, main: Sales One."
+    assert team["user"]["sales.two"] not in rows
 
 
 async def test_notify_team_without_responsible_is_todays_behaviour(session_factory, seed, team):

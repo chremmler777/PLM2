@@ -115,11 +115,12 @@ class NotificationService:
         """Expand department membership, then dedup-notify each member. Only
         ACTIVE members in the change's organization (change_people's rule):
         never a namesake department elsewhere, never a disabled account."""
-        from app.services.change_people import department_members_of_change_org
+        from app.services.change_people import team_owner_ids
         if not department_ids:
             return 0
-        member_ids = await department_members_of_change_org(
-            db, change, department_ids)
+        # F7: the project team's owner of each department, not everyone in it
+        member_ids = await team_owner_ids(
+            db, getattr(change, "project_id", None), department_ids)
         return await NotificationService.notify_once(
             db, member_ids, kind=kind, subject_key=subject_key,
             title=title, body=body, link=link)
@@ -138,41 +139,67 @@ class NotificationService:
         subject_key: str | None = None,
     ) -> int:
         """Per-department notification about a project's work, routed by the
-        project team (spec §18): the responsible of each department (or every
-        member where none is set) gets it as today; a backup gets the same
-        notification marked as info ("Info: you are backup here, main: X").
-        Notifications have no quiet flag, so the info copy is still an
-        ordinary unread notification. user_ids: the recipients when the
-        caller already narrowed them; otherwise the ACTIVE members of the
-        departments in the project's organization (change_people's rule for
-        a change: never a namesake department elsewhere, never a disabled
-        account). kind + subject_key dedup like notify_once."""
-        from types import SimpleNamespace
-        from app.services.change_people import department_members_of_change_org
+        project team: each department's owner on the project (responsible,
+        else named backup; every live member where the team names nobody).
+        F7 (2026-10-26): no backup info copies any more. user_ids: the
+        caller's narrowed recipients, filtered by the same rule (a person
+        who is no member of these departments, e.g. the lead, stays).
+        kind + subject_key dedup like notify_once."""
+        from app.services.change_people import team_owner_ids
         from app.services.project_team_service import ProjectTeamService
+        # F7 / R33 (test 2026-10-26): only who owns the work hears it: the
+        # project team's responsible per department (its named backup while
+        # the responsible is out), else the department's members. No info
+        # copies to backups or to members the team does not name (a late
+        # item reaches the backup through the sweep).
+        owners = await team_owner_ids(db, project_id, department_ids)
         if user_ids is None:
             if not department_ids:
                 return 0
-            user_ids = await department_members_of_change_org(
-                db, SimpleNamespace(project_id=project_id), department_ids)
-        mains, backups = await ProjectTeamService.split_recipients(
-            db, project_id, department_ids, user_ids)
+            ids = owners
+        else:
+            mains, _backups = await ProjectTeamService.split_recipients(
+                db, project_id, department_ids, user_ids)
+            ids = [u for u in mains if u in owners or not await _is_member(
+                db, u, department_ids)]
+        ids = await _real_accounts(db, ids)
+        if kind == "stage_entered" and ids:
+            # one notice per person per event: whoever just got the task
+            # for it is not told the stage started too
+            ids = await _not_just_told(db, ids)
+        if not ids:
+            return 0
+        if kind is not None and subject_key is not None:
+            return await NotificationService.notify_once(
+                db, ids, kind=kind, subject_key=subject_key,
+                title=title, body=body, link=link)
+        return await NotificationService.notify_users(db, ids, title, body, link,
+                                                      kind=kind)
 
-        async def _send(ids: list[int], text: str | None) -> int:
-            if not ids:
-                return 0
-            if kind is not None and subject_key is not None:
-                return await NotificationService.notify_once(
-                    db, ids, kind=kind, subject_key=subject_key,
-                    title=title, body=text, link=link)
-            return await NotificationService.notify_users(db, ids, title, text, link,
-                                                          kind=kind)
 
-        n = await _send(mains, body)
-        by_main: dict[str, list[int]] = {}
-        for uid, main in backups.items():
-            by_main.setdefault(main, []).append(uid)
-        for main, ids in by_main.items():
-            note = BACKUP_NOTE.format(main=main)
-            n += await _send(ids, f"{body}\n{note}" if body else note)
-        return n
+async def _is_member(db, user_id: int, department_ids) -> bool:
+    return (await db.execute(select(UserDepartment.user_id).where(
+        UserDepartment.user_id == user_id,
+        UserDepartment.department_id.in_(list(department_ids or []))))).first() is not None
+
+
+async def _real_accounts(db, user_ids) -> list[int]:
+    """Active accounts that may count as people (no placeholder / local
+    account, hub_departments.member_clause)."""
+    from app.models.entities import User
+    from app.services.hub_departments import member_clause
+    ids = sorted({int(u) for u in user_ids or []})
+    if not ids:
+        return []
+    return sorted((await db.execute(select(User.id).where(
+        User.id.in_(ids), User.is_active.is_(True), member_clause()))).scalars().all())
+
+
+async def _not_just_told(db, user_ids) -> list[int]:
+    from datetime import datetime, timedelta
+    since = datetime.utcnow() - timedelta(minutes=2)
+    told = set((await db.execute(select(Notification.user_id).where(
+        Notification.user_id.in_(list(user_ids)),
+        Notification.kind.in_(("task_new", "task_assigned")),
+        Notification.created_at >= since))).scalars().all())
+    return [u for u in user_ids if u not in told]

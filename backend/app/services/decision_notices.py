@@ -26,11 +26,15 @@ SIDE_DEPARTMENT = {"pm": "Project Manager", "quality": "Quality"}
 SIDE_WORDS = {"pm": "PM", "quality": "Quality"}
 
 
-async def _members(session: AsyncSession, change, dept_name: str) -> list[int]:
-    from app.services.change_people import department_members_of_change_org
+async def _members(session: AsyncSession, change, dept_name: str,
+                   exclude=()) -> list[int]:
+    """F11: the project team's owner of the side (responsible, else its
+    backup, else the members), never `exclude` (the actor, 4-eyes)."""
+    from app.services.change_people import team_owner_ids
     ids = [i for (i,) in (await session.execute(select(Department.id).where(
         Department.name == dept_name, Department.is_active.is_(True)))).all()]
-    return await department_members_of_change_org(session, change, ids, real_only=True)
+    return await team_owner_ids(session, change.project_id, ids,
+                                exclude=exclude, real_only=True)
 
 
 async def _send(session: AsyncSession, ids: Iterable[int], key: str, title: str,
@@ -54,8 +58,8 @@ async def sign_off_owed(session: AsyncSession, change, sides: list[str], offer,
         if (change.pm_signed_by if side == "pm" else change.quality_signed_by) is not None:
             continue      # a re-sign: ChangeService._ask_resign tells the signer
         other = change.quality_signed_by if side == "pm" else change.pm_signed_by
-        ids = [i for i in await _members(session, change, SIDE_DEPARTMENT[side])
-               if i not in (actor_id, other)]
+        ids = await _members(session, change, SIDE_DEPARTMENT[side],
+                             exclude=(actor_id, other))
         sent += await _send(
             session, ids, f"chg:{change.id}:sign:{side}:{offer.id}",
             f"{SIDE_WORDS[side]} sign-off needed: {change.change_number}",
@@ -93,7 +97,7 @@ async def concession_owed(session: AsyncSession, change, issue,
     if (not cm_switches.on("RELEASE_V2") or not svc.quality_decides_concessions()
             or issue.route != "customer_concession" or not issue.is_open):
         return 0
-    ids = [i for i in await _members(session, change, "Quality") if i != actor_id]
+    ids = await _members(session, change, "Quality", exclude=(actor_id,))
     return await _send(
         session, ids, f"vi:{issue.id}:concession_decide",
         f"{change.change_number} {issue.ref}: Quality decides the concession",

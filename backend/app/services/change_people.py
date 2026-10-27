@@ -55,15 +55,46 @@ async def department_members_of_change_org(
     ids = sorted({int(d) for d in department_ids or []})
     if not ids:
         return []
+    from app.services.hub_departments import member_clause
+    # F7: a placeholder / local account (admin, testuser) is nobody's
+    # department member (migration 150) and is never told
     q = (select(UserDepartment.user_id)
          .join(User, User.id == UserDepartment.user_id)
-         .where(UserDepartment.department_id.in_(ids), User.is_active.is_(True)))
+         .where(UserDepartment.department_id.in_(ids), User.is_active.is_(True),
+                member_clause()))
     if real_only:
         q = q.where(User.role != "admin")
     org_id = await change_org_id(session, change)
     if org_id is not None:
         q = q.where(User.organization_id == org_id)
     return sorted(set((await session.execute(q)).scalars().all()))
+
+
+async def team_owner_ids(session: AsyncSession, project_id: Optional[int],
+                         department_ids: Iterable[int], *,
+                         exclude: Iterable[int] = (),
+                         real_only: bool = False) -> list[int]:
+    """F7 / R33 (test 2026-10-26): who is told about a department's work on
+    a project: per department its project-team owner (the responsible; the
+    named backup when the responsible is not set, inactive or gone), never
+    the rest of the department. A department the team names nobody for:
+    its active members in the project's organization (no placeholder
+    accounts). `exclude` (the actor, a 4-eyes signer): skipped at every
+    level, so the backup, then the members, step in."""
+    from types import SimpleNamespace
+    from app.services.project_team_service import _pair
+    skip = {int(i) for i in exclude or [] if i is not None}
+    out: set[int] = set()
+    for did in sorted({int(d) for d in department_ids or [] if d is not None}):
+        resp, backup = await _pair(session, project_id, did)
+        named = [p[0] for p in (resp, backup) if p is not None and p[0] not in skip]
+        if named:
+            out.add(named[0])
+            continue
+        out |= set(await department_members_of_change_org(
+            session, SimpleNamespace(project_id=project_id), [did],
+            real_only=real_only)) - skip
+    return sorted(out)
 
 
 async def staffed_department_ids(

@@ -311,7 +311,7 @@ class MeetingService:
     @staticmethod
     async def _apply_cost_carrier(session: AsyncSession, change: ChangeRequest,
                                   meeting: ChangeMeeting, user: User) -> None:
-        """Spec §16: the room re-confirms the cost carrier Sales picked at
+        """Spec §16: the room re-confirms the cost carrier Project Management picked at
         capture. A flip is a decision with consequences (it selects the
         whole commercial branch), so it is audited and Sales is told."""
         wanted = meeting.cost_carrier == "customer"
@@ -596,7 +596,9 @@ class MeetingService:
                        **({"flag_type": flag_type, "check_what": check_what,
                            "part_id": part_id} if structured else {})},
             notes=concern.note)
-        if assess_question:
+        if assess_question or (kind != "risk" and concern.answer_from == "customer"):
+            # F8: a customer question at scoping is the Sales contact's task
+            # too: told once when raised
             await MeetingService._tell_question_asked(session, change, concern, user)
         return concern
 
@@ -634,8 +636,9 @@ class MeetingService:
         goes to the Sales contact (else every Sales member, [R3]), a question
         for our team to the lead (else Project Management)."""
         from app.services.notification_service import NotificationService
-        dept = await session.get(Department, concern.department_id)
-        who = dept.name if dept is not None else "A department"
+        dept = (await session.get(Department, concern.department_id)
+                if concern.department_id is not None else None)
+        who = dept.name if dept is not None else (concern.raised_by_name or "A colleague")
         title = f"Question from {who}: {change.change_number}"[:255]
         # A3-13: the hold sentence only while the asking department's
         # submit is still open (asked after its submit, it holds nothing)

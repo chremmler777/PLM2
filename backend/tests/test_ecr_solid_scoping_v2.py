@@ -687,3 +687,28 @@ async def test_unrouted_check_item_no_hold_with_switch_off(
         concerns = [c]
         meetings = [_M()]
     assert MeetingService.unrouted_check_owners(_C()) == {}
+
+
+async def test_f8_customer_question_is_the_sales_contacts_task(
+        client, admin_auth, seed, session_factory):
+    """F8 (test 2026-10-26): raised at scoping, a customer question tells the
+    Sales contact and is their task (mine), with the mail copy."""
+    from app.models.change import ChangeRequest
+    from app.models.notification import Notification
+    from sqlalchemy import select
+    cid, pid = await _scoping(client, admin_auth, seed, "f8")
+    _, proc, pe = await _user(client, session_factory, seed, "pef8", "Process Engineer")
+    karl, _sales, karl_auth = await _user(client, session_factory, seed, "karl8", "Sales")
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).sales_owner_id = karl
+        await s.commit()
+    res = await _raise(client, pe, cid, _question(proc))
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        told = (await s.execute(select(Notification.kind).where(
+            Notification.user_id == karl))).scalars().all()
+    assert told.count("task_new") == 1
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=karl_auth)).json()
+            if t["change_id"] == cid and t["kind"] == "obtain_info"]
+    assert len(rows) == 1 and rows[0]["mine"] is True and rows[0]["customer_copy"]
+    assert rows[0].get("role", "main") == "main"

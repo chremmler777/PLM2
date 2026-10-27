@@ -161,8 +161,15 @@ class StartAtRiskService:
             user.id, notes=change.start_at_risk_quality_note)
         # R33: now a PM member can decide: told once, never the asker
         from app.services.notification_service import NotificationService
-        people = [u for u in await StartAtRiskService._pm_member_ids(session, change)
-                  if u not in (change.start_at_risk_requested_by, user.id)]
+        # T16: the project team's PM first (its backup, then the members),
+        # not every PM member of the plant
+        from app.services.change_people import team_owner_ids
+        pm = [d for (d,) in (await session.execute(
+            select(Department.id).where(Department.name == "Project Manager",
+                                        Department.is_active.is_(True)))).all()]
+        people = await team_owner_ids(
+            session, change.project_id, pm,
+            exclude=(change.start_at_risk_requested_by, user.id))
         await NotificationService.notify_once(
             session, people, kind="decision_needed",
             subject_key=f"start_at_risk:{change.id}:approve:"
