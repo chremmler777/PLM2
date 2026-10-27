@@ -75,7 +75,7 @@ flowchart TD
 | `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
 | `quoting` | Offer tab (Approval for internal changes): quote plan, price (cost basis, factors, risk weighting, changeover, piece price), document (CBD/rough, free fields, terms, PDF). Sending v1 auto-moves to `quoted` | Sales |
 | `quoted` | Offer sent, valid 30 days from receipt; negotiation rounds against an offer version, new versions with "what changed". Acceptance of a sent, unexpired version freezes the planned P&L | Sales |
-| `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
+| `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", MS Project export. Publishing the plan to the customer is a side step, not a gate: it needs the bank build decision (running change or planned scrap) and is offered once timing is validated. Mother plant: release deadline = their SOP, "Inform" stamp instead of the publish | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Logistics + all teams for timing |
 | `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
 | `in_validation` | Release tab: validation checks (weight, cycle time, dimensions computed from a measurement against fixed limits) plus the release checklist (16 items; 13 on a change that ended before the rework; each row answered by its department) and the lessons learned step; a FAIL raises its validation issue with Quality's Fix task (who fixes, retest date) and a concession beside it (§3 "Computed checks, the Fix task, the concession") | departments, Quality, PM |
 | `released` → `closed` | Change is live. The release needs, HARD (no override, not even an admin): no failed validation check (unless covered by an accepted concession) and no open validation issue; for a customer change the PM and Quality sign-offs on the latest offer sent. SOFT (override bound to the rule): every check answered, every impacted revision through its check workflow, release checklist complete, lessons step done, no open plan deviation, no newer index pending. Close is HARD-blocked while a price is open (`price_open`); an internal change closes with its achieved value beside the target (SOFT). Closing tells the Sales contact (internal: the lead) and Process when it was on the change. Summary with the P&L offer vs doing; then PM wraps it up | PM |
@@ -602,7 +602,7 @@ Three typed containers, three responsibilities:
   Tool Engineer, Manufacturing Engineer, APQP, Packaging Engineer. Packaging's
   bucket opens with "packaging impacted?" — if yes: layout change / packaging
   type / modification; "not impacted" is a complete assessment. Sales, PM,
-  Scheduling and Quality carry no assessment tasks for physical part changes.
+  Logistics and Quality carry no assessment tasks for physical part changes.
 - **No cost fields at assessment.** Cost (the workbook's per-department
   activity grids — hours × rates per plant, one-time vs lifecycle) belongs to
   `costing`.
@@ -962,7 +962,7 @@ tasks):
 | Implement tool change | Tool Engineer | Project Manager | Toolshop S, Process Engineer C |
 | Adjust process / parameter sheets (was "routing sheets") | Process Engineer | Project Manager | Manufacturing Engineer C |
 | Clarify inspection plan / PPAP need | Quality | Project Manager | Sales C |
-| Update master data & logistics | Scheduling | Project Manager | |
+| Update master data & logistics | Logistics | Project Manager | |
 | Sampling / trial | Tool Engineer | Quality | Process Engineer S |
 | Final release | Project Manager | Quality | Sales I |
 The retired Production, Production control, Purchasing and Logistics own
@@ -1474,11 +1474,11 @@ validated" every plan editor's write bumps `change.plan_revision`
 moment the plan changes under it.
 
 - **Team confirmation**: every required department (every department with
-  an R/A assessment row, plus Scheduling and Sales when they exist,
+  an R/A assessment row, plus Logistics and Sales when they exist,
   `ChangePlanService.required_department_ids`; with `RELEASE_V2`, ECR-solid
   §8-9: the departments with work on the change, i.e. impact yes or hours /
   cost priced on it (`ImplementationService.implementing_department_ids`),
-  plus Scheduling, plus Sales only on a customer change; a change nobody
+  plus Logistics, plus Sales only on a customer change; a change nobody
   priced falls back to its R/A departments) posts `confirmed` or
   `concern` (with a note) against the current revision
   (`ChangePlanService.post_feedback`, panel `TeamFeedbackPanel.tsx`). Only
@@ -1518,13 +1518,13 @@ validated, every responsible team must confirm the detailed plan" when
 `approved` itself, not when resuming from `on_hold` or looping back from
 `in_validation`, both of which re-enter a plan that was already live.
 With `RELEASE_V2` a required department with no real member here
-(`change_people.staffed_department_ids`, e.g. Scheduling or Packaging in a
+(`change_people.staffed_department_ids`, e.g. Logistics or Packaging in a
 small plant) is confirmed by the lead or a Project Management member
 (A5-03, the R37 fallback of release rows and validation checks); the task
 goes to the lead (no lead, or a lead who cannot act: inactive, an admin
 account, read-only or with only retired departments: Project Management;
 `change_people.coordinator`) and the row reads
-"Scheduling has no member here: <lead name|Project Management>
+"Logistics has no member here: <lead name|Project Management>
 coordinates" (`change_people.no_member_words`). A member of another
 department, or PM for a staffed one, is refused.
 
@@ -1585,7 +1585,7 @@ existing per-department validation checks.
   Engineer keeps the process details in the process database (PDB) and
   owes no release row; Quality owns none either. Others: `index_updated`,
   `drawing_released`, `spare_parts` (Development), `packaging_updated`
-  (Packaging Engineer), `erp_updated`/`stock_handled` (Scheduling),
+  (Packaging Engineer), `erp_updated`/`stock_handled` (Logistics),
   `customer_informed` (Sales). The five new rows (`ADDED_LATER`) are left
   off a change that ended before `PLM_RELEASE_ROWS_SINCE`
   (`release_checklist.keys_for`; "ended" is `ended_at`: `released_at`,
@@ -2190,7 +2190,7 @@ is the project team's, so `meeting_service.py::create_meeting` requires status
 ## 5. Roles (ECR set, 2026-08-11)
 
 The nine ECR roles, in picker order: **Sales, Project Manager, APQP, Tool
-Engineer, Manufacturing Engineer, Process Engineer, Development, Scheduling,
+Engineer, Manufacturing Engineer, Process Engineer, Development, Scheduling (Logistics since migration 150),
 Packaging Engineer** — plus **Quality**, kept active for the PM+Quality
 approval sign-off. All other departments are deactivated for ECR
 (migration 043; renames: R&D → Development, Tooling Engineer → Tool Engineer,
@@ -2616,7 +2616,7 @@ card (`cm_rules.DECIDE_ONLY_RULES`: the routing change) is served as kind
 whose meeting is open and whose impacted set is unlocked (confirm step off)
 lists `meeting_decision` (hard, the lead or Project Management, exit
 "decide 'proceed'"), the same thing stage-state's "Impacted set is not
-locked" refuses; the bank build row names Scheduling. The footer follows
+locked" refuses; the bank build row names Logistics. The footer follows
 the row kinds (a routing change is "decided, not overridden"); overdue assessments count as a
 blocker only while the change is in assessment. The cockpit shows one "Override" link per soft rule (only
 to a viewer who may take the step), "No override" plus the exits for a hard
@@ -2644,7 +2644,7 @@ one, and "Absorb" on an open price for who may ask it.
   the task card and "Your actions" alike). At approved, while the hop waits
   on someone else, the lead (else Project Management) has `plan_watch`
   ("Approved: next step", A6-05) naming who owes it: "Waiting for
-  Scheduling: decide the bank build", "Waiting for Sales: publish the plan",
+  Logistics: decide the bank build", "Waiting for Sales: publish the plan",
   "Waiting for the teams to confirm the plan; then validate the timing", or
   the lead's own "Decide the release gate (or override it)". The cockpit
   lists the same rows.
