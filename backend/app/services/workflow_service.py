@@ -247,7 +247,7 @@ class WorkflowService:
         customer = (await db.execute(
             select(ChangeRequest.customer_relevant).where(
                 ChangeRequest.id == instance.change_id))).scalar_one_or_none()
-        if customer is None or customer:
+        if customer is None:
             return {}
         first = (await db.execute(
             select(func.min(WfStage.stage_order)).where(
@@ -257,6 +257,15 @@ class WorkflowService:
         rows = (await db.execute(select(Department.id, Department.name).where(
             Department.name.in_(WorkflowService.INTERNAL_NO_LATER_TASK)))).all()
         label = stage.name or f"stage {stage.stage_order}"
+        if customer:
+            # retest N4: on a customer change the same stages are the
+            # change's own costing, offer and customer answer, done on the
+            # change (status machine, Sales' offer, PM's sign-off), never
+            # as these engine tasks: My Tasks never showed them either
+            return {i: (f"Done on the change, not as a task ('{label}'): "
+                        + ("costing, sign-off and approval" if n == "Project Manager"
+                           else "the offer and the customer's answer"))
+                    for i, n in rows}
         return {i: (f"Not asked on an internal change ('{label}'): "
                     + ("the lead holds Project Management's part, the money is "
                        "the internal approval" if n == "Project Manager"

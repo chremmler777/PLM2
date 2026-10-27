@@ -71,8 +71,9 @@ async def test_t2_internal_change_opens_no_summation_tasks(session_factory, seed
         assert notes == []
 
 
-async def test_t2_customer_change_keeps_its_later_stages(session_factory, seed):
-    """NEGATIVE: a customer change's summation stays the engine's (unchanged)."""
+async def test_t2_n4_customer_change_opens_no_summation_tasks_either(session_factory, seed):
+    """Retest N4: a customer change's Summation / Customer activities are
+    done on the change; their PM / Sales engine tasks are born waived."""
     from app.services.workflow_service import WorkflowService
     iid, cid, pm, sales = await _later_stage_instance(session_factory, seed, customer=True)
     async with session_factory() as s:
@@ -81,11 +82,36 @@ async def test_t2_customer_change_keeps_its_later_stages(session_factory, seed):
         await s.commit()
     async with session_factory() as s:
         inst = await s.get(WfInstance, iid)
-        assert inst.status == "active" and inst.current_stage_order == 2
         tasks = (await s.execute(select(WfInstanceTask).where(
             WfInstanceTask.instance_id == iid,
-            WfInstanceTask.stage_order == 2))).scalars().all()
-        assert {t.status for t in tasks} == {"active"}
+            WfInstanceTask.stage_order > 1))).scalars().all()
+        assert tasks and {t.status for t in tasks} == {"waived"}
+        assert all("Done on the change" in t.notes for t in tasks)
+        assert (await s.execute(select(Notification))).scalars().all() == []
+
+
+async def test_t2_other_departments_keep_later_stage_tasks(session_factory, seed):
+    """NEGATIVE: only PM / Sales are waived; another department's later
+    stage task stays active."""
+    from app.services.workflow_service import WorkflowService
+    iid, cid, pm, sales = await _later_stage_instance(session_factory, seed, customer=True)
+    qa = await make_department_member(session_factory, seed["engineer_id"], "Quality")
+    async with session_factory() as s:
+        st = (await s.execute(select(WfStage).where(
+            WfStage.template_id == (await s.get(WfInstance, iid)).template_id,
+            WfStage.stage_order == 2))).scalar_one()
+        step = (await s.execute(select(WfStep).where(WfStep.stage_id == st.id))).scalar_one()
+        s.add(WfStepRasic(step_id=step.id, department_id=qa, rasic_letter="R"))
+        await s.commit()
+    async with session_factory() as s:
+        inst = await s.get(WfInstance, iid)
+        await WorkflowService._maybe_advance_stage(s, inst)
+        await s.commit()
+    async with session_factory() as s:
+        t = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == iid, WfInstanceTask.department_id == qa))).scalar_one()
+        assert t.status == "active"
+        assert (await s.get(WfInstance, iid)).current_stage_order == 2
 
 
 async def _approved_change(session_factory, seed, *, planned: bool, validated: bool):
