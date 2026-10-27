@@ -56,7 +56,8 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
   const { data: summation } = useQuery({
     queryKey: ['change-summation', change.id],
     queryFn: () => changesApi.getSummation(change.id),
-    enabled: v2 && canApprove && open, retry: false,
+    // T8: the approved amount reads in the costing's currency too
+    enabled: v2 && canApprove && (open || !!change.internal_approved_at), retry: false,
   })
   const { data: positions = [] } = useQuery({
     queryKey: ['costing-positions', change.id],
@@ -89,7 +90,7 @@ export default function InternalApproval({ change, canApprove, approvers, needsM
           <CircleCheck aria-hidden="true" size={16} />{t('internal.approved')}
         </p>
         <p className="mt-1 text-xs text-slate-400 tabular-nums">
-          {t('internal.amount')}: {formatMoney(change.internal_approved_amount)}
+          {t('internal.amount')}: {formatMoney(change.internal_approved_amount, summation?.currency ?? undefined)}
           {' · '}{formatDate(change.internal_approved_at)}
         </p>
         {change.internal_rationale && (
