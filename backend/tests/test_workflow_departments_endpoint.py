@@ -29,7 +29,11 @@ async def test_seed_creates_retired_roles_retired():
     import inspect
     import app.main as main
     src = inspect.getsource(main)
-    for name in ("Logistics", "Production", "Purchasing", "Production control",
+    # esc P2-2 (835c202d): Logistics is live again (it took Scheduling's
+    # bank build and ERP rows), so it is seeded active
+    assert next(l for l in src.splitlines()
+                if l.strip().startswith('("Logistics", ')).rstrip().endswith("True),")
+    for name in ("Production", "Purchasing", "Production control",
                  "Operations Manager", "Developer"):
         assert f'("{name}", ' in src
         line = next(l for l in src.splitlines() if l.strip().startswith(f'("{name}", '))
