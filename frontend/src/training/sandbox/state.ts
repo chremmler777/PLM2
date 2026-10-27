@@ -25,7 +25,7 @@ export const SEED = {
   assessmentFor: {
     'Tool Engineer': 800_301,
     Quality: 800_302,
-    Scheduling: 800_303,
+    Logistics: 800_303,
     Finance: 800_304,
   } as Record<string, number>,
   departments: {
@@ -33,7 +33,7 @@ export const SEED = {
     'Project Manager': 800_402,
     'Tool Engineer': 800_403,
     Quality: 800_404,
-    Scheduling: 800_405,
+    Logistics: 800_405,
     Finance: 800_406,
   } as Record<string, number>,
   pmUser: 800_501,

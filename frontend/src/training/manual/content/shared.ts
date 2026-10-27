@@ -67,7 +67,7 @@ export const basicsChapter: ContentChapter = {
               ['Tool, Manufacturing, Process, APQP, Packaging', 'Assessing, costing and doing their own part of the work, and their own release checks.'],
               ['Toolshop', 'Says whether toolmakers spend time on the change ("Will toolmakers spend time on this?"), costs that time and books the toolmakers\' hours (Belk for his team). Trains with the engineers.'],
               ['Management', 'The OK on a lower accepted price and on Absorb (with Project Management), and the notice on an urgent failed check. Trains with Project Management.'],
-              ['Scheduling', 'How the change reaches the line (bank build), the plan with PM and Sales, ERP and old stock.'],
+              ['Logistics', 'How the change reaches the line (bank build), the plan with PM and Sales, ERP and old stock.'],
               ['Quality', 'The Quality sign-off before approval, the governance view (D1, Audit), the training record.'],
               ['Finance', 'Checks the cost sheet Sales keeps, and may change it: every rate that prices a change.'],
             ],
@@ -332,7 +332,7 @@ export const flowChapter: ContentChapter = {
         {
           p:
             'Approved opens the "Timing" tab. The detailed plan starts as a copy of the quote plan. ' +
-            'Scheduling decides the bank build. Every responsible team confirms the plan or raises a ' +
+            'Logistics decides the bank build. Every responsible team confirms the plan or raises a ' +
             'concern. Then "Validate timing" sets the baseline and Sales publishes the plan to the ' +
             'customer.',
         },

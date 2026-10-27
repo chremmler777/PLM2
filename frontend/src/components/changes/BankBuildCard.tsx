@@ -2,7 +2,7 @@
  * How an approved change actually reaches the line — and when the customer
  * hears about it.
  *
- * Stage 7 of the process map splits one decision across two desks. Scheduling
+ * Stage 7 of the process map splits one decision across two desks. Logistics
  * picks between a running change (the new state runs in on the fly) and a
  * planned scrap (the remaining bank is written off and rebuilt), and sketches
  * the plan. Planned scrap costs money, and that money is the customer's: the
@@ -36,7 +36,7 @@ interface Props {
     'id' | 'status' | 'bank_build_mode' | 'bank_build_note' | 'scrap_quote_price' | 'scrap_price_set'
     | 'bank_build_set_by_name' | 'bank_build_set_at'
     | 'plan_published_by_name' | 'plan_published_at'> & { mother_plant_name?: string | null }
-  /** Scheduling / PM / change lead / admin — the page derives it. */
+  /** Logistics / PM / change lead / admin — the page derives it. */
   canSetMode?: boolean
   /** Sales / change lead / admin. */
   canPublish?: boolean
@@ -101,7 +101,7 @@ export default function BankBuildCard({
         <span className="font-medium text-slate-100">{t('bankbuild.title')}</span>
         <p className="text-xs text-slate-400 mt-0.5" data-testid="bank-build-intro">
           {motherPlant
-            ? `How does the change reach the line? Scheduling decides; ${plantName(change.mother_plant_name)} hears about it with the validated timing.`
+            ? `How does the change reach the line? Logistics decides; ${plantName(change.mother_plant_name)} hears about it with the validated timing.`
             : t('bankbuild.intro')}
         </p>
       </div>

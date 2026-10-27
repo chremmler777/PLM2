@@ -281,18 +281,18 @@ const engineering: TrainingTask[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Scheduling, Quality, Finance
+// Logistics, Quality, Finance
 // ---------------------------------------------------------------------------
 
 const scheduling: TrainingTask[] = [
   answerRowTask({
     key: 'sch_answer_checklist_row',
-    department: 'Scheduling',
+    department: 'Logistics',
     rowKey: 'bank_build_needed',
     rowLabel: 'Bank build needed',
     title: 'Answer a checklist row',
     brief:
-      'CR-TRAIN-0002 is waiting for the Scheduling assessment. The reinforced clip ' +
+      'CR-TRAIN-0002 is waiting for the Logistics assessment. The reinforced clip ' +
       'tower means the mold goes to the toolmaker for about two weeks. Answer the row ' +
       '"Bank build needed" and say how many parts have to be built ahead, and on which press.',
     why:

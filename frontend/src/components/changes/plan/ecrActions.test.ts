@@ -72,10 +72,10 @@ describe('buffer preset', () => {
 })
 
 describe('bank build preset', () => {
-  it('ends where the first downtime starts, in the Scheduling lane, as an idea', () => {
-    const cs = bankBuildChangeSet(plan(), [], { lane: 'Scheduling', departmentId: 30 }, 10)
+  it('ends where the first downtime starts, in the Logistics lane, as an idea', () => {
+    const cs = bankBuildChangeSet(plan(), [], { lane: 'Logistics', departmentId: 30 }, 10)
     expect(cs.addTasks![0]).toMatchObject({
-      name: 'Bank build (idea)', kind: 'bank_build', isIdea: true, lane: 'Scheduling', start: '2026-09-25', duration: 10,
+      name: 'Bank build (idea)', kind: 'bank_build', isIdea: true, lane: 'Logistics', start: '2026-09-25', duration: 10,
       meta: { department_id: 30 },
     })
     // Linked FS into the downtime so it follows it.
@@ -86,19 +86,19 @@ describe('bank build preset', () => {
 
   it('the idea link never pushes the downtime or what follows it (review 4b93d732 #1)', () => {
     const p = plan()
-    const cs = bankBuildChangeSet(p, [3], { lane: 'Scheduling', departmentId: null }, 20)
+    const cs = bankBuildChangeSet(p, [3], { lane: 'Logistics', departmentId: null }, 20)
     const { moved } = autoPushChangeSet(p, cs, { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [] })
     expect(moved).toEqual([])
   })
 
   it('ends at the selection start when something is selected', () => {
-    const cs = bankBuildChangeSet(plan(), [3], { lane: 'Scheduling', departmentId: null }, 10)
+    const cs = bankBuildChangeSet(plan(), [3], { lane: 'Logistics', departmentId: null }, 10)
     expect(cs.addTasks![0].start).toBe('2026-10-03')
   })
 
   it('without a downtime or selection starts at the plan start', () => {
     const ctx = { tasks: [t(1, '2026-10-05', 5)], links: [], newId }
-    const cs = bankBuildChangeSet(ctx, [], { lane: 'Scheduling', departmentId: null }, 10)
+    const cs = bankBuildChangeSet(ctx, [], { lane: 'Logistics', departmentId: null }, 10)
     expect(cs.addTasks![0].start).toBe('2026-10-05')
   })
 })
@@ -207,9 +207,9 @@ describe('successor moves follow summaries (backend cascade)', () => {
 describe('bank build ideas follow their anchor (G15)', () => {
   it('warns about a second bank build on the same downtime', () => {
     const ctx = plan()
-    const first = bankBuildChangeSet(ctx, [], { lane: 'Scheduling', departmentId: null })
+    const first = bankBuildChangeSet(ctx, [], { lane: 'Logistics', departmentId: null })
     const after = applyChangeSet(ctx, first)
-    const second = bankBuildChangeSet({ ...ctx, tasks: after.tasks, links: after.links }, [], { lane: 'Scheduling', departmentId: null })
+    const second = bankBuildChangeSet({ ...ctx, tasks: after.tasks, links: after.links }, [], { lane: 'Logistics', departmentId: null })
     expect(second.meta?.warning).toContain('already has a bank build idea')
   })
   it('moves a linked idea along with its anchor', () => {

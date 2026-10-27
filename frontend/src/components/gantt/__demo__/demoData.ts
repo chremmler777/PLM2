@@ -15,7 +15,7 @@ export const DEMO_KINDS: Record<string, GanttKindStyle> = {
   milestone: { label: 'Milestone', color: '#e2e8f0', milestone: true },
 }
 const KIND_KEYS = Object.keys(DEMO_KINDS).filter((k) => k !== 'milestone')
-const LANES = ['Development', 'Tool Engineer', 'Supplier', 'APQP', 'Customer', 'Scheduling']
+const LANES = ['Development', 'Tool Engineer', 'Supplier', 'APQP', 'Customer', 'Logistics']
 
 /** Deterministic plan: phases of 10 tasks under a summary, chained with mixed link types. */
 export function demoModel(n: number, start = '2026-10-05'): GanttModel {

@@ -198,7 +198,7 @@ describe('resolveWaitStates', () => {
       change({ status: 'rejected', customer_relevant: false }), [], deptName)).toEqual([])
   })
 
-  it('waits on Scheduling for the bank-build decision once approved', () => {
+  it('waits on Logistics for the bank-build decision once approved', () => {
     const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName)
     expect(waits.map((w) => w.key)).toEqual(['bank-build'])
     expect(waits[0].text).toBe(t('wait.onBankBuild'))
@@ -262,7 +262,7 @@ describe('resolveWaitStates', () => {
   })
 
   it('lists the bank-build and timing waits side by side', () => {
-    const fb = { required: [{ department_name: 'Scheduling', verdict: 'concern', stale: false }] }
+    const fb = { required: [{ department_name: 'Logistics', verdict: 'concern', stale: false }] }
     const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName, [], {}, null, fb)
     expect(waits.map((w) => w.key)).toEqual(['bank-build', 'timing-confirm'])
   })

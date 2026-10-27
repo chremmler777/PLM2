@@ -136,7 +136,7 @@ function MyTraining({ data }: { data: TrainingStatus }) {
       ) : (
         <Notice tone="info" title="No training is owed by your departments">
           Training follows your department (Sales, Project Manager, the engineering
-          departments, Scheduling, Quality, Finance). You can still practice any role below;
+          departments, Logistics, Quality, Finance). You can still practice any role below;
           nothing is recorded.
         </Notice>
       )}

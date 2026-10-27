@@ -32,7 +32,7 @@ For Development, Tool Engineer, Manufacturing Engineer, Process Engineer, APQP a
 - **External modification = Yes needs the change presentation and the change RFQ.** Upload both on the row before you submit.
 - **A line without a rate is not counted.** Tell Sales, who keep the cost sheet. A change is priced with the rates valid on the day it was created.
 - **A failed check needs a reason.** A fail without one is not a check.
-- **After the baseline only PM, Sales, Scheduling and the lead move dates.** Tell PM when a date will not hold.
+- **After the baseline only PM, Sales, Logistics and the lead move dates.** Tell PM when a date will not hold.
 
 ## Your practical check
 

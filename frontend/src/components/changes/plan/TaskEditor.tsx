@@ -237,7 +237,7 @@ export default function TaskEditor(p: Props) {
       <div className="grid gap-4 px-4 py-4 md:grid-cols-2 xl:grid-cols-3">
         {readOnly && (
           <p className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs text-slate-400">
-            Read only. Plan editors (PM, Sales, Scheduling, change lead) change the plan.
+            Read only. Plan editors (PM, Sales, Logistics, change lead) change the plan.
           </p>
         )}
         <div>

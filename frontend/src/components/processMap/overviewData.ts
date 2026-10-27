@@ -80,7 +80,7 @@ export const OVERVIEW_STAGES: OverviewStage[] = [
     evidence: ['offer versions (PDF)', 'what changed per version', 'acceptance or internal approval'],
   },
   {
-    key: 'timing', name: 'Timing', owner: 'PM, Scheduling, all teams', target: 'procmap-node-approved',
+    key: 'timing', name: 'Timing', owner: 'PM, Logistics, all teams', target: 'procmap-node-approved',
     gates: [
       { text: 'customer: accepted offer, PM + Quality sign-off on the latest offer sent (two people)', hard: true },
       { text: 'internal: approved by an engineering approver, never the raiser, + release deadline', hard: true },
@@ -138,7 +138,7 @@ export const OVERVIEW_LANES: Lane[] = [
     key: 'mother-plant', name: 'Change from KTX Weissenburg / Solingen', joins: 'rejoins at Timing', tone: 'purple',
     target: 'procmap-mother-plant-lane',
     steps: ['PM captures: ref + SOP', 'scoping-lite: impact lock', 'inform the team: receipts', 'approved: release date = their SOP'],
-    note: 'Started by Project Management only. Skips assessment, costing, offer and the quote deadline: from scoping straight to approved, then bank-build planning and implementation. Hard gate: impact locked, the team informed and the SOP date set. Timing confirmed by the informed departments and Scheduling.',
+    note: 'Started by Project Management only. Skips assessment, costing, offer and the quote deadline: from scoping straight to approved, then bank-build planning and implementation. Hard gate: impact locked, the team informed and the SOP date set. Timing confirmed by the informed departments and Logistics.',
   },
   {
     key: 'revision', name: 'Revision intake', joins: 'from Intake', tone: 'teal',

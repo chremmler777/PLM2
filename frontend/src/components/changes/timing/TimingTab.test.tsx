@@ -47,7 +47,7 @@ const fb = (over: Partial<PlanFeedback> = {}): PlanFeedback => ({
   required: [
     { department_id: 11, department_name: 'Tool Engineer', verdict: 'confirmed', note: null, by_name: 'Ann', at: '2026-09-20', stale: false },
     { department_id: 12, department_name: 'APQP', verdict: null, note: null, by_name: null, at: null, stale: false },
-    { department_id: 13, department_name: 'Scheduling', verdict: 'confirmed', note: null, by_name: 'Bo', at: '2026-09-18', stale: true },
+    { department_id: 13, department_name: 'Logistics', verdict: 'confirmed', note: null, by_name: 'Bo', at: '2026-09-18', stale: true },
   ],
   ...over,
 })
@@ -138,7 +138,7 @@ describe('TimingTab', () => {
     const text = screen.getByTestId('timing-blockers').textContent ?? ''
     expect(text).toContain('Fix 1 plan error')
     expect(text).toContain('Resolve 1 idea block')
-    expect(text).toContain('Waiting for confirmation from APQP, Scheduling')
+    expect(text).toContain('Waiting for confirmation from APQP, Logistics')
     expect(screen.getByTestId('timing-step-2').textContent).toContain('1 of 3 confirmed')
   })
 
@@ -306,7 +306,7 @@ describe('TimingTab', () => {
     expect(screen.getByTestId('timing-step-3').textContent).toContain('22 Sep 2026')
   })
 
-  it('hides deviation decisions from plan editors who may not decide (Scheduling)', async () => {
+  it('hides deviation decisions from plan editors who may not decide (Logistics)', async () => {
     vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
     vi.mocked(planApi.deviations).mockResolvedValue([{
       id: 5, task_id: 1, task_name: 'Tool rework', old_start: '2026-10-05', old_end: '2026-10-10',

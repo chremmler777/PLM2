@@ -163,7 +163,7 @@ describe('BankBuildCard', () => {
 
   it('stops being editable once the change has left approved', () => {
     // The backend only takes the decision at `approved`; afterwards the card is
-    // the record of what was decided, for Scheduling too.
+    // the record of what was decided, for Logistics too.
     wrap({ change: change({ status: 'in_implementation', bank_build_mode: 'running_change' }) })
     expect(screen.queryByTestId('bank-build-save')).toBeNull()
     expect(screen.getByTestId('bank-build-readonly').textContent)

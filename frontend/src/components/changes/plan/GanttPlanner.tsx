@@ -441,8 +441,8 @@ export default function GanttPlanner({
   }
   const addBuffer = () => apply(bufferChangeSet(ctx(), selection, 5))
   const addBankBuild = () => {
-    const sched = departments.find((d) => d.name === 'Scheduling' && d.is_active !== false)
-    const cs = bankBuildChangeSet(ctx(), selection, { lane: 'Scheduling', departmentId: sched?.id ?? null })
+    const sched = departments.find((d) => d.name === 'Logistics' && d.is_active !== false)
+    const cs = bankBuildChangeSet(ctx(), selection, { lane: 'Logistics', departmentId: sched?.id ?? null })
     if (typeof cs.meta?.warning === 'string') toast.warning?.(cs.meta.warning)
     apply(cs)
   }
@@ -544,7 +544,7 @@ export default function GanttPlanner({
         ) : (
           <>
             <p className="text-sm font-medium text-slate-200">No plan yet</p>
-            <p className="mt-1 text-xs text-slate-400">Plan editors (PM, Sales, Scheduling, change lead) build it here. You see it as soon as it exists.</p>
+            <p className="mt-1 text-xs text-slate-400">Plan editors (PM, Sales, Logistics, change lead) build it here. You see it as soon as it exists.</p>
           </>
         )}
       </div>

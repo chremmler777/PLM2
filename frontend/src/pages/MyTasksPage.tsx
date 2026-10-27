@@ -274,7 +274,7 @@ const TASK_TAB: Record<string, string> = {
   send_rejection: '?tab=scoping',
   costing_input: '?tab=costing', estimate_low: '?tab=offer', price_open: '?tab=offer', estimate_check: '?tab=costing',
   create_quote: '?tab=commercial',
-  // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
+  // Stage 7 lives on the implementation tab: Logistics decides there, Sales
   // publishes from the same card.
   bank_build: '?tab=implementation',
   publish_plan: '?tab=implementation',

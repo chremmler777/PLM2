@@ -303,7 +303,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'next.item.customer_accepted': { de: 'Annahme durch den Kunden', en: 'Customer acceptance' },
   'next.item.pm_signoff': { de: 'Freigabe PM', en: 'PM sign-off' },
   'next.item.quality_signoff': { de: 'Freigabe Qualität', en: 'Quality sign-off' },
-  'next.item.bank_build': { de: 'Serienanlauf festlegen (Terminplanung)', en: 'Bank-build decision (Scheduling)' },
+  'next.item.bank_build': { de: 'Serienanlauf festlegen (Logistik)', en: 'Bank-build decision (Logistics)' },
   'next.item.check_mapping': { de: 'Prüf-Workflow für: {detail}', en: 'Check workflow for: {detail}' },
   'next.item.resulting_revisions': { de: '{n} Teile ohne neuen Stand', en: '{n} items without a resulting revision' },
   'next.item.tool_change': { de: 'Werkzeugänderung offen: {n} Werkzeug(e)', en: 'Tool change not done: {n} tool(s)' },
@@ -1683,9 +1683,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // Stage 7 — how the approved change reaches the line, and telling the customer.
   'bankbuild.title': { de: 'Bankbau-Plan', en: 'Bank build plan' },
   'bankbuild.intro': {
-    de: 'Wie kommt die Änderung in die Serie? Die Terminplanung entscheidet, '
+    de: 'Wie kommt die Änderung in die Serie? Die Logistik entscheidet, '
       + 'der Vertrieb veröffentlicht den Plan beim Kunden.',
-    en: 'How does the change reach the line? Scheduling decides, Sales publishes '
+    en: 'How does the change reach the line? Logistics decides, Sales publishes '
       + 'the plan to the customer.',
   },
   'bankbuild.mode.running_change': { de: 'Fließende Änderung', en: 'Running change' },
@@ -1731,12 +1731,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Publish plan to the customer',
   },
   'bankbuild.publishNeedsMode': {
-    de: 'Erst muss die Terminplanung die Umstellungsart festlegen',
-    en: 'Scheduling has to decide the mode first',
+    de: 'Erst muss die Logistik die Umstellungsart festlegen',
+    en: 'Logistics has to decide the mode first',
   },
   'bankbuild.readOnly': {
-    de: 'Nur Terminplanung, PM, Lead oder Admin können den Plan festlegen.',
-    en: 'Only Scheduling, PM, the change lead or an admin can set the plan.',
+    de: 'Nur Logistik, PM, Lead oder Admin können den Plan festlegen.',
+    en: 'Only Logistics, PM, the change lead or an admin can set the plan.',
   },
   'tasks.kind.bank_build': { de: 'Bankbau festlegen', en: 'Decide bank build' },
   'tasks.hint.bank_build': {
@@ -1749,8 +1749,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Publish the bank-build plan to the customer',
   },
   'wait.onBankBuild': {
-    de: 'Wartet auf Terminplanung - Bankbau-Entscheidung offen',
-    en: 'Scheduling: bank-build decision pending',
+    de: 'Wartet auf Logistik - Bankbau-Entscheidung offen',
+    en: 'Logistics: bank-build decision pending',
   },
   'wait.onTimingConfirm': {
     de: 'Timing: wartet auf Bestätigung der Teams: {x}',

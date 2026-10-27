@@ -530,7 +530,7 @@ export const changesApi = {
   deleteNegotiation: (id: number, negotiationId: number) =>
     client.delete(`/v1/changes/${id}/negotiations/${negotiationId}`).then((r) => r.data),
 
-  // Stage 7: how the approved change reaches the line. Scheduling writes the
+  // Stage 7: how the approved change reaches the line. Logistics writes the
   // mode (and, for planned scrap, the additional quote the customer bears);
   // Sales publishes the resulting plan. Two calls because they are two people's
   // decisions, not two halves of one form.

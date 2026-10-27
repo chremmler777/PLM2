@@ -51,7 +51,7 @@ Rules for the rows:
 | `project_management` | Project Management | Project Manager |
 | `sales` | Sales | Sales |
 | `engineering` | Engineers | Development, Tool Engineer, Manufacturing Engineer, Process Engineer, APQP, Packaging Engineer |
-| `scheduling` | Scheduling | Scheduling |
+| `scheduling` | Logistics | Logistics (Scheduling merged in) |
 | `quality` | Quality | Quality |
 | `finance` | Finance | Finance |
 

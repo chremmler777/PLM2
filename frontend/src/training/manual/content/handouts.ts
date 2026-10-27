@@ -179,7 +179,7 @@ export const HANDOUTS: Handout[] = [
           ['External modification = Yes needs the change presentation and the change RFQ.', 'Upload both on the row before you submit.'],
           ['A line without a rate is not counted.', 'Tell Sales, who keep the cost sheet. A change is priced with the rates valid on the day it was created.'],
           ['A failed check needs a reason.', 'A fail without one is not a check.'],
-          ['After the baseline only PM, Sales, Scheduling and the lead move dates.', 'Tell PM when a date will not hold.'],
+          ['After the baseline only PM, Sales, Logistics and the lead move dates.', 'Tell PM when a date will not hold.'],
         ],
       },
     ],
@@ -187,8 +187,8 @@ export const HANDOUTS: Handout[] = [
   {
     role: 'scheduling',
     file: 'scheduling.md',
-    title: 'Scheduling',
-    audience: 'Scheduling',
+    title: 'Logistics',
+    audience: 'Logistics',
     chapter: '06',
     job: 'decide how the change reaches the line without the customer running short, help build and confirm the plan, and close out ERP and stock.',
     blocks: [
@@ -212,7 +212,7 @@ export const HANDOUTS: Handout[] = [
           ['The bank build ends before the tool downtime starts.', 'The plan warns if it does not.'],
           ['Your own plan edit makes your confirmation stale too.', 'Confirm after the last edit.'],
           ['After the baseline every move is a deviation.', 'Write a reason the customer could read. The move and the blocks it pushed are decided as one group.'],
-          ['Only Scheduling, PM, the change lead or an admin set the bank build plan.', 'Sales publishes it.'],
+          ['Only Logistics, PM, the change lead or an admin set the bank build plan.', 'Sales publishes it.'],
         ],
       },
       {

@@ -34,7 +34,7 @@ export interface TimingTabProps {
   canEditPlan: boolean
   canPublish: boolean
   canSeeAll: boolean
-  /** Bank-build mode: Scheduling, PM, lead, admin (not Sales). */
+  /** Bank-build mode: Logistics, PM, lead, admin (not Sales). */
   canSetBankBuild?: boolean
   /** Deviation lock / escalate: PM, Sales, lead, admin. */
   canDecideDeviation?: boolean
@@ -210,7 +210,7 @@ export default function TimingTab({
                 <span className="text-xs text-slate-400">Copies every block of the quote plan, links and ideas included. Then refine it with the teams.</span>
               </div>
             ) : (
-              <p className="text-sm text-slate-400">The detailed plan is not created yet. PM, Scheduling or Sales start it from the quote plan.</p>
+              <p className="text-sm text-slate-400">The detailed plan is not created yet. PM, Logistics or Sales start it from the quote plan.</p>
             )
           ) : !baseline ? (
             canValidate ? (
@@ -227,7 +227,7 @@ export default function TimingTab({
               </div>
             ) : (
               <p className="text-sm text-slate-400">
-                {waiting.length > 0 ? 'Waiting for every team to confirm. PM, Scheduling or Sales then validate the timing.' : 'Every team confirmed. PM, Scheduling or Sales validate the timing next.'}
+                {waiting.length > 0 ? 'Waiting for every team to confirm. PM, Logistics or Sales then validate the timing.' : 'Every team confirmed. PM, Logistics or Sales validate the timing next.'}
               </p>
             )
           ) : motherPlant ? (
@@ -287,7 +287,7 @@ export default function TimingTab({
       {plan && tasks.length > 0 && !plan.can_edit && !plan.can_edit_dates && (
         <p data-testid="timing-readonly"
           className="inline-flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-2.5 py-0.5 text-[11px] text-slate-400"
-          title="PM, Scheduling, Sales, the change lead and admins edit the plan; teams update the progress of their own tasks.">
+          title="PM, Logistics, Sales, the change lead and admins edit the plan; teams update the progress of their own tasks.">
           Read only{plan.progress_department_ids?.length ? ': you update the progress of your own tasks' : ''}
         </p>
       )}

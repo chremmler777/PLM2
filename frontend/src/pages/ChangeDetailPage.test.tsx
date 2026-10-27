@@ -443,9 +443,9 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     expect(tab.getAttribute('aria-selected')).toBe('true')
   })
 
-  it('renders the timing tab with plan and publish rights for Scheduling', async () => {
+  it('renders the timing tab with plan and publish rights for Logistics', async () => {
     vi.mocked(useDepartments).mockReturnValue({
-      data: [{ id: 11, name: 'Scheduling', flow_type: 'action', is_active: true, sort_order: 1 }],
+      data: [{ id: 11, name: 'Logistics', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [11] })
     authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: 5 }
@@ -453,7 +453,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     wrap('/changes/1?tab=timing')
     await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
       .toBe('edit=true publish=false'))
-    // Scheduling sets the bank-build mode but does not lock/escalate deviations.
+    // Logistics sets the bank-build mode but does not lock/escalate deviations.
     expect(screen.getByTestId('timing-rights-2').textContent).toBe('bank=true decide=false admin=false')
   })
 

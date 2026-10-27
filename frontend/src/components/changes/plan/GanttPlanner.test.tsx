@@ -16,7 +16,7 @@ vi.mock('../../../api/changePlan', () => ({
 vi.mock('../../../hooks/queries/useWorkflows', () => ({
   useDepartments: () => ({ data: [
     { id: 11, name: 'Tool Engineer', is_active: true }, { id: 12, name: 'APQP', is_active: true },
-    { id: 30, name: 'Scheduling', is_active: true },
+    { id: 30, name: 'Logistics', is_active: true },
   ] }),
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
@@ -317,14 +317,14 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(body.tasks_upsert.find((u) => u.id === 4)).toMatchObject({ start_date: '2026-11-01' })
   })
 
-  it('adds a bank build idea in the Scheduling lane, ending at the first downtime', async () => {
+  it('adds a bank build idea in the Logistics lane, ending at the first downtime', async () => {
     vi.mocked(planApi.get).mockResolvedValue(modernOut())
     renderPlanner()
     await screen.findByTestId('gantt-planner')
     fireEvent.click(screen.getByTestId('gantt-add-bank-build'))
     await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalledTimes(1))
     expect(vi.mocked(planApi.applyChanges).mock.calls[0][2].tasks_upsert[0]).toMatchObject({
-      name: 'Bank build (idea)', kind: 'bank_build', is_idea: true, lane: 'Scheduling', department_id: 30,
+      name: 'Bank build (idea)', kind: 'bank_build', is_idea: true, lane: 'Logistics', department_id: 30,
       start_date: '2026-09-25', duration_days: 10,
     })
   })

@@ -326,7 +326,7 @@ export interface ChangeRequest {
    * How the change gets onto the line once it is approved (stage 7). Either the
    * new state runs in on the fly, or the remaining old stock is scrapped on
    * purpose — and then the customer pays for the scrap, quoted separately.
-   * Null until Scheduling has decided.
+   * Null until Logistics has decided.
    */
   bank_build_mode?: BankBuildMode | null;
   bank_build_note?: string | null;
@@ -498,7 +498,7 @@ export type ChangeTaskKind =
   | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input'
   /** Sales builds the offer once the departments are done costing. */
   | 'create_quote'
-  /** Scheduling picks running change vs planned scrap on an approved change. */
+  /** Logistics picks running change vs planned scrap on an approved change. */
   | 'bank_build'
   /** Sales puts the resulting bank-build plan in front of the customer. */
   | 'publish_plan'

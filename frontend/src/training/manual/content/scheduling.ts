@@ -1,12 +1,12 @@
 import type { ContentChapter, PracticeTaskSpec } from './types'
 
-//: Chapter 06, Scheduling. Section ids sch-assessment, sch-bankbuild and
+//: Chapter 06, Logistics. Section ids sch-assessment, sch-bankbuild and
 //: sch-plan replace the stubs of the same id in ../chapters.tsx.
 
 export const schedulingChapter: ContentChapter = {
   id: 'scheduling',
   number: '06',
-  title: 'Scheduling',
+  title: 'Logistics',
   summary: 'How the change reaches the line: bank build or running change, the plan, stock and ERP.',
   roles: ['scheduling'],
   sections: [
@@ -34,7 +34,7 @@ export const schedulingChapter: ContentChapter = {
         },
         {
           callout:
-            'For a normal part change Scheduling has no assessment task. The five engineering ' +
+            'For a normal part change Logistics has no assessment task. The five engineering ' +
             'departments assess. You come in at the plan, where you are always asked to confirm.',
         },
       ],
@@ -45,7 +45,7 @@ export const schedulingChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'Sometimes the scoping meeting gives Scheduling a letter R or A, for example ' +
+            'Sometimes the scoping meeting gives Logistics a letter R or A, for example ' +
             'when the tool leaves for rework and stock has to carry the line. Then an assessment task appears in ' +
             '"My Tasks" and your bucket opens on the "Assessments" tab.',
         },
@@ -57,7 +57,7 @@ export const schedulingChapter: ContentChapter = {
             ['"Rest to No"', 'fills only the rows you have not answered. Use it after you looked at them, not instead.'],
           ],
         },
-        { shot: 'sch-assessment-checklist', alt: 'The Scheduling bucket on the Assessments tab: "Finished-part stock affected" and "Bank build needed" answered Yes, each with what has to be done, every other row No.' },
+        { shot: 'sch-assessment-checklist', alt: 'The Logistics bucket on the Assessments tab: "Finished-part stock affected" and "Bank build needed" answered Yes, each with what has to be done, every other row No.' },
       ],
     },
     {
@@ -89,7 +89,7 @@ export const schedulingChapter: ContentChapter = {
         {
           p:
             'Write the cut-over date, the coverage and the plants in the "Plan note". Then press ' +
-            '"Save". Only Scheduling, PM, the change lead or an admin can set the plan.',
+            '"Save". Only Logistics, PM, the change lead or an admin can set the plan.',
         },
         { shot: 'sch-bank-build-card', alt: 'The "Bank build plan" card with "Planned scrap" selected, a scrap quote price and a plan note.' },
         { h3: 'The bank build block in the plan' },
@@ -116,15 +116,15 @@ export const schedulingChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'The plan is a Gantt, close to MS Project. PM, Sales, Scheduling and the change lead ' +
+            'The plan is a Gantt, close to MS Project. PM, Sales, Logistics and the change lead ' +
             'edit it. Everyone else sees it and reports progress on their own blocks.',
         },
         {
           points: [
             ['Quote plan', 'is the rough timing Sales shows the customer. Editable from costing until the change is approved.'],
             ['Detailed plan', 'starts as a copy of the quote plan when the change is approved: "Create detailed plan from quote plan". You refine it with the teams.'],
-            ['Team confirmation', 'Every responsible team, Scheduling included, answers "Confirm timing" or "Raise concern".'],
-            ['"Validate timing"', 'sets the baseline. PM, Scheduling or Sales press it once every team has confirmed.'],
+            ['Team confirmation', 'Every responsible team, Logistics included, answers "Confirm timing" or "Raise concern".'],
+            ['"Validate timing"', 'sets the baseline. PM, Logistics or Sales press it once every team has confirmed.'],
           ],
         },
         {
@@ -133,7 +133,7 @@ export const schedulingChapter: ContentChapter = {
             'then reads "Plan changed after this confirmation". Confirm again after the last edit.',
           tone: 'warn',
         },
-        { shot: 'sch-team-confirmation', alt: 'The "Team confirmation" panel with "Confirm timing" and "Raise concern" for Scheduling and one stale chip.' },
+        { shot: 'sch-team-confirmation', alt: 'The "Team confirmation" panel with "Confirm timing" and "Raise concern" for Logistics and one stale chip.' },
         { h3: 'After the baseline: every date move is a deviation' },
         {
           p:
@@ -162,7 +162,7 @@ export const schedulingChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'In validation the "Release" tab lists the release checklist. Two rows are Scheduling\'s. ' +
+            'In validation the "Release" tab lists the release checklist. Two rows are Logistics\'s. ' +
             'Tick "Done", or "N.a." with a note that says why it does not apply.',
         },
         {
@@ -171,7 +171,7 @@ export const schedulingChapter: ContentChapter = {
             ['"Old stock handled as agreed (bank consumed or scrapped)"', 'What the bank build or scrap plan promised has happened.'],
           ],
         },
-        { shot: 'sch-release-checklist', alt: 'The release checklist grouped by department with the two Scheduling rows marked "Done".' },
+        { shot: 'sch-release-checklist', alt: 'The release checklist grouped by department with the two Logistics rows marked "Done".' },
       ],
     },
     {
@@ -212,7 +212,7 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     fixture: [
       'CR-TRAIN-0003, customer change, status approved, no bank-build mode set: the accepted offer carried no changeover decision to take over ("Customer pays scrap" without a scrap price).',
       'Detailed plan seeded with a "Tool downtime" block of 21 days.',
-      'Trainee acts as a Scheduling member.',
+      'Trainee acts as a Logistics member.',
     ],
     pass: [
       { assert: 'change.bank_build_mode is planned_scrap', hint: 'The mode is still not "Planned scrap". Old stock is scrapped here.' },
@@ -228,7 +228,7 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     screen: { kind: 'timing', change: 'CR-TRAIN-0016' },
     brief:
       'The detailed plan of CR-TRAIN-0016 still holds the "Bank build (idea)". The bank really is built, ' +
-      'by Scheduling, in the ten days before the tool leaves. Make the idea a real block ' +
+      'by Logistics, in the ten days before the tool leaves. Make the idea a real block ' +
       'that ends no later than the tool downtime starts.',
     why:
       'An idea block stops "Validate timing". A bank that ends after the downtime starts ' +
@@ -236,7 +236,7 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     fixture: [
       'CR-TRAIN-0016 approved, detailed plan with a "Tool downtime" block and a "Bank build (idea)" block that ends 3 days after the downtime starts.',
       'No baseline yet.',
-      'Trainee acts as a Scheduling member.',
+      'Trainee acts as a Logistics member.',
     ],
     pass: [
       { assert: 'no block in the detailed plan has is_idea true', hint: 'The plan still has an idea block. Untick "Idea block" or delete the idea.' },
@@ -257,11 +257,11 @@ export const schedulingTasks: PracticeTaskSpec[] = [
       'A confirmation is a promise. A concern with a reason is what lets PM fix the plan ' +
       'before the baseline is set, when it is still free to change.',
     fixture: [
-      'CR-TRAIN-0017 approved, detailed plan at plan_revision 2, no Scheduling feedback yet.',
-      'Trainee acts as a Scheduling member.',
+      'CR-TRAIN-0017 approved, detailed plan at plan_revision 2, no Logistics feedback yet.',
+      'Trainee acts as a Logistics member.',
     ],
     pass: [
-      { assert: 'the latest Scheduling feedback is verdict concern at the current plan revision', hint: 'Scheduling has not raised a concern on this plan yet.' },
+      { assert: 'the latest Logistics feedback is verdict concern at the current plan revision', hint: 'Logistics has not raised a concern on this plan yet.' },
       { assert: 'the concern note has at least 15 characters', hint: 'The concern needs a note that says what does not work and what would.' },
     ],
   },
@@ -273,18 +273,18 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     screen: { kind: 'release', change: 'CR-TRAIN-0011' },
     brief:
       'CR-TRAIN-0011 is in validation. The new routing is live in ERP. The bank was consumed ' +
-      'as planned. Answer both Scheduling rows of the release checklist.',
+      'as planned. Answer both Logistics rows of the release checklist.',
     why:
       'Release waits for every row. An old part left in stock at the old index is shipped by ' +
       'somebody who did not know.',
     fixture: [
       'CR-TRAIN-0011 in_validation, release checks seeded, all open.',
-      'Trainee acts as a Scheduling member.',
+      'Trainee acts as a Logistics member.',
     ],
     pass: [
       { assert: 'check erp_updated has status done', hint: '"ERP, BOM and routing updated" is still open.' },
       { assert: 'check stock_handled has status done', hint: '"Old stock handled as agreed (bank consumed or scrapped)" is still open.' },
-      { assert: 'no other department\'s check was changed', hint: 'Only the two Scheduling rows were to be answered.' },
+      { assert: 'no other department\'s check was changed', hint: 'Only the two Logistics rows were to be answered.' },
     ],
   },
 ]

@@ -111,7 +111,7 @@ export function bufferChangeSet(ctx: Ctx, selection: GanttId[], days = 5, extra:
 }
 
 /**
- * Bank build idea: 10 days in the Scheduling lane, ending where the first
+ * Bank build idea: 10 days in the Logistics lane, ending where the first
  * tool downtime starts (or where the selection starts). Not linked: it is a
  * proposal until the team decides.
  */

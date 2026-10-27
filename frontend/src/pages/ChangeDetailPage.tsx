@@ -349,7 +349,7 @@ export default function ChangeDetailPage() {
   const qualityDeptId = departments.find((d) => d.name === 'Quality')?.id;
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
   const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
-  const schedulingDeptId = departments.find((d) => d.name === 'Scheduling')?.id;
+  const logisticsDeptId = departments.find((d) => d.name === 'Logistics')?.id;
   const managementDeptId = departments.find((d) => d.name === 'Management')?.id;
   // A viewer (no department) is read-only even when named as lead.
   const isChangeLead = !actingAs && canWrite
@@ -360,8 +360,8 @@ export default function ChangeDetailPage() {
     && myActions.memberships.includes(pmDeptId);
   const isSalesMember = !!myActions && salesDeptId !== undefined
     && myActions.memberships.includes(salesDeptId);
-  const isSchedulingMember = !!myActions && schedulingDeptId !== undefined
-    && myActions.memberships.includes(schedulingDeptId);
+  const isLogisticsMember = !!myActions && logisticsDeptId !== undefined
+    && myActions.memberships.includes(logisticsDeptId);
   const isManagementMember = !!myActions && managementDeptId !== undefined
     && myActions.memberships.includes(managementDeptId);
   const isGovernanceDept = isQualityMember || isPmMember;
@@ -399,11 +399,11 @@ export default function ChangeDetailPage() {
   // Sales (plus lead/admin) publishes the plan and acknowledges the weight delta.
   const canPublishPlan = isAdmin || isChangeLead || isSalesMember;
   // Timing (spec 2026-09-25): plan editors and who publishes to the customer.
-  const canEditPlan = isAdmin || isChangeLead || isSalesMember || isPmMember || isSchedulingMember;
+  const canEditPlan = isAdmin || isChangeLead || isSalesMember || isPmMember || isLogisticsMember;
   const canPublishTiming = isAdmin || isChangeLead || isSalesMember;
   // How the change reaches the line (bank build mode): the backend allows
-  // Scheduling, PM, the change lead and admin, not Sales.
-  const canSetBankBuild = isAdmin || isChangeLead || isSchedulingMember || isPmMember;
+  // Logistics, PM, the change lead and admin, not Sales.
+  const canSetBankBuild = isAdmin || isChangeLead || isLogisticsMember || isPmMember;
   // Deviation lock / escalate: PM, Sales, lead, admin (spec section 3).
   const canDecideDeviation = isAdmin || isChangeLead || isPmMember || isSalesMember;
   // Release checklist rows beyond the owner department, and the lessons step.
@@ -560,7 +560,7 @@ export default function ChangeDetailPage() {
       case 'internal-approval': return canApproveInternalCosts ? null
         : t('internal.approvedBy').replace('{who}', stage?.internal_approvers || t('internal.approverFallback'));
       case 'validate-timing': {
-        if (!(canEditPlan || canPublishTiming)) return 'Needs the Project Manager, Scheduling or Sales';
+        if (!(canEditPlan || canPublishTiming)) return 'Needs the Project Manager, Logistics or Sales';
         // The Timing tab holds its "Validate timing" until every team has
         // confirmed: the cockpit does not offer a step the tab refuses.
         const waiting = (planFeedback?.required ?? []).filter((r) => !(r.verdict === 'confirmed' && !r.stale));

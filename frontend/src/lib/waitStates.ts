@@ -317,7 +317,7 @@ export function resolveWaitStates(
     }
   }
 
-  // An approved change is not moving until Scheduling has said how it reaches
+  // An approved change is not moving until Logistics has said how it reaches
   // the line and every responsible team has confirmed the detailed timing,
   // which is then validated. Only a validated timing goes to the customer, so
   // the publish wait (customer changes) comes after that.
