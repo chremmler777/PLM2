@@ -163,6 +163,8 @@ export interface IssueOut {
   currency?: string | null
   /** The linked check is no longer asked of its department: no re-check, the issue closes with a note. */
   check_retired?: boolean
+  /** T12: what the open issue waits on, owner first ("APQP confirms the limits of ..."). */
+  waiting_on?: string | null
   /** Sales quoted a customer-paid fix to the customer. */
   fix_quoted_at?: string | null
   fix_quoted_by_name?: string | null

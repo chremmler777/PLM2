@@ -257,6 +257,27 @@ class ValidationIssueService:
             check, await ValidationIssueService._dept_names(session))
 
     @staticmethod
+    async def limits_wait(session: AsyncSession,
+                          check: Optional[ValidationCheck]) -> Optional[str]:
+        """T12 (test 2026-10-27): the linked check passed, but against
+        limits only the measurer set (A5-02): the issue closes when APQP
+        confirms them, not when the check passes 'again'. Returns the words
+        ("APQP confirms the limits of Measured cycle time, set by Dale
+        Perry") or None."""
+        from app.services.validation_service import (
+            LIMITS_CONFIRMER_DEPARTMENT, ValidationService)
+        if (check is None or check.status != "passed"
+                or not ValidationService.limits_pending(check)):
+            return None
+        from app.services import validation_checklist as catalog
+        names = await ValidationIssueService._dept_names(session)
+        setter = (await ValidationService._names(
+            session, [check.limits_set_by])).get(check.limits_set_by)
+        label = catalog.label_for(check.check_key, names.get(check.department_id))
+        return (f"{LIMITS_CONFIRMER_DEPARTMENT} confirms the limits of {label}"
+                + (f", set by {setter}" if setter else ""))
+
+    @staticmethod
     def _retired_in(check: Optional[ValidationCheck], names: dict) -> bool:
         """check_retired against department names already loaded."""
         if check is None:
@@ -400,6 +421,24 @@ class ValidationIssueService:
             select(func.count()).select_from(ValidationIssue).where(
                 ValidationIssue.change_id == change.id,
                 ValidationIssue.status.not_in(ISSUE_DONE_STATUSES)))).scalar() or 0
+
+    @staticmethod
+    async def open_limits_waits(session: AsyncSession,
+                                change: ChangeRequest) -> list[str]:
+        """T12: one limits_wait text per open issue whose linked check
+        passed and waits on APQP's limits confirm."""
+        rows = (await session.execute(
+            select(ValidationIssue, ValidationCheck)
+            .join(ValidationCheck, ValidationCheck.id == ValidationIssue.check_id)
+            .where(ValidationIssue.change_id == change.id,
+                   ValidationIssue.status.not_in(ISSUE_DONE_STATUSES))
+            .order_by(ValidationIssue.number))).all()
+        out = []
+        for i, c in rows:
+            wait = await ValidationIssueService.limits_wait(session, c)
+            if wait:
+                out.append(f"{i.ref}: {wait}")
+        return out
 
     @staticmethod
     async def release_blocker(session: AsyncSession,
@@ -2038,6 +2077,12 @@ class ValidationIssueService:
         retired = issue.check_id is not None and await svc.check_retired(
             session, await session.get(ValidationCheck, issue.check_id))
         if issue.check_id is not None and not retired:
+            wait = await svc.limits_wait(
+                session, await session.get(ValidationCheck, issue.check_id))
+            if wait:
+                raise ChangeError(
+                    f"{issue.ref} closes by itself once {wait}: the check "
+                    "passed against limits nobody confirmed yet")
             raise ChangeError(
                 f"{issue.ref} is linked to a validation check: it closes when "
                 "that check is answered 'passed' again")
@@ -2874,7 +2919,13 @@ class ValidationIssueService:
                                                       names.get(c.department_id)),
                            "department_id": c.department_id,
                            "department_name": names.get(c.department_id),
-                           "status": c.status} if c else None),
+                           "status": c.status,
+                           "limits_pending": bool(
+                               i.is_open and await svc.limits_wait(session, c))}
+                          if c else None),
+                # T12: what the open issue waits on, in words (owner first)
+                "waiting_on": (await svc.limits_wait(session, c)
+                               if c is not None and i.is_open else None),
                 "affected_part_id": i.affected_part_id,
                 "affected_part_number": parts.get(i.affected_part_id),
                 "affected_tool_ref": i.affected_tool_ref,

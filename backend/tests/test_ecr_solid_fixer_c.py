@@ -136,3 +136,42 @@ async def test_t9_release_gate_is_the_step_once_the_rest_is_done(session_factory
     assert kinds.count("gate") == 1 and "plan_watch" not in kinds
     gate = next(a for a in acts if a["kind"] == "gate")
     assert gate.get("due_date")
+
+
+from tests.test_ecr_solid_fix_concession import (  # noqa: E402,F401
+    REF, _fail_weight, _issue, _iurl, _who, fix,
+)
+from tests.test_validation_checks import _auth, _url, val  # noqa: E402,F401
+
+
+async def test_t12_issue_waits_on_apqp_while_the_limits_are_unconfirmed(
+        client, fix, session_factory):
+    await _fail_weight(client, fix)
+    issue = await _issue(client, fix)
+    tool = await _auth(client, fix, "Tool Engineer")
+    res = await client.post(_url(fix, "/checks"), headers=tool, json={
+        "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
+        "measurement": {"sample_size": 5, "min_value": 503.0, "max_value": 509.0,
+                        "measuring_ref": REF, "what_changed_kind": "parameter",
+                        "what_changed_ref": "holding pressure -5 bar, PS-114 rev C"}})
+    assert res.status_code == 201 and res.json()["status"] == "passed", res.text
+    issue = await _issue(client, fix)
+    assert issue["status"] not in ("closed", "accepted")
+    assert issue["check"]["limits_pending"] is True
+    assert issue["waiting_on"].startswith("APQP confirms the limits of")
+    # the close refusal names APQP, not "answered 'passed' again"
+    from app.models.entities import User
+    from app.services.change_service import ChangeError, ChangeService
+    from app.services.validation_issue_service import ValidationIssueService
+    async with session_factory() as s:
+        change = await ChangeService.get_change(s, fix["change_id"])
+        admin = (await s.execute(select(User).where(User.role == "admin"))).scalars().first()
+        with pytest.raises(ChangeError) as e:
+            await ValidationIssueService.close(s, change, issue["id"], "x", admin)
+        assert "APQP confirms the limits" in str(e.value)
+        assert "passed' again" not in str(e.value)
+        # the release row's owner is APQP, not Quality
+        change.status = "in_validation"
+        nxt = await ChangeService.next_step_missing(s, change)
+        row = next(i for i in nxt["items"] if i["key"] == "validation_issues")
+        assert row["who"].startswith("VI-1: APQP confirms the limits")

@@ -1907,7 +1907,13 @@ class ChangeService:
             n = await ValidationIssueService.open_count(session, change)
             if n:
                 if cm_switches.on("RELEASE_V2"):
-                    add("validation_issues", "hard", n=n, exits=["concession"])
+                    # T12: issues whose check passed and only waits on
+                    # APQP's limits confirm are APQP's, not Quality's
+                    waits = await ValidationIssueService.open_limits_waits(
+                        session, change)
+                    add("validation_issues", "hard", n=n, exits=["concession"],
+                        who=("; ".join(waits) if waits and len(waits) == n
+                             else None))
                 else:
                     add("validation_issues", "soft", n=n, rule="validation_issues_open")
             n = await ReleaseService.open_count(session, change)

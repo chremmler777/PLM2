@@ -284,6 +284,12 @@ export default function IssueCard({
       <div className="border-t border-slate-800 px-4 py-2.5">
         <IssueStepper issue={issue} />
       </div>
+      {open && issue.waiting_on && (
+        <p data-testid={`issue-waiting-${issue.id}`} role="note"
+          className="border-t border-slate-800 px-4 py-2 text-[11px] text-amber-200">
+          The check passed: closes by itself once {issue.waiting_on}.
+        </p>
+      )}
       {open && issue.check_retired && (
         <p data-testid={`issue-check-retired-${issue.id}`} role="note"
           className="border-t border-slate-800 px-4 py-2 text-[11px] text-slate-400">

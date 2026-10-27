@@ -445,3 +445,12 @@ describe('issue on a retired check', () => {
     expect(screen.getByTestId('issue-primary-11').getAttribute('data-act')).toBe('close')
   })
 })
+
+describe('T12 issue while APQP confirms the limits', () => {
+  it('names APQP as what the issue waits on, not a re-check', () => {
+    card(issue({ status: 'open', check_id: 63, check_key: 'cycle_time',
+      waiting_on: 'APQP confirms the limits of Measured cycle time, set by Dale Perry' }))
+    expect(screen.getByTestId('issue-waiting-11').textContent)
+      .toContain('closes by itself once APQP confirms the limits of Measured cycle time')
+  })
+})
