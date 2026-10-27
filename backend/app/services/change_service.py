@@ -4420,7 +4420,9 @@ class ChangeService:
                 open_by_dept: dict = {}
                 fallback: set = set()
                 org = release_orgs.get(c.id)
-                for key in release_checklist.CHECK_KEYS:
+                # N1: the rows this change asks (keys_for: an internal change
+                # has no customer rows), the count the Release tab shows
+                for key in release_checklist.keys_for(c, rows):
                     r = rows.get(key)
                     if r is not None and r.status in ("done", "na"):
                         continue
@@ -6130,7 +6132,8 @@ class ChangeService:
                     and await ReleaseService.is_pm_or_lead(session, change, user)):
                 unstaffed = await ReleaseService.unstaffed_department_ids(
                     session, change, await ReleaseService.view_rows(session, change))
-            for key in release_checklist.CHECK_KEYS:
+            # N1: only the rows the Release tab shows for this change
+            for key in release_checklist.keys_for(change, answered):
                 row = answered.get(key)
                 if row is not None and row.status in ("done", "na"):
                     continue

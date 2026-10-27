@@ -236,3 +236,35 @@ async def test_released_lead_action_matches_my_tasks(client, session_factory, se
     if act_adv:
         assert act_adv[0]["to_status"] == "closed" and act_adv[0]["label"] == "Close change"
     assert task_adv, tasks
+
+
+async def test_n1_internal_change_asks_sales_no_release_check(client, session_factory, seed):
+    """Retest N1: an internal change's Release tab has no Sales row, so
+    neither My Tasks nor the change page owe Sales a release check."""
+    from app.services import release_checklist as rc
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="C-N1", title="t", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], lead_id=seed["admin_id"],
+                          customer_relevant=False, status="in_validation")
+        s.add(c); await s.commit()
+        cid = c.id
+    sales_keys = [k for k in rc.CHECK_KEYS if rc.owner_for(k) == "Sales"]
+    assert sales_keys and not [k for k in rc.keys_for(c) if rc.owner_for(k) == "Sales"]
+    await make_department_member(session_factory, seed["engineer_id"], "Sales")
+    from tests.conftest import ENGINEER_PASSWORD, login
+    eng = await login(client, "eng@test.io", ENGINEER_PASSWORD)
+    tasks = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=eng)).json()
+             if t["change_id"] == cid and t["kind"] == "release_check"]
+    acts = [a for a in (await client.get(f"/api/v1/changes/{cid}/my-actions",
+                                         headers=eng)).json()["actions"]
+            if a["kind"] == "release_check"]
+    assert tasks == [] and acts == []
+    # NEGATIVE: on a customer change Sales does owe its row
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).customer_relevant = True
+        await s.commit()
+    acts = [a for a in (await client.get(f"/api/v1/changes/{cid}/my-actions",
+                                         headers=eng)).json()["actions"]
+            if a["kind"] == "release_check"]
+    assert len(acts) == 1
