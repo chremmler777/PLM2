@@ -334,6 +334,10 @@ export default function ConcernStrip({
       onlyDepartmentId === undefined || c.department_id === onlyDepartmentId)
   const open = listed.filter((c: ChangeConcern) => c.is_open)
   const settled = listed.filter((c: ChangeConcern) => !c.is_open)
+  // Scoping (2026-10-27): settled cancel votes fold into one line
+  const [showSettled, setShowSettled] = useState(false)
+  const foldSettled = !scoped && settled.length > 0
+  const shownSettled = foldSettled && !showSettled ? [] : settled
   // Only the legacy flags obstruct anything. Risks are counted and shown, but the
   // card must not dress them up as a blockade — they never were one.
   const blocking = open.filter((c: ChangeConcern) => c.kind !== 'risk')
@@ -372,7 +376,7 @@ export default function ConcernStrip({
       )}
 
       <ul className="space-y-1">
-        {[...open, ...settled].map((c: ChangeConcern) => (
+        {[...open, ...shownSettled].map((c: ChangeConcern) => (
           <li key={c.id} id={`concern-card-${c.id}`}
             className={`flex items-start gap-2 text-sm rounded border px-2 py-1.5 ${
               c.is_open ? KIND_STYLE[c.kind] : 'border-slate-700 bg-slate-900/40 text-slate-500'}`}>
@@ -569,6 +573,14 @@ export default function ConcernStrip({
           </li>
         ))}
       </ul>
+      {foldSettled && (
+        <button type="button" data-testid="concern-settled-toggle"
+          className="text-xs text-slate-400 hover:text-slate-200"
+          onClick={() => setShowSettled((v) => !v)}>
+          {t(showSettled ? 'concern.settledHide' : 'concern.settledShow')
+            .replace('{n}', String(settled.length))}
+        </button>
+      )}
 
       {failure && (
         <p role="alert" data-testid="concern-error"

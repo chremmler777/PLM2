@@ -20,5 +20,12 @@ describe('Scoping takes blocking questions only (2026-10-27)', () => {
     expect(screen.getByTestId('quick-add-submit').textContent).toBe(t('flag.addQuestion'))
     expect(screen.queryByTestId('quick-add-question')).toBeNull()
     expect(screen.queryByTestId('check-items')).toBeNull()
+    // the short form: question, who answers, part; no department, topic or effect
+    expect(screen.queryByTestId('quick-add-dept')).toBeNull()
+    expect(screen.queryByTestId('quick-add-what')).toBeNull()
+    expect(screen.queryByTestId('quick-add-effect')).toBeNull()
+    expect(screen.queryByTestId('quick-add-scope-test')).toBeNull()
+    expect(screen.getByTestId('quick-add-from-customer')).toBeTruthy()
+    expect(screen.getByTestId('quick-add-part')).toBeTruthy()
   })
 })

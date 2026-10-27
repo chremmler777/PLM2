@@ -574,7 +574,12 @@ class MeetingService:
                          if flag_type == "question" and c.is_open and c.is_question
                          and c.raised_by == user.id
                          and c.department_id == department_id
-                         and c.check_what == check_what), None)
+                         and c.check_what == check_what
+                         # questions only (2026-10-27): the PM asks many
+                         # questions with no topic; the same text is the twin
+                         and (not cm_switches.SCOPING_QUESTIONS_ONLY
+                              or c.note.strip().lower() == note.strip().lower())),
+                        None)
             if twin is not None:
                 raise ChangeError(
                     f"You already asked this (#{twin.id}: {twin.note}): add to "
@@ -724,6 +729,8 @@ class MeetingService:
         if flag_type not in FLAG_TYPES:
             raise ChangeError(
                 f"Invalid flag type '{flag_type}': question or check")
+        if check_what is None and cm_switches.SCOPING_QUESTIONS_ONLY:
+            check_what = "other"  # the PM's short form names no topic
         if check_what not in CHECK_WHAT:
             raise ChangeError(
                 "Pick what to check: one of " + ", ".join(CHECK_WHAT))
@@ -791,7 +798,7 @@ class MeetingService:
 
     @staticmethod
     def _question_fields(answer_from: Optional[str],
-                         scope_effect: Optional[str]) -> tuple[str, str]:
+                         scope_effect: Optional[str]) -> tuple[str, Optional[str]]:
         """A question owes "who can answer" and "what the answer changes in
         the scope" (spec §3): if nothing in the scope hangs on it, it is a
         check item."""
@@ -799,6 +806,10 @@ class MeetingService:
             raise ChangeError(
                 "Say who can answer the question: customer, our_team or supplier")
         effect = (scope_effect or "").strip()
+        if cm_switches.SCOPING_QUESTIONS_ONLY:
+            # 2026-10-27: every scoping question blocks; the PM's short form
+            # asks only who answers (what it changes is optional)
+            return answer_from, effect or None
         if len(effect) < 5:
             raise ChangeError(
                 "Say what the answer changes in the scope (parts, who assesses, "

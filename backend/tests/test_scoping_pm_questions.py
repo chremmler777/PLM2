@@ -85,3 +85,23 @@ async def test_scoping_takes_no_check_items(client, admin_auth, seed, session_fa
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{qid}/type",
                             headers=admin_auth, json={"flag_type": "check"})
     assert res.status_code == 400 and "questions only" in res.json()["detail"], res.text
+
+
+async def test_pm_short_form_question_text_and_who_answers(
+        client, admin_auth, seed, session_factory):
+    """The PM's short form: question + who answers (+ part); no department,
+    no topic, no 'what it changes'. Two questions, both block proceed."""
+    from tests.test_scoping_live_test_1 import _decide, _dept_ids, _meeting
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq6")
+    for note in ("Both variants?", "Which colour?"):
+        res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth, json={
+            "kind": "needs_info", "note": note, "flag_type": "question",
+            "answer_from": "customer"})
+        assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth, json={
+        "kind": "needs_info", "note": "both variants? ", "flag_type": "question",
+        "answer_from": "customer"})
+    assert res.status_code == 400 and "already asked" in res.json()["detail"]
+    mid = await _meeting(client, admin_auth, cid, await _dept_ids(session_factory))
+    res = await _decide(client, admin_auth, cid, mid, "proceed")
+    assert res.status_code == 400

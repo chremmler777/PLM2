@@ -47,9 +47,11 @@ function rememberDept(id: number) {
 }
 
 /** "Make it a question": who answers, what the answer changes in the scope. */
-export function QuestionFields({ from, setFrom, effect, setEffect, idPrefix }: {
+export function QuestionFields({ from, setFrom, effect, setEffect, idPrefix, withEffect = true }: {
   from: AnswerFrom | ''; setFrom: (v: AnswerFrom) => void
   effect: string; setEffect: (v: string) => void; idPrefix: string
+  /** the PM's short form (questions only) asks just who answers */
+  withEffect?: boolean
 }) {
   return (
     <div className="space-y-1.5 rounded border border-amber-800/50 bg-amber-950/20 p-2"
@@ -65,10 +67,12 @@ export function QuestionFields({ from, setFrom, effect, setEffect, idPrefix }: {
           </label>
         ))}
       </fieldset>
-      <input value={effect} onChange={(e) => setEffect(e.target.value)}
-        aria-label={t('flag.scopeEffect')}
-        placeholder={`${t('flag.scopeEffect')} ${t('flag.scopeEffectPlaceholder')}`}
-        data-testid={`${idPrefix}-effect`} className={`${input} w-full`} />
+      {withEffect && (
+        <input value={effect} onChange={(e) => setEffect(e.target.value)}
+          aria-label={t('flag.scopeEffect')}
+          placeholder={`${t('flag.scopeEffect')} ${t('flag.scopeEffectPlaceholder')}`}
+          data-testid={`${idPrefix}-effect`} className={`${input} w-full`} />
+      )}
     </div>
   )
 }
@@ -118,10 +122,12 @@ export default function ScopingFlags({
   }
   const raise = useMutation({
     mutationFn: () => changesApi.raiseConcern(changeId, {
-      kind: 'needs_info', note: note.trim(), department_id: deptId,
-      flag_type: asQuestion ? 'question' : 'check', check_what: what as CheckWhat,
+      kind: 'needs_info', note: note.trim(),
+      // the PM's short form (questions only): no department, no topic
+      ...(SCOPING_QUESTIONS_ONLY ? {} : { department_id: deptId, check_what: what as CheckWhat }),
+      flag_type: asQuestion ? 'question' : 'check',
       ...(partId !== '' ? { part_id: partId } : {}),
-      ...(asQuestion ? { answer_from: from as AnswerFrom, scope_effect: effect.trim() } : {}),
+      ...(asQuestion ? { answer_from: from as AnswerFrom, scope_effect: effect.trim() || undefined } : {}),
     }),
     onSuccess: () => {
       if (deptId != null) rememberDept(deptId)
@@ -154,10 +160,10 @@ export default function ScopingFlags({
 
   const missing = [
     ...(note.trim() ? [] : [t('flag.missingNote')]),
-    ...(deptId != null ? [] : [t('flag.missingDept')]),
-    ...(what ? [] : [t('flag.missingWhat')]),
+    ...(deptId != null || SCOPING_QUESTIONS_ONLY ? [] : [t('flag.missingDept')]),
+    ...(what || SCOPING_QUESTIONS_ONLY ? [] : [t('flag.missingWhat')]),
     ...(asQuestion && !from ? [t('flag.missingFrom')] : []),
-    ...(asQuestion && effect.trim().length < 5 ? [t('flag.missingEffect')] : []),
+    ...(asQuestion && !SCOPING_QUESTIONS_ONLY && effect.trim().length < 5 ? [t('flag.missingEffect')] : []),
   ]
 
   // Check items by owning department (the raised-for one), in raise order.
@@ -182,10 +188,12 @@ export default function ScopingFlags({
           <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('flag.meetingTitle')}</p>
           <div className="flex flex-wrap items-center gap-2">
             <input value={note} onChange={(e) => setNote(e.target.value)}
-              aria-label={t('flag.placeholder')} placeholder={t('flag.placeholder')}
+              aria-label={t(SCOPING_QUESTIONS_ONLY ? 'flag.questionPlaceholder' : 'flag.placeholder')}
+              placeholder={t(SCOPING_QUESTIONS_ONLY ? 'flag.questionPlaceholder' : 'flag.placeholder')}
               data-testid="quick-add-note"
               onKeyDown={(e) => { if (e.key === 'Enter' && missing.length === 0) raise.mutate() }}
               className={`${input} flex-1 min-w-[14rem]`} />
+            {!SCOPING_QUESTIONS_ONLY && (<>
             <select value={deptId ?? ''} aria-label={t('flag.raisedFor')} data-testid="quick-add-dept"
               onChange={(e) => setDeptPicked(e.target.value ? Number(e.target.value) : undefined)}
               className={input}>
@@ -197,6 +205,7 @@ export default function ScopingFlags({
               <option value="">{t('flag.checkWhat')}…</option>
               {CHECK_WHAT.map((k) => <option key={k} value={k}>{t(`flag.what.${k}`)}</option>)}
             </select>
+            </>)}
             <select value={partId} aria-label={t('flag.part')} data-testid="quick-add-part"
               onChange={(e) => setPartId(e.target.value ? Number(e.target.value) : '')}
               className={`${input} max-w-[12rem]`}>
@@ -222,7 +231,7 @@ export default function ScopingFlags({
               </label>
             )}
             {!asQuestion && <span className="text-slate-500">{t('flag.defaultHint')}</span>}
-            {asQuestion && (
+            {asQuestion && !SCOPING_QUESTIONS_ONLY && (
               <span className="text-amber-300/90" data-testid="quick-add-scope-test">
                 {t('flag.scopeTest')} {t('flag.scopeTestNo')}
               </span>
@@ -230,7 +239,7 @@ export default function ScopingFlags({
           </div>
           {asQuestion && (
             <QuestionFields from={from} setFrom={setFrom} effect={effect}
-              setEffect={setEffect} idPrefix="quick-add" />
+              setEffect={setEffect} idPrefix="quick-add" withEffect={!SCOPING_QUESTIONS_ONLY} />
           )}
           {twins.length > 0 && (
             <div className="text-[11px] space-y-1" data-testid="quick-add-twins">
@@ -271,7 +280,7 @@ export default function ScopingFlags({
       {(!SCOPING_QUESTIONS_ONLY || checks.length > 0) && (
       <section className="space-y-1.5" data-testid="check-items">
         <h4 className="text-[11px] uppercase tracking-wide text-slate-500">
-          {t('flag.checks')} ({checks.length})
+          {t(SCOPING_QUESTIONS_ONLY ? 'flag.checksOld' : 'flag.checks')} ({checks.length})
         </h4>
         {checks.length === 0 ? (
           <p className="text-xs text-slate-500">{t('flag.noChecks')}</p>

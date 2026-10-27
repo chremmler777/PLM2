@@ -159,6 +159,7 @@ describe('ConcernStrip', () => {
       is_open: false, withdrawn_at: '2026-08-07T10:00:00', withdrawn_by: 4,
       withdrawn_by_name: 'Pia PM' })] as never)
     wrap(<ConcernStrip changeId={7} editable />)
+    fireEvent.click(await screen.findByTestId('concern-settled-toggle'))
     expect((await screen.findByTestId('concern-settled-1')).textContent)
       .toBe(t('concern.settledByPm').replace('{x}', 'Pia PM'))
   })
@@ -167,6 +168,7 @@ describe('ConcernStrip', () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({ id: 1, raised_by: 9,
       is_open: false, withdrawn_at: '2026-08-07T10:00:00', withdrawn_by: 9 })] as never)
     wrap(<ConcernStrip changeId={7} editable />)
+    fireEvent.click(await screen.findByTestId('concern-settled-toggle'))
     expect((await screen.findByTestId('concern-settled-1')).textContent)
       .toBe(t('concern.withdrawnByAuthor'))
   })
@@ -229,10 +231,20 @@ describe('ConcernStrip', () => {
       .disabled).toBe(true)
   })
 
+  it('folds settled flags into one line (2026-10-27) until shown', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ raised_by: 5, is_open: false, resolved_by_meeting_id: 3 })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    const toggle = await screen.findByTestId('concern-settled-toggle')
+    expect(toggle.textContent).toBe(t('concern.settledShow').replace('{n}', '1'))
+    expect(screen.queryByText('Tool cannot hold tolerance')).toBeNull()
+  })
+
   it('shows settled flags struck through and un-withdrawable', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
       concern({ raised_by: 5, is_open: false, resolved_by_meeting_id: 3 })] as never)
     wrap(<ConcernStrip changeId={7} editable />)
+    fireEvent.click(await screen.findByTestId('concern-settled-toggle'))
     await screen.findByText('Tool cannot hold tolerance')
     expect(screen.getByText(/answered by the decision/)).toBeDefined()
     expect(screen.queryByRole('button', { name: /withdraw/ })).toBeNull()
