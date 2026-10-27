@@ -127,6 +127,43 @@ interface ProjectTeamRow {
 const projectLabel = (p: ProjectRef): string =>
   p.code ? `${p.code} · ${p.name}` : p.name;
 
+interface PmRef {
+  id: number;
+  name: string;
+  mine: boolean;
+}
+
+interface ProjectGroup {
+  key: string;
+  label: string;
+  projects: ProjectRef[];
+}
+
+// Largest project number first inside a group (as on the Projects page).
+const byNumberDesc = (a: ProjectRef, b: ProjectRef): number => {
+  const n = (p: ProjectRef) => parseInt((p.code ?? '').match(/\d+/)?.[0] ?? '-1', 10);
+  return n(b) - n(a);
+};
+
+export function groupByPm(projects: ProjectRef[], pmOf: Record<string, PmRef>): ProjectGroup[] {
+  const mine: ProjectRef[] = [];
+  const others = new Map<string, ProjectRef[]>();
+  const none: ProjectRef[] = [];
+  for (const p of projects) {
+    const pm = pmOf[String(p.id)];
+    if (!pm) none.push(p);
+    else if (pm.mine) mine.push(p);
+    else others.set(pm.name, [...(others.get(pm.name) ?? []), p]);
+  }
+  const groups: ProjectGroup[] = [];
+  if (mine.length) groups.push({ key: 'mine', label: t('start.projectsMine'), projects: mine.sort(byNumberDesc) });
+  for (const name of [...others.keys()].sort()) {
+    groups.push({ key: `pm-${name}`, label: `${t('start.projectsOfPm')} ${name}`, projects: others.get(name)!.sort(byNumberDesc) });
+  }
+  if (none.length) groups.push({ key: 'none', label: t('start.projectsNoPm'), projects: none.sort(byNumberDesc) });
+  return groups;
+}
+
 export default function StartChangeModal({ open, onClose, prefill }: StartChangeModalProps) {
   const navigate = useNavigate();
 
@@ -184,6 +221,14 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
     queryFn: async () => (await client.get('/v1/plants/projects')).data,
     enabled: open,
   });
+  // Picker order (Christoph 2026-10-27): the projects I am PM responsible
+  // for first, then the other PMs' (grouped by PM), no PM defined last.
+  const { data: pmOf = {} } = useQuery<Record<string, PmRef>>({
+    queryKey: ['project-pm-responsibles'],
+    queryFn: async () => (await client.get('/v1/projects/pm-responsibles')).data,
+    enabled: open && !projectLocked,
+  });
+  const projectGroups = useMemo(() => groupByPm(projects, pmOf), [projects, pmOf]);
 
   const { data: parts = [] } = useQuery<PickedPart[]>({
     queryKey: ['project-parts', projectId],
@@ -451,10 +496,14 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
               }}
             >
               <option value="">-</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {projectLabel(p)}
-                </option>
+              {projectGroups.map((g) => (
+                <optgroup key={g.key} label={g.label}>
+                  {g.projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {projectLabel(p)}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           )}

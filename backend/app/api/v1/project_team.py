@@ -62,6 +62,29 @@ async def team_gaps(
     return {str(k): v for k, v in (await ProjectTeamService.team_gaps(db, ids)).items()}
 
 
+@router.get("/pm-responsibles")
+async def pm_responsibles(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """{project_id: {id, name, mine}} of each project's Project Manager responsible,
+    for the Start change project picker (Christoph 2026-10-27: the caller's
+    own projects first, then the other PMs', undefined last). Projects with
+    no PM responsible are left out. mine = the caller (under Act as person:
+    that person) is the PM responsible."""
+    from app.models.workflow import Department, ProjectResponsible
+    rows = (await db.execute(
+        select(ProjectResponsible.project_id, User.id, User.full_name, User.username)
+        .join(Department, Department.id == ProjectResponsible.department_id)
+        .join(User, User.id == ProjectResponsible.user_id)
+        .join(Project, Project.id == ProjectResponsible.project_id)
+        .join(Plant, Plant.id == Project.plant_id)
+        .where(Department.name == "Project Manager",
+               Plant.organization_id == current_user.organization_id))).all()
+    return {str(pid): {"id": uid, "name": full or uname,
+                      "mine": uid == current_user.id} for pid, uid, full, uname in rows}
+
+
 @router.get("/{project_id}/team", response_model=list[dict])
 async def get_team(
     project_id: int,

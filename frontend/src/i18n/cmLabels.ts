@@ -356,6 +356,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.system': { de: 'System', en: 'System' },
   'start.title': { de: 'Änderungsantrag anlegen', en: 'New change request' },
   'start.project': { de: 'Projekt', en: 'Project' },
+  'start.projectsMine': { de: 'Meine Projekte', en: 'My projects' },
+  'start.projectsOfPm': { de: 'PM', en: 'PM' },
+  'start.projectsNoPm': { de: 'Kein PM festgelegt', en: 'No PM defined' },
   'start.item': { de: 'Betroffene Teile', en: 'Affected items' },
   'start.itemHint': {
     de: 'Mehrere Teile wählbar, z. B. alle Teile eines Werkzeugs in einem Antrag. Das erste ist das führende Teil.',
