@@ -36,7 +36,13 @@ import { plantText } from '../../lib/plantName'
 
 /** The room's letters, in the order the picker shows them. I (informed) is an
  *  FYI: no assessment, nothing blocks on it. */
-const RASIC_PICK: RasicLetter[] = ['R', 'A', 'S', 'C', 'I']
+// Christoph 2026-10-28: no full RASIC in scoping, two calls only:
+// Responsible (assesses, costing waits for it) or Informed (one notice).
+// An older A counts as R, S/C as I when a call is carried over.
+const RASIC_PICK: RasicLetter[] = ['R', 'I']
+const twoLetter = (l: RasicLetter): RasicLetter => (l === 'R' || l === 'A' ? 'R' : 'I')
+const twoLetters = (m: Record<string, RasicLetter>): Record<number, RasicLetter> =>
+  Object.fromEntries(Object.entries(m).map(([k, v]) => [Number(k), twoLetter(v)]))
 
 /** An attendee as picked. A directory person is a colleague (and carries
  *  their user id and email as the contacts API sends them); a typed name
@@ -190,9 +196,9 @@ export default function ScopingPanel(
   const recommendedIds = recommended.filter((d) => !d.optional).map((d) => d.id)
   const sometimesIds = recommended.filter((d) => d.optional).map((d) => d.id)
   const recommendedRasic = (): Record<number, RasicLetter> =>
-    Object.fromEntries(recommended.filter((d) => !d.optional).map((d) => [d.id, d.rasic_letter ?? 'R']))
+    Object.fromEntries(recommended.filter((d) => !d.optional).map((d) => [d.id, twoLetter(d.rasic_letter ?? 'R')]))
   const recommendedLetter = (id: number): RasicLetter =>
-    recommended.find((d) => d.id === id)?.rasic_letter ?? 'R'
+    twoLetter(recommended.find((d) => d.id === id)?.rasic_letter ?? 'R')
   // §3 internal: the raiser's department is auto-R (served by the backend);
   // leaving it out, or below R/A, needs a reason, logged
   const raiserDept = recommended.find((d) => d.raiser)
@@ -209,7 +215,7 @@ export default function ScopingPanel(
   const lastLetters = meetings[meetings.length - 1]?.department_rasic
   useEffect(() => {
     if (deptTouched || !lastLetters || Object.keys(lastLetters).length === 0) return
-    setDeptRasic(Object.fromEntries(Object.entries(lastLetters).map(([k, v]) => [Number(k), v])) as Record<number, RasicLetter>)
+    setDeptRasic(twoLetters(lastLetters as Record<string, RasicLetter>))
     setCarried(true)
   }, [lastLetters]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -243,7 +249,7 @@ export default function ScopingPanel(
       if (!allowed.length) continue
       const assesses = (recommendedIds.includes(d.id) || sometimesIds.includes(d.id))
         && d.manager_id !== a.user_id
-      const want: RasicLetter = assesses ? 'R' : 'C'
+      const want: RasicLetter = assesses ? 'R' : 'I'
       picks[d.id] = allowed.includes(want) ? want : allowed[0]
     }
     const ids = Object.keys(picks).map(Number)
@@ -442,7 +448,7 @@ export default function ScopingPanel(
     // its cost carrier, so the room edits the difference, not the whole list.
     const last = latestMeeting
     const letters = last?.department_rasic
-      ? Object.fromEntries(Object.entries(last.department_rasic).map(([k, v]) => [Number(k), v]))
+      ? twoLetters(last.department_rasic as Record<string, RasicLetter>)
       : null
     if (letters && Object.keys(letters).length > 0) {
       setDeptRasic(letters as Record<number, RasicLetter>); setDeptTouched(true); setCarried(true)
@@ -1158,7 +1164,7 @@ export default function ScopingPanel(
             )}
             {!motherPlant && (
               <p className="mt-1.5 text-[11px] text-slate-500">
-                <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
+                {t('rasic.assessNote')}
               </p>
             )}
             {!motherPlant && raiserOut && (

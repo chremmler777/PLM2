@@ -59,7 +59,21 @@ describe('RoutingDeviationPanel wait line', () => {
 describe('RoutingDeviationPanel add dialog', () => {
   afterEach(cleanup)
 
-  it('offers I (Informed) next to R, A, S and C', async () => {
+  it('an assessing department pulls in without approval: the dialog says so', async () => {
+    auth.current = { userId: 5 }
+    const { fireEvent } = await import('@testing-library/react')
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RoutingDeviationPanel changeId={7} routing={routing({ deviation_status: 'none', has_deviation: false })}
+          departments={[{ id: 4, name: 'Quality' } as never]} routedIds={[]}
+          stageOrder={1} canAdd pullIn canDecide={false} leadId={9} />
+      </QueryClientProvider>)
+    fireEvent.click(screen.getByTestId('add-department-button'))
+    expect(screen.getByText(t('routingDev.pullInHint'))).toBeTruthy()
+    expect(screen.queryByText(t('routingDev.leadHint'))).toBeNull()
+  })
+
+  it('offers Responsible and Informed only, no full RASIC (Christoph 2026-10-28)', async () => {
     auth.current = { userId: 5 }
     const { fireEvent } = await import('@testing-library/react')
     render(
@@ -71,7 +85,7 @@ describe('RoutingDeviationPanel add dialog', () => {
     fireEvent.click(screen.getByTestId('add-department-button'))
     const values = Array.from(document.querySelectorAll('input[name="rasic"]'))
       .map((i) => (i as HTMLInputElement).value)
-    expect(values).toEqual(['R', 'A', 'S', 'C', 'I'])
+    expect(values).toEqual(['R', 'I'])
     expect(screen.getByText(t('routingDev.letter.I'))).toBeTruthy()
     expect(t('routingDev.letter.I')).toMatch(/Informed|Informiert/)
   })

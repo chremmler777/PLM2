@@ -917,3 +917,33 @@ async def test_audit_entries_read_as_names(client, auth, seed, depts, session_fa
     approved = next(r for r in rows if r["action"] == "task_approved")
     assert approved["display_values"]["task_id"].startswith("Development")
     assert approved["acting_as_department_name"] == "Development"
+
+
+async def test_assessing_department_pulls_in_who_it_needs(client, auth, seed, depts,
+                                                          session_factory):
+    """Christoph 2026-10-28: an assessing department pulls in a department it
+    needs, with a reason, no approval; a department that does not assess
+    cannot."""
+    cid = await _in_assessment(client, auth, seed, session_factory)
+    tool = acting(auth, depts["Tool Engineer"])
+    sales = acting(auth, depts["Sales"])
+    assert (await _state(client, tool, cid))["can_pull_in"] is True
+    assert (await _state(client, sales, cid))["can_pull_in"] is False
+    url = f"/api/v1/changes/{cid}/routing/deviation"
+    body = {"op": "add", "department_id": depts["APQP"], "rasic_letter": "R"}
+    res = await client.post(url, json={**body, "reason": "no"}, headers=tool)
+    assert res.status_code == 400 and "reason" in res.json()["detail"]
+    res = await client.post(url, json={**body, "reason": "New gauge insert needed"},
+                            headers=tool)
+    assert res.status_code == 200, res.text
+    assert res.json()["deviation_status"] == "approved"
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid,
+            ChangeAssessment.department_id == depts["APQP"]))).scalars().all()
+    assert len(rows) == 1 and rows[0].rasic_letter == "R"
+    # Sales does not assess: the old rule applies (it may add only itself)
+    res = await client.post(url, json={"op": "add", "department_id": depts["Packaging Engineer"],
+                                       "rasic_letter": "R", "reason": "Packaging too"},
+                            headers=sales)
+    assert res.status_code == 403

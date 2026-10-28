@@ -1047,13 +1047,13 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
     const submit = screen.getByTestId('add-department-submit') as HTMLButtonElement
     expect(submit.disabled).toBe(true)
     fireEvent.change(select, { target: { value: '4' } })
-    fireEvent.click(screen.getByLabelText(t('routingDev.letter.S')))
+    fireEvent.click(screen.getByLabelText(t('routingDev.letter.I')))
     expect(submit.disabled).toBe(true)  // still no reason
     fireEvent.change(screen.getByTestId('add-department-reason'), { target: { value: 'forgot the tool' } })
     expect(submit.disabled).toBe(false)
     fireEvent.click(submit)
     await waitFor(() => expect(changesApi.postDeviation).toHaveBeenCalledWith(7, {
-      op: 'add', stage_order: 1, department_id: 4, rasic_letter: 'S', reason: 'forgot the tool',
+      op: 'add', stage_order: 1, department_id: 4, rasic_letter: 'I', reason: 'forgot the tool',
     }))
   })
 

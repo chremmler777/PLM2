@@ -1735,6 +1735,8 @@ export interface StageStateResponse {
     pending_deviation_id?: number | null;
   }>;
   can_edit_impact: boolean;
+  /** Christoph 2026-10-28: an assessing department pulls in who it needs, no approval. */
+  can_pull_in?: boolean;
   impact_edit_needs_reason: boolean;
   /** C16: locked before the offer: the edit reopens the departments' costing. */
   impact_edit_reopens?: boolean;

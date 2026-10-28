@@ -917,7 +917,11 @@ class ChangeRoutingService:
     async def apply_deviation(session: AsyncSession, change: ChangeRequest, user_id: int, *,
                               op: str, department_id: int, rasic_letter: Optional[str] = None,
                               stage_order: Optional[int] = None,
-                              reason: Optional[str] = None) -> ChangeRouting:
+                              reason: Optional[str] = None,
+                              pull_in: bool = False) -> ChangeRouting:
+        """pull_in (Christoph 2026-10-28): an assessing department pulls in a
+        department it needs; approve_deviation(pull_in=True) follows at once,
+        so nobody is asked to approve it and the lead is only told."""
         from app.services.change_service import ChangeService  # local import avoids cycle
         if op == "add":
             # P4: Management gives OKs and books no hours (no cost-sheet
@@ -1117,6 +1121,17 @@ class ChangeRoutingService:
         await ChangeService.append_changelog(
             session, change, "routing_deviation", f"Routing deviation: {desc}", user_id,
             notes=(reason.strip() if reason else None), new_value=record)
+        if pull_in:
+            if change.lead_id is not None and change.lead_id != user_id:
+                await NotificationService.notify_once(
+                    session, [change.lead_id], kind="routing_pull_in",
+                    subject_key=f"routing-pull:{change.id}:{user_id}:{desc}",
+                    title=f"Department pulled in: {change.change_number}",
+                    body=f"{desc.capitalize()}" + (f": {reason.strip()}" if reason else ""),
+                    link=f"/changes/{change.id}?tab=assessments",
+                )
+            await ChangeRoutingService.repair_stage_tasks(session, change, None)
+            return routing
         # The decision sits with the lead (4-eyes: nobody who filed a request
         # of the pending bundle takes it). If the lead filed one, Project
         # Management decides (user_can_decide_deviation): tell its members
@@ -1248,6 +1263,31 @@ class ChangeRoutingService:
         )).scalars().all()
         active = [a.stage_order for a in rows if a.status == "active"]
         return max(active) if active else 1
+
+    @staticmethod
+    async def may_pull_in(session: AsyncSession, change: ChangeRequest, user) -> bool:
+        """Christoph 2026-10-28: a department that assesses this change pulls
+        in the department it needs, without an approval. In assessment, for a
+        member (acts-as aware) of a department holding a Responsible row; not
+        while another routing change waits for its decision."""
+        if change.status != "in_assessment" or getattr(user, "effective_role", None) == "viewer":
+            return False
+        routing = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+        )).scalar_one_or_none()
+        if routing is not None and routing.deviation_status == "pending_approval":
+            return False
+        from app.services.workflow_service import WorkflowService
+        mine = set(await WorkflowService.effective_department_ids(session, user))
+        rows = (await session.execute(select(
+            ChangeAssessment.department_id, ChangeAssessment.stage_order).where(
+            ChangeAssessment.change_id == change.id,
+            ChangeAssessment.rasic_letter.in_(BLOCKING_LETTERS)))).all()
+        if not rows:
+            return False
+        # the assessment stage only: a later (commercial) stage's row is dormant
+        first = min(o for _, o in rows)
+        return bool(mine & {d for d, o in rows if o == first})
 
     @staticmethod
     def user_can_decide_deviation(change: ChangeRequest, routing: ChangeRouting,
@@ -1529,7 +1569,8 @@ class ChangeRoutingService:
     @staticmethod
     async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
                                 *, acting: bool = False,
-                                pm_ok: Optional[bool] = None) -> ChangeRouting:
+                                pm_ok: Optional[bool] = None,
+                                pull_in: bool = False) -> ChangeRouting:
         from app.services.change_service import ChangeService
         # Lock order (see _lock_routing): the instance, then the routing.
         inst = await ChangeRoutingService.lock_instance(session, change.id)
@@ -1539,10 +1580,11 @@ class ChangeRoutingService:
             await ChangeRoutingService.lock_task_instance(session, change.id)
         routing = await ChangeRoutingService._lock_routing(session, change)
         proposers = await _pending_proposers(session, routing)
-        ChangeRoutingService._check_decide(
-            change, routing, user_id, "approve", acting, proposers=proposers,
-            lead_idle=bool(await ChangeService.leadless_ids(session, [change])),
-            pm_ok=await ChangeRoutingService._pm_ok_of(session, user_id, pm_ok))
+        if not pull_in:
+            ChangeRoutingService._check_decide(
+                change, routing, user_id, "approve", acting, proposers=proposers,
+                lead_idle=bool(await ChangeService.leadless_ids(session, [change])),
+                pm_ok=await ChangeRoutingService._pm_ok_of(session, user_id, pm_ok))
         # A pending "not our responsibility" re-letters only now (§16 P1-3),
         # and only if the department has not answered in the meantime (then
         # its answer stands and the decline is moot).
@@ -1679,7 +1721,9 @@ class ChangeRoutingService:
         if uninformed_ids:
             outcome["uninformed_department_ids"] = sorted(uninformed_ids)
         await ChangeService.append_changelog(
-            session, change, "routing_deviation_approved", "Routing deviation approved", user_id,
+            session, change, "routing_deviation_approved",
+            ("Department pulled in by an assessing department (no approval needed)"
+             if pull_in else "Routing deviation approved"), user_id,
             new_value=outcome or None)
         await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing

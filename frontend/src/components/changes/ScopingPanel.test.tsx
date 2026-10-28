@@ -279,8 +279,9 @@ describe('ScopingPanel department picker', () => {
     ]
     vi.mocked(changesApi.createMeeting).mockClear()
     render(wrap(<ScopingPanel change={change()} />))
-    // Quality is recommended as Consulted: picked, with C pressed.
-    const c = await screen.findByTestId('rasic-2-C')
+    // Quality is recommended as Consulted: picked, shown as Informed (two
+    // letters only, Christoph 2026-10-28).
+    const c = await screen.findByTestId('rasic-2-I')
     await waitFor(() => expect(c.getAttribute('aria-pressed')).toBe('true'))
     // Tool Engineer was not in the standard: picking it makes it Responsible.
     expect(screen.getByTestId('rasic-4-none').getAttribute('aria-pressed')).toBe('true')
@@ -291,14 +292,15 @@ describe('ScopingPanel department picker', () => {
     fireEvent.click(screen.getByTestId('rasic-4-none'))
     expect(screen.getByTestId('rasic-row-4').className).toContain('opacity-60')
     fireEvent.click(screen.getByRole('button', { name: /^Tool Engineer$/ }))
-    // The room overrules the standard: Quality becomes Accountable.
-    fireEvent.click(screen.getByTestId('rasic-2-A'))
-    expect(screen.getByTestId('rasic-2-A').getAttribute('aria-pressed')).toBe('true')
+    // The room overrules the standard: Quality becomes Responsible.
+    expect(screen.queryByTestId('rasic-2-A')).toBeNull()
+    fireEvent.click(screen.getByTestId('rasic-2-R'))
+    expect(screen.getByTestId('rasic-2-R').getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
     fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
-    expect(body.department_rasic).toEqual({ 2: 'A', 4: 'R' })
+    expect(body.department_rasic).toEqual({ 2: 'R', 4: 'R' })
     expect(body.selected_department_ids.sort()).toEqual([2, 4])
   })
 
@@ -754,7 +756,7 @@ describe('ScopingPanel meeting routing selection', () => {
       fireEvent.keyDown(input, { key: 'Enter' })
     }
     expect(screen.getByTestId('rasic-6-R').getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTestId('rasic-8-C').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('rasic-8-I').getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByTestId('rasic-auto-added').textContent).toContain('Packaging Engineer (Kenny Rice)')
     expect(screen.getByTestId('rasic-auto-added').textContent).not.toContain('Chris Boss')
     vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
@@ -768,7 +770,7 @@ describe('ScopingPanel meeting routing selection', () => {
     const chip = await screen.findByRole('button', { name: new RegExp(`^${FIVE[1].name}$`) })
     await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'))
     expect(screen.queryByTestId('meeting-raiser-waive')).toBeNull()
-    fireEvent.click(screen.getByTestId('rasic-3-C'))
+    fireEvent.click(screen.getByTestId('rasic-3-I'))
     expect(screen.getByTestId('meeting-raiser-waive')).toBeTruthy()
     fireEvent.click(screen.getByTestId('meeting-carrier-internal'))
     const save = screen.getByRole('button', { name: t('meeting.save') }) as HTMLButtonElement
@@ -943,7 +945,8 @@ describe('ScopingPanel §16 meeting record', () => {
     fireEvent.click(reopen)
     expect(screen.getByTestId('meeting-carried')).toBeTruthy()
     expect(screen.getByTestId('rasic-2-R').getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTestId('rasic-4-C').getAttribute('aria-pressed')).toBe('true')
+    // an old C is carried over as Informed
+    expect(screen.getByTestId('rasic-4-I').getAttribute('aria-pressed')).toBe('true')
   })
 
   it('warns in a dialog listing the open flags instead of proceeding (2026-10-14)', async () => {

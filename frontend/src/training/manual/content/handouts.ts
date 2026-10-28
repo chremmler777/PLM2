@@ -47,7 +47,7 @@ export const HANDOUTS: Handout[] = [
           head: ['Stage', 'You', 'Where'],
           rows: [
             ['Captured', '"New Change Request": all parts from the same tool, one-line reason, who carries the cost, documents (Sales brings the customer\'s facts and the quote deadline); set the lead, "Hand over to scoping"', '"Changes", cockpit "Next step", "Status"'],
-            ['Scoping', 'Impacted set ("Apply selection"), Development confirms; "+ Record a meeting" with the letters R, A, S, C, I and the cost carrier; decide', '"Impacted", "Scoping"'],
+            ['Scoping', 'Impacted set ("Apply selection"), Development confirms; "+ Record a meeting" with Responsible or Informed per department and the cost carrier; decide', '"Impacted", "Scoping"'],
             ['In Assessment', 'Chase open departments; "Add a department to the assessment" if one was forgotten; "Take off routing" if one should not assess (waits for approval); "Close assessment → Costing"', '"Assessments", "Blocked by"'],
             ['Costing', 'Check every department priced its part, "Close costing"', '"Costing", "Cost summary"'],
             ['Quoted', '"PM sign-off" (the cockpit asks once "Customer accepted" is recorded)', '"Offer"'],

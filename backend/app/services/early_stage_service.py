@@ -1308,6 +1308,8 @@ class EarlyStageService:
             # C16: before the offer the reason reopens the departments' costing
             "impact_edit_reopens": change.status in LOCKED_PRE_QUOTE and _v2(),
             "lead_assigned": change.lead_id is not None,
+            # Christoph 2026-10-28: an assessing department pulls in who it needs
+            "can_pull_in": await _may_pull_in(session, change, user),
             # One price rule (PriceViewer) for the API and the cost cards.
             "can_see_prices": await PriceViewer(session, user).may_read(change),
             "can_approve_internal": can_approve_internal,
@@ -1332,7 +1334,7 @@ class EarlyStageService:
             # R24 (A1-03): a read-only user, a viewer named as lead too,
             # writes nothing: every write flag is off so the page offers no
             # button the auth layer refuses with 403
-            out.update({"can_edit_impact": False, "can_record_meeting": False,
+            out.update({"can_edit_impact": False, "can_record_meeting": False, "can_pull_in": False,
                         "can_approve_internal": False,
                         "internal_hold_can_override": False})
             if isinstance(out.get("assessment"), dict):
@@ -1582,3 +1584,8 @@ class EarlyStageService:
             if "service" in probe or "token" in probe:
                 return False
         return True
+
+
+async def _may_pull_in(session, change, user) -> bool:
+    from app.services.change_routing_service import ChangeRoutingService
+    return await ChangeRoutingService.may_pull_in(session, change, user)

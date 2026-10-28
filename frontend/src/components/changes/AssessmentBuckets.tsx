@@ -175,7 +175,7 @@ function sentBackOf(a: { details?: Record<string, unknown> | null } | null | und
 
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
-  canAddDepartment = false, routingDeviation = null, declinedIds, round,
+  canAddDepartment = false, canPullIn = false, routingDeviation = null, declinedIds, round,
   onContinueCosting, writable = false,
 }: {
   change: ChangeDetail
@@ -189,6 +189,8 @@ export default function AssessmentBuckets({
   canSeeAll?: boolean
   /** Lead, PM or admin may put a forgotten department on the hook mid-assessment. */
   canAddDepartment?: boolean
+  /** Christoph 2026-10-28: an assessing department pulls in who it needs. */
+  canPullIn?: boolean
   /** The pending routing change as the backend judges it for this viewer
    *  (stage-state routing_deviation): can_decide is the lead's call, else
    *  Project Management's, never a read-only user's (R24). */
@@ -309,7 +311,8 @@ export default function AssessmentBuckets({
     <RoutingDeviationPanel changeId={changeId} routing={routing}
       departments={departments} routedIds={ids}
       stageOrder={Number.isFinite(assessStage) ? assessStage : 1}
-      canAdd={canAddDepartment && editable} canDecide={canDecide}
+      canAdd={(canAddDepartment || canPullIn) && editable} canDecide={canDecide}
+      pullIn={canPullIn}
       leadId={change.lead_id ?? null} decider={routingDeviation?.decider ?? null} />
   )
 

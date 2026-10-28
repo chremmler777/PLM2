@@ -28,7 +28,8 @@ import type { ChangeRouting, DeviationRequest } from '../../types/change'
 
 // I (informed): notified only, no task, never waited on (backend TASK_LETTERS).
 type Letter = 'R' | 'A' | 'S' | 'C' | 'I'
-const LETTERS: Letter[] = ['R', 'A', 'S', 'C', 'I']
+// Christoph 2026-10-28: Responsible or Informed only, no full RASIC.
+const LETTERS: Letter[] = ['R', 'I']
 
 const fieldCls =
   'mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none'
@@ -43,6 +44,8 @@ interface Props {
   stageOrder: number
   /** Lead, PM or admin while the change is in assessment. */
   canAdd: boolean
+  /** An assessing department pulls in who it needs: applied at once, no approval. */
+  pullIn?: boolean
   /** The backend's verdict (stage-state routing_deviation.can_decide). */
   canDecide: boolean
   /** The change lead, so the wait line names who decides: the lead, or the
@@ -53,8 +56,9 @@ interface Props {
   decider?: string | null
 }
 
-function AddDepartmentDialog({ open, candidates, pending = false, onSubmit, onClose }: {
+function AddDepartmentDialog({ open, candidates, pending = false, pullIn = false, onSubmit, onClose }: {
   open: boolean
+  pullIn?: boolean
   candidates: { id: number; name: string }[]
   pending?: boolean
   onSubmit: (body: Pick<DeviationRequest, 'department_id' | 'rasic_letter' | 'reason'>) => void
@@ -115,8 +119,8 @@ function AddDepartmentDialog({ open, candidates, pending = false, onSubmit, onCl
               className={`${fieldCls} min-h-[70px]`}
               value={reason} onChange={(e) => setReason(e.target.value)} />
           </div>
-          <p className="text-xs text-slate-400">{t('routingDev.leadHint')}</p>
-          <p className="text-xs text-amber-300/90">{t('routingDev.templateHint')}</p>
+          <p className="text-xs text-slate-400">{t(pullIn ? 'routingDev.pullInHint' : 'routingDev.leadHint')}</p>
+          {!pullIn && <p className="text-xs text-amber-300/90">{t('routingDev.templateHint')}</p>}
         </div>
       )}
     </Dialog>
@@ -125,6 +129,7 @@ function AddDepartmentDialog({ open, candidates, pending = false, onSubmit, onCl
 
 export default function RoutingDeviationPanel({
   changeId, routing, departments, routedIds, stageOrder, canAdd, canDecide, leadId, decider,
+  pullIn = false,
 }: Props) {
   const qc = useQueryClient()
   const { userId } = useAuth()
@@ -144,7 +149,9 @@ export default function RoutingDeviationPanel({
 
   const propose = useMutation({
     mutationFn: (body: DeviationRequest) => changesApi.postDeviation(changeId, body),
-    onSuccess: () => { invalidate(); toast.success(t('routingDev.proposed')); setAddOpen(false) },
+    onSuccess: () => {
+      invalidate(); toast.success(t(pullIn ? 'routingDev.pulledIn' : 'routingDev.proposed')); setAddOpen(false)
+    },
     onError: fail,
   })
   const approve = useMutation({
@@ -241,7 +248,7 @@ export default function RoutingDeviationPanel({
         </div>
       )}
 
-      <AddDepartmentDialog open={addOpen} candidates={candidates} pending={propose.isPending}
+      <AddDepartmentDialog open={addOpen} candidates={candidates} pending={propose.isPending} pullIn={pullIn}
         onClose={() => setAddOpen(false)}
         onSubmit={(body) => propose.mutate({ op: 'add', stage_order: stageOrder, ...body })} />
       <ReasonDialog open={rejectOpen} danger

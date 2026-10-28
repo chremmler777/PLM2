@@ -1521,15 +1521,26 @@ async def post_deviation(change_id: int, body: DeviationRequest,
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
-    refusal = await _deviation_refusal(db, change, current_user, body)
+    from app.services.change_routing_service import ChangeRoutingService
+    # Christoph 2026-10-28: an assessing department pulls in who it needs
+    # (Responsible or Informed), with a reason, no approval; the lead is told.
+    pull_in = (body.op == "add" and body.rasic_letter in ("R", "I")
+               and not await WorkflowService.actor_in_department(
+                   db, current_user, body.department_id)
+               and await ChangeRoutingService.may_pull_in(db, change, current_user))
+    if pull_in and len((body.reason or "").strip()) < 5:
+        raise HTTPException(400, "Say why your department needs them (reason, 5+ characters)")
+    refusal = None if pull_in else await _deviation_refusal(db, change, current_user, body)
     if refusal:
         raise HTTPException(403, refusal)
-    from app.services.change_routing_service import ChangeRoutingService
     try:
         await ChangeRoutingService.apply_deviation(
             db, change, current_user.id, op=body.op, department_id=body.department_id,
             rasic_letter=body.rasic_letter, stage_order=body.stage_order,
-            reason=body.reason)
+            reason=body.reason, pull_in=pull_in)
+        if pull_in:
+            await ChangeRoutingService.approve_deviation(
+                db, change, current_user.id, pull_in=True)
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()

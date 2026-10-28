@@ -1349,6 +1349,7 @@ export default function ChangeDetailPage() {
             isPm={isPmMember}
             canSeeAll={canSeeCosts}
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
+            canPullIn={!!stage?.can_pull_in}
             routingDeviation={stage?.routing_deviation ?? null}
             declinedIds={stage?.assessment?.declined_pending.map((d) => d.department_id)}
             round={assessmentState}
