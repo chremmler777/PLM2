@@ -19,6 +19,7 @@ import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import AttachmentDropzone from '../AttachmentDropzone'
+import { CONFIRM_EVIDENCE_REQUIRED } from '../../../lib/scopingRules'
 import type { AnswerForm as AnswerBody, Attachment, ChangeConcern } from '../../../types/change'
 
 const input = 'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100'
@@ -79,10 +80,15 @@ export default function AnswerForm({
 
   // What still stops the save, in words (the backend says the same).
   const evidence = mailId !== '' || docs.length > 0 || (!customer && ref.trim().length >= 5)
+  // 2026-10-28: no proof is a warning; a reference typed must still be one
+  const noProof = kind === 'confirmed' && !confirming && !evidence && !CONFIRM_EVIDENCE_REQUIRED
+    && ref.trim() === ''
   const missing = kind === ''
     ? [t('answer.pick')]
     : kind === 'confirmed'
-      ? (evidence ? [] : [customer ? t('answer.mail') : t('answer.ref')])
+      ? (evidence ? []
+        : noProof ? (note.trim() ? [] : [t('answer.inWords')])
+          : [customer ? t('answer.mail') : t('answer.ref')])
       : [
           ...(value.trim() && (na || /\d/.test(value)) ? [] : [t('answer.value')]),
           ...(na || unit.trim() ? [] : [t('answer.unit')]),
@@ -106,7 +112,7 @@ export default function AnswerForm({
       )}
       {kind === 'confirmed' && (
         <div className="space-y-1.5">
-          {customer && (
+          {customer && CONFIRM_EVIDENCE_REQUIRED && (
             <p className="text-[11px] text-amber-300/90" data-testid={`answer-customer-rule-${c.id}`}>
               {t('answer.customerRule')}
             </p>
@@ -128,13 +134,6 @@ export default function AnswerForm({
                 data-testid={`answer-ref-${c.id}`} className={`${input} flex-1 min-w-[12rem]`} />
             )}
           </div>
-          {/* a closed question takes no more documents: the filed mail or a
-              reference confirms it then */}
-          {c.is_open && (
-            <AttachmentDropzone changeId={changeId} kind={docKind} concernId={c.id}
-              compact label={t(customer ? 'answer.customerDocSlot' : 'attach.responseSlot')}
-              onUploaded={onDone} />
-          )}
         </div>
       )}
       {kind === 'assumed' && (
@@ -156,9 +155,22 @@ export default function AnswerForm({
           </p>
         </div>
       )}
+      {/* a closed question takes no more documents: the filed mail or a
+          reference confirms it then. Assumed takes them too (2026-10-28:
+          more info behind the assumption) */}
+      {kind !== '' && c.is_open && (
+        <AttachmentDropzone changeId={changeId} kind={docKind} concernId={c.id}
+          compact label={t(customer ? 'answer.customerDocSlot' : 'attach.responseSlot')}
+          onUploaded={onDone} />
+      )}
+      {noProof && (
+        <p role="note" className="text-[11px] text-amber-300/90" data-testid={`answer-no-proof-${c.id}`}>
+          {t(customer ? 'answer.noProofCustomer' : 'answer.noProof')}
+        </p>
+      )}
       {kind !== '' && !confirming && (
         <input value={note} onChange={(e) => setNote(e.target.value)}
-          aria-label={t('answer.note')} placeholder={t('answer.note')}
+          aria-label={t('answer.note')} placeholder={t(noProof ? 'answer.inWords' : 'answer.note')}
           className={`${input} w-full`} />
       )}
       {kind !== '' && (

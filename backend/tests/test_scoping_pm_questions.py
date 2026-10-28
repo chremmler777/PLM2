@@ -105,3 +105,43 @@ async def test_pm_short_form_question_text_and_who_answers(
     mid = await _meeting(client, admin_auth, cid, await _dept_ids(session_factory))
     res = await _decide(client, admin_auth, cid, mid, "proceed")
     assert res.status_code == 400
+
+
+async def test_confirmed_without_proof_is_allowed_with_the_answer_in_words(
+        client, admin_auth, seed, session_factory):
+    """Christoph 2026-10-28: forcing the customer's mail is overboard; the
+    form warns instead. No proof needs the answer in words; a reference that
+    is given must still be a real one; the history says "no proof"."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq7")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth, json={
+        "kind": "needs_info", "note": "Both variants?", "flag_type": "question",
+        "answer_from": "customer"})
+    qid = res.json()["id"]
+    url = f"/api/v1/changes/{cid}/concerns/{qid}/answer"
+    res = await client.post(url, json={"answer_kind": "confirmed"}, headers=admin_auth)
+    assert res.status_code == 400 and "in words" in res.json()["detail"]
+    res = await client.post(url, json={"answer_kind": "confirmed", "mail_id": 999999,
+                                       "note": "Yes"}, headers=admin_auth)
+    assert res.status_code == 400
+    res = await client.post(url, json={"answer_kind": "confirmed",
+                                       "note": "Yes, LH and RH"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["answer_kind"] == "confirmed" and not res.json()["answer_ref"]
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)).json()
+    rows = log.get("items", log) if isinstance(log, dict) else log
+    assert any("no proof attached" in (r.get("description") or r.get("summary") or str(r))
+               for r in rows), rows[:3]
+
+
+async def test_switch_on_brings_back_the_evidence_rule(
+        client, admin_auth, seed, session_factory, monkeypatch):
+    from app.services import cm_switches
+    monkeypatch.setattr(cm_switches, "CONFIRM_EVIDENCE_REQUIRED", True)
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq8")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth, json={
+        "kind": "needs_info", "note": "Both variants?", "flag_type": "question",
+        "answer_from": "customer"})
+    url = f"/api/v1/changes/{cid}/concerns/{res.json()['id']}/answer"
+    res = await client.post(url, json={"answer_kind": "confirmed", "note": "Yes"},
+                            headers=admin_auth)
+    assert res.status_code == 400 and "customer's" in res.json()["detail"]

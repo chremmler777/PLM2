@@ -220,3 +220,8 @@ export function ownerUnroutableLine(
  *  backend cm_switches.SCOPING_QUESTIONS_ONLY): no new check items and no
  *  "Make it a check item"; old check items keep working. */
 export const SCOPING_QUESTIONS_ONLY = true
+
+/** A Confirmed answer saves without a filed mail / document / reference
+ *  (Christoph 2026-10-28: a warning, not a must; mirrors backend
+ *  cm_switches.CONFIRM_EVIDENCE_REQUIRED). It then needs the answer in words. */
+export const CONFIRM_EVIDENCE_REQUIRED = false

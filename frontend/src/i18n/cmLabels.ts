@@ -2788,6 +2788,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'answer.salesOwner': { de: 'der Vertriebskontakt', en: 'the Sales contact' },
   'answer.note': { de: 'Antwort in Worten (optional)', en: 'The answer in words (optional)' },
   'answer.save': { de: 'Antwort speichern', en: 'Save answer' },
+  'answer.inWords': { de: 'Antwort in Worten', en: 'The answer in words' },
+  'answer.noProof': {
+    de: 'Etwas vergessen? Ohne Nachweis zählt nur der Text. Zeichnungs-Nr., Prozessblatt oder ein Dokument machen die Antwort nachvollziehbar.',
+    en: 'Forgot something? With no proof only your words count. A drawing no., process sheet or document makes the answer traceable.' },
+  'answer.noProofCustomer': {
+    de: 'Etwas vergessen? Die Mail oder das Dokument des Kunden macht die Antwort nachvollziehbar. Ohne zählt nur der Text.',
+    en: "Forgot something? The customer's mail or document makes the answer traceable. Without it only your words count." },
   'answer.assumedLine': { de: 'Angenommen: {v} · Risiko: {r}', en: 'Assumed: {v} · risk: {r}' },
   'answer.confirmLine': { de: 'zu bestätigen durch {who} bis {d}', en: 'to confirm by {who} by {d}' },
   'answer.confirmedLine': { de: 'Bestätigt: {ref}', en: 'Confirmed: {ref}' },

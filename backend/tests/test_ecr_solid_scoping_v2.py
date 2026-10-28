@@ -28,6 +28,9 @@ def _any_member_may_ask(monkeypatch):
     # check items too (scoping takes questions only since 2026-10-27; the
     # refusal is tested in test_scoping_pm_questions.py)
     monkeypatch.setattr(cm_switches, "SCOPING_QUESTIONS_ONLY", False)
+    # the hard evidence rule (a warning only since 2026-10-28, tested in
+    # test_scoping_pm_questions.py)
+    monkeypatch.setattr(cm_switches, "CONFIRM_EVIDENCE_REQUIRED", True)
 
 pytestmark = pytest.mark.asyncio
 

@@ -1023,21 +1023,30 @@ class MeetingService:
         *, answer_kind: str, ref: Optional[str], mail_id: Optional[int] = None,
         assumed_value: Optional[str],
         assumed_unit: Optional[str], assumed_risk: Optional[str],
-        confirm_by_id: Optional[int], confirm_due,
-    ) -> None:
+        confirm_by_id: Optional[int], confirm_due, note: Optional[str] = None,
+    ) -> bool:
+        """Apply the answer form; True = Confirmed with no proof attached."""
         if answer_kind not in ANSWER_KINDS:
             raise ChangeError("Answer Confirmed (with evidence) or Assumed")
         if answer_kind == "confirmed":
             why = await MeetingService._confirm_evidence(
                 session, change, concern, ref, mail_id)
-            if why:
+            # 2026-10-28: no proof at all is a warning, not a refusal (a
+            # given ref or mail still has to be a real one); the answer in
+            # words then carries it
+            given = mail_id is not None or bool((ref or "").strip())
+            if why and (given or cm_switches.CONFIRM_EVIDENCE_REQUIRED):
                 raise ChangeError(why)
+            if why and not (note or "").strip():
+                raise ChangeError(
+                    "Confirmed without proof: write the answer in words "
+                    "(attaching the mail or document is better)")
             concern.answer_kind = "confirmed"
             concern.answer_ref = await MeetingService._evidence_text(
                 session, ref, mail_id)
             concern.assumed_value = concern.assumed_unit = concern.assumed_risk = None
             concern.confirm_by_id = concern.confirm_due = None
-            return
+            return bool(why)
         value = (assumed_value or "").strip()
         unit = (assumed_unit or "").strip()
         risk = (assumed_risk or "").strip()
@@ -1068,6 +1077,7 @@ class MeetingService:
         concern.confirm_by_id = confirm_by_id
         concern.confirm_due = confirm_due
         concern.confirmed_at = concern.confirmed_by = None
+        return False
 
     #: Plain words of a check-what pick in a mail to the customer.
     CHECK_WHAT_WORDS = {
@@ -1794,6 +1804,7 @@ class MeetingService:
             raise ChangeError(
                 "A check item is closed by the department it was raised for, in "
                 "its assessment (Answered / Not relevant / Assumed)")
+        no_proof = False   # a Confirmed answer with no proof (2026-10-28)
         departmental = (concern.department_id is not None
                         and change.status == "in_assessment"
                         # a hold from before C8 (flag_type NULL) stays a
@@ -1836,11 +1847,11 @@ class MeetingService:
                 if not cm_switches.on("SCOPING_V2"):
                     raise ChangeError(
                         "Confirmed / Assumed answers are switched off (SCOPING_V2)")
-                await MeetingService._apply_answer_form(
+                no_proof = await MeetingService._apply_answer_form(
                     session, change, concern, answer_kind=answer_kind, ref=ref,
                     mail_id=mail_id, assumed_value=assumed_value, assumed_unit=assumed_unit,
                     assumed_risk=assumed_risk, confirm_by_id=confirm_by_id,
-                    confirm_due=confirm_due)
+                    confirm_due=confirm_due, note=note)
             # An answer needs content — either words, or the document that
             # carries them filed into this question's container.
             elif not note and not await ChangeService.has_info_response(
@@ -1857,7 +1868,8 @@ class MeetingService:
             form = (f" (Assumed: {concern.assumed_value}"
                     f"{' ' + concern.assumed_unit if concern.assumed_unit else ''})")
         elif concern.answer_kind == "confirmed":
-            form = " (Confirmed" + (f": {concern.answer_ref}" if concern.answer_ref else "") + ")"
+            form = " (Confirmed" + (f": {concern.answer_ref}" if concern.answer_ref
+                                    else ", no proof attached" if no_proof else "") + ")"
         await ChangeService.append_changelog(
             session, change, "concern_answered",
             f"{MeetingService.flag_word(concern)} #{concern.id} answered{form}"

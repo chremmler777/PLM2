@@ -39,6 +39,12 @@ SCOPING_QUESTIONS_ONLY = True
 # 2026-10-27: "scope needs to be defined, otherwise I don't let it go").
 SCOPE_REQUIRED = True
 
+# A Confirmed answer without a filed mail / document / reference is allowed
+# (Christoph 2026-10-28: forcing the customer's mail is overboard; warn
+# instead). It then needs the answer in words and is logged "no proof
+# attached". True brings back the hard evidence rule.
+CONFIRM_EVIDENCE_REQUIRED = False
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call

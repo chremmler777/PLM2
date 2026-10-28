@@ -12,6 +12,7 @@ import { unroutedCheckOwners } from '../../../lib/scopingRules'
 // since 2026-10-27 (ScopingQuestionsOnly.test.tsx covers that)
 vi.mock('../../../lib/scopingRules', async (orig) => ({
   ...(await orig<typeof import('../../../lib/scopingRules')>()), SCOPING_QUESTIONS_ONLY: false,
+  CONFIRM_EVIDENCE_REQUIRED: true,
 }))
 import type { ChangeConcern, ChangeMeeting } from '../../../types/change'
 
