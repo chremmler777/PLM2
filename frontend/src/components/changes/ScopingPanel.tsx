@@ -483,10 +483,14 @@ export default function ScopingPanel(
   // Why "Proceed & start assessment" cannot be pressed yet, in words.
   // Christoph 2026-10-28: Proceed stays off until every question is
   // answered and closed (the backend refuses it too: HARD #2)
-  const questionsHold = v2 && openQuestions.length > 0
+  // ... and so does an open proposal to cancel: the PM settles it first
+  const openCancelVotes = concerns.filter((c) => c.is_open && c.kind === 'reject_proposal')
+  const questionsHold = v2 && (openQuestions.length > 0 || openCancelVotes.length > 0)
   const proceedBlockedWhy = (m: ChangeMeeting): string | undefined =>
-    questionsHold ? t(openQuestions.length === 1 ? 'meeting.questionsHold1' : 'meeting.questionsHoldN')
-      .replace('{n}', String(openQuestions.length))
+    v2 && openQuestions.length > 0
+      ? t(openQuestions.length === 1 ? 'meeting.questionsHold1' : 'meeting.questionsHoldN')
+        .replace('{n}', String(openQuestions.length))
+      : v2 && openCancelVotes.length > 0 ? t('meeting.cancelVoteHold')
       : carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing')
         : impactUnlocked ? t('meeting.impactNotLocked')
           : noImpactedParts ? t('meeting.noImpactedParts') : undefined
@@ -847,7 +851,7 @@ export default function ScopingPanel(
             impactedItems={(change as { impacted_items?: ImpactedItem[] }).impacted_items ?? []}
             departments={departments} myDepartmentIds={myDepartmentIds}
             changeDepartmentIds={[...new Set([...recommendedIds, ...(latestMeeting?.selected_department_ids ?? [])])]}
-            editable={writable} canRaise={canRecordMeeting} onChanged={invalidate} />
+            editable={writable} canRaise={change.can_raise_question ?? canRecordMeeting} onChanged={invalidate} />
         )}
 
         {/* Everything else the team flagged, in one strip. */}

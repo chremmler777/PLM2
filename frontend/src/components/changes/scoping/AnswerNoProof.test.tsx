@@ -37,10 +37,11 @@ describe('Confirmed without proof: a warning, not a must (2026-10-28)', () => {
     const ours = { ...q, answer_from: 'our_team' } as ChangeConcern
     render(wrap(<AnswerForm changeId={7} concern={ours} attachments={[]} onDone={() => {}} />))
     fireEvent.click(screen.getByTestId('answer-kind-confirmed-11'))
-    fireEvent.change(screen.getByTestId('answer-ref-11'), { target: { value: 'Drawing 10-1187 rev B' } })
+    fireEvent.change(screen.getByTestId('answer-ref-11'), { target: { value: 'etertertert' } })
+    // a typed reference counts as words: Save is on
     fireEvent.click(screen.getByTestId('answer-save-11'))
     expect(screen.getByText('Save without an attachment?')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Attach first' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.queryByText('Save without an attachment?')).toBeNull()
   })
 

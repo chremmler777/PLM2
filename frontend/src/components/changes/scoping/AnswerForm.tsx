@@ -82,16 +82,16 @@ export default function AnswerForm({
 
   // What still stops the save, in words (the backend says the same).
   const evidence = mailId !== '' || docs.length > 0 || (!customer && ref.trim().length >= 5)
-  // 2026-10-28: no proof is a warning; a reference typed must still be one
+  // 2026-10-28: no proof is a warning (asked once on Save), not a must;
+  // the answer or a reference in words carries it then
   const noProof = kind === 'confirmed' && !confirming && !evidence && !CONFIRM_EVIDENCE_REQUIRED
-    && ref.trim() === ''
   // nothing filed: no picked mail, no document on the question
   const noFile = kind === 'confirmed' && !confirming && mailId === '' && docs.length === 0
   const missing = kind === ''
     ? [t('answer.pick')]
     : kind === 'confirmed'
       ? (evidence ? []
-        : noProof ? (note.trim() ? [] : [t('answer.inWords')])
+        : noProof ? (note.trim() || ref.trim() ? [] : [t('answer.inWords')])
           : [customer ? t('answer.mail') : t('answer.ref')])
       : [
           ...(value.trim() && (na || /\d/.test(value)) ? [] : [t('answer.value')]),
@@ -188,7 +188,7 @@ export default function AnswerForm({
           <ConfirmDialog open={askNoFile} data-testid={`answer-no-file-${c.id}`}
             title={t('answer.noFileTitle')}
             body={t(customer ? 'answer.noProofCustomer' : 'answer.noProof')}
-            confirmLabel={t('answer.saveAnyway')} cancelLabel={t('answer.attachFirst')}
+            confirmLabel={t('answer.saveAnyway')} cancelLabel={t('answer.back')}
             pending={save.isPending}
             onConfirm={() => save.mutateAsync()} onClose={() => setAskNoFile(false)} />
           {missing.length > 0 && (

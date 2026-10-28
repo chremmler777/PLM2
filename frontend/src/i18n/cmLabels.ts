@@ -2706,8 +2706,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'taskcard.gotIt': { de: 'Verstanden', en: 'Got it' },
   // --- C33: scoping is triage (questions and check items) -------------------
   'flag.title': { de: 'Fragen und Prüfpunkte', en: 'Questions and check items' },
-  'flag.meetingTitle': { de: 'Aus dem Meeting (PM)', en: 'From the meeting (PM)' },
-  'flag.pmOnlyHint': { de: 'Fragen und Prüfpunkte erfasst der PM im Scoping-Meeting: bring deinen Punkt ins Meeting oder sag es dem PM. Abbruch vorschlagen kannst du unten.', en: 'Questions and check items are recorded by the PM in the scoping meeting: bring your point to the meeting or tell the PM. You can still propose to cancel below.' },
+  'flag.meetingTitle': { de: 'Frage stellen (Projektteam)', en: 'Ask a question (project team)' },
+  'flag.pmOnlyHint': { de: 'Fragen stellt das Projektteam (PM, Lead, die benannten Verantwortlichen): sag es dem PM oder bring deinen Punkt ins Meeting. Abbruch vorschlagen kannst du unten.', en: 'Questions are raised by the project team (PM, lead, the named responsibles): tell the PM or bring your point to the meeting. You can still propose to cancel below.' },
   'flag.questionPlaceholder': { de: 'Frage, ohne deren Antwort der Umfang nicht entschieden werden kann', en: 'Question the scope cannot be decided without' },
   'flag.placeholder': { de: 'Was ist zu prüfen? Eine Zeile', en: 'What should be checked? One line' },
   'flag.raisedFor': { de: 'Für', en: 'Raised for' },
@@ -2739,6 +2739,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'flag.from.customer': { de: 'Kunde', en: 'Customer' },
   'flag.from.our_team': { de: 'Unser Team', en: 'Our team' },
   'flag.from.supplier': { de: 'Lieferant', en: 'Supplier' },
+  'meeting.cancelVoteHold': { de: 'Erst den Abbruchvorschlag klären (PM), dann Weiter.', en: 'Settle the proposal to cancel first (PM), then Proceed.' },
   'meeting.questionsHold1': { de: 'Erst die offene Frage beantworten und schließen, dann Weiter.', en: 'Answer and close the open question first, then Proceed.' },
   'meeting.questionsHoldN': { de: 'Erst die {n} offenen Fragen beantworten und schließen, dann Weiter.', en: 'Answer and close the {n} open questions first, then Proceed.' },
   'openQ.title1': { de: '1 offene Frage hält diese Änderung an', en: '1 open question holds this change' },
@@ -2793,7 +2794,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'answer.inWords': { de: 'Antwort in Worten', en: 'The answer in words' },
   'answer.noFileTitle': { de: 'Ohne Anhang speichern?', en: 'Save without an attachment?' },
   'answer.saveAnyway': { de: 'Trotzdem speichern', en: 'Save anyway' },
-  'answer.attachFirst': { de: 'Erst anhängen', en: 'Attach first' },
+  'answer.back': { de: 'Zurück', en: 'Back' },
   'answer.noProof': {
     de: 'Etwas vergessen? Ohne Nachweis zählt nur der Text. Zeichnungs-Nr., Prozessblatt oder ein Dokument machen die Antwort nachvollziehbar.',
     en: 'Forgot something? With no proof only your words count. A drawing no., process sheet or document makes the answer traceable.' },
@@ -2808,8 +2809,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'proceed.go': { de: 'Freigeben: {n} Prüfpunkte gehen an die Fachbereiche', en: 'Proceed: {n} check items go to departments' },
   'proceed.goPlain': { de: 'Freigeben & Bewertung starten', en: 'Proceed & start assessment' },
   'proceed.questionsOpen': {
-    de: 'Offene Fragen halten die Freigabe: beantworten und schließen, oder Noch nicht.',
-    en: 'Open questions hold proceed: answer and close them, or Not yet.' },
+    de: 'Offene Fragen halten die Freigabe: beantworten und schließen, oder als Entwurf speichern.',
+    en: 'Open questions hold proceed: answer and close them, or Save draft.' },
   'proceed.heldBelow': {
     de: 'Die Freigabe wartet auf die Punkte unten, jeder mit seinem Verantwortlichen.',
     en: 'Proceed waits for the points below, each with its owner.' },
@@ -2837,8 +2838,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Go mit Bedingungen: jeder Prüfpunkt geht an seinen Fachbereich, fällig mit dessen Bewertung.',
     en: 'Go with conditions: each check item goes to its department, due with its assessment.' },
   'meeting.goConditions': { de: 'Go mit Bedingungen: {n} Prüfpunkte', en: 'Go with conditions: {n} check items' },
-  'meeting.notYet': { de: 'Noch nicht', en: 'Not yet' },
-  'meeting.notYetTitle': { de: 'Noch nicht: was fehlt?', en: 'Not yet: what is missing?' },
+  'meeting.notYet': { de: 'Als Entwurf speichern', en: 'Save draft' },
+  'meeting.notYetTitle': { de: 'Als Entwurf speichern: was fehlt?', en: 'Save draft: what is missing?' },
   'tasks.kind.confirm_assumption': { de: 'Annahme bestätigen', en: 'Confirm an assumption' },
   'tasks.hint.confirm_assumption': { de: 'Annahme bestätigen: {x}', en: 'Confirm the assumption: {x}' },
   'tasks.hint.scopingReady': { de: 'Bereit: freigeben', en: 'Ready: proceed' },
@@ -3061,7 +3062,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.kind.index_deadline_confirm': { de: 'Termin mit dem Kunden bestätigen', en: 'Confirm the deadline with the customer' },
   'tasks.hint.scopingSettle': { de: '{n} beantwortet, {x} schließt ab', en: '{n} answered, {x} settles' },
   'concern.answeredSettles': { de: 'beantwortet, {x} schließt ab', en: 'answered, {x} settles' },
-  'tasks.hint.scopingWaiting': { de: 'Noch nicht: wartet auf {n} Antwort(en) ({x})', en: 'Not yet: waiting for {n} answer(s) ({x})' },
+  'tasks.hint.scopingWaiting': { de: 'Entwurf: wartet auf {n} Antwort(en) ({x})', en: 'Draft: waiting for {n} answer(s) ({x})' },
   // --- spec §4: check items first, C8 questions in the assessment ----------
   'achk.title': { de: 'Prüfpunkte für {d}: {n} offen', en: 'Checks for {d}: {n} open' },
   'achk.holds': { de: 'Offene Prüfpunkte und Fragen halten Ihre Abgabe.', en: 'Open check items and questions hold your submit.' },

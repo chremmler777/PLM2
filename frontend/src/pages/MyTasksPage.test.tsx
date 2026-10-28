@@ -151,7 +151,7 @@ describe('MyTasksPage change tasks by kind', () => {
       open_questions: 1, waiting_on: ['Process Fri'], answered_questions: 1,
       settle_by: ['Quality'], holds: [],
     }))
-    const hint = screen.getByText(/Not yet: waiting for 1 answer/)
+    const hint = screen.getByText(/Draft: waiting for 1 answer/)
     expect(hint.textContent).toContain('(Process Fri)')
     expect(hint.textContent).toContain('1 answered, Quality settles')
     expect(hint.textContent).not.toContain('Quality Fri')

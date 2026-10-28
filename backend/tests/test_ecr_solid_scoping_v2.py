@@ -319,7 +319,7 @@ async def test_not_yet_keeps_every_question_open(
     # each side with the due weekday of its question (spec §3 "Sales Thu")
     import re
     assert re.fullmatch(
-        r"Not yet: waiting for 2 answers \(Process Engineer (Mon|Tue|Wed|Thu|Fri), "
+        r"Draft: waiting for 2 answers \(Process Engineer (Mon|Tue|Wed|Thu|Fri), "
         r"Tool Engineer (Mon|Tue|Wed|Thu|Fri)\)", res.json()["decision_reason"])
     rows = await _concerns(client, pm, cid)
     assert rows[q1["id"]]["is_open"] and rows[q2["id"]]["is_open"]

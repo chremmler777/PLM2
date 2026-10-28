@@ -385,6 +385,9 @@ class ChangeResponse(BaseModel):
     origin: str = "customer"
     # Spec §17: the change was started by (or took) a revision intake.
     from_intake: bool = False
+    # 2026-10-28: the viewer may raise a scoping question (project team,
+    # PM, lead; anyone with SCOPING_QUESTIONS_PM_ONLY off)
+    can_raise_question: Optional[bool] = None
     mother_plant_name: Optional[str] = None
     mother_plant_ref: Optional[str] = None
     mother_plant_sop: Optional[date] = None

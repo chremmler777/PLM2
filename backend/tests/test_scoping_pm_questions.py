@@ -127,6 +127,11 @@ async def test_confirmed_without_proof_is_allowed_with_the_answer_in_words(
                                        "note": "Yes, LH and RH"}, headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["answer_kind"] == "confirmed" and not res.json()["answer_ref"]
+    # a thin reference is kept as typed (the form asked once), no refusal
+    res = await client.post(url, json={"answer_kind": "confirmed", "ref": "etertertert"},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["answer_ref"] == "etertertert"
     log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)).json()
     rows = log.get("items", log) if isinstance(log, dict) else log
     assert any("no proof attached" in (r.get("description") or r.get("summary") or str(r))
@@ -145,3 +150,20 @@ async def test_switch_on_brings_back_the_evidence_rule(
     res = await client.post(url, json={"answer_kind": "confirmed", "note": "Yes"},
                             headers=admin_auth)
     assert res.status_code == 400 and "customer's" in res.json()["detail"]
+
+
+async def test_project_team_member_may_ask_until_the_change_is_passed_on(
+        client, admin_auth, seed, session_factory):
+    """Christoph 2026-10-28: the project team asks too, while in scoping."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq9")
+    uid, quality_id, quality = await _user(client, session_factory, seed, "pmq-q9", "Quality")
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=quality)).json()
+    assert detail["can_raise_question"] is False
+    assert (await _ask(client, quality, cid, quality_id)).status_code == 403
+    res = await client.put(f"/api/v1/projects/{seed['project_id']}/team", headers=admin_auth,
+                           json={"department_id": quality_id, "user_id": uid, "slot": "backup"})
+    assert res.status_code == 200, res.text
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=quality)).json()
+    assert detail["can_raise_question"] is True
+    res = await _ask(client, quality, cid, quality_id)
+    assert res.status_code == 200, res.text

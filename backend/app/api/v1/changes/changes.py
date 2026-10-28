@@ -1054,6 +1054,10 @@ async def get_change(
         select(RevisionIntake.id).where(RevisionIntake.change_id == change.id)
         .limit(1))).scalar_one_or_none() is not None
     out.next_step = await ChangeService.next_step_missing(db, change)
+    if change.status in ("captured", "scoping"):
+        from app.services.meeting_service import MeetingService
+        out.can_raise_question = await MeetingService.may_raise_question(
+            db, change, current_user)
     # §10-§11 (RELEASE_V2): the header shows any concession in force
     from app.services import cm_switches
     if cm_switches.on("RELEASE_V2") and change.status in (

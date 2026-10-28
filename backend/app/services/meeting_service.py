@@ -44,6 +44,31 @@ class MeetingService:
             session, user)
 
     @staticmethod
+    async def may_raise_question(session: AsyncSession, change: ChangeRequest,
+                                 user: User) -> bool:
+        """Who may raise a scoping question (the rule raise_concern applies)."""
+        from app.services.change_people import holds_lead
+        return (not cm_switches.SCOPING_QUESTIONS_PM_ONLY
+                or holds_lead(change, user)
+                or await MeetingService.user_is_pm(session, user)
+                or await MeetingService.on_project_team(session, change, user))
+
+    @staticmethod
+    async def on_project_team(session: AsyncSession, change: ChangeRequest,
+                              user: User) -> bool:
+        """The user is a named responsible or backup on the change's project
+        team (any department)."""
+        from app.models.workflow import ProjectResponsible
+        if change.project_id is None:
+            return False
+        return (await session.execute(
+            select(ProjectResponsible.id).where(
+                ProjectResponsible.project_id == change.project_id,
+                (ProjectResponsible.user_id == user.id)
+                | (ProjectResponsible.backup_user_id == user.id)).limit(1)
+        )).first() is not None
+
+    @staticmethod
     async def user_is_pm_member(session: AsyncSession, user: User) -> bool:
         """Project Manager MEMBERSHIP — no admin shortcut, unlike user_is_pm.
 
@@ -473,17 +498,16 @@ class MeetingService:
                 "a concern (needs_info or reject_proposal) instead")
         if (not in_assessment and kind == "needs_info"
                 and cm_switches.SCOPING_QUESTIONS_PM_ONLY):
-            # Christoph 2026-10-27: scoping is a team task led by the PM. The
-            # team brings its points to the meeting and the PM (or the lead)
-            # records the questions; afterwards each department asks from its
-            # own assessment. A cancel vote stays open to everyone.
-            from app.services.change_people import holds_lead
-            if not (holds_lead(change, user)
-                    or await MeetingService.user_is_pm(session, user)):
+            # Christoph 2026-10-27: scoping is a team task led by the PM.
+            # 2026-10-28: the project team (named responsible or backup on
+            # the change's project) may ask too, until the change is passed
+            # on; every question holds proceed. Others tell the PM. A cancel
+            # vote stays open to everyone.
+            if not await MeetingService.may_raise_question(session, change, user):
                 raise MeetingForbidden(
-                    "Scoping questions are raised in the meeting by Project "
-                    "Management or the change lead: bring your point to the "
-                    "meeting or tell the PM. Propose to cancel stays open to you")
+                    "Scoping questions are raised by the project team, Project "
+                    "Management or the change lead: tell the PM or bring your "
+                    "point to the meeting. Propose to cancel stays open to you")
         if kind == "risk":
             # The vocabulary is per department (app/services/risk_types.py):
             # a Tool Engineer's "not steel-safe" is not a Sales risk. The
@@ -1031,13 +1055,12 @@ class MeetingService:
         if answer_kind == "confirmed":
             why = await MeetingService._confirm_evidence(
                 session, change, concern, ref, mail_id)
-            # 2026-10-28: no proof at all is a warning, not a refusal (a
-            # given ref or mail still has to be a real one); the answer in
-            # words then carries it
-            given = mail_id is not None or bool((ref or "").strip())
-            if why and (given or cm_switches.CONFIRM_EVIDENCE_REQUIRED):
+            # 2026-10-28: no proof is a warning, not a refusal (the form
+            # asks once). A picked mail must still be a filed one; a thin
+            # reference is kept as typed. Words (answer or reference) carry it.
+            if why and (mail_id is not None or cm_switches.CONFIRM_EVIDENCE_REQUIRED):
                 raise ChangeError(why)
-            if why and not (note or "").strip():
+            if why and not ((note or "").strip() or (ref or "").strip()):
                 raise ChangeError(
                     "Confirmed without proof: write the answer in words "
                     "(attaching the mail or document is better)")
@@ -1868,8 +1891,8 @@ class MeetingService:
             form = (f" (Assumed: {concern.assumed_value}"
                     f"{' ' + concern.assumed_unit if concern.assumed_unit else ''})")
         elif concern.answer_kind == "confirmed":
-            form = " (Confirmed" + (f": {concern.answer_ref}" if concern.answer_ref
-                                    else ", no proof attached" if no_proof else "") + ")"
+            form = (" (Confirmed" + (", no proof attached" if no_proof else "")
+                    + (f": {concern.answer_ref}" if concern.answer_ref else "") + ")")
         await ChangeService.append_changelog(
             session, change, "concern_answered",
             f"{MeetingService.flag_word(concern)} #{concern.id} answered{form}"
@@ -2286,14 +2309,15 @@ class MeetingService:
         v2 = cm_switches.on("SCOPING_V2")
         waiting = [c for c in blocking if c.is_question]
         if decision == "needs_info" and not reason and v2 and waiting:
-            # "Not yet: waiting for 3 answers (Sales, Process)": the open
+            # "Draft: waiting for 3 answers (Sales, Process)" (the Save draft
+            # button, was "Not yet", 2026-10-28): the open
             # questions are the reason; no new one is raised. An answered
             # one waits on its asker, who settles it (A2-04).
             dept_ids = {c.department_id for c in waiting if c.department_id}
             names = dict((await session.execute(
                 select(Department.id, Department.name).where(
                     Department.id.in_(dept_ids)))).all()) if dept_ids else {}
-            reason = "Not yet: " + MeetingService.waiting_words(waiting, names, change)
+            reason = "Draft: " + MeetingService.waiting_words(waiting, names, change)
             raise_question = False
         else:
             raise_question = True

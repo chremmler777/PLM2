@@ -356,6 +356,8 @@ export interface ChangeRequest {
   origin?: ChangeOrigin;
   /** Spec §17: started by (or took) a revision intake. */
   from_intake?: boolean;
+  /** The viewer may raise a scoping question (project team, PM, lead). */
+  can_raise_question?: boolean | null;
   mother_plant_name?: string | null;
   mother_plant_ref?: string | null;
   /** The mother plant's SOP (YYYY-MM-DD); the release deadline at approval. */
