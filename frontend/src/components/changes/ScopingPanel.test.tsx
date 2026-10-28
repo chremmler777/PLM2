@@ -1029,10 +1029,12 @@ describe('ScopingPanel §16 meeting record', () => {
     const notYet = await screen.findByTestId('meeting-not-yet-21')
     expect(notYet.textContent).toBe(t('meeting.notYet'))
     expect(notYet.getAttribute('title')).toContain('Quality')
-    // negative: proceed stays held by the question
-    fireEvent.click(screen.getByTestId('meeting-proceed-21'))
-    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(screen.getByText('Not yet', { selector: 'button:not([data-testid])' }))
+    // negative: proceed is off while the question is open, and says why
+    // (Christoph 2026-10-28)
+    const proceed = screen.getByTestId('meeting-proceed-21') as HTMLButtonElement
+    expect(proceed.disabled).toBe(true)
+    expect(screen.getByTestId('meeting-proceed-why-21').textContent)
+      .toBe(t('meeting.questionsHold1'))
     fireEvent.click(notYet)
     await waitFor(() => expect(changesApi.decideMeeting).toHaveBeenCalledWith(7, 21, 'needs_info', undefined))
   })

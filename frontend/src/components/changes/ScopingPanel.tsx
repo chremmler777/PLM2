@@ -481,10 +481,15 @@ export default function ScopingPanel(
     m.department_rasic?.[String(id)] ?? null
 
   // Why "Proceed & start assessment" cannot be pressed yet, in words.
+  // Christoph 2026-10-28: Proceed stays off until every question is
+  // answered and closed (the backend refuses it too: HARD #2)
+  const questionsHold = v2 && openQuestions.length > 0
   const proceedBlockedWhy = (m: ChangeMeeting): string | undefined =>
-    carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing')
-      : impactUnlocked ? t('meeting.impactNotLocked')
-        : noImpactedParts ? t('meeting.noImpactedParts') : undefined
+    questionsHold ? t(openQuestions.length === 1 ? 'meeting.questionsHold1' : 'meeting.questionsHoldN')
+      .replace('{n}', String(openQuestions.length))
+      : carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing')
+        : impactUnlocked ? t('meeting.impactNotLocked')
+          : noImpactedParts ? t('meeting.noImpactedParts') : undefined
 
   // "25.09.2026 · Anna, Ben", or what is known when the record is thin.
   const meetingHeadline = (m: ChangeMeeting): string => {
@@ -540,8 +545,8 @@ export default function ScopingPanel(
             )}
             <button type="button" className={btnSm.primary}
               data-testid={`meeting-proceed-${m.id}`}
-              disabled={decide.isPending || carrierOfMeeting(m) === '' || impactUnlocked
-                || noImpactedParts}
+              disabled={decide.isPending || questionsHold || carrierOfMeeting(m) === ''
+                || impactUnlocked || noImpactedParts}
               title={proceedBlockedWhy(m)}
               aria-describedby={proceedBlockedWhy(m) ? `meeting-proceed-why-${m.id}` : undefined}
               onClick={() => setConfirmProceed(m)}>
