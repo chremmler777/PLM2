@@ -1542,13 +1542,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'meeting.notes': { de: 'Protokoll', en: 'Meeting notes' },
   'meeting.departments': { de: 'Betroffene Abteilungen', en: 'Impacted departments' },
   'meeting.rasicHint': {
-    de: 'Standard: Tool Engineer, APQP, Development und Manufacturing Engineer bewerten; Packaging nur, wenn sich die Verpackung ändert. Hier geht es nur um die Bewertung, nicht um die Zuständigkeit: Logistik, Qualität, Prozess usw. kommen in der Umsetzung mit eigenen Aufgaben dazu. Anwesenheit allein macht niemanden verantwortlich.',
-    en: 'Standard: Tool Engineer, APQP, Development and Manufacturing Engineer assess; Packaging only when the packaging changes. This sets who assesses, not who is responsible: Logistics, Quality, Process etc. join at implementation with their own tasks. Attendance alone makes nobody responsible.',
+    de: 'Nur für die Analyse bis zum Angebot (Bewertung und Kalkulation). Standard: Tool Engineer, APQP, Development und Manufacturing Engineer; Packaging nur, wenn sich die Verpackung ändert. Das ist nicht die Zuständigkeit für die Umsetzung: dort wird das Team breiter, Logistik, Qualität, Prozess, Werkzeugbau usw. bekommen dann ihre eigenen Aufgaben. Teilnehmer bringen ihre Abteilung mit; Anwesenheit allein macht niemanden verantwortlich.',
+    en: 'Only for the analysis up to the quote (assessment and costing). Standard: Tool Engineer, APQP, Development and Manufacturing Engineer; Packaging only when the packaging changes. This is not who is responsible for implementation: there the team broadens, and Logistics, Quality, Process, Toolshop etc. get their own tasks. Attendees bring their department in; attendance alone makes nobody responsible.',
   },
+  'rasic.autoAdded': { de: 'Mit Teilnehmern dazugekommen: {x}. Änderbar.', en: 'Added with attendees: {x}. Change it if needed.' },
   'rasic.sometimes': { de: 'manchmal', en: 'sometimes' },
   'rasic.extraWarn': {
-    de: 'Meist erst in der Umsetzung nötig. Nur bewerten lassen, wenn es sie jetzt wirklich betrifft.',
-    en: 'Usually not needed until implementation. Assess now only if it really affects them now.',
+    de: 'Meist erst in der Umsetzung nötig (dort wird das Team breiter). Nur bewerten lassen, wenn es das Angebot wirklich betrifft.',
+    en: 'Usually not needed until implementation (the team broadens there). Assess now only if it really affects the quote.',
   },
   'meeting.attendanceHint': { de: 'Nur Anwesenheit, keine Zuständigkeit.', en: 'Attendance only, not responsibility.' },
   'rasic.R': { de: 'Verantwortlich (bewertet)', en: 'Responsible (assesses)' },

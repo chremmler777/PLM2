@@ -735,6 +735,32 @@ describe('ScopingPanel meeting routing selection', () => {
     vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
   })
 
+  it('an attendee brings their one department in; a manager with several adds nothing (Christoph 2026-10-28)', async () => {
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(
+      FIVE.map((d) => (d.id === 6 ? { ...d, optional: true } : d)) as never)
+    deptState.current = [...FIVE, { id: 8, name: 'Logistics' }].map((d) => ({ ...d, is_active: true }))
+    vi.mocked(contactsApi.list).mockResolvedValue([
+      { name: 'Kenny Rice', email: 'kenny@ktx.io', user_id: 51, department: 'Packaging Engineer' },
+      { name: 'Alexa Hall', email: 'alexa@ktx.io', user_id: 52, department: 'Logistics' },
+      { name: 'Chris Boss', email: 'boss@ktx.io', user_id: 53, department: 'Development, Tool Engineer' },
+    ])
+    render(wrap(<ScopingPanel change={change()} />))
+    const tool = await screen.findByRole('button', { name: /^Tool Engineer$/ })
+    await waitFor(() => expect(tool.getAttribute('aria-pressed')).toBe('true'))
+    const input = await screen.findByLabelText(new RegExp(t('meeting.participants'))) as HTMLInputElement
+    await waitFor(() => expect(document.querySelectorAll('#sc-contacts option').length).toBe(3))
+    for (const who of ['kenny', 'alexa', 'chris boss']) {
+      fireEvent.change(input, { target: { value: who } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+    }
+    expect(screen.getByTestId('rasic-6-R').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('rasic-8-C').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('rasic-auto-added').textContent).toContain('Packaging Engineer (Kenny Rice)')
+    expect(screen.getByTestId('rasic-auto-added').textContent).not.toContain('Chris Boss')
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
+    vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
+  })
+
   it('internal: the raiser\'s department is R; leaving it out needs a reason (§3)', async () => {
     vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(
       FIVE.map((d) => (d.id === 3 ? { ...d, rasic_letter: 'R', raiser: true } : d)) as never)

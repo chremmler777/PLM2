@@ -225,6 +225,27 @@ export default function ScopingPanel(
   const labelOf = (c: Contact) => labels.get(c) ?? c.name
   const fromContact = (c: Contact): Attendee =>
     ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null, guest: false })
+  // Christoph 2026-10-28: an attendee brings their department in (Russ
+  // attends: Manufacturing Engineer), as a convenience. Only a person in
+  // exactly one department (a manager holding several adds nothing); the
+  // standard and "sometimes" departments come in as R, others as C (looped
+  // in, owe no assessment). A department the room took off stays off.
+  const [autoAdded, setAutoAdded] = useState<{ dept: string; who: string }[]>([])
+  const [takenOff, setTakenOff] = useState<number[]>([])
+  const addAttendeeDept = (a: Attendee) => {
+    if (motherPlant || a.user_id == null) return
+    const c = contacts.find((x) => x.user_id === a.user_id)
+    const names = (c?.department ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    if (names.length !== 1) return
+    const d = pickableDepartments(departments, deptIds).find((x) => x.name === names[0])
+    if (!d || d.id in deptRasic || takenOff.includes(d.id)) return
+    const allowed = lettersFor(d.id)
+    if (!allowed.length) return
+    const want: RasicLetter = recommendedIds.includes(d.id) || sometimesIds.includes(d.id) ? 'R' : 'C'
+    setDeptTouched(true)
+    setDeptRasic((prev) => ({ ...prev, [d.id]: allowed.includes(want) ? want : allowed[0] }))
+    setAutoAdded((prev) => [...prev, { dept: d.name, who: a.name }])
+  }
   const appendParticipant = (a: Attendee | null) => {
     if (!a || !a.name.trim()) return
     const next = { ...a, name: a.name.trim() }
@@ -234,6 +255,7 @@ export default function ScopingPanel(
       || ((p.user_id == null || next.user_id == null)
         && p.name.toLowerCase() === next.name.toLowerCase()))) {
       setParticipants([...participants, next])
+      addAttendeeDept(next)
     }
     setAddName('')
   }
@@ -469,6 +491,7 @@ export default function ScopingPanel(
   }
   const toggleDept = (id: number) => {
     setDeptTouched(true)
+    if (id in deptRasic) setTakenOff((prev) => [...prev, id])
     setDeptRasic((prev) => {
       if (id in prev) { const next = { ...prev }; delete next[id]; return next }
       const allowed = lettersFor(id)
@@ -1069,7 +1092,7 @@ export default function ScopingPanel(
                   <div key={d.id} data-testid={`rasic-row-${d.id}`}
                     className={`flex items-center justify-between gap-3 py-1.5 border-b border-slate-700/70 ${
                       letter ? '' : 'opacity-60'}`}>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                     <button type="button" onClick={() => toggleDept(d.id)}
                       aria-pressed={!!letter}
                       title={isRec ? t('meeting.recommended') : undefined}
@@ -1121,6 +1144,11 @@ export default function ScopingPanel(
                 )
               })}
             </div>
+            {!motherPlant && autoAdded.length > 0 && (
+              <p className="mt-1.5 text-[11px] text-sky-300/90" data-testid="rasic-auto-added">
+                {t('rasic.autoAdded').replace('{x}', autoAdded.map((x) => `${x.dept} (${x.who})`).join(', '))}
+              </p>
+            )}
             {!motherPlant && (
               <p className="mt-1.5 text-[11px] text-slate-500">
                 <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
