@@ -78,6 +78,7 @@ import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/c
 import { btnIcon, btnSm } from '../components/common/buttonStyles';
 import { formatDate, formatMoney } from '../lib/format';
 import TaskCard from '../components/changes/TaskCard';
+import OpenQuestionsBanner from '../components/changes/OpenQuestionsBanner';
 
 /** The change-detail queries refresh when the user comes back to the tab:
  *  other departments answer, approve and block while it sits in the
@@ -1086,6 +1087,8 @@ export default function ChangeDetailPage() {
         </p>
       )}
 
+      <OpenQuestionsBanner status={change.status} concerns={concerns}
+        onShow={change.status === 'scoping' && effectiveTab !== 'scoping' ? () => goTab('scoping') : undefined} />
       {blocked && (
         <DeviationBanner
           changeId={changeId}

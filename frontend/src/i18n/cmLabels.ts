@@ -2739,6 +2739,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'flag.from.customer': { de: 'Kunde', en: 'Customer' },
   'flag.from.our_team': { de: 'Unser Team', en: 'Our team' },
   'flag.from.supplier': { de: 'Lieferant', en: 'Supplier' },
+  'openQ.title1': { de: '1 offene Frage hält diese Änderung an', en: '1 open question holds this change' },
+  'openQ.titleN': { de: '{n} offene Fragen halten diese Änderung an', en: '{n} open questions hold this change' },
+  'openQ.impact': { de: 'Die Änderung geht erst in die Bewertung, wenn alle Fragen beantwortet und geschlossen sind. Bis dahin gibt es keine Aufgaben für die Abteilungen.', en: 'The change goes to assessment only once every question is answered and closed. Until then no department gets a task.' },
+  'openQ.answered': { de: 'Beantwortet, PM schließt', en: 'Answered, PM closes' },
+  'openQ.noOwner': { de: 'Offen', en: 'Open' },
+  'openQ.show': { de: 'Fragen im Scoping zeigen', en: 'Show the questions in Scoping' },
   'flag.scopeEffect': { de: 'Was ändert die Antwort am Umfang?', en: 'What does the answer change in the scope?' },
   'flag.scopeEffectPlaceholder': {
     de: 'z. B. entscheidet, ob der Werkzeugbau bewertet', en: 'e.g. decides whether Toolshop assesses' },
