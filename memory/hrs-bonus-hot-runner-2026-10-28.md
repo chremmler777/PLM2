@@ -1,6 +1,6 @@
 ---
 name: hrs-bonus-hot-runner-2026-10-28
-description: HRS group bonus (Christine 10/28) - January list of HRS hot runners per plant; PLM2 has no HR fields yet; per-tool feed system of 1994/2277 from FZ quotes; design agreed, build waits for Christoph's go
+description: HRS group bonus (Christine 10/28) - PARKED 2026-10-28, Brandon (toolshop) tracks HRS quotes/orders by hand; per-tool feed system of 1994/2277 from FZ quotes kept as reference
 metadata:
   type: project
 ---
@@ -20,7 +20,10 @@ Feed system per tool (quoted, not as-built):
 - Where it lives: RFQ2 tooling_offer_lines.tech (hot_runner_make, drops_quoted); tooling_calcs HR fields empty,
   tooling_variant_items.num_drops = 1 everywhere (default, unusable).
 
-Design agreed (not built, waits for go): parts tool_hr_make / tool_hr_type (incl. "heated sprue") / tool_hr_drops /
+PARKED 2026-10-28 (Christoph): nothing to build; Brandon (toolshop) tracks HRS quotes/orders by hand until a system
+exists. 2277 back panel HR type (227701/02/03) stays OPEN: regular SVG vs FlexFlow One, decision expected mid-November 2026.
+
+Design as discussed (for when it is unparked): parts tool_hr_make / tool_hr_type (incl. "heated sprue") / tool_hr_drops /
 tool_hr_ordered_on / tool_hr_source; suppliers country + city; worksheet columns; cross-project xlsx report
 (application = Brose no. + part name + program/Scout; explicit "none" for cold tools); backfill from the quotes.
 Estimate 1-1.5 days. Open: the sprue make (HRS?) and what GLOW is, both to confirm with FZ BOM / HRS order confirmation.
