@@ -336,6 +336,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'You are backup here. It does not count on your badge.',
   },
   'tasks.asBackup': { de: '+{n} als Vertretung', en: '+{n} as backup' },
+  'tasks.showSupport': { de: 'Unterstützungsaufgaben zeigen ({n})', en: 'Show support tasks ({n})' },
+  'tasks.showDone': { de: 'Erledigte zeigen', en: 'Show done' },
+  'tasks.showDoneHint': { de: 'Was du in den letzten 30 Tagen an Änderungen erledigt hast (aus der Historie)', en: 'What you did on changes in the last 30 days (from the history)' },
+  'tasks.doneTitle': { de: 'Erledigt, letzte 30 Tage', en: 'Done, last 30 days' },
+  'tasks.doneEmpty': { de: 'In den letzten 30 Tagen nichts erledigt', en: 'Nothing done in the last 30 days' },
   'tasks.mainBadge': {
     de: 'Meine Aufgaben: {n} offen, für die du verantwortlich bist (oder deine Abteilung, wenn niemand benannt ist)',
     en: 'My tasks: {n} open that you are responsible for (or your department, where nobody is named)',

@@ -16,7 +16,7 @@ const clientMocks = vi.hoisted(() => ({
 }))
 vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('../api/changes', () => ({
-  changesApi: { myTasks: vi.fn().mockResolvedValue([]), acceptAssessment: vi.fn() },
+  changesApi: { myTasks: vi.fn().mockResolvedValue([]), myDone: vi.fn().mockResolvedValue([]), acceptAssessment: vi.fn() },
 }))
 
 const myTask = (over: Record<string, unknown>) => ({
@@ -485,6 +485,10 @@ describe('MyTasksPage project team (spec §18)', () => {
                    role: 'backup', main_name: 'Cody Hrtyanski' }),
     ] as never)
     wrap(<MyTasksPage />)
+    // Christoph 2026-10-28: support (backup) rows hidden until asked for
+    await screen.findByTestId('task-show-support')
+    expect(screen.queryByText('GB-CM-0008')).toBeNull()
+    fireEvent.click(screen.getByTestId('task-show-support'))
     await screen.findByText('GB-CM-0008')
     expect(screen.getByTestId('task-list-title').textContent).toContain('(1)')
     expect(screen.getByTestId('task-list-backup-count').textContent).toBe(
@@ -493,6 +497,16 @@ describe('MyTasksPage project team (spec §18)', () => {
     expect(rows.map((r) => r.getAttribute('data-role'))).toEqual(['main', 'backup'])
     expect(rows[1].className).toContain('opacity-60')
     expect(screen.getByTestId('backup-chip').textContent).toContain('Cody Hrtyanski')
+  })
+
+  it('Show done lists my own recent work (Christoph 2026-10-28)', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    vi.mocked(changesApi.myDone).mockResolvedValue([{ id: 5, change_id: 9, change_number: 'CR-2026-0009',
+      title: 'Rib', action: 'assessment_submitted', description: 'Assessment submitted: feasible',
+      at: '2026-10-27T10:00:00Z' }] as never)
+    wrap(<MyTasksPage />)
+    fireEvent.click(await screen.findByTestId('task-show-done'))
+    expect((await screen.findByTestId('done-row-5')).textContent).toContain('Assessment submitted: feasible')
   })
 })
 
@@ -572,6 +586,7 @@ describe('MyTasksPage: Needs you, due rules, task links (L3)', () => {
       changeTask({ kind: 'sign_off', side: 'quality', needs_you: true, role: 'backup' }),
     ] as never)
     wrap(<MyTasksPage />)
+    fireEvent.click(await screen.findByTestId('task-show-support'))
     await screen.findByText('GB-CM-0007')
     expect(screen.queryByTestId('needs-you')).toBeNull()
   })

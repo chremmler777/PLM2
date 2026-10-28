@@ -149,6 +149,11 @@ export const changesApi = {
   myTasks: () =>
     client.get<ChangeTask[]>('/v1/changes/my-tasks').then((r) => r.data),
 
+  myDone: (days = 30) =>
+    client.get<{ id: number; change_id: number; change_number: string; title: string;
+      action: string; description: string; at: string }[]>(
+      '/v1/changes/my-done', { params: { days } }).then((r) => r.data),
+
   myActions: (id: number): Promise<MyActionsResponse> =>
     client.get(`/v1/changes/${id}/my-actions`).then((r) => r.data),
 

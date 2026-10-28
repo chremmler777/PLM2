@@ -187,3 +187,19 @@ async def test_apqp_mfg_tool_engineer_pick_the_impact_tree_in_scoping(
     _, _, quality = await _user(client, session_factory, seed, "pmq-impq", "Quality")
     st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=quality)).json()
     assert st["can_edit_impact"] is False
+
+
+async def test_my_done_lists_my_own_recent_work(client, admin_auth, seed, session_factory):
+    """My Tasks "Show done" (Christoph 2026-10-28): the caller's own history
+    entries, newest first; somebody else's are not listed."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq11")
+    _, quality_id, quality = await _user(client, session_factory, seed, "pmq-done", "Quality")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=quality, json={
+        "kind": "reject_proposal", "note": "Cannot be measured"})
+    assert res.status_code == 200, res.text
+    mine = (await client.get("/api/v1/changes/my-done", headers=quality)).json()
+    assert mine and all(r["change_id"] == cid for r in mine)
+    assert mine[0]["change_number"].startswith("CR-")
+    admin = (await client.get("/api/v1/changes/my-done", headers=admin_auth)).json()
+    assert any(r["change_id"] == cid for r in admin)
+    assert not any(r["id"] in {m["id"] for m in mine} for r in admin)

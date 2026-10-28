@@ -278,6 +278,37 @@ async def change_permissions(
     }
 
 
+# Bookkeeping rows the app writes on the side: not "work done" for My Tasks.
+_DONE_NOISE = ("title_recomposed", "metadata_updated", "price_opened", "price_closed",
+               "plan_seeded", "cost_lines_seeded", "revision_spawned", "four_eyes_fallback")
+
+
+@router.get("/my-done")
+async def my_done(
+    days: int = Query(30, ge=1, le=365),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """My Tasks "Show done" (Christoph 2026-10-28): what the caller did on
+    changes in the last `days` days, newest first, from the audit history
+    (change tasks are computed from the live state and leave no closed row of
+    their own). Under act as person: that person's own entries."""
+    from datetime import timedelta
+    since = datetime.utcnow() - timedelta(days=days)
+    rows = (await db.execute(
+        select(ChangeChangelog.id, ChangeChangelog.change_id, ChangeChangelog.action,
+               ChangeChangelog.action_description, ChangeChangelog.performed_at,
+               ChangeRequest.change_number, ChangeRequest.title)
+        .join(ChangeRequest, ChangeRequest.id == ChangeChangelog.change_id)
+        .where(ChangeChangelog.performed_by == current_user.id,
+               ChangeChangelog.performed_at >= since,
+               ChangeChangelog.action.not_in(_DONE_NOISE))
+        .order_by(ChangeChangelog.performed_at.desc(), ChangeChangelog.id.desc())
+        .limit(200))).all()
+    return [{"id": i, "change_id": cid, "change_number": num, "title": title,
+             "action": action, "description": desc, "at": at}
+            for i, cid, action, desc, at, num, title in rows]
+
+
 @router.get("/my-tasks")
 async def my_change_tasks(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),

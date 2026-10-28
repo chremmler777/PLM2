@@ -574,11 +574,18 @@ function TaskList() {
   // C3 "Needs you": decisions only this person gives, on top, by due.
   const needsYou = allRows.filter((r) => r.source === 'change' && r.task.needs_you && !isBackup(r.task))
     .sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'));
-  const rows = allRows.filter((r) => !needsYou.includes(r));
+  const listed = allRows.filter((r) => !needsYou.includes(r));
   // Project team (spec §18): the header counts main rows, the same number as
   // the sidebar badge; backup rows are listed after them, muted.
-  const backupCount = rows.filter((r) => isBackup(r.task)).length;
-  const mainCount = rows.length - backupCount;
+  const backupCount = listed.filter((r) => isBackup(r.task)).length;
+  const mainCount = listed.length - backupCount;
+  // Christoph 2026-10-28: the muted support (backup) rows are hidden until
+  // asked for; a late one is the backup's too and always shows.
+  const [showSupport, setShowSupport] = useState(false);
+  const rows = showSupport ? listed
+    : listed.filter((r) => !isBackup(r.task) || ('late' in r.task && !!r.task.late));
+  const hiddenSupport = listed.length - rows.length;
+  const [showDone, setShowDone] = useState(false);
   const head = (
     <thead>
       <tr className="border-b border-slate-700 bg-slate-900">
@@ -621,6 +628,20 @@ function TaskList() {
             </span>
           )}
         </h2>
+        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+          {(hiddenSupport > 0 || showSupport) && backupCount > 0 && (
+            <label className="flex items-center gap-1.5" title={t('tasks.backupBadge').replace('{n}', String(backupCount))}>
+              <input type="checkbox" data-testid="task-show-support" checked={showSupport}
+                onChange={(e) => setShowSupport(e.target.checked)} />
+              {t('tasks.showSupport').replace('{n}', String(backupCount))}
+            </label>
+          )}
+          <label className="flex items-center gap-1.5" title={t('tasks.showDoneHint')}>
+            <input type="checkbox" data-testid="task-show-done" checked={showDone}
+              onChange={(e) => setShowDone(e.target.checked)} />
+            {t('tasks.showDone')}
+          </label>
+        </div>
         <label className="flex items-center gap-2 text-xs text-slate-400">
           {t('tasks.deptFilter')}
           {loadingDepts ? (
@@ -663,7 +684,46 @@ function TaskList() {
         </div>
       )}
     </div>
+    {showDone && <DoneList navigate={navigate} />}
     </div>
+  );
+}
+
+/** My Tasks "Show done" (Christoph 2026-10-28): what I did on changes in the
+ *  last 30 days, from the audit history, newest first. */
+function DoneList({ navigate }: { navigate: ReturnType<typeof useNavigate> }) {
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['change-my-done'],
+    queryFn: () => changesApi.myDone(30),
+  });
+  return (
+    <section data-testid="done-list">
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
+        {t('tasks.doneTitle')} ({data.length})
+      </h2>
+      {isLoading ? <LoadingSkeleton count={3} /> : data.length === 0 ? (
+        <EmptyState data-testid="done-list-empty" title={t('tasks.doneEmpty')} />
+      ) : (
+        <div className="bg-slate-800/60 border border-slate-700 rounded-lg overflow-x-auto">
+          <table className="w-full text-sm">
+            <tbody>
+              {data.map((r) => (
+                <tr key={r.id} data-testid={`done-row-${r.id}`}
+                  className="border-b border-slate-700/60 last:border-0 hover:bg-slate-700/30 cursor-pointer"
+                  onClick={() => navigate(`/changes/${r.change_id}`)}>
+                  <td className="px-4 py-2 whitespace-nowrap text-slate-500 tabular-nums">{formatDate(r.at)}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <span className="font-mono text-slate-300">{r.change_number}</span>
+                    <span className="ml-2 text-slate-500">{r.title}</span>
+                  </td>
+                  <td className="px-4 py-2 text-slate-400">{r.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
