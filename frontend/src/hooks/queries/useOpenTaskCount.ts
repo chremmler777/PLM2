@@ -27,6 +27,9 @@ export interface MyTaskCounts {
   /** 1 when the Finance cost sheet review is due for the caller. */
   finance: number;
   total: number;
+  /** Rows where the caller is only the named backup (listed, not in total);
+   *  the sidebar shows them as a second, grey counter (Christoph 2026-10-28). */
+  backup: number;
 }
 
 export function useMyTaskCounts(): MyTaskCounts {
@@ -57,10 +60,15 @@ export function useMyTaskCounts(): MyTaskCounts {
   // Project team (spec §18): backup rows are listed on My Tasks but do not
   // count; where no responsible is set every row is main (today's behaviour).
   const main = (rows: { role?: string | null }[]) => rows.filter((r) => !isBackup(r)).length;
-  const list = main(foldWorkflowTasks(workflow)) + main(foldChangeTasks(changeTasks));
-  const intakeRows = main([...(intakes?.triage ?? []), ...(intakes?.review ?? [])]);
+  const backups = (rows: { role?: string | null }[]) => rows.filter(isBackup).length;
+  const wf = foldWorkflowTasks(workflow);
+  const ch = foldChangeTasks(changeTasks);
+  const intakeAll = [...(intakes?.triage ?? []), ...(intakes?.review ?? [])];
+  const list = main(wf) + main(ch);
+  const intakeRows = main(intakeAll);
   const finance = review?.due ? 1 : 0;
-  return { list, intakes: intakeRows, finance, total: list + intakeRows + finance };
+  return { list, intakes: intakeRows, finance, total: list + intakeRows + finance,
+           backup: backups(wf) + backups(ch) + backups(intakeAll) };
 }
 
 export function useOpenTaskCount(): number {

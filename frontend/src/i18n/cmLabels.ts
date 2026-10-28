@@ -336,6 +336,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'You are backup here. It does not count on your badge.',
   },
   'tasks.asBackup': { de: '+{n} als Vertretung', en: '+{n} as backup' },
+  'tasks.backupBadge': { de: 'Als Vertretung (Backup)', en: 'As backup' },
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },

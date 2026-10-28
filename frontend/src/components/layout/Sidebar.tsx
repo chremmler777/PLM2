@@ -16,7 +16,8 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import SearchBox from '../SearchBox';
 import NotificationBell from '../NotificationBell';
-import { useOpenTaskCount } from '../../hooks/queries/useOpenTaskCount';
+import { useMyTaskCounts } from '../../hooks/queries/useOpenTaskCount';
+import { t } from '../../i18n/cmLabels';
 import { readStored, writeStored } from '../../lib/safeStorage';
 import ActsAsSwitch from './ActsAsSwitch';
 
@@ -52,7 +53,9 @@ export default function Sidebar() {
   };
 
   // Workflow tasks + change tasks: whatever My Tasks would show.
-  const openTasks = useOpenTaskCount();
+  // Yellow: tasks you are responsible for; grey: tasks you hold as the
+  // named backup (Christoph 2026-10-28).
+  const { total: openTasks, backup: backupTasks } = useMyTaskCounts();
 
   const dailyItems: NavItem[] = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -91,12 +94,15 @@ export default function Sidebar() {
     const active = isActive(item.path);
     const Icon = item.icon;
     const count = item.path === '/my-tasks' ? openTasks : 0;
+    const backupCount = item.path === '/my-tasks' ? backupTasks : 0;
+    const openWords = [count > 0 ? `${count} open` : '', backupCount > 0 ? `${backupCount} as backup` : '']
+      .filter(Boolean).join(', ');
     return (
       <Link
         key={item.path}
         to={item.path}
         aria-current={active ? 'page' : undefined}
-        aria-label={isCollapsed ? (count > 0 ? `${item.label}, ${count} open` : item.label) : undefined}
+        aria-label={isCollapsed ? (openWords ? `${item.label}, ${openWords}` : item.label) : undefined}
         className={`group relative w-full py-2 rounded-md text-sm font-medium flex items-center gap-3 transition-colors ${
           isCollapsed ? 'justify-center px-0' : 'px-3'
         } ${
@@ -118,6 +124,19 @@ export default function Sidebar() {
             : 'px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0 tabular-nums'}>
             {count}
             {!isCollapsed && <span className="sr-only"> open</span>}
+          </span>
+        )}
+        {backupCount > 0 && !isCollapsed && (
+          <span data-testid="sidebar-backup-count" title={t('tasks.backupBadge')}
+            className="px-1.5 py-0.5 rounded-md bg-slate-600 text-slate-100 text-xs font-bold flex-shrink-0 tabular-nums">
+            {backupCount}
+            <span className="sr-only"> as backup</span>
+          </span>
+        )}
+        {backupCount > 0 && isCollapsed && count === 0 && (
+          <span data-testid="sidebar-backup-count"
+            className="absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-slate-600 text-slate-100 text-[11px] leading-4 font-bold text-center tabular-nums">
+            {backupCount}
           </span>
         )}
       </Link>

@@ -132,6 +132,16 @@ describe('Sidebar My Tasks counter', () => {
     expect(badge.closest('a')?.textContent).toContain('My Tasks')
   })
 
+  it('shows backup rows as a second, grey counter (Christoph 2026-10-28)', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      { kind: 'kickoff' }, { kind: 'assessment', role: 'backup' },
+    ] as never)
+    wrap(<Sidebar />)
+    const backup = await screen.findByTestId('sidebar-backup-count')
+    expect(backup.textContent).toContain('1')
+    expect(backup.closest('a')?.textContent).toContain('4')
+  })
+
   it('shows no badge when nothing is waiting', async () => {
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: [] })
