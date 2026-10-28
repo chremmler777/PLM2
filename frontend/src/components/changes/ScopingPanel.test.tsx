@@ -735,7 +735,7 @@ describe('ScopingPanel meeting routing selection', () => {
     vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
   })
 
-  it('an attendee brings their one department in; a manager with several adds nothing (Christoph 2026-10-28)', async () => {
+  it('an attendee brings their departments in; already-ticked ones are left as they are (Christoph 2026-10-28)', async () => {
     vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(
       FIVE.map((d) => (d.id === 6 ? { ...d, optional: true } : d)) as never)
     deptState.current = [...FIVE, { id: 8, name: 'Logistics' }].map((d) => ({ ...d, is_active: true }))

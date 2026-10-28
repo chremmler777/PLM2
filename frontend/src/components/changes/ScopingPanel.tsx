@@ -225,26 +225,33 @@ export default function ScopingPanel(
   const labelOf = (c: Contact) => labels.get(c) ?? c.name
   const fromContact = (c: Contact): Attendee =>
     ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null, guest: false })
-  // Christoph 2026-10-28: an attendee brings their department in (Russ
-  // attends: Manufacturing Engineer), as a convenience. Only a person in
-  // exactly one department (a manager holding several adds nothing); the
-  // standard and "sometimes" departments come in as R, others as C (looped
-  // in, owe no assessment). A department the room took off stays off.
+  // Christoph 2026-10-28: an attendee brings their departments in (Russ
+  // attends: Manufacturing Engineer; Alexa: Logistics), as a convenience.
+  // A standard or "sometimes" department of a member comes in as R; one the
+  // person only manages (Alexa: Packaging), and any other, as C (looped in,
+  // owes no assessment). A department the room took off stays off.
   const [autoAdded, setAutoAdded] = useState<{ dept: string; who: string }[]>([])
   const [takenOff, setTakenOff] = useState<number[]>([])
   const addAttendeeDept = (a: Attendee) => {
     if (motherPlant || a.user_id == null) return
     const c = contacts.find((x) => x.user_id === a.user_id)
     const names = (c?.department ?? '').split(',').map((x) => x.trim()).filter(Boolean)
-    if (names.length !== 1) return
-    const d = pickableDepartments(departments, deptIds).find((x) => x.name === names[0])
-    if (!d || d.id in deptRasic || takenOff.includes(d.id)) return
-    const allowed = lettersFor(d.id)
-    if (!allowed.length) return
-    const want: RasicLetter = recommendedIds.includes(d.id) || sometimesIds.includes(d.id) ? 'R' : 'C'
+    const picks: Record<number, RasicLetter> = {}
+    for (const d of pickableDepartments(departments, deptIds)) {
+      if (!names.includes(d.name) || d.id in deptRasic || takenOff.includes(d.id)) continue
+      const allowed = lettersFor(d.id)
+      if (!allowed.length) continue
+      const assesses = (recommendedIds.includes(d.id) || sometimesIds.includes(d.id))
+        && d.manager_id !== a.user_id
+      const want: RasicLetter = assesses ? 'R' : 'C'
+      picks[d.id] = allowed.includes(want) ? want : allowed[0]
+    }
+    const ids = Object.keys(picks).map(Number)
+    if (!ids.length) return
     setDeptTouched(true)
-    setDeptRasic((prev) => ({ ...prev, [d.id]: allowed.includes(want) ? want : allowed[0] }))
-    setAutoAdded((prev) => [...prev, { dept: d.name, who: a.name }])
+    setDeptRasic((prev) => ({ ...prev, ...picks }))
+    setAutoAdded((prev) => [...prev, ...ids.map((id) => ({
+      dept: departments.find((d) => d.id === id)?.name ?? String(id), who: a.name }))])
   }
   const appendParticipant = (a: Attendee | null) => {
     if (!a || !a.name.trim()) return
