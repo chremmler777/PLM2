@@ -60,7 +60,7 @@
 - [Cavity layout 2026-10-10](cavity-layout-2026-10-10.md) - cavities are "2+2" text, never summed; mig 114 live on prod 56d621b6
 - [Revision update simplify (open)](revision-update-simplify-2026-10-10.md) - plan later: one simple 'new customer data' path + old drawing/new data; 206.886.197 incident
 - [ECR live test 1 2026-10-14](ecr-live-test-1-2026-10-14.md) - first live test: question stays asker task (asker+Sales+PM answer), open-flags popup, auto parts lock on proceed, PM scope text, per-dept assessment->costing pipeline
-- [1994 E1.1 FZ toolmaker data 2026-10-15](1994-e11-fz-toolmaker-2026-10-15.md) - 4 E1.1 drafts awaiting Brose confirmation; naming rule; data-exchange + moldflow backlog; stage via /tmp + docker cp
+- [1994 FZ toolmaker drafts](1994-e11-fz-toolmaker-2026-10-15.md) - E1.1 (10/15) + E1.2 (10/22) drafts; 10/28 E1.3 on 800/799/967 (2275-2277), their E1.1/E1.2 closed; naming rule; stage via /tmp + docker cp
 - [Part-data mail 2026-10-15](part-data-mail-2026-10-15.md) - KTX Apps Graph mail like TWOS, 1994 list (EC kickoff + Karl), 5-min digest, trial first
 - [Session state 2026-10-15](session-state-2026-10-15.md) - end of day: deployed 0536924c/alembic 115, ecr-solid migration 115 clash, open decisions, backlog
 - [Session state 2026-10-16](session-state-2026-10-16.md) - back fix deployed; Moldflow overview (mig 116) in build; ECR must renumber 117+
