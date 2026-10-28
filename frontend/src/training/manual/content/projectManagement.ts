@@ -33,7 +33,7 @@ export const pmChapter: ContentChapter = {
             head: ['Stage', 'What you do'],
             rows: [
               ['Captured', 'You capture the request ("New Change Request"), with the customer\'s facts from Sales, and own the process from here to close. As the project\'s lead PM you lead every change on the project by default; the hand-over row is yours: "Hand over to scoping". No lead PM on the project: set the lead first (and name the lead PM in the project team). As the lead, set the priority; Sales sets the quote deadline.'],
-              ['Scoping', 'Check the impacted set Development picks (you may pick too), run the scoping meeting, decide.'],
+              ['Scoping', 'Check the impacted set Development, APQP, Manufacturing and Tool Engineer pick (you may pick too), run the scoping meeting, decide.'],
               ['In Assessment', 'Chase the open departments, add a forgotten one, decide on "Not our responsibility", then "Close assessment → Costing".'],
               ['Costing', 'Watch every department price its part, then "Close costing".'],
               ['Quoted', 'Give the "PM sign-off". The cockpit asks for it once the customer accepted.'],

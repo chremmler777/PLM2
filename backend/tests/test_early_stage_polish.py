@@ -316,7 +316,8 @@ async def test_development_picks_then_confirms_impact(client, auth, seed, depts,
                         .values(status="scoping"))
         await s.commit()
     assert (await _state(client, dev, cid))["can_edit_impact"] is True
-    assert (await _state(client, tool, cid))["can_edit_impact"] is False
+    # 2026-10-28: Tool Engineer picks too (APQP, Manufacturing as well)
+    assert (await _state(client, tool, cid))["can_edit_impact"] is True
     actions = (await client.get(f"/api/v1/changes/{cid}/my-actions", headers=dev)).json()
     row = next(a for a in actions["actions"] if a["kind"] == "impact_confirm")
     assert row["label"] == "Pick and confirm impacted items"
@@ -326,7 +327,8 @@ async def test_development_picks_then_confirms_impact(client, auth, seed, depts,
     res = await client.put(f"/api/v1/changes/{cid}/impacted-items",
                            json={"part_ids": [p1, p2]}, headers=dev)
     assert res.status_code == 200, res.text
-    res = await client.delete(f"/api/v1/changes/{cid}/impacted-items/0", headers=tool)
+    sales = acting(auth, depts["Sales"])
+    res = await client.delete(f"/api/v1/changes/{cid}/impacted-items/0", headers=sales)
     assert res.status_code == 403
     assert "Development" in res.json()["detail"]
     detail = (await client.get(f"/api/v1/changes/{cid}", headers=auth)).json()

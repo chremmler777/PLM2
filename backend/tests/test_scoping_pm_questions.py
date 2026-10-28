@@ -167,3 +167,23 @@ async def test_project_team_member_may_ask_until_the_change_is_passed_on(
     assert detail["can_raise_question"] is True
     res = await _ask(client, quality, cid, quality_id)
     assert res.status_code == 200, res.text
+
+
+async def test_apqp_mfg_tool_engineer_pick_the_impact_tree_in_scoping(
+        client, admin_auth, seed, session_factory):
+    """Christoph 2026-10-28: APQP, Manufacturing and Tool Engineer change the
+    impact tree too (with Development); Quality does not."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq10")
+    for i, dept in enumerate(("APQP", "Manufacturing Engineer", "Tool Engineer")):
+        _, _, auth = await _user(client, session_factory, seed, f"pmq-imp{i}", dept)
+        st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=auth)).json()
+        assert st["can_edit_impact"] is True, dept
+        part = await client.post("/api/v1/parts", json={
+            "project_id": seed["project_id"], "part_number": f"ART-PMQ10-{i}",
+            "name": "Part", "part_type": "internal_mfg"}, headers=admin_auth)
+        res = await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                                json={"part_id": part.json()["id"]}, headers=auth)
+        assert res.status_code == 200, (dept, res.text)
+    _, _, quality = await _user(client, session_factory, seed, "pmq-impq", "Quality")
+    st = (await client.get(f"/api/v1/changes/{cid}/stage-state", headers=quality)).json()
+    assert st["can_edit_impact"] is False

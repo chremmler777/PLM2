@@ -1274,7 +1274,7 @@ export default function ChangeDetailPage() {
           impactConfirmedAt={change.impact_confirmed_at}
           canConfirm={canConfirmImpact}
           confirmStep={change.impact_confirm_step !== false}
-          // Lead, PM and admin edit the set; Development picks it too while it
+          // Lead, PM and admin edit the set; Development, APQP, Mfg and Tool Engineer pick it too while it
           // is at scoping and not locked, then confirms it. The backend's
           // can_edit_impact is the answer; the fallback mirrors it.
           canEdit={!!canWrite && (stage ? stage.can_edit_impact : (isAdmin || isChangeLead || isPmMember

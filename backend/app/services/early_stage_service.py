@@ -340,14 +340,14 @@ class EarlyStageService:
                                   user: User) -> Optional[str]:
         """Editing the impacted set: the change lead, Project Management
         members, admin, at any open stage (after the lock their edit clears
-        Development's confirmation: that is the reopen). Development members
-        (acts-as aware, the same check as the confirm) pick the set
-        themselves while it is at scoping and not locked, then confirm it."""
+        Development's confirmation: that is the reopen). Development, APQP,
+        Manufacturing and Tool Engineer members (acts-as aware) pick the set
+        themselves while it is at scoping and not locked (2026-10-28)."""
         r = await EarlyStageService._roles(session, change, user)
         if r["run_team"]:
             return None
         if (change.status == "scoping"
-                and await ChangeService.user_can_confirm_impact(session, user)):
+                and await ChangeService.user_can_pick_impact(session, user)):
             # Switch off (cm_switches): no manual lock to respect in scoping,
             # the set locks at the 'proceed' decision.
             if change.impact_confirmed_at is None or not change.impact_confirm_step:
@@ -355,8 +355,9 @@ class EarlyStageService:
             return ("The impacted set is locked (confirmed by Development). "
                     "Only the change lead, Project Management or an admin may "
                     "reopen it by editing")
-        return ("Only Development (at scoping, before the lock), the change "
-                "lead, Project Management or an admin may edit the impacted items")
+        return ("Only Development, APQP, Manufacturing or Tool Engineer (at "
+                "scoping, before the lock), the change lead, Project Management "
+                "or an admin may edit the impacted items")
 
     @staticmethod
     def post_quote(change: ChangeRequest) -> bool:

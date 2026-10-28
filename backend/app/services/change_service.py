@@ -3378,6 +3378,21 @@ class ChangeService:
         dept_ids = await WorkflowService.effective_department_ids(session, user)
         return rd_dept.id in dept_ids
 
+    # Christoph 2026-10-28: the standard assessors pick the impact tree in
+    # scoping too, not only Development ("add APQP, manufacturing and tooling
+    # engineer to the persons that can change it").
+    IMPACT_PICKERS = ("Development", "APQP", "Manufacturing Engineer", "Tool Engineer")
+
+    @staticmethod
+    async def user_can_pick_impact(session: AsyncSession, user: User) -> bool:
+        """Member (acts-as aware) of a department that picks the impacted set
+        in scoping. Like the confirm, no admin shortcut here: admin edits as
+        run team anyway."""
+        from app.services.workflow_service import WorkflowService
+        ids = set((await session.execute(select(Department.id).where(
+            Department.name.in_(ChangeService.IMPACT_PICKERS)))).scalars().all())
+        return bool(ids & set(await WorkflowService.effective_department_ids(session, user)))
+
     @staticmethod
     async def _user_in_department(session: AsyncSession, user: User, department_name: str) -> bool:
         """Admin, or member of the named department. Shared by the sign-off,

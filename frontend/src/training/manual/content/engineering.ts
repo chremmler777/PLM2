@@ -27,7 +27,7 @@ export const engineeringChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Scoping', 'Development picks the impacted set. Bring your points to the meeting; the PM records a question only if the scope cannot be decided without it. What your department must check, you check in your assessment.'],
+              ['Scoping', 'Development, APQP, Manufacturing and Tool Engineer pick the impacted set. Bring your points to the meeting; the PM records a question only if the scope cannot be decided without it. What your department must check, you check in your assessment.'],
               ['In Assessment', 'Answer every checklist row, flag risks on the rows, give a verdict.'],
               ['Costing', 'Price your part: your own time, estimates or vendor quotes, a lead time on every line.'],
               ['Timing', 'Confirm the detailed plan for your department, or raise a concern.'],
