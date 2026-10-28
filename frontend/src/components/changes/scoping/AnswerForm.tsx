@@ -19,6 +19,7 @@ import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import AttachmentDropzone from '../AttachmentDropzone'
+import ConfirmDialog from '../../common/ConfirmDialog'
 import { CONFIRM_EVIDENCE_REQUIRED } from '../../../lib/scopingRules'
 import type { AnswerForm as AnswerBody, Attachment, ChangeConcern } from '../../../types/change'
 
@@ -45,6 +46,7 @@ export default function AnswerForm({
   const [value, setValue] = useState('')
   const [unit, setUnit] = useState('')
   const [risk, setRisk] = useState('')
+  const [askNoFile, setAskNoFile] = useState(false)
   const customer = c.answer_from === 'customer'
   const mails = attachments.filter((a) => a.kind === 'customer_email')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -83,6 +85,8 @@ export default function AnswerForm({
   // 2026-10-28: no proof is a warning; a reference typed must still be one
   const noProof = kind === 'confirmed' && !confirming && !evidence && !CONFIRM_EVIDENCE_REQUIRED
     && ref.trim() === ''
+  // nothing filed: no picked mail, no document on the question
+  const noFile = kind === 'confirmed' && !confirming && mailId === '' && docs.length === 0
   const missing = kind === ''
     ? [t('answer.pick')]
     : kind === 'confirmed'
@@ -177,9 +181,16 @@ export default function AnswerForm({
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={btnSm.primary} data-testid={`answer-save-${c.id}`}
             disabled={missing.length > 0 || save.isPending}
-            onClick={() => save.mutate()}>
+            onClick={() => (noFile ? setAskNoFile(true) : save.mutate())}>
             {confirming ? t('answer.confirmNow') : t('answer.save')}
           </button>
+          {/* 2026-10-28: Confirmed with no file or mail attached is asked once */}
+          <ConfirmDialog open={askNoFile} data-testid={`answer-no-file-${c.id}`}
+            title={t('answer.noFileTitle')}
+            body={t(customer ? 'answer.noProofCustomer' : 'answer.noProof')}
+            confirmLabel={t('answer.saveAnyway')} cancelLabel={t('answer.attachFirst')}
+            pending={save.isPending}
+            onConfirm={() => save.mutateAsync()} onClose={() => setAskNoFile(false)} />
           {missing.length > 0 && (
             <span className="text-[11px] text-slate-500" data-testid={`answer-missing-${c.id}`}>
               {t('flag.missing').replace('{x}', missing.join(', '))}

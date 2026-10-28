@@ -26,8 +26,22 @@ describe('Confirmed without proof: a warning, not a must (2026-10-28)', () => {
     fireEvent.change(screen.getByPlaceholderText('The answer in words'), { target: { value: 'Yes, LH and RH' } })
     expect(save.disabled).toBe(false)
     fireEvent.click(save)
+    // asked once: no file attached
+    expect(changesApi.answerConcernForm).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save anyway' }))
     await waitFor(() => expect(changesApi.answerConcernForm).toHaveBeenCalledWith(
       7, 11, { answer_kind: 'confirmed', note: 'Yes, LH and RH' }))
+  })
+
+  it('a typed reference is no attachment: still asked', () => {
+    const ours = { ...q, answer_from: 'our_team' } as ChangeConcern
+    render(wrap(<AnswerForm changeId={7} concern={ours} attachments={[]} onDone={() => {}} />))
+    fireEvent.click(screen.getByTestId('answer-kind-confirmed-11'))
+    fireEvent.change(screen.getByTestId('answer-ref-11'), { target: { value: 'Drawing 10-1187 rev B' } })
+    fireEvent.click(screen.getByTestId('answer-save-11'))
+    expect(screen.getByText('Save without an attachment?')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Attach first' }))
+    expect(screen.queryByText('Save without an attachment?')).toBeNull()
   })
 
   it('Assumed takes attachments too', () => {

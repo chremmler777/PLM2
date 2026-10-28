@@ -2789,6 +2789,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'answer.note': { de: 'Antwort in Worten (optional)', en: 'The answer in words (optional)' },
   'answer.save': { de: 'Antwort speichern', en: 'Save answer' },
   'answer.inWords': { de: 'Antwort in Worten', en: 'The answer in words' },
+  'answer.noFileTitle': { de: 'Ohne Anhang speichern?', en: 'Save without an attachment?' },
+  'answer.saveAnyway': { de: 'Trotzdem speichern', en: 'Save anyway' },
+  'answer.attachFirst': { de: 'Erst anhängen', en: 'Attach first' },
   'answer.noProof': {
     de: 'Etwas vergessen? Ohne Nachweis zählt nur der Text. Zeichnungs-Nr., Prozessblatt oder ein Dokument machen die Antwort nachvollziehbar.',
     en: 'Forgot something? With no proof only your words count. A drawing no., process sheet or document makes the answer traceable.' },
