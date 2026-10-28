@@ -52,3 +52,11 @@ Documented on prod 2026-09-30 20:01 (backup plm2-before-tool-shrink-20260930-200
 Hostacom tools + 227705 still open (supplier request to Christine). NM0 set on 206.883.607 and _G07.
 BOM for Purchasing: Desktop\Christine\1994-2277 BOM PLM prod 2026-09-30.xlsx (pictures, purchased parts).
 Pivot axis colour (standard black?) still open with Brose.
+
+2026-10-28 raw material meeting (Christoph with Christine Kaufmann, Karl, Cody, Candy), recorded on prod 15:10
+(backup /data/compose/db-backups/plm2-before-resin-meeting-20261028-150950.sql.gz, script
+backend/scripts/record_brose_resin_meeting_20261028.py): Hostacom TRC352N NOMINATED, series starts with it, Polykemi
+etc. only sampled for price if validated. One "Resin decision 2026-10-28" comment per article on part.material (18),
+MaterialDB links already matched, nothing changed. 1994 Moldflow rows: empty material_label/udb_source filled
+(PP tools, 199407, 199409). Open: 199401 Moldflow label says BASF Ultramid B3EG3 substitute; 227704 has 1.25 % with no
+shrink decision record (no source); udb_status left as is (199407 open although FZ has the UDB).
