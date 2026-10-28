@@ -717,6 +717,24 @@ describe('ScopingPanel meeting routing selection', () => {
     expect(body.selected_department_ids).toEqual([2, 3, 4, 5])
   })
 
+  it('starts from the standard four: Packaging is "sometimes", an extra assessor is warned (Christoph 2026-10-28)', async () => {
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(
+      FIVE.map((d) => (d.id === 6 ? { ...d, optional: true } : d)) as never)
+    deptState.current = [...FIVE, { id: 8, name: 'Logistics' }].map((d) => ({ ...d, is_active: true }))
+    render(wrap(<ScopingPanel change={change()} />))
+    const tool = await screen.findByRole('button', { name: new RegExp(`^${FIVE[0].name}$`) })
+    await waitFor(() => expect(tool.getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.getByTestId('rasic-row-6').textContent).toContain(t('rasic.sometimes'))
+    expect(screen.getByRole('button', { name: /^Packaging Engineer/ }).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.queryByTestId('rasic-extra-8')).toBeNull()
+    fireEvent.click(screen.getByTestId('rasic-8-R'))
+    expect(screen.getByTestId('rasic-extra-8').textContent).toContain(t('rasic.extraWarn'))
+    // Packaging marked: no warning, it is a known "sometimes"
+    fireEvent.click(screen.getByTestId('rasic-6-R'))
+    expect(screen.queryByTestId('rasic-extra-6')).toBeNull()
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
+  })
+
   it('internal: the raiser\'s department is R; leaving it out needs a reason (§3)', async () => {
     vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(
       FIVE.map((d) => (d.id === 3 ? { ...d, rasic_letter: 'R', raiser: true } : d)) as never)

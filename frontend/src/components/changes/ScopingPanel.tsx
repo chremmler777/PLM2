@@ -184,9 +184,13 @@ export default function ScopingPanel(
     queryFn: () => changesApi.recommendedDepartments(changeId),
     enabled: status === 'captured' || status === 'scoping',
   })
-  const recommendedIds = recommended.map((d) => d.id)
+  // Christoph 2026-10-28: the room starts from the standard (Tool Engineer,
+  // APQP, Development, Manufacturing Engineer); "optional" ones (Packaging)
+  // are offered as "sometimes", not pre-marked.
+  const recommendedIds = recommended.filter((d) => !d.optional).map((d) => d.id)
+  const sometimesIds = recommended.filter((d) => d.optional).map((d) => d.id)
   const recommendedRasic = (): Record<number, RasicLetter> =>
-    Object.fromEntries(recommended.map((d) => [d.id, d.rasic_letter ?? 'R']))
+    Object.fromEntries(recommended.filter((d) => !d.optional).map((d) => [d.id, d.rasic_letter ?? 'R']))
   const recommendedLetter = (id: number): RasicLetter =>
     recommended.find((d) => d.id === id)?.rasic_letter ?? 'R'
   // §3 internal: the raiser's department is auto-R (served by the backend);
@@ -1055,18 +1059,33 @@ export default function ScopingPanel(
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 border-t border-slate-700/70">
               {pickableDepartments(departments, deptIds).map((d) => {
                 const isRec = recommendedIds.includes(d.id)
+                const sometimes = sometimesIds.includes(d.id)
                 const letter = deptRasic[d.id]
+                // Assessing now beyond the standard: most departments join
+                // at implementation with their own task, not here
+                const extra = !motherPlant && recommended.length > 0 && !isRec && !sometimes
+                  && (letter === 'R' || letter === 'A')
                 return (
                   <div key={d.id} data-testid={`rasic-row-${d.id}`}
                     className={`flex items-center justify-between gap-3 py-1.5 border-b border-slate-700/70 ${
                       letter ? '' : 'opacity-60'}`}>
+                    <div className="min-w-0">
                     <button type="button" onClick={() => toggleDept(d.id)}
                       aria-pressed={!!letter}
                       title={isRec ? t('meeting.recommended') : undefined}
-                      className={`min-w-0 truncate text-left text-sm rounded px-1 -mx-1 transition-colors ${
+                      className={`max-w-full truncate text-left text-sm rounded px-1 -mx-1 transition-colors ${
                         letter ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
                       {departmentLabel(d)}
+                      {sometimes && !letter && (
+                        <span className="ml-1.5 text-[11px] text-slate-500">{t('rasic.sometimes')}</span>
+                      )}
                     </button>
+                    {extra && (
+                      <p className="text-[11px] leading-snug text-amber-300/90" data-testid={`rasic-extra-${d.id}`}>
+                        {t('rasic.extraWarn')}
+                      </p>
+                    )}
+                    </div>
                     {motherPlant ? (
                       <input type="checkbox" checked={!!letter} data-testid={`inform-${d.id}`}
                         aria-label={`${t('mp.informDepartments')}: ${d.name}`}

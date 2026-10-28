@@ -1260,10 +1260,12 @@ async def recommended_departments(
 ):
     """Departments to pre-mark in the scoping decision: the Responsible/
     Accountable assessors of the change type's stage-1 routing. The lead can
-    then narrow the fan-out to those relevant for this specific change."""
+    then narrow the fan-out to those relevant for this specific change.
+    optional = offered but not pre-marked (cm_switches.SCOPING_PRESELECT)."""
     from app.services.change_routing_service import ChangeRoutingService
     from app.models.change import BLOCKING_LETTERS
     from app.models.workflow import Department
+    from app.services import cm_switches
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
@@ -1289,8 +1291,16 @@ async def recommended_departments(
         .order_by(Department.sort_order, Department.name))).all()
     # R25: Management is never pre-marked for a task (Informed only).
     from app.services.cost_sheet_service import NON_ROUTABLE_DEPARTMENTS
+    # Christoph 2026-10-28: the room starts from the standard four; the
+    # standard's other assessors (Packaging) are offered, not pre-marked
+    preselect = cm_switches.SCOPING_PRESELECT.get(change.change_type)
+
+    def _optional(i: int, n: str) -> bool:
+        return (preselect is not None and i != raiser and n not in preselect
+                and letters[i] in BLOCKING_LETTERS)
     return [{"id": i, "name": n, "rasic_letter": letters[i],
-             **({"raiser": True} if i == raiser else {})} for i, n in rows
+             **({"raiser": True} if i == raiser else {}),
+             **({"optional": True} if _optional(i, n) else {})} for i, n in rows
             if n not in NON_ROUTABLE_DEPARTMENTS or letters[i] == "I"]
 
 

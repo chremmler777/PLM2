@@ -203,7 +203,7 @@ export const changesApi = {
   // Stage-1 departments of the change type's standard routing, each with the
   // letter the standard gives it — the picker's starting point.
   recommendedDepartments: (id: number) =>
-    client.get<{ id: number; name: string; rasic_letter?: RasicLetter; raiser?: boolean }[]>(
+    client.get<{ id: number; name: string; rasic_letter?: RasicLetter; raiser?: boolean; optional?: boolean }[]>(
       `/v1/changes/${id}/recommended-departments`).then((r) => r.data),
 
   getRouting: (id: number) =>

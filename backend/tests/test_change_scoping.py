@@ -87,6 +87,10 @@ async def test_recommended_departments_are_stage1_responsible(
     assert names == {"Development", "Tool Engineer", "Manufacturing Engineer",
                      "APQP", "Packaging Engineer"}
     assert "Sales" not in names and "Logistics" not in names
+    # Christoph 2026-10-28: the room starts from the standard four; Packaging
+    # is offered ("sometimes"), not pre-marked
+    optional = {d["name"] for d in res.json() if d.get("optional")}
+    assert optional == {"Packaging Engineer"}
 
 
 @pytest.mark.asyncio

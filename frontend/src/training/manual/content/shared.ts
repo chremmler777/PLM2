@@ -280,8 +280,10 @@ export const flowChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'For a part change five departments assess: Development, Tool Engineer, Manufacturing ' +
-            'Engineer, APQP and Packaging Engineer. The room may add others.',
+            'For a part change four departments assess as standard: Development, Tool Engineer, ' +
+            'Manufacturing Engineer and APQP. Packaging Engineer only when the packaging changes. ' +
+            'The room may add others, but most join at implementation with their own tasks: ' +
+            'not assessing is not the same as not responsible.',
         },
         {
           points: [

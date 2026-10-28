@@ -38,9 +38,10 @@ export const engineeringChapter: ContentChapter = {
         },
         {
           p:
-            'For a part change all five of Development, Tool Engineer, Manufacturing Engineer, APQP ' +
-            'and Packaging Engineer assess. Process Engineer is routed when the scoping meeting ' +
-            'gives it a letter.',
+            'For a part change the standard is Development, Tool Engineer, Manufacturing Engineer ' +
+            'and APQP. Packaging Engineer only when the packaging changes. Process Engineer is ' +
+            'routed when the scoping meeting gives it a letter; otherwise Process, Quality and ' +
+            'Logistics come in at implementation with their own tasks.',
         },
         {
           p:

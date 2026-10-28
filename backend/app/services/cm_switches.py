@@ -74,3 +74,13 @@ def on(name: str) -> bool:
     if name not in SWITCH_GROUPS:
         raise KeyError(f"Unknown switch group '{name}'")
     return bool(globals()[name])
+
+# Who the scoping room starts from (Christoph 2026-10-28: "standard I say
+# Tool Engineer, APQP, Development, Manufacturing Engineering; the rest is not
+# needed until implementation in most cases; sometimes Packaging, already
+# rare"). Per change type: the standard's other assessors stay offered as
+# "sometimes" but are not pre-marked; the raiser's own department stays
+# auto-R. A type not listed here pre-marks its standard as before.
+SCOPING_PRESELECT = {
+    "physical_part": ("Tool Engineer", "APQP", "Development", "Manufacturing Engineer"),
+}
