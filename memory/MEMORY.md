@@ -75,3 +75,4 @@
 - [Viewer export + 2277 cavities](viewer-export-and-2277-cavities-2026-10-26.md) — @read_only POST marker for viewer exports (deployed 10-26); 227703/04/05 cavities filled
 - [2277 back panels = 3200 t Engel](feedback-2277-backpanel-press-3200.md) — 227701/227702 both EN 3200-1, cav 2 and 1+1; RFQ2 press pick always goes wrong
 - [1994 E2 admin activation 2026-10-28](1994-e2-admin-activation-2026-10-28.md) — 886.197/883.607/887.233 E2 active (administrative, official + no impact), CR-2026-0008 cancelled, 2122 investigation draft still open
+- [HRS bonus hot runners 2026-10-28](hrs-bonus-hot-runner-2026-10-28.md) — January HRS list from PLM2: no HR fields yet, per-tool feed system 1994/2277 (7 heated sprues), agreed design waits for go
