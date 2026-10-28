@@ -1144,6 +1144,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Zurückgegeben am {date}: {reason}. Den geänderten Umfang bewerten und erneut einreichen; die Kalkulation dieses Fachbereichs ist wieder offen und wartet auf diese Antwort.',
     en: 'Sent back {date}: {reason}. Assess the changed set and submit again; this department’s costing is open again and waits on this answer.',
   },
+  'bucket.groupResponsible': { de: 'Verantwortlich: bewerten ({n})', en: 'Responsible: assessing ({n})' },
+  'bucket.groupInformed': { de: 'Informiert ({n})', en: 'Informed ({n})' },
+  'bucket.groupInformedHint': { de: 'keine Bewertung geschuldet, niemand wartet darauf', en: 'no assessment owed, nothing waits for them' },
   'bucket.none': {
     de: 'Noch keine Fachbereiche eingebunden. Das Scoping-Meeting entscheidet die Verteilung.',
     en: 'No departments routed yet. The scoping meeting decides who assesses.',
@@ -2201,9 +2204,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'meeting.recordFirst': { de: '+ Termin erfassen', en: '+ Record a meeting' },
   'meeting.collapse': { de: 'Einklappen', en: 'Collapse' },
   'meeting.carriedLetters': {
-    de: 'RASIC aus dem letzten Termin übernommen.',
-    en: 'RASIC letters carried over from the last meeting.',
+    de: 'Abteilungen aus dem letzten Termin übernommen.',
+    en: 'Departments carried over from the last meeting.',
   },
+  'meeting.replacesUndecided': {
+    de: 'Der Termin vom {d} ist noch nicht entschieden: dieser neue ersetzt ihn, entschieden wird dann hier.',
+    en: 'The meeting of {d} is not decided yet: this new one replaces it, and the decision is made here.',
+  },
+  'meeting.replacedBy': { de: 'Ersetzt durch den Termin vom {d}', en: 'Replaced by the meeting of {d}' },
   'meeting.awaitingDecision': {
     de: 'Der letzte Termin wartet noch auf seine Entscheidung.',
     en: 'The last meeting is still waiting for its decision.',

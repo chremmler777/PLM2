@@ -66,15 +66,16 @@ async def test_proceed_kicks_off_assessment(client, admin_auth, seed, part,
     async with session_factory() as s:
         dept_ids = [d for (d,) in await s.execute(select(Department.id))][:2]
     await to_scoping(client, admin_auth, change["id"])
-    res = await post_meeting(client, admin_auth, change["id"],
-                             selected_department_ids=dept_ids)
-    mid = res.json()["id"]
     # proceed without departments is rejected on a fresh meeting
     res2 = await post_meeting(client, admin_auth, change["id"])
     res3 = await client.post(
         f"/api/v1/changes/{change['id']}/meetings/{res2.json()['id']}/decide",
         json={"decision": "proceed"}, headers=admin_auth)
     assert res3.status_code == 400
+    # a newer meeting replaces it (Christoph 2026-10-28): decided is the newest
+    res = await post_meeting(client, admin_auth, change["id"],
+                             selected_department_ids=dept_ids)
+    mid = res.json()["id"]
     # proceed with departments: scoping -> in_assessment in one call.
     # Entering assessment is hard-gated on the impact lock, so lock it first.
     await lock_impact(session_factory, change["id"])

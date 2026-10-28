@@ -203,3 +203,18 @@ async def test_my_done_lists_my_own_recent_work(client, admin_auth, seed, sessio
     admin = (await client.get("/api/v1/changes/my-done", headers=admin_auth)).json()
     assert any(r["change_id"] == cid for r in admin)
     assert not any(r["id"] in {m["id"] for m in mine} for r in admin)
+
+
+async def test_a_newer_meeting_replaces_an_undecided_one(client, admin_auth, seed,
+                                                         session_factory):
+    """Christoph 2026-10-28: the decision belongs to the newest meeting; an
+    older undecided one cannot be decided any more."""
+    from tests.test_scoping_live_test_1 import _decide, _dept_ids, _meeting
+    cid = await _change_in_scoping(client, admin_auth, seed, "pmq12")
+    ids = await _dept_ids(session_factory)
+    first = await _meeting(client, admin_auth, cid, ids)
+    second = await _meeting(client, admin_auth, cid, ids)
+    res = await _decide(client, admin_auth, cid, first, "needs_info", "Waiting for the gauge drawing")
+    assert res.status_code == 400 and "replaced" in res.json()["detail"], res.text
+    res = await _decide(client, admin_auth, cid, second, "needs_info", "Waiting for the gauge drawing")
+    assert res.status_code == 200, res.text

@@ -2238,6 +2238,13 @@ class MeetingService:
         meeting = await MeetingService._get_meeting(session, change, meeting_id)
         if meeting.decision is not None:
             raise ChangeError(f"Meeting already decided ('{meeting.decision}')")
+        # Christoph 2026-10-28: a newer meeting replaces an undecided one; the
+        # decision belongs to the newest record (its departments and carrier)
+        newer = (await session.execute(select(ChangeMeeting.id).where(
+            ChangeMeeting.change_id == change.id,
+            ChangeMeeting.id > meeting.id).limit(1))).scalar_one_or_none()
+        if newer is not None:
+            raise ChangeError("This meeting was replaced by a newer one: decide the newest meeting")
         # Proceed names everything that holds it at once (owner each), not
         # one refusal per press: the dialog's own fields (departments, R/A,
         # cost carrier, the urgent need-by) and proceed_holds.

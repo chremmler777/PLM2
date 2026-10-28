@@ -416,6 +416,22 @@ export default function ScopingPanel(
   const latestMeeting: ChangeMeeting | null =
     meetings.length > 0 ? meetings[meetings.length - 1] : null
   const olderMeetings: ChangeMeeting[] = meetings.slice(0, Math.max(0, meetings.length - 1))
+  // Christoph 2026-10-28: a newer meeting replaces an undecided one; only
+  // the newest is decided (the backend refuses the older one too).
+  const replacedBy = (m: ChangeMeeting): ChangeMeeting | null => {
+    if (m.decision) return null
+    const i = meetings.findIndex((x: ChangeMeeting) => x.id === m.id)
+    return i >= 0 && i < meetings.length - 1 ? meetings[i + 1] : null
+  }
+  const replacedChip = (m: ChangeMeeting) => {
+    const by = replacedBy(m)
+    return by ? (
+      <span data-testid={`meeting-replaced-${m.id}`}
+        className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+        {t('meeting.replacedBy').replace('{d}', formatDate(by.meeting_date))}
+      </span>
+    ) : null
+  }
   // Both paths, meeting-raised and hand-raised, render the same card with the
   // same gates. Closing belongs to the asker (or PM); answering to the asking
   // department (or the author), Sales or PM (2026-10-14, served per question).
@@ -555,7 +571,7 @@ export default function ScopingPanel(
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
             {decisionLabel(m.decision)}
           </span>
-        ) : recordOpen && motherPlant ? (
+        ) : replacedBy(m) ? replacedChip(m) : recordOpen && motherPlant ? (
           <span className="flex flex-wrap items-center justify-end gap-2">
             {onInformTeam && (
               <button type="button" className={btnSm.primary}
@@ -940,6 +956,7 @@ export default function ScopingPanel(
                     <span className="text-slate-400">
                       {formatDate(m.meeting_date)}
                     </span>
+                    {!m.decision && replacedChip(m)}
                     {m.decision && (
                       <span className="px-1.5 py-0 rounded-full bg-slate-700 text-slate-300">
                         {decisionLabel(m.decision)}
@@ -985,6 +1002,11 @@ export default function ScopingPanel(
           </div>
           {carried && (
             <p className="text-[11px] text-slate-400" data-testid="meeting-carried">{t('meeting.carriedLetters')}</p>
+          )}
+          {latestMeeting && !latestMeeting.decision && !motherPlant && (
+            <p className="text-[11px] text-amber-300/90" data-testid="meeting-replaces">
+              {t('meeting.replacesUndecided').replace('{d}', formatDate(latestMeeting.meeting_date))}
+            </p>
           )}
           {/* No minutes field: the discussion itself lives in the mail thread,
               which belongs on the change as a document. */}

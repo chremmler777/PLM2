@@ -7,7 +7,7 @@
  * A department's work never appears outside its own row, so there is exactly one
  * place to look for it.
  */
-import { useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check, ChevronDown, ChevronRight, Cog, FileText, Flag, Gauge, Package, Paperclip,
@@ -355,10 +355,24 @@ export default function AssessmentBuckets({
     .flatMap((c) => [c.department_id, ...(c.co_department_ids ?? [])])
     .filter((d): d is number => d != null))
 
+  // Christoph 2026-10-28: Responsible on top, Informed (and older optional
+  // S/C rows) below a bar: who owes an answer reads at a glance.
+  const assessingRow = (row: (typeof rows)[number]) => owedIds.has(row.id) || row.rasic == null
+    || row.rasic === 'R' || row.rasic === 'A' || row.checks
+  const ordered = [...visible.filter(assessingRow), ...visible.filter((r) => !assessingRow(r))]
+  const firstInformed = ordered.find((r) => !assessingRow(r))?.id
+  const informedCount = ordered.filter((r) => !assessingRow(r)).length
+
   return (
     <div className="space-y-2">
       {deviationPanel}
-      {visible.map((row) => {
+      {ordered.length > 0 && informedCount > 0 && informedCount < ordered.length && (
+        <h3 data-testid="bucket-group-responsible"
+          className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {t('bucket.groupResponsible').replace('{n}', String(ordered.length - informedCount))}
+        </h3>
+      )}
+      {ordered.map((row) => {
         const a = row.assessment
         const owed = owedIds.has(row.id) && (row.rasic === 'R' || row.rasic === 'A')
         // A department the gate waits on is never "Optional", whatever its letter.
@@ -385,7 +399,18 @@ export default function AssessmentBuckets({
         const rowEditable = editable || reopened
         const canSubmit = isMine && rowEditable && (a?.status === 'active' || (owed && a?.status === 'pending'))
         return (
-          <section key={row.id} data-testid={`bucket-${row.id}`}
+          <Fragment key={row.id}>
+          {row.id === firstInformed && (
+            <div data-testid="bucket-group-informed" role="separator"
+              className="flex items-center gap-3 pt-4 pb-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('bucket.groupInformed').replace('{n}', String(informedCount))}
+              </span>
+              <span className="h-px flex-1 bg-slate-700" aria-hidden="true" />
+              <span className="text-[11px] text-slate-500">{t('bucket.groupInformedHint')}</span>
+            </div>
+          )}
+          <section data-testid={`bucket-${row.id}`}
             className={`rounded-lg border ${
               expanded ? 'border-slate-600 bg-slate-800' : 'border-slate-700 bg-slate-800/50'}`}>
             <button type="button" data-testid={`bucket-toggle-${row.id}`}
@@ -676,6 +701,7 @@ export default function AssessmentBuckets({
               </BucketErrorBoundary>
             )}
           </section>
+          </Fragment>
         )
       })}
 

@@ -1023,6 +1023,20 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
   })
   afterEach(cleanup)
 
+  it('Responsible on top, Informed below a bar (Christoph 2026-10-28)', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
+      stages: [{ stage_order: 1, departments: [
+        { department_id: 6, rasic_letter: 'I', tier: 'info', status: null, verdict: null },
+        { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+      ] }],
+    }) as never)
+    buckets({ canSeeAll: true })
+    await screen.findByTestId('bucket-6')
+    const order = Array.from(document.querySelectorAll('[data-testid^="bucket-group-"], section[data-testid^="bucket-"]'))
+      .map((e) => e.getAttribute('data-testid'))
+    expect(order).toEqual(['bucket-group-responsible', 'bucket-2', 'bucket-group-informed', 'bucket-6'])
+  })
+
   it('offers the button to the lead only, and only in assessment', async () => {
     vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith() as never)
     buckets({ canSeeAll: true })

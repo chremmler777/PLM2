@@ -928,6 +928,17 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].meeting_date).toBe('2026-07-04T12:00:00Z')
   })
 
+  it('a newer meeting replaces an undecided one: no buttons on the old one (Christoph 2026-10-28)', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([
+      undecided({ id: 21, meeting_date: '2026-10-27T10:00:00Z' }),
+      undecided({ id: 22, meeting_date: '2026-10-28T10:00:00Z' }),
+    ] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    fireEvent.click(await screen.findByTestId('meeting-summary-21'))
+    expect((await screen.findAllByTestId('meeting-replaced-21')).length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('meeting-replaced-22')).toBeNull()
+  })
+
   it('folds the form away after a save; reopening carries the last letters', async () => {
     let meetings: unknown[] = []
     vi.mocked(changesApi.listMeetings).mockImplementation(() => Promise.resolve(meetings as never))
