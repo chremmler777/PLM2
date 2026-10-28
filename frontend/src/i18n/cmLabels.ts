@@ -231,13 +231,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments blocked by open concerns',
   },
   'cockpit.decideInMeeting': {
-    de: 'Scoping-Termin festhalten: weiter, noch nicht oder ablehnen →',
-    en: 'Record the scoping meeting: proceed, not yet or reject →',
+    de: 'Scoping-Termin festhalten: weiter, als Entwurf speichern oder ablehnen →',
+    en: 'Record the scoping meeting: proceed, save draft or reject →',
   },
   // R37: a meeting saved without its decision is decided, not recorded again
   'cockpit.decideSavedMeeting': {
-    de: 'Scoping-Termin vom {d} entscheiden: weiter, noch nicht oder ablehnen →',
-    en: 'Decide the scoping meeting of {d}: proceed, not yet or reject →',
+    de: 'Scoping-Termin vom {d} entscheiden: weiter, als Entwurf speichern oder ablehnen →',
+    en: 'Decide the scoping meeting of {d}: proceed, save draft or reject →',
   },
   'cockpit.savedMeetingDecides': {
     de: 'Scoping-Termin vom {d} gespeichert; Lead oder Projektmanagement entscheidet: Scoping ansehen →',
@@ -261,8 +261,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'The meeting decides: proceed, needs more info or reject.',
   },
   'scopingSteps.noteV2': {
-    de: 'Die Entscheidung fällt im Termin: Freigabe, noch nicht oder Ablehnung.',
-    en: 'The meeting decides: proceed, not yet or reject.',
+    de: 'Die Entscheidung fällt im Termin: Freigabe, Entwurf oder Ablehnung.',
+    en: 'The meeting decides: proceed, save draft or reject.',
   },
   'scopingSteps.ready': { de: 'Bereit für die Entscheidung', en: 'Ready for the decision' },
   'scopingSteps.decide': { de: 'Im Scoping-Termin entscheiden', en: 'Decide in scoping meeting' },
