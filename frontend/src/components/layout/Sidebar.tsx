@@ -119,7 +119,8 @@ export default function Sidebar() {
           className={`flex-shrink-0 ${active ? 'text-sky-300' : 'text-slate-500 group-hover:text-slate-300'}`} />
         {!isCollapsed && <span className="flex-1 truncate">{item.label}</span>}
         {count > 0 && (
-          <span className={isCollapsed
+          <span data-testid="sidebar-task-count" title={t('tasks.mainBadge').replace('{n}', String(count))}
+            className={isCollapsed
             ? 'absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-amber-500 text-slate-900 text-[11px] leading-4 font-bold text-center tabular-nums'
             : 'px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0 tabular-nums'}>
             {count}
@@ -127,14 +128,14 @@ export default function Sidebar() {
           </span>
         )}
         {backupCount > 0 && !isCollapsed && (
-          <span data-testid="sidebar-backup-count" title={t('tasks.backupBadge')}
+          <span data-testid="sidebar-backup-count" title={t('tasks.backupBadge').replace('{n}', String(backupCount))}
             className="px-1.5 py-0.5 rounded-md bg-slate-600 text-slate-100 text-xs font-bold flex-shrink-0 tabular-nums">
             {backupCount}
             <span className="sr-only"> as backup</span>
           </span>
         )}
         {backupCount > 0 && isCollapsed && count === 0 && (
-          <span data-testid="sidebar-backup-count"
+          <span data-testid="sidebar-backup-count" title={t('tasks.backupBadge').replace('{n}', String(backupCount))}
             className="absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-slate-600 text-slate-100 text-[11px] leading-4 font-bold text-center tabular-nums">
             {backupCount}
           </span>

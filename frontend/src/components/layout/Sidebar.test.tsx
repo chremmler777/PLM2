@@ -140,6 +140,9 @@ describe('Sidebar My Tasks counter', () => {
     const backup = await screen.findByTestId('sidebar-backup-count')
     expect(backup.textContent).toContain('1')
     expect(backup.closest('a')?.textContent).toContain('4')
+    // hover info on both counters
+    expect(screen.getByTestId('sidebar-task-count').getAttribute('title')).toMatch(/^My tasks: 4 open/)
+    expect(backup.getAttribute('title')).toMatch(/^Support tasks: 1 where you are the named backup/)
   })
 
   it('shows no badge when nothing is waiting', async () => {

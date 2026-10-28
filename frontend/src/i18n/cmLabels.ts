@@ -336,7 +336,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'You are backup here. It does not count on your badge.',
   },
   'tasks.asBackup': { de: '+{n} als Vertretung', en: '+{n} as backup' },
-  'tasks.backupBadge': { de: 'Als Vertretung (Backup)', en: 'As backup' },
+  'tasks.mainBadge': {
+    de: 'Meine Aufgaben: {n} offen, für die du verantwortlich bist (oder deine Abteilung, wenn niemand benannt ist)',
+    en: 'My tasks: {n} open that you are responsible for (or your department, where nobody is named)',
+  },
+  'tasks.backupBadge': {
+    de: 'Unterstützungsaufgaben: {n}, bei denen du als Vertretung (Backup) benannt bist. Zählt nicht mit; wird auch deine, wenn sie überfällig ist oder der Verantwortliche abwesend ist',
+    en: 'Support tasks: {n} where you are the named backup. Not counted as yours; it becomes yours too when it is late or the responsible is out',
+  },
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },
