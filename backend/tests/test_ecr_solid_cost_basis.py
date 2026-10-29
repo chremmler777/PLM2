@@ -275,3 +275,18 @@ async def test_finalized_member_reads_the_cause_and_junk_basis_is_refused_on_sav
         "department_id": cb["tool"], "label": "Second", "kind": "external",
         "quantity": 1, "quantity_unit": "pcs"}, headers=cb["pe"])
     assert res.status_code == 403 and "Only a member" in res.json()["detail"]
+
+
+async def test_assessment_effort_hours_alone_are_an_answer(client, cb, session_factory):
+    """Audit 2026-10-29 (P2-2): hours typed on the standing 'Assessment
+    effort' row (the assessment's effort_hours) finalize like any cost line."""
+    res = await _finalize(client, cb)
+    assert res.status_code == 400 and "Nothing to finalize" in res.text, res.text
+    from sqlalchemy import update
+    async with session_factory() as s:
+        await s.execute(update(ChangeAssessment)
+                        .where(ChangeAssessment.change_id == cb["cid"])
+                        .values(effort_hours=3.0))
+        await s.commit()
+    res = await _finalize(client, cb)
+    assert res.status_code == 200, res.text

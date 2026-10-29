@@ -191,7 +191,8 @@ async def _may_act(session: AsyncSession, change: ChangeRequest,
 
 async def _has_answer(session: AsyncSession, change: ChangeRequest,
                       department_id: int) -> bool:
-    """A cost line with hours or money, or a position. The zero-hour lines
+    """A cost line with hours or money, the assessment-effort hours, or a
+    position. The zero-hour lines
     seeded from the checklist (CostService.seed_from_checklist) are a
     starting grid, not an answer."""
     from app.models.change_cost import AssessmentCostLine, CostingPosition
@@ -206,6 +207,10 @@ async def _has_answer(session: AsyncSession, change: ChangeRequest,
                    func.coalesce(L.external_cost, 0) != 0,
                    func.coalesce(L.minutes_per_part, 0) != 0)))).scalar() or 0
     if lines:
+        return True
+    # Audit 2026-10-29 (P2-2): hours on the standing "Assessment effort" row
+    # live on the assessment (effort_hours) and are an answer too
+    if any((a.effort_hours or 0) > 0 for a in _rows(change, department_id)):
         return True
     positions = (await session.execute(
         select(func.count(CostingPosition.id)).where(
