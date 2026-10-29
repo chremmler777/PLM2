@@ -315,9 +315,14 @@ async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
             if not counted:
                 quotes.append(f"'{p.label}' (no offer, or no favourite among several)")
             for o in counted:
-                # A3-10 (R4): the quote number is a reference id, not 'tbd'
-                if reference_refusal(o.quote_ref) is not None or o.id not in filed:
-                    quotes.append(f"'{p.label}' ({o.vendor_name}: quote number and file)")
+                # A3-10 (R4): the quote number is a reference id, not 'tbd'.
+                # Audit 2026-10-29 (P2-1): name only what is missing, the
+                # file was attached and the message still asked for it
+                missing = ([] if reference_refusal(o.quote_ref) is None
+                           else ["the quote number (field 'Quote no.' under the offer)"]) \
+                    + ([] if o.id in filed else ["the quote file"])
+                if missing:
+                    quotes.append(f"'{p.label}' ({o.vendor_name}: {' and '.join(missing)})")
         elif p.est_cost:
             ok = (p.basis_part_id is not None and len(p.basis_differs or "") >= 5
                   if p.basis == "same_as" else says_what(p.basis_ref))
@@ -325,8 +330,7 @@ async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
                 estimates.append(f"'{p.label}'")
     why = []
     if quotes:
-        why.append("Quoted positions need the supplier's quote number and the "
-                   "quote file on the offer: " + ", ".join(quotes))
+        why.append("Quoted positions are missing: " + ", ".join(quotes))
     if estimates:
         why.append("Estimated positions need their basis: the reference (an "
                    "earlier tool, the supplier's figure and its date) or 'same "

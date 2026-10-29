@@ -137,11 +137,14 @@ async def test_a_quote_finalizes_only_with_its_number_and_file(client, cb):
     assert res.status_code == 400 and "no offer" in res.text
     o = await _offer(client, cb, p["id"])
     res = await _finalize(client, cb)
-    assert res.status_code == 400 and "FZ: quote number and file" in res.text
+    assert res.status_code == 400 and "FZ: the quote number" in res.text \
+        and "and the quote file" in res.text
     await client.put(_u(cb, f"/costing/offers/{o['id']}"),
                      json={"quote_ref": "FZ-Q-2231", "quoted_on": "2026-10-12",
                            "valid_until": "2026-12-31"}, headers=cb["te"])
-    assert (await _finalize(client, cb)).status_code == 400      # no file yet
+    res = await _finalize(client, cb)                              # no file yet
+    assert res.status_code == 400 and "FZ: the quote file)" in res.text \
+        and "quote number" not in res.text, res.text
     await _file(client, cb, o["id"])
     res = await _finalize(client, cb)
     assert res.status_code == 200, res.text
@@ -221,7 +224,9 @@ async def test_a_quote_number_that_says_nothing_does_not_finalize(client, cb):
     o = await _offer(client, cb, p["id"], quote_ref="tbd")
     await _file(client, cb, o["id"])
     res = await _finalize(client, cb)
-    assert res.status_code == 400 and "FZ: quote number and file" in res.text, res.text
+    # audit 2026-10-29 (P2-1): the file is there, only the number is asked
+    assert res.status_code == 400 and "FZ: the quote number" in res.text \
+        and "quote file" not in res.text, res.text
     await client.put(_u(cb, f"/costing/offers/{o['id']}"),
                      json={"quote_ref": "FZ-Q-2231"}, headers=cb["te"])
     res = await _finalize(client, cb)
