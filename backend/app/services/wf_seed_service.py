@@ -129,16 +129,20 @@ ASKED_ON_RELEASE = {
 
 
 def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
+    # Audit 2026-10-29 (P2-4): on the Article template Development is the
+    # designer, so an A for Development too was a second task for the same
+    # job; the Design review (4-eyes, Quality A) checks it. Migration 153.
+    dev_a = [] if konstruktion_r == "Development" else [("Development", "A")]
     return {
         "name": name,
         "description": "Check workflow per impacted ECN revision (kickoff -> ready-to-go)",
         "stages": [
             ("Design", [
                 ("Update 3D data", [
-                    (konstruktion_r, "R"), ("Development", "A"), ("Project Manager", "I"),
+                    (konstruktion_r, "R"), *dev_a, ("Project Manager", "I"),
                 ], {"requires_cad_evidence": True}),
                 ("Update drawings & documentation", [
-                    (konstruktion_r, "R"), ("Development", "A"), ("Quality", "S"),
+                    (konstruktion_r, "R"), *dev_a, ("Quality", "S"),
                 ], {}),
             ]),
             ("Design check", [
