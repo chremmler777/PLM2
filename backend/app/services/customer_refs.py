@@ -15,11 +15,17 @@ _PROJECT_CODE = re.compile(r"^\s*\d{4}\s+(?=\S)")
 _KTX_PART_ANY = re.compile(r"\b\d{2}-\d{4}-\d{3}-\d+\b")
 
 
-def customer_title(title: Optional[str]) -> str:
-    """The change title as the customer may read it."""
+def customer_title(title: Optional[str], drop: Iterable[Optional[str]] = ()) -> str:
+    """The change title as the customer may read it. drop: numbers already
+    named in front (the customer part numbers), not repeated in the title.
+    Audit 2026-10-29 (P2-3): the auto title is now "<our part> - <customer
+    part> - <project> <name>", so every " - " segment is cleaned, not only
+    the first."""
     t = _KTX_PART.sub("", title or "")
-    t = _PROJECT_CODE.sub("", t)
     t = _KTX_PART_ANY.sub("", t)
+    dropped = {(n or "").strip() for n in drop if (n or "").strip()}
+    parts = [_PROJECT_CODE.sub("", seg).strip() for seg in re.split(r"\s+-\s+", t)]
+    t = " - ".join(p for p in parts if p and p not in dropped)
     t = re.sub(r"\s{2,}", " ", t).strip(" -:")
     return t or "your change request"
 
@@ -36,8 +42,9 @@ def customer_numbers(numbers: Iterable[Optional[str]]) -> str:
 
 def customer_heading(title: Optional[str], numbers: Iterable[Optional[str]] = ()) -> str:
     """Customer part numbers first, then the title without our numbers."""
+    numbers = list(numbers)
     nums = customer_numbers(numbers)
-    name = customer_title(title)
+    name = customer_title(title, numbers)
     return f"{nums} {name}" if nums else name
 
 

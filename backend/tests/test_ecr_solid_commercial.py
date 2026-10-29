@@ -164,7 +164,7 @@ async def test_offer_states_index_and_warns_on_an_older_one(
         await s.commit()
     sales = await _auth(client, "sales")
     o = await _create(client, sales, cid)
-    assert {"number": "886.197", "index": "C", "newer": None} in o["indexes"]
+    assert {"number": "886.197", "customer_number": None, "index": "C", "newer": None} in o["indexes"]
     assert "index_older" not in {w["code"] for w in o["warnings"]}
     async with session_factory() as s:
         s.add(PartRevision(part_id=part.id, revision_name="4", phase="official",

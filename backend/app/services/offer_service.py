@@ -1613,7 +1613,7 @@ class OfferService:
             snap = data.pop(SNAPSHOT_KEY, None)
             sent_list = data.pop(SEND_KEY, None)
             if o.status == "draft":
-                indexes = [{k: r[k] for k in ("number", "index", "newer")}
+                indexes = [{k: r[k] for k in ("number", "customer_number", "index", "newer")}
                            for r in live_indexes]
                 send_list = OfferService.send_list(
                     change, data,
@@ -1868,7 +1868,8 @@ class OfferService:
         org = (await session.get(Organization, plant.organization_id)
                if plant else None)
         # §6: each part with the index the offer goes out on
-        items = [{"number": r["number"], "name": r["name"], "index": r["index"]}
+        items = [{"number": r["customer_number"] or r["number"], "name": r["name"],
+                  "index": r["index"]}
                  for r in await OfferService.part_indexes(session, change)]
         # idea blocks are kept, marked: the PDF draws them hatched, outside
         # the committed finish
@@ -1936,8 +1937,12 @@ class OfferService:
                 newer = {"index": name(top),
                          "received": (top.customer_received_at.isoformat()
                                       if top.customer_received_at else None)}
+            # "number" stays our part number (the key frozen offers match
+            # on); what the customer reads is customer_number (audit
+            # 2026-10-29, P2-3: the offer named KTX numbers)
             out.append({"part_id": it.part_id,
                         "number": part.part_number if part else str(it.part_id),
+                        "customer_number": (part.customer_part_number or None) if part else None,
                         "name": part.name if part else "", "index": index,
                         "newer": newer})
         return out

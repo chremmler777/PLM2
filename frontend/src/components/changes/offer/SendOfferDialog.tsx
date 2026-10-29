@@ -195,7 +195,7 @@ export default function SendOfferDialog({
           {t('send.goesOutOn')}:{' '}
           {(offer.indexes ?? []).map((i, n) => (
             <span key={`${i.number}-${n}`} className="mr-2 text-slate-200">
-              {i.number} <span className="font-medium">{i.index || '-'}</span>
+              {i.customer_number ?? i.number} <span className="font-medium">{i.index || '-'}</span>
               {i.newer && <span className="text-amber-300"> ({t('send.newer').replace('{i}', i.newer.index)})</span>}
             </span>
           ))}

@@ -7825,8 +7825,13 @@ class ChangeService:
             frozen = {i.get("number"): i.get("index") or "" for i in
                       ((offer.data or {}).get("_snapshot") or {}).get("items") or []
                       if isinstance(i, dict)}
-            now_idx = {r["number"]: r["index"] for r in
-                       await OfferService.part_indexes(session, change)}
+            # a snapshot names the customer number since audit P2-3, older
+            # ones our part number: match either
+            now_idx = {}
+            for r in await OfferService.part_indexes(session, change):
+                now_idx[r["number"]] = r["index"]
+                if r.get("customer_number"):
+                    now_idx[r["customer_number"]] = r["index"]
             evidence["index_changes"] = [
                 {"number": n, "offer": frozen[n], "now": now_idx[n]}
                 for n in frozen if n in now_idx and now_idx[n] != frozen[n]]

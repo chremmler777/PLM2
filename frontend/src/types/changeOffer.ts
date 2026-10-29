@@ -201,6 +201,8 @@ export interface OfferOut {
 
 export interface OfferPartIndex {
   number: string
+  /** Audit P2-3: what the customer reads (their part number), if known. */
+  customer_number?: string | null
   index: string
   newer?: { index: string; received?: string | null } | null
 }

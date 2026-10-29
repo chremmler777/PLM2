@@ -530,3 +530,13 @@ async def test_esc_p3_6_team_change_leaves_history(session_factory, seed):
             AuditLog.entity_type == "project_team"))).scalars().all()
         assert len(rows) == 1 and rows[0].action == "team_changed"
         assert '"responsible_id": %d' % seed["engineer_id"] in rows[0].new_values
+
+
+def test_customer_heading_cleans_the_new_auto_title():
+    """Audit 2026-10-29 (P2-3): "<our part> - <customer part> - <project>
+    <name>" read to the customer as customer number once, then the name."""
+    from app.services.customer_refs import customer_heading
+    got = customer_heading(
+        "20-3450-001-0 - 3CR.853.653 - 1864 OPMOBILITY VW426 GRILL CARRIER", ["3CR.853.653"])
+    assert got == "3CR.853.653 OPMOBILITY VW426 GRILL CARRIER"
+    assert "1864" not in got and "20-3450" not in got
