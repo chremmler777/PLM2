@@ -78,10 +78,17 @@ describe('ImplementationPanel', () => {
     wrap(<ImplementationPanel changeId={7} />)
     await screen.findByText(/ECR1\.1/)
     const spy = vi.spyOn(lastQc, 'invalidateQueries')
-    fireEvent.click(screen.getByRole('button', { name: /Workflow/ }))
+    // P1-2 (audit 2026-10-29): the running check workflow opens by itself
     fireEvent.click(screen.getByTestId('wf-section'))
     expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 7, 'implementation'] })
     expect(spy).toHaveBeenCalledWith({ queryKey: ['change-my-actions', 7] })
+  })
+
+  it('the running workflow can still be folded away', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByTestId('wf-section')
+    fireEvent.click(screen.getByRole('button', { name: /Workflow/ }))
+    expect(screen.queryByTestId('wf-section')).toBeNull()
   })
 
   it('signs no-geometry-change with a reason', async () => {

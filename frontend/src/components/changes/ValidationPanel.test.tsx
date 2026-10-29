@@ -74,6 +74,20 @@ describe('ValidationPanel', () => {
   })
   afterEach(cleanup)
 
+  it('P1-1 (audit 2026-10-29): APQP sees the Tool Engineer block to confirm its limits', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [
+        { department_id: 9, checks: [check({ check_key: 'weight', computed: true, check_id: 78,
+          unit_short: 'g', lower_limit: 480, upper_limit: 530, limits_pending: true,
+          can_confirm_limits: true, measurements: [] })] },
+        { department_id: 11, checks: [check({ check_key: 'sampled' })] },
+      ],
+    }) as never)
+    render_({ myDepartmentIds: [4] })
+    expect(await screen.findByTestId('validation-limits-ok-9-weight')).toBeTruthy()
+    expect(screen.queryByTestId('validation-pass-11-sampled')).toBeNull()
+  })
+
   it('passes a check for the viewer’s own department', async () => {
     vi.mocked(changesApi.validationState).mockResolvedValue(state() as never)
     render_()

@@ -16,7 +16,9 @@ interface Props {
 export default function ImplementationPanel({ changeId }: Props) {
   const qc = useQueryClient();
   const [signTarget, setSignTarget] = useState<ImplementationItem | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  // undefined = untouched: the first revision whose check workflow still
+  // runs opens by itself (audit 2026-10-29, P1-2: two clicks deep, missed)
+  const [expandedPick, setExpanded] = useState<number | null | undefined>(undefined);
   const [uploadFor, setUploadFor] = useState<number | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -39,6 +41,8 @@ export default function ImplementationPanel({ changeId }: Props) {
   });
 
   if (isLoading || !data) return <div className="text-slate-400 text-sm">…</div>;
+  const expanded = expandedPick !== undefined ? expandedPick
+    : data.items.find((i) => i.revision_id !== null && i.instance_id !== null && !i.ready)?.item_id ?? null;
 
   return (
     <div className="space-y-4">

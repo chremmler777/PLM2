@@ -496,9 +496,13 @@ export default function ValidationPanel({
   // Nothing to send back once every check has passed.
   const allPassed = all.length > 0 && all.every((d) => d.checks.length > 0
     && liveChecks(d).every((c) => c.status === 'passed'))
+  // Audit 2026-10-29 (P1-1): APQP confirms the limits a Tool Engineer set,
+  // so a block with a check this viewer may confirm shows too (read-only
+  // apart from the confirm, the backend's can_confirm_limits).
   const visible = canSeeAll
     ? all
-    : all.filter((d) => myDepartmentIds.includes(d.department_id))
+    : all.filter((d) => myDepartmentIds.includes(d.department_id)
+      || d.checks.some((c) => c.can_confirm_limits))
   const others = all.length - visible.length
   const delta = state.weight_delta_g ?? 0
 

@@ -119,8 +119,9 @@ function ClosingSummary({ change, departments, canSeeCosts }: {
   )
 }
 
-function Collapsible({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
-  const [open, setOpen] = useState(false)
+function Collapsible({ title, children, testId, defaultOpen = false }: {
+  title: string; children: ReactNode; testId?: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <section data-testid={testId} className="rounded-xl border border-slate-700 bg-slate-800/40">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
@@ -274,7 +275,11 @@ export default function ReleaseTab({
         )}
       </StepSection>
 
-      <Collapsible title="Revisions (ECN)" testId="release-revisions">
+      {/* Audit 2026-10-29 (P1-2): the last check-workflow stage (sampling,
+          final release) is done here during validation; "Complete … task"
+          lands on this tab, so the section starts open then. */}
+      <Collapsible title="Revisions (ECN)" testId="release-revisions"
+        defaultOpen={change.status === 'in_validation'}>
         <ImplementationPanel changeId={change.id} />
       </Collapsible>
     </div>

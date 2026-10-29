@@ -328,6 +328,13 @@ describe('ReleaseTab', () => {
   afterEach(cleanup)
   beforeEach(() => { vi.clearAllMocks() })
 
+  it('P1-2 (audit 2026-10-29): in validation the Revisions (ECN) section starts open', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={vi.fn()} advancing={false} />)
+    expect((await screen.findByTestId('release-revisions')).textContent).toContain('mock-ecn')
+  })
+
   it('lists the blockers as info and keeps Release clickable (soft guard via deviation)', async () => {
     vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
     const onAdvance = vi.fn()
