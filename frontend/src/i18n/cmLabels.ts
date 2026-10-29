@@ -1438,6 +1438,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Antwort des Kunden hier ablegen',
     en: 'Drop the customer’s answer here',
   },
+  'answer.ourDocSlot': { de: 'Unterlage zur Antwort hier ablegen', en: 'Drop the document behind the answer here' },
   'attach.requestSlot': {
     de: 'Rückfrage an den Kunden hier ablegen',
     en: 'Drop the question sent to the customer here',
@@ -2218,12 +2219,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'meeting.proceedTitle': { de: 'Freigeben und Bewertung starten', en: 'Proceed and start assessment' },
   'meeting.proceedConsequence': {
-    de: 'Die mit R oder A markierten Abteilungen erhalten jetzt ihre Bewertungsaufgabe. Der Umfang ist damit für die Bewertung festgelegt; Änderungen danach laufen über eine Routing-Änderung.',
-    en: 'The departments marked R or A get their assessment task now. This fixes who assesses; changing it afterwards goes through a routing change.',
+    de: 'Die als Verantwortlich markierten Abteilungen erhalten jetzt ihre Bewertungsaufgabe. Der Umfang ist damit für die Bewertung festgelegt; Änderungen danach laufen über eine Routing-Änderung.',
+    en: 'The departments marked Responsible get their assessment task now. This fixes who assesses; changing it afterwards goes through a routing change.',
   },
   'meeting.proceedNoAssessor': {
-    de: 'Keine Abteilung ist mit R oder A markiert: niemand bewertet',
-    en: 'No department is marked R or A: nobody assesses',
+    de: 'Keine Abteilung ist als Verantwortlich markiert: niemand bewertet',
+    en: 'No department is marked Responsible: nobody assesses',
   },
   'meeting.proceedCarrier': { de: 'Kostenträger: {x}', en: 'Cost carrier: {x}' },
   'meeting.proceedConfirm': { de: 'Bewertung starten', en: 'Start assessment' },

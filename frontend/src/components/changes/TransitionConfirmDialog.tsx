@@ -64,7 +64,7 @@ export default function TransitionConfirmDialog({
       closeOnBackdrop={!confirm.reason} data-testid={`confirm-${confirm.to}`}
       footer={(
         <>
-          <Button onClick={onClose} disabled={busy}>Not yet</Button>
+          <Button onClick={onClose} disabled={busy}>Back</Button>
           <Button variant="primary" data-testid="confirm-go" disabled={busy || held || needsReason}
             title={held ? confirm.holdNote ?? 'Complete what is still open first' : needsReason ? 'Give a reason first' : undefined}
             onClick={() => onConfirm(confirm.reason ? reason.trim() : undefined)}>

@@ -78,6 +78,9 @@ const STATE_LABEL: Record<State, string> = {
 /** Copy kept local (cmLabels is owned elsewhere): a C/S row owes no answer. */
 const OPTIONAL_LABEL = 'Optional'
 const OPTIONAL_HINT = 'Consulted or supporting: this department may add input, no answer is required'
+// Christoph 2026-10-28: Responsible / Informed only; an Informed row says so
+const INFORMED_LABEL = 'Informed'
+const INFORMED_HINT = 'Informed: one notice, no task, nothing waits for it'
 const stateLabel = (s: State) => (s === 'optional' ? OPTIONAL_LABEL : t(STATE_LABEL[s]))
 
 /**
@@ -431,9 +434,9 @@ export default function AssessmentBuckets({
               )}
               <span className="text-slate-100 font-medium truncate">{deptName(row.id)}</span>
               <span data-testid={`bucket-state-${row.id}`}
-                title={state === 'optional' ? OPTIONAL_HINT : undefined}
+                title={state === 'optional' ? (row.rasic === 'I' ? INFORMED_HINT : OPTIONAL_HINT) : undefined}
                 className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
-                {stateLabel(state)}
+                {state === 'optional' && row.rasic === 'I' ? INFORMED_LABEL : stateLabel(state)}
               </span>
               {row.checks && (state === 'waiting' || state === 'in_work') && (
                 <span data-testid={`bucket-checks-${row.id}`} title={t('bucket.checksFirstHint')}

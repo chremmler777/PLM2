@@ -164,7 +164,7 @@ export default function AnswerForm({
           more info behind the assumption) */}
       {kind !== '' && c.is_open && (
         <AttachmentDropzone changeId={changeId} kind={docKind} concernId={c.id}
-          compact label={t(customer ? 'answer.customerDocSlot' : 'attach.responseSlot')}
+          compact label={t(customer ? 'answer.customerDocSlot' : 'answer.ourDocSlot')}
           onUploaded={onDone} />
       )}
       {noProof && (

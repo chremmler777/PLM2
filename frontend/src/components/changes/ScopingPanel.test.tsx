@@ -382,7 +382,7 @@ describe('ScopingPanel refused decision', () => {
     expect((await screen.findByTestId('confirm-open')).textContent).toContain('Rita RD')
     expect(screen.queryByTestId('decide-error')).toBeNull()
     // ... and as the line on the panel once the dialog is closed.
-    fireEvent.click(within(screen.getByTestId('confirm-in_assessment')).getByRole('button', { name: 'Not yet' }))
+    fireEvent.click(within(screen.getByTestId('confirm-in_assessment')).getByRole('button', { name: 'Back' }))
     const alert = await screen.findByTestId('decide-error')
     expect(alert.textContent).toContain('Rita RD')
     expect(alert.textContent).toContain('tool cannot hold tolerance')
