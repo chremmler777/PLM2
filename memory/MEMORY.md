@@ -76,3 +76,4 @@
 - [2277 back panels = 3200 t Engel](feedback-2277-backpanel-press-3200.md) — 227701/227702 both EN 3200-1, cav 2 and 1+1; RFQ2 press pick always goes wrong
 - [1994 E2 admin activation 2026-10-28](1994-e2-admin-activation-2026-10-28.md) — 886.197/883.607/887.233 E2 active (administrative, official + no impact), CR-2026-0008 cancelled, 2122 investigation draft still open
 - [HRS bonus hot runners 2026-10-28](hrs-bonus-hot-runner-2026-10-28.md) — PARKED, Brandon tracks HRS by hand; 15-tool feed system reference (7 heated sprues); 2277 back panel SVG vs FlexFlow open till mid-Nov
+- [1994 479 E2 TM 004 2026-10-29](1994-479-e2-tm004-2026-10-29.md) — 206.881.479 TM 004 TOOLING as E2 · 004 (id 2278, intake 15 pending), FZ E1.1 2262 closed, mailed
