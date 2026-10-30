@@ -38,7 +38,7 @@ def test_118_up_and_down_on_sqlite(tmp_path):
     from tests.test_change_starter_departments import _load_migration_032
     _load_migration_032()                  # puts the real alembic into sys.modules, once
     m118 = _load("118_ppap_submitted_by.py")
-    assert (m118.revision, m118.down_revision) == ("118", "117")
+    assert (m118.revision, m118.down_revision) == ("118", "117a")
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'm118.db'}")
     with engine.begin() as conn:
         for stmt in PRE.split(";"):

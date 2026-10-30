@@ -3,14 +3,14 @@ approve/reject can tell the submitter from the approver. Existing submitted
 rows fall back to created_by in the app; nothing is backfilled.
 
 Revision ID: 118
-Revises: 117
+Revises: 117a
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "118"
-down_revision = "117"
+down_revision = "117a"
 branch_labels = None
 depends_on = None
 

@@ -1,15 +1,15 @@
-"""117: change_requests.scope_definition, the scope of the change in the
+"""117a: change_requests.scope_definition, the scope of the change in the
 project manager's words (written in captured/scoping, read-only afterwards).
 
-Revision ID: 117
-Revises: 116
+Revision ID: 117a
+Revises: 117 (after 117 DFM entry delete from main)
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "117"
-down_revision = "116"
+revision = "117a"
+down_revision = "117"
 branch_labels = None
 depends_on = None
 
