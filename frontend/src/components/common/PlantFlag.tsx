@@ -1,16 +1,24 @@
 /**
- * Plant country flags: which plant a project or part belongs to (Toccoa US,
- * Silao MX, Weissenburg DE) and both when a part is shared across plants.
- * Small inline SVGs, because Windows shows emoji flags as plain letters.
+ * The plant flag in the project header: Toccoa US, Silao MX, Weissenburg DE.
+ * A small inline SVG, because Windows shows emoji flags as plain letters.
  */
 import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
 
-const PLANT_NAME: Record<string, string> = {
-  US: 'Toccoa (USA)',
-  MX: 'Silao (Mexico)',
-  DE: 'Weissenburg (Germany)',
-};
+interface PlantRow { id: number; name: string; code: string; location?: string | null }
+
+// plant code -> country; unknown codes fall back to the plant location.
+const PLANT_COUNTRY: Record<string, string> = { 'usa-toccoa': 'US', SIL: 'MX', WUG: 'DE', 'main-plant': 'DE' };
+
+export function plantCountry(plant?: PlantRow | null): string | null {
+  if (!plant) return null;
+  if (PLANT_COUNTRY[plant.code]) return PLANT_COUNTRY[plant.code];
+  const loc = (plant.location ?? '').toLowerCase();
+  if (/\b(mx|mexico)\b/.test(loc)) return 'MX';
+  if (/\b(usa|ga)\b/.test(loc)) return 'US';
+  if (/\b(de|germany)\b/.test(loc)) return 'DE';
+  return null;
+}
 
 function FlagSvg({ country }: { country: string }) {
   const common = { width: 16, height: 11, viewBox: '0 0 16 11', 'aria-hidden': true as const };
@@ -45,37 +53,24 @@ function FlagSvg({ country }: { country: string }) {
   return null;
 }
 
-export function PlantFlags({ countries, testId }: { countries?: string[] | null; testId?: string }) {
-  const known = (countries ?? []).filter((c) => PLANT_NAME[c]);
-  if (known.length === 0) return null;
-  const title = known.length > 1
-    ? `Both plants: ${known.map((c) => PLANT_NAME[c]).join(' + ')}`
-    : PLANT_NAME[known[0]];
+/** One flag for a plant; nothing when the plant is unknown. */
+export function PlantFlag({ plant, testId }: { plant?: PlantRow | null; testId?: string }) {
+  const country = plantCountry(plant);
+  if (!country || !plant) return null;
   return (
-    <span data-testid={testId} title={title} aria-label={title}
-      className="inline-flex flex-shrink-0 items-center gap-0.5 align-middle">
-      {known.map((c) => (
-        <span key={c} className="inline-flex rounded-[2px] ring-1 ring-slate-600/80 overflow-hidden">
-          <FlagSvg country={c} />
-        </span>
-      ))}
+    <span data-testid={testId} title={plant.name} aria-label={plant.name}
+      className="inline-flex flex-shrink-0 align-middle rounded-[2px] ring-1 ring-slate-600/80 overflow-hidden">
+      <FlagSvg country={country} />
     </span>
   );
 }
 
-/** Countries of every part of a project, {part_id: ["US", "MX"]}. One request
- *  per project; every row and header on the page shares it. */
-export function useProjectPartCountries(projectId?: number | null) {
-  return useQuery<Record<string, string[]>>({
-    queryKey: ['project-part-countries', projectId],
-    queryFn: async () => (await client.get(`/v1/plants/projects/${projectId}/part-countries`)).data,
-    enabled: !!projectId,
-    staleTime: 5 * 60 * 1000,
+/** The project's plant flag; plants come from the shared ['plants'] query. */
+export function ProjectPlantFlag({ plantId, testId }: { plantId?: number | null; testId?: string }) {
+  const { data: plants } = useQuery<PlantRow[]>({
+    queryKey: ['plants'],
+    queryFn: async () => (await client.get('/v1/plants')).data,
+    staleTime: 10 * 60 * 1000,
   });
-}
-
-export function PartPlantFlags({ projectId, partId, testId }:
-  { projectId?: number | null; partId: number; testId?: string }) {
-  const { data } = useProjectPartCountries(projectId);
-  return <PlantFlags countries={data?.[String(partId)]} testId={testId} />;
+  return <PlantFlag plant={plants?.find((p) => p.id === plantId)} testId={testId} />;
 }

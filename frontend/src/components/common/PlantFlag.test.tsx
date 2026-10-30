@@ -1,28 +1,26 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
-import { PlantFlags } from './PlantFlag'
+import { PlantFlag, plantCountry } from './PlantFlag'
 
-describe('PlantFlags', () => {
+describe('PlantFlag', () => {
   afterEach(cleanup)
 
-  it('shows one flag with the plant name', () => {
-    render(<PlantFlags countries={['MX']} testId="f" />)
+  it('maps the plant to its country', () => {
+    expect(plantCountry({ id: 1, name: 'Silao Mexico', code: 'SIL' })).toBe('MX')
+    expect(plantCountry({ id: 2, name: 'USA Toccoa', code: 'usa-toccoa' })).toBe('US')
+    expect(plantCountry({ id: 3, name: 'X', code: 'x', location: 'Toccoa, GA, USA' })).toBe('US')
+    expect(plantCountry({ id: 4, name: 'Y', code: 'y', location: 'Nowhere' })).toBeNull()
+  })
+
+  it('shows one flag titled with the plant name', () => {
+    render(<PlantFlag plant={{ id: 1, name: 'Silao Mexico', code: 'SIL' }} testId="f" />)
     const el = screen.getByTestId('f')
-    expect(el.getAttribute('title')).toBe('Silao (Mexico)')
+    expect(el.getAttribute('title')).toBe('Silao Mexico')
     expect(el.querySelectorAll('svg')).toHaveLength(1)
   })
 
-  it('shows both flags for a shared part', () => {
-    render(<PlantFlags countries={['US', 'MX']} testId="f" />)
-    const el = screen.getByTestId('f')
-    expect(el.getAttribute('title')).toBe('Both plants: Toccoa (USA) + Silao (Mexico)')
-    expect(el.querySelectorAll('svg')).toHaveLength(2)
-  })
-
-  it('renders nothing without a known country', () => {
-    render(<PlantFlags countries={[]} testId="f" />)
+  it('renders nothing for an unknown plant', () => {
+    render(<PlantFlag plant={null} testId="f" />)
     expect(screen.queryByTestId('f')).toBeNull()
-    render(<PlantFlags countries={['XX']} testId="g" />)
-    expect(screen.queryByTestId('g')).toBeNull()
   })
 })

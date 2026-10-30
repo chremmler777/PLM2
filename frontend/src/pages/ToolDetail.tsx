@@ -17,7 +17,6 @@ import { toolScope } from '../api/dfm';
 import { producedArticles, type ToolRelation } from '../components/tools/toolRelations';
 import FieldNoteMarker from '../components/fieldNotes/FieldNoteMarker';
 import { usePartFieldNoteIndex } from '../hooks/queries/useFieldNotes';
-import { PartPlantFlags } from '../components/common/PlantFlag';
 
 export interface ToolPart {
   id: number;
@@ -71,7 +70,6 @@ export default function ToolDetail({ part, onOpenPart, onBack, nextPhase = null,
               <h1 data-field-key="tool.number" className="text-4xl font-bold text-slate-100 mb-1">
                 {part.part_number}
                 <FieldNoteMarker partId={part.id} fieldKey="tool.number" label="Tool no." note={notes.get('tool.number')} projectId={part.project_id} />
-                {' '}<PartPlantFlags projectId={part.project_id} partId={part.id} testId="tool-flags" />
               </h1>
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap mb-3">
