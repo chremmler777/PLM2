@@ -89,19 +89,20 @@ describe('AssessmentChecks (spec §4)', () => {
     cleanup()
     render(view([{ ...q, can_answer: true }], false))
     expect(screen.getByTestId('achk-qhead-21').textContent).toBe(
-      `${t('achk.asksCustomerVia').replace('{d}', 'Development')}: `
+      `Question for the customer: `
       + t('achk.answerBy').replace('{d}', formatDate('2026-10-20T12:00:00')))
-    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('asks the customer')
+    // the step line says what to do; no 'Waiting for the answer.' for the one who gets it
+    expect(screen.getByTestId('achk-qstep-21').textContent)
+      .toBe('Development needs this from the customer. Copy the mail text, send it to the customer, then enter the answer here.')
+    expect(screen.queryByText(t('achk.waitingOther'))).toBeNull()
     cleanup()
     render(view([{ ...q, can_answer: true, answer_from: 'supplier' }], false))
-    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('asks the supplier')
+    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('Question for the supplier')
     cleanup()
     // a question for our team: the answerer is asked directly
     render(view([{ ...q, can_answer: true, answer_from: 'our_team' }], false))
     expect(screen.getByTestId('achk-qhead-21').textContent)
       .toContain(t('achk.asksYou').replace('{d}', 'Development'))
-    cleanup()
-    render(view([{ ...q, can_answer: true }], false))
     // negative: the answerer is not told it holds "your submit"
     expect(screen.queryByText(t('achk.waiting'))).toBeNull()
     expect(screen.getByText(t('achk.waitingOther'))).toBeTruthy()

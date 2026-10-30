@@ -302,6 +302,8 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
     ? `${t('answer.assumed')}: ${q.assumed_value ?? ''} ${q.assumed_unit ?? ''}`.trim()
     : q.answer_kind === 'confirmed' ? `${t('answer.confirmed')}: ${q.answer_ref ?? ''}`
       : q.answer_note
+  const outside = q.answer_from === 'customer' || q.answer_from === 'supplier'
+  const passOn = outside && !!q.can_answer && !q.answered_at && !editable
   return (
     <div className="rounded border border-sky-800/60 bg-sky-950/20 p-2 space-y-1" data-testid={`achk-q-${q.id}`}>
       {/* A3-13: worded by viewer: the asker reads its own question, the
@@ -310,11 +312,10 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
         {editable
           ? t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))
           : q.can_answer && !q.answered_at
-            // a customer/supplier question: the viewer only passes it on
-            // (Christoph 2026-10-30, "still not clear who gets asked")
-            ? t(q.answer_from === 'customer' ? 'achk.asksCustomerVia'
-              : q.answer_from === 'supplier' ? 'achk.asksSupplierVia' : 'achk.asksYou')
-              .replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
+            // a customer/supplier question: the heading names who is asked,
+            // the step line below what the viewer does (Christoph 2026-10-30)
+            ? (outside ? t(`achk.questionTo.${q.answer_from}`)
+              : t('achk.asksYou').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? ''))
               + (q.answer_due ? `: ${t('achk.answerBy').replace('{d}', formatCalendarDate(q.answer_due))}` : '')
             : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
               .replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
@@ -323,6 +324,11 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
       {q.answered_at ? (
         <p className="text-xs text-slate-200">{t('achk.answer')}: {answer}
           {q.answered_by_name && <span className="text-slate-500"> ({q.answered_by_name})</span>}</p>
+      ) : passOn ? (
+        <p className="text-xs text-slate-300" data-testid={`achk-qstep-${q.id}`}>
+          {t(`achk.passOn.${q.answer_from}`)
+            .replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')}
+        </p>
       ) : (
         <p className="text-xs text-slate-400">{t(editable ? 'achk.waiting' : 'achk.waitingOther')}</p>
       )}
