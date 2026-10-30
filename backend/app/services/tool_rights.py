@@ -24,6 +24,12 @@ def _is_admin(user) -> bool:
     return getattr(user, "effective_role", None) == "admin"
 
 
+def is_admin(user) -> bool:
+    """The admin of this rule (not while acting as a department), for rules
+    like "the recorder or an admin" (DFM entry delete)."""
+    return user is not None and _is_admin(user)
+
+
 async def can_edit_tools(db: AsyncSession, user) -> bool:
     if user is None:
         return False

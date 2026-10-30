@@ -1,8 +1,10 @@
 """DFM archive service: topics per tool or per project (the project-wide
 "general tooling DFM"), append-only entries in three columns, files on disk
 under uploads/dfm/<tool>/<entry>/ or uploads/dfm/project-<project>/<entry>/.
-Entries are never deleted; an update is a new entry that supersedes the old
-one. Only an empty topic can be (soft) deleted.
+An update is a new entry that supersedes the old one. An entry nothing builds
+on yet (no live reply, no live update) can be soft deleted by its recorder or
+an admin, with a reason: hidden everywhere, row, files and audit stay. A topic
+is (soft) deleted with a reason once it has entries.
 
 Every operation works on a DfmScope: exactly one of tool / project."""
 from __future__ import annotations
@@ -28,6 +30,7 @@ from app.models.entities import Project, User
 from app.models.part import Part
 from app.services import dfm_audit
 from app.services.part_service import ChangelogService
+from app.services.tool_rights import is_admin as is_tool_admin
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,13 @@ CLOSE_EMPTY_MESSAGE = "Record at least one message before finishing the topic"
 EMPTY_ENTRY_MESSAGE = "Attach the DFM file or write a note"
 DELETE_REASON_MESSAGE = "Say why this topic is deleted: it already has entries"
 ALREADY_SUPERSEDED_MESSAGE = "This entry was already updated, refresh"
+ENTRY_DELETE_DENIED = "Only the user who recorded this entry or an admin can delete it"
+ENTRY_DELETE_REASON = "Say why this entry is deleted"
+ENTRY_HAS_UPDATE = ("This entry was updated by #{id}. Delete the later step first, "
+                    "or use Update instead")
+ENTRY_HAS_REPLY = ("#{id} replies to this entry. Delete the later step first, "
+                   "or use Update instead")
+MAX_DELETE_REASON = 500
 MAX_FILENAME_LEN = 255
 MAX_CONTENT_TYPE_LEN = 100
 # kinds whose addressees owe an answer
@@ -216,6 +226,24 @@ def check_flow(topic: DfmTopic, party: str, targets: list[str], kind: str, reply
         raise DfmError("An answer must be addressed to the sender of the message it replies to")
 
 
+def live_entries(topic: DfmTopic) -> list[DfmEntry]:
+    """The topic's entries without the deleted ones: every view, count and
+    status works on these."""
+    return [e for e in topic.entries if getattr(e, "deleted_at", None) is None]
+
+
+def entry_blocker(entry: DfmEntry, entries: list[DfmEntry]) -> str | None:
+    """Why the entry cannot be deleted because a later live step builds on it
+    (an update of it, or a reply to it), else None. entries: the live ones."""
+    for e in entries:
+        if e.id != entry.id and e.supersedes_id == entry.id:
+            return ENTRY_HAS_UPDATE.format(id=e.id)
+    for e in entries:
+        if e.id != entry.id and e.reply_to_id == entry.id:
+            return ENTRY_HAS_REPLY.format(id=e.id)
+    return None
+
+
 def _msg_date(e: DfmEntry) -> date:
     """The mail date when set, else the day it was recorded."""
     return e.sent_at or business_date_of(e.recorded_at)
@@ -232,7 +260,7 @@ def flow_state(topic: DfmTopic, today: date | None = None) -> dict:
     addressee is either answered (a current answer from that party replies
     to any version of the message) or awaiting since the message date."""
     today = today or business_today()
-    entries = list(topic.entries)
+    entries = live_entries(topic)
     successor = {e.supersedes_id: e.id for e in entries if e.supersedes_id is not None}
 
     def head(i: int) -> int:
@@ -341,7 +369,8 @@ class DfmService:
         Who may delete is checked by the caller (tool_rights). A topic with entries needs a reason."""
         reason = (reason or "").strip() or None
         has_entry = (await session.execute(
-            select(DfmEntry.id).where(DfmEntry.topic_id == topic.id).limit(1))).scalar_one_or_none()
+            select(DfmEntry.id).where(DfmEntry.topic_id == topic.id, DfmEntry.deleted_at.is_(None))
+            .limit(1))).scalar_one_or_none()
         if has_entry is not None and reason is None:
             raise DfmError(DELETE_REASON_MESSAGE)
         topic.deleted_at = datetime.utcnow()
@@ -357,7 +386,8 @@ class DfmService:
         if topic.status == DFM_TOPIC_FINISHED:
             raise DfmClosed("Topic is already finished")
         has_entry = (await session.execute(
-            select(DfmEntry.id).where(DfmEntry.topic_id == topic.id).limit(1))).scalar_one_or_none()
+            select(DfmEntry.id).where(DfmEntry.topic_id == topic.id, DfmEntry.deleted_at.is_(None))
+            .limit(1))).scalar_one_or_none()
         if has_entry is None:
             raise DfmClosed(CLOSE_EMPTY_MESSAGE)
         topic.status = DFM_TOPIC_FINISHED
@@ -397,12 +427,13 @@ class DfmService:
         kind = parse_kind(kind)
         if supersedes_id is not None:
             old = await session.get(DfmEntry, supersedes_id)
-            if old is None or old.topic_id != topic.id:
+            if old is None or old.topic_id != topic.id or old.deleted_at is not None:
                 raise DfmError("The entry to update is not in this topic")
             if old.party != party:
                 raise DfmError("An entry can only be updated from its own column")
             successor = (await session.execute(
-                select(DfmEntry.id).where(DfmEntry.supersedes_id == old.id))).scalar_one_or_none()
+                select(DfmEntry.id).where(DfmEntry.supersedes_id == old.id,
+                                          DfmEntry.deleted_at.is_(None)))).scalar_one_or_none()
             if successor is not None:
                 raise DfmClosed(ALREADY_SUPERSEDED_MESSAGE)
             # an update keeps the kind and reply link of what it updates unless given
@@ -413,6 +444,8 @@ class DfmService:
                 reply_to_id = old.reply_to_id
         kind = kind or DFM_KIND_ORIGINAL
         reply_to = await session.get(DfmEntry, reply_to_id) if reply_to_id is not None else None
+        if reply_to is not None and reply_to.deleted_at is not None:
+            reply_to = None  # a deleted message cannot be replied to
         check_flow(topic, party, targets, kind, reply_to, reply_to_id)
         for name, contents, _ in files:
             if not (name or "").strip():
@@ -475,6 +508,42 @@ class DfmService:
             raise
         return entry
 
+    @staticmethod
+    async def delete_entry(session: AsyncSession, scope: DfmScope, topic: DfmTopic, entry_id: int, user,
+                           reason: str | None) -> DfmEntry:
+        """Soft delete of a wrong or too early entry: hidden everywhere (flow,
+        counts, status, file downloads); row, files on disk and audit stay.
+        Tool rights are checked by the caller; here: only the recorder or an
+        admin, only on an open topic, with a reason, and only while no live
+        entry updates or replies to it. Deleting an update makes the entry it
+        superseded current again."""
+        entry = await session.get(DfmEntry, entry_id)
+        if entry is None or entry.topic_id != topic.id or entry.deleted_at is not None:
+            raise DfmError("Entry not found", status=404)
+        if not (is_tool_admin(user) or entry.recorded_by == user.id):
+            raise DfmError(ENTRY_DELETE_DENIED, status=403)
+        if topic.status != DFM_TOPIC_OPEN:
+            raise DfmClosed(TOPIC_CLOSED_MESSAGE)
+        reason = (reason or "").strip()
+        if not reason:
+            raise DfmError(ENTRY_DELETE_REASON)
+        await session.refresh(topic, attribute_names=["entries"])
+        blocker = entry_blocker(entry, live_entries(topic))
+        if blocker:
+            raise DfmError(blocker, status=409)
+        entry.deleted_at = datetime.utcnow()
+        entry.deleted_by = user.id
+        entry.delete_reason = reason[:MAX_DELETE_REASON]
+        files = ", ".join(f.original_filename for f in entry.files)
+        await _changelog(session, scope, "dfm_entry_deleted",
+                         f"DFM entry #{entry.id} ({entry.kind}) deleted in {topic.title}"
+                         + (f" with {files}" if files else "") + f" ({entry.delete_reason})", user.id)
+        await _audit(session, scope, "entry_deleted", user.id, topic_id=topic.id, entry_id=entry.id,
+                     details={**dfm_audit.entry_details(entry), "reason": entry.delete_reason,
+                              "files": [f.original_filename for f in entry.files]})
+        await session.flush()
+        return entry
+
     # ---- response shaping -------------------------------------------------
 
     @staticmethod
@@ -487,8 +556,9 @@ class DfmService:
             can_edit = is_admin(user)
         flow = flow or flow_state(topic, today)
         names = names or {}
-        entry_count = len(topic.entries)
-        stamps = [topic.opened_at] + [e.recorded_at for e in topic.entries]
+        live = live_entries(topic)
+        entry_count = len(live)
+        stamps = [topic.opened_at] + [e.recorded_at for e in live]
         if topic.closed_at:
             stamps.append(topic.closed_at)
         return {
@@ -518,9 +588,10 @@ class DfmService:
         }
 
     @staticmethod
-    def entry_dict(e: DfmEntry, names: dict, state: dict | None = None) -> dict:
+    def entry_dict(e: DfmEntry, names: dict, state: dict | None = None, can_delete: bool = False) -> dict:
         """state: this entry's answered_by / awaiting from flow_state; earlier
-        versions (history) carry empty lists."""
+        versions (history) carry empty lists. can_delete: the viewer may
+        delete it now (topic_detail decides)."""
         state = state or {}
         return {
             "id": e.id, "topic_id": e.topic_id, "party": e.party,
@@ -531,6 +602,7 @@ class DfmService:
             "recorded_by": e.recorded_by, "recorded_by_name": names.get(e.recorded_by),
             "recorded_at": _iso(e.recorded_at),
             "files": [DfmService.file_dict(f, names) for f in e.files],
+            "can_delete": can_delete,
         }
 
     @staticmethod
@@ -542,12 +614,20 @@ class DfmService:
         earlier but sent later. Each supersede chain is collapsed onto its
         newest entry; `history` lists the earlier versions, newest first.
         Adds the derived flow: per entry answered_by / awaiting, per topic
-        waiting_on and next_step (the longest waiting addressee)."""
-        by_id = {e.id: e for e in topic.entries}
+        waiting_on and next_step (the longest waiting addressee). Deleted
+        entries are left out; can_delete per entry: tool rights, recorder or
+        admin, open topic, nothing builds on it."""
+        if can_edit is None:
+            can_edit = is_admin(user)
+        live = live_entries(topic)
+        by_id = {e.id: e for e in live}
         flow = flow_state(topic, today)
+        may_delete = bool(can_edit) and user is not None and topic.status == DFM_TOPIC_OPEN
         entries = []
         for e in flow["current"]:
-            d = DfmService.entry_dict(e, names, flow["per_entry"][e.id])
+            deletable = (may_delete and (is_tool_admin(user) or e.recorded_by == user.id)
+                         and entry_blocker(e, live) is None)
+            d = DfmService.entry_dict(e, names, flow["per_entry"][e.id], can_delete=deletable)
             history = []
             cursor = by_id.get(e.supersedes_id) if e.supersedes_id else None
             while cursor is not None:
@@ -562,7 +642,7 @@ class DfmService:
     @staticmethod
     def user_ids(topic: DfmTopic) -> set:
         ids = {topic.opened_by, topic.closed_by}
-        for e in topic.entries:
+        for e in live_entries(topic):
             ids.add(e.recorded_by)
             ids.update(f.uploaded_by for f in e.files)
         return ids

@@ -23,7 +23,7 @@ export function auditGroupOf(action: DfmAuditAction): Exclude<DfmAuditGroup, 'al
   switch (action) {
     case 'topic_opened': case 'topic_closed': case 'topic_reopened':
     case 'topic_renamed': case 'topic_deleted': return 'topic';
-    case 'entry_recorded': case 'entry_updated': return 'messages';
+    case 'entry_recorded': case 'entry_updated': case 'entry_deleted': return 'messages';
     case 'file_attached': return 'files';
     case 'file_viewed': case 'file_downloaded': return 'views';
   }
@@ -42,6 +42,7 @@ export const AUDIT_ACTION_STYLE: Record<DfmAuditAction, { label: string; badge: 
   topic_deleted: { label: 'Topic deleted', badge: 'bg-red-500/15 text-red-200 ring-red-400/40', dot: 'bg-red-400' },
   entry_recorded: { label: 'Message recorded', badge: 'bg-blue-500/15 text-blue-200 ring-blue-400/40', dot: 'bg-blue-400' },
   entry_updated: { label: 'Message updated', badge: 'bg-blue-500/15 text-blue-200 ring-blue-400/40', dot: 'bg-blue-400' },
+  entry_deleted: { label: 'Message deleted', badge: 'bg-red-500/15 text-red-200 ring-red-400/40', dot: 'bg-red-400' },
   file_attached: { label: 'File attached', badge: 'bg-violet-500/15 text-violet-200 ring-violet-400/40', dot: 'bg-violet-400' },
   file_viewed: { label: 'File viewed', badge: 'bg-cyan-500/15 text-cyan-200 ring-cyan-400/40', dot: 'bg-cyan-400' },
   file_downloaded: { label: 'File downloaded', badge: 'bg-teal-500/15 text-teal-200 ring-teal-400/40', dot: 'bg-teal-400' },
@@ -86,6 +87,11 @@ export function auditSummary(e: DfmAuditEvent): string {
     case 'entry_updated': {
       const kind = e.details.kind ? KIND_LABELS[e.details.kind] : '';
       return `${style.label} (${kind}) ${route(e.details.party, e.details.addressed_to)}`.trim();
+    }
+    case 'entry_deleted': {
+      const kind = e.details.kind ? KIND_LABELS[e.details.kind] : '';
+      return `${style.label} (${kind}) ${route(e.details.party, e.details.addressed_to)}`.trim()
+        + (e.details.reason ? `: ${e.details.reason}` : '');
     }
     case 'file_attached':
       return `${style.label}: ${e.details.filename ?? e.file?.filename ?? ''}`;

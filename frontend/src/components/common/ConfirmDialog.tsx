@@ -35,13 +35,15 @@ export interface ConfirmDialogProps {
   closeOnConfirm?: boolean
   /** Shown when the failure carries no backend reason. */
   errorFallback?: string
+  /** The confirm button is off (for example until a required reason is typed). */
+  confirmDisabled?: boolean
   'data-testid'?: string
 }
 
 export default function ConfirmDialog({
   open, title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, pending = false,
   onConfirm, onClose, closeOnConfirm = true, errorFallback = 'That did not work. Try again.',
-  'data-testid': testId,
+  confirmDisabled = false, 'data-testid': testId,
 }: ConfirmDialogProps) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,7 +69,7 @@ export default function ConfirmDialog({
   const close = () => { setError(null); onClose() }
 
   const confirm = async () => {
-    if (busy) return
+    if (busy || confirmDisabled) return
     const token = ++runToken.current
     const current = () => token === runToken.current && openRef.current
     setError(null)
@@ -98,7 +100,7 @@ export default function ConfirmDialog({
           <Button ref={cancelRef} onClick={close} disabled={busy}>{cancelLabel}</Button>
           <Button ref={okRef} variant={danger ? 'danger' : 'primary'}
             icon={busy ? <LoaderCircle size={16} className="motion-safe:animate-spin" /> : undefined}
-            aria-disabled={busy || undefined} aria-busy={busy || undefined}
+            disabled={confirmDisabled && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
             onClick={() => { void confirm() }} data-testid="confirm-ok">
             {confirmLabel}
           </Button>
