@@ -17,6 +17,7 @@ import { CATEGORY_META, type TreeNode } from './projectTypes';
 import {
   MIRROR_LANE_WIDTH, MIRROR_LINE, MIRROR_ROW_GAP, MIRROR_TICK_GAP, type MirrorSegment,
 } from './mirrorConnectors';
+import { PartPlantFlags } from '../common/PlantFlag';
 
 /** Row-local x of the thumbnail's left edge at depth 0: chevron (16) + gap-1 (4) + button border (1) + px-2 (8). */
 const THUMB_OFFSET = 29;
@@ -36,6 +37,8 @@ const DOTS_H: React.CSSProperties = {
 };
 
 export interface ItemRowProps {
+  /** Project of the rows, for the plant flags (none without it). */
+  projectId?: number;
   node: TreeNode;
   depth?: number;
   projectCode?: string;
@@ -183,6 +186,7 @@ export default function ItemRow(props: ItemRowProps) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 min-w-0 text-sm">
                 <span className="truncate text-slate-100">{name}</span>
+                {props.projectId != null && <PartPlantFlags projectId={props.projectId} partId={part.id} testId={`row-flags-${part.id}`} />}
                 {part.part_type === 'sub_assembly' && <span className="text-yellow-400 flex-shrink-0" title="Sub-assembly">★</span>}
                 {hasChildren && <span className="text-xs text-slate-500 flex-shrink-0">({node.children.length})</span>}
                 <span className="ml-auto flex-shrink-0 flex items-center gap-1 text-[11px] text-slate-400">

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
+import { PlantFlags } from '../components/common/PlantFlag';
 
 interface Project {
   id: number;
@@ -13,6 +14,7 @@ interface Project {
   description: string | null;
   status: string;
   plant_id: number;
+  countries?: string[];
 }
 
 interface Plant {
@@ -210,6 +212,7 @@ export default function ProjectsPage() {
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-baseline gap-3 min-w-0">
                   <span className="text-base font-bold text-slate-100 tabular-nums shrink-0">{p.code}</span>
+                  <PlantFlags countries={p.countries} testId={`project-flags-${p.id}`} />
                   <span className="text-sm text-slate-400 truncate">{p.name}</span>
                   {p.description && (
                     <span className="text-xs text-slate-500 truncate hidden md:inline">{p.description}</span>

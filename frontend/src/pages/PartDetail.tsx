@@ -36,6 +36,7 @@ import IntakePanel from '../components/intake/IntakePanel';
 import { usePartIntakes } from '../hooks/queries/useIntakes';
 import { pendingChipText } from '../api/intakes';
 import { formatCalendarDate } from '../lib/format';
+import { PartPlantFlags } from '../components/common/PlantFlag';
 
 interface Part extends Partial<PartMaterial> {
   id: number;
@@ -262,7 +263,7 @@ export default function PartDetail() {
             className="mb-4 px-3 py-1 bg-slate-700 text-slate-100 rounded hover:bg-slate-600 text-sm">← {part.project_id ? 'Back to project' : 'Back'}</button>
           <div className="flex justify-between items-start gap-4">
             <div>
-              <h1 data-field-key="part.part_number" className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}{marker('part.part_number', 'KTX no.')}</h1>
+              <h1 data-field-key="part.part_number" className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}{marker('part.part_number', 'KTX no.')}{' '}<PartPlantFlags projectId={part.project_id} partId={part.id} testId="part-flags" /></h1>
               {editingCustomerNumber === null ? (
                 <div data-field-key="part.customer_part_number" className="flex items-center mb-1">
                   <button data-testid="edit-customer-part-number" title="Edit the customer part number"

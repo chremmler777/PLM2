@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.dependencies import get_current_user
 from app.models import Plant, User, get_db
 from app.models.entities import Project
+from app.services import plant_flags
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class ProjectPatch(BaseModel):
     customer_naming: Optional[Literal["vw", "scout"]] = None
 
 
-def _project_dict(p: Project) -> dict:
+def _project_dict(p: Project, countries: list[str] | None = None) -> dict:
     return {
         "id": p.id,
         "name": p.name,
@@ -44,6 +45,7 @@ def _project_dict(p: Project) -> dict:
         "status": p.status,
         "plant_id": p.plant_id,
         "customer_naming": p.customer_naming,
+        "countries": countries or [],
     }
 
 
@@ -80,7 +82,25 @@ async def get_all_projects(
         .order_by(Project.name)
     )
     projects = result.scalars().all()
-    return [_project_dict(p) for p in projects]
+    countries = await plant_flags.project_countries(db, list(projects))
+    return [_project_dict(p, countries.get(p.id)) for p in projects]
+
+
+@router.get("/projects/{project_id}/part-countries", response_model=dict)
+async def get_project_part_countries(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Plant countries per part of a project ({part_id: ["US", "MX"]}): its own
+    plant plus every plant whose projects use the part (BOM or relation)."""
+    project = (await db.execute(
+        select(Project).join(Plant).where(
+            (Project.id == project_id) & (Plant.organization_id == current_user.organization_id))
+    )).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return {str(k): v for k, v in (await plant_flags.project_part_countries(db, project_id)).items()}
 
 
 @router.get("/{plant_id}/projects", response_model=List[dict])
@@ -104,8 +124,8 @@ async def get_plant_projects(
     from app.models import Project
     result = await db.execute(select(Project).where(Project.plant_id == plant_id))
     projects = result.scalars().all()
-
-    return [_project_dict(p) for p in projects]
+    countries = await plant_flags.project_countries(db, list(projects))
+    return [_project_dict(p, countries.get(p.id)) for p in projects]
 
 
 @router.post("/projects", response_model=dict, status_code=status.HTTP_201_CREATED)

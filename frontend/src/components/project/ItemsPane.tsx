@@ -282,6 +282,7 @@ export default function ItemsPane({
                         <ItemRow
                           key={node.part.id}
                           node={node}
+                          projectId={projectId}
                           projectCode={projectCode}
                           structure={structure}
                           paintByPartId={paintByPartId}

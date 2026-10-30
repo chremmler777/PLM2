@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MilestoneStrip from '../MilestoneStrip';
+import { PlantFlags } from '../common/PlantFlag';
 import StartChangeButton from '../changes/StartChangeButton';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
 import { ProjectTeamCard } from './ProjectTeamCard';
@@ -57,6 +58,7 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
       </button>
       <h1 className="min-w-0 truncate text-sm text-slate-100">
         <span className="font-mono font-semibold">{project.code}</span>{' '}
+        <PlantFlags countries={project.countries} testId="project-header-flags" />{' '}
         <span className="font-semibold">{project.name}</span>
         {customer && <span className="text-slate-400"> · {customer}</span>}
       </h1>
