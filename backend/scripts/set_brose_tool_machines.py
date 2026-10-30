@@ -38,7 +38,7 @@ MACHINES = {
     ("1994", "199408"): "KM 350-1 (KM 350/2000 CX)",  # 211 Inner side shield; of KM 350-3, KM 350-1
     ("1994", "199409"): "KM 550-2 (KM 550/2000/750 GX)",  # 212 Decor cover; of KM 550-2
     ("1994", "199410"): "KM 200-1 (KM 200/750 CX)",  # 213 A-bracket outer trim; of KM 200-1, KM 200-2
-    ("2277", "227701"): "KM 1300-1 (KM 1300/8100/750 MXL)",  # 202 Seat back panel MIC; of KM 2300-1, KM 1300-1
+    ("2277", "227701"): "EN 3200-1 (Engel DUO 17060/3500 TECH US)",  # 202 Seat back panel MIC; RFQ2 picked KM 2300-1, KM 1300-1, but both back panels run on 3200 t (Christoph 2026-10-26), never the smallest-class pick
     ("2277", "227702"): "EN 3200-1 (Engel DUO 17060/3500 TECH US)",  # 203 Seat back panel DS/PS; of EN 3200-1
     ("2277", "227703"): "KM 900-1 (KM 900/4300 GX)",  # 200 Map pocket; of KM 900-1, KM 900-2
     ("2277", "227704"): "KM 80-1 (KM 80/380 CX)",  # 201 Pivot axis (G05); of KM 80-3, KM 80-2, KM 80-1

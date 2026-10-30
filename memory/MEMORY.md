@@ -60,7 +60,7 @@
 - [Cavity layout 2026-10-10](cavity-layout-2026-10-10.md) - cavities are "2+2" text, never summed; mig 114 live on prod 56d621b6
 - [Revision update simplify (open)](revision-update-simplify-2026-10-10.md) - plan later: one simple 'new customer data' path + old drawing/new data; 206.886.197 incident
 - [ECR live test 1 2026-10-14](ecr-live-test-1-2026-10-14.md) - first live test: question stays asker task (asker+Sales+PM answer), open-flags popup, auto parts lock on proceed, PM scope text, per-dept assessment->costing pipeline
-- [1994 E1.1 FZ toolmaker data 2026-10-15](1994-e11-fz-toolmaker-2026-10-15.md) - 4 E1.1 drafts awaiting Brose confirmation; naming rule; data-exchange + moldflow backlog; stage via /tmp + docker cp
+- [1994 FZ toolmaker drafts](1994-e11-fz-toolmaker-2026-10-15.md) - E1.1 (10/15) + E1.2 (10/22) drafts; 10/28 E1.3 on 800/799/967 (2275-2277), their E1.1/E1.2 closed; naming rule; stage via /tmp + docker cp
 - [Part-data mail 2026-10-15](part-data-mail-2026-10-15.md) - KTX Apps Graph mail like TWOS, 1994 list (EC kickoff + Karl), 5-min digest, trial first
 - [Session state 2026-10-15](session-state-2026-10-15.md) - end of day: deployed 0536924c/alembic 115, ecr-solid migration 115 clash, open decisions, backlog
 - [Session state 2026-10-16](session-state-2026-10-16.md) - back fix deployed; Moldflow overview (mig 116) in build; ECR must renumber 117+
@@ -73,3 +73,7 @@
 - [2277 972.A E2 + final Infor numbers](2277-972a-fea-cm-e2-2026-10-23.md) — 10-23: E2 id 2265 filed, 2277 mail list = 1994s 8, 18 articles got final numbers (0503/0001), held 08-28 script would now mail
 - [2277 971.C as E3](2277-971c-e3-2026-10-26.md) — 971.C filed on part 2268 as E3 id 2274, not a new part; 971.D held
 - [Viewer export + 2277 cavities](viewer-export-and-2277-cavities-2026-10-26.md) — @read_only POST marker for viewer exports (deployed 10-26); 227703/04/05 cavities filled
+- [2277 back panels = 3200 t Engel](feedback-2277-backpanel-press-3200.md) — 227701/227702 both EN 3200-1, cav 2 and 1+1; RFQ2 press pick always goes wrong
+- [1994 E2 admin activation 2026-10-28](1994-e2-admin-activation-2026-10-28.md) — 886.197/883.607/887.233 E2 active (administrative, official + no impact), CR-2026-0008 cancelled, 2122 investigation draft still open
+- [HRS bonus hot runners 2026-10-28](hrs-bonus-hot-runner-2026-10-28.md) — PARKED, Brandon tracks HRS by hand; 15-tool feed system reference (7 heated sprues); 2277 back panel SVG vs FlexFlow open till mid-Nov
+- [1994 479 E2 TM 004 2026-10-29](1994-479-e2-tm004-2026-10-29.md) — 206.881.479 TM 004 TOOLING as E2 · 004 (id 2278, intake 15 pending), FZ E1.1 2262 closed, mailed

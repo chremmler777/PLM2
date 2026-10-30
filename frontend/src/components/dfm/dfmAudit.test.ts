@@ -63,4 +63,10 @@ describe('dfmAudit helpers', () => {
     expect(auditSummary(renamed)).toBe('Topic renamed: renamed DFM to DFM rev 1')
     expect(auditSummary(ev({ action: 'topic_deleted', entry: null, details: { title: 'DFM' } }))).toBe('Topic deleted: DFM')
   })
+
+  it('groups a deleted message with messages and names the reason', () => {
+    expect(auditGroupOf('entry_deleted')).toBe('messages')
+    const deleted = ev({ action: 'entry_deleted', details: { kind: 'answer', party: 'tier1', addressed_to: ['ktx'], reason: 'too early' } })
+    expect(auditSummary(deleted)).toBe('Message deleted (Answer) Tier 1 → KTX: too early')
+  })
 })

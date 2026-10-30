@@ -113,10 +113,11 @@ export default function DfmAuditLog({ scope, topicId, onJumpToEntry }: Props) {
 
 function Row({ e, showTopic, onJumpToEntry }: { e: DfmAuditEvent; showTopic: boolean; onJumpToEntry(entryId: number, topicId: number): void }) {
   const style = AUDIT_ACTION_STYLE[e.action];
-  const isMessage = e.action === 'entry_recorded' || e.action === 'entry_updated';
+  const isMessage = e.action === 'entry_recorded' || e.action === 'entry_updated' || e.action === 'entry_deleted';
   const isFile = e.action === 'file_attached' || e.action === 'file_viewed' || e.action === 'file_downloaded';
   const sha = e.action === 'file_attached' ? auditShaShort(e.details.sha256) : null;
-  const jumpable = e.entry != null && e.topic != null;
+  // a deleted message has no card to jump to
+  const jumpable = e.entry != null && e.topic != null && e.action !== 'entry_deleted';
 
   return (
     <tr data-testid={`dfm-audit-row-${e.id}`} className="align-top hover:bg-slate-800/60">
@@ -146,6 +147,9 @@ function Row({ e, showTopic, onJumpToEntry }: { e: DfmAuditEvent; showTopic: boo
           )}
           {e.action === 'topic_deleted' && (e.details.title ?? e.topic?.title) && (
             <span data-testid="dfm-audit-deleted" className="text-slate-300">{e.details.title ?? e.topic?.title}</span>
+          )}
+          {e.action === 'entry_deleted' && e.details.reason && (
+            <span data-testid="dfm-audit-delete-reason" className="text-slate-300">Reason: {e.details.reason}</span>
           )}
           {e.action === 'file_attached' && e.details.size != null && (
             <span className="text-slate-500 tabular-nums">{auditFileSize(e.details.size)}</span>

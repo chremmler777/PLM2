@@ -35,6 +35,17 @@ class TopicDelete(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000)
 
 
+class EntryDelete(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("reason must not be blank")
+        return v.strip()
+
+
 class TopicCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
 
@@ -82,12 +93,12 @@ async def _detail(db: AsyncSession, topic: DfmTopic, user: User) -> dict:
 
 
 async def _load_file(db: AsyncSession, scope: DfmScope, file_id: int) -> tuple[DfmEntryFile, str, int]:
-    """Files of a deleted topic cannot exist (only empty topics are deleted)."""
+    """A file of a deleted entry is not found (it stays on disk)."""
     found = (await db.execute(
         select(DfmEntryFile, DfmEntry.topic_id)
         .join(DfmEntry, DfmEntry.id == DfmEntryFile.entry_id)
         .join(DfmTopic, DfmTopic.id == DfmEntry.topic_id)
-        .where(DfmEntryFile.id == file_id, scope.topic_filter()))).one_or_none()
+        .where(DfmEntryFile.id == file_id, scope.topic_filter(), DfmEntry.deleted_at.is_(None)))).one_or_none()
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     row, topic_id = found
@@ -233,6 +244,22 @@ def _build_router(prefix: str, id_param: str, scope_dep: Callable) -> APIRouter:
         # shaped through the topic detail so the answered / awaiting state is filled
         detail = await _detail(db, topic, current_user)
         return next(x for x in detail["entries"] if x["id"] == entry.id)
+
+    @router.delete(base + "/topics/{topic_id}/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_entry(topic_id: int, entry_id: int, body: EntryDelete, scope: DfmScope = Depends(scope_dep),
+                           current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+        """Soft delete of a wrong or too early entry (hidden; row, files and audit
+        stay). Its recorder or an admin, with a reason, while no later step
+        (update or reply) builds on it."""
+        await require_tool_editor(db, current_user)
+        topic = await _topic(db, scope, topic_id)
+        try:
+            await DfmService.delete_entry(db, scope, topic, entry_id, current_user, body.reason)
+        except DfmError as e:
+            await db.rollback()
+            raise _http(e)
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.get(base + "/files/{file_id}/download")
     async def download_dfm_file(file_id: int, scope: DfmScope = Depends(scope_dep),

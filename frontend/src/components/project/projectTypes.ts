@@ -13,6 +13,7 @@ export interface Project {
   code: string;
   status: string;
   customer_naming?: CustomerNaming;
+  plant_id?: number;
 }
 
 export interface Part {

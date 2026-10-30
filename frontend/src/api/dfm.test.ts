@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildEntryFormData, createEntry, deleteTopic, dfmFileUrl, dfmKey, getAudit, listTopics, projectScope, renameTopic, toolScope, KINDS, KIND_LABELS, PARTIES, PARTY_LABELS } from './dfm'
+import { buildEntryFormData, createEntry, deleteEntry, deleteTopic, dfmFileUrl, dfmKey, getAudit, listTopics, projectScope, renameTopic, toolScope, KINDS, KIND_LABELS, PARTIES, PARTY_LABELS } from './dfm'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('./client', () => ({ default: clientMocks, API_BASE_URL: '/plm2/api' }))
@@ -66,6 +66,12 @@ describe('dfm api', () => {
     expect(clientMocks.patch).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/4', { title: 'Gate' })
     await deleteTopic(projectScope(35), 4)
     expect(clientMocks.delete).toHaveBeenCalledWith('/v1/projects/35/dfm/topics/4')
+  })
+
+  it('deletes an entry with DELETE and the trimmed reason', async () => {
+    clientMocks.delete.mockResolvedValue({ status: 204 })
+    await deleteEntry(toolScope(7), 4, 19, '  wrong file ')
+    expect(clientMocks.delete).toHaveBeenCalledWith('/v1/parts/7/dfm/topics/4/entries/19', { data: { reason: 'wrong file' } })
   })
 
   it('keeps tool and project query keys apart', () => {

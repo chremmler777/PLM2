@@ -75,6 +75,8 @@ export interface DfmEntry {
   recorded_by_name: string | null;
   recorded_at: string;
   files: DfmFile[];
+  /** The viewer may delete it now: its recorder or an admin, open topic, no later step builds on it. */
+  can_delete?: boolean;
   history: Omit<DfmEntry, 'history'>[];
 }
 
@@ -179,13 +181,18 @@ export async function createEntry(scope: DfmScope, topicId: number, input: DfmEn
     { headers: { 'Content-Type': 'multipart/form-data' } })).data;
 }
 
+/** Soft delete of a wrong or too early entry (hidden; files and audit stay). The reason is required. */
+export async function deleteEntry(scope: DfmScope, topicId: number, entryId: number, reason: string): Promise<void> {
+  await client.delete(`${base(scope)}/topics/${topicId}/entries/${entryId}`, { data: { reason: reason.trim() } });
+}
+
 export function dfmFileUrl(scope: DfmScope, fileId: number, mode: 'download' | 'inline'): string {
   return `${API_BASE_URL}${base(scope)}/files/${fileId}/${mode}`;
 }
 
 export type DfmAuditAction =
   | 'topic_opened' | 'topic_closed' | 'topic_reopened' | 'topic_renamed' | 'topic_deleted'
-  | 'entry_recorded' | 'entry_updated'
+  | 'entry_recorded' | 'entry_updated' | 'entry_deleted'
   | 'file_attached' | 'file_downloaded' | 'file_viewed';
 
 export interface DfmAuditActor {
@@ -233,6 +240,10 @@ export interface DfmAuditEvent {
     content_type?: string;
     sha256?: string | null;
     backfilled?: boolean;
+    /** topic_deleted / entry_deleted: why. */
+    reason?: string;
+    /** entry_deleted: the deleted entry's file names. */
+    files?: string[];
   };
 }
 

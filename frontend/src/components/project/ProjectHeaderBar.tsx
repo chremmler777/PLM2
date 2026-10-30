@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MilestoneStrip from '../MilestoneStrip';
+import { ProjectPlantFlag } from '../common/PlantFlag';
 import StartChangeButton from '../changes/StartChangeButton';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
 import { Users } from 'lucide-react';
@@ -62,6 +63,7 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart, ba
         ← {back ? back.label : 'Projects'}
       </button>
       <h1 className="min-w-0 truncate text-sm text-slate-100">
+        <ProjectPlantFlag plantId={project.plant_id} testId="project-header-flag" />{' '}
         <span className="font-mono font-semibold">{project.code}</span>{' '}
         <span className="font-semibold">{project.name}</span>
         {customer && <span className="text-slate-400"> · {customer}</span>}

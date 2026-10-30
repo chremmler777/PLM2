@@ -51,6 +51,7 @@ const ACTION_TEXT: Record<string, string> = {
   dfm_topic_closed: 'DFM topic closed',
   dfm_topic_reopened: 'DFM topic reopened',
   dfm_entry_recorded: 'DFM entry recorded',
+  dfm_entry_deleted: 'DFM entry deleted',
 };
 
 const isFlag = (v: string | null): v is FieldFlag => !!v && (FLAGS as string[]).includes(v);

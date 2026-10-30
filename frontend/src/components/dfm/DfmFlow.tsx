@@ -11,13 +11,15 @@
  * with Reopen. The route and the files sent are the card's main content (the
  * answers live inside the DFM files). "Finish confirmed" is a quiet button
  * that needs at least one message and a confirmation; an empty topic can be
- * renamed or deleted from the header.
+ * renamed or deleted from the header. A card the backend marks can_delete
+ * (its recorder or an admin, nothing builds on it yet) has a Delete action
+ * that asks for a reason (wrong file, recorded too early).
  */
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  closeTopic, deleteTopic, dfmFileUrl, dfmKey, getTopic, renameTopic, reopenTopic, KIND_LABELS, KINDS, PARTIES, PARTY_LABELS,
+  closeTopic, deleteEntry, deleteTopic, dfmFileUrl, dfmKey, getTopic, renameTopic, reopenTopic, KIND_LABELS, KINDS, PARTIES, PARTY_LABELS,
   type DfmEntry, type DfmScope,
 } from '../../api/dfm';
 import ConfirmDialog from '../common/ConfirmDialog';
@@ -70,6 +72,8 @@ export default function DfmFlow({
     () => (autoOpenForm ? { step: newOriginalStep(), n: 1 } : null));
   const [confirm, setConfirm] = useState<'finish' | 'delete' | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  const [entryToDelete, setEntryToDelete] = useState<DfmEntry | null>(null);
+  const [entryReason, setEntryReason] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);  // null = not renaming
   const [openHistory, setOpenHistory] = useState<Set<number>>(new Set());
   const [highlighted, setHighlighted] = useState<number | null>(null);
@@ -131,6 +135,16 @@ export default function DfmFlow({
       onBack();
     },
   });
+  // Errors (e.g. a later step now builds on it) show inside the confirm dialog.
+  const removeEntry = useMutation({
+    mutationFn: (entryId: number) => deleteEntry(scope, topicId, entryId, entryReason),
+    onSuccess: () => {
+      toast.success('Entry deleted');
+      refresh();
+      if (scope.kind === 'tool') queryClient.invalidateQueries({ queryKey: ['changelog', String(scope.id)] });
+    },
+  });
+  const askDeleteEntry = (e: DfmEntry) => { setMenuFor(null); setEntryReason(''); setEntryToDelete(e); };
   const rename = useMutation({
     mutationFn: (title: string) => renameTopic(scope, topicId, title),
     onSuccess: () => { toast.success('Topic renamed'); setRenaming(null); refresh(); },
@@ -290,11 +304,22 @@ export default function DfmFlow({
     </button>
   );
 
+  const deleteButton = (e: DfmEntry, inMenu = false) => (
+    <button key="delete" data-testid={`dfm-delete-entry-${e.id}`} onClick={() => askDeleteEntry(e)}
+      title="Remove this entry (wrong file or recorded too early)"
+      className={inMenu
+        ? 'block w-full text-left text-xs px-3 py-1.5 text-red-300 hover:bg-red-500/10'
+        : 'ml-auto text-xs px-2 py-0.5 rounded text-red-300 hover:text-red-200 hover:bg-red-500/10'}>
+      Delete
+    </button>
+  );
+
   const card = (e: DfmEntry) => {
     const style = KIND_STYLE[e.kind];
     const target = e.reply_to_id != null ? byId.get(ids.get(e.reply_to_id) ?? -1) : undefined;
     const lit = highlighted === e.id;
     const acts = actionsFor(e);
+    const deletable = open && canEdit && e.can_delete === true;
     const badge = (
       <span data-testid="dfm-kind-badge" className={`text-[11px] font-medium px-1.5 py-px rounded ring-1 ring-inset ${style.badge}`}>
         {KIND_LABELS[e.kind]}
@@ -312,7 +337,7 @@ export default function DfmFlow({
               {badge}
               <span className="min-w-0 truncate">{route(e)}</span>
               <span className="ml-auto tabular-nums text-slate-400">{shortDate(e.sent_at ?? e.recorded_at)}</span>
-              {acts.length > 0 && (
+              {(acts.length > 0 || deletable) && (
                 <span className="relative">
                   <button data-testid={`dfm-menu-${e.id}`} aria-label="Actions" aria-expanded={menuFor === e.id}
                     onClick={() => setMenuFor((cur) => (cur === e.id ? null : e.id))}
@@ -320,6 +345,7 @@ export default function DfmFlow({
                   {menuFor === e.id && (
                     <div className="absolute right-0 top-full mt-1 z-30 min-w-[10rem] rounded-md bg-slate-800 ring-1 ring-slate-600 shadow-lg py-1">
                       {acts.map((a) => actionButton(e, a, true))}
+                      {deletable && deleteButton(e, true)}
                     </div>
                   )}
                 </span>
@@ -354,9 +380,10 @@ export default function DfmFlow({
                 ))}
               </div>
             )}
-            {acts.length > 0 && (
+            {(acts.length > 0 || deletable) && (
               <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-slate-700/70">
                 {acts.map((a) => actionButton(e, a))}
+                {deletable && deleteButton(e)}
               </div>
             )}
           </>
@@ -578,6 +605,29 @@ export default function DfmFlow({
             </div>
           )}
         onConfirm={() => remove.mutateAsync()} />
+      <ConfirmDialog data-testid="dfm-delete-entry-confirm" open={entryToDelete !== null} onClose={() => setEntryToDelete(null)} danger
+        title={entryToDelete ? `Delete entry #${entryToDelete.id}?` : 'Delete entry?'} confirmLabel="Delete entry"
+        errorFallback="Could not delete the entry" confirmDisabled={!entryReason.trim()}
+        body={(
+          <div className="space-y-2">
+            <p data-testid="dfm-delete-entry-warning" className="text-sm text-slate-200">
+              This removes the entry and its files from the DFM for everyone. Use Update instead if you want to replace
+              it with a newer version.
+            </p>
+            {entryToDelete && entryToDelete.files.length > 0 && (
+              <p className="text-xs text-slate-400 break-all">
+                Files: {entryToDelete.files.map((f) => f.original_filename).join(', ')}
+              </p>
+            )}
+            <label className="block text-sm text-slate-300">Reason: (required)
+              <textarea data-testid="dfm-delete-entry-reason" rows={2} maxLength={500} value={entryReason}
+                onChange={(ev) => setEntryReason(ev.target.value)}
+                placeholder="e.g. recorded before all comments were in"
+                className="mt-1 block w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm" />
+            </label>
+          </div>
+        )}
+        onConfirm={() => (entryToDelete ? removeEntry.mutateAsync(entryToDelete.id) : undefined)} />
     </div>
   );
 }

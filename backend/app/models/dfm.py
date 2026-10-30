@@ -1,9 +1,11 @@
 """DFM archive: topics per tool (or project-wide, the "general tooling DFM"), each a three-column ledger (toolmaker | KTX |
-Tier 1) of append-only entries with files. Entries are never deleted; an update
-is a new entry that supersedes the old one, and the old one stays as history."""
+Tier 1) of append-only entries with files. An update is a new entry that
+supersedes the old one, and the old one stays as history. An entry nothing
+builds on yet can be soft deleted (wrong file, recorded too early): hidden,
+its row, files and audit events stay."""
 from datetime import date, datetime
 
-from sqlalchemy import CheckConstraint, String, Text, Date, DateTime, ForeignKey, Integer, JSON
+from sqlalchemy import CheckConstraint, Index, String, Text, Date, DateTime, ForeignKey, Integer, JSON, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -47,8 +49,15 @@ class DfmTopic(Base):
 
 
 class DfmEntry(Base):
-    """One row of the ledger, in its author's column (party)."""
+    """One row of the ledger, in its author's column (party). A deleted entry
+    (deleted_at) is hidden everywhere; it keeps its row, files and audit events."""
     __tablename__ = "dfm_entries"
+    __table_args__ = (
+        # an entry can only be superseded once by a live entry; a deleted update
+        # does not block a new one (migration 117)
+        Index("uq_dfm_entries_supersedes_live", "supersedes_id", unique=True,
+              sqlite_where=text("deleted_at IS NULL"), postgresql_where=text("deleted_at IS NULL")),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     topic_id: Mapped[int] = mapped_column(ForeignKey("dfm_topics.id"), index=True)
@@ -58,13 +67,16 @@ class DfmEntry(Base):
     kind: Mapped[str] = mapped_column(String(20), default=DFM_KIND_ORIGINAL, server_default=DFM_KIND_ORIGINAL)
     # the message this one forwards, answers or asks again about; none for an original
     reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True, index=True)
-    # unique so an entry can only be superseded once; NULL stays allowed (multiple
-    # entries may have no successor)
-    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True, unique=True)
+    # unique among live entries (uq_dfm_entries_supersedes_live); NULL stays
+    # allowed (multiple entries may have no successor)
+    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True)
 
     recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))  # the KTX user who put it in
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     sent_at: Mapped[date | None] = mapped_column(Date, nullable=True)  # mail date if different
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    delete_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     topic: Mapped["DfmTopic"] = relationship(back_populates="entries")
     files: Mapped[list["DfmEntryFile"]] = relationship(
@@ -92,7 +104,7 @@ class DfmEntryFile(Base):
 # Audit actions. Events are append-only: there is no update or delete path.
 DFM_AUDIT_ACTIONS = (
     "topic_opened", "topic_closed", "topic_reopened", "topic_renamed", "topic_deleted",
-    "entry_recorded", "entry_updated",
+    "entry_recorded", "entry_updated", "entry_deleted",
     "file_attached", "file_downloaded", "file_viewed",
 )
 
