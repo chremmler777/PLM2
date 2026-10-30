@@ -89,8 +89,19 @@ describe('AssessmentChecks (spec §4)', () => {
     cleanup()
     render(view([{ ...q, can_answer: true }], false))
     expect(screen.getByTestId('achk-qhead-21').textContent).toBe(
-      `${t('achk.asksYou').replace('{d}', 'Development')}: `
+      `${t('achk.asksCustomerVia').replace('{d}', 'Development')}: `
       + t('achk.answerBy').replace('{d}', formatDate('2026-10-20T12:00:00')))
+    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('asks the customer')
+    cleanup()
+    render(view([{ ...q, can_answer: true, answer_from: 'supplier' }], false))
+    expect(screen.getByTestId('achk-qhead-21').textContent).toContain('asks the supplier')
+    cleanup()
+    // a question for our team: the answerer is asked directly
+    render(view([{ ...q, can_answer: true, answer_from: 'our_team' }], false))
+    expect(screen.getByTestId('achk-qhead-21').textContent)
+      .toContain(t('achk.asksYou').replace('{d}', 'Development'))
+    cleanup()
+    render(view([{ ...q, can_answer: true }], false))
     // negative: the answerer is not told it holds "your submit"
     expect(screen.queryByText(t('achk.waiting'))).toBeNull()
     expect(screen.getByText(t('achk.waitingOther'))).toBeTruthy()

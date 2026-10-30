@@ -310,7 +310,11 @@ function QuestionRow({ changeId, q, editable, onDone, attachments, confirmerName
         {editable
           ? t('achk.question').replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))
           : q.can_answer && !q.answered_at
-            ? t('achk.asksYou').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
+            // a customer/supplier question: the viewer only passes it on
+            // (Christoph 2026-10-30, "still not clear who gets asked")
+            ? t(q.answer_from === 'customer' ? 'achk.asksCustomerVia'
+              : q.answer_from === 'supplier' ? 'achk.asksSupplierVia' : 'achk.asksYou')
+              .replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
               + (q.answer_due ? `: ${t('achk.answerBy').replace('{d}', formatCalendarDate(q.answer_due))}` : '')
             : t('achk.asks').replace('{d}', q.asking_department_name ?? q.raised_by_name ?? '')
               .replace('{who}', t(`flag.from.${q.answer_from ?? 'our_team'}`))}
