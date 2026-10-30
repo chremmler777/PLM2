@@ -93,7 +93,7 @@ describe('AssessmentChecks (spec §4)', () => {
       + t('achk.answerBy').replace('{d}', formatDate('2026-10-20T12:00:00')))
     // the step line says what to do; no 'Waiting for the answer.' for the one who gets it
     expect(screen.getByTestId('achk-qstep-21').textContent)
-      .toBe('Development needs this from the customer. Copy the mail text, send it to the customer, then enter the answer here.')
+      .toBe('Development needs this from the customer. Ask them your way (mail, phone, meeting) and enter the answer here.')
     expect(screen.queryByText(t('achk.waitingOther'))).toBeNull()
     cleanup()
     render(view([{ ...q, can_answer: true, answer_from: 'supplier' }], false))

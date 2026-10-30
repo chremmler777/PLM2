@@ -48,6 +48,8 @@ export default function AnswerForm({
   const [risk, setRisk] = useState('')
   const [askNoFile, setAskNoFile] = useState(false)
   const customer = c.answer_from === 'customer'
+  const source = c.answer_from === 'customer' || c.answer_from === 'supplier'
+    ? c.answer_from : 'our_team'
   const mails = attachments.filter((a) => a.kind === 'customer_email')
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
   // a customer question: only the customer's own document filed on it
@@ -109,7 +111,9 @@ export default function AnswerForm({
             <label key={k} className="flex items-center gap-1.5 cursor-pointer">
               <input type="radio" name={`answer-kind-${nameId}`} checked={kind === k}
                 data-testid={`answer-kind-${k}-${c.id}`} onChange={() => setKind(k)} />
-              <span className="text-slate-200">{t(`answer.${k}`)}</span>
+              {/* Christoph 2026-10-30 "who is sure of what?": the pick names
+                  where the answer comes from, not a degree of certainty */}
+              <span className="text-slate-200">{t(`answer.pick.${k}.${source}`)}</span>
             </label>
           ))}
         </fieldset>
