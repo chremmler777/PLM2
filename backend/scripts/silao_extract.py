@@ -18,7 +18,7 @@ import os
 import re
 from collections import Counter
 
-from silao_sep_map import SKIP_EXT, SKIP_NAME_PREFIX, sep_slot
+from silao_sep_map import MAX_BYTES, SKIP_EXT, SKIP_NAME_PREFIX, sep_slot
 
 T, A = "VW316PA", "AU436"
 FZ_SUPPLIER_ID = 1  # "FZ Tools" in suppliers
@@ -374,6 +374,73 @@ def link_documents(st, project, docs, files, resolve):
                                       "note": f"Silao SharePoint: {os.path.dirname(p)}"})
 
 
+CUSTOMER_DIR = "05. Data Transfer to KTX/Design/VW Group Data/"
+VW_FILE = re.compile(r"^(2GJ|8M[ABC])_(\d{3})_(\d{3})_([A-Z]?)_+([A-Z0-9]{3})_")
+MATURATION = re.compile(r"(2GJ|8M[ABC])\.(\d{3})\.(\d{3})(?:\.([A-Z]))?(?:\.[A-Z])?-(VW316PA|AU436)-(\w+)")
+
+
+def tool_id_numbers(tool_id):
+    """'2GJ.819.703_4.C-VW316-0012..0016' -> {12..16}; '-0008-10' -> {8, 9, 10};
+    '-0002_3' -> {2, 3}; '-0001' -> {1}."""
+    m = re.search(r"VW316-(\d{4})(?:(\.\.|-|_)(\d{1,4}))?", tool_id or "")
+    if not m:
+        return set()
+    a = int(m.group(1))
+    if not m.group(3):
+        return {a}
+    b = int(m.group(3))
+    return set(range(a, b + 1)) if m.group(2) in ("..", "-") else {a, b}
+
+
+def link_customer_data(st, files, taos_tools):
+    """VW / Audi customer data (OFFICIAL DWG data, MATURATION DATA) -> parts.
+    Official files carry the customer number (+ letter): they go on every
+    finished good with that number. Maturation files carry the MTNA part id:
+    Audi ids are the molded part numbers here, Taos ids map to the mold whose
+    MTNA tool id range covers them."""
+    fgs = [p for p in st.parts.values() if p["part_type"] == "sub_assembly"]
+
+    def norm(cpn):  # '2GJ 858 415 N VIF' / '8MB.820.901.A 69D' -> ('2GJ858415', 'N')
+        t = re.split(r"[\s.]+", (cpn or "").strip())
+        return ("".join(t[:3]), t[3] if len(t) > 3 and re.fullmatch(r"[A-Z]", t[3]) else "")
+
+    for rel in sorted(files):
+        if not rel.startswith(CUSTOMER_DIR) or rel in st.linked_paths:
+            continue
+        fn = os.path.basename(rel)
+        if os.path.splitext(fn)[1].lower() in SKIP_EXT:
+            continue
+        targets, kind, ftype = [], None, None
+        m = VW_FILE.match(fn)
+        mm = MATURATION.search(fn)
+        if m and "OFFICIAL" in rel:
+            base, letter, kind = m.group(1) + m.group(2) + m.group(3), m.group(4), m.group(5)
+            same = [p["pn"] for p in fgs if norm(p.get("customer_part_number"))[0] == base]
+            exact = [p["pn"] for p in fgs if norm(p.get("customer_part_number")) == (base, letter)]
+            # Audi: the letter is the drawing index (C), not part of the number -> all of them
+            targets = exact if (exact and m.group(1) == "2GJ") else same
+        elif mm and "MATURATION" in rel:
+            kind = "MAT"
+            if mm.group(5) == "AU436":
+                ref = f"{mm.group(1)}.{mm.group(2)}.{mm.group(3)}{'.' + mm.group(4) if mm.group(4) else ''}-AU436-{mm.group(6)}"
+                targets = [p["pn"] for p in st.parts.values() if p.get("customer_part_number") == ref][:1]
+                if not targets:  # same MTNA id under another vent prefix (shared part)
+                    tail = f"-AU436-{mm.group(6)}"
+                    targets = [p["pn"] for p in st.parts.values() if p["project"] == A and
+                               (p.get("customer_part_number") or "").endswith(tail)][:1]
+            else:
+                n = int(re.sub(r"\D", "", mm.group(6)) or -1)
+                targets = [pn for pn, t in taos_tools.items() if n in tool_id_numbers(t.get("tool_id"))][:1]
+        if not targets:
+            continue
+        ext = os.path.splitext(fn)[1].lower()
+        ftype = "drawing" if ext in (".catdrawing", ".pdf", ".tif") or kind == "DRW" else "cad"
+        st.linked_paths.add(rel)
+        for pn in targets:
+            st.part_files.append({"pn": pn, "rel": rel, "filename": fn, "file_type": ftype,
+                                  "kind": kind, "note": f"Customer data: {os.path.dirname(rel)[len(CUSTOMER_DIR):]}"})
+
+
 def sep_name(rel, prefix_len):
     """Filename with the subfolders below the mapped folder, so flat SEP slots keep context."""
     parts = rel.split("/")
@@ -405,10 +472,11 @@ def main():
     moldlist = json.load(open(moldlist_path)) if os.path.exists(moldlist_path) else None
 
     st = Stage()
-    build_taos(st, taos)
+    taos_tools = build_taos(st, taos)
     _, au_ref = build_au436(st, au, numbers, moldlist)
     link_documents(st, T, taos["documents"], files, lambda x: x)
     link_documents(st, A, au["documents"], files, lambda x: au_ref.get(x, x))
+    link_customer_data(st, files, taos_tools)
 
     # changes from mail -> part descriptions ("CHANGE ..." lines) and project descriptions
     for proj, keys, text in CHANGES:
@@ -477,6 +545,12 @@ def main():
             prefix_len = prefix.count("/") + 1
         st.sep_files.append({"project": slot[0], "gate": slot[1], "item_no": slot[2],
                              "rel": p, "filename": sep_name(p, prefix_len)})
+
+    # never stage files too big for the 32-bit size columns
+    big = [f["rel"] for f in st.part_files + st.sep_files if files.get(f["rel"], 0) > MAX_BYTES]
+    st.part_files = [f for f in st.part_files if files.get(f["rel"], 0) <= MAX_BYTES]
+    st.sep_files = [f for f in st.sep_files if files.get(f["rel"], 0) <= MAX_BYTES]
+    st.held += [f"file over 2 GB, kept on the mirror only: {r}" for r in sorted(set(big))]
 
     # drop relations/BOM children that point at held parts
     st.relations = [r for r in st.relations if r["from"] in st.parts and r["to"] in st.parts]

@@ -150,7 +150,9 @@ SEP_MAP: list[tuple[str, tuple[str, str, int] | None]] = [
 ]
 
 # File types never imported (photo/video dumps stay on the mirror).
-SKIP_EXT = {".avi", ".mov", ".mp4", ".heic", ".bmp", ".db", ".tmp", ".lnk"}
+SKIP_EXT = {".avi", ".mov", ".mp4", ".heic", ".bmp", ".db", ".tmp", ".lnk",
+            ".exe", ".msi", ".iso", ".dll", ".bat", ".cmd", ".vbs", ".ps1"}  # no installers or scripts
+MAX_BYTES = 2_000_000_000  # file_size columns are 32-bit integers
 SKIP_NAME_PREFIX = ("~$",)  # Office lock files
 
 
