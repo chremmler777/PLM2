@@ -1123,10 +1123,12 @@ class MeetingService:
         # (CR, article, project code); part_number is the customer's
         from app.services.customer_refs import customer_title
         topic = MeetingService.CHECK_WHAT_WORDS.get(concern.check_what or "", "")
-        where = f" for part {part_number}" if part_number else ""
         whose = ("your change request" if concern.answer_from == "customer"
                  else "our change")
         name = customer_title(change.title)
+        # the part is named once: not again when the title leads with it
+        where = (f" for part {part_number}"
+                 if part_number and not name.startswith(part_number) else "")
         lines = [
             f"Subject: {name}: question"
             + (f" on {topic}" if topic and topic != "other" else ""),

@@ -220,6 +220,26 @@ def test_f9_customer_copy_drops_our_numbers():
     assert "for part 51 12 7 123456" in text and "BOTTOM COVER LEFT" in text
 
 
+def test_group_scheme_article_numbers_stay_internal():
+    """Christoph 2026-10-30 (CR-2026-0031): the 21- article number of the
+    group scheme reached the mail text, and the Brose number came twice."""
+    from types import SimpleNamespace
+    from app.services import customer_refs
+    from app.services.meeting_service import MeetingService
+    title = ("21-227701-0503-0000 - 206.881.971 - 206.881.971 Seat Back Panel MIC "
+             "(Lehnenabdeckung)")
+    assert customer_refs.customer_title(title) \
+        == "206.881.971 Seat Back Panel MIC (Lehnenabdeckung)"
+    assert customer_refs.customer_title("21-227701-XXXX-XX00 - 1994 GRILL") == "GRILL"
+    change = SimpleNamespace(change_number="CR-2026-0031", title=title)
+    concern = SimpleNamespace(kind="needs_info", answer_from="customer", check_what="other",
+                              note="Which grain?", scope_effect=None)
+    text = MeetingService.customer_copy(change, concern, "206.881.971")
+    assert "21-227701" not in text and "CR-2026-0031" not in text
+    assert text.count("206.881.971") == 2          # subject + body, once each
+    assert "for part" not in text                  # the title already leads with it
+
+
 async def test_f17_finance_reads_the_costing_summation(client, session_factory, seed):
     from tests.conftest import ENGINEER_PASSWORD, login
     async with session_factory() as s:

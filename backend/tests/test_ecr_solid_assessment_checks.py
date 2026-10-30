@@ -487,6 +487,31 @@ async def test_sales_is_not_tasked_with_an_our_team_question(client, assess):
     assert "our change" in rows[0]["customer_copy"]
 
 
+async def test_project_management_sees_a_customer_question_as_support(
+        client, assess, session_factory, seed):
+    """Christoph 2026-10-30: a customer/supplier question from the
+    assessment is Sales' to ask, but Project Management sees it too: a
+    support row naming the Sales contact, with the mail text."""
+    a = assess
+    _pm2_id, _, pm2 = await _user(client, session_factory, seed, "pm2", "Project Manager")
+    cq = (await client.post(_url(a, "/concerns"), json=_q(a["tool"], answer_from="customer",
+                                                          note="Grain K31 on the new rib?"),
+                            headers=a["te"])).json()
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=pm2)).json()
+            if t.get("kind") == "obtain_info" and t["change_id"] == a["cid"]]
+    assert len(rows) == 1 and rows[0]["concern_id"] == cq["id"]
+    assert rows[0]["role"] == "backup" and rows[0]["main_name"]
+    assert "Grain K31 on the new rib?" in (rows[0].get("customer_copy") or "")
+    # Sales keeps it as its own task
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=a["sa"])).json()
+            if t.get("kind") == "obtain_info" and t["change_id"] == a["cid"]]
+    assert len(rows) == 1 and rows[0]["role"] == "main"
+    # negative: Process (neither Sales, PM nor lead) gets no row
+    rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=a["pe"])).json()
+            if t.get("kind") == "obtain_info" and t["change_id"] == a["cid"]]
+    assert rows == []
+
+
 async def test_question_refusals(client, assess, monkeypatch):
     a = assess
     # negative: for another department, without who answers, as a check item

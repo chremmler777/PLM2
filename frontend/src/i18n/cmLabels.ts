@@ -2926,6 +2926,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'copy.show': { de: 'Text zeigen', en: 'Show text' },
   'copy.hide': { de: 'Text ausblenden', en: 'Hide text' },
   'copy.done': { de: 'Mailtext kopiert', en: 'Mail text copied' },
+  'copy.short': { de: 'Kopieren', en: 'Copy' },
   'copy.failed': { de: 'Kopieren nicht möglich: Text unten markieren', en: 'Could not copy: select the text below' },
   'tasks.hint.scopingHeld': { de: 'Freigabe wartet auf: {x}', en: 'Proceed waits for: {x}' },
   'proceed.hold.ppap_decision': { de: 'PPAP-Entscheidung ({who})', en: 'PPAP decision ({who})' },

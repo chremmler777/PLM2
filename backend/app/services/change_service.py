@@ -4722,7 +4722,29 @@ class ChangeService:
                     **({"target_tab": "assessments"}
                        if c.status == "in_assessment" else {}),
                 })
-            customer_qs = [q for q in questions if q.answer_from == "customer"]
+            elif live and theirs and (is_pm_member or holds_lead(c, user)):
+                # Christoph 2026-10-30: Project Management (and the lead)
+                # sees the customer/supplier question too, as a support row
+                # with the mail text; Sales stays the one who asks
+                from app.services.meeting_service import MeetingService as _MS
+                newest = theirs[-1]
+                tasks.append({
+                    **await _base(c), "kind": "obtain_info",
+                    "reason": newest.note,
+                    "question_count": len(theirs),
+                    "concern_id": newest.id,
+                    "department_id": newest.department_id,
+                    "since": newest.raised_at,
+                    "customer_copy": _MS.customer_copy(c, newest),
+                    # Sales' row: the change's Sales contact, else the
+                    # project's Sales responsible, is named as the main
+                    "role_department_id": dept_by_name.get("Sales"),
+                    **({"main_user": (c.sales_owner_id, c.sales_owner_name or "Sales")}
+                       if c.sales_owner_id is not None else {}),
+                    **({"target_tab": "assessments"}
+                       if c.status == "in_assessment" else {}),
+                })
+            customer_qs =[q for q in questions if q.answer_from == "customer"]
             if not live and in_sales and customer_qs:
                 # F8 (spec §0 [R4]): each customer question is a Sales task
                 # with the mail copy text, the change's Sales contact's
