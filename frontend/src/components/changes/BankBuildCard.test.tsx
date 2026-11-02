@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import BankBuildCard from './BankBuildCard'
 import { changesApi } from '../../api/changes'
@@ -116,6 +116,10 @@ describe('BankBuildCard', () => {
     expect(screen.getByTestId('bank-build-publish-state').textContent)
       .toBe(t('bankbuild.unpublished'))
     fireEvent.click(screen.getByTestId('bank-build-publish'))
+    // Audit P3-6: asked once more
+    const ask = await screen.findByTestId('bank-build-publish-confirm')
+    expect(changesApi.publishBankBuildPlan).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: t('bankbuild.publish') }))
     await waitFor(() => expect(changesApi.publishBankBuildPlan).toHaveBeenCalledWith(7))
   })
 

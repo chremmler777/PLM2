@@ -109,13 +109,20 @@ export default function ImplementationPanel({ changeId }: Props) {
 
             {!evidenceOk && item.revision_id !== null && (
               <div className="mt-3 flex items-center gap-2">
+                {/* Audit P3-7: the button says what a second click does
+                    (it closed the uploader without a word) */}
                 <button
+                  type="button"
+                  data-testid={`impl-upload-${item.item_id}`}
+                  aria-expanded={uploadFor === item.item_id}
                   onClick={() =>
                     setUploadFor(uploadFor === item.item_id ? null : item.item_id)
                   }
-                  className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs"
+                  className={uploadFor === item.item_id
+                    ? 'px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs'
+                    : 'px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs'}
                 >
-                  Upload CAD
+                  {uploadFor === item.item_id ? t('impl.uploadClose') : t('impl.uploadCad')}
                 </button>
                 {item.may_sign_no_geometry && (
                   <button

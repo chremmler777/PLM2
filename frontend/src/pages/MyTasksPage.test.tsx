@@ -427,7 +427,8 @@ describe('MyTasksPage one list (spec §16)', () => {
     wrap(<MyTasksPage />)
     await screen.findByText('Update 3D data')
     expect(screen.getAllByText('Update 3D data')).toHaveLength(1)
-    expect(screen.getAllByTestId('task-rasic').map((e) => e.textContent)).toEqual(['R', 'A'])
+    // Audit P3-11: R and A of one step read as one R (R / I only)
+    expect(screen.getAllByTestId('task-rasic').map((e) => e.textContent)).toEqual(['R'])
   })
 
   it('folds a department\'s duplicate change-task rows into one', async () => {

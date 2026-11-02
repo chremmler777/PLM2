@@ -15,6 +15,7 @@ import { t } from '../../i18n/cmLabels';
 import { formatDueDay } from '../../lib/format';
 import { taskKindLabel } from '../../lib/humanLabels';
 import { dueNote } from '../../lib/myTasks';
+import { ANSWER_KINDS, landOnCustomerAnswer } from '../../lib/landOn';
 import { transitionLabel } from '../../lib/changeStatus';
 import { btnSm } from '../common/buttonStyles';
 import type { ChangeTask } from '../../types/change';
@@ -112,7 +113,12 @@ export default function TaskCard({ changeId, kind, departmentId, deviationId, si
                 </span>
               ) : (
                 <button type="button" data-testid="task-card-next" className={btnSm.primary}
-                  onClick={() => (advanceTo ? onAdvance?.(advanceTo) : onGo(target))}>
+                  onClick={() => {
+                    if (advanceTo) { onAdvance?.(advanceTo); return; }
+                    onGo(target);
+                    // audit P3-5: land on the Customer answer panel
+                    if (ANSWER_KINDS.has(task.kind)) landOnCustomerAnswer();
+                  }}>
                   {nextLabel}
                 </button>
               )}

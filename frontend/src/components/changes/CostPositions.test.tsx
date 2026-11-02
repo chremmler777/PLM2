@@ -252,10 +252,17 @@ describe('CostPositions', () => {
     fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '4100' } })
     const add = screen.getByTestId('costpos-add-2') as HTMLButtonElement
     expect(add.disabled).toBe(true)                      // no quantity, no unit
+    // Audit P3-1: the form says so, and the button names what is missing
+    expect(screen.getByTestId('costpos-new-needs-2').textContent).toContain('Quantity and unit are required')
+    expect(add.title).toContain('Quantity')
     fireEvent.change(screen.getByTestId('costpos-new-qty-2'), { target: { value: '2' } })
     expect(add.disabled).toBe(true)                      // no unit
+    expect(add.title).toContain('Unit')
+    expect(add.title).not.toContain('Quantity,')
     fireEvent.change(screen.getByTestId('costpos-new-qtyunit-2'), { target: { value: 'inserts' } })
     expect(add.disabled).toBe(false)
+    expect(screen.queryByTestId('costpos-new-needs-2')).toBeNull()
+    expect(add.title).toBe('')
     fireEvent.click(add)
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
       expect.objectContaining({ kind: 'external', quantity: 2, quantity_unit: 'inserts' })))

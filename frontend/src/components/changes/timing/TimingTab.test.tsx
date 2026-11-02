@@ -233,6 +233,10 @@ describe('TimingTab', () => {
       canPublish: true,
     })
     fireEvent.click(await screen.findByTestId('timing-publish'))
+    // Audit P3-6: asked once more; nothing goes out on the first click
+    const ask = await screen.findByTestId('timing-publish-confirm')
+    expect(planApi.publishPlan).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Publish plan' }))
     await waitFor(() => expect(planApi.publishPlan).toHaveBeenCalledWith(7))
     // The bank-build card never shows a second publish button inside the tab.
     expect(screen.getByTestId('bank-build-stub').dataset.hidePublish).toBe('true')

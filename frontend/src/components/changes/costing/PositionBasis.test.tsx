@@ -24,6 +24,22 @@ const pos = (over: Partial<CostPosition> = {}): CostPosition => ({
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('PositionBasis (spec §4, C25)', () => {
+  const quoted = () => pos({ basis: 'quote', pricing: 'quote', estimated: false, offers: [{
+    id: 4, position_id: 9, vendor_name: 'FZ Tools', cost: 1200, quote_ref: 'Q-3450-I4',
+    quoted_on: null, valid_until: null, attachments: [] }] as never })
+
+  it('P3-2: a date typed after saving the number says it is not saved and goes with Save', async () => {
+    render(wrap(<PositionBasis changeId={7} position={quoted()} editable onChanged={() => {}} />))
+    const save = screen.getByTestId('quoteref-save-4') as HTMLButtonElement
+    expect(save.disabled).toBe(true)                       // nothing changed
+    expect(screen.queryByTestId('quoteref-unsaved-4')).toBeNull()
+    fireEvent.change(screen.getByTestId('quoteref-on-4'), { target: { value: '2026-10-27' } })
+    expect(screen.getByTestId('quoteref-unsaved-4').textContent).toContain('press Save')
+    fireEvent.click(save)
+    await waitFor(() => expect(changesApi.updateCostingOffer).toHaveBeenCalledWith(7, 4,
+      { quote_ref: 'Q-3450-I4', quoted_on: '2026-10-27', valid_until: null }))
+  })
+
   it('an estimate is marked and saves only a reference that names something', async () => {
     render(wrap(<PositionBasis changeId={7} position={pos()} editable onChanged={() => {}} />))
     expect(screen.getByTestId('basis-estimated-9')).toBeTruthy()

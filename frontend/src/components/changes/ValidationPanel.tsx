@@ -331,8 +331,16 @@ function CheckRow({
               : 'Measuring report (number or file name, e.g. MR-2026-118)'}
             className={`w-full ${fieldCls}`} />
         )}
+        {/* Audit P3-8: a Pass that waits for the report says so (the first
+            click on a disabled Pass looked like it did nothing) */}
+        {reportNeeded && !retest && !refOk(note) && (
+          <p data-testid={`validation-report-needed-${id}`} className="text-[11px] text-amber-300">
+            {t('validation.reportFirst')}
+          </p>
+        )}
         <div className="flex items-center gap-2">
           <button type="button" data-testid={`validation-pass-${id}`}
+            title={reportNeeded && !retest && !refOk(note) ? t('validation.reportFirst') : undefined}
             disabled={!mayPass || post.isPending}
             onClick={() => post.mutate({ status: 'passed' })}
             className={btnSm.secondary}>

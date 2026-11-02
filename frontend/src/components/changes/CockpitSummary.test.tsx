@@ -859,6 +859,20 @@ describe('CockpitSummary waits', () => {
     expect(btn.title).toBe('Needs the Project Manager')
   })
 
+  it('P3-10: Sales reads that the sign-off waits for PM and Quality, no disabled "Sign off" of its own', () => {
+    const accepted = change({ status: 'quoted', customer_relevant: true, customer_response: 'accepted',
+      pm_signed_by: null, quality_signed_by: null, assessments: [] })
+    render(wrap(<CockpitSummary change={accepted} gates={[]} pendingDeviations={0} onAdvance={vi.fn()}
+      advancing={false} needs={(k) => (k === 'signoff' ? 'Needs the Project Manager and Quality' : null)} />))
+    expect(screen.queryByRole('button', { name: 'Sign off (PM and Quality)' })).toBeNull()
+    expect(screen.getByText(t('next.signoffWaits'))).toBeDefined()
+    cleanup()
+    // a signer keeps the button
+    render(wrap(<CockpitSummary change={accepted} gates={[]} pendingDeviations={0} onAdvance={vi.fn()}
+      advancing={false} />))
+    expect(screen.getByRole('button', { name: 'Sign off (PM and Quality)' })).toBeDefined()
+  })
+
   it('F3: at quoting the next step jumps to the offer tab, no Quoted/Approved/Rejected buttons', () => {
     const onGo = vi.fn()
     render(wrap(<CockpitSummary change={change({ status: 'quoting', customer_relevant: true })}

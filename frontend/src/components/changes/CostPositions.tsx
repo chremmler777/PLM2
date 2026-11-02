@@ -1211,6 +1211,12 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
 
   const ready = label.trim() !== '' && !add.isPending
     && (!needsQty || ((num(qty) ?? 0) > 0 && qtyUnit.trim() !== ''))
+  // Audit P3-1: say what 'Add line' still waits for (the unit was silent)
+  const waitsFor = [
+    ...(label.trim() === '' ? [t('costpos.label')] : []),
+    ...(needsQty && !((num(qty) ?? 0) > 0) ? [t('costpos.quantity')] : []),
+    ...(needsQty && qtyUnit.trim() === '' ? [t('costpos.quantityUnit')] : []),
+  ]
   const submitOnEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && ready) add.mutate() }
   // Sampling is priced from the cost sheet (trials x the class's price), in
   // the group below. The old own-time "Sampling" category would sit next to
@@ -1291,6 +1297,16 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
                   className={`${fieldCls} w-24`} />
               </span>
             )}
+            {needsQty && label.trim() !== '' && waitsFor.length > 0 && (
+              <span data-testid={`costpos-new-needs-${departmentId}`} className="text-[11px] text-amber-300">
+                {t('costpos.qtyRequired')}
+              </span>
+            )}
+            {isQuote && (
+              <span data-testid={`costpos-new-quotehint-${departmentId}`} className="text-[11px] text-slate-400">
+                {t('costpos.quoteAfterAdd')}
+              </span>
+            )}
             {lineType === 'estimate' && (
               <VendorField testId={`costpos-new-vendor-${departmentId}`} value={vendor}
                 onChange={setVendor} placeholder={t('costpos.vendorOptional')}
@@ -1368,6 +1384,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
         <td className={`${cellCls} text-right whitespace-nowrap sticky right-0 bg-slate-800`}>
           <button type="button" data-testid={`costpos-add-${departmentId}`}
             disabled={!ready} onClick={() => add.mutate()}
+            title={waitsFor.length ? t('costpos.addNeeds').replace('{x}', waitsFor.join(', ')) : undefined}
             className={btnSm.primary}>
             {t('costpos.addLine')}
           </button>

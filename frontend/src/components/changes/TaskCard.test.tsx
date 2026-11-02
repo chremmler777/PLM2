@@ -41,6 +41,36 @@ describe('TaskCard (spec §0 task links)', () => {
     expect(screen.getByTestId('task-card-next').textContent).toBe('Submit assessment for Process')
   })
 
+  it('P3-5: "Record the customer answer" lands on the answer panel; other tasks do not scroll', async () => {
+    const panel = document.createElement('div')
+    panel.setAttribute('data-testid', 'customer-decision')
+    const scroll = vi.fn()
+    panel.scrollIntoView = scroll
+    document.body.appendChild(panel)
+    vi.mocked(changesApi.myTasks).mockResolvedValue([row({ kind: 'customer_response', department_id: null })] as never)
+    const onGo = vi.fn()
+    wrap(<TaskCard changeId={7} kind="customer_response" onGo={onGo} onClose={vi.fn()}
+      actions={[{ kind: 'customer_response', label: 'Record the customer answer', target_tab: 'offer' }]} />)
+    await screen.findByTestId('task-card')
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByTestId('task-card-next'))
+    expect(onGo).toHaveBeenCalledWith('offer')
+    vi.advanceTimersByTime(200)
+    expect(scroll).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+    cleanup()
+    vi.mocked(changesApi.myTasks).mockResolvedValue([row()] as never)
+    wrap(<TaskCard changeId={7} kind="assessment" departmentId={2} onGo={vi.fn()} onClose={vi.fn()}
+      actions={[{ kind: 'assessment', label: 'Submit', target_tab: 'assessments', department_id: 2 }]} />)
+    await screen.findByTestId('task-card')
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByTestId('task-card-next'))
+    vi.advanceTimersByTime(200)
+    expect(scroll).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+    panel.remove()
+  })
+
   it('turns into "done" at once when the change refreshes and the task is gone (no reload)', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValueOnce([row()] as never)
     wrap(<TaskCard changeId={7} kind="assessment" departmentId={2} actions={[]} onGo={vi.fn()} onClose={vi.fn()} />)

@@ -26,6 +26,7 @@ import { formatDate, formatMoney } from '../../lib/format'
 import { toastError } from '../../lib/apiError'
 import { plantName } from '../../lib/plantName'
 import { btnSm } from '../common/buttonStyles'
+import ConfirmDialog from '../common/ConfirmDialog'
 
 const MODES: BankBuildMode[] = ['running_change', 'planned_scrap']
 
@@ -89,6 +90,8 @@ export default function BankBuildCard({
     onError: (e: unknown) => toastError(e, 'Could not save the bank-build plan'),
   })
 
+  // Audit P3-6: publishing to the customer is asked once more
+  const [confirmPublish, setConfirmPublish] = useState(false)
   const publish = useMutation({
     mutationFn: () => changesApi.publishBankBuildPlan(change.id),
     onSuccess: invalidate,
@@ -206,10 +209,15 @@ export default function BankBuildCard({
           <div className="flex items-center gap-2 flex-wrap">
             <button type="button" data-testid="bank-build-publish"
               disabled={!change.bank_build_mode || publish.isPending}
-              onClick={() => publish.mutate()}
+              onClick={() => setConfirmPublish(true)}
               className={btnSm.primary}>
               {t('bankbuild.publish')}
             </button>
+            <ConfirmDialog open={confirmPublish} title={t('bankbuild.publishConfirmTitle')}
+              body={t('bankbuild.publishConfirmBody')} confirmLabel={t('bankbuild.publish')}
+              errorFallback="Could not publish the plan"
+              onConfirm={() => publish.mutateAsync()} onClose={() => setConfirmPublish(false)}
+              data-testid="bank-build-publish-confirm" />
             {!change.bank_build_mode && (
               <span data-testid="bank-build-publish-blocked" className="text-xs text-slate-400">
                 {t('bankbuild.publishNeedsMode')}

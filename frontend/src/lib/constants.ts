@@ -3,6 +3,14 @@
  */
 
 /** RASIC color mapping used in flowchart and workflow progress views */
+/** The two letters the change flow shows (Christoph 2026-10-28: RASIC
+ *  reduced to Responsible / Informed; old A reads R, S/C read I). Audit
+ *  P3-11: My Tasks chips and the workflow rows still showed A, S, C. The
+ *  workflow designer keeps the full set. */
+export const shownLetter = (l: string): 'R' | 'I' => (l === 'R' || l === 'A' ? 'R' : 'I')
+export const shownLetters = (ls: string[]): ('R' | 'I')[] =>
+  [...new Set(ls.map(shownLetter))].sort((a, b) => (a === b ? 0 : a === 'R' ? -1 : 1))
+
 export const rasicColors: Record<string, { bg: string; text: string }> = {
   R: { bg: 'bg-blue-900', text: 'text-blue-200' },
   A: { bg: 'bg-green-900', text: 'text-green-200' },

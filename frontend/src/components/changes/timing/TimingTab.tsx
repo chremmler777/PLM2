@@ -7,7 +7,8 @@
  * or escalate. The bank-build decision and the department tracking of stage 8
  * sit underneath, unchanged.
  */
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import ConfirmDialog from '../../common/ConfirmDialog'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Check, Download } from 'lucide-react'
@@ -124,6 +125,8 @@ export default function TimingTab({
     onSuccess: () => { toast.success('Timing validated. The baseline is set.'); invalidateAll() },
     onError: (e: unknown) => toastError(e, 'Could not validate the timing'),
   })
+  // Audit P3-6: publishing to the customer is asked once more
+  const [confirmPublish, setConfirmPublish] = useState(false)
   const publish = useMutation({
     mutationFn: () => planApi.publishPlan(id),
     onSuccess: () => { toast.success('Plan published to the customer'); invalidateAll() },
@@ -254,8 +257,13 @@ export default function TimingTab({
               ) : !timingValidated ? null : canPublish ? (
                 <>
                   <button type="button" className={primary} disabled={publish.isPending}
-                    onClick={() => publish.mutate()} data-testid="timing-publish">Publish plan to customer</button>
+                    onClick={() => setConfirmPublish(true)} data-testid="timing-publish">Publish plan to customer</button>
                   <span className="text-xs text-slate-400">Records that the validated timing went to the customer. Export it above to attach.</span>
+                  <ConfirmDialog open={confirmPublish} title="Publish the plan to the customer?"
+                    body="This records that the validated timing went to the customer, with your name and today's date. Send the exported plan to the customer yourself; a later change of the plan is a new publish."
+                    confirmLabel="Publish plan" errorFallback="Could not publish the plan"
+                    onConfirm={() => publish.mutateAsync()} onClose={() => setConfirmPublish(false)}
+                    data-testid="timing-publish-confirm" />
                 </>
               ) : (
                 <p className="text-sm text-slate-400">The change lead publishes the validated plan to the customer.</p>

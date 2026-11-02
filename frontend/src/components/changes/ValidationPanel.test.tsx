@@ -104,10 +104,14 @@ describe('ValidationPanel', () => {
     render_()
     const pass = await screen.findByTestId('validation-pass-4-measured') as HTMLButtonElement
     expect(pass.disabled).toBe(true)
+    // Audit P3-8: the disabled Pass says what it waits for
+    expect(screen.getByTestId('validation-report-needed-4-measured').textContent).toContain('measuring report first')
+    expect(pass.title).toContain('measuring report first')
     fireEvent.change(screen.getByTestId('validation-report-4-measured'), { target: { value: 'ok' } })
     expect(pass.disabled).toBe(true)
     fireEvent.change(screen.getByTestId('validation-report-4-measured'), { target: { value: 'CMM report MR-2026-311' } })
     expect(pass.disabled).toBe(false)
+    expect(screen.queryByTestId('validation-report-needed-4-measured')).toBeNull()
     fireEvent.click(pass)
     await waitFor(() => expect(changesApi.setValidationCheck).toHaveBeenCalledWith(7, {
       department_id: 4, check_key: 'measured', status: 'passed', note: 'CMM report MR-2026-311',

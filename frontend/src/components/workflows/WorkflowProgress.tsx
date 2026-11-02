@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { formatDate, formatCalendarDate } from '../../lib/format';
 import { WfInstance, WfInstanceTask, WfDecision } from '../../types/workflow';
-import { rasicColors, instanceStatusColors } from '../../lib/constants';
+import { rasicColors, shownLetter, instanceStatusColors } from '../../lib/constants';
 import { t } from '../../i18n/cmLabels';
 
 interface Props {
@@ -228,7 +228,9 @@ function TaskRow({
   onReject,
   onWaive,
 }: TaskRowProps) {
-  const colors = rasicColors[task.rasic_letter] ?? rasicColors['R'];
+  // Audit P3-11: the change flow shows R and I only (A reads R, S/C read I)
+  const letter = shownLetter(task.rasic_letter);
+  const colors = rasicColors[letter] ?? rasicColors['R'];
 
   if (!task.is_actionable) {
     // S/I/C — auto-noted
@@ -237,7 +239,7 @@ function TaskRow({
         <span
           className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
         >
-          {task.rasic_letter}
+          {letter}
         </span>
         <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
         <span className="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded">Noted</span>
@@ -251,7 +253,7 @@ function TaskRow({
         <span
           className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
         >
-          {task.rasic_letter}
+          {letter}
         </span>
         <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
         <span className="text-xs bg-green-800 text-green-200 px-2 py-0.5 rounded font-medium">
@@ -267,7 +269,7 @@ function TaskRow({
         <span
           className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
         >
-          {task.rasic_letter}
+          {letter}
         </span>
         <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
         <span className="text-xs bg-red-800 text-red-200 px-2 py-0.5 rounded font-medium">
@@ -287,7 +289,7 @@ function TaskRow({
           <span
             className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
           >
-            {task.rasic_letter}
+            {letter}
           </span>
           <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
           <span className="text-xs text-slate-400">{task.step_name}</span>
@@ -311,7 +313,7 @@ function TaskRow({
       <span
         className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
       >
-        {task.rasic_letter}
+        {letter}
       </span>
       <span className="text-slate-100 text-sm font-medium flex-1">{task.department_name}</span>
       <span className="text-xs text-slate-400 mr-2">

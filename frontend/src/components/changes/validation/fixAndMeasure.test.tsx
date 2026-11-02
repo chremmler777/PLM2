@@ -68,7 +68,21 @@ describe('measurementBody', () => {
   it('cycle time names its lot', () => {
     const ct = weight({ check_key: 'cycle_time', unit_short: 's', needs_lot: true })
     expect(measurementBody(ct, draft()).body).toBeNull()
+    // Audit P3-9: says why, in words
+    expect(measurementBody(ct, draft()).why).toContain('Lot missing')
     expect(measurementBody(ct, draft({ lot: 'lot 2026-41-117' })).body).toMatchObject({ lot_ref: 'lot 2026-41-117' })
+  })
+})
+
+describe('MeasurementForm lot hint (audit P3-9)', () => {
+  it('a cycle time says the lot is required; a weight does not', () => {
+    wrap(<MeasurementForm changeId={7} deptId={3} id="3-ct"
+      check={weight({ check_key: 'cycle_time', unit_short: 's', needs_lot: true })} />)
+    expect(screen.getByTestId('validation-lot-hint-3-ct').textContent).toContain('required')
+    expect((screen.getByTestId('validation-lot-3-ct') as HTMLInputElement).placeholder).toContain('required')
+    cleanup()
+    wrap(<MeasurementForm changeId={7} deptId={3} check={weight()} id="3-weight" />)
+    expect(screen.queryByTestId('validation-lot-hint-3-weight')).toBeNull()
   })
 })
 

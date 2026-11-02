@@ -1670,6 +1670,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'validation.max': { de: 'Max', en: 'Max' },
   'validation.measuringRef': { de: 'Messbericht oder Messmittel', en: 'Measuring report or device id' },
   'validation.lotRef': { de: 'Los', en: 'Lot' },
+  'validation.reportFirst': { de: 'Erst den Messbericht nennen, dann Bestanden', en: 'Name the measuring report first, then Pass' },
+  // Audit P3-9: the cycle time is measured on a named lot
+  'validation.required': { de: 'Pflicht', en: 'required' },
+  'validation.lotRequired': { de: 'Los fehlt: die Zykluszeit nennt das gemessene Los', en: 'Lot missing: the cycle time names the lot it was measured on' },
+  'validation.lotHint': { de: 'Die Zykluszeit wird an einem benannten Los gemessen (Los- oder Auftragsnummer, Pflicht).', en: 'The cycle time is measured on a named lot (lot or job number, required).' },
   'validation.limits': { de: 'Grenzen', en: 'Limits' },
   'validation.lower': { de: 'Untergrenze', en: 'Lower limit' },
   'validation.upper': { de: 'Obergrenze', en: 'Upper limit' },
@@ -3218,6 +3223,18 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'basis.part': { de: 'Teil', en: 'Part' },
   'basis.differs': { de: 'Was ist anders (Größe, Kavitäten, Material, Schieber)', en: 'What differs (size, cavities, material, slides)' },
   'basis.save': { de: 'Speichern', en: 'Save' },
+  // Audit P3-1: what a new money line still needs
+  'costpos.qtyRequired': { de: 'Menge und Einheit sind Pflicht (z. B. 1 Stk, 2 Einsätze)', en: 'Quantity and unit are required (e.g. 1 pcs, 2 inserts)' },
+  'costpos.quoteAfterAdd': { de: 'Lieferant, Preis und Angebotsnummer kommen auf das Lieferantenangebot darunter, sobald die Zeile angelegt ist', en: "Vendor, price and quote number go on the supplier's offer below, once the line is added" },
+  'costpos.addNeeds': { de: 'Noch nötig: {x}', en: 'Still needed: {x}' },
+  // Audit P3-6
+  'bankbuild.publishConfirmTitle': { de: 'Plan an den Kunden veröffentlichen?', en: 'Publish the plan to the customer?' },
+  'bankbuild.publishConfirmBody': { de: 'Das hält fest, dass der validierte Terminplan an den Kunden ging, mit deinem Namen und dem heutigen Datum. Den exportierten Plan schickst du selbst; eine spätere Planänderung ist eine neue Veröffentlichung.', en: "This records that the validated timing went to the customer, with your name and today's date. Send the exported plan to the customer yourself; a later change of the plan is a new publish." },
+  // Audit P3-7
+  'impl.uploadCad': { de: 'CAD hochladen', en: 'Upload CAD' },
+  'impl.uploadClose': { de: 'Hochladen schließen', en: 'Close the upload' },
+  'next.signoffWaits': { de: 'Wartet auf die Freigaben von PM und Qualität', en: 'Waiting for the PM and Quality sign-offs' },
+  'basis.unsaved': { de: 'nicht gespeichert: Speichern drücken', en: 'not saved yet: press Save' },
   'basis.failed': { de: 'Konnte nicht gespeichert werden', en: 'Could not save' },
   'basis.sameAsWords': { de: 'wie {p}, anders: {d}', en: 'same as {p}, differs: {d}' },
   'basis.estimateWords': { de: 'Schätzung: {r}', en: 'estimate: {r}' },

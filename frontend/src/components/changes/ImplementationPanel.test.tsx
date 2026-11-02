@@ -66,6 +66,20 @@ describe('ImplementationPanel', () => {
     expect(screen.getByRole('button', { name: /Upload CAD/ })).toBeDefined()
   })
 
+  it('P3-7: the upload button says it closes the uploader once it is open', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    const btn = await screen.findByTestId('impl-upload-1')
+    expect(btn.textContent).toBe('Upload CAD')
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(btn)
+    expect(screen.getByTestId('cad-uploader')).toBeDefined()
+    expect(btn.textContent).toBe('Close the upload')
+    expect(btn.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(btn)
+    expect(screen.queryByTestId('cad-uploader')).toBeNull()
+    expect(btn.textContent).toBe('Upload CAD')
+  })
+
   it('names who a running check workflow still needs (final walk P2-4)', async () => {
     vi.mocked(changesApi.getImplementation).mockResolvedValue({
       ...progress, items: [{ ...progress.items[0], waiting_on: ['Development', 'Quality'] }],

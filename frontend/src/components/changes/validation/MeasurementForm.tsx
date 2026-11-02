@@ -40,7 +40,8 @@ export function measurementBody(check: Pick<ValidationCheck, 'lower_limit' | 'up
   if (lo == null || hi == null) return { body: null, why: `${t('validation.min')} / ${t('validation.max')}` }
   if (lo > hi) return { body: null, why: 'Min > Max' }
   if (!refOk(d.ref)) return { body: null, why: t('validation.measuringRef') }
-  if (check.needs_lot && !refOk(d.lot)) return { body: null, why: t('validation.lotRef') }
+  // Audit P3-9: the cycle time names its lot; say so, not just "Lot"
+  if (check.needs_lot && !refOk(d.lot)) return { body: null, why: t('validation.lotRequired') }
   const body: ValidationMeasurementIn = { sample_size: n, min_value: lo, max_value: hi, measuring_ref: d.ref.trim() }
   if (check.needs_lot) body.lot_ref = d.lot.trim()
   if (check.lower_limit == null || check.upper_limit == null) {
@@ -156,10 +157,14 @@ export default function MeasurementForm({ changeId, deptId, check, id, prefillNo
         <input data-testid={`validation-ref-${id}`} aria-label={t('validation.measuringRef')} placeholder={t('validation.measuringRef')}
           value={d.ref} onChange={set('ref')} className={`flex-1 min-w-[10rem] ${fieldCls}`} />
         {check.needs_lot && (
-          <input data-testid={`validation-lot-${id}`} aria-label={t('validation.lotRef')} placeholder={t('validation.lotRef')}
+          <input data-testid={`validation-lot-${id}`} aria-label={t('validation.lotRef')}
+            placeholder={`${t('validation.lotRef')} (${t('validation.required')})`}
             value={d.lot} onChange={set('lot')} className={`w-32 ${fieldCls}`} />
         )}
       </div>
+      {check.needs_lot && (
+        <p data-testid={`validation-lot-hint-${id}`} className="text-[11px] text-slate-400">{t('validation.lotHint')}</p>
+      )}
       {retest && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] text-amber-300">{t('validation.whatChanged')}</span>

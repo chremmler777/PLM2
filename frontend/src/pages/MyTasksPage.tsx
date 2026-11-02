@@ -9,7 +9,7 @@ import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
 import LateInMyDepartments from '../components/LateInMyDepartments';
-import { rasicColors } from '../lib/constants';
+import { rasicColors, shownLetters } from '../lib/constants';
 import { formatCalendarDate, formatDate } from '../lib/format';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
 import { btnSm } from '../components/common/buttonStyles';
@@ -530,7 +530,7 @@ function DueCell({ due, overdue, task }: {
 
 const LetterChips = ({ letters }: { letters: string[] }) => (
   <span className="inline-flex gap-1 align-middle">
-    {letters.map((l) => {
+    {shownLetters(letters).map((l) => {
       const colors = rasicColors[l] ?? rasicColors['R'];
       return (
         <span key={l} data-testid="task-rasic"

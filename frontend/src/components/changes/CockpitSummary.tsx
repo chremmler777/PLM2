@@ -12,6 +12,7 @@ import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
 import { btnBase, btnSizes, btnSm, buttonClass, type ButtonSize } from '../common/buttonStyles'
 import { t } from '../../i18n/cmLabels'
+import { ANSWER_KINDS, landOnCustomerAnswer } from '../../lib/landOn'
 import { DECIDE_ONLY_RULES } from '../../lib/overrideRules'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
@@ -572,6 +573,10 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     .filter((st) => decidesNotFeasible || !(st.kind === 'action' && st.key === 'override-costing'))
     .map((st) => (!decidesNotFeasible && st.kind === 'wait' && st.key === 'not-feasible'
       ? { ...st, text: t('next.notFeasibleNotYours').replace('{x}', notFeasibleWho) } : st))
+    // Audit P3-10: the sign-off is PM's and Quality's; anyone else reads
+    // that it waits for them, not a disabled "Sign off" as their action
+    .map((st): NextStep => (st.kind === 'go' && st.key === 'signoff' && needs('signoff')
+      ? { kind: 'wait', key: 'signoff', text: t('next.signoffWaits') } : st))
   const hiddenSteps = allSteps.length - steps.length
   const buttons = steps.filter((st): st is Exclude<NextStep, { kind: 'wait' }> => st.kind !== 'wait')
   const offPath = OFF_PATH_STATUSES.includes(change.status)
@@ -658,7 +663,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       // "Ready: move it on" makes the move, like the Next step button
       : a.kind === 'advance' && a.to_status
         ? onAdvance(a.to_status)
-        : onAction?.(a.target_tab))
+        : (onAction?.(a.target_tab), ANSWER_KINDS.has(a.kind) && landOnCustomerAnswer()))
   // A gate constrains its target transition hard (backend: no row decided
   // 'yes', no move). A step it holds is not a live button: it is disabled with
   // the gate's reason, and the way to D1 is right under it.
@@ -692,10 +697,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             (onGo ?? onAction)?.(st.tab)
             // The answer panel sits below the offer's own steps (a screen or
             // more down): the button that names it must land on it.
-            if (st.key === 'answer') {
-              window.setTimeout(() => document.querySelector('[data-testid="customer-decision"]')
-                ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 150)
-            }
+            if (st.key === 'answer') landOnCustomerAnswer()
           } else if (st.kind === 'action') onStepAction?.(st.key)
           else onAdvance(st.to)
         }}>

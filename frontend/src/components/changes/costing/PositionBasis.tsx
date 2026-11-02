@@ -167,6 +167,9 @@ function QuoteRef({ changeId, offer: o, editable, onChanged }: {
     onError: (e: unknown) => { toastError(e, t('basis.failed')) },
   })
   const filed = (o.attachments ?? []).length > 0
+  // Audit P3-2: the date is kept only with Save; say so while it is not
+  const dirty = ref.trim() !== (o.quote_ref ?? '') || on !== (o.quoted_on ?? '')
+    || until !== (o.valid_until ?? '')
   if (!editable) {
     return (
       <p className="text-slate-400">{o.vendor_name}: {o.quote_ref ?? t('basis.noQuoteRef')}
@@ -181,12 +184,14 @@ function QuoteRef({ changeId, offer: o, editable, onChanged }: {
         aria-label={t('basis.quoteRef')} data-testid={`quoteref-ref-${o.id}`}
         onChange={(e) => setRef(e.target.value)} />
       <label className="text-slate-500">{t('basis.quotedOn')}
-        <input type="date" className={`${input} ml-1`} value={on} onChange={(e) => setOn(e.target.value)} /></label>
+        <input type="date" className={`${input} ml-1`} value={on} data-testid={`quoteref-on-${o.id}`}
+          onChange={(e) => setOn(e.target.value)} /></label>
       <label className="text-slate-500">{t('basis.validUntil')}
         <input type="date" className={`${input} ml-1`} value={until} onChange={(e) => setUntil(e.target.value)} /></label>
       <button type="button" className={btnSm.secondary} data-testid={`quoteref-save-${o.id}`}
-        disabled={save.isPending || ref.trim().length < 3} onClick={() => save.mutate()}>
+        disabled={save.isPending || ref.trim().length < 3 || !dirty} onClick={() => save.mutate()}>
         {t('basis.save')}</button>
+      {dirty && <span className="text-amber-300" data-testid={`quoteref-unsaved-${o.id}`}>{t('basis.unsaved')}</span>}
       {!filed && <span className="text-amber-300">{t('basis.noFile')}</span>}
     </div>
   )

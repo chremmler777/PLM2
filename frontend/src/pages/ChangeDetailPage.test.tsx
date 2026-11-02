@@ -1465,6 +1465,22 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     expect(screen.queryByTestId('confirm-clear')).toBeNull()
   })
 
+  it('P3-4: close costing reads the summation fresh, so hours entered meanwhile are named', async () => {
+    authState.current = { isAdmin: true, role: 'admin', canWrite: true, userId: 99 }
+    change.status = 'costing' as ChangeDetail['status']
+    change.customer_relevant = true
+    vi.mocked(changesApi.getSummation).mockResolvedValue({ unpriced_lines: [] } as never)
+    wrap('/changes/1?tab=overview')
+    await waitFor(() => expect(changesApi.getSummation).toHaveBeenCalled())
+    // APQP enters 3 h without a rate in its own session
+    vi.mocked(changesApi.getSummation).mockResolvedValue({ unpriced_lines: [
+      { position_id: 54, department_id: 6, label: 'Internal effort', kind: 'internal_effort', quantity: 3, unit: 'h', message: 'No rate' },
+    ] } as never)
+    fireEvent.click(await screen.findByText('mock-advance-quoting'))
+    await waitFor(() => expect(screen.getByTestId('confirm-open').textContent)
+      .toContain('No cost sheet rate for #6: 3 h unpriced'))
+  })
+
   it('the cockpit knows which steps a deviation covers, and asking one opens the deviation banner (review M1)', async () => {
     change.status = 'approved' as ChangeDetail['status']
     vi.mocked(changesApi.listDeviations).mockResolvedValue([

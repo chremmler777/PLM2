@@ -434,11 +434,17 @@ export default function ChangeDetailPage() {
   // summation lists them. Cost roles only, like every figure.
   // Also read while costing runs: the "Close costing" step warns on the same
   // fact the Costing tab states (nothing costed at all).
-  const { data: closingSummation, isLoading: closingSummationLoading } = useQuery({
+  const { data: closingSummation, isFetching: closingSummationLoading, refetch: refetchClosingSummation } = useQuery({
     queryKey: ['change-summation', changeId],
     queryFn: () => changesApi.getSummation(changeId),
     enabled: (confirmTo === 'quoting' || change?.status === 'costing') && canSeeCosts,
   });
+  // Audit P3-4: the departments enter their hours in their own sessions, so
+  // the summation read when the page opened can predate them; the dialog
+  // reads it fresh (it names the unpriced hours, like the offer does).
+  useEffect(() => {
+    if (confirmTo === 'quoting' && canSeeCosts) void refetchClosingSummation();
+  }, [confirmTo, canSeeCosts, refetchClosingSummation]);
   // What is worth a second look before "Close costing": a total of zero with
   // nothing waiting for a rate. A warning only, never a hold: the backend
   // counts a zero line as an answer (costing_pending_department_ids), so a
