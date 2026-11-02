@@ -318,6 +318,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'next.item.mother_plant_sop': { de: 'SOP-Termin des Werks', en: "The plant's SOP date" },
   'next.item.timing_validated': { de: 'Terminplan validieren (alle Teams)', en: 'Validate the timing (every team)' },
   'next.item.validation_issues': { de: '{n} Validierungsthemen offen', en: '{n} validation issues open' },
+  // P2-6 (Christoph 2026-11-02): an Assumed customer answer holds the release
+  'next.item.customer_assumptions': { de: '{n} angenommene Kundenantworten noch nicht bestätigt', en: '{n} assumed customer answers not confirmed yet' },
+  'why.exit.confirm_assumption': { de: 'Ausweg: der Bestätiger trägt die Antwort des Kunden an der Frage ein.', en: "Way out: the confirmer records the customer's answer on the question." },
+  'release.assumptionWarnings': { de: 'Angenommen, noch nicht bestätigt (hält die Freigabe nicht auf)', en: 'Assumed, not confirmed yet (does not hold the release)' },
   'next.item.release_checklist': { de: '{n} Punkte der Freigabe-Checkliste offen', en: '{n} release checklist items open' },
   'next.item.lessons': { de: 'Lessons Learned abschließen', en: 'Finish lessons learned' },
   'next.item.plan_deviations': { de: '{n} Planabweichungen offen', en: '{n} plan deviations open' },

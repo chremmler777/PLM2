@@ -87,4 +87,6 @@ export interface ReleaseState {
   }
   can_release: boolean
   blockers: string[]
+  /** P2-6: open Assumed answers that only warn (our team, a supplier). */
+  assumption_warnings?: string[]
 }

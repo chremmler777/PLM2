@@ -5,7 +5,7 @@
  * closing summary puts plan against actual.
  */
 import { useState, type ReactNode } from 'react'
-import { Check, ChevronRight, CircleCheck, Hourglass } from 'lucide-react'
+import { AlertTriangle, Check, ChevronRight, CircleCheck, Hourglass } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../../api/changes'
 import { changeReleaseApi } from '../../../api/changeRelease'
@@ -25,6 +25,7 @@ import LessonsStep from './LessonsStep'
 import IssuesPanel, { issueBlockers, useValidationIssues } from '../validation/IssuesPanel'
 import { isIssueOpen } from '../../../types/validationIssue'
 import { btnPrimary } from '../../common/buttonStyles'
+import { t } from '../../../i18n/cmLabels'
 
 export { closingFigures }
 
@@ -249,6 +250,19 @@ export default function ReleaseTab({
                     Releasing anyway asks for a deviation with a reason, which is recorded on the change.
                   </p>
                 )}
+              </div>
+            )}
+            {(release?.assumption_warnings?.length ?? 0) > 0 && (
+              <div data-testid="release-assumption-warnings"
+                className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2">
+                <p className="mb-1 text-xs font-medium text-slate-300">{t('release.assumptionWarnings')}</p>
+                <ul className="space-y-1">
+                  {release!.assumption_warnings!.map((w) => (
+                    <li key={w} className="flex gap-1.5 text-xs text-slate-400">
+                      <AlertTriangle aria-hidden="true" size={12} className="mt-0.5 shrink-0 text-amber-400" />{w}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             {canManage ? (

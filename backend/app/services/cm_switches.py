@@ -45,6 +45,12 @@ SCOPE_REQUIRED = True
 # attached". True brings back the hard evidence rule.
 CONFIRM_EVIDENCE_REQUIRED = False
 
+# P2-6 (Christoph 2026-11-02): an Assumed answer the CUSTOMER still has to
+# confirm holds the release (HARD, no override: the exit is the confirm);
+# our team's and a supplier's open assumptions are listed as a warning only.
+# Off = listed only, as before.
+ASSUMED_CUSTOMER_BLOCKS_RELEASE = True
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call

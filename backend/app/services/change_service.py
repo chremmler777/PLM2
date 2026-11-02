@@ -874,6 +874,12 @@ class ChangeService:
             signed = await ChangeService.signoff_offer_refusal(session, change)
             if signed:
                 return signed
+        if to_status == "released":
+            # P2-6 (Christoph 2026-11-02): the customer confirms what was
+            # assumed for them before the change is released
+            assumed = await ChangeService.customer_assumption_refusal(session, change)
+            if assumed:
+                return assumed
         if (to_status == "closed" and change.price_open
                 and cm_switches.on("COMMERCIAL_V2")):
             if not change.customer_relevant:
@@ -885,6 +891,57 @@ class ChangeService:
                     "supplement, or the money is absorbed (Absorb, with the OK "
                     "of Project Management or Management)")
         return None
+
+    @staticmethod
+    async def open_assumptions(session: AsyncSession,
+                               change: ChangeRequest) -> dict[str, list[str]]:
+        """P2-6 (Christoph 2026-11-02): the Assumed answers nobody confirmed
+        yet, in words ("0.1 mm: Which rib height tolerance does the gauge
+        need? (confirms: Karl Limburg, due 5 Nov 2026)"), split into
+        'customer' (answer_from customer: holds the release) and 'other'
+        (our team, a supplier: a warning only)."""
+        from sqlalchemy import inspect as _inspect
+        if "concerns" in _inspect(change).unloaded:
+            await session.refresh(change, ["concerns"])
+        rows = [q for q in change.concerns
+                if q.answer_kind == "assumed" and q.confirmed_at is None
+                and q.retracted_at is None and q.withdrawn_at is None]
+        out: dict[str, list[str]] = {"customer": [], "other": []}
+        if not rows:
+            return out
+        from app.core.display import fmt_date
+        from app.models.entities import User
+        ids = {q.confirm_by_id for q in rows if q.confirm_by_id is not None}
+        names = dict((await session.execute(
+            select(User.id, User.full_name).where(User.id.in_(ids))))
+            .all()) if ids else {}
+        for q in sorted(rows, key=lambda r: r.id):
+            value = " ".join(x for x in (q.assumed_value, q.assumed_unit) if x)
+            text = (q.note or "").strip()
+            head = f"{value}: {text}" if value and text else (value or text or f"#{q.id}")
+            who = names.get(q.confirm_by_id) or (
+                "the Sales contact" if q.answer_from == "customer" else "the asker")
+            due = f", due {fmt_date(q.confirm_due)}" if q.confirm_due else ""
+            line = f"{head} (confirms: {who}{due})"
+            out["customer" if q.answer_from == "customer" else "other"].append(line)
+        return out
+
+    @staticmethod
+    async def customer_assumption_refusal(session: AsyncSession,
+                                          change: ChangeRequest) -> Optional[str]:
+        """P2-6 (HARD at release, switch ASSUMED_CUSTOMER_BLOCKS_RELEASE):
+        an Assumed customer answer still unconfirmed, named with who
+        confirms it. None when there is none."""
+        from app.services import cm_switches
+        if not cm_switches.ASSUMED_CUSTOMER_BLOCKS_RELEASE:
+            return None
+        lines = (await ChangeService.open_assumptions(session, change))["customer"]
+        if not lines:
+            return None
+        n = len(lines)
+        return (f"{n} assumed customer answer{'s' if n != 1 else ''} not confirmed "
+                f"yet: {'; '.join(lines)}. The confirmer records the customer's "
+                "answer on the question first; no override releases past it")
 
     @staticmethod
     async def latest_sent_offer(session: AsyncSession, change: ChangeRequest):
@@ -1924,6 +1981,13 @@ class ChangeService:
             n = await ReleaseService.open_deviation_count(session, change)
             if n:
                 add("plan_deviations", "soft", n=n, rule="plan_deviations_open")
+            # P2-6 (Christoph 2026-11-02): an Assumed customer answer not
+            # confirmed yet (HARD; our team's / a supplier's only warn)
+            if cm_switches.ASSUMED_CUSTOMER_BLOCKS_RELEASE:
+                lines = (await ChangeService.open_assumptions(session, change))["customer"]
+                if lines:
+                    add("customer_assumptions", "hard", exits=["confirm_assumption"],
+                        n=len(lines), detail="; ".join(lines))
             if (cm_switches.on("RELEASE_V2")
                     and await ChangeService.signoff_offer_refusal(session, change)):
                 # the same rule as the HARD refusal (one truth, R37)

@@ -503,6 +503,10 @@ class ReleaseService:
         n = await ReleaseService.open_deviation_count(session, change)
         if n:
             out.append(ReleaseService.deviations_message(n))
+        # P2-6 (Christoph 2026-11-02): HARD, the transition's own words
+        assumed = await ChangeService.customer_assumption_refusal(session, change)
+        if assumed:
+            out.append(assumed)
         return out
 
     @staticmethod
@@ -592,7 +596,20 @@ class ReleaseService:
             },
             "can_release": change.status == "in_validation" and not blockers,
             "blockers": blockers,
+            # P2-6: our team's and a supplier's open assumptions (and the
+            # customer's with the switch off) warn, they never hold
+            "assumption_warnings": await ReleaseService.assumption_warnings(session, change),
         }
+
+    @staticmethod
+    async def assumption_warnings(session: AsyncSession, change: ChangeRequest) -> list[str]:
+        """Assumed answers still unconfirmed that do not hold the release."""
+        from app.services import cm_switches
+        lines = await ChangeService.open_assumptions(session, change)
+        out = list(lines["other"])
+        if not cm_switches.ASSUMED_CUSTOMER_BLOCKS_RELEASE:
+            out = lines["customer"] + out
+        return out
 
     #: A5-09: the release rows a computed validation check answers
     MEASURED_ROWS = {"weight_measured": ("Tool Engineer", "weight"),

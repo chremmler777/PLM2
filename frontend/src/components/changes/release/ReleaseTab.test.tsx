@@ -349,6 +349,25 @@ describe('ReleaseTab', () => {
     expect(onAdvance).toHaveBeenCalledWith('released')
   })
 
+  it('P2-6: names an open customer assumption as a blocker, our-team ones as a warning only', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state({
+      blockers: ['1 assumed customer answer not confirmed yet: 0.1 mm: rib height (confirms: Karl Limburg)'],
+      assumption_warnings: ['2 mm: wall thickness (confirms: Dale Perry)'] }))
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={vi.fn()} advancing={false} />)
+    expect((await screen.findByTestId('release-blockers')).textContent).toContain('confirms: Karl Limburg')
+    expect(screen.getByTestId('release-assumption-warnings').textContent).toContain('confirms: Dale Perry')
+    expect(screen.getByTestId('release-blockers').textContent).not.toContain('Dale Perry')
+  })
+
+  it('P2-6: no warning box without open assumptions', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={vi.fn()} advancing={false} />)
+    await screen.findByTestId('release-blockers')
+    expect(screen.queryByTestId('release-assumption-warnings')).toBeNull()
+  })
+
   it('CO2: a read-only account is not offered "+ Add lesson" in the lessons step', async () => {
     vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
     wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge={false}
