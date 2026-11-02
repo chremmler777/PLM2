@@ -127,7 +127,9 @@ async def test_viewer_without_tool_rights_is_refused(client, eng_auth, seed, mon
     tool = await make_tool(client, eng_auth, seed)
     topic = await make_topic(client, eng_auth, tool)
     a = (await post_entry(client, eng_auth, tool, topic, party="toolmaker", addressed_to=["ktx"])).json()
-    viewer = await login(client, "eng@test.io", admin=False)  # plm2_Viewer: read only
+    # a hub account in no PLM department is read only (migration 150); eng@test.io
+    # is a department member on this branch and may write
+    viewer = await login(client, "nodept-viewer@test.io", admin=False)
     assert (await delete(client, viewer, tool, topic, a["id"])).status_code == 403
 
 
