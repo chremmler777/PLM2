@@ -488,9 +488,13 @@ export default function AssessmentBuckets({
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
                 {/* Tasks are mandatory per department — there is no claim step,
                     so an empty owner is not a state worth announcing. */}
-                {a?.owner_name && (
+                {a?.owner_name ? (
                   <span className="text-slate-400">{a.owner_name}</span>
-                )}
+                ) : a?.responsible_name ? (
+                  // Audit P3-15: nobody owns the row yet: its responsible
+                  <span data-testid={`bucket-responsible-${row.id}`} className="text-slate-500"
+                    title={t('bucket.responsibleHint')}>{a.responsible_name}</span>
+                ) : null}
                 {a?.due_date && (
                   <span className={`inline-flex items-center gap-1 tabular-nums ${
                     a.overdue ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>

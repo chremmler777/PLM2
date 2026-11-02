@@ -1072,6 +1072,15 @@ async def get_change(
         a.has_rfq = state.get("has_rfq", False)
         a.rfq_expected = state.get("rfq_expected", False)
     out = await _price_safe(db, change, current_user, ChangeDetailResponse)
+    # Audit P3-15: an unowned row names its project-team responsible
+    from app.services.project_team_service import _responsible
+    resp_cache: dict = {}
+    for row in out.assessments:
+        if row.owner_name is None and row.department_id is not None:
+            if row.department_id not in resp_cache:
+                r = await _responsible(db, change.project_id, row.department_id)
+                resp_cache[row.department_id] = r[1] if r else None
+            row.responsible_name = resp_cache[row.department_id]
     await fill_part_labels(db, out.impacted_items)
     await _hide_foreign_drafts(db, current_user, out.assessments)
     # Vendor quotes follow their costing position's read rule here too.
@@ -3490,8 +3499,19 @@ async def list_concerns(
     if cm_switches.on("ASSESSMENT_V2") and change.status not in ("captured", "scoping"):
         from app.services import due_rules as _dr
         await _dr.load_clock_floor(db)      # A6-01: the answer due's floor
+    # Audit P3-16: when the change first entered assessment (a concern
+    # raised before it is scoping's)
+    import json
+    from sqlalchemy import func
+    from app.models.change import ChangeChangelog as _CL
+    assessed_at = (await db.execute(
+        select(func.min(_CL.performed_at)).where(
+            _CL.change_id == change.id, _CL.field_name == "status",
+            _CL.new_value == json.dumps("in_assessment")))).scalar()
     for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
+        row.raised_in_scoping = (c.raised_at < assessed_at if assessed_at and c.raised_at
+                                 else change.status in ("captured", "scoping"))
         if c.kind == "needs_info":
             # The question is the asking side's (2026-10-14): who that is, and
             # whether the caller may answer it (same check as POST .../answer).

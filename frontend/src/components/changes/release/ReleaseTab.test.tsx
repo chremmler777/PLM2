@@ -79,6 +79,29 @@ describe('ReleaseChecklist', () => {
     expect((screen.getByTestId('release-check-customer_approval-confirm') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('P3-18: an open row says up front what Done will ask for; a row without a reference does not', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[9]} canManage={false} editable
+      checks={[
+        check({ key: 'parts_measured', label: 'Measurements confirmed', department_id: 9, department_name: 'APQP',
+          needs_ref: true, ref_prompt: 'The measurement report (number or file name)' }),
+        check({ key: 'surface_quality', label: 'Surface', department_id: 9, department_name: 'APQP' }),
+      ]} />)
+    expect(screen.getByTestId('release-check-parts_measured-needs').textContent)
+      .toBe('Done needs: The measurement report (number or file name)')
+    expect(screen.queryByTestId('release-check-surface_quality-needs')).toBeNull()
+    fireEvent.click(screen.getByTestId('release-check-parts_measured-done'))
+    expect(screen.queryByTestId('release-check-parts_measured-needs')).toBeNull()   // the field says it now
+  })
+
+  it('P3-19: the cycle-time row says to pick Unchanged or Changed first', () => {
+    const ct = check({ key: 'cycle_time_tool', label: 'Cycle time', value_kind: 'cycle_time', hint: null })
+    wrap(<ReleaseChecklist changeId={7} checks={[ct]} myDepartmentIds={[4]} canManage={false} editable />)
+    fireEvent.click(screen.getByTestId('release-check-cycle_time_tool-done'))
+    expect(screen.getByTestId('release-check-cycle_time_tool-pick').textContent).toContain('Unchanged')
+    fireEvent.click(screen.getByTestId('release-check-cycle_time_tool-unchanged'))
+    expect(screen.queryByTestId('release-check-cycle_time_tool-pick')).toBeNull()
+  })
+
   it('R38: a row that promises a report asks for it by name; the Cm row takes the value instead', () => {
     wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[9]} canManage={false} editable
       checks={[
@@ -307,6 +330,19 @@ describe('LessonsStep', () => {
     expect(screen.queryByTestId('lessons-none-reason')).toBeNull()
     fireEvent.click(screen.getByTestId('lessons-complete'))
     await waitFor(() => expect(changeReleaseApi.completeLessons).toHaveBeenCalledWith(7, undefined))
+  })
+
+  it('P3-20: "+ Add lesson" lands on the form with the title focused', () => {
+    const scroll = vi.fn()
+    const proto = window.HTMLElement.prototype as unknown as { scrollIntoView?: () => void }
+    const before = proto.scrollIntoView
+    proto.scrollIntoView = scroll
+    try {
+      wrap(<LessonsStep changeId={7} lessons={{ items: [] }} canAdd canComplete={false} />)
+      fireEvent.click(screen.getByTestId('lesson-add'))
+      expect(document.activeElement).toBe(screen.getByTestId('lesson-title'))
+      expect(scroll).toHaveBeenCalled()
+    } finally { proto.scrollIntoView = before }
   })
 
   it('adds a lesson through the inline form', async () => {

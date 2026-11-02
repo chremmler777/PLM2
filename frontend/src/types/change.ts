@@ -42,6 +42,8 @@ export interface Assessment {
   status: string;
   owner_id: number | null;
   owner_name: string | null;
+  /** Audit P3-15: the project team's responsible while nobody owns the row. */
+  responsible_name?: string | null;
   accepted_at: string | null;
   due_date: string | null;
   overdue: boolean;
@@ -1287,6 +1289,8 @@ export type RiskSeverity = 1 | 2 | 3;
 
 /** A team member's flag against a change, raised in parallel with the meeting. */
 export interface ChangeConcern {
+  /** Audit P3-16: raised before the change entered assessment. */
+  raised_in_scoping?: boolean | null;
   id: number;
   change_id: number;
   kind: ConcernKind;

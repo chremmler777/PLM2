@@ -3234,6 +3234,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl.uploadCad': { de: 'CAD hochladen', en: 'Upload CAD' },
   'impl.uploadClose': { de: 'Hochladen schließen', en: 'Close the upload' },
   'next.signoffWaits': { de: 'Wartet auf die Freigaben von PM und Qualität', en: 'Waiting for the PM and Quality sign-offs' },
+  'bucket.responsibleHint': { de: 'Verantwortlich laut Projektteam (hat noch nicht begonnen)', en: 'Responsible per the project team (not started yet)' },
+  // Audit P3-18 / P3-19: release rows say what Done asks for
+  'release.doneNeeds': { de: 'Erledigt braucht: {x}', en: 'Done needs: {x}' },
+  'release.approvalRef': { de: 'die PSW-/ISIR-Referenz oder den Dateinamen der Freigabe', en: 'the PSW / ISIR reference or the file name of the approval' },
+  'release.pickCycleOutcome': { de: 'Erst „Unverändert“ oder „Geändert“ wählen', en: "Pick 'Unchanged' or 'Changed' first" },
   'basis.unsaved': { de: 'nicht gespeichert: Speichern drücken', en: 'not saved yet: press Save' },
   'basis.failed': { de: 'Konnte nicht gespeichert werden', en: 'Could not save' },
   'basis.sameAsWords': { de: 'wie {p}, anders: {d}', en: 'same as {p}, differs: {d}' },

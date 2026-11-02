@@ -106,6 +106,20 @@ describe('AssessmentBuckets dormant stages', () => {
     expect(screen.queryByText(t('tasks.unclaimed'))).toBeNull()
   })
 
+  it('P3-15: an unowned row names the project team responsible; an owner wins', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[]} editable canSeeAll
+      change={change({ assessments: [assessment({ responsible_name: 'Christoph Demmler' })] })} />)
+    expect((await screen.findByTestId('bucket-responsible-2')).textContent).toBe('Christoph Demmler')
+    cleanup()
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[]} editable canSeeAll
+      change={change({ assessments: [assessment({ owner_id: 3, owner_name: 'Rita RD',
+        responsible_name: 'Christoph Demmler' })] })} />)
+    expect(await screen.findByText('Rita RD')).toBeDefined()
+    expect(screen.queryByTestId('bucket-responsible-2')).toBeNull()
+  })
+
   it('a department the meeting put on the hook is owed work, not a later stage (final walk P1-1)', async () => {
     // The room marked Quality R in stage 1, but its row was never activated
     // (no engine task): the round waits on it, so the bucket says so and

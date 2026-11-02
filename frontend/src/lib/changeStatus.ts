@@ -286,7 +286,9 @@ export function changeTabLabel(raw: string, customerRelevant?: boolean | null, s
     case 'offer': return customerRelevant ? 'Offer' : 'Approval'
     case 'mother': return plantName(plant)
     case 'review': return 'Review'
-    case 'timing': return 'Timing'
+    // Audit P3-14: while implementing, the tab is where the implementation
+    // is tracked; "Timing, Current phase" read as if planning still ran
+    case 'timing': return status === 'in_implementation' ? 'Timing & implementation' : 'Timing'
     case 'release': return 'Release'
     case 'd1': return 'D1'
     case 'audit': return 'Audit'

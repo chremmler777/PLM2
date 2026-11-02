@@ -109,6 +109,15 @@ describe('engineering review track (spec §17)', () => {
   })
 })
 
+describe('timing tab name (audit P3-14)', () => {
+  it('names the implementation while implementing, Timing otherwise', async () => {
+    const m = await import('./changeStatus')
+    expect(m.changeTabLabel('timing', true, 'in_implementation')).toBe('Timing & implementation')
+    expect(m.changeTabLabel('timing', true, 'approved')).toBe('Timing')
+    expect(m.changeTabLabel('timing')).toBe('Timing')
+  })
+})
+
 describe('one verb per step (UI polish 2.4)', () => {
   it('names every forward step the same way everywhere', async () => {
     const { transitionLabel, TRANSITION_LABELS } = await import('./changeStatus')

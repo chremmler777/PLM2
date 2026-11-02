@@ -189,6 +189,18 @@ describe('ConcernStrip', () => {
       t('concern.missing').replace('{x}', `${t('concern.missingType')}, ${t('concern.missingNote')}`))
   })
 
+  it('P3-16: a cancel vote cast in scoping never shows as an assessment risk; scoping still lists it', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({ department_id: 4,
+      raised_in_scoping: true, is_open: false, withdrawn_at: '2026-10-29T10:00:00' })] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped departments={[]} onlyDepartmentId={4} />)
+    expect((await screen.findByTestId('concern-empty')).textContent).toBe(t('risk.none'))
+    expect(screen.queryByText('Tool cannot hold tolerance')).toBeNull()
+    cleanup()
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern({ raised_in_scoping: true })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    expect(await screen.findByText('Tool cannot hold tolerance')).toBeDefined()
+  })
+
   it('says plainly in assessment that no risk is raised, not "before the meeting"', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={[]} />)
     expect((await screen.findByTestId('concern-empty')).textContent).toBe(t('risk.none'))

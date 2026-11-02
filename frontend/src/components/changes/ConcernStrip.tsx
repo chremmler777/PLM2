@@ -330,6 +330,9 @@ export default function ConcernStrip({
 
   const listed = concerns
     .filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
+    // Audit P3-16: a cancel vote cast in scoping is scoping's, never an
+    // assessment's "Risk" (it showed under APQP, settled)
+    .filter((c: ChangeConcern) => !(scoped && c.kind === 'reject_proposal' && c.raised_in_scoping))
     .filter((c: ChangeConcern) =>
       onlyDepartmentId === undefined || c.department_id === onlyDepartmentId)
   const open = listed.filter((c: ChangeConcern) => c.is_open)

@@ -3,7 +3,7 @@
  * what should go differently next time; PM (or the lead, an admin) closes the
  * step with at least one lesson or a stated reason why there is none.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { changeReleaseApi } from '../../../api/changeRelease'
 import type {
@@ -41,6 +41,13 @@ export default function LessonsStep({
 }) {
   const qc = useQueryClient()
   const [adding, setAdding] = useState(false)
+  // Audit P3-20: the form opens below the list; land on it, title focused
+  const titleRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!adding) return
+    titleRef.current?.focus()
+    titleRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+  }, [adding])
   const [form, setForm] = useState<LessonIn>(EMPTY)
   const [noneReason, setNoneReason] = useState('')
   const items = lessons.items ?? []
@@ -93,7 +100,7 @@ export default function LessonsStep({
       {adding && (
         <div data-testid="lesson-form" className="grid gap-2 rounded-lg border border-slate-700 bg-slate-900/50 p-3 sm:grid-cols-3">
           <Field label="Title" className="sm:col-span-3">
-            <input data-testid="lesson-title" className={`${inputCls} w-full`} value={form.title}
+            <input ref={titleRef} data-testid="lesson-title" className={`${inputCls} w-full`} value={form.title}
               onChange={(e) => set('title', e.target.value)} />
           </Field>
           <Field label="What happened" className="sm:col-span-3">

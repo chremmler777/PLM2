@@ -715,20 +715,36 @@ class WorkflowService:
                 kind="task_new",
             )
 
-        if fyi_departments:
+        # Audit P3-12: a change's own routing past its first stage (Summation
+        # & Budget, Customer activities) runs on the change's status, which
+        # tells everyone involved: its stage FYIs were noise
+        if fyi_departments and not (instance.change_id is not None
+                                    and stage.stage_order > 1):
             from app.services.notification_service import NotificationService
 
             part, revision = await WorkflowService._instance_part_context(db, instance)
             stage_label = stage.name or f"stage {stage.stage_order}"
             link = (f"/changes/{instance.change_id}?tab=assessments"
                     if instance.change_id is not None else "/my-tasks")
+            # name the change and the stage, not the part's internal title
+            fchange = (await WorkflowService._task_change(db, instance)
+                       if instance.change_id is None else None)
+            pn = getattr(part, "part_number", None) or part.name
+            if fchange is not None:
+                title = f"FYI: '{stage_label}' started on {fchange.change_number}"
+                body = (f"{fchange.change_number}, part {pn} {revision.revision_name}: "
+                        f"'{stage_label}' has started. Nothing to do for your "
+                        "department; you are kept informed.")
+                link = f"/changes/{fchange.id}"
+            else:
+                title = f"FYI: {part.name} {revision.revision_name}"
+                body = f"'{stage_label}' has started — informational only."
             await NotificationService.notify_team(
                 db, part.project_id,
                 list(fyi_departments),
                 kind="fyi_stage",
                 subject_key=f"inst:{instance.id}:stage:{stage.stage_order}",
-                title=f"FYI: {part.name} {revision.revision_name}",
-                body=f"'{stage_label}' has started — informational only.",
+                title=title[:200], body=body,
                 link=link,
             )
         return len(born_waived)
@@ -1007,12 +1023,30 @@ class WorkflowService:
                     from app.services.notification_service import NotificationService
 
                     part, revision = await WorkflowService._instance_part_context(db, instance)
+                    # Audit P3-21: a change's check workflow says so, with
+                    # the change number and the part number (not the
+                    # internal title), and has a kind
+                    wchange = await WorkflowService._task_change(db, instance)
+                    if wchange is not None:
+                        pn = getattr(part, "part_number", None) or part.name
+                        await NotificationService.notify_users(
+                            db, [instance.started_by],
+                            title=(f"Check workflow done: {pn} {revision.revision_name} "
+                                   f"({wchange.change_number})")[:200],
+                            body=(f"Every step of the check workflow for {pn} "
+                                  f"{revision.revision_name} is approved: the revision is "
+                                  f"ready to go for the release of {wchange.change_number}."),
+                            link=f"/changes/{wchange.id}?tab=release",
+                            kind="workflow_completed",
+                        )
+                        break
                     await NotificationService.notify_users(
                         db,
                         [instance.started_by],
                         title=f"Workflow completed: {part.name} {revision.revision_name}",
                         body="All stages approved.",
                         link=f"/projects/{part.project_id}?part={part.id}",
+                        kind="workflow_completed",
                     )
                     break
 

@@ -2934,6 +2934,8 @@ class ChangeService:
             await ChangeService.notify_stage_entered(session, change, to_status)
         # N2 / T16: the tasks these hops open are told to their owners
         from app.services import task_notices
+        if to_status == "costing":
+            await task_notices.on_costing(session, change, user_id)
         if to_status == "approved":
             await task_notices.on_approved(session, change, user_id)
         if to_status == "in_validation":

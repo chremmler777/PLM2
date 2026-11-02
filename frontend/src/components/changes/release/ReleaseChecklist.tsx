@@ -143,6 +143,12 @@ function CheckRow({ changeId, check, canEdit }: {
               Validation: {check.measurement}
             </div>
           )}
+          {/* Audit P3-18: what 'Done' will ask for, before it is clicked */}
+          {check.status === 'open' && !retired && canEdit && editing === null && check.needs_ref && (
+            <div data-testid={`release-check-${check.key}-needs`} className="text-[11px] text-slate-400">
+              {t('release.doneNeeds').replace('{x}', check.ref_prompt ?? t('release.approvalRef'))}
+            </div>
+          )}
           {check.status !== 'open' && (check.by_name || check.note) && (
             <div className="text-[11px] text-slate-400">
               {check.by_name}{check.at ? `, ${fmtDate(check.at)}` : ''}{check.note ? `: ${check.note}` : ''}
@@ -180,6 +186,12 @@ function CheckRow({ changeId, check, canEdit }: {
                 </button>
               ))}
             </div>
+          )}
+          {/* Audit P3-19: the confirm waits for the pick, and says so */}
+          {kind === 'cycle_time' && outcome === '' && (
+            <span data-testid={`release-check-${check.key}-pick`} className="text-[11px] text-amber-300">
+              {t('release.pickCycleOutcome')}
+            </span>
           )}
           {numberUsed && (
             <label className="inline-flex items-center gap-1 text-xs text-slate-400">

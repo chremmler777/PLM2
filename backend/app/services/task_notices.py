@@ -2,7 +2,8 @@
 to its owner (spec §0 "the task is the notice"): the project team's
 responsible per department, its backup while out, else the members
 (NotificationService.notify_team), a named person directly. These are the
-stage hops that open tasks no other notice announced: approval (lead's plan,
+stage hops that open tasks no other notice announced: costing (each
+department that owes its input, audit P3-13), approval (lead's plan,
 Logistics' bank build, the at-risk sign-offs and Sales' quote), the detailed
 plan (each team confirms it) and validation (each release-check owner)."""
 from typing import Optional
@@ -21,6 +22,29 @@ async def _dept_ids(session: AsyncSession, *names: str) -> dict[str, int]:
 
 def _link(change: ChangeRequest, tab: str) -> str:
     return f"/changes/{change.id}?tab={tab}"
+
+
+async def on_costing(session: AsyncSession, change: ChangeRequest,
+                     actor_id: Optional[int]) -> int:
+    """Audit P3-13: entering costing, each department that still owes its
+    costing input hears it (it was told nothing until the quote was
+    ready). Once per change and department."""
+    from app.services import cm_switches
+    from app.services.change_service import ChangeService
+    from app.services.notification_service import NotificationService
+    if not cm_switches.on("ASSESSMENT_V2"):
+        return 0
+    num = change.change_number
+    sent = 0
+    for did in await ChangeService.costing_pending_department_ids(session, change):
+        sent += await NotificationService.notify_team(
+            session, change.project_id, [did], kind="task_new",
+            subject_key=f"chg:{change.id}:costing_open:{did}",
+            title=f"Your costing: {num}"[:255],
+            body=(f"'{change.title}' is in costing: enter your department's hours "
+                  "and costs for the change and finalize them (Costing tab)."),
+            link=_link(change, "costing"))
+    return sent
 
 
 async def on_approved(session: AsyncSession, change: ChangeRequest,

@@ -224,6 +224,10 @@ class AssessmentResponse(BaseModel):
     status: str = "active"
     owner_id: Optional[int] = None
     owner_name: Optional[str] = None
+    # Audit P3-15: who owns the department's work on the project (team
+    # responsible, else backup) while nobody owns the row yet; the bucket
+    # names them like the others. None: the department as a whole.
+    responsible_name: Optional[str] = None
     accepted_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
     overdue: bool = False
@@ -1508,6 +1512,9 @@ class ConcernResponse(BaseModel):
     change_id: int
     kind: str
     note: str
+    # Audit P3-16: raised before the change entered assessment (a scoping
+    # cancel vote is scoping's, never an assessment's risk). None: unknown.
+    raised_in_scoping: Optional[bool] = None
     raised_by: int
     raised_by_name: Optional[str] = None
     # The asker's department memberships — who is asking matters as much as
