@@ -238,6 +238,10 @@ def test_group_scheme_article_numbers_stay_internal():
     assert "21-227701" not in text and "CR-2026-0031" not in text
     assert text.count("206.881.971") == 2          # subject + body, once each
     assert "for part" not in text                  # the title already leads with it
+    # what the answer decides is internal: never in the customer's text
+    concern.scope_effect = "new graining, +3 weeks, $12k"
+    text = MeetingService.customer_copy(change, concern, "206.881.971")
+    assert "graining" not in text and "decides" not in text
 
 
 async def test_f17_finance_reads_the_costing_summation(client, session_factory, seed):

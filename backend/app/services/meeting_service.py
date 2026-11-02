@@ -1113,7 +1113,7 @@ class MeetingService:
                       part_number: Optional[str] = None) -> Optional[str]:
         """The mail text Sales copies for a customer question (spec §0 [R4],
         §3 "text and customer copy built from the picks"): what is asked,
-        on which part, and what the answer decides. A supplier question
+        on which part; what the answer decides stays internal. A supplier question
         (C8: Sales asks the supplier too) gets the same text, worded for the
         supplier. None for other questions."""
         if (concern.kind != "needs_info"
@@ -1140,8 +1140,8 @@ class MeetingService:
             "",
             concern.note.strip(),
         ]
-        if concern.scope_effect:
-            lines += ["", f"Your answer decides: {concern.scope_effect.strip()}"]
+        # what the answer decides stays internal (cost, timing): never in
+        # the customer's text (Christoph 2026-11-02)
         lines += ["", "Thank you, and best regards"]
         return "\n".join(lines)
 

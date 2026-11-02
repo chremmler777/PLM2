@@ -554,7 +554,8 @@ async def test_customer_question_carries_the_mail_copy(
     rows = await _concerns(client, sales, cid)
     copy = rows[q["id"]]["customer_copy"]
     assert "Which resin lot?" in copy and "ART-SV17" in copy
-    assert "Decides whether Process assesses" in copy
+    # what the answer decides stays internal (Christoph 2026-11-02)
+    assert "Decides whether Process assesses" not in copy
     assert rows[mine["id"]]["customer_copy"] is None
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
     row = next(t for t in tasks if t["kind"] == "obtain_info" and t["change_id"] == cid)
