@@ -18,7 +18,7 @@ from tests.conftest import login, make_department_member, satisfy_capture_gate
 
 pytestmark = pytest.mark.asyncio
 
-URGENT = {"priority": "critical", "release_due_date": "2026-10-30T12:00:00",
+URGENT = {"priority": "critical", "release_due_date": "2027-10-30T12:00:00",
           "urgent_reason": "line_stop", "urgent_evidence": "Customer mail 2026-10-15 09:12"}
 
 
@@ -104,7 +104,7 @@ async def test_urgent_needs_need_by_and_reason_evidence_optional(client, admin_a
     r = await _create(client, admin_auth, seed, "urgent ok", customer_relevant=True, **URGENT)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["priority"] == "critical" and body["release_due_date"].startswith("2026-10-30")
+    assert body["priority"] == "critical" and body["release_due_date"].startswith("2027-10-30")
     assert body["urgent_reason"] == "line_stop"
 
 
@@ -115,7 +115,7 @@ async def test_making_a_change_urgent_later_needs_the_same(client, admin_auth, s
     assert r.status_code == 400 and "need-by" in r.json()["detail"]
     r = await client.patch(f"/api/v1/changes/{cid}", json=URGENT, headers=admin_auth)
     assert r.status_code == 200, r.text
-    assert r.json()["release_due_date"].startswith("2026-10-30")
+    assert r.json()["release_due_date"].startswith("2027-10-30")
 
 
 async def test_mother_plant_changes_keep_their_own_urgency(client, admin_auth, seed):
@@ -248,12 +248,12 @@ async def test_internal_urgent_not_realistic_tells_the_lead_not_sales(
                           headers=admin_auth)
     assert r.status_code == 400 and "start at risk" not in r.json()["detail"]
     # the proposed date lies after today and after the need-by
-    for early in ("2026-10-01T12:00:00", "2026-10-30T12:00:00"):
+    for early in ("2026-10-01T12:00:00", "2027-10-30T12:00:00"):
         r = await client.post(url, json={"decision": "proceed", "need_by_check": "no",
                                          "need_by_proposed": early}, headers=admin_auth)
         assert r.status_code == 400 and "propose a date after" in r.json()["detail"], early
     r = await client.post(url, json={"decision": "proceed", "need_by_check": "no",
-                                     "need_by_proposed": "2026-11-20T12:00:00"},
+                                     "need_by_proposed": "2027-11-20T12:00:00"},
                           headers=admin_auth)
     assert r.status_code == 200, r.text
     rows = [t for t in (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
