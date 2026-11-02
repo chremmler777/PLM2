@@ -925,6 +925,8 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/changes"),
     ("PATCH", "/changes/{change_id}"),
     ("POST", "/changes/{change_id}/transition"),
+    # a hold's new review date (Christoph 2026-11-02): the run team's act
+    ("PUT", "/changes/{change_id}/hold-review"),
     ("POST", "/changes/{change_id}/customer-response"),
     ("POST", "/changes/{change_id}/rejection-sent"),
     ("POST", "/changes/{change_id}/sign-off"),

@@ -366,7 +366,7 @@ async def test_sweep_due_soon_overdue_and_at_risk_dedup(session_factory, seed):
                            "deadline_at_risk": 0, "deadline_overdue": 0,
                            "validation_issue_escalated": 0, "concession_expiring": 0,
                            "overdue_digest": 0,
-                           "change_digest": 0}
+                           "change_digest": 0, "hold_review": 0}
 
 
 @pytest.mark.asyncio
