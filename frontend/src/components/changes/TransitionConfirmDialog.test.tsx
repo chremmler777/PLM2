@@ -9,6 +9,33 @@ const base: TransitionConfirm = {
 }
 
 describe('TransitionConfirmDialog', () => {
+  // Christoph 2026-11-02: a hold takes a reason AND a review date
+  const hold: TransitionConfirm = { ...base, to: 'on_hold', title: 'Put on hold', confirmLabel: 'Put on hold',
+    reason: { label: 'Why?' },
+    date: { label: 'Check again on', defaultValue: '2026-11-16', min: '2026-11-03', max: '2027-02-02' } }
+
+  it('sends the prefilled review date with the reason', () => {
+    const onConfirm = vi.fn()
+    render(<TransitionConfirmDialog confirm={hold} onConfirm={onConfirm} onClose={() => {}} />)
+    expect((screen.getByTestId('confirm-date') as HTMLInputElement).value).toBe('2026-11-16')
+    fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: 'No PO yet' } })
+    fireEvent.click(screen.getByTestId('confirm-go'))
+    expect(onConfirm).toHaveBeenCalledWith('No PO yet', '2026-11-16')
+  })
+
+  it('holds the confirm while the review date is out of range', () => {
+    const onConfirm = vi.fn()
+    render(<TransitionConfirmDialog confirm={hold} onConfirm={onConfirm} onClose={() => {}} />)
+    fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: 'No PO yet' } })
+    fireEvent.change(screen.getByTestId('confirm-date'), { target: { value: '2027-06-01' } })
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('confirm-date'), { target: { value: '' } })
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+    cleanup()
+    render(<TransitionConfirmDialog confirm={base} onConfirm={onConfirm} onClose={() => {}} />)
+    expect(screen.queryByTestId('confirm-date')).toBeNull()
+  })
+
   it('is a modal named by its title; Escape closes it', () => {
     const onClose = vi.fn()
     render(<TransitionConfirmDialog confirm={base} onConfirm={() => {}} onClose={onClose} />)

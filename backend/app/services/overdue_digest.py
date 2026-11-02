@@ -217,6 +217,18 @@ async def late_entries(session: AsyncSession, changes: dict, now: datetime, *,
             add(c.id, "stage", dept_id, what[:1].upper() + what[1:], owner or who,
                 due, f"{who}: {what} (due {fmt_date(due)})")
 
+    # Christoph 2026-11-02: a hold nobody looked at 3 working days after its
+    # review date is Project Management's (its manager reads it)
+    from app.services import hold_review
+    for c in changes.values():
+        if hold_review.escalated(c, now):
+            owner = getattr(c, "lead_name", None) or "Project Management"
+            due = hold_review.due_at(c.hold_review_date)
+            add(c.id, "hold_review", by_name.get("Project Manager"),
+                "Hold review", owner, due,
+                f"On hold, review date {fmt_date(c.hold_review_date)} passed "
+                f"({owner}: resume, cancel or set a new date)")
+
     for c in changes.values() if deadlines else ():
         kind = c.active_deadline
         due = (c.release_due_date if kind == "release"

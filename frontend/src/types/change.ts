@@ -252,6 +252,10 @@ export interface ChangeRequest {
   active_deadline: 'quote' | 'release' | null;
   release_due_date: string | null;
   release_due_reason: string | null;
+  /** On hold (Christoph 2026-11-02): checked again on this day (YYYY-MM-DD),
+   *  and why it is on hold. */
+  hold_review_date?: string | null;
+  hold_reason?: string | null;
   impact_confirmed_by?: number | null;
   impact_confirmed_by_name?: string | null;
   impact_confirmed_at?: string | null;
@@ -625,7 +629,9 @@ export interface ChangeTask {
    *  for assessments and the rows that owe a number or a decision; the
    *  digest alone (no lead, or Sales' stage rows); Project Management
    *  instead of the lead when the lead cannot act (pm_digest, pm); nobody else. */
-  escalation?: 'lead_digest' | 'lead' | 'pm_digest' | 'pm' | 'digest' | null;
+  escalation?: 'lead_digest' | 'lead' | 'pm_digest' | 'pm' | 'digest' | 'pm_manager' | null;
+  /** hold_resume rows: the hold's review date (YYYY-MM-DD). */
+  hold_review_date?: string | null;
   /** C20: the deadline the row runs against ("due Thu (quote deadline Mon)"). */
   deadline_date?: string | null;
   deadline_kind?: 'quote' | 'need_by' | null;

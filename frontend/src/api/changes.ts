@@ -91,8 +91,13 @@ export const changesApi = {
      * checks did not pass has to say so in writing.
      */
     reason?: string;
+    /** Into on_hold: the review date, YYYY-MM-DD (Christoph 2026-11-02). */
+    hold_until?: string;
   }) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/transition`, { to_status, ...opts }).then((r) => r.data),
+  /** A new review date for a change on hold, with a short reason (history). */
+  moveHoldReview: (id: number, review_date: string, reason: string) =>
+    client.put<ChangeRequest>(`/v1/changes/${id}/hold-review`, { review_date, reason }).then((r) => r.data),
 
   listDeviations: (id: number) =>
     client.get<TransitionDeviation[]>(`/v1/changes/${id}/deviations`).then((r) => r.data),

@@ -359,10 +359,15 @@ const taskHint = (task: ChangeTask): string | null => {
       return task.hint ?? null;
     case 'kickoff':
       return kickoffHint(task.missing, task.hint);
-    case 'hold_resume':
-      return task.reason?.trim()
+    case 'hold_resume': {
+      // Christoph 2026-11-02: the row names its review date
+      const why = task.reason?.trim()
         ? t('tasks.hint.hold_resume').replace('{x}', task.reason.trim())
         : t('tasks.hint.hold_resumeNoReason');
+      return task.hold_review_date
+        ? `${why} · ${t('tasks.holdReview').replace('{d}', formatCalendarDate(task.hold_review_date))}`
+        : why;
+    }
     case 'scoping_wrapup': {
       // C33: "Not yet: waiting for 2 answers (Sales Thu, Process Fri)", then
       // what else holds proceed with its owner; "Ready: proceed" only when

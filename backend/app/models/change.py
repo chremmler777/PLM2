@@ -383,6 +383,13 @@ class ChangeRequest(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A hold has a review date (Christoph 2026-11-02, migration 154): the
+    # lead / PM checks it again that day (resume task due then, reminder
+    # mailed), 3 working days later it escalates to the manager of Project
+    # Management. The reason of the latest hold rides beside it for the
+    # header line; every date is on the changelog too.
+    hold_review_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    hold_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Rejection is a decision someone has to answer for later, so it carries a
     # memo like cancellation does. Unlike cancellation it is reversible: a

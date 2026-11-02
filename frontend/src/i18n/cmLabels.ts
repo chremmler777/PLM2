@@ -2689,6 +2689,23 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'One working day past due: it is in the daily overdue digest now' },
   'tasks.lateHintOwn': {
     de: 'Einen Arbeitstag über fällig', en: 'One working day past due' },
+  // Christoph 2026-11-02: a hold's review date
+  'tasks.lateHintPmManager': {
+    de: 'Drei Arbeitstage nach dem Prüftermin: der Leiter Projektmanagement sieht es jetzt im täglichen Überfällig-Bericht',
+    en: 'Three working days past the review date: the manager of Project Management sees it in the daily overdue digest now' },
+  'tasks.holdReview': { de: 'Wieder prüfen am {d}', en: 'Check again on {d}' },
+  'confirm.holdDate': { de: 'Wieder prüfen am (Pflicht; Standard in 2 Wochen, höchstens ~3 Monate)', en: 'Check again on (required; default in 2 weeks, at most ~3 months)' },
+  'confirm.holdDateRange': { de: 'Ein Tag nach heute, höchstens 92 Tage voraus', en: 'A day after today, at most 92 days ahead' },
+  'hold.until': { de: 'Angehalten bis {d}: {x}', en: 'On hold until {d}: {x}' },
+  'hold.untilNoReason': { de: 'Angehalten bis {d}', en: 'On hold until {d}' },
+  'hold.due': { de: 'Prüftermin heute: fortsetzen, abbrechen oder neuen Termin setzen', en: 'Review date today: resume, cancel or set a new date' },
+  'hold.past': { de: 'Prüftermin überschritten: fortsetzen, abbrechen oder neuen Termin setzen; 3 Arbeitstage danach sieht es der Leiter Projektmanagement', en: 'Review date passed: resume, cancel or set a new date; 3 working days after it the manager of Project Management sees it' },
+  'hold.move': { de: 'Neuen Prüftermin setzen', en: 'Set a new review date' },
+  'hold.moveDate': { de: 'Neuer Prüftermin', en: 'New review date' },
+  'hold.moveReason': { de: 'Warum später? (Pflicht, in der Historie)', en: 'Why later? (required, on the history)' },
+  'hold.moveReasonHint': { de: 'z. B. Kunde hat SOP auf KW 50 verschoben', en: 'e.g. customer moved SOP to week 50' },
+  'hold.moveSave': { de: 'Termin speichern', en: 'Save the date' },
+  'hold.moved': { de: 'Neuer Prüftermin gespeichert', en: 'New review date saved' },
   'tasks.dueUrgent': { de: '(dringend)', en: '(urgent)' },
   'tasks.dueQuoteDeadline': { de: '(Angebotstermin {d})', en: '(quote deadline {d})' },
   'tasks.dueNeedBy': { de: '(benötigt bis {d})', en: '(need-by {d})' },

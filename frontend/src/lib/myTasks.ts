@@ -27,7 +27,8 @@ export function lateHint(escalation: ChangeTask['escalation']): string {
     : escalation === 'lead' ? 'tasks.lateHintLead'
       : escalation === 'pm_digest' ? 'tasks.lateHintPm'
         : escalation === 'pm' ? 'tasks.lateHintPmOnly'
-          : escalation === 'digest' ? 'tasks.lateHintDigest' : 'tasks.lateHintOwn')
+          : escalation === 'digest' ? 'tasks.lateHintDigest'
+            : escalation === 'pm_manager' ? 'tasks.lateHintPmManager' : 'tasks.lateHintOwn')
 }
 
 const earlier = (a: string | null | undefined, b: string | null | undefined) =>

@@ -63,6 +63,9 @@ MAIL_KINDS = frozenset({
     # the project team dialog's Save: newly Responsible / Backup (a
     # "no longer" notice, team_removed, stays a badge)
     "team_assigned",
+    # a hold's review date has come (Christoph 2026-11-02): the lead / PM
+    # resumes, cancels or sets a new date
+    "hold_review",
 })
 #: graph_send raises "Graph sendMail <status>: ..." for a non-202 answer.
 #: 401/403 (our app), 408/429 (throttling) and 5xx stop the run; any other

@@ -34,6 +34,7 @@ import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary, { gateStateText } from '../components/changes/CockpitSummary';
 import { signoffOwed } from '../lib/signoff';
 import TransitionConfirmDialog, { type TransitionConfirm } from '../components/changes/TransitionConfirmDialog';
+import HoldBanner from '../components/changes/HoldBanner';
 import { changeReleaseApi } from '../api/changeRelease';
 import { validationIssuesApi, validationIssuesKey } from '../api/validationIssues';
 import { releaseKey } from '../components/changes/release/releaseKeys';
@@ -76,7 +77,7 @@ import { projectLabel } from '../lib/project';
 import { unpricedByDepartment } from '../lib/unpriced';
 import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/change';
 import { btnIcon, btnSm } from '../components/common/buttonStyles';
-import { formatDate, formatMoney } from '../lib/format';
+import { addDaysIso, formatDate, formatMoney, todayIso } from '../lib/format';
 import TaskCard from '../components/changes/TaskCard';
 import OpenQuestionsBanner from '../components/changes/OpenQuestionsBanner';
 
@@ -464,6 +465,7 @@ export default function ChangeDetailPage() {
     mutationFn: (vars: {
       to: string; cancellation_reason?: string;
       rejection_reason?: string; reopen_reason?: string; reason?: string;
+      hold_until?: string;
     }) =>
       changesApi.transition(changeId, vars.to, vars),
     onSuccess: () => {
@@ -634,9 +636,14 @@ export default function ChangeDetailPage() {
     // without); the reason rides on the run team's resume task.
     if (confirmTo === 'on_hold') {
       const verb = transitionLabel('on_hold', change.status);
+      // Christoph 2026-11-02: and when it is checked again (2 weeks by
+      // default, at most ~3 months; the backend's hold_review rule)
+      const today = todayIso();
       return { to: confirmTo, title: verb, consequence: t('confirm.holdBody'),
         open: [], confirmLabel: verb,
-        reason: { label: t('confirm.holdReason'), placeholder: t('confirm.holdReasonHint') } };
+        reason: { label: t('confirm.holdReason'), placeholder: t('confirm.holdReasonHint') },
+        date: { label: t('confirm.holdDate'), defaultValue: addDaysIso(today, 14),
+          min: addDaysIso(today, 1), max: addDaysIso(today, 92), hint: t('confirm.holdDateRange') } };
     }
     if (change.status === 'captured' && confirmTo === 'scoping') {
       return {
@@ -1077,6 +1084,11 @@ export default function ChangeDetailPage() {
           </p>
         </div>
       )}
+      {/* Christoph 2026-11-02: "On hold until <date>: <reason>" */}
+      {change.status === 'on_hold' && (
+        <HoldBanner changeId={change.id} reviewDate={change.hold_review_date}
+          reason={change.hold_reason} canMove={isAdmin || isChangeLead || isPmMember} />
+      )}
       {isRecord && (
         <p role="status" data-testid="closed-banner"
           className="mt-3 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-300">
@@ -1136,14 +1148,14 @@ export default function ChangeDetailPage() {
       />
       <TransitionConfirmDialog confirm={confirm} busy={transition.isPending}
         onClose={() => setConfirmTo(null)}
-        onConfirm={(reason) => {
+        onConfirm={(reason, day) => {
           const to = confirmTo!; setConfirmTo(null);
           // C6: the override dialog, bound to the first rule that holds it
           if (confirm?.asksDeviation) {
             setOverrideFor({ to: to as ChangeStatus, rule: stage?.transition_blocks?.[to]?.rule ?? '' });
             return;
           }
-          transition.mutate(reason ? { to, reason } : { to });
+          transition.mutate(reason ? { to, reason, ...(day ? { hold_until: day } : {}) } : { to });
         }}>
         {/* R37: hours vs estimate, open assumptions, lessons; own hours prefilled */}
         {confirmTo === 'closed' && <CloseSummary changeId={change.id} />}

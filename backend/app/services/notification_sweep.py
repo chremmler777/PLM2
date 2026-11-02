@@ -331,6 +331,34 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                          f"({fmt_date(due)}).",
                     link=f"/changes/{c.id}")
 
+    # A hold's review date (Christoph 2026-11-02): on the day the lead (PM
+    # when the lead cannot act) is reminded, mailed (hold_review); one
+    # notice per date, a new date is told again. 3 working days later the
+    # overdue digest names it to the manager of Project Management.
+    from app.services import hold_review
+    held = [c for c in (await session.execute(select(ChangeRequest).where(
+        ChangeRequest.status == "on_hold",
+        ChangeRequest.hold_review_date.is_not(None)))).scalars().all()
+        if hold_review.reached(c, now)]
+    counts["hold_review"] = 0
+    if held:
+        await to(held)
+        for c in held:
+            ids = [i for i in targets.get(c.id, []) if i is not None]
+            if not ids:
+                continue
+            why = (c.hold_reason or "").strip()
+            counts["hold_review"] += await _once(
+                session, ids, kind="hold_review",
+                subject_key=f"hold_review:{c.id}:{c.hold_review_date.isoformat()}",
+                title=f"Check the hold: {c.change_number}",
+                body=(f"The hold's review date has come ({fmt_date(c.hold_review_date)}): "
+                      "resume the change, cancel it or set a new review date."
+                      + (f" On hold because: {why}" if why else "")
+                      + f" Without a step by {fmt_date(hold_review.escalates_at(c.hold_review_date))}"
+                      " the manager of Project Management is told."),
+                link=f"/changes/{c.id}")
+
     changes = (await session.execute(
         select(ChangeRequest).where(
             ChangeRequest.status.not_in(TERMINAL_STATUSES),

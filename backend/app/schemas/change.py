@@ -115,6 +115,16 @@ class TransitionRequest(BaseModel):
     # C6/R4: the override's reason pick (cm_rules.OVERRIDE_REASONS), required
     # with deviation_reason while COMMERCIAL_V2 is on.
     deviation_reason_code: Optional[str] = None
+    # Christoph 2026-11-02: a hold says when it is checked again ("check
+    # again on", default today + 2 weeks, at most ~3 months ahead).
+    hold_until: Optional[date] = None
+
+
+class HoldReviewRequest(BaseModel):
+    """A new review date for a change on hold, with a short reason
+    (Christoph 2026-11-02): each new date is on the change history."""
+    review_date: date
+    reason: str
 
 
 class CustomerResponseRequest(BaseModel):
@@ -342,6 +352,10 @@ class ChangeResponse(BaseModel):
     change_type: str
     priority: str
     status: str
+    # On hold (Christoph 2026-11-02, migration 154): "On hold until <date>:
+    # <reason>"; kept after a resume (the changelog has every date)
+    hold_review_date: Optional[date] = None
+    hold_reason: Optional[str] = None
     lead_id: Optional[int] = None
     lead_name: Optional[str] = None
     # C10: the named Sales contact (NULL on internal changes).

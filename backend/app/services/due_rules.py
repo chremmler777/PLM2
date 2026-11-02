@@ -202,7 +202,9 @@ OWN_DUE_PREFIXES = ("assessment", "validation_issue_",
                     # C33: an Assumed answer is confirmed by its own date
                     "confirm_assumption",
                     # §1: a deadline "not asked yet" too
-                    "index_deadline_confirm")
+                    "index_deadline_confirm",
+                    # a hold is due on its review date (Christoph 2026-11-02)
+                    "hold_resume")
 
 
 #: Who sees a late row besides its owner (spec §0 one escalation rule):
@@ -297,6 +299,11 @@ async def annotate_tasks(session, tasks: list[dict], changes,
             t["overdue"] = due < now
         t["late"] = is_late(due, now) if isinstance(due, datetime) else False
         t["escalation"] = escalation_of(t, c, c.id in idle)
+        if t["kind"] == "hold_resume":
+            # Christoph 2026-11-02: late 3 working days after the review
+            # date, then the manager of Project Management sees it (digest)
+            t["late"] = bool(t.pop("hold_escalated", False))
+            t["escalation"] = "pm_manager" if t["late"] else None
 
 
 def task_order(t: dict) -> tuple:

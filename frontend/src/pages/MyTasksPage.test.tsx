@@ -125,6 +125,17 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(opened()).toBe('/changes/7')
   })
 
+  it('names the hold review date on the resume row (Christoph 2026-11-02)', async () => {
+    await renderWith(changeTask({ kind: 'hold_resume', status: 'on_hold', reason: 'No PO',
+      hold_review_date: '2026-11-16' }))
+    expect(screen.getByText('On hold because: No PO · Check again on 16 Nov 2026')).toBeDefined()
+  })
+
+  it('names no review date when the hold has none', async () => {
+    await renderWith(changeTask({ kind: 'hold_resume', status: 'on_hold', reason: 'No PO' }))
+    expect(screen.queryByText(/Check again on/)).toBeNull()
+  })
+
   it('says what scoping still owes and opens the scoping tab', async () => {
     await renderWith(changeTask({
       kind: 'scoping_wrapup', impact_confirmed: false, has_decision: false,

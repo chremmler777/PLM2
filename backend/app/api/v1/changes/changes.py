@@ -35,7 +35,7 @@ from app.services.validation_issue_service import IssueForbidden, IssueNotFound
 from app.services.change_people import holds_lead, is_acting
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
-    TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
+    TransitionRequest, HoldReviewRequest, ImpactedItemCreate, ImpactedItemResponse,
     AssessmentSubmit, AssessmentResponse, AssessmentAssignIn, AssessmentDueDateIn,
     CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
@@ -1692,6 +1692,7 @@ async def transition_change(
             rejection_reason=body.rejection_reason,
             reopen_reason=body.reopen_reason,
             reason=body.reason or body.escalation_reason,
+            hold_until=body.hold_until,
         )
     except DeviationRequired as e:
         # An approved deviation would lift this refusal. With a
@@ -1747,6 +1748,29 @@ async def transition_change(
                        f"OK of {who}"),
             "deviation": row,
         }))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
+
+
+@router.put("/{change_id}/hold-review", response_model=ChangeResponse)
+async def move_hold_review(
+    change_id: int, body: HoldReviewRequest,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A new review date for a change on hold, with a short reason
+    (Christoph 2026-11-02): the lead, Project Management or an admin; the
+    date and the reason go on the change history."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.move_hold_review(
+            db, change, current_user, body.review_date, body.reason)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

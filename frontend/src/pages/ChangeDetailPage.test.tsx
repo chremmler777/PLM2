@@ -9,6 +9,7 @@ import { useDepartments } from '../hooks/queries/useWorkflows'
 import type { ChangeDetail } from '../types/change'
 import { t } from '../i18n/cmLabels'
 import { ACTS_AS_KEY } from '../lib/actsAs'
+import { addDaysIso, todayIso } from '../lib/format'
 
 // ChangeDetailPage fetches via changesApi (get/getImplementation/getGates/listDeviations),
 // plantsApi.list, and useDepartments (workflowApi.getDepartments). Heavy tab-content
@@ -1011,9 +1012,12 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     expect(go.disabled).toBe(true)
     expect(changesApi.transition).not.toHaveBeenCalled()
     fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: 'No PO until 30 Oct' } })
+    // Christoph 2026-11-02: with the review date, two weeks out by default
+    const day = (screen.getByTestId('confirm-date') as HTMLInputElement).value
+    expect(day).toBe(addDaysIso(todayIso(), 14))
     fireEvent.click(go)
     await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(
-      1, 'on_hold', { to: 'on_hold', reason: 'No PO until 30 Oct' }))
+      1, 'on_hold', { to: 'on_hold', reason: 'No PO until 30 Oct', hold_until: day }))
     authState.current = { isAdmin: false, role: 'engineer', canWrite: true, userId: null }
   })
 

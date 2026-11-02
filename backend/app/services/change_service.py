@@ -6,7 +6,7 @@ import json
 import re
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List
 
 from sqlalchemy import select, func
@@ -2344,6 +2344,47 @@ class ChangeService:
             parts.append(f"{names.get(d, f'dept {d}')}" + (f" ({extra})" if extra else ""))
         return " · ".join(["Costing not finalized: " + ", ".join(parts)] + index_lines)
 
+    #: A new review date says why in a few words (Christoph 2026-11-02).
+    HOLD_MOVE_REASON_MIN = 5
+
+    @staticmethod
+    async def move_hold_review(session: AsyncSession, change: ChangeRequest,
+                               user, review_date: date, reason: Optional[str]) -> None:
+        """Set a new review date on a change on hold (Christoph 2026-11-02):
+        the lead, a Project Management member or an admin, with a short
+        reason; the date and the reason go on the changelog. The reminder
+        and the escalation start over from the new date (their notices are
+        keyed by the date). Raises PermissionError / ChangeError."""
+        from app.services import hold_review
+        from app.services.change_people import holds_lead
+        from app.services.meeting_service import MeetingService
+        if not (user.effective_role == "admin" or holds_lead(change, user)
+                or await MeetingService.user_is_pm_member(session, user)):
+            raise PermissionError(
+                "Only the change lead, Project Management or an admin may set "
+                "a new review date for the hold")
+        if change.status != "on_hold":
+            raise ChangeError("Only a change on hold has a review date")
+        why = (reason or "").strip()
+        if len(why) < ChangeService.HOLD_MOVE_REASON_MIN:
+            raise ChangeError("Say in a few words why the hold is checked again "
+                              "later (the reason is on the history)")
+        refusal = hold_review.date_refusal(review_date)
+        if refusal:
+            raise ChangeError(refusal)
+        old = change.hold_review_date
+        if old == review_date:
+            raise ChangeError("That is the review date already: pick another day")
+        change.hold_review_date = review_date
+        from app.core.display import fmt_date
+        await ChangeService.append_changelog(
+            session, change, "hold_review_moved",
+            f"Hold review moved {fmt_date(old)} -> {fmt_date(review_date)}: {why}",
+            user.id, field_name="hold_review_date",
+            old_value=old.isoformat() if old else None,
+            new_value=review_date.isoformat(), notes=why)
+        await session.flush()
+
     @staticmethod
     async def _status_before_hold(session: AsyncSession,
                                   change: ChangeRequest) -> Optional[str]:
@@ -2482,8 +2523,11 @@ class ChangeService:
         reason: Optional[str] = None,
         logged_rules: tuple = (),
         at_risk: bool = False,
+        hold_until: Optional[date] = None,
     ) -> ChangeRequest:
-        """`logged_rules`: soft rules a system hand-over passes without an
+        """`hold_until`: into on_hold, the review date (Christoph
+        2026-11-02; default today + 2 weeks, hold_review.date_refusal).
+        `logged_rules`: soft rules a system hand-over passes without an
         override, named in the changelog instead (C9: a full ECR from the
         intake goes to scoping with what its capture still misses).
         `at_risk`: only StartAtRiskService.approve's own hop (§7a); a later
@@ -2616,6 +2660,16 @@ class ChangeService:
             raise ChangeError(
                 "A reason is required to reopen costing — say which numbers "
                 "have to change")
+
+        if to_status == "on_hold":
+            # Christoph 2026-11-02: a hold is checked again on a date
+            from app.services import hold_review
+            review = hold_until or hold_review.default_date()
+            why = hold_review.date_refusal(review)
+            if why:
+                raise ChangeError(why)
+            change.hold_review_date = review
+            change.hold_reason = escalation_note or None
 
         if to_status == "cancelled":
             if not cancellation_reason:
@@ -2843,6 +2897,16 @@ class ChangeService:
             notes=("; ".join(d.reason for d in covering) if covering else
                    (escalation_note or None) if to_status == "on_hold" else None),
         )
+
+        if to_status == "on_hold" and change.hold_review_date is not None:
+            # every review date is on the history (Christoph 2026-11-02)
+            from app.core.display import fmt_date
+            await ChangeService.append_changelog(
+                session, change, "hold_review_set",
+                f"On hold until {fmt_date(change.hold_review_date)}", user_id,
+                field_name="hold_review_date", old_value=None,
+                new_value=change.hold_review_date.isoformat(),
+                notes=escalation_note or None)
 
         if logged:
             # a system hand-over past soft rules: named, not overridden
@@ -4165,8 +4229,17 @@ class ChangeService:
             elif c.status == "on_hold" and (holds_lead(c, user) or is_pm):
                 # C1: a hold is the run team's to resume or cancel; the lead
                 # owns it, Project Management backs up (no lead: PM's own).
+                # Christoph 2026-11-02: due on the review date, not before
+                from app.services import hold_review as _hr
+                review = c.hold_review_date
+                hold_due = _hr.due_at(review) if review else None
                 tasks.append({**await _base(c), "kind": "hold_resume",
-                              "reason": hold_reason.get(c.id),
+                              "reason": c.hold_reason or hold_reason.get(c.id),
+                              "hold_review_date": review,
+                              **({"due_date": hold_due,
+                                  "overdue": hold_due < datetime.utcnow(),
+                                  "hold_escalated": _hr.escalated(c)}
+                                 if hold_due else {}),
                               **({"main_user": (c.lead_id, c.lead_name or "")}
                                  if c.lead_id is not None and not holds_lead(c, user)
                                  and c.id not in idle_lead else {}),

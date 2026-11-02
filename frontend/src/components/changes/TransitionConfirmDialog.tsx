@@ -30,6 +30,9 @@ export interface TransitionConfirm {
   info?: string[]
   /** The step needs a reason on the record: a required memo box. */
   reason?: { label: string; placeholder?: string }
+  /** The step needs a date (a hold's "check again on", Christoph
+      2026-11-02): a required date field, YYYY-MM-DD, prefilled. */
+  date?: { label: string; defaultValue: string; min: string; max: string; hint?: string }
   /** The step is refused while anything is still open: the confirm button
       stays disabled until `open` is empty. */
   holdWhileOpen?: boolean
@@ -46,28 +49,35 @@ export default function TransitionConfirmDialog({
 }: {
   confirm: TransitionConfirm | null
   busy?: boolean
-  /** Called with the memo when the step asks for one. */
-  onConfirm: (reason?: string) => void
+  /** Called with the memo (and the date) when the step asks for them. */
+  onConfirm: (reason?: string, date?: string) => void
   onClose: () => void
   /** Fix-it-here controls under the open list (e.g. the missing description). */
   children?: ReactNode
 }) {
   const reasonId = useId()
+  const dateId = useId()
   const [reason, setReason] = useState('')
+  const [day, setDay] = useState('')
   const open = !!confirm
-  useEffect(() => { if (open) setReason('') }, [open])
+  const defaultDay = confirm?.date?.defaultValue ?? ''
+  useEffect(() => { if (open) { setReason(''); setDay(defaultDay) } }, [open, defaultDay])
   if (!confirm) return null
   const held = (!!confirm.holdWhileOpen && (confirm.loading || confirm.open.length > 0)) || !!confirm.holdNote
   const needsReason = !!confirm.reason && !reason.trim()
+  // ISO days compare as text: the field's own min/max, checked here too
+  const badDay = !!confirm.date && (!day || day < confirm.date.min || day > confirm.date.max)
   return (
     <Dialog open onClose={onClose} title={confirm.title} size="md" busy={busy} showClose={false}
       closeOnBackdrop={!confirm.reason} data-testid={`confirm-${confirm.to}`}
       footer={(
         <>
           <Button onClick={onClose} disabled={busy}>Back</Button>
-          <Button variant="primary" data-testid="confirm-go" disabled={busy || held || needsReason}
-            title={held ? confirm.holdNote ?? 'Complete what is still open first' : needsReason ? 'Give a reason first' : undefined}
-            onClick={() => onConfirm(confirm.reason ? reason.trim() : undefined)}>
+          <Button variant="primary" data-testid="confirm-go" disabled={busy || held || needsReason || badDay}
+            title={held ? confirm.holdNote ?? 'Complete what is still open first' : needsReason ? 'Give a reason first'
+              : badDay ? confirm.date?.hint ?? 'Pick a valid date first' : undefined}
+            onClick={() => (confirm.date ? onConfirm(confirm.reason ? reason.trim() : undefined, day)
+              : onConfirm(confirm.reason ? reason.trim() : undefined))}>
             {confirm.confirmLabel}
           </Button>
         </>
@@ -119,6 +129,16 @@ export default function TransitionConfirmDialog({
             aria-required="true" value={reason} placeholder={confirm.reason.placeholder}
             onChange={(e) => setReason(e.target.value)}
             className="w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 placeholder-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" />
+        </div>
+      )}
+      {confirm.date && (
+        <div className="mt-3">
+          <label htmlFor={dateId} className="mb-1 block text-sm text-slate-300">{confirm.date.label}</label>
+          <input id={dateId} type="date" data-testid="confirm-date" required aria-required="true"
+            value={day} min={confirm.date.min} max={confirm.date.max}
+            onChange={(e) => setDay(e.target.value)}
+            className="rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" />
+          {confirm.date.hint && <p className="mt-1 text-xs text-slate-400">{confirm.date.hint}</p>}
         </div>
       )}
     </Dialog>
