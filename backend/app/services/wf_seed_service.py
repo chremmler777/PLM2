@@ -80,17 +80,20 @@ ASSESSMENT_STANDARD_BY_TYPE = {"physical_part": ECM_BEWERTUNG_PHYSICAL}
 
 # ECR-solid C21: who owns the industrialization and the trial of a check
 # workflow (both ECN templates). Migration 131 rewrites the live rows to this.
+# Christoph 2026-11-02 (audit P2-4): Project Management approves the stage
+# ONCE, as A on its last step; it was A on all four (four approvals for one
+# stage). Migration 155 drops the other three PM A rows.
 INDUSTRIALIZATION_STEPS = [
     ("Implement tool change", [
-        ("Tool Engineer", "R"), ("Project Manager", "A"), ("Toolshop", "S"),
+        ("Tool Engineer", "R"), ("Toolshop", "S"),
         ("Process Engineer", "C"),
     ], {}),
     ("Adjust process / parameter sheets", [
-        ("Process Engineer", "R"), ("Project Manager", "A"),
+        ("Process Engineer", "R"),
         ("Manufacturing Engineer", "C"),
     ], {}),
     ("Clarify inspection plan / PPAP need", [
-        ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
+        ("Quality", "R"), ("Sales", "C"),
     ], {}),
     ("Update master data & logistics", [
         ("Logistics", "R"), ("Project Manager", "A"),
