@@ -502,13 +502,13 @@ describe('StartChangeModal', () => {
       expect(create.disabled).toBe(true)
       fireEvent.change(screen.getByTestId('start-urgent-evidence'), { target: { value: 'Mail buyer 10-15' } })
       const needBy = screen.getByLabelText('Need-by date (urgent)')
-      fireEvent.change(needBy, { target: { value: '30.10.2026' } })
+      fireEvent.change(needBy, { target: { value: '30.10.2027' } })
       fireEvent.blur(needBy)
       await waitFor(() => expect(create.disabled).toBe(false))
       fireEvent.click(create)
       await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(expect.objectContaining({
         priority: 'critical', urgent_reason: 'line_stop', urgent_evidence: 'Mail buyer 10-15',
-        release_due_date: '2026-10-30T12:00:00' })))
+        release_due_date: '2027-10-30T12:00:00' })))
     })
 
     it('§2 a complete capture is created and handed over in one click', async () => {

@@ -50,13 +50,13 @@ describe('§2 capture on the change', () => {
     expect(changesApi.update).not.toHaveBeenCalled()
     const save = screen.getByTestId('urgent-save') as HTMLButtonElement
     expect(save.disabled).toBe(true)
-    fireEvent.change(screen.getByLabelText('Need-by date (urgent)'), { target: { value: '2026-10-30' } })
+    fireEvent.change(screen.getByLabelText('Need-by date (urgent)'), { target: { value: '2027-10-30' } })
     fireEvent.change(screen.getByTestId('prio-urgent-reason'), { target: { value: 'safety' } })
     fireEvent.change(screen.getByTestId('prio-urgent-evidence'), { target: { value: '8D-2026-114' } })
     expect(save.disabled).toBe(false)
     fireEvent.click(save)
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
-      priority: 'critical', release_due_date: '2026-10-30T12:00:00',
+      priority: 'critical', release_due_date: '2027-10-30T12:00:00',
       urgent_reason: 'safety', urgent_evidence: '8D-2026-114' }))
   })
 
