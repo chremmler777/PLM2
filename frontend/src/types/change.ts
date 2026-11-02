@@ -1551,7 +1551,9 @@ export interface ImplDepartmentState {
  * implementing.
  */
 export type ValidationCheckKey =
-  | 'sampled' | 'measured' | 'cycle_time' | 'weight' | 'revision_bump';
+  | 'sampled' | 'measured' | 'cycle_time' | 'weight' | 'revision_bump'
+  // P2-5: own-work checks of Toolshop, Process Engineer, Quality
+  | 'toolshop_work' | 'parameter_sheets' | 'inspection_plan';
 
 /** Open until somebody says otherwise; a fail is a statement, not a silence. */
 export type ValidationCheckStatus = 'open' | 'passed' | 'failed';

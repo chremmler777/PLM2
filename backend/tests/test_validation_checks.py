@@ -649,7 +649,11 @@ async def test_catalog_departments():
     assert cat.keys_for("Tool Engineer")[2:] == ["cycle_time", "weight"]
     # ECR-solid C21: the tool is sampled by the Tool Engineer alone
     assert cat.keys_for("Manufacturing Engineer") == ["measured"]
-    assert cat.keys_for("Process Engineer") == ["measured"]
+    # P2-5 (Christoph 2026-11-02): Process confirms its parameter sheets,
+    # Toolshop its tool work, Quality the inspection plan / PPAP need
+    assert cat.keys_for("Process Engineer") == ["measured", "parameter_sheets"]
+    assert cat.keys_for("Toolshop") == ["toolshop_work"]
+    assert cat.keys_for("Quality") == ["inspection_plan"]
     assert cat.CYCLE_TIME_DEPARTMENT == "Tool Engineer"
     assert cat.label_for("cycle_time", "Process Engineer") == "Measured cycle time"
     assert cat.keys_for("APQP") == ["measured"]

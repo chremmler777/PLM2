@@ -64,6 +64,10 @@ CHECK_CATEGORY = {
     "sampled": "tool",
     "packaging_validated": "packaging",
     "revision_bump": "documentation",
+    # P2-5 own-work checks (Christoph 2026-11-02)
+    "toolshop_work": "tool",
+    "parameter_sheets": "other",
+    "inspection_plan": "documentation",
 }
 
 #: A6-09: the department names one my_actions call reads once (R34).

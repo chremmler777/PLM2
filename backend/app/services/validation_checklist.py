@@ -71,6 +71,36 @@ DEPARTMENT_CHECKS = {
     ],
 }
 
+# Audit 2026-10-29 P2-5 (Christoph 2026-11-02): every department Responsible
+# in the implementation that had implementation work confirms its own work
+# in validation. Toolshop, Process Engineer and Quality had no item: the
+# Toolshop did the insert work, Process adjusted the parameter sheets,
+# Quality clarified the inspection plan / PPAP need. A department owes it
+# when it costed work on the change (implementing) or was R on a check
+# workflow step of the change that was not waived (ValidationService
+# .own_work_department_ids).
+OWN_WORK_CHECKS = {
+    "Toolshop": ("toolshop_work", "Werkzeugarbeiten erledigt und geprüft",
+                 "Tool work done and checked (inserts, rework as planned)",
+                 False, None),
+    "Process Engineer": ("parameter_sheets",
+                         "Prozess-/Einstellblätter aktualisiert und an der Maschine bestätigt",
+                         "Process / parameter sheets updated and confirmed on the machine",
+                         False, None),
+    "Quality": ("inspection_plan", "Prüfplan / PPAP-Bedarf umgesetzt",
+                "Inspection plan / PPAP need applied to the changed part",
+                False, None),
+}
+for _dept, _item in OWN_WORK_CHECKS.items():
+    DEPARTMENT_CHECKS.setdefault(_dept, []).append(_item)
+#: The own-work keys (not seeded into a change that had already finished).
+OWN_WORK_KEYS = frozenset(i[0] for i in OWN_WORK_CHECKS.values())
+
+
+def own_work_key(department_name: str | None) -> str | None:
+    item = OWN_WORK_CHECKS.get(department_name or "")
+    return item[0] if item else None
+
 # The check whose passing number is a commercial fact rather than a technical
 # one: it stamps the change's validated weight and can raise a Sales task.
 WEIGHT_KEY = "weight"

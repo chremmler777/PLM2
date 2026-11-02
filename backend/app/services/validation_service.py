@@ -165,6 +165,50 @@ class ValidationService:
             session, change)
 
     @staticmethod
+    async def own_work_department_ids(session: AsyncSession,
+                                      change: ChangeRequest) -> list[int]:
+        """P2-5 (Christoph 2026-11-02): the departments with an own-work
+        check (catalog.OWN_WORK_CHECKS) that were Responsible on a check
+        workflow step of this change's revisions and had it to do (the task
+        not waived: a no-geometry revision's waived steps are no work)."""
+        from app.models.part import PartRevision
+        from app.models.workflow import WfInstance, WfInstanceTask
+        rows = (await session.execute(
+            select(WfInstanceTask.department_id, Department.name)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+            .join(Department, Department.id == WfInstanceTask.department_id)
+            .where(PartRevision.originating_change_id == change.id,
+                   WfInstance.status != "canceled",
+                   WfInstanceTask.rasic_letter == "R",
+                   WfInstanceTask.status != "waived",
+                   Department.name.in_(list(catalog.OWN_WORK_CHECKS)))
+            .distinct())).all()
+        return sorted({d for d, _ in rows})
+
+    @staticmethod
+    async def owed_keys(session: AsyncSession, change: ChangeRequest,
+                        have=frozenset()) -> dict[int, list[str]]:
+        """{department id: the check keys it owes on this change}, in
+        catalog order: an implementing department its catalog checks; a
+        department that was only R on a check workflow step its own-work
+        check (P2-5). An own-work check is not added to a change that had
+        already finished (`have`: the (department, key) rows on file)."""
+        names = await ValidationService._department_names(session)
+        finished = change.status in ("released", "closed", "cancelled", "rejected")
+        out: dict[int, list[str]] = {}
+        for d in await ValidationService.implementing_department_ids(session, change):
+            out[d] = catalog.keys_for(names.get(d))
+        for d in await ValidationService.own_work_department_ids(session, change):
+            key = catalog.own_work_key(names.get(d))
+            if key and key not in out.setdefault(d, []):
+                out[d].append(key)
+        if finished:
+            out = {d: [k for k in ks if k not in catalog.OWN_WORK_KEYS or (d, k) in have]
+                   for d, ks in out.items()}
+        return {d: ks for d, ks in out.items() if ks}
+
+    @staticmethod
     async def list_checks(session: AsyncSession,
                           change: ChangeRequest) -> list[ValidationCheck]:
         return list((await session.execute(
@@ -190,16 +234,16 @@ class ValidationService:
         """
         existing = await ValidationService.list_checks(session, change)
         have = {(row.department_id, row.check_key) for row in existing}
-        names = await ValidationService._department_names(session)
         created = []
-        for dept_id in await ValidationService.implementing_department_ids(
-                session, change):
-            for item in catalog.items_for(names.get(dept_id)):
-                if (dept_id, item["key"]) in have:
+        # P2-5: an R department's own-work check too (owed_keys)
+        for dept_id, keys in (await ValidationService.owed_keys(
+                session, change, have)).items():
+            for key in keys:
+                if (dept_id, key) in have:
                     continue
                 row = ValidationCheck(
                     change_id=change.id, department_id=dept_id,
-                    check_key=item["key"], status="open")
+                    check_key=key, status="open")
                 session.add(row)
                 created.append(row)
         if created:
@@ -308,6 +352,11 @@ class ValidationService:
         by_dept: dict[int, list[ValidationCheck]] = {}
         for row in rows:
             by_dept.setdefault(row.department_id, []).append(row)
+        # what each department owes now (P2-5: an R department only its
+        # own-work check); a department with rows but nothing owed keeps its
+        # catalog list, as before
+        owed_by_dept = await ValidationService.owed_keys(
+            session, change, {(r.department_id, r.check_key) for r in rows})
 
         departments = []
         for dept_id in sorted(by_dept):
@@ -319,7 +368,9 @@ class ValidationService:
             # at the end and marked retired, when somebody answered them, so
             # an answer never silently vanishes; an unanswered retired row is
             # not owed any more and is left out. Retired rows never count.
-            current = catalog.keys_for(dept_name)
+            current = owed_by_dept.get(dept_id) or [
+                k for k in catalog.keys_for(dept_name)
+                if k not in catalog.OWN_WORK_KEYS or k in stored]
             keys = current + [k for k in stored if k not in current
                               and stored[k].status != "open"]
             for key in keys:
@@ -487,15 +538,20 @@ class ValidationService:
         check_key = spec["check_key"]
         status = spec.get("status")
 
-        implementing = await ValidationService.implementing_department_ids(
-            session, change)
-        if department_id not in implementing:
+        owed = await ValidationService.owed_keys(session, change)
+        if department_id not in owed:
             raise ValidationError(
                 f"Department {department_id} is not implementing this change: "
-                "only departments that costed work on it validate it")
+                "only departments that costed work on it, or were Responsible "
+                "in its implementation, validate it")
         names = await ValidationService._department_names(session)
         dept_name = names.get(department_id)
         item = catalog.item_for(check_key, dept_name)
+        if item is not None and check_key not in owed[department_id]:
+            raise ValidationError(
+                f"'{item['label_en']}' is not owed by "
+                f"{dept_name or f'department {department_id}'} on this change: "
+                "it validates its own implementation work only")
         if item is None:
             raise ValidationError(
                 f"'{check_key}' is not a validation check for "

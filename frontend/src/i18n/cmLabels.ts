@@ -1937,6 +1937,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'validation.check.packaging_validated': {
     de: 'Verpackung mit dem geänderten Teil validiert', en: 'Packaging validated with the changed part',
   },
+  // P2-5 (Christoph 2026-11-02): each Responsible department confirms its own work
+  'validation.check.toolshop_work': { de: 'Werkzeugarbeiten erledigt und geprüft', en: 'Tool work done and checked (inserts, rework as planned)' },
+  'validation.check.parameter_sheets': { de: 'Prozess-/Einstellblätter aktualisiert und an der Maschine bestätigt', en: 'Process / parameter sheets updated and confirmed on the machine' },
+  'validation.check.inspection_plan': { de: 'Prüfplan / PPAP-Bedarf umgesetzt', en: 'Inspection plan / PPAP need applied to the changed part' },
   'validation.hint.revision_bump': {
     de: 'Indexstände gemäß Kundenaussage angehoben und geprüft',
     en: 'Revision levels raised per customer statement and verified',

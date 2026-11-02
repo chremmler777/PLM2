@@ -5578,7 +5578,6 @@ class ChangeService:
         validating = [c for c in open_changes if c.status == "in_validation"]
         if dep_ids and validating:
             from app.models.change_validation import ValidationCheck
-            from app.services import validation_checklist as catalog
             from app.services.validation_service import ValidationService
             answered: dict = {}
             for cid, did, key in (await db.execute(
@@ -5592,7 +5591,9 @@ class ChangeService:
                 coordinates, coordinator_name, no_member_words, staffed_department_ids,
             )
             for c in validating:
-                implementing = set(await ValidationService.implementing_department_ids(db, c))
+                # P2-5: an R department's own-work check counts too
+                owed_keys = await ValidationService.owed_keys(db, c)
+                implementing = set(owed_keys)
                 # A5-04 a (R37): a department with no real member here is
                 # the lead's to answer (no lead: Project Management), with
                 # its own row
@@ -5602,7 +5603,7 @@ class ChangeService:
                     rest = implementing - dep_ids
                     fallback = rest - await staffed_department_ids(db, c, rest)
                 for did in sorted((implementing & dep_ids) | fallback):
-                    open_keys = [k for k in catalog.keys_for(names.get(did))
+                    open_keys = [k for k in owed_keys.get(did, [])
                                  if k not in answered.get((c.id, did), set())]
                     if open_keys:
                         row = {**await base(c), "kind": "validation_check",

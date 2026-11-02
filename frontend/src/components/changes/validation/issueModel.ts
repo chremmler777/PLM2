@@ -108,6 +108,10 @@ export const CATEGORY_FROM_CHECK: Record<string, IssueCategory> = {
   sampled: 'tool',
   packaging_validated: 'packaging',
   revision_bump: 'documentation',
+  // P2-5 own-work checks
+  toolshop_work: 'tool',
+  parameter_sheets: 'other',
+  inspection_plan: 'documentation',
 }
 export const categoryForCheck = (key?: string | null): IssueCategory =>
   (key && CATEGORY_FROM_CHECK[key]) || 'other'
