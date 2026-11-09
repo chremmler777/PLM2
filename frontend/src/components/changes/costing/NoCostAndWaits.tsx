@@ -117,8 +117,9 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
     queryKey: ['costing-positions', changeId],
     queryFn: () => changesApi.listCostPositions(changeId),
   })
-  const soleLine = (posList ?? []).filter((p) => p.department_id === departmentId && p.kind === 'external').length === 1
-  const outside = (w: SupplierWait) => w.position_id == null && !soleLine
+  // Christoph 2026-11-08: with an external line every wait sits in a line's box
+  const hasLine = (posList ?? []).some((p) => p.department_id === departmentId && p.kind === 'external')
+  const outside = (w: SupplierWait) => !hasLine && w.position_id == null
   const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open && outside(w))
   const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open && outside(w))
   // Christoph 2026-11-08: with two or more supplier lines (cases) the wait
@@ -186,7 +187,7 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
             .replace('{by}', w.closed_by_name ?? '-')}
         </div>
       ))}
-      {editable && !open && (
+      {editable && !open && !hasLine && (
         <button type="button" className="text-xs underline text-sky-300" data-testid={`supwait-open-${departmentId}`}
           onClick={() => setOpen(true)}>{t('wait.sup.start')}</button>
       )}
