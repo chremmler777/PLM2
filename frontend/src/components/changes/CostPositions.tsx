@@ -1615,7 +1615,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           </td>
         </tr>
       )}
-      {p.kind === 'own_time' && p.notes !== 'From the bookings' && editable && !editing && (
+      {/* only a line carried from the assessment gets its fill row; a line
+          added here has its hours already (Christoph 2026-11-09) */}
+      {p.kind === 'own_time' && (p.notes ?? '').startsWith('From the assessment') && editable && !editing && (
         <tr data-testid={`costpos-internal-${p.id}`} className="bg-slate-900/40">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
