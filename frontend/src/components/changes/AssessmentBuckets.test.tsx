@@ -1243,3 +1243,12 @@ describe('AssessmentBuckets: continue to costing (per-department pipeline)', () 
     expect(screen.queryByTestId('bucket-continue-costing-2')).toBeNull()
   })
 })
+
+describe('caseHead (2026-11-09 night)', () => {
+  it('names a spare part case as a spare part, not an internal modification', async () => {
+    const { caseHead } = await import('./AssessmentBuckets')
+    expect(caseHead('sparepart_required', 0, 'Spare slide')).toBe('Spare part · Case 1: Spare slide')
+    expect(caseHead('modification_external', 1, 'Core')).toBe('External modification · Case 2: Core')
+    expect(caseHead('modification_internal', 0, 'Insert')).toBe('Internal modification · Case 1: Insert')
+  })
+})

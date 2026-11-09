@@ -34,6 +34,15 @@ import { t } from '../../i18n/cmLabels'
 import { formatDate, formatCalendarDate } from '../../lib/format'
 import { isRoutable } from '../../lib/departments'
 import { btnSm } from '../common/buttonStyles'
+
+/** The headline of an assessment case in the read view (and its file chips). */
+const CASE_HEAD: Record<string, string> = {
+  modification_internal: 'Internal modification',
+  modification_external: 'External modification',
+  sparepart_required: 'Spare part',
+}
+export const caseHead = (key: string | null | undefined, n: number, text: string): string =>
+  `${CASE_HEAD[key ?? ''] ?? 'Internal modification'} · ${t('check.case')} ${n + 1}: ${text}`
 import type {
   ChangeConcern,
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects, StageAssessment,
@@ -711,7 +720,8 @@ export default function AssessmentBuckets({
                     .filter((i) => i.key && CASE_KEYS.has(i.key) && i.answer === 'yes')
                     .flatMap((i) => casesOf(i).map((c, n) => ({
                       key: `${i.key}-${n}`,
-                      head: `${i.key === 'modification_external' ? 'External modification' : 'Internal modification'} · ${t('check.case')} ${n + 1}: ${c.text}`,
+                      // 2026-11-09 night: a spare part case read 'Internal modification'
+                      head: caseHead(i.key, n, c.text),
                       docs: evidenceOf(a.id).filter((att) => att.case_ref && att.case_ref === c.id),
                     })))
                   const mails = (change.attachments ?? [])
