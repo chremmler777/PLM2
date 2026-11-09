@@ -30,6 +30,14 @@ import {
 import PlantNotInUseNote from '../common/PlantNotInUseNote'
 import PmCostingOverview from './costing/PmCostingOverview'
 import { t } from '../../i18n/cmLabels'
+
+/** The tag chip of an open point; a tag without a label shows 'OPEN', never
+ *  the raw key (2026-11-09 night: 'costing.tag.support_hours'). */
+export function tagLabel(tag: string): string {
+  const key = `costing.tag.${tag}`
+  const label = t(key)
+  return label === key ? t('costing.tag.other') : label
+}
 import { formatDate, formatDays, formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeDetail, DeptRollup, Summation } from '../../types/change'
 
@@ -172,7 +180,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
           <ul className="mt-0.5 space-y-0.5 text-xs text-red-100">
             {blocking.map((r, n) => (
               <li key={n}>• <span className="mr-1 rounded bg-red-800/80 px-1 text-[10px] font-semibold text-red-50">
-                {t(`costing.tag.${r.tag}`)}</span>{r.text}</li>
+                {tagLabel(r.tag)}</span>{r.text}</li>
             ))}
           </ul>
         </div>
@@ -183,7 +191,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
           <ul className="mt-0.5 space-y-0.5 text-xs text-slate-300">
             {infoItems.map((r, n) => (
               <li key={n}>• <span className={`mr-1 rounded px-1 text-[10px] font-semibold ${TAG_STYLE[r.tag] ?? TAG_STYLE.other}`}>
-                {t(`costing.tag.${r.tag}`)}</span>{r.text}</li>
+                {tagLabel(r.tag)}</span>{r.text}</li>
             ))}
           </ul>
         </div>

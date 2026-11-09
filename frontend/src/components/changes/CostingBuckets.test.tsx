@@ -344,3 +344,16 @@ describe('CostingBuckets', () => {
     })
   })
 })
+
+describe('tagLabel (2026-11-09 night)', () => {
+  it('labels every finalize-check tag the backend sends, and never shows a raw key', async () => {
+    const { tagLabel } = await import('./CostingBuckets')
+    for (const tag of ['amount_missing', 'basis_missing', 'book_hours', 'compare', 'empty', 'favourite',
+      'hours_missing', 'price_missing', 'quote_missing', 'received', 'support_hours',
+      'time_critical_missing', 'transport_missing', 'waiting', 'waiting_info']) {
+      expect(tagLabel(tag)).not.toContain('costing.tag.')
+    }
+    expect(tagLabel('support_hours')).toBe('SUPPORT HOURS')
+    expect(tagLabel('something_new')).toBe('OPEN')
+  })
+})
