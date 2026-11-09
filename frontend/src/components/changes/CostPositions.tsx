@@ -1121,40 +1121,53 @@ function BookedRow({ changeId, position: p, editable }: {
 }
 
 /** Christoph 2026-11-08: an internal case line fills like the external
- *  estimate: hours, days, what the figure is based on. */
+ *  estimate. 2026-11-09: hours only (no days), same look as the estimate:
+ *  ESTIMATE tag, red fields + "... missing" until hours and basis are there. */
 function InternalQuickRow({ changeId, position: p, onChanged }: {
   changeId: number; position: CostPosition; onChanged: () => void
 }) {
   const [hours, setHours] = useState(p.hours != null ? String(p.hours) : '')
-  const [days, setDays] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
   const [basis, setBasis] = useState(p.notes ?? '')
-  const dirty = num(hours) !== (p.hours ?? null) || num(days) !== (p.lead_time_days ?? null)
-    || basis.trim() !== (p.notes ?? '')
+  const dirty = num(hours) !== (p.hours ?? null) || basis.trim() !== (p.notes ?? '')
   const save = useMutation({
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
-      hours: num(hours), lead_time_days: num(days), lead_time_unit: 'calendar_days',
-      notes: basis.trim() || null,
+      hours: num(hours), notes: basis.trim() || null,
     }),
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toastError(e, 'Could not save the internal work'),
   })
-  const thin = !(Number(hours) > 0)
+  const noHours = !(Number(hours) > 0)
+  const noBasis = basis.trim().length < 5
+  const missing = noHours || noBasis
   return (
-    <div className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1 ${thin
-      ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`}>
-      <span className="w-36 text-xs font-medium text-slate-200">{t('costpos.internalWork')}</span>
-      <input type="number" step="0.5" min={0} value={hours} onChange={(e) => setHours(e.target.value)}
-        data-testid={`int-hours-${p.id}`} aria-label={t('costpos.hours')} placeholder={t('costpos.hours')}
-        className={`${fieldCls} w-24 tabular-nums text-right`} />
-      <input type="number" step="1" min={1} value={days} onChange={(e) => setDays(e.target.value)}
-        data-testid={`int-days-${p.id}`} aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
-        className={`${fieldCls} w-24 tabular-nums text-right`} />
-      <input value={basis} onChange={(e) => setBasis(e.target.value)}
-        data-testid={`int-basis-${p.id}`} aria-label={t('costpos.estBasis')} placeholder={t('costpos.estBasis')}
-        className={`${fieldCls} flex-1 min-w-[12rem]`} />
-      <button type="button" className={btnSm.primary} data-testid={`int-save-${p.id}`}
-        disabled={!dirty || save.isPending || (days !== '' && !(Number(days) >= 1))}
-        onClick={() => save.mutate()}>{t('common.save')}</button>
+    <div data-testid={`int-row-${p.id}`} data-missing={missing ? 'yes' : 'no'}
+      className={`flex flex-wrap items-start gap-2 rounded px-2 py-1.5 ${missing
+        ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : 'border border-slate-700'}`}>
+      <span className="w-36 pt-1 text-xs font-medium text-slate-200">{t('costpos.internalWork')}</span>
+      <div className="flex-1 min-w-[12rem]">
+        <span className="rounded border border-slate-500 px-1.5 text-[11px] font-semibold text-slate-200">{t('costpos.bannerEstimate')}</span>
+        <input value={basis} onChange={(e) => setBasis(e.target.value)}
+          data-testid={`int-basis-${p.id}`} aria-label={t('costpos.estBasis')} title={t('costpos.estBasis')}
+          placeholder={t('costpos.estBasisShort')}
+          className={`${fieldCls} mt-0.5 block w-full ${noBasis ? 'border-red-600' : ''}`} />
+        {missing && (
+          <span className="mt-0.5 block text-[11px] text-red-300">
+            {[noHours && t('costpos.hours'), noBasis && t('costpos.estBasisShort')]
+              .filter(Boolean).join(', ')} {t('costpos.missingWord')}</span>
+        )}
+      </div>
+      <label className="flex items-center gap-1 pt-5 text-xs text-slate-400">
+        <input type="number" step="0.5" min={0} value={hours} onChange={(e) => setHours(e.target.value)}
+          data-testid={`int-hours-${p.id}`} aria-label={t('costpos.hours')}
+          className={`${fieldCls} w-24 tabular-nums text-right ${noHours ? 'border-red-600' : ''}`} />
+        h
+      </label>
+      <div className="w-16 pt-5">
+        {dirty && (
+          <button type="button" className={btnSm.primary} data-testid={`int-save-${p.id}`}
+            disabled={save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+        )}
+      </div>
     </div>
   )
 }
