@@ -177,6 +177,16 @@ def as_issues(found: list[dict]) -> dict:
     return {"errors": errors, "warnings": warnings}
 
 
+def position_tag(p) -> Optional[str]:
+    """The costing tag the rules read for a seeding position. A spare part
+    line from the assessment carries no tag; it is bought alongside, never a
+    tool change (2026-11-09 night: a freshly seeded CR-33 plan had the error
+    'trial starts before the spare slide is finished')."""
+    if p is None:
+        return None
+    return "spare_part" if getattr(p, "is_spare_part", False) else p.tag
+
+
 # ---------------------------------------------------------------- plan I/O
 async def roles_of(session: AsyncSession, tasks: list) -> tuple[dict, dict]:
     """({task id -> role or None}, {position id -> costing tag}) of the
@@ -188,9 +198,9 @@ async def roles_of(session: AsyncSession, tasks: list) -> tuple[dict, dict]:
     pos_ids = {t.source_position_id for t in tasks if t.source_position_id}
     tags = {}
     if pos_ids:
-        tags = dict((await session.execute(
-            select(CostingPosition.id, CostingPosition.tag)
-            .where(CostingPosition.id.in_(pos_ids)))).all())
+        tags = {p.id: position_tag(p) for p in (await session.execute(
+            select(CostingPosition)
+            .where(CostingPosition.id.in_(pos_ids)))).scalars().all()}
     return {t.id: classify(t.kind, t.name, t.lane, names.get(t.department_id),
                            tags.get(t.source_position_id))
             for t in tasks}, tags

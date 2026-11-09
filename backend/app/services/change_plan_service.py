@@ -757,7 +757,9 @@ class ChangePlanService:
                     continue
                 dname = names.get(p.department_id, f"Department {p.department_id}")
                 pred = eng_by_dept.get(p.department_id) or order
-                kind = "downtime" if dname == TOOL_DEPARTMENT else "supplier"
+                # a spare part is bought alongside: the tool is not down
+                kind = ("downtime" if dname == TOOL_DEPARTMENT and not p.is_spare_part
+                        else "supplier")
                 t = add(p.label + (f" - {vendor}" if vendor else ""), kind,
                         after(pred), td(cal, int(days)), lane=dname,
                         dept_id=p.department_id, preds=(pred,), source=p.id)
@@ -789,7 +791,7 @@ class ChangePlanService:
         def role(t):
             p = pos_by_id.get(t.source_position_id)
             return plan_rules.classify(t.kind, t.name, t.lane, names.get(t.department_id),
-                                       p.tag if p is not None else None)
+                                       plan_rules.position_tag(p))
         changes_ = [t for t in tasks if t.source_position_id is not None]
         tool_changes = [t for t in changes_ if role(t) == plan_rules.TOOL_CHANGE]
         line_changes = [t for t in changes_ if role(t) == plan_rules.LINE_CHANGE]

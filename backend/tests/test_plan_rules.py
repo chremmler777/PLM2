@@ -422,3 +422,30 @@ async def test_idea_bank_build_only_warns(client, world):
     v = res.json()["validation"]
     assert any(w["code"] == "tool_change_during_bank_build" for w in v["warnings"])
     assert not any(e["code"] == "tool_change_during_bank_build" for e in v["errors"])
+
+
+async def test_seed_with_a_spare_part_not_time_critical_has_no_rule_error(
+        client, world, session_factory):
+    """2026-11-09 night (CR-33): a spare part from the assessment (no tag) is
+    bought alongside, not a tool change: the seeded plan lets sampling start
+    before it ends and the rules agree (no 'trial before change done'); the
+    tool is not down for it (supplier block, no downtime)."""
+    await _positions(session_factory, world)
+    cid, depts, uid = world["change_id"], world["depts"], world["users"]["tool"]
+    async with session_factory() as s:
+        s.add(CostingPosition(change_id=cid, department_id=depts["Tool Engineer"],
+                              label="Spare slide", kind="external", pricing="estimate",
+                              notes="From the assessment: Spare part required",
+                              est_cost=350, lead_time_days=60, time_critical=False,
+                              lead_time_unit="calendar_days", created_by=uid))
+        await s.commit()
+    sales = await _auth(client, "sales")
+    res = await client.post(_url(cid, "/seed"), json={"plan": "quote"}, headers=sales)
+    assert res.status_code == 200, res.text
+    out = res.json()
+    t = _by_name(out)
+    spare = next(v for k, v in t.items() if k.startswith("Spare slide"))
+    assert spare["rule_role"] is None and spare["kind"] == "supplier"
+    assert t["Sampling / trial"]["start_date"] < spare["end_date"]
+    codes = {i["code"] for i in out["validation"]["errors"]}
+    assert "trial_before_change_done" not in codes
