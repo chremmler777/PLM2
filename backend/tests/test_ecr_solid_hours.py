@@ -42,9 +42,22 @@ async def _book(client, auth, cid, **body):
     return await client.post(f"/api/v1/changes/{cid}/hours", json=body, headers=auth)
 
 
-async def test_book_hours_in_assessment_with_the_estimate_prefilled(
+async def test_book_hours_in_assessment_names_the_estimate_without_prefill(
         client, admin, seed, depts, people, session_factory):
+    # 2026-11-09 night: before implementation the estimate is work still to
+    # come; the dialog names it but never prefills it (14 h of 'costing
+    # effort' were one click away)
     cid = await _with_estimate(client, admin, seed, session_factory, depts)
+    dev = people["Development"][1]
+    st = (await client.get(f"/api/v1/changes/{cid}/hours", headers=dev)).json()
+    mine = {m["department_id"]: m for m in st["mine"]}[depts["Development"]]
+    assert mine["prefill_hours"] is None and mine["source_label"] == "your estimate: 6 h"
+
+
+async def test_book_hours_in_implementation_with_the_estimate_prefilled(
+        client, admin, seed, depts, people, session_factory):
+    cid = await _with_estimate(client, admin, seed, session_factory, depts,
+                               status="in_implementation")
     dev = people["Development"][1]
     st = (await client.get(f"/api/v1/changes/{cid}/hours", headers=dev)).json()
     mine = {m["department_id"]: m for m in st["mine"]}[depts["Development"]]
@@ -56,7 +69,7 @@ async def test_book_hours_in_assessment_with_the_estimate_prefilled(
     row = {r["department_id"]: r for r in st["departments"]}[depts["Development"]]
     assert row["booked_hours"] == 6.0 and row["estimate_hours"] == 6.0
     b = st["bookings"][0]
-    assert b["source"] == "estimate" and b["status_at_booking"] == "in_assessment"
+    assert b["source"] == "estimate" and b["status_at_booking"] == "in_implementation"
     assert b["work_date"] == business_today().isoformat()
     mine = {m["department_id"]: m for m in st["mine"]}[depts["Development"]]
     assert mine["prefill_hours"] is None and "6 h booked" in mine["source_label"]

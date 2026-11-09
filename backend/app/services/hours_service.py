@@ -61,6 +61,11 @@ def window_until(change: ChangeRequest) -> Optional[datetime]:
     return end + timedelta(days=AFTER_CLOSE_DAYS) if end is not None else None
 
 
+# Up to the customer's go the department's estimate is work still to come.
+PRE_IMPLEMENTATION = frozenset(
+    {"captured", "scoping", "in_assessment", "costing", "quoting", "quoted"})
+
+
 def window_open(change: ChangeRequest, now: Optional[datetime] = None) -> bool:
     until = window_until(change)
     return until is None or (now or datetime.utcnow()) <= until
@@ -425,10 +430,15 @@ class HoursService:
         from app.services.change_plan_service import ChangePlanService
         users = await ChangePlanService._user_names(session, [x.booked_by for x in bookings])
         prefill = []
+        # 2026-11-09 night: up to the quote the estimate is the work still to
+        # come (implementation hours, support, line hours), not hours worked:
+        # prefilling it booked 14 h of 'costing effort' in one click. The
+        # estimate is named, never prefilled, before implementation.
+        may_prefill = change.status not in PRE_IMPLEMENTATION
         for did in sorted(mine, key=lambda i: (names.get(i) or "", i)):
             e = est.get((change.id, did))
             b = booked.get((change.id, did), 0.0)
-            left = round(max((e or 0) - b, 0), 2)
+            left = round(max((e or 0) - b, 0), 2) if may_prefill else 0
             prefill.append({
                 "department_id": did, "department_name": names.get(did),
                 "estimate_hours": e, "booked_hours": b,
@@ -452,7 +462,7 @@ class HoursService:
             for did in coordinated:
                 e = est.get((change.id, did))
                 b = booked.get((change.id, did), 0.0)
-                left = round(max((e or 0) - b, 0), 2)
+                left = round(max((e or 0) - b, 0), 2) if may_prefill else 0
                 prefill.append({
                     "department_id": did, "department_name": names.get(did),
                     "estimate_hours": e, "booked_hours": b,
