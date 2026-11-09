@@ -114,8 +114,12 @@ async def progress(session: AsyncSession, change: ChangeRequest) -> dict:
     from app.services import early_costing
     from app.services.early_stage_service import EarlyStageService
     rows = await counted_rows(session, change)
-    dept_ids = sorted({a.department_id for a in rows})
     pending_costing = set(early_costing.state(change)["pending"])
+    # 2026-11-09 night: a department that owes costing without a counted row
+    # (the PM: its rows are the excluded review and the quote stage) is one
+    # of the X of Y too; before, "8 of 8" showed while the PM's costing held
+    # the hop.
+    dept_ids = sorted({a.department_id for a in rows} | pending_costing)
     names = await EarlyStageService._dept_names(session, dept_ids)
     open_: list[dict] = []
     for d in dept_ids:
@@ -125,12 +129,12 @@ async def progress(session: AsyncSession, change: ChangeRequest) -> dict:
         if unanswered:
             what, row = "assessment", unanswered[0]
         elif d in pending_costing:
-            what, row = "costing", mine[0]
+            what, row = "costing", (mine[0] if mine else None)
         else:
             continue
         open_.append({"department_id": d, "department_name": names.get(d),
-                      "owner_name": row.effective_owner_name, "open": what,
-                      "stage_order": row.stage_order})
+                      "owner_name": row.effective_owner_name if row else None,
+                      "open": what, "stage_order": row.stage_order if row else None})
     total = len(dept_ids)
     return {"total": total, "done": total - len(open_), "open": open_,
             "ready": total > 0 and not open_}

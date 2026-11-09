@@ -266,3 +266,25 @@ async def test_pm_rows_scoping_and_costing_effort_from_the_bookings(session_fact
             CostingPosition.department_id == pm))).scalars()}
     assert rows == {HoursService.PM_SCOPING_LABEL: 3.5,
                     HoursService.COSTING_EFFORT_LABEL: 2.0}
+
+
+async def test_pm_costing_counts_in_x_of_y_without_a_counted_row(
+        monkeypatch, client, admin_auth, session_factory, seed):
+    """2026-11-09 night (CR-33): the PM's only rows are the excluded cost
+    review and the quote stage; its owed costing still holds the hop and must
+    be one of the X of Y and named as open (it showed 'all finished')."""
+    ids = await _make(session_factory, seed,
+                      extra_rows=[("Project Manager", 2, "R", False)])
+    real = auto_advance.counted_rows
+
+    async def without_pm(session, change):
+        return [a for a in await real(session, change)
+                if a.department_id != ids["Project Manager"]]
+    monkeypatch.setattr(auto_advance, "counted_rows", without_pm)
+    await _finalize_tool(client, session_factory, seed, ids, "auto-tool9@test.io")
+    assert await _status(session_factory, ids["change_id"]) == "costing"
+    st = (await client.get(f"/api/v1/changes/{ids['change_id']}/stage-state",
+                           headers=admin_auth)).json()["auto_advance"]
+    assert [(o["department_name"], o["open"]) for o in st["open"]] == [
+        ("Project Manager", "costing")]
+    assert st["ready"] is False and st["done"] == st["total"] - 1
