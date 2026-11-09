@@ -556,10 +556,8 @@ export default function ChangeDetailPage() {
   // until its stage opens: nothing to do on it yet, so it does not keep the
   // department on Assessments once its open row is submitted (2026-11-09 night:
   // Dale landed on Assessments with costing his only open step).
-  // Only R/A rows owe a submit; a C/S row gates nothing (no task either).
   const myOpenAssessment = change.assessments.some((a) => myDepts.includes(a.department_id)
-    && !a.submitted_at && a.status !== 'pending' && a.status !== 'waived'
-    && (a.rasic_letter == null || a.rasic_letter === 'R' || a.rasic_letter === 'A'))
+    && !a.submitted_at && a.status !== 'pending' && a.status !== 'waived')
   const myStep: Tab | 'done' | null = (() => {
     // Christoph 2026-11-09: assessment & costing is one self-running step;
     // in costing too each department lands where IT is still open

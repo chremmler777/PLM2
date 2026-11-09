@@ -251,7 +251,6 @@ describe('ChangeDetailPage start tab per department (2026-11-09 night)', () => {
     change.assessments = [
       { id: 1, department_id: 27, stage_order: 1, status: 'submitted', submitted_at: '2026-11-09T05:00:00' },
       { id: 2, department_id: 27, stage_order: 2, status: 'pending', submitted_at: null },
-      { id: 3, department_id: 27, stage_order: 2, status: 'active', submitted_at: null, rasic_letter: 'C' },
     ] as unknown as ChangeDetail['assessments']
     ;(change as Record<string, unknown>).costing_pending_department_ids = [27]
     wrap('/changes/1')
