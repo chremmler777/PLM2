@@ -73,6 +73,20 @@ describe('BookHoursDialog', () => {
     expect(opts).not.toContain('Tool Engineer')
     expect(screen.queryByTestId('book-hours-coordination')).toBeNull()
   })
+  it('Christoph 2026-11-09: from the PM Scoping effort row the dialog says so, has no prefill and books scoping', async () => {
+    vi.mocked(hoursApi.get).mockResolvedValue(state({ can_coordinate: true }))
+    wrap(<BookHoursDialog changeId={7} open onClose={() => {}} scoping initialDepartmentId={2}
+      departments={[{ id: 2, name: 'Project Manager' }]} myDepartmentIds={[2]} />)
+    expect(await screen.findByText('Book hours: Scoping effort')).toBeTruthy()
+    expect(screen.getByTestId('book-hours-scoping').textContent).toMatch(/count as Scoping effort/)
+    await waitFor(() => expect(hoursApi.get).toHaveBeenCalled())
+    expect((screen.getByTestId('book-hours-hours') as HTMLInputElement).value).toBe('')
+    expect(screen.queryByTestId('book-hours-coordination')).toBeNull()
+    fireEvent.change(screen.getByTestId('book-hours-hours'), { target: { value: '2' } })
+    fireEvent.click(screen.getByText('Book'))
+    await waitFor(() => expect(hoursApi.book).toHaveBeenCalled())
+    expect(vi.mocked(hoursApi.book).mock.calls[0][1]).toMatchObject({ department_id: 2, hours: 2, scoping: true })
+  })
   it('A5-04: the lead books for a department with no member here, worded', async () => {
     vi.mocked(hoursApi.get).mockResolvedValue(state({
       mine: [{ department_id: 4, department_name: 'Tool Engineer', estimate_hours: 10, booked_hours: 4,
@@ -179,6 +193,7 @@ describe('BookingsDialog', () => {
   it('phase words', () => {
     expect(phaseLabel({ phase: 'costing', activity: null })).toBe('Costing')
     expect(phaseLabel({ phase: 'assessment', activity: 'coordination' })).toBe('Assessment, coordination')
+    expect(phaseLabel({ phase: 'scoping', activity: 'scoping' })).toBe('Scoping')
   })
 })
 

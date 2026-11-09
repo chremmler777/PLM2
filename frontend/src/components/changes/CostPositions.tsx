@@ -1791,7 +1791,8 @@ function EffortRow({
               <button type="button" data-testid={`costpos-effort-book-${departmentId}`}
                 data-missing={bookMissing ? 'yes' : 'no'}
                 title={bookMissing ? t('costpos.bookCostingHours') : undefined}
-                onClick={() => requestBookHours({ departmentId })}
+                onClick={() => requestBookHours(rowKey === 'costpos.pmScopingRow'
+                  ? { departmentId, scoping: true } : { departmentId })}
                 className={bookMissing
                   ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
                   : btnSm.secondary}>{t('hours.title')}</button>
@@ -1837,8 +1838,10 @@ function EffortRow({
 
 /** Christoph 2026-11-08: costing effort is booked (Book hours) and is
  *  mandatory: the standing row is red until the first costing booking. */
-function CostingEffortStanding({ changeId, departmentId, position, editable, index }: {
+function CostingEffortStanding({ changeId, departmentId, position, editable, index, pm = false }: {
   changeId: number; departmentId: number; position?: CostPosition; editable: boolean; index: number
+  /** the Project Manager: its costing effort is what it booked after scoping */
+  pm?: boolean
 }) {
   const { data: fc } = useQuery({
     queryKey: ['change', changeId, 'finalize-check', departmentId],
@@ -1855,7 +1858,8 @@ function CostingEffortStanding({ changeId, departmentId, position, editable, ind
         <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[11px]">{t('costpos.standing')}</span>
         {missing && <span className="ml-1.5 rounded bg-red-800 px-1 text-[11px] font-semibold text-red-100">{t('costpos.required')}</span>}
       </td>
-      <td className={`${cellCls} text-slate-400 text-xs`}>{t('costpos.bookedHint')}
+      <td className={`${cellCls} text-slate-400 text-xs`} data-testid={`costpos-costing-effort-hint-${departmentId}`}>
+        {t(pm ? 'costpos.bookedHintPm' : 'costpos.bookedHint')}
         {position && <RateNote p={position} />}</td>
       <td className={`${cellCls} text-xs text-slate-400 whitespace-nowrap`}>{t('costpos.type.time')}</td>
       <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
@@ -2497,7 +2501,8 @@ export default function CostPositions({
               )
             })}
             <CostingEffortStanding changeId={changeId} departmentId={departmentId}
-              position={costingEffort} editable={editable} index={EFFORT_FIELDS.length + 1} />
+              position={costingEffort} editable={editable} index={EFFORT_FIELDS.length + 1}
+              pm={departmentName === 'Project Manager'} />
             {ownLines.map(rowOf)}
           </tbody>
           <tbody data-testid={`costpos-list-${departmentId}`}>

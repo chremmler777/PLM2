@@ -1060,3 +1060,38 @@ describe('CostPositions — spare part time critical (Christoph 2026-11-09)', ()
     expect(screen.getByTestId('costpos-lead-excluded-66').textContent).toBe(t('costpos.tc.notCounted'))
   })
 })
+
+describe('PM rows: Scoping effort books into scoping, Costing effort is after scoping (Christoph 2026-11-09 night)', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([] as never)
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+  })
+  afterEach(cleanup)
+
+  it('PM: "after scoping" and its Scoping effort Book hours asks for a scoping booking', async () => {
+    const seen: unknown[] = []
+    const on = (e: Event) => seen.push((e as CustomEvent).detail)
+    window.addEventListener('plm2:book-hours', on)
+    try {
+      positions({ departmentName: 'Project Manager' })
+      expect((await screen.findByTestId('costpos-costing-effort-hint-2')).textContent)
+        .toContain('Sum of the bookings after scoping')
+      fireEvent.click(screen.getByTestId('costpos-effort-book-2'))
+      expect(seen).toEqual([{ departmentId: 2, scoping: true }])
+    } finally { window.removeEventListener('plm2:book-hours', on) }
+  })
+
+  it('NEGATIVE: any other department keeps "after your assessment" and a plain booking', async () => {
+    const seen: unknown[] = []
+    const on = (e: Event) => seen.push((e as CustomEvent).detail)
+    window.addEventListener('plm2:book-hours', on)
+    try {
+      positions({ departmentName: 'Tool Engineer' })
+      expect((await screen.findByTestId('costpos-costing-effort-hint-2')).textContent)
+        .toContain('after your assessment')
+      fireEvent.click(screen.getByTestId('costpos-effort-book-2'))
+      expect(seen).toEqual([{ departmentId: 2 }])
+    } finally { window.removeEventListener('plm2:book-hours', on) }
+  })
+})
+

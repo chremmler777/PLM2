@@ -38,6 +38,9 @@ AFTER_CLOSE_DAYS = 7
 MAX_HOURS = 24.0
 #: the lead's own row
 COORDINATION = "coordination"
+# Christoph 2026-11-09: a PM booking made from the 'Scoping effort' row: it
+# counts on Scoping effort even when booked in assessment or costing
+SCOPING = "scoping"
 #: where a booking's number came from
 SOURCES = ("estimate", "typed")
 #: a department's own labour (CostingPosition kinds whose hours it works)
@@ -191,6 +194,16 @@ class HoursService:
             raise HoursError("The work date is today or earlier")
         if work_date < today - timedelta(days=BACKDATE_DAYS):
             raise HoursError(f"Hours are booked within {BACKDATE_DAYS} days of the work")
+        scoping = bool(spec.get("scoping"))
+        if scoping:
+            if coordination:
+                raise HoursError("Scoping effort or Coordination, not both")
+            pm_name = (await session.execute(select(Department.name).where(
+                Department.id == dept_id))).scalar_one_or_none()
+            if pm_name != "Project Manager":
+                raise HoursError("Scoping effort is the Project Manager's row")
+            if change.status not in HoursService.PRE_OFFER:
+                raise HoursError("Scoping effort is booked before the offer")
         source = spec.get("source") or "typed"
         if source not in SOURCES:
             raise HoursError("Source: 'estimate' (confirmed) or 'typed'")
@@ -212,7 +225,7 @@ class HoursService:
             change_id=change.id, department_id=dept_id, hours=round(hours, 2),
             note=note, booked_by=actor.id, booked_at=datetime.utcnow(),
             work_date=work_date, source=source, booked_for=booked_for,
-            activity=COORDINATION if coordination else None,
+            activity=COORDINATION if coordination else SCOPING if scoping else None,
             status_at_booking=change.status)
         session.add(b)
         await session.flush()
@@ -222,6 +235,7 @@ class HoursService:
             session, change, "hours_booked",
             f"{b.hours:g} h booked for {dept.name if dept else dept_id}"
             + (" (coordination)" if coordination else "")
+            + (" (scoping effort)" if scoping else "")
             + (f" for {booked_for}" if booked_for else "")
             + (" (your estimate confirmed)" if source == "estimate" else ""),
             actor.id,
@@ -267,12 +281,17 @@ class HoursService:
             # Christoph 2026-11-09: the PM did the scoping, not an
             # assessment: 'Scoping effort' = booked during capture and
             # scoping, 'Costing effort' = booked in assessment and costing
-            assess = float((await session.execute(base.where(
+            # (a booking from the Scoping effort row counts there, whenever)
+            from sqlalchemy import or_ as _or
+            from_row = ImplementationBooking.activity == SCOPING
+            assess = float((await session.execute(base.where(_or(
                 ImplementationBooking.status_at_booking.in_(
-                    HoursService.PM_SCOPING)))).scalar() or 0)
+                    HoursService.PM_SCOPING), from_row)))).scalar() or 0)
             costing = float((await session.execute(base.where(
                 ImplementationBooking.status_at_booking.in_(
-                    HoursService.PM_COSTING)))).scalar() or 0)
+                    HoursService.PM_COSTING),
+                _or(ImplementationBooking.activity.is_(None),
+                    ImplementationBooking.activity != SCOPING)))).scalar() or 0)
         elif since is None:
             assess = float((await session.execute(base)).scalar() or 0)
             costing = 0.0
@@ -482,7 +501,14 @@ class HoursService:
                 .group_by(ChangeAssessment.department_id))).all():
             since_by[did] = at
 
+        pm_ids = set((await session.execute(select(Department.id).where(
+            Department.name == "Project Manager"))).scalars().all())
+
         def phase(x) -> str:
+            if x.status_at_booking in HoursService.PRE_OFFER and x.department_id in pm_ids:
+                # the PM's standing rows: Scoping effort / Costing effort
+                return "scoping" if (x.activity == SCOPING or x.status_at_booking
+                                     in HoursService.PM_SCOPING) else "costing"
             if x.status_at_booking in HoursService.PRE_OFFER:
                 since = since_by.get(x.department_id)
                 return "assessment" if since is None or (

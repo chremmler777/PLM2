@@ -38,7 +38,7 @@ export function bookBlocked(deptId: number | null, hours: string, workDate: stri
 }
 
 export default function BookHoursDialog({ changeId, open, onClose, departments, myDepartmentIds,
-  initialDepartmentId = null, confirm = false }: {
+  initialDepartmentId = null, confirm = false, scoping = false }: {
   changeId: number
   open: boolean
   onClose: () => void
@@ -47,6 +47,9 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
   initialDepartmentId?: number | null
   /** the one prefilled confirm at the department's last action */
   confirm?: boolean
+  /** Christoph 2026-11-09: opened from the PM's Scoping effort row: the hours
+   *  land on Scoping effort (for that department only) */
+  scoping?: boolean
 }) {
   const qc = useQueryClient()
   const { data: state } = useQuery({ queryKey: hoursKey(changeId), queryFn: () => hoursApi.get(changeId), enabled: open })
@@ -65,6 +68,7 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
   const [note, setNote] = useState('')
   const [prefilled, setPrefilled] = useState<number | null>(null)
   const pre = state?.mine?.find((m) => m.department_id === deptId)
+  const forScoping = scoping && deptId != null && deptId === initialDepartmentId
 
   useEffect(() => {
     if (!open) return
@@ -75,7 +79,7 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
   useEffect(() => {
     // the confirm comes prefilled with what is left of the estimate; F13:
     // so does a plain Book hours that names "your estimate" (one prefill)
-    if (open && pre?.prefill_hours && prefilled == null && (confirm || hours === '')) {
+    if (open && !scoping && pre?.prefill_hours && prefilled == null && (confirm || hours === '')) {
       setHours(String(pre.prefill_hours)); setPrefilled(pre.prefill_hours)
     }
   }, [open, confirm, pre?.prefill_hours]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -100,12 +104,13 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
       ...(forWhom.trim() ? { booked_for: forWhom.trim() } : {}),
       ...(coordination ? { coordination: true } : {}),
       ...(note.trim() ? { note: note.trim() } : {}),
+      ...(forScoping ? { scoping: true } : {}),
       // a confirmed estimate stays 'estimate' only while the number is the prefill
       source: prefilled != null && h === prefilled ? 'estimate' : 'typed',
     })
   }
   return (
-    <Dialog open={open} onClose={onClose} title={t(confirm ? 'hours.confirmTitle' : 'hours.title')}
+    <Dialog open={open} onClose={onClose} title={forScoping ? t('hours.scopingTitle') : t(confirm ? 'hours.confirmTitle' : 'hours.title')}
       closeOnBackdrop={false}
       footer={(
         <>
@@ -120,6 +125,9 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
         )}
         {confirm && (
           <p className="text-xs text-slate-300">{t('hours.confirmIntro')}</p>
+        )}
+        {forScoping && (
+          <p data-testid="book-hours-scoping" className="text-xs text-sky-300">{t('hours.scopingIntro')}</p>
         )}
         <label className="block text-xs text-slate-400">{t('hours.department')}
           <select data-testid="book-hours-dept" value={deptId ?? ''} className={`${inputCls} mt-0.5 w-full`}
@@ -148,7 +156,7 @@ export default function BookHoursDialog({ changeId, open, onClose, departments, 
           <input data-testid="book-hours-for" value={forWhom} onChange={(e) => setForWhom(e.target.value)}
             placeholder={t('hours.forColleagueHint')} className={`${inputCls} mt-0.5 w-full`} />
         </label>
-        {state?.can_coordinate && (
+        {state?.can_coordinate && !forScoping && (
           <label className="flex items-center gap-2 text-xs text-slate-300">
             <input type="checkbox" data-testid="book-hours-coordination" checked={coordination}
               onChange={(e) => setCoordination(e.target.checked)} />

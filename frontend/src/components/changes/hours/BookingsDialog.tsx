@@ -26,7 +26,7 @@ const fmtH = (n?: number | null) => (n == null ? '-' : `${Math.round(n * 100) / 
 
 export function phaseLabel(b: Pick<HoursBooking, 'phase' | 'activity'>): string {
   const p = b.phase ?? ''
-  const base = p === 'assessment' || p === 'costing' ? t(`hours.phase.${p}`)
+  const base = p === 'assessment' || p === 'costing' || p === 'scoping' ? t(`hours.phase.${p}`)
     : (STATUS_LABELS as Record<string, string>)[p] ?? (p ? p.replace(/_/g, ' ') : '-')
   return b.activity === 'coordination' ? `${base}, ${t('hours.coordinationShort')}` : base
 }

@@ -268,6 +268,42 @@ async def test_pm_rows_scoping_and_costing_effort_from_the_bookings(session_fact
                     HoursService.COSTING_EFFORT_LABEL: 2.0}
 
 
+async def test_pm_books_scoping_effort_from_its_row_while_in_costing(
+        client, session_factory, seed):
+    """Christoph 2026-11-09 night: the PM's 'Scoping effort' Book hours
+    (scoping=true) lands on Scoping effort even when the change is in
+    costing; a plain booking then lands on Costing effort. Only the PM's
+    row, only before the offer."""
+    from app.models.change_cost import CostingPosition
+    from app.services.hours_service import HoursService
+    ids = await _make(session_factory, seed,
+                      extra_rows=[("Project Manager", 2, "R", False)])
+    pm = await _member(client, session_factory, seed, ids["Project Manager"],
+                       "auto-pm-scoping@test.io")
+    url = f"/api/v1/changes/{ids['change_id']}/hours"
+    res = await client.post(url, json={"department_id": ids["Project Manager"],
+                                       "hours": 2, "scoping": True}, headers=pm)
+    assert res.status_code == 201, res.text
+    res = await client.post(url, json={"department_id": ids["Project Manager"],
+                                       "hours": 1}, headers=pm)
+    assert res.status_code == 201, res.text
+    phases = sorted((b["hours"], b["phase"]) for b in res.json()["bookings"])
+    assert phases == [(1, "costing"), (2, "scoping")]
+    async with session_factory() as s:
+        rows = {p.label: p.hours for p in (await s.execute(select(CostingPosition).where(
+            CostingPosition.change_id == ids["change_id"],
+            CostingPosition.department_id == ids["Project Manager"]))).scalars()}
+    assert rows == {HoursService.PM_SCOPING_LABEL: 2.0,
+                    HoursService.COSTING_EFFORT_LABEL: 1.0}
+    # another department cannot book 'scoping'
+    tool = await _member(client, session_factory, seed, ids["Tool Engineer"],
+                         "auto-tool-scoping@test.io")
+    res = await client.post(url, json={"department_id": ids["Tool Engineer"],
+                                       "hours": 1, "scoping": True}, headers=tool)
+    assert res.status_code == 400
+    assert "Project Manager" in res.json()["detail"]
+
+
 async def test_pm_costing_counts_in_x_of_y_without_a_counted_row(
         monkeypatch, client, admin_auth, session_factory, seed):
     """2026-11-09 night (CR-33): the PM's only rows are the excluded cost

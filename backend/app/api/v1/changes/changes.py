@@ -1162,6 +1162,9 @@ class HoursIn(BaseModel):
     coordination: bool = False
     source: Optional[str] = None
     note: Optional[str] = None
+    # Christoph 2026-11-09: the PM's 'Scoping effort' Book hours: the hours
+    # count on Scoping effort whatever the change's status (before the offer)
+    scoping: bool = False
 
 
 @router.get("/{change_id}/hours")
