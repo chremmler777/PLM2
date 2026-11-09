@@ -247,10 +247,16 @@ async def _has_answer(session: AsyncSession, change: ChangeRequest,
     # live on the assessment (effort_hours) and are an answer too
     if any((a.effort_hours or 0) > 0 for a in _rows(change, department_id)):
         return True
-    positions = (await session.execute(
-        select(func.count(CostingPosition.id)).where(
-            CostingPosition.change_id == change.id,
-            CostingPosition.department_id == department_id))).scalar() or 0
+    # the mandatory implementation support line (2026-11-08) at 0 h is the
+    # "no support" answer to that question, not a cost answer by itself;
+    # the PM's "time still to come" estimate IS its costing answer (0 too)
+    q = select(func.count(CostingPosition.id)).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.department_id == department_id)
+    if not _always_owes(change, department_id):
+        q = q.where(or_(CostingPosition.kind != "support_effort",
+                        func.coalesce(CostingPosition.hours, 0) != 0))
+    positions = (await session.execute(q)).scalar() or 0
     return bool(positions)
 
 
