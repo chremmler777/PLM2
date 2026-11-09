@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import CostPositions, { NewOfferForm } from './CostPositions'
+import CostPositions, { NewOfferForm, OfferRow } from './CostPositions'
 import { changesApi } from '../../api/changes'
 import { costSheetMachinesApi } from '../../api/costSheetMachines'
 import { t } from '../../i18n/cmLabels'
@@ -10,6 +10,7 @@ import { formatHours } from '../../lib/format'
 vi.mock('../../api/changes', () => ({
   changesApi: {
     listCostPositions: vi.fn(),
+    listSupplierWaits: vi.fn().mockResolvedValue([]),
     createCostPosition: vi.fn().mockResolvedValue({}),
     createCostCategory: vi.fn().mockResolvedValue({ id: 5, department_id: 2, key: 'd2_laser', label: 'Laser', entry_type: 'money' }),
     deleteCostCategory: vi.fn().mockResolvedValue({ id: 5 }),
@@ -390,9 +391,9 @@ describe('CostPositions', () => {
       .toBe(`30 ${t('costpos.unitShort.calendar_days')}`)
     expect(screen.getByTestId('costpos-offer-summary-11').textContent)
       .toBe(`2 ${t('costpos.partsSum')} + 2 ${t('costpos.altSum')}`)
-    expect(screen.getByTestId('offer-part-81')).toBeTruthy()
-    expect(screen.queryByTestId('offer-fav-81')).toBeNull()
-    expect(screen.getByTestId('offer-fav-83').getAttribute('aria-pressed')).toBe('true')
+    // 8e85fd31: one supplier table per line; the starred alternative is marked
+    expect(screen.getByTestId('supplier-star-83').textContent).toBe('★')
+    expect(screen.getByTestId('supplier-star-84').textContent).toBe('☆')
     // 0b6529d8: a quote is filed via 'Quote received' from an asked shop, the
     // free new-offer form is gone from the line
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
@@ -416,18 +417,15 @@ describe('CostPositions', () => {
     expect(total).toContain(formatHours(18))
   })
 
-  it('draws a quoted position as one row per vendor, shipping included or separate', async () => {
+  it('draws a quoted position as one line per supplier, transport as an amount or none (8e85fd31)', async () => {
     positions()
-    await screen.findByTestId('costpos-offers-11')
-    expect(screen.getByTestId('offer-row-91')).toBeTruthy()
-    expect(screen.getByTestId('offer-row-92')).toBeTruthy()
-    // Writers edit the row in place; shipping is an amount unless the vendor
-    // rolled it into the price.
-    expect((screen.getByTestId('offer-vendor-91') as HTMLInputElement).value).toBe('Vendor A')
-    expect((screen.getByTestId('offer-shipping-included-91') as HTMLInputElement).checked).toBe(false)
-    expect(screen.getByTestId('offer-shipping-cost-91')).toBeTruthy()
-    expect((screen.getByTestId('offer-shipping-included-92') as HTMLInputElement).checked).toBe(true)
-    expect(screen.queryByTestId('offer-shipping-cost-92')).toBeNull()
+    await screen.findByTestId('supplier-lines-11')
+    const a = screen.getByTestId('supplier-line-11-Vendor A')
+    const b = screen.getByTestId('supplier-line-11-Vendor B')
+    // Writers edit the line in place; empty transport = no transport costs.
+    expect((within(a).getByLabelText(t('costpos.price')) as HTMLInputElement).value).toBe('5000')
+    expect((within(a).getByLabelText(t('costpos.transport')) as HTMLInputElement).value).toBe('200')
+    expect((within(b).getByLabelText(t('costpos.transport')) as HTMLInputElement).value).toBe('')
     // The position shows what it is worth — the favourite offer's price and
     // its lead time, in the unit that offer was quoted in.
     expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5,200.00')
@@ -496,8 +494,7 @@ describe('CostPositions', () => {
 
   it('keeps exactly one favourite when the department votes', async () => {
     positions()
-    // The server clears the siblings; the list it hands back afterwards agrees
-    // with what the click already showed.
+    // The server clears the siblings; the list it hands back afterwards agrees.
     vi.mocked(changesApi.updateCostingOffer).mockImplementation((async () => {
       vi.mocked(changesApi.listCostPositions).mockResolvedValue([effort, {
         ...external,
@@ -505,15 +502,14 @@ describe('CostPositions', () => {
       }] as never)
       return {}
     }) as never)
-    await screen.findByTestId('offer-fav-91')
-    expect(screen.getByTestId('offer-fav-91').getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByTestId('offer-fav-92').getAttribute('aria-pressed')).toBe('false')
-    fireEvent.click(screen.getByTestId('offer-fav-92'))
+    await screen.findByTestId('supplier-star-91')
+    expect(screen.getByTestId('supplier-star-91').textContent).toBe('★')
+    expect(screen.getByTestId('supplier-star-92').textContent).toBe('☆')
+    fireEvent.click(screen.getByTestId('supplier-star-92'))
     await waitFor(() => expect(changesApi.updateCostingOffer)
       .toHaveBeenCalledWith(7, 92, { favorite: true }))
-    // The star moves the moment it is clicked — the sibling goes dark with it.
-    await waitFor(() => expect(screen.getByTestId('offer-fav-92').getAttribute('aria-pressed')).toBe('true'))
-    expect(screen.getByTestId('offer-fav-91').getAttribute('aria-pressed')).toBe('false')
+    await waitFor(() => expect(screen.getByTestId('supplier-star-92').textContent).toBe('★'))
+    expect(screen.getByTestId('supplier-star-91').textContent).toBe('☆')
   })
 
   it('deletes a cost line only after a confirm, and names the line on the delete button', async () => {
@@ -533,9 +529,10 @@ describe('CostPositions', () => {
     await waitFor(() => expect(changesApi.deleteCostPosition).toHaveBeenCalledWith(7, 11))
   })
 
-  it('deletes a vendor offer only after a confirm', async () => {
+  it('deletes a vendor offer only after a confirm (OfferRow, exported, no longer on the line)', async () => {
     vi.mocked(changesApi.deleteCostingOffer).mockClear()
-    positions()
+    wrap(<OfferRow changeId={7} positionId={11} offer={external.offers[1] as never}
+      currency="USD" editable onChanged={() => {}} />)
     const del = await screen.findByTestId('offer-delete-92')
     expect(del.getAttribute('aria-label')).toBe('Delete the offer from Vendor B')
     fireEvent.click(del)
@@ -547,9 +544,10 @@ describe('CostPositions', () => {
   it('shows a plain amount, not a guessed EUR, while the currency is unknown (review)', async () => {
     vi.mocked(changesApi.costingContext).mockRejectedValueOnce(new Error('not yet'))
     positions({ editable: false })
-    await screen.findByTestId('offer-cost-91')
-    expect(screen.getByTestId('offer-cost-91').textContent).toBe('5,000.00')
-    expect(screen.getByTestId('offer-shipping-91').textContent).not.toContain('EUR')
+    const a = await screen.findByTestId('supplier-line-11-Vendor A')
+    expect(a.textContent).toContain('5,000.00')
+    expect(a.textContent).toContain('200.00')
+    expect(a.textContent).not.toContain('EUR')
   })
 
   it('gives a reader the figures and no input at all', async () => {
@@ -560,13 +558,15 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
     expect(screen.queryByTestId('costpos-delete-11')).toBeNull()
     // The vote is still visible — Sales needs to know which vendor was chosen.
-    expect(screen.getByTestId('offer-fav-91').textContent).toBe(t('costpos.favorite'))
-    expect(screen.getByTestId('offer-fav-92').textContent).toBe('')
-    expect(screen.getByTestId('offer-vendor-91').textContent).toBe('Vendor A')
-    expect(screen.getByTestId('offer-shipping-92').textContent)
-      .toContain(t('costpos.shippingIncluded'))
-    expect(screen.getByTestId('offer-lead-91').textContent)
-      .toBe(`30 ${t('costpos.unitShort.business_days')}`)
+    expect(screen.getByTestId('supplier-star-91').textContent).toBe('★')
+    expect((screen.getByTestId('supplier-star-91') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('supplier-star-92').textContent).toBe('☆')
+    const a = screen.getByTestId('supplier-line-11-Vendor A')
+    expect(a.textContent).toContain('Vendor A')
+    expect(a.textContent).toContain('30')
+    expect(within(a).queryAllByRole('spinbutton')).toHaveLength(0)
+    expect(screen.getByTestId('supplier-line-11-Vendor B').textContent)
+      .toContain(t('costpos.noTransport'))
     // The effort answers read as plain text for someone who may not write them.
     expect(screen.getByTestId('costpos-effort-value-internal_effort-2').textContent).toBe('12 h')
     expect(screen.getByTestId('costpos-effort-value-support_effort-2').textContent).toBe('-')

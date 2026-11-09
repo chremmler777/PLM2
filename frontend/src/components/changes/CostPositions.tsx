@@ -487,6 +487,9 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
   return (
     <div className="mt-1 rounded-lg border border-slate-600 bg-slate-800/60 p-2">
     <p className="mb-1 text-xs font-semibold text-slate-200">
+      {offers.filter((x) => !x.is_partial).length > 1 && !offers.some((x) => x.favorite) && (
+        <span className="mr-2 rounded bg-red-800 px-1.5 text-[11px] font-semibold text-red-100">{t('costpos.pickFavoriteBanner')}</span>
+      )}
       {t('costpos.quotesBox').replace('{w}', String(asked.filter((w) => w.is_open && !offers.some((x) => key(x.vendor_name) === key(w.vendor_name))).length))
         .replace('{r}', String(offers.length))}</p>
     <table className="w-full" data-testid={`supplier-lines-${p.id}`}>
@@ -617,10 +620,19 @@ function ReceivedLine({ changeId, positionId, offer: o, td, editable, currency, 
           <button type="button" className={btnSm.primary} disabled={save.isPending || !(Number(days) >= 1)}
             onClick={() => save.mutate()}>{t('common.save')}</button>
         )}
-        <button type="button" data-testid={`supplier-star-${o.id}`} disabled={!editable || starring}
-          title={t('costpos.favoriteHint')} onClick={onStar}
-          className={`ml-1 ${o.favorite ? 'text-amber-300' : 'text-slate-500 hover:text-amber-200'}`}>
-          {o.favorite ? '★' : '☆'}</button>
+        {o.favorite ? (
+          <span data-testid={`supplier-star-${o.id}`} title={t('costpos.favoriteLineHint')}
+            className="ml-1 rounded bg-amber-700 px-1.5 text-[11px] font-semibold text-amber-50">★ {t('costpos.favorite')}</span>
+        ) : editable ? (
+          <button type="button" data-testid={`supplier-star-${o.id}`} disabled={starring}
+            title={t('costpos.favoriteLineHint')} onClick={onStar}
+            className="ml-1 rounded border border-amber-700/70 px-1.5 text-[11px] text-amber-200 hover:bg-amber-900/40">
+            ☆ {t('costpos.makeFavorite')}</button>
+        ) : null}
+        {o.chosen && (
+          <span className="ml-1 rounded bg-violet-800 px-1.5 text-[11px] font-semibold text-violet-100"
+            title={o.chosen_reason ?? undefined}>{t('vendor.salesChose')}</span>
+        )}
       </td>
     </tr>
   )

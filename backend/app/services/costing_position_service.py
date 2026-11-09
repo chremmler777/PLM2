@@ -667,6 +667,15 @@ class CostingPositionService:
         CostingPositionService._validate_offer(offer, position)
         session.add(offer)
         await session.flush()
+        # Christoph 2026-11-08: one quote is the favourite by itself; with a
+        # second one the engineer picks (the automatic star goes)
+        await session.refresh(position, ["offers"])
+        full = [o for o in position.offers if not o.is_partial]
+        if len(full) == 1 and not offer.is_partial:
+            offer.favorite = True
+        elif len(full) == 2:
+            for o in full:
+                o.favorite = False
         # Christoph 2026-11-08: the quote of a shop we waited on closes that
         # wait (received)
         from app.services import supplier_wait_service as _sw
