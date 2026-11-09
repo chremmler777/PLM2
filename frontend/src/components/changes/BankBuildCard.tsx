@@ -32,11 +32,22 @@ const MODES: BankBuildMode[] = ['running_change', 'planned_scrap']
 
 const onDay = (iso?: string | null) => formatDate(iso)
 
+/** What Sales offered (parts left, changeover date, note) as the plan note's start. */
+function offeredNote(c: Pick<ChangeRequest, 'old_stock_parts' | 'changeover_date' | 'changeover_offer_note'>): string {
+  const bits = [
+    c.old_stock_parts != null ? `${c.old_stock_parts} old parts left` : null,
+    c.changeover_date ? `changeover ${formatDate(c.changeover_date)}` : null,
+    c.changeover_offer_note || null,
+  ].filter(Boolean)
+  return bits.length ? `Offered: ${bits.join(', ')}` : ''
+}
+
 interface Props {
   change: Pick<ChangeRequest,
     'id' | 'status' | 'bank_build_mode' | 'bank_build_note' | 'scrap_quote_price' | 'scrap_price_set'
     | 'bank_build_set_by_name' | 'bank_build_set_at'
-    | 'plan_published_by_name' | 'plan_published_at'> & { mother_plant_name?: string | null; customer_relevant?: boolean }
+    | 'plan_published_by_name' | 'plan_published_at'
+    | 'changeover_offer_mode' | 'old_stock_parts' | 'changeover_date' | 'changeover_offer_note'> & { mother_plant_name?: string | null; customer_relevant?: boolean }
   /** Logistics / PM / change lead / admin — the page derives it. */
   canSetMode?: boolean
   /** Sales / change lead / admin. */
@@ -57,8 +68,13 @@ export default function BankBuildCard({
   // An internal change has no customer to publish to.
   const hidePublish = hide || motherPlant || change.customer_relevant === false
   const qc = useQueryClient()
-  const [mode, setMode] = useState<BankBuildMode | null>(change.bank_build_mode ?? null)
-  const [note, setNote] = useState(change.bank_build_note ?? '')
+  // Christoph 2026-11-09: until Logistics decides, prefill from what Sales
+  // offered the customer (customer scraps -> planned scrap)
+  const offered: BankBuildMode | null = change.changeover_offer_mode === 'customer_scrap' ? 'planned_scrap'
+    : change.changeover_offer_mode === 'running_change' ? 'running_change' : null
+  const [mode, setMode] = useState<BankBuildMode | null>(change.bank_build_mode ?? offered)
+  const [note, setNote] = useState(change.bank_build_note
+    ?? (change.bank_build_mode == null ? offeredNote(change) : ''))
   const [price, setPrice] = useState(
     change.scrap_quote_price != null ? String(change.scrap_quote_price) : '')
   // The price is sent only when the user touched it: a viewer who may not

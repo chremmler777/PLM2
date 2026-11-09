@@ -54,7 +54,7 @@ from app.schemas.change import (
     ConcernTypeIn, ConcernJoinIn, ConcernConfirmIn, CheckCloseIn, CheckReopenIn, EstimateCheckIn, PpapDecisionIn, CustomerFlipAnswerIn,
     RecheckAnswerIn, IndexScopeIn, IndexDeadlineIn, NeedByTellIn,
     ScopeDefinitionIn,
-    CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
+    CostLeadTimeIn, WeightEstimateIn, BankBuildIn, ChangeoverOfferIn,
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
     CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
@@ -2525,6 +2525,37 @@ async def put_bank_build(
         await ChangeService.set_bank_build(
             db, change, body.mode, current_user, note=body.note,
             scrap_quote_price=body.scrap_quote_price)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return await _price_safe(db, change, current_user, ChangeResponse)
+
+
+@router.put("/{change_id}/changeover-offer", response_model=ChangeResponse)
+async def put_changeover_offer(
+    change_id: int, body: ChangeoverOfferIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """What Sales offers the customer for the old stock (Christoph
+    2026-11-09): running_change | customer_scrap, optional parts left,
+    changeover date and note. Sales, Project Management, the change lead or
+    an admin; until the customer answered the offer."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not (await ChangeService.user_can_set_quoted_price(db, current_user, change)
+            or await ChangeService._user_in_department(db, current_user, "Project Manager")):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, Project Management, the change lead or an "
+                   "admin may set the offered changeover")
+    try:
+        await ChangeService.set_changeover_offer(
+            db, change, current_user, body.mode,
+            old_stock_parts=body.old_stock_parts,
+            changeover_date=body.changeover_date, note=body.note)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

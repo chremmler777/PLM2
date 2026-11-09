@@ -9,7 +9,7 @@ import type { ScopeChangeCard,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn, CostingContext,
-  ChangeNegotiation, NegotiationChannel, BankBuildMode,
+  ChangeNegotiation, NegotiationChannel, BankBuildMode, ChangeoverOfferMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
   ValidationState, ValidationCheckKey, ValidationMeasurementIn, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse, ImpactObjectsResponse,
 } from '../types/change';
@@ -554,6 +554,10 @@ export const changesApi = {
   setBankBuild: (id: number, body: {
     mode: BankBuildMode; note?: string; scrap_quote_price?: number;
   }) => client.put<ChangeRequest>(`/v1/changes/${id}/bank-build`, body).then((r) => r.data),
+  /** What Sales offers the customer for the old stock (Christoph 2026-11-09). */
+  setChangeoverOffer: (id: number, body: {
+    mode: ChangeoverOfferMode; old_stock_parts?: number | null; changeover_date?: string | null; note?: string | null;
+  }) => client.put<ChangeRequest>(`/v1/changes/${id}/changeover-offer`, body).then((r) => r.data),
   publishBankBuildPlan: (id: number) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/bank-build/publish`).then((r) => r.data),
 

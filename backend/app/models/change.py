@@ -96,6 +96,8 @@ NEGOTIATION_CHANNELS = ("meeting", "call", "email")
 # ('running_change'), or the bank is thrown away ('planned_scrap') — which the
 # CUSTOMER pays for, so it is only sayable with a scrap quote behind it.
 BANK_BUILD_MODES = ("running_change", "planned_scrap")
+# What Sales offers the customer for the old stock (Christoph 2026-11-09).
+CHANGEOVER_OFFER_MODES = ("running_change", "customer_scrap")
 ATTACHMENT_PHASES = ("baseline", "post_scoping")
 SCOPING_STATUSES = ("captured", "scoping")
 #: ECR-solid §2: why a change is urgent (priority 'critical').
@@ -249,6 +251,18 @@ class ChangeRequest(Base):
     plan_published_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     plan_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Changeover offered to the customer (migration 160, Christoph
+    # 2026-11-09: "For now Sales just offers running change or customer
+    # scraps ... only to tie the customer down on its decision"). The offer
+    # states it; Logistics plans the bank build after quoting (bank_build_*),
+    # which may prefill from it. Mode: CHANGEOVER_OFFER_MODES.
+    changeover_offer_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    old_stock_parts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    changeover_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    changeover_offer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changeover_offer_set_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    changeover_offer_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Costing to close (migration 087). plan_revision counts edits to the
     # DETAILED plan before its baseline: a team's confirmation is only worth
@@ -432,6 +446,8 @@ class ChangeRequest(Base):
         foreign_keys=[bank_build_set_by], lazy="selectin")
     plan_published_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[plan_published_by], lazy="selectin")
+    changeover_offer_set_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[changeover_offer_set_by], lazy="selectin")
 
     @property
     def project_number(self) -> Optional[str]:
@@ -514,6 +530,11 @@ class ChangeRequest(Base):
     @property
     def validated_weight_by_name(self) -> Optional[str]:
         u = self.validated_weight_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def changeover_offer_set_by_name(self) -> Optional[str]:
+        u = self.changeover_offer_set_by_user
         return u.full_name if u is not None else None
 
     @property

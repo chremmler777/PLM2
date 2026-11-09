@@ -3967,6 +3967,66 @@ class ChangeService:
         )
         return change
 
+    #: Where Sales records the offered changeover: until the customer has
+    #: answered the offer (then Logistics plans the bank build).
+    CHANGEOVER_OFFER_STATUSES = ("draft", "captured", "scoping", "in_assessment",
+                                 "costing", "quoting", "quoted")
+
+    @staticmethod
+    async def set_changeover_offer(
+        session: AsyncSession, change: ChangeRequest, user: User, mode: str, *,
+        old_stock_parts: Optional[int] = None,
+        changeover_date: Optional[date] = None, note: Optional[str] = None,
+    ) -> ChangeRequest:
+        """What Sales offers the customer for the old stock (Christoph
+        2026-11-09): "For now Sales just offers running change or customer
+        scraps ... only to tie the customer down on its decision".
+
+        running_change | customer_scrap; parts left, changeover date and a
+        note are optional. Who may: user_can_set_quoted_price (Sales, the
+        change lead, admin) or a Project Management member. Not after the
+        customer answered (admins exempt). bank_build_* is untouched: it is
+        Logistics' plan after acceptance and may prefill from this."""
+        from app.models.change import CHANGEOVER_OFFER_MODES
+        if mode not in CHANGEOVER_OFFER_MODES:
+            raise ChangeError(
+                f"Unknown changeover '{mode}': running_change or customer_scrap")
+        if (change.status not in ChangeService.CHANGEOVER_OFFER_STATUSES
+                and user.effective_role != "admin"):
+            raise ChangeError(
+                "The changeover is offered before the customer answers the "
+                f"offer, not while the change is '{change.status}'")
+        if old_stock_parts is not None and old_stock_parts < 0:
+            raise ChangeError("Parts left cannot be negative")
+        old = ({"mode": change.changeover_offer_mode,
+                "old_stock_parts": change.old_stock_parts,
+                "changeover_date": (change.changeover_date.isoformat()
+                                    if change.changeover_date else None)}
+               if change.changeover_offer_mode is not None else None)
+        change.changeover_offer_mode = mode
+        change.old_stock_parts = old_stock_parts
+        change.changeover_date = changeover_date
+        change.changeover_offer_note = (note or "").strip() or None
+        change.changeover_offer_set_by = user.id
+        change.changeover_offer_set_at = datetime.utcnow()
+        desc = ("Changeover offered: running change" if mode == "running_change"
+                else "Changeover offered: customer scraps the old stock")
+        details = []
+        if old_stock_parts is not None:
+            details.append(f"{old_stock_parts} parts left")
+        if changeover_date is not None:
+            details.append(f"changeover {changeover_date.isoformat()}")
+        if details:
+            desc += f" ({', '.join(details)})"
+        await ChangeService.append_changelog(
+            session, change, "changeover_offered", desc, user.id,
+            field_name="changeover_offer_mode", old_value=old,
+            new_value={"mode": mode, "old_stock_parts": old_stock_parts,
+                       "changeover_date": (changeover_date.isoformat()
+                                           if changeover_date else None)},
+            notes=change.changeover_offer_note)
+        return change
+
     @staticmethod
     def _action_key(a: dict) -> tuple:
         """Identity of a cockpit action / task row across the two builders:

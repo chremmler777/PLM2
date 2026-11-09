@@ -541,6 +541,18 @@ class ChangeResponse(BaseModel):
     plan_published_by: Optional[int] = None
     plan_published_by_name: Optional[str] = None
     plan_published_at: Optional[datetime] = None
+    # Changeover offered to the customer (Christoph 2026-11-09, migration
+    # 160): Sales offers running change or customer scraps, to tie the
+    # customer down on it; the offer states it. Optional details: parts
+    # left, changeover date, note. Separate from bank_build_mode (Logistics'
+    # plan after acceptance), which may prefill from it.
+    changeover_offer_mode: Optional[str] = None
+    old_stock_parts: Optional[int] = None
+    changeover_date: Optional[date] = None
+    changeover_offer_note: Optional[str] = None
+    changeover_offer_set_by: Optional[int] = None
+    changeover_offer_set_by_name: Optional[str] = None
+    changeover_offer_set_at: Optional[datetime] = None
     internal_approved_by: Optional[int] = None
     internal_approved_at: Optional[datetime] = None
     internal_approved_amount: Optional[float] = None
@@ -589,6 +601,7 @@ class ChangeResponse(BaseModel):
             row["validated_weight_by_name"] = data.validated_weight_by_name
             row["bank_build_set_by_name"] = data.bank_build_set_by_name
             row["plan_published_by_name"] = data.plan_published_by_name
+            row["changeover_offer_set_by_name"] = data.changeover_offer_set_by_name
             # Model properties (not in __dict__) must be injected explicitly.
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
@@ -1490,6 +1503,16 @@ class BankBuildIn(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("Scrap quote price must be greater than zero")
         return v
+
+
+class ChangeoverOfferIn(BaseModel):
+    """What Sales offers for the old stock (Christoph 2026-11-09): mode
+    running_change | customer_scrap; parts left, changeover date and note
+    optional."""
+    mode: str
+    old_stock_parts: Optional[int] = None
+    changeover_date: Optional[date] = None
+    note: Optional[str] = None
 
 
 class ConcernAnswerIn(BaseModel):

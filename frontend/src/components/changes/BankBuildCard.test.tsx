@@ -97,6 +97,27 @@ describe('BankBuildCard', () => {
     expect(screen.getByTestId('bank-build-price-hidden').textContent).toBe(t('bankbuild.scrapPriceHidden'))
   })
 
+  it('prefills from the changeover Sales offered (Christoph 2026-11-09)', async () => {
+    wrap({ change: change({ changeover_offer_mode: 'running_change', old_stock_parts: 1200,
+      changeover_date: '2026-12-18', changeover_offer_note: 'customer agreed' }) })
+    expect((screen.getByTestId('bank-build-mode-running_change') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByTestId('bank-build-note') as HTMLTextAreaElement).value)
+      .toBe('Offered: 1200 old parts left, changeover 18 Dec 2026, customer agreed')
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenCalledWith(7, {
+      mode: 'running_change', note: 'Offered: 1200 old parts left, changeover 18 Dec 2026, customer agreed',
+    }))
+    cleanup()
+    wrap({ change: change({ changeover_offer_mode: 'customer_scrap' }) })
+    expect((screen.getByTestId('bank-build-mode-planned_scrap') as HTMLInputElement).checked).toBe(true)
+    // the scrap quote price is still Logistics' to name
+    expect((screen.getByTestId('bank-build-save') as HTMLButtonElement).disabled).toBe(true)
+    cleanup()
+    // a decision on record wins over the offer
+    wrap({ change: change({ bank_build_mode: 'running_change', changeover_offer_mode: 'customer_scrap' }) })
+    expect((screen.getByTestId('bank-build-mode-running_change') as HTMLInputElement).checked).toBe(true)
+  })
+
   it('holds the save shut until a mode is picked', () => {
     wrap()
     expect((screen.getByTestId('bank-build-save') as HTMLButtonElement).disabled).toBe(true)

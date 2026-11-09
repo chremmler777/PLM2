@@ -347,6 +347,17 @@ export interface ChangeRequest {
   scrap_price_set?: boolean;
   bank_build_set_by_name?: string | null;
   bank_build_set_at?: string | null;
+  /**
+   * Changeover offered to the customer (Christoph 2026-11-09): Sales offers
+   * running change or customer scraps; parts left, date and note optional.
+   * Logistics' bank_build_* after acceptance may prefill from it.
+   */
+  changeover_offer_mode?: ChangeoverOfferMode | null;
+  old_stock_parts?: number | null;
+  changeover_date?: string | null;
+  changeover_offer_note?: string | null;
+  changeover_offer_set_by_name?: string | null;
+  changeover_offer_set_at?: string | null;
   /** Set once Sales has put the plan in front of the customer. */
   plan_published_by_name?: string | null;
   plan_published_at?: string | null;
@@ -751,6 +762,9 @@ export interface SummationPositionRollup {
   unpriced_count: number;
   positions: SummationPositionLine[];
 }
+
+/** What Sales offers for the old stock (backend CHANGEOVER_OFFER_MODES). */
+export type ChangeoverOfferMode = 'running_change' | 'customer_scrap'
 
 export interface Summation {
   /** The costing currency (the costing plant's): totals and by_department are in it. */
