@@ -481,7 +481,10 @@ export default function ActivityChecklist({
                           onChange={(e) => putCases(cases.map((x, m) => (m === n ? { ...x, text: e.target.value } : x)))}
                           placeholder={t('check.casePlaceholder', lang)}
                           aria-label={`${t('check.case', lang)} ${n + 1}`}
-                          className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                          title={!saysWhat(c.text) ? t('check.tooShort', lang) : undefined}
+                          data-thin={!saysWhat(c.text) ? 'yes' : 'no'}
+                          className={`flex-1 bg-slate-900 border rounded px-2 py-1 text-xs text-slate-100 ${
+                            !saysWhat(c.text) ? 'border-red-600' : 'border-slate-600'}`} />
                         {cases.length > 1 && (
                           <button type="button" className="text-xs text-slate-400 hover:text-red-300 px-1"
                             aria-label={t('check.caseRemove', lang)}
@@ -544,11 +547,18 @@ export default function ActivityChecklist({
                 </div>
               )
             })() : (
+            <>
             <input type="text" data-testid={`check-remark-${id}`}
               value={item.remark ?? ''}
+              data-thin={item.answer === 'yes' && !saysWhat(item.remark) ? 'yes' : 'no'}
               onChange={(e) => put({ ...item, remark: e.target.value })}
               placeholder={t('check.remarkPlaceholder', lang)} aria-label={t('check.remark', lang)}
-              className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+              className={`w-full bg-slate-900 border rounded px-2 py-1 text-xs text-slate-100 ${
+                item.answer === 'yes' && !saysWhat(item.remark) ? 'border-red-600' : 'border-slate-600'}`} />
+            {item.answer === 'yes' && !saysWhat(item.remark) && (
+              <p className="text-[11px] text-red-300">{t('check.tooShort', lang)}</p>
+            )}
+            </>
             )}
             {/* Supplier work is presented (the change presentation) and
                 priced (the change RFQ): each document has its own slot here,
