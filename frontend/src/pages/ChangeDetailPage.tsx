@@ -60,9 +60,10 @@ import { NeedByLine, NeedByTellCard, ProblemTargetEditor } from '../components/c
 import { SupplierWaitLine } from '../components/changes/costing/NoCostAndWaits';
 import { ConcessionLine } from '../components/changes/release/AchievedCard';
 import BookHoursDialog from '../components/changes/hours/BookHoursDialog';
+import BookingsDialog from '../components/changes/hours/BookingsDialog';
 import CloseSummary from '../components/changes/CloseSummary';
 import HoursCard from '../components/changes/hours/HoursCard';
-import { BOOK_HOURS_EVENT, hoursApi, hoursKey } from '../api/hours';
+import { BOOK_HOURS_EVENT, HOURS_CORRECTION_EVENT, hoursApi, hoursKey } from '../api/hours';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -153,6 +154,13 @@ export default function ChangeDetailPage() {
     const on = (e: Event) => setHoursDialog((e as CustomEvent).detail ?? {});
     window.addEventListener(BOOK_HOURS_EVENT, on);
     return () => window.removeEventListener(BOOK_HOURS_EVENT, on);
+  }, []);
+  // Christoph 2026-11-08: the booked-hours correction table (edit / delete)
+  const [bookingsDialog, setBookingsDialog] = useState<{ departmentId?: number } | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => setBookingsDialog((e as CustomEvent).detail ?? {});
+    window.addEventListener(HOURS_CORRECTION_EVENT, on);
+    return () => window.removeEventListener(HOURS_CORRECTION_EVENT, on);
   }, []);
   const [reopenOpen, setReopenOpen] = useState(false);
   // Pulling a change from quote creation back into costing: same people who
@@ -524,8 +532,27 @@ export default function ChangeDetailPage() {
         .map((e) => ({ old_value: decodeLogValue(e.old_value), new_value: decodeLogValue(e.new_value) })));
     return { kind, at };
   })();
+  // Christoph 2026-11-08: during the assessment each department works where
+  // IT stands: after its assessment it is in costing (until finalized), then
+  // it waits. The start tab and the green dot follow the viewer's departments.
+  const myDepts = myActions?.memberships ?? []
+  const myStep: Tab | 'done' | null = (() => {
+    if (change.status !== 'in_assessment' || stopped || !myDepts.length) return null
+    const pending = new Set(change.costing_pending_department_ids ?? [])
+    const finalized = new Set(change.costing_finalized_department_ids ?? [])
+    const owed = new Set(change.costing_owed_department_ids ?? [])
+    const mineAssessing = change.assessments.some((a) => myDepts.includes(a.department_id)
+      && !a.submitted_at)
+    if (mineAssessing) return 'assessment' as Tab
+    if (myDepts.some((d) => pending.has(d))) return 'costing' as Tab
+    if (myDepts.some((d) => finalized.has(d) || owed.has(d))) return 'done'
+    return null
+  })()
   const tab: Tab = resolveChangeTab(rawTab, change.status, change.origin)
-    ?? (stopped ? stoppedDefaultTab(stopped.kind, stopped.at) : defaultTabFor(change.status, change.origin));
+    ?? (stopped ? stoppedDefaultTab(stopped.kind, stopped.at)
+      : myStep && myStep !== 'done' ? myStep
+      : myStep === 'done' ? 'costing'  // shows 'All set for now'
+      : defaultTabFor(change.status, change.origin));
   // Once a validation issue exists the Release tab stays open through a loop
   // back to implementation: the validation record never disappears.
   const stoppedLocked = (tb: Tab) => !!stopped && stoppedTabLocked(stopped.at, tb)
@@ -818,7 +845,9 @@ export default function ChangeDetailPage() {
     const locked = !governance && tabLocked(tb);
     const selected = effectiveTab === tb;
     const isActivePhase = !governance && !locked && !stopped
-      && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
+      && (myStep === 'done' ? false
+        : myStep ? tb === myStep
+        : activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb));
     // Scoping leaves two jobs on the impact tab: pick the impacted items,
     // then confirm the set. Both are done when the confirmation lands.
     // With Development's confirm switched off, the open work is picking.
@@ -1289,6 +1318,8 @@ export default function ChangeDetailPage() {
       <BookHoursDialog changeId={change.id} open={!!hoursDialog} onClose={() => setHoursDialog(null)}
         departments={allDepartments} myDepartmentIds={myDeptIds}
         initialDepartmentId={hoursDialog?.departmentId ?? null} confirm={!!hoursDialog?.confirm} />
+      <BookingsDialog changeId={change.id} open={!!bookingsDialog} onClose={() => setBookingsDialog(null)}
+        departmentId={bookingsDialog?.departmentId ?? null} departments={allDepartments} />
 
       {effectiveTab === 'scoping' && change && (
         <div className="space-y-4">

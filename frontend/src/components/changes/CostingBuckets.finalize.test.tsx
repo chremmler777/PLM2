@@ -58,11 +58,11 @@ describe('FinalizeBar', () => {
     expect(screen.queryByTestId('costing-finalize-top-2')).toBeNull()
   })
 
-  it('nothing missing: pinned on top as well; confirm inline, Keep working changes nothing', async () => {
+  it('nothing missing: one button at the end; confirm inline, Keep working changes nothing', async () => {
     vi.mocked(changesApi.finalizeCheck).mockResolvedValue({ reasons: [], position_ids: [], items: [] })
     show()
-    expect(await screen.findByTestId('costing-finalize-top-2')).toBeTruthy()
-    const btn = screen.getByTestId('costing-finalize-2') as HTMLButtonElement
+    const btn = await screen.findByTestId('costing-finalize-2') as HTMLButtonElement
+    expect(screen.queryByTestId('costing-finalize-top-2')).toBeNull()
     await waitFor(() => expect(btn.disabled).toBe(false))
     fireEvent.click(btn)
     expect(screen.getByTestId('costing-finalize-confirm-2').textContent)
@@ -77,7 +77,10 @@ describe('FinalizeBar', () => {
   it('Finalize now finalizes', async () => {
     vi.mocked(changesApi.finalizeCheck).mockResolvedValue({ reasons: [], position_ids: [], items: [] })
     show()
-    fireEvent.click(await screen.findByTestId('costing-finalize-top-btn-2'))
+    const btn = await screen.findByTestId('costing-finalize-2') as HTMLButtonElement
+    await waitFor(() => expect(btn.disabled).toBe(false))
+    expect(screen.queryByTestId('costing-finalize-top-btn-2')).toBeNull()  // one button only
+    fireEvent.click(btn)
     fireEvent.click(screen.getByTestId('costing-finalize-now-2'))
     await waitFor(() => expect(changesApi.finalizeDepartmentCosting).toHaveBeenCalledWith(7, 2))
   })
@@ -86,7 +89,8 @@ describe('FinalizeBar', () => {
     show({ costing_finalized_department_ids: [2], costing_pending_department_ids: [],
       costing_finalized_info: { 2: { at: '2026-11-07T10:00:00', by: 3, by_name: 'Dale Smith' } } })
     expect((await screen.findByTestId('costing-finalized-by-2')).textContent).toMatch(/Finalized by Dale Smith, /)
-    expect(screen.getByTestId('costing-next-2').textContent).toMatch(/the PM \(Steven\).*prepares the\s+offer/)
+    expect(screen.getByTestId('costing-allset-2').textContent).toMatch(/All set for now/)
+    expect(screen.getByTestId('costing-next-2').textContent).toMatch(/until implementation: the PM \(Steven\) and\s+Sales take it from here/)
     expect(screen.getByText(/Project Management or an admin can/)).toBeTruthy()
     expect(screen.getByTestId('costing-reopen-2')).toBeTruthy()
     expect(screen.queryByTestId('costing-finalize-2')).toBeNull()

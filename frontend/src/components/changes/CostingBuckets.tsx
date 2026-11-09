@@ -108,9 +108,13 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
               {noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalized')}
               {finalizedBy ? ` by ${finalizedBy}` : ''}{finalizedAt ? `, ${formatDate(finalizedAt)}` : ''}
             </p>
+            {/* Christoph 2026-11-08: after finalizing, the department is done until implementation */}
+            <p data-testid={`costing-allset-${departmentId}`} className="text-base font-semibold text-emerald-200">
+              All set for now.
+            </p>
             <p data-testid={`costing-next-${departmentId}`}>
-              Next: {pmName ? `the PM (${pmName})` : 'the PM'} sees {dept} as done and prepares the
-              offer once every department is finalized.
+              Nothing more to do for {dept} until implementation: {pmName ? `the PM (${pmName})` : 'the PM'} and
+              Sales take it from here (offer to the customer). You will be asked again when the change goes into implementation.
             </p>
             <p className="text-slate-400">
               To change a line, reopen: a member of {dept}, Project Management or an admin can, while costing is open.
@@ -126,7 +130,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
     )
   }
   // at the top only once nothing is missing: the call, pinned
-  if (placement === 'top' && !ready) return null
+  if (placement === 'top') return null  // one Finalize button, at the end of the department (Christoph 2026-11-08)
 
   const confirmPanel = confirming && (
     <div role="group" aria-label="Confirm finalize" data-testid={`costing-finalize-confirm-${departmentId}`}
@@ -146,7 +150,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
   )
 
   return (
-    <div data-testid={placement === 'top' ? `costing-finalize-top-${departmentId}` : `costing-finalize-bar-${departmentId}`}
+    <div data-testid={`costing-finalize-bar-${departmentId}`}
       className="rounded border border-slate-600 bg-slate-900/60 text-xs text-slate-300">
       {/* Christoph 2026-11-08: one container of line items, a coloured banner each */}
       {/* Christoph 2026-11-08: same look as the assessment's open points */}
@@ -191,7 +195,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
           )}
         </div>
         {!confirming && (
-          <button type="button" data-testid={placement === 'top' ? `costing-finalize-top-btn-${departmentId}` : `costing-finalize-${departmentId}`}
+          <button type="button" data-testid={`costing-finalize-${departmentId}`}
             disabled={finalize.isPending || !ready} onClick={() => setConfirming(true)}
             title={ready ? undefined : `${blocking.length || reasons.length} open point(s) first`}
             className="rounded-md bg-sky-600 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">
