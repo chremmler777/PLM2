@@ -41,6 +41,7 @@ COORDINATION = "coordination"
 # Christoph 2026-11-09: a PM booking made from the 'Scoping effort' row: it
 # counts on Scoping effort even when booked in assessment or costing
 SCOPING = "scoping"
+ASSESSMENT = "assessment"
 #: where a booking's number came from
 SOURCES = ("estimate", "typed")
 #: a department's own labour (CostingPosition kinds whose hours it works)
@@ -204,6 +205,12 @@ class HoursService:
                 raise HoursError("Scoping effort is the Project Manager's row")
             if change.status not in HoursService.PRE_OFFER:
                 raise HoursError("Scoping effort is booked before the offer")
+        assessment = bool(spec.get("assessment"))
+        if assessment:
+            if coordination or scoping:
+                raise HoursError("Assessment effort, Scoping effort or Coordination: one of them")
+            if change.status not in HoursService.PRE_OFFER:
+                raise HoursError("Assessment effort is booked before the offer")
         source = spec.get("source") or "typed"
         if source not in SOURCES:
             raise HoursError("Source: 'estimate' (confirmed) or 'typed'")
@@ -225,7 +232,8 @@ class HoursService:
             change_id=change.id, department_id=dept_id, hours=round(hours, 2),
             note=note, booked_by=actor.id, booked_at=datetime.utcnow(),
             work_date=work_date, source=source, booked_for=booked_for,
-            activity=COORDINATION if coordination else SCOPING if scoping else None,
+            activity=(COORDINATION if coordination else SCOPING if scoping
+                      else ASSESSMENT if assessment else None),
             status_at_booking=change.status)
         session.add(b)
         await session.flush()
@@ -299,10 +307,15 @@ class HoursService:
             assess = float((await session.execute(base)).scalar() or 0)
             costing = 0.0
         else:
-            assess = float((await session.execute(
-                base.where(ImplementationBooking.booked_at <= since))).scalar() or 0)
-            costing = float((await session.execute(
-                base.where(ImplementationBooking.booked_at > since))).scalar() or 0)
+            # a booking from the Assessment effort row counts there, whenever
+            from sqlalchemy import or_ as _or
+            from_row = ImplementationBooking.activity == ASSESSMENT
+            assess = float((await session.execute(base.where(_or(
+                ImplementationBooking.booked_at <= since, from_row)))).scalar() or 0)
+            costing = float((await session.execute(base.where(
+                ImplementationBooking.booked_at > since,
+                _or(ImplementationBooking.activity.is_(None),
+                    ImplementationBooking.activity != ASSESSMENT)))).scalar() or 0)
         from app.services import costing_rates
 
         async def put(kind: str, label: str, total: float, notes):
@@ -515,7 +528,7 @@ class HoursService:
                                      in HoursService.PM_SCOPING) else "costing"
             if x.status_at_booking in HoursService.PRE_OFFER:
                 since = since_by.get(x.department_id)
-                return "assessment" if since is None or (
+                return "assessment" if x.activity == ASSESSMENT or since is None or (
                     x.booked_at is not None and x.booked_at <= since) else "costing"
             return x.status_at_booking or "other"
         managed = await HoursService._managed_department_ids(session, actor)

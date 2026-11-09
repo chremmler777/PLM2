@@ -1792,7 +1792,7 @@ function EffortRow({
                 data-missing={bookMissing ? 'yes' : 'no'}
                 title={bookMissing ? t('costpos.bookCostingHours') : undefined}
                 onClick={() => requestBookHours(rowKey === 'costpos.pmScopingRow'
-                  ? { departmentId, scoping: true } : { departmentId })}
+                  ? { departmentId, scoping: true } : { departmentId, assessment: true })}
                 className={bookMissing
                   ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
                   : btnSm.secondary}>{t('hours.title')}</button>

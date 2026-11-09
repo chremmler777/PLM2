@@ -1165,6 +1165,9 @@ class HoursIn(BaseModel):
     # Christoph 2026-11-09: the PM's 'Scoping effort' Book hours: the hours
     # count on Scoping effort whatever the change's status (before the offer)
     scoping: bool = False
+    # Christoph 2026-11-09: Book hours from a department's 'Assessment effort'
+    # row counts there, also after its assessment submit (before the offer)
+    assessment: bool = False
 
 
 @router.get("/{change_id}/hours")

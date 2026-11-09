@@ -1081,7 +1081,7 @@ describe('PM rows: Scoping effort books into scoping, Costing effort is after sc
     } finally { window.removeEventListener('plm2:book-hours', on) }
   })
 
-  it('NEGATIVE: any other department keeps "after your assessment" and a plain booking', async () => {
+  it('NEGATIVE: any other department keeps "after your assessment" and books Assessment effort from its row', async () => {
     const seen: unknown[] = []
     const on = (e: Event) => seen.push((e as CustomEvent).detail)
     window.addEventListener('plm2:book-hours', on)
@@ -1090,7 +1090,7 @@ describe('PM rows: Scoping effort books into scoping, Costing effort is after sc
       expect((await screen.findByTestId('costpos-costing-effort-hint-2')).textContent)
         .toContain('after your assessment')
       fireEvent.click(screen.getByTestId('costpos-effort-book-2'))
-      expect(seen).toEqual([{ departmentId: 2 }])
+      expect(seen).toEqual([{ departmentId: 2, assessment: true }])
     } finally { window.removeEventListener('plm2:book-hours', on) }
   })
 })

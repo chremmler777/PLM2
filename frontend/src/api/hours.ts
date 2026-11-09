@@ -9,7 +9,7 @@ export interface HoursBooking {
   work_date?: string | null
   source: 'estimate' | 'typed'
   booked_for?: string | null
-  activity?: 'coordination' | 'scoping' | null
+  activity?: 'coordination' | 'scoping' | 'assessment' | null
   note?: string | null
   booked_by_name?: string | null
   status_at_booking?: string | null
@@ -69,6 +69,7 @@ export interface HoursIn {
   /** Christoph 2026-11-09: the PM's Scoping effort row: counts on Scoping
    *  effort whatever the change's status (before the offer) */
   scoping?: boolean
+  assessment?: boolean
 }
 
 export interface HoursPatch {
@@ -95,7 +96,7 @@ export const hoursApi = {
  *  confirm, it opens prefilled with the department's estimate: the one
  *  confirm at the department's last action. */
 export const BOOK_HOURS_EVENT = 'plm2:book-hours'
-export function requestBookHours(detail: { departmentId?: number; confirm?: boolean; scoping?: boolean } = {}) {
+export function requestBookHours(detail: { departmentId?: number; confirm?: boolean; scoping?: boolean; assessment?: boolean } = {}) {
   window.dispatchEvent(new CustomEvent(BOOK_HOURS_EVENT, { detail }))
 }
 

@@ -152,7 +152,7 @@ export default function ChangeDetailPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   // C15: one Book hours dialog, opened from the header, the hours card, or a
   // department's last action (the prefilled confirm) on any tab
-  const [hoursDialog, setHoursDialog] = useState<{ departmentId?: number; confirm?: boolean; scoping?: boolean } | null>(null);
+  const [hoursDialog, setHoursDialog] = useState<{ departmentId?: number; confirm?: boolean; scoping?: boolean; assessment?: boolean } | null>(null);
   useEffect(() => {
     const on = (e: Event) => setHoursDialog((e as CustomEvent).detail ?? {});
     window.addEventListener(BOOK_HOURS_EVENT, on);
@@ -1349,7 +1349,7 @@ export default function ChangeDetailPage() {
       <BookHoursDialog changeId={change.id} open={!!hoursDialog} onClose={() => setHoursDialog(null)}
         departments={allDepartments} myDepartmentIds={myDeptIds}
         initialDepartmentId={hoursDialog?.departmentId ?? null} confirm={!!hoursDialog?.confirm}
-        scoping={!!hoursDialog?.scoping} />
+        scoping={!!hoursDialog?.scoping} assessment={!!hoursDialog?.assessment} />
       <BookingsDialog changeId={change.id} open={!!bookingsDialog} onClose={() => setBookingsDialog(null)}
         departmentId={bookingsDialog?.departmentId ?? null} departments={allDepartments} />
 

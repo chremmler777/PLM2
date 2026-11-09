@@ -2888,6 +2888,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'hours.phase.assessment': { de: 'Bewertung', en: 'Assessment' },
   'hours.phase.costing': { de: 'Kalkulation', en: 'Costing' },
   'hours.phase.scoping': { de: 'Scoping', en: 'Scoping' },
+  'hours.assessmentTitle': { de: 'Stunden buchen: Aufwand Bewertung', en: 'Book hours: Assessment effort' },
+  'hours.assessmentIntro': { de: 'Diese Stunden zählen als Aufwand Bewertung, nicht als Kalkulationsaufwand.', en: 'These hours count as Assessment effort, not as Costing effort.' },
   'hours.scopingTitle': { de: 'Stunden buchen: Scoping-Aufwand', en: 'Book hours: Scoping effort' },
   'hours.scopingIntro': { de: 'Diese Stunden zählen als Scoping-Aufwand (Erfassung und Scoping), nicht als Kalkulationsaufwand.', en: 'These hours count as Scoping effort (capture and scoping), not as Costing effort.' },
   'hours.none': { de: 'Noch keine Buchungen.', en: 'No bookings yet.' },

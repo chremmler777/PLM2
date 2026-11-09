@@ -54,7 +54,7 @@ describe('AssessmentSubmitForm', () => {
       .toContain(t('why.hours')))
     expect((screen.getByRole('button', { name: /submit assessment/i }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(screen.getByTestId('effort-book-2'))
-    expect(requestBookHours).toHaveBeenCalledWith({ departmentId: 2 })
+    expect(requestBookHours).toHaveBeenCalledWith({ departmentId: 2, assessment: true })
     cleanup()
     // booked: the submit carries the booked sum and books nothing itself
     render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2}

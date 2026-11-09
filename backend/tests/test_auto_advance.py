@@ -355,3 +355,39 @@ async def test_an_engine_noted_consulted_row_does_not_hold_the_move(
         await s.commit()
     await _finalize_tool(client, session_factory, seed, ids, "auto-tool11@test.io")
     assert await _status(session_factory, ids["change_id"]) == "quoting"
+
+
+async def test_assessment_effort_row_books_assessment_after_the_submit(
+        client, session_factory, seed):
+    """Christoph 2026-11-09: Book hours from a department's 'Assessment
+    effort' row (assessment=true) counts as Assessment effort even after its
+    assessment submit; a plain booking after the submit stays Costing effort."""
+    from datetime import datetime, timedelta
+    from app.models.change import ChangeAssessment
+    from app.models.change_cost import CostingPosition
+    from app.services.hours_service import HoursService
+    ids = await _make(session_factory, seed)
+    async with session_factory() as s:
+        for a in (await s.execute(select(ChangeAssessment).where(
+                ChangeAssessment.change_id == ids["change_id"],
+                ChangeAssessment.department_id == ids["Tool Engineer"]))).scalars():
+            a.submitted_at = datetime.utcnow() - timedelta(hours=1)
+        await s.commit()
+    tool = await _member(client, session_factory, seed, ids["Tool Engineer"],
+                         "auto-tool-assess@test.io")
+    url = f"/api/v1/changes/{ids['change_id']}/hours"
+    res = await client.post(url, json={"department_id": ids["Tool Engineer"],
+                                       "hours": 2, "assessment": True}, headers=tool)
+    assert res.status_code == 201, res.text
+    res = await client.post(url, json={"department_id": ids["Tool Engineer"],
+                                       "hours": 1}, headers=tool)
+    assert res.status_code == 201, res.text
+    phases = sorted((b["hours"], b["phase"]) for b in res.json()["bookings"])
+    assert phases == [(1, "costing"), (2, "assessment")]
+    async with session_factory() as s:
+        rows = {p.kind: p.hours for p in (await s.execute(select(CostingPosition).where(
+            CostingPosition.change_id == ids["change_id"],
+            CostingPosition.department_id == ids["Tool Engineer"],
+            CostingPosition.kind.in_(("internal_effort", "own_time"))))).scalars()
+            if p.kind == "internal_effort" or p.label == HoursService.COSTING_EFFORT_LABEL}
+    assert rows == {"internal_effort": 2.0, "own_time": 1.0}

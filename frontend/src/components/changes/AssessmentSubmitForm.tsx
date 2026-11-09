@@ -212,7 +212,9 @@ export default function AssessmentSubmitForm({
             : t('effort.noneBooked')}
         </p>
         <button type="button" data-testid={`effort-book-${departmentId}`}
-          onClick={() => requestBookHours({ departmentId })}
+          // booked from the assessment = Assessment effort, even if the submit
+          // follows within seconds (Christoph 2026-11-09)
+          onClick={() => requestBookHours({ departmentId, assessment: true })}
           className={hoursOk
             ? 'inline-flex h-7 items-center rounded-lg border border-slate-600 px-2.5 text-xs text-slate-200 hover:bg-slate-700/60'
             : 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'}>
