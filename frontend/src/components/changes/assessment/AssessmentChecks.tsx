@@ -73,7 +73,7 @@ export default function AssessmentChecks({
   const questions = concerns.filter((c) => asksFrom(c, departmentId))
     .sort((x, y) => Number(!!y.is_open) - Number(!!x.is_open) || x.id - y.id)
   const others = concerns.filter((c) => c.kind === 'needs_info')
-  const [showQs, setShowQs] = useState(true)
+  const [showQs, setShowQs] = useState(false)
   if (!checks.length && !questions.length && !editable) return null
 
   return (
@@ -97,7 +97,7 @@ export default function AssessmentChecks({
         </div>
       )}
       {questions.length > 0 && (
-        // Christoph 2026-11-08: the assessor folds the question list away
+        // Christoph 2026-11-08: the assessor folds the closed questions away
         <button type="button" data-testid={`achk-qtoggle-${departmentId}`}
           aria-expanded={showQs} onClick={() => setShowQs(!showQs)}
           className="flex items-center gap-1 text-xs font-semibold text-slate-300 hover:text-slate-100">
@@ -106,7 +106,8 @@ export default function AssessmentChecks({
             .replace('{n}', String(questions.length))}
         </button>
       )}
-      {showQs && questions.map((q) => (
+      {/* open questions always show; the fold hides only the closed ones */}
+      {questions.filter((q) => q.is_open || showQs).map((q) => (
         <QuestionRow key={q.id} changeId={changeId} q={q} editable={editable} onDone={refresh}
           attachments={attachments} confirmerName={confirmerName} />
       ))}
