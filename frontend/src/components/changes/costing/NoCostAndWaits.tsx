@@ -112,14 +112,24 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
   })
   const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open)
   const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open)
+  // Christoph 2026-11-08: with two or more supplier lines (cases) the wait
+  // names which one it is for
+  const { data: positions } = useQuery({
+    queryKey: ['costing-positions', changeId],
+    queryFn: () => changesApi.listCostPositions(changeId),
+  })
+  const extLines = (positions ?? []).filter((p) => p.department_id === departmentId && p.kind === 'external')
+  const [posId, setPosId] = useState<number | ''>('')
+  const lineName = (id?: number | null) => extLines.find((p) => p.id === id)?.label
   const [open, setOpen] = useState(false)
   const [vendor, setVendor] = useState('')
   const [asked, setAsked] = useState(today())
   const [expected, setExpected] = useState('')
   const start = useMutation({
     mutationFn: () => changesApi.startSupplierWait(changeId, {
-      department_id: departmentId, vendor_name: vendor.trim(), asked_on: asked, expected_by: expected }),
-    onSuccess: () => { setOpen(false); setVendor(''); setExpected(''); refresh() },
+      department_id: departmentId, vendor_name: vendor.trim(), asked_on: asked, expected_by: expected,
+      ...(posId !== '' ? { position_id: posId } : {}) }),
+    onSuccess: () => { setOpen(false); setVendor(''); setExpected(''); setPosId(''); refresh() },
     onError: (e: unknown) => { toastError(e, t('wait.sup.failed')) },
   })
   const close = useMutation({
@@ -135,6 +145,8 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
           data-testid={`supwait-${w.id}`}>
           <span>{t('wait.sup.line').replace('{v}', w.vendor_name)
             .replace('{a}', formatDate(w.asked_on)).replace('{e}', formatDate(w.expected_by))}</span>
+          {lineName(w.position_id) && (
+            <span className="rounded bg-amber-900/60 px-1 text-amber-100">{lineName(w.position_id)}</span>)}
           {w.created_by_name && <span className="text-sky-300/80">{t('wait.sup.by').replace('{x}', w.created_by_name)}</span>}
           <span className={`rounded px-1.5 ${w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
             {w.chip}</span>
@@ -151,6 +163,8 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
       {done.map((w) => (
         <div key={w.id} data-testid={`supwait-done-${w.id}`}
           className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400">
+          {lineName(w.position_id) && (
+            <span className="mr-1 rounded bg-slate-700 px-1 text-slate-200">{lineName(w.position_id)}</span>)}
           {t('wait.sup.doneLine').replace('{v}', w.vendor_name)
             .replace('{a}', formatDate(w.asked_on)).replace('{who}', w.created_by_name ?? '-')
             .replace('{r}', t(`wait.sup.reason.${w.close_reason ?? 'received'}`))
@@ -164,6 +178,14 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
       )}
       {editable && open && (
         <div className="flex flex-wrap items-end gap-2 rounded border border-slate-700 p-2">
+          {extLines.length > 0 && (
+            <label className="text-[11px] text-slate-400">{t('wait.sup.forCase')}
+              <select className={`${input} block`} value={posId} data-testid={`supwait-case-${departmentId}`}
+                onChange={(e) => setPosId(e.target.value === '' ? '' : Number(e.target.value))}>
+                <option value="">{extLines.length > 1 ? t('wait.sup.pickCase') : t('wait.sup.allCases')}</option>
+                {extLines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select></label>
+          )}
           <label className="text-[11px] text-slate-400">{t('wait.sup.vendor')}
             <input className={`${input} block w-32`} value={vendor} data-testid={`supwait-vendor-${departmentId}`}
               onChange={(e) => setVendor(e.target.value)} /></label>
@@ -175,7 +197,8 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
               data-testid={`supwait-expected-${departmentId}`}
               onChange={(e) => setExpected(e.target.value)} /></label>
           <button type="button" className={btnSm.primary} data-testid={`supwait-save-${departmentId}`}
-            disabled={vendor.trim().length < 2 || !asked || !expected || start.isPending}
+            disabled={vendor.trim().length < 2 || !asked || !expected || start.isPending
+              || (extLines.length > 1 && posId === '')}
             onClick={() => start.mutate()}>{t('wait.sup.save')}</button>
           <button type="button" className={btnSm.secondary} onClick={() => setOpen(false)}>
             {t('achk.cancel')}</button>
