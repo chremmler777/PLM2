@@ -552,6 +552,12 @@ export default function ChangeDetailPage() {
   // IT stands: after its assessment it is in costing (until finalized), then
   // it waits. The start tab and the green dot follow the viewer's departments.
   const myDepts = myActions?.memberships ?? []
+  // A later-stage row (e.g. Tool Engineer's stage-2 C review) is 'pending'
+  // until its stage opens: nothing to do on it yet, so it does not keep the
+  // department on Assessments once its open row is submitted (2026-11-09 night:
+  // Dale landed on Assessments with costing his only open step).
+  const myOpenAssessment = change.assessments.some((a) => myDepts.includes(a.department_id)
+    && !a.submitted_at && a.status !== 'pending' && a.status !== 'waived')
   const myStep: Tab | 'done' | null = (() => {
     // Christoph 2026-11-09: assessment & costing is one self-running step;
     // in costing too each department lands where IT is still open
@@ -559,7 +565,7 @@ export default function ChangeDetailPage() {
     const auto = stage?.auto_advance
     if (change.status === 'costing' && auto && !stopped && myDepts.length) {
       const mine = auto.open.filter((o) => myDepts.includes(o.department_id))
-      if (mine.some((o) => o.open === 'assessment')) return 'assessments' as Tab
+      if (mine.some((o) => o.open === 'assessment') && myOpenAssessment) return 'assessments' as Tab
       if (mine.length) return 'costing' as Tab
       return change.assessments.some((a) => myDepts.includes(a.department_id)) ? 'done' : null
     }
@@ -567,9 +573,7 @@ export default function ChangeDetailPage() {
     const pending = new Set(change.costing_pending_department_ids ?? [])
     const finalized = new Set(change.costing_finalized_department_ids ?? [])
     const owed = new Set(change.costing_owed_department_ids ?? [])
-    const mineAssessing = change.assessments.some((a) => myDepts.includes(a.department_id)
-      && !a.submitted_at)
-    if (mineAssessing) return 'assessments' as Tab
+    if (myOpenAssessment) return 'assessments' as Tab
     if (myDepts.some((d) => pending.has(d))) return 'costing' as Tab
     if (myDepts.some((d) => finalized.has(d) || owed.has(d))) return 'done'
     return null

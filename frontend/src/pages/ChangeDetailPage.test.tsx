@@ -238,6 +238,37 @@ describe('ChangeDetailPage URL-driven tabs', () => {
   })
 })
 
+describe('ChangeDetailPage start tab per department (2026-11-09 night)', () => {
+  afterEach(() => {
+    cleanup()
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+    change.assessments = []
+    ;(change as Record<string, unknown>).costing_pending_department_ids = undefined
+  })
+
+  it('opens Costing once the department submitted its open row, though its later-stage row is still pending', async () => {
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [27] })
+    change.assessments = [
+      { id: 1, department_id: 27, stage_order: 1, status: 'submitted', submitted_at: '2026-11-09T05:00:00' },
+      { id: 2, department_id: 27, stage_order: 2, status: 'pending', submitted_at: null },
+    ] as unknown as ChangeDetail['assessments']
+    ;(change as Record<string, unknown>).costing_pending_department_ids = [27]
+    wrap('/changes/1')
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Costing/ }).getAttribute('aria-selected')).toBe('true'))
+  })
+
+  it('stays on Assessments while the department still has an open row', async () => {
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [27] })
+    change.assessments = [
+      { id: 1, department_id: 27, stage_order: 1, status: 'active', submitted_at: null },
+    ] as unknown as ChangeDetail['assessments']
+    ;(change as Record<string, unknown>).costing_pending_department_ids = [27]
+    wrap('/changes/1')
+    const tab = await screen.findByRole('tab', { name: /Assessments/ })
+    await waitFor(() => expect(tab.getAttribute('aria-selected')).toBe('true'))
+  })
+})
+
 describe('ChangeDetailPage governance tab gating', () => {
   afterEach(() => {
     cleanup()
