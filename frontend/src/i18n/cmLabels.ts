@@ -3433,7 +3433,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'nocost.hours': { de: 'Stunden', en: 'Hours' },
   'nocost.save': { de: 'Speichern und abschließen', en: 'Save and finalize' },
   'nocost.failed': { de: 'Konnte nicht gespeichert werden', en: 'Could not save' },
-  'nocost.finalized': { de: 'Abgeschlossen ohne Kosten: {x}.', en: 'Finalized with no cost: {x}.' },
+  'nocost.finalized': { de: 'Abgeschlossen ohne Kosten ({x})', en: 'Finalized with no cost ({x})' },
   'nocost.word.no_work': { de: 'keine Arbeit', en: 'no work' },
   'nocost.word.absorbed': { de: 'übernommen ({h} h)', en: 'absorbed ({h} h)' },
   'nocost.word.supplier': { de: 'Lieferant macht es', en: 'the supplier does it' },
