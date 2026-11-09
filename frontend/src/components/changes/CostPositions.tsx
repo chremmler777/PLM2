@@ -1701,7 +1701,7 @@ function EffortRow({
     queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
     enabled: editable && kind === 'internal_effort',
   })
-  const bookMissing = false && !!fc?.items?.some((i) => i.tag === 'book_hours')
+  const bookMissing = !!fc?.items?.some((i) => i.tag === 'book_hours')
   // Blur and the Save click (or Enter, then blur) arrive in the same moment,
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is
@@ -1808,7 +1808,7 @@ function EffortRow({
                 onClick={() => requestBookHours({ departmentId })}
                 className={bookMissing
                   ? 'inline-flex h-7 items-center rounded-lg border border-red-600 bg-red-900/50 px-2.5 text-xs font-medium text-red-100 hover:bg-red-800/60'
-                  : btnSm.secondary}>{t('hours.title')}</button>
+                  : btnSm.secondary}>{bookMissing ? t('costpos.bookCostingBtn') : t('hours.title')}</button>
             )}
           </span>
         ) : editable ? (

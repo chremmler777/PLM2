@@ -743,6 +743,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.deliveryDays': { de: 'Lieferzeit (Tage)', en: 'Delivery (days)' },
   'costpos.bookedHint': { de: 'Summe der Buchungen nach der Bewertung; ändern über Stunden buchen', en: 'Sum of the bookings after your assessment; change it through Book hours' },
   'costpos.fromBookings': { de: 'aus den Buchungen', en: 'from the bookings' },
+  'costpos.bookCostingBtn': { de: 'Kalkulationsstunden buchen', en: 'Book costing hours' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
