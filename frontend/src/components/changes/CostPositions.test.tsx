@@ -69,6 +69,14 @@ const effort = {
   lead_time_days: null, notes: null, effective_cost: 1080, offers: [],
 }
 
+// An answered support effort: the one effort field still typed here
+// (internal_effort is the booked hours, read-only since c280e174).
+const support = {
+  id: 12, department_id: 2, label: t('costpos.supportEffortField'), tag: null,
+  kind: 'support_effort', pricing: null, est_cost: null, hours: 12,
+  lead_time_days: null, notes: null, effective_cost: 1080, offers: [],
+}
+
 const wrap = (ui: React.ReactElement) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     {ui}
@@ -93,12 +101,16 @@ describe('CostPositions', () => {
     positions()
     // No hunting through an add-form: both fields are simply there, and the one
     // already answered shows its number.
+    // c280e174: the assessment effort is the booked hours, read-only, with Book hours
     await waitFor(() => expect(
-      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
-    ).toBe('12'))
+      screen.getByTestId('costpos-effort-value-internal_effort-2').textContent,
+    ).toBe('12 h'))
+    expect(screen.queryByTestId('costpos-effort-internal_effort-2')).toBeNull()
+    expect(screen.getByTestId('costpos-effort-book-2')).toBeTruthy()
     expect(screen.getByTestId('costpos-effort-support_effort-2')).toBeTruthy()
+    // no input, so no input label: the row names itself
     expect(screen.getByTestId(`costpos-effort-2`).textContent)
-      .toContain(t('costpos.internalEffortField'))
+      .toContain(t('costpos.internalEffortRow'))
     expect(screen.getByTestId(`costpos-effort-2`).textContent)
       .toContain(t('costpos.supportEffortField'))
     // The position behind a bound field is not repeated in the list below.
@@ -146,13 +158,15 @@ describe('CostPositions', () => {
     let resolve!: (v: unknown) => void
     vi.mocked(changesApi.updateCostPosition).mockImplementationOnce(
       () => new Promise((r) => { resolve = r }) as never)
+    // the typed effort field is support_effort since c280e174
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([effort, support, external] as never)
     positions()
     await waitFor(() => expect(
-      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
+      (screen.getByTestId('costpos-effort-support_effort-2') as HTMLInputElement).value,
     ).toBe('12'))
-    const internal = screen.getByTestId('costpos-effort-internal_effort-2')
+    const internal = screen.getByTestId('costpos-effort-support_effort-2')
     fireEvent.change(internal, { target: { value: '14' } })
-    fireEvent.click(screen.getByTestId('costpos-effort-save-internal_effort-2'))
+    fireEvent.click(screen.getByTestId('costpos-effort-save-support_effort-2'))
     await waitFor(() => expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1))
     fireEvent.change(internal, { target: { value: '15' } })
     fireEvent.blur(internal)
@@ -160,7 +174,7 @@ describe('CostPositions', () => {
     expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1)
     resolve({})
     await waitFor(() => expect(changesApi.updateCostPosition)
-      .toHaveBeenLastCalledWith(7, 10, { hours: 15 }))
+      .toHaveBeenLastCalledWith(7, 12, { hours: 15 }))
     expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(2)
   })
 
@@ -205,16 +219,18 @@ describe('CostPositions', () => {
   })
 
   it('edits that same position on every save after the first', async () => {
+    // the typed effort field is support_effort since c280e174
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([effort, support, external] as never)
     positions()
     // Once the answered position has arrived, the field is bound to it.
     await waitFor(() => expect(
-      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
+      (screen.getByTestId('costpos-effort-support_effort-2') as HTMLInputElement).value,
     ).toBe('12'))
-    const internal = screen.getByTestId('costpos-effort-internal_effort-2')
+    const internal = screen.getByTestId('costpos-effort-support_effort-2')
     fireEvent.change(internal, { target: { value: '14' } })
-    fireEvent.click(screen.getByTestId('costpos-effort-save-internal_effort-2'))
+    fireEvent.click(screen.getByTestId('costpos-effort-save-support_effort-2'))
     await waitFor(() => expect(changesApi.updateCostPosition)
-      .toHaveBeenCalledWith(7, 10, { hours: 14 }))
+      .toHaveBeenCalledWith(7, 12, { hours: 14 }))
     expect(changesApi.createCostPosition).not.toHaveBeenCalled()
   })
 
@@ -547,7 +563,7 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('offer-lead-91').textContent)
       .toBe(`30 ${t('costpos.unitShort.business_days')}`)
     // The effort answers read as plain text for someone who may not write them.
-    expect(screen.getByTestId('costpos-effort-value-internal_effort-2').textContent).toBe('12')
+    expect(screen.getByTestId('costpos-effort-value-internal_effort-2').textContent).toBe('12 h')
     expect(screen.getByTestId('costpos-effort-value-support_effort-2').textContent).toBe('-')
     expect(screen.queryByTestId('costpos-effort-internal_effort-2')).toBeNull()
     // Tags read as words, in the labelled vocabulary.
