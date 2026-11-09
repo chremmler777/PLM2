@@ -251,6 +251,12 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
             "Nothing to finalize yet: enter hours or an amount on at least one "
             "cost line, or add a position (the zero lines seeded from the "
             "checklist are not an answer)")
+    from app.services import supplier_wait_service as _sw
+    for x in await _sw.open_waits(session, [change.id], "costing"):
+        if x.department_id == department_id:
+            x.closed_at = datetime.utcnow()
+            x.closed_by = actor.id
+            x.close_reason = "not_received"
     anchor = next((a for a in _rows(change, department_id)
                    if a.verdict in COSTING_VERDICTS), None)
     _set_details(anchor, costing_finalized_at=datetime.utcnow().isoformat(),
@@ -281,6 +287,19 @@ async def _refuse_while_waiting(session: AsyncSession, change: ChangeRequest,
         return
     w = (await waits.open_by_department(session, [change.id], "costing")).get(
         (change.id, department_id))
+    if w is not None:
+        # Christoph 2026-11-08: a quoted line needs one quote; the shops still
+        # out are closed as not received at finalize
+        from app.models.change_cost import CostingPosition
+        holding = []
+        for x in await waits.open_waits(session, [change.id], "costing"):
+            if x.department_id != department_id:
+                continue
+            pos = await session.get(CostingPosition, x.position_id) if x.position_id else None
+            if pos is not None and pos.offers:
+                continue
+            holding.append(x)
+        w = holding[0] if holding else None
     if w is not None:
         raise EarlyCostingError(
             f"{waits.line(w)}: close the wait when the quote is in, or the lead "
@@ -391,8 +410,9 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
         CostingPosition.department_id == department_id))).scalars().all()
     labels = {p.id: p.label for p in rows}
     if cm_switches.on("ASSESSMENT_V2"):
+        quoted_lines = {p.id for p in rows if p.offers}
         for w in await waits.open_waits(session, [change.id], "costing"):
-            if w.department_id == department_id:
+            if w.department_id == department_id and w.position_id not in quoted_lines:
                 where = f" ({labels[w.position_id]})" if w.position_id in labels else ""
                 items.append({"tag": "waiting", "text":
                               f"{w.vendor_name}{where}: quote expected {fmt_date(w.expected_by)}"})

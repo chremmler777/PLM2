@@ -701,6 +701,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.favoriteLineHint': { de: 'Favorit der Abteilung: dieses Angebot bepreist die Zeile; Vertrieb kann später anders wählen', en: "The department's favourite prices the line; Sales can choose another later" },
   'costing.beforeFinalize': { de: 'Vor dem Abschließen noch offen', en: 'Still open before you can finalize' },
   'costing.tag.favourite': { de: 'FAVORIT WÄHLEN', en: 'PICK FAVOURITE' },
+  'wait.sup.badge.not_received': { de: 'NICHT ERHALTEN', en: 'NOT RECEIVED' },
+  'wait.sup.reason.not_received': { de: 'nicht erhalten (Kalkulation abgeschlossen)', en: 'not received (costing finalized)' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

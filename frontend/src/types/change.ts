@@ -1850,7 +1850,7 @@ export interface SupplierWait {
   /** "day 9 of 21" */
   chip: string
   closed_at?: string | null
-  close_reason?: 'received' | 'price_on_estimate' | 'not_needed' | null
+  close_reason?: 'received' | 'price_on_estimate' | 'not_needed' | 'not_received' | null
   created_by_name?: string | null
   created_at?: string | null
   closed_by_name?: string | null

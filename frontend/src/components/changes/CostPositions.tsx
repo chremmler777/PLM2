@@ -523,7 +523,8 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
               <td className={`${td} font-medium text-slate-200`}>{n}</td>
               <td className={td}>
                 {w && !w.is_open ? (
-                  <span className="rounded bg-slate-700 px-1.5 font-semibold text-slate-200">
+                  <span className={`rounded px-1.5 font-semibold ${w.close_reason === 'not_received'
+                    ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
                     {t(`wait.sup.badge.${w.close_reason ?? 'not_needed'}`)}</span>
                 ) : (
                   <span className={`rounded px-1.5 ${w?.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
