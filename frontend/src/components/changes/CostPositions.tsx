@@ -1528,9 +1528,18 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 text-xs">
-              <button type="button" data-testid={`costpos-edit-${p.id}`}
-                onClick={() => setEditing(true)} aria-label={`${t('costpos.edit')}: ${p.label}`}
-                className={btnSm.ghost}>{t('costpos.edit')}</button>
+              {/* Christoph 2026-11-08: a carried case line is filled in its rows
+                  below (estimate / quotes); Edit only for other lines, and it
+                  says what it edits */}
+              {(p.notes ?? '').startsWith('From the assessment') ? (
+                <span className="text-[11px] text-slate-500" title={t('costpos.carriedHint')}>
+                  {t('costpos.carried')}</span>
+              ) : (
+                <button type="button" data-testid={`costpos-edit-${p.id}`}
+                  onClick={() => setEditing(true)} aria-label={`${t('costpos.edit')}: ${p.label}`}
+                  title={t('costpos.editHint')}
+                  className={btnSm.ghost}>{t('costpos.edit')}</button>
+              )}
               <button type="button" data-testid={`costpos-delete-${p.id}`}
                 onClick={() => setConfirmDelete(true)} title={t('costpos.delete')}
                 aria-label={`Delete cost line: ${p.label}`}
