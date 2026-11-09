@@ -131,6 +131,17 @@ async def finalize_department_costing(change_id: int, department_id: int,
     return await _costing_state(db, change_id, current_user)
 
 
+@router.get("/{change_id}/costing/departments/{department_id}/finalize-check")
+async def finalize_check(change_id: int, department_id: int,
+                         current_user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Christoph 2026-11-08: why Finalize is refused now (all reasons) and
+    the lines missing something, for the department's red marks."""
+    from app.services import early_costing
+    change = await _change(db, change_id, current_user)
+    return await early_costing.finalize_reasons(db, change, department_id)
+
+
 @router.post("/{change_id}/costing/departments/{department_id}/reopen")
 async def reopen_department_costing(change_id: int, department_id: int,
                                     body: Optional[CostingReopenIn] = None,

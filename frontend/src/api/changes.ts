@@ -245,6 +245,10 @@ export const changesApi = {
   finalizeDepartmentCosting: (id: number, departmentId: number) =>
     client.post(`/v1/changes/${id}/costing/departments/${departmentId}/finalize`)
       .then((r) => r.data as DepartmentCostingState),
+  /** Christoph 2026-11-08: every reason Finalize is refused, and the lines missing something. */
+  finalizeCheck: (id: number, departmentId: number) =>
+    client.get<{ reasons: string[]; position_ids: number[] }>(
+      `/v1/changes/${id}/costing/departments/${departmentId}/finalize-check`).then((r) => r.data),
   reopenDepartmentCosting: (id: number, departmentId: number, reason?: string) =>
     client.post(`/v1/changes/${id}/costing/departments/${departmentId}/reopen`,
       reason ? { reason } : {}).then((r) => r.data as DepartmentCostingState),

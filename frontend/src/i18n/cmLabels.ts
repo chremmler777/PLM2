@@ -648,6 +648,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'why.noRef': { de: 'Jedem Nein eine Referenz geben: {r}', en: 'Give each No its reference: {r}' },
   'check.tooShort': { de: 'Zu kurz: in ein paar Worten sagen, was sich ändert', en: 'Too short: say in a few words what changes' },
   'costpos.noneBooked': { de: 'nichts gebucht', en: 'nothing booked' },
+  'costpos.lineMissing': { de: 'Preis oder Stunden fehlen', en: 'Price or hours missing' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

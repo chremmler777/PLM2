@@ -632,6 +632,13 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   basisParts?: { id: number; number: string }[]
 }) {
   const p = position
+  // Christoph 2026-11-08: a line missing its price / hours is marked red
+  const { data: fcheck } = useQuery({
+    queryKey: ['change', changeId, 'finalize-check', p.department_id],
+    queryFn: () => changesApi.finalizeCheck(changeId, p.department_id),
+    enabled: editable,
+  })
+  const missing = !!fcheck?.position_ids?.includes(p.id)
   const [editing, setEditing] = useState(false)
   const [classId, setClassId] = useState<number | null>(p.machine_class_id ?? null)
   const [machineId, setMachineId] = useState<number | null>(p.machine_id ?? null)
@@ -699,8 +706,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
 
   return (
     <>
-      <tr data-testid={`costpos-row-${p.id}`}
-        className={`border-t border-slate-700/70 ${editing ? 'bg-slate-800/60' : ''}`}>
+      <tr data-testid={`costpos-row-${p.id}`} data-missing={missing ? 'yes' : 'no'}
+        title={missing ? t('costpos.lineMissing') : undefined}
+        className={`border-t border-slate-700/70 ${editing ? 'bg-slate-800/60' : missing ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : ''}`}>
         <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
         <td className={cellCls}>
           {p.tag ? (

@@ -54,6 +54,12 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
     onSuccess: () => { toast.success(t('costing.finalizedSaved')); refresh() },
     onError: (e: unknown) => toastError(e, 'Could not finalize the costing'),
   })
+  const { data: check } = useQuery({
+    queryKey: ['change', changeId, 'finalize-check', departmentId],
+    queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
+    enabled: !finalized,
+  })
+  const reasons = finalized ? [] : (check?.reasons ?? [])
   const reopen = useMutation({
     mutationFn: () => changesApi.reopenDepartmentCosting(changeId, departmentId),
     onSuccess: () => { toast.success(t('costing.reopenInputSaved')); refresh() },
@@ -76,10 +82,15 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
         </button>
       ) : (
         <button type="button" data-testid={`costing-finalize-${departmentId}`}
-          disabled={finalize.isPending} onClick={() => finalize.mutate()}
+          disabled={finalize.isPending || reasons.length > 0} onClick={() => finalize.mutate()}
           className={btnSm.primary}>
           {t('costing.finalize')}
         </button>
+      )}
+      {reasons.length > 0 && (
+        <ul data-testid={`costing-why-not-${departmentId}`} className="basis-full space-y-0.5 text-red-300">
+          {reasons.map((r, n) => <li key={n}>• {r}</li>)}
+        </ul>
       )}
     </div>
   )
@@ -284,8 +295,9 @@ export default function CostingBuckets({
         const writable = editable && (isPm || !finalized)
         return (
           <section key={id} data-testid={`costing-bucket-${id}`}
-            className={`rounded-lg border ${
-              expanded ? 'border-slate-600 bg-slate-800' : 'border-slate-700 bg-slate-800/50'}`}>
+            className={`rounded-lg border ${!finalized && owesInput(id)
+              ? 'border-red-600/80 ring-1 ring-red-700/40' : expanded ? 'border-slate-600' : 'border-slate-700'} ${
+              expanded ? 'bg-slate-800' : 'bg-slate-800/50'}`}>
             <button type="button" data-testid={`costing-toggle-${id}`}
               aria-expanded={expanded}
               onClick={() => setOpenDept(expanded ? null : id)}

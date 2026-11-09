@@ -243,6 +243,9 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
         raise EarlyCostingError("The department's costing is already finalized")
     await _refuse_while_waiting(session, change, department_id)
     await _refuse_thin_basis(session, change, department_id)
+    empty, _ = await _empty_lines(session, change, department_id)
+    if empty:
+        raise EarlyCostingError(". ".join(empty))
     if not await _has_answer(session, change, department_id):
         raise EarlyCostingError(
             "Nothing to finalize yet: enter hours or an amount on at least one "
@@ -345,6 +348,47 @@ async def _refuse_thin_basis(session: AsyncSession, change: ChangeRequest,
                    "above by how much): " + ", ".join(checks))
     if why:
         raise EarlyCostingError(". ".join(why))
+
+
+async def _empty_lines(session: AsyncSession, change: ChangeRequest,
+                       department_id: int) -> tuple[list[str], list[int]]:
+    """Christoph 2026-11-08: a line carried from the assessment (or added)
+    with nothing on it: an external estimate without a price, an own-time
+    line without hours. Returns (reasons, position ids)."""
+    from app.models.change_cost import CostingPosition
+    rows = (await session.execute(select(CostingPosition).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.department_id == department_id,
+        CostingPosition.kind.in_(("external", "own_time"))))).scalars().all()
+    price = [p for p in rows if p.kind == "external" and p.pricing != "quote"
+             and not (p.est_cost or 0) > 0]
+    hours = [p for p in rows if p.kind == "own_time" and not (p.hours or 0) > 0]
+    why = []
+    if price:
+        why.append("Enter the price of: " + ", ".join(f"'{p.label}'" for p in price))
+    if hours:
+        why.append("Enter the hours of: " + ", ".join(f"'{p.label}'" for p in hours))
+    return why, [p.id for p in price + hours]
+
+
+async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
+                           department_id: int) -> dict:
+    """Every reason the department's Finalize is refused today, in words,
+    and the lines that are missing something (for the red marks)."""
+    reasons: list[str] = []
+    if change.status not in OPEN_STATUSES or not owes(change, department_id) \
+            or is_finalized(change, department_id):
+        return {"reasons": [], "position_ids": []}
+    for check in (_refuse_while_waiting, _refuse_thin_basis):
+        try:
+            await check(session, change, department_id)
+        except EarlyCostingError as e:
+            reasons.extend(x.strip() for x in str(e).split(". ") if x.strip())
+    empty, ids = await _empty_lines(session, change, department_id)
+    reasons.extend(empty)
+    if not await _has_answer(session, change, department_id):
+        reasons.append("Nothing entered yet: hours or an amount on at least one line")
+    return {"reasons": reasons, "position_ids": ids}
 
 
 #: Spec §4 "<Dept> has no cost" (C18): why a department that owes a costing
