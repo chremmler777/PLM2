@@ -887,7 +887,7 @@ describe('CostPositions — sections by line type (Christoph 2026-11-08)', () =>
     expect(screen.queryByTestId('costpos-new-2')).toBeNull()
     fireEvent.click(screen.getByTestId('costpos-add-open-2'))
     expect(screen.getByTestId('costpos-new-2')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('costpos-add-close-2'))
+    fireEvent.click(screen.getByTestId('costpos-add-cancel-2'))
     expect(screen.queryByTestId('costpos-new-2')).toBeNull()
   })
 

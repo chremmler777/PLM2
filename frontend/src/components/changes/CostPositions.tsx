@@ -90,6 +90,8 @@ export const leadTimeText = (days: number, unit?: LeadTimeUnit | null): string =
  */
 export function effectiveOf(p: CostPosition): number | null {
   if (p.kind === 'external' && p.pricing === 'quote') {
+    // the backend's line total counts spare parts as amount x price + transport
+    if (p.effective_cost != null && (p.quantity_unit ?? '') === 'pcs') return p.effective_cost
     return quotedTotal(p, pricedOffer(p))
   }
   if (p.effective_cost != null) return p.effective_cost
@@ -1804,9 +1806,11 @@ const SAMPLING = '__sampling'
  * what the line is (own hours, or money as estimate or vendor quote), then the
  * description, then the amount. Enter saves and clears for the next line.
  */
-function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged, ctx, v2 = false }: {
+function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged, ctx, v2 = false, onCancel }: {
   changeId: number; departmentId: number; categories: CostCategory[]
   onAdded: () => void; onCategoriesChanged: () => void; ctx?: CostingContext
+  /** Christoph 2026-11-08: an add row opened by accident is removed again, filled or not */
+  onCancel?: () => void
   /** ASSESSMENT_V2: a money line says how many of what (A3-07). */
   v2?: boolean
 }) {
@@ -2066,6 +2070,10 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
             className={btnSm.primary}>
             {t('costpos.addLine')}
           </button>
+          {onCancel && (
+            <button type="button" data-testid={`costpos-add-cancel-${departmentId}`}
+              onClick={onCancel} className={`${btnSm.secondary} ml-1`}>{t('costpos.cancelAdd')}</button>
+          )}
         </td>
       </tr>
       {newCat !== null && (
@@ -2393,15 +2401,8 @@ export default function CostPositions({
             {editable && (adding ? (
               <>
                 <AddLine changeId={changeId} departmentId={departmentId} categories={categories}
-                  ctx={ctx} onAdded={invalidate} v2={v2}
+                  ctx={ctx} onAdded={invalidate} v2={v2} onCancel={() => setAdding(false)}
                   onCategoriesChanged={() => qc.invalidateQueries({ queryKey: ['costing-tags', departmentId] })} />
-                <tr>
-                  <td />
-                  <td colSpan={6} className={`${cellCls} pt-0`}>
-                    <button type="button" className={btnSm.ghost} data-testid={`costpos-add-close-${departmentId}`}
-                      onClick={() => setAdding(false)}>{t('common.close')}</button>
-                  </td>
-                </tr>
               </>
             ) : (
               <tr>
