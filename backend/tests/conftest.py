@@ -318,6 +318,59 @@ async def finalize_costing(session_factory, change_id: int, actor_id: int = 1):
         await s.commit()
 
 
+async def ready_to_finalize(session_factory, change_id: int, department_id: int,
+                            actor_id: int = 1, *, support_hours: float = 0.0,
+                            book_hours: bool = True, transport: bool = True,
+                            time_critical: bool | None = True):
+    """Make a department pass the 2026-11-08/09 finalize rules a test is not
+    about, straight in the DB (same shortcut as lock_impact): an
+    implementation support / 'PM time still to come' line with hours
+    (support_hours, 0 allowed) unless one exists, a costing booking after its
+    assessment (book_hours; counts in assessment/costing for the PM),
+    transport 0 on every quote without it (transport) and an answer on every
+    unanswered spare part (time_critical; None leaves them). The rules
+    themselves are tested on purpose in test_early_costing.py,
+    test_auto_advance.py and test_costing_positions.py."""
+    from datetime import datetime, timedelta
+    from sqlalchemy import select as _select
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.models.change_cost import CostingOffer, CostingPosition
+    from app.models.change_impl import ImplementationBooking
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, change_id)
+        positions = (await s.execute(_select(CostingPosition).where(
+            CostingPosition.change_id == change_id,
+            CostingPosition.department_id == department_id))).scalars().all()
+        if support_hours is not None and not any(
+                p.kind == "support_effort" and p.hours is not None for p in positions):
+            s.add(CostingPosition(
+                change_id=change_id, department_id=department_id,
+                kind="support_effort", label="Implementation support (h)",
+                hours=support_hours, created_by=actor_id))
+        if transport:
+            for p in positions:
+                for o in (await s.execute(_select(CostingOffer).where(
+                        CostingOffer.position_id == p.id))).scalars():
+                    if o.shipping_cost is None:
+                        o.shipping_cost = 0.0
+        if time_critical is not None:
+            for p in positions:
+                if p.is_spare_part and p.time_critical is None:
+                    p.time_critical = time_critical
+        if book_hours:
+            since = max((a.submitted_at for a in (await s.execute(
+                _select(ChangeAssessment).where(
+                    ChangeAssessment.change_id == change_id,
+                    ChangeAssessment.department_id == department_id))).scalars()
+                if a.submitted_at), default=None)
+            at = max(datetime.utcnow(), since or datetime.utcnow()) + timedelta(seconds=1)
+            s.add(ImplementationBooking(
+                change_id=change_id, department_id=department_id, hours=0.5,
+                booked_by=actor_id, booked_at=at, work_date=at.date(),
+                status_at_booking=change.status, note="costing (test)"))
+        await s.commit()
+
+
 async def validate_timing(session_factory, change_id: int, actor_id: int = 1):
     """Stamp 'Timing validated' directly (bypasses the detailed plan and the
     teams' confirmations) so state-machine tests can cross the approved ->

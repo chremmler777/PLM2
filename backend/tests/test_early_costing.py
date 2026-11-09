@@ -10,7 +10,7 @@ from app.models.change import ChangeAssessment, ChangeRequest
 from app.models.change_cost import DepartmentRate
 from app.models.entities import Project
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import login
+from tests.conftest import login, ready_to_finalize
 
 pytestmark = pytest.mark.asyncio
 
@@ -101,6 +101,7 @@ async def test_submitted_department_costs_and_finalizes_during_assessment(
     assert detail["costing_owed_department_ids"] == [early["tool"]]
     assert detail["costing_pending_department_ids"] == [early["tool"]]
 
+    await ready_to_finalize(session_factory, early["change_id"], early["tool"])
     res = await client.post(_url(early, early["tool"], "finalize"), headers=tool)
     assert res.status_code == 200, res.text
     assert res.json() == {"owed_department_ids": [early["tool"]],
@@ -156,6 +157,7 @@ async def test_finalized_departments_stay_finalized_into_costing(
         client, admin_auth, session_factory, seed, early):
     tool = await _member(client, session_factory, seed, early["tool"], "ec-tool3@test.io")
     assert (await _add_position(client, tool, early, early["tool"])).status_code == 201
+    await ready_to_finalize(session_factory, early["change_id"], early["tool"])
     assert (await client.post(_url(early, early["tool"], "finalize"),
                               headers=tool)).status_code == 200
     async with session_factory() as s:
@@ -184,6 +186,7 @@ async def test_superseded_assessments_take_the_finalization_with_them(
     finalization; the department's positions stay as its draft."""
     tool = await _member(client, session_factory, seed, early["tool"], "ec-tool4@test.io")
     assert (await _add_position(client, tool, early, early["tool"])).status_code == 201
+    await ready_to_finalize(session_factory, early["change_id"], early["tool"])
     assert (await client.post(_url(early, early["tool"], "finalize"),
                               headers=tool)).status_code == 200
     from app.services import early_costing
@@ -202,7 +205,8 @@ async def test_superseded_assessments_take_the_finalization_with_them(
     positions = (await client.get(
         f"/api/v1/changes/{early['change_id']}/costing/positions",
         headers=admin_auth)).json()
-    assert len(positions) == 1
+    # the tool line and the support hours line (0 h) finalize asked for
+    assert sorted(p["kind"] for p in positions) == ["external", "support_effort"]
 
 
 async def test_costing_closed_refuses_finalize_and_reopen(
