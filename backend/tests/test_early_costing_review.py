@@ -50,7 +50,7 @@ async def test_later_stage_submit_after_finalize_reopens_the_department(
         s.add(ChangeAssessment(
             change_id=early["change_id"], department_id=early["tool"],
             stage_order=2, verdict="feasible", status="submitted",
-            submitted_at=datetime.utcnow() + timedelta(seconds=1)))
+            submitted_at=datetime.utcnow() + timedelta(minutes=1)))
         await s.commit()
     detail = await _detail(client, admin_auth, early)
     assert early["tool"] in detail["costing_pending_department_ids"]

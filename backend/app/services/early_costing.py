@@ -120,6 +120,11 @@ def _parse(ts) -> Optional[datetime]:
         return None
 
 
+# 2026-11-09 night: the host clock (WSL) jumps back a few seconds now and
+# then; a finalize or booking right after a submit must never read as before it.
+CLOCK_SLACK_S = 30
+
+
 def finalized_row(change: ChangeRequest, department_id: int) -> Optional[ChangeAssessment]:
     """The row carrying the department's finalization, while it still holds:
     no row of the department was submitted after it (a later stage woken at
@@ -129,7 +134,9 @@ def finalized_row(change: ChangeRequest, department_id: int) -> Optional[ChangeA
     if row is None:
         return None
     at = _parse(row.details_dict.get("costing_finalized_at"))
-    if at is not None and any(a.submitted_at is not None and a.submitted_at > at
+    from datetime import timedelta
+    if at is not None and any(a.submitted_at is not None
+                              and a.submitted_at > at + timedelta(seconds=CLOCK_SLACK_S)
                               for a in rows):
         return None
     return row
@@ -529,7 +536,8 @@ async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
         from app.services.hours_service import HoursService
         q = q.where(ImplementationBooking.status_at_booking.in_(HoursService.PM_COSTING))
     elif since is not None:
-        q = q.where(ImplementationBooking.booked_at >= since)
+        from datetime import timedelta
+        q = q.where(ImplementationBooking.booked_at >= since - timedelta(seconds=CLOCK_SLACK_S))
     return not ((await session.execute(q)).scalar() or 0)
 
 

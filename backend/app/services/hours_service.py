@@ -273,6 +273,9 @@ class HoursService:
         if not rows and not pm:
             return
         since = max((a.submitted_at for a in rows if a.submitted_at), default=None)
+        if since is not None:   # host clock jumps (early_costing.CLOCK_SLACK_S)
+            from datetime import timedelta as _td
+            since = since - _td(seconds=30)
         base = select(_f.coalesce(_f.sum(ImplementationBooking.hours), 0)).where(
             ImplementationBooking.change_id == change.id,
             ImplementationBooking.department_id == department_id,
@@ -499,7 +502,8 @@ class HoursService:
                        func.max(ChangeAssessment.submitted_at))
                 .where(ChangeAssessment.change_id == change.id)
                 .group_by(ChangeAssessment.department_id))).all():
-            since_by[did] = at
+            # host clock jumps (early_costing.CLOCK_SLACK_S)
+            since_by[did] = at - timedelta(seconds=30) if at is not None else None
 
         pm_ids = set((await session.execute(select(Department.id).where(
             Department.name == "Project Manager"))).scalars().all())
