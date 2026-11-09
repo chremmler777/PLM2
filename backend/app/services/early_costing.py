@@ -373,32 +373,71 @@ async def _empty_lines(session: AsyncSession, change: ChangeRequest,
 
 async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
                            department_id: int) -> dict:
-    """Every reason the department's Finalize is refused today, in words,
-    and the lines that are missing something (for the red marks)."""
-    reasons: list[str] = []
+    """Christoph 2026-11-08: what still stops the department's Finalize, one
+    short item per point and line (banner tag + words), and the lines that
+    miss something (red marks). Same rules as finalize()."""
+    from app.models.change import ChangeAttachment
+    from app.models.change_cost import CostingPosition
+    from app.services import cm_switches, supplier_wait_service as waits
+    from app.services.cm_rules import reference_refusal, says_what
+    from app.core.display import fmt_date
     if change.status not in OPEN_STATUSES or not owes(change, department_id) \
             or is_finalized(change, department_id):
-        return {"reasons": [], "position_ids": []}
-    for check in (_refuse_while_waiting, _refuse_thin_basis):
-        try:
-            await check(session, change, department_id)
-        except EarlyCostingError as e:
-            reasons.extend(x.strip() for x in str(e).split(". ") if x.strip())
-    empty, ids = await _empty_lines(session, change, department_id)
-    reasons.extend(empty)
-    if not await _has_answer(session, change, department_id):
-        reasons.append("Nothing entered yet: hours or an amount on at least one line")
-    # one tag per reason for the banner (Christoph 2026-11-08)
-    def tag(r: str) -> str:
-        for prefix, t in (("Waiting on", "waiting"), ("Quoted positions", "quote_missing"),
-                          ("Estimated positions", "basis_missing"), ("Compare the quote", "compare"),
-                          ("Enter the price", "price_missing"), ("Enter the hours", "hours_missing"),
-                          ("Nothing entered", "empty")):
-            if r.startswith(prefix):
-                return t
-        return "other"
-    return {"reasons": reasons, "position_ids": ids,
-            "items": [{"tag": tag(r), "text": r} for r in reasons]}
+        return {"reasons": [], "items": [], "position_ids": []}
+    items: list[dict] = []
+    ids: list[int] = []
+    rows = (await session.execute(select(CostingPosition).where(
+        CostingPosition.change_id == change.id,
+        CostingPosition.department_id == department_id))).scalars().all()
+    labels = {p.id: p.label for p in rows}
+    if cm_switches.on("ASSESSMENT_V2"):
+        for w in await waits.open_waits(session, [change.id], "costing"):
+            if w.department_id == department_id:
+                where = f" ({labels[w.position_id]})" if w.position_id in labels else ""
+                items.append({"tag": "waiting", "text":
+                              f"{w.vendor_name}{where}: quote expected {fmt_date(w.expected_by)}"})
+    ext = [p for p in rows if p.kind == "external"]
+    offer_ids = [o.id for p in ext for o in p.offers]
+    filed = set((await session.execute(
+        select(ChangeAttachment.costing_offer_id).where(
+            ChangeAttachment.costing_offer_id.in_(offer_ids)))).scalars().all()) if offer_ids else set()
+    for p in ext:
+        if p.estimate_check == "pending":
+            items.append({"tag": "compare", "text": f"{p.label}: compare the quote with your estimate"})
+            ids.append(p.id)
+        if p.pricing == "quote":
+            if not p.offers:
+                items.append({"tag": "quote_missing", "text": f"{p.label}: no quote received yet"})
+                ids.append(p.id)
+                continue
+            fav = p.favorite_offer
+            if not p.counted_offers(fav):
+                items.append({"tag": "favourite", "text": f"{p.label}: pick the favourite"})
+                ids.append(p.id)
+                continue
+            for o in p.counted_offers(fav):
+                miss = ([] if reference_refusal(o.quote_ref) is None else ["quote no."]) \
+                    + ([] if o.id in filed else ["quote file"])
+                if miss:
+                    items.append({"tag": "quote_missing",
+                                  "text": f"{p.label} – {o.vendor_name}: {' and '.join(miss)} missing"})
+                    ids.append(p.id)
+        else:
+            if not (p.est_cost or 0) > 0:
+                items.append({"tag": "price_missing", "text": f"{p.label}: enter the estimated price"})
+                ids.append(p.id)
+            elif not (p.basis_part_id is not None and len(p.basis_differs or "") >= 5
+                      if p.basis == "same_as" else says_what(p.basis_ref)):
+                items.append({"tag": "basis_missing", "text": f"{p.label}: say what the estimate is based on"})
+                ids.append(p.id)
+    for p in rows:
+        if p.kind == "own_time" and not (p.hours or 0) > 0:
+            items.append({"tag": "hours_missing", "text": f"{p.label}: enter the hours"})
+            ids.append(p.id)
+    if not items and not await _has_answer(session, change, department_id):
+        items.append({"tag": "empty", "text": "Nothing entered yet: hours or an amount on one line"})
+    return {"reasons": [i["text"] for i in items], "items": items,
+            "position_ids": sorted(set(ids))}
 
 
 #: Spec §4 "<Dept> has no cost" (C18): why a department that owes a costing

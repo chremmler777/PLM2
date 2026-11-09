@@ -112,8 +112,15 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
   })
   // Christoph 2026-11-08: a wait on a supplier line is handled in that line's
   // quote table; here only the department's other waits
-  const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open && w.position_id == null)
-  const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open && w.position_id == null)
+  // with exactly one supplier line, its waits (with or without a line) are in that line
+  const { data: posList } = useQuery({
+    queryKey: ['costing-positions', changeId],
+    queryFn: () => changesApi.listCostPositions(changeId),
+  })
+  const soleLine = (posList ?? []).filter((p) => p.department_id === departmentId && p.kind === 'external').length === 1
+  const outside = (w: SupplierWait) => w.position_id == null && !soleLine
+  const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open && outside(w))
+  const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open && outside(w))
   // Christoph 2026-11-08: with two or more supplier lines (cases) the wait
   // names which one it is for
   const { data: positions } = useQuery({

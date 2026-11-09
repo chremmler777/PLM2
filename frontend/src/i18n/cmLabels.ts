@@ -699,6 +699,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.makeFavorite': { de: 'Als Favorit', en: 'Make favourite' },
   'costpos.pickFavoriteBanner': { de: 'FAVORIT WÄHLEN', en: 'PICK THE FAVOURITE' },
   'costpos.favoriteLineHint': { de: 'Favorit der Abteilung: dieses Angebot bepreist die Zeile; Vertrieb kann später anders wählen', en: "The department's favourite prices the line; Sales can choose another later" },
+  'costing.beforeFinalize': { de: 'Vor dem Abschließen noch offen', en: 'Still open before you can finalize' },
+  'costing.tag.favourite': { de: 'FAVORIT WÄHLEN', en: 'PICK FAVOURITE' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

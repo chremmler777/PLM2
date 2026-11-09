@@ -65,41 +65,55 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
     onSuccess: () => { toast.success(t('costing.reopenInputSaved')); refresh() },
     onError: (e: unknown) => toastError(e, 'Could not reopen the costing'),
   })
+  const TAG_STYLE: Record<string, string> = {
+    waiting: 'bg-sky-700 text-white', compare: 'bg-amber-600 text-white', favourite: 'bg-amber-600 text-white',
+    quote_missing: 'bg-red-700 text-white', price_missing: 'bg-red-700 text-white',
+    basis_missing: 'bg-red-700 text-white', hours_missing: 'bg-red-700 text-white',
+    empty: 'bg-slate-600 text-white', other: 'bg-slate-600 text-white',
+  }
+  const items = check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))
   return (
     <div data-testid={`costing-finalize-bar-${departmentId}`}
-      className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
-      <span>{finalized
-        ? (noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalizedBody'))
-        : reasons.length ? t('costing.notYet') : t('costing.finalizeHint')}</span>
-      {!finalized && v2 && (
-        <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
+      className="rounded border border-slate-700 bg-slate-900/40 text-xs text-slate-300">
+      {/* Christoph 2026-11-08: one container of line items, a coloured banner each */}
+      {!finalized && items.length > 0 && (
+        <div className="border-b border-slate-700 px-3 py-2">
+          <p className="mb-1 font-semibold text-slate-200">{t('costing.beforeFinalize')}</p>
+          <ul data-testid={`costing-why-not-${departmentId}`}
+            className="divide-y divide-slate-700/70 rounded border border-slate-700 bg-slate-950/40">
+            {items.map((r, n) => (
+              <li key={n} className="flex items-center gap-2 px-2 py-1">
+                <span className={`w-32 flex-shrink-0 rounded px-1.5 py-0.5 text-center text-[11px] font-semibold ${TAG_STYLE[r.tag] ?? TAG_STYLE.other}`}>
+                  {t(`costing.tag.${r.tag}`)}</span>
+                <span className="text-slate-200">{r.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
-      {finalized ? (
-        <button type="button" data-testid={`costing-reopen-${departmentId}`}
-          disabled={reopen.isPending} onClick={() => reopen.mutate()}
-          className={btnSm.secondary}>
-          {t('costing.reopenInput')}
-        </button>
-      ) : (
-        <button type="button" data-testid={`costing-finalize-${departmentId}`}
-          disabled={finalize.isPending || reasons.length > 0} onClick={() => finalize.mutate()}
-          className={btnSm.primary}>
-          {t('costing.finalize')}
-        </button>
-      )}
-      {reasons.length > 0 && (
-        <ul data-testid={`costing-why-not-${departmentId}`} className="basis-full space-y-1">
-          {(check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))).map((r, n) => (
-            <li key={n} className="flex items-start gap-2 rounded border border-slate-700 bg-slate-900/60 px-2 py-1">
-              <span className={`flex-shrink-0 rounded px-1.5 text-[11px] font-semibold ${
-                r.tag === 'waiting' ? 'bg-sky-800 text-sky-100'
-                  : r.tag === 'compare' ? 'bg-amber-800 text-amber-100' : 'bg-red-800 text-red-100'}`}>
-                {t(`costing.tag.${r.tag}`)}</span>
-              <span className="text-slate-200">{r.text}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+        <span className="flex items-center gap-2">
+          {finalized
+            ? (noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalizedBody'))
+            : items.length ? null : t('costing.finalizeHint')}
+          {!finalized && v2 && (
+            <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
+          )}
+        </span>
+        {finalized ? (
+          <button type="button" data-testid={`costing-reopen-${departmentId}`}
+            disabled={reopen.isPending} onClick={() => reopen.mutate()}
+            className={btnSm.secondary}>
+            {t('costing.reopenInput')}
+          </button>
+        ) : (
+          <button type="button" data-testid={`costing-finalize-${departmentId}`}
+            disabled={finalize.isPending || reasons.length > 0} onClick={() => finalize.mutate()}
+            className={btnSm.primary}>
+            {t('costing.finalize')}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
