@@ -1361,7 +1361,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           <CaseDocs changeId={changeId} position={p} />
         </td>
         <td className={`${cellCls} min-w-[12rem]`}>
-          {editing ? (
+          {editing && !(p.notes ?? '').startsWith('From the assessment') ? (
             <input data-testid={`costpos-edit-label-${p.id}`} value={label}
               aria-label={t('costpos.label')} autoFocus
               onChange={(e) => setLabel(e.target.value)}
@@ -1544,9 +1544,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
               <VendorField testId={`costpos-edit-vendor-${p.id}`} value={vendor} onChange={setVendor}
                 placeholder={t('costpos.vendorOptional')} />
             )}
-            <input data-testid={`costpos-edit-notes-${p.id}`} value={notes}
+            {!(p.notes ?? '').startsWith('From the assessment') && <input data-testid={`costpos-edit-notes-${p.id}`} value={notes}
               aria-label={t('costpos.notes')} placeholder={t('costpos.notes')}
-              onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} flex-1 min-w-[10rem]`} />
+              onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} flex-1 min-w-[10rem]`} />}
           </td>
         </tr>
       )}
