@@ -288,3 +288,31 @@ async def test_pm_costing_counts_in_x_of_y_without_a_counted_row(
     assert [(o["department_name"], o["open"]) for o in st["open"]] == [
         ("Project Manager", "costing")]
     assert st["ready"] is False and st["done"] == st["total"] - 1
+
+
+async def test_an_engine_noted_consulted_row_does_not_hold_the_move(
+        client, session_factory, seed):
+    """DECIDED BY CLAUDE (night 2026-11-09, CR-33): a C row whose engine task
+    is 'noted' and not actionable has no submit path and no task; it counts
+    as done. A C row without such a task still holds (all rows count)."""
+    from app.models.workflow import WfInstance, WfInstanceTask, WfTemplate
+    ids = await _make(session_factory, seed,
+                      extra_rows=[("Development", 2, "C", False)])
+    async with session_factory() as s:
+        tmpl = WfTemplate(name="auto-noted", version=1, is_active=True,
+                          created_by=seed["admin_id"])
+        s.add(tmpl); await s.flush()
+        inst = WfInstance(template_id=tmpl.id, change_id=ids["change_id"], status="active",
+                          current_stage_order=2, started_by=seed["admin_id"])
+        s.add(inst); await s.flush()
+        task = WfInstanceTask(instance_id=inst.id, stage_order=2,
+                              department_id=ids["Development"], rasic_letter="C",
+                              status="noted", is_actionable=False)
+        s.add(task); await s.flush()
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == ids["change_id"],
+            ChangeAssessment.department_id == ids["Development"]))).scalar_one()
+        row.wf_instance_task_id = task.id
+        await s.commit()
+    await _finalize_tool(client, session_factory, seed, ids, "auto-tool11@test.io")
+    assert await _status(session_factory, ids["change_id"]) == "quoting"

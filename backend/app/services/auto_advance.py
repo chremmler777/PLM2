@@ -60,6 +60,20 @@ TEXT_QUOTING = ("Automatically to Quote creation: all departments finished "
 DONE_ROW = ("submitted", "waived")
 
 
+def row_done(a) -> bool:
+    """Submitted or waived; also a row whose engine task is 'noted' and not
+    actionable (a C/S row of a later stage, e.g. Development / Tool Engineer
+    C on 'Summation & Budget'): the engine settled it as information, there
+    is no submit path for it and it gets no task, so it cannot be owed.
+    DECIDED BY CLAUDE (night 2026-11-09, CR-33 sat at '6 of 9' on two such
+    rows); Christoph to confirm."""
+    if a.effective_status in DONE_ROW:
+        return True
+    task = getattr(a, "task", None)
+    return (task is not None and task.status == "noted"
+            and not task.is_actionable and a.submitted_at is None)
+
+
 def applies(change: ChangeRequest) -> bool:
     """The change runs this phase on its own (the cockpit hides the manual
     close and shows the progress instead)."""
@@ -125,7 +139,7 @@ async def progress(session: AsyncSession, change: ChangeRequest) -> dict:
     for d in dept_ids:
         mine = sorted((a for a in rows if a.department_id == d),
                       key=lambda a: (a.stage_order, a.id or 0))
-        unanswered = [a for a in mine if a.effective_status not in DONE_ROW]
+        unanswered = [a for a in mine if not row_done(a)]
         if unanswered:
             what, row = "assessment", unanswered[0]
         elif d in pending_costing:
