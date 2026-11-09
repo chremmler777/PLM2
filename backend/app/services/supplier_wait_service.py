@@ -257,8 +257,15 @@ async def serialize(session: AsyncSession, waits: list[SupplierWait]) -> list[di
     dept_ids = {w.department_id for w in waits}
     names = dict((await session.execute(
         select(Department.id, Department.name).where(Department.id.in_(dept_ids)))).all())
+    # Christoph 2026-11-08: who asked and who closed it, when
+    from app.models.entities import User
+    uids = {u for w in waits for u in (w.created_by, w.closed_by) if u is not None}
+    people = dict((await session.execute(
+        select(User.id, User.full_name).where(User.id.in_(uids)))).all()) if uids else {}
     today = business_today()
     return [{
+        "created_by_name": people.get(w.created_by), "created_at": w.created_at,
+        "closed_by_name": people.get(w.closed_by),
         "id": w.id, "change_id": w.change_id, "department_id": w.department_id,
         "department_name": names.get(w.department_id), "phase": w.phase,
         "vendor_name": w.vendor_name, "asked_on": w.asked_on,

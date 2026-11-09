@@ -13,7 +13,7 @@
  * - SupplierWaitLine: the header's "Waiting on FZ since 7 Oct".
  */
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { btnSm } from '../../common/buttonStyles'
 import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
@@ -105,7 +105,13 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
   changeId: number; departmentId: number; waits: SupplierWait[]; editable: boolean
 }) {
   const refresh = useRefresh(changeId)
-  const mine = waits.filter((w) => w.department_id === departmentId && w.is_open)
+  // all of the department's waits (closed ones too: who answered, when)
+  const { data: all } = useQuery({
+    queryKey: ['change', changeId, 'supplier-waits'],
+    queryFn: () => changesApi.listSupplierWaits(changeId),
+  })
+  const mine = (all ?? waits).filter((w) => w.department_id === departmentId && w.is_open)
+  const done = (all ?? []).filter((w) => w.department_id === departmentId && !w.is_open)
   const [open, setOpen] = useState(false)
   const [vendor, setVendor] = useState('')
   const [asked, setAsked] = useState(today())
@@ -129,6 +135,7 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
           data-testid={`supwait-${w.id}`}>
           <span>{t('wait.sup.line').replace('{v}', w.vendor_name)
             .replace('{a}', formatDate(w.asked_on)).replace('{e}', formatDate(w.expected_by))}</span>
+          {w.created_by_name && <span className="text-sky-300/80">{t('wait.sup.by').replace('{x}', w.created_by_name)}</span>}
           <span className={`rounded px-1.5 ${w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
             {w.chip}</span>
           {editable && (
@@ -139,6 +146,16 @@ export function SupplierWaitPanel({ changeId, departmentId, waits, editable }: {
                 onClick={() => close.mutate({ id: w.id, reason: 'not_needed' })}>{t('wait.sup.notNeeded')}</button>
             </>
           )}
+        </div>
+      ))}
+      {done.map((w) => (
+        <div key={w.id} data-testid={`supwait-done-${w.id}`}
+          className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400">
+          {t('wait.sup.doneLine').replace('{v}', w.vendor_name)
+            .replace('{a}', formatDate(w.asked_on)).replace('{who}', w.created_by_name ?? '-')
+            .replace('{r}', t(`wait.sup.reason.${w.close_reason ?? 'received'}`))
+            .replace('{d}', w.closed_at ? formatDate(w.closed_at) : '-')
+            .replace('{by}', w.closed_by_name ?? '-')}
         </div>
       ))}
       {editable && !open && (

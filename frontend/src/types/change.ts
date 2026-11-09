@@ -1851,6 +1851,9 @@ export interface SupplierWait {
   chip: string
   closed_at?: string | null
   close_reason?: 'received' | 'price_on_estimate' | 'not_needed' | null
+  created_by_name?: string | null
+  created_at?: string | null
+  closed_by_name?: string | null
 }
 
 /** ECR-solid §6 [R3]: a scope change card (no prices in it). */
