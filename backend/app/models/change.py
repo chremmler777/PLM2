@@ -839,6 +839,9 @@ class ChangeAttachment(Base):
         ForeignKey("change_concerns.id"), nullable=True, index=True)
     # Evidence for one department's assessment (moldflow report, test results).
     # Mutually exclusive with concern_id: a document belongs to one container.
+    # 156: the modification case this document belongs to (case id in the
+    # assessment's details); None = the whole assessment
+    case_ref: Mapped[str | None] = mapped_column(String(40), nullable=True)
     assessment_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_assessments.id"), nullable=True, index=True)
     # The vendor offer this document is. Third and last container, exclusive

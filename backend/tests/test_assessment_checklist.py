@@ -518,3 +518,34 @@ async def test_modification_cases_become_costing_lines(
         a = await s.get(ChangeAssessment, tab["assessment_id"])
         ch = await s.get(ChangeRequest, tab["change_id"])
         assert await carry_cases(s, ch, a, "Tool Engineer", 1) == 0
+
+
+async def test_each_modification_case_owes_its_own_documents(client, admin_auth, tab):
+    """Christoph 2026-11-08: with case ids, every external case needs its own
+    change PPT and RFQ, every internal case its own change PPT."""
+    impacts = answered("Tool Engineer", yes={"modification_external"},
+                       remarks={"modification_external": "Insert LH; insert RH"})
+    for i in impacts:
+        if i.get("key") == "modification_external":
+            i["cases"] = [{"id": "cA", "text": "Insert LH"}, {"id": "cB", "text": "Insert RH"}]
+    # documents for case A only
+    for kind, name in (("change_ppt", "a.pptx"), ("rfq", "a.pdf")):
+        up = await client.post(
+            f"/api/v1/changes/{tab['change_id']}/attachments",
+            files={"file": (name, b"x", "application/octet-stream")},
+            data={"assessment_id": str(tab["assessment_id"]), "kind": kind, "case_ref": "cA"},
+            headers=admin_auth)
+        assert up.status_code in (200, 201), up.text
+        assert up.json()["case_ref"] == "cA"
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 400
+    assert "case 2 'Insert RH'" in res.json()["detail"]
+    assert "case 1" not in res.json()["detail"]
+    for kind, name in (("change_ppt", "b.pptx"), ("rfq", "b.pdf")):
+        await client.post(
+            f"/api/v1/changes/{tab['change_id']}/attachments",
+            files={"file": (name, b"x", "application/octet-stream")},
+            data={"assessment_id": str(tab["assessment_id"]), "kind": kind, "case_ref": "cB"},
+            headers=admin_auth)
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 200, res.text

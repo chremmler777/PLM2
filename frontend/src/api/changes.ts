@@ -176,7 +176,7 @@ export const changesApi = {
     opts?: {
       kind?: AttachmentKind; respondsToId?: number;
       concernId?: number; assessmentId?: number; costingOfferId?: number;
-      validationIssueId?: number;
+      validationIssueId?: number; caseRef?: string;
     },
   ) => {
     const fd = new FormData();
@@ -189,6 +189,7 @@ export const changesApi = {
     // so it lands there and nowhere else.
     if (opts?.concernId !== undefined) fd.append('concern_id', String(opts.concernId));
     if (opts?.assessmentId !== undefined) fd.append('assessment_id', String(opts.assessmentId));
+    if (opts?.caseRef) fd.append('case_ref', opts.caseRef);
     // A vendor quote belongs to the offer it prices, not to the change at large.
     if (opts?.costingOfferId !== undefined) fd.append('costing_offer_id', String(opts.costingOfferId));
     // Evidence and customer mails filed into one validation issue.

@@ -20,12 +20,10 @@ NOTE_PREFIX = "From the assessment: "
 
 
 def cases_of(entry: dict) -> list[str]:
-    """The cases of a Yes row: its case list, else its remark, else nothing."""
-    raw = entry.get("cases")
-    if isinstance(raw, list):
-        out = [str(c).strip() for c in raw if str(c).strip()]
-        if out:
-            return out
+    """The case texts of a Yes row: its case list, else its remark."""
+    out = [c["text"] for c in checklist.case_list(entry)]
+    if out:
+        return out
     remark = (entry.get("remark") or "").strip()
     return [remark] if remark else []
 

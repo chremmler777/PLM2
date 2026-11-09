@@ -7213,14 +7213,19 @@ class ChangeService:
         answer = details if isinstance(details, dict) else a.details_dict
         if answer.get("impacted") is not False:
             filed: set = set()
+            filed_by_case: dict = {}
             if a.id is not None:
-                filed = {k for (k,) in (await session.execute(
-                    select(ChangeAttachment.kind).where(
-                        ChangeAttachment.change_id == change.id,
-                        ChangeAttachment.assessment_id == a.id))).all()}
+                for k, ref in (await session.execute(
+                        select(ChangeAttachment.kind, ChangeAttachment.case_ref).where(
+                            ChangeAttachment.change_id == change.id,
+                            ChangeAttachment.assessment_id == a.id))).all():
+                    filed.add(k)
+                    if ref:
+                        filed_by_case.setdefault(ref, set()).add(k)
             dept = await session.get(Department, department_id)
             owed = checklist.missing_documents(
-                answer.get("impacts"), filed, dept.name if dept else None)
+                answer.get("impacts"), filed, dept.name if dept else None,
+                filed_by_case=filed_by_case)
             if owed:
                 raise ChangeError("; ".join(owed))
         a.verdict = verdict
@@ -8794,6 +8799,7 @@ class ChangeService:
         costing_offer_id: Optional[int] = None,
         actor: Optional[User] = None,
         validation_issue_id: Optional[int] = None,
+        case_ref: Optional[str] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
@@ -8902,6 +8908,7 @@ class ChangeService:
             responds_to_id=responds_to_id, concern_id=concern_id,
             assessment_id=assessment_id, costing_offer_id=costing_offer_id,
             validation_issue_id=validation_issue_id,
+            case_ref=case_ref if assessment_id is not None else None,
         )
         session.add(att)
         await session.flush()

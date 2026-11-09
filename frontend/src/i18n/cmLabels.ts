@@ -616,7 +616,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'check.casePlaceholder': { de: 'Was genau, z. B. Einsatz LH nacharbeiten (Zeichnung/Anzahl)', en: 'What exactly, e.g. re-cut insert LH (drawing / count)' },
   'check.caseAdd': { de: '+ weiterer Fall', en: '+ another case' },
   'check.caseRemove': { de: 'Fall entfernen', en: 'Remove case' },
-  'check.caseHint': { de: 'Jeder Fall wird eine eigene Zeile in der Kalkulation.', en: 'Each case becomes its own costing line.' },
+  'check.caseHint': { de: 'Jeder Fall hat eigene Dokumente und wird eine eigene Zeile in der Kalkulation.', en: 'Each case has its own documents and becomes its own costing line.' },
   'bucket.openPoints': { de: 'Offene Punkte ({n})', en: 'Open points ({n})' },
   'bucket.openCount': { de: '{n} offen', en: '{n} open' },
   'bucket.openCheck': { de: 'Prüfpunkt #{n}: {x}', en: 'Check item #{n}: {x}' },

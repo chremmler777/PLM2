@@ -148,6 +148,8 @@ export interface Attachment {
   /** The needs-info container this document belongs to, if any. */
   concern_id?: number | null;
   /** The assessment this document is evidence for — exclusive with concern_id. */
+  /** The modification case this document belongs to (156). */
+  case_ref?: string | null;
   assessment_id?: number | null;
   /** The vendor offer this quote document belongs to. */
   costing_offer_id?: number | null;
@@ -854,6 +856,9 @@ export interface ChecklistItemDef {
    *  modification: the change presentation and the change RFQ). Told apart
    *  by attachment kind; the backend refuses the submit without them. */
   requires_documents?: ChecklistRequiredDocument[];
+  /** Internal / External modification (2026-11-08): the documents EACH case
+   *  owes, filed with the case id (attachment case_ref). */
+  case_documents?: ChecklistRequiredDocument[];
 }
 
 export interface ChecklistRequiredDocument {

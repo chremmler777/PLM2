@@ -2503,6 +2503,8 @@ async def upload_attachment(
     # Evidence for one department's assessment. Mutually exclusive with
     # concern_id — a document belongs to one container.
     assessment_id: Optional[int] = Form(None),
+    # 156: the modification case this document belongs to (Christoph 2026-11-08)
+    case_ref: Optional[str] = Form(None),
     # The vendor offer this document IS (kind='vendor_quote'). Third container,
     # exclusive with the other two; written by whoever may write the position.
     costing_offer_id: Optional[int] = Form(None),
@@ -2548,6 +2550,7 @@ async def upload_attachment(
             concern_id=concern_id, assessment_id=assessment_id,
             costing_offer_id=costing_offer_id, actor=current_user,
             validation_issue_id=validation_issue_id,
+            case_ref=(case_ref or "").strip()[:40] or None,
         )
     except ChangeError as e:
         os.remove(stored_path)      # do not leave an orphan on a rejected upload
@@ -2560,6 +2563,7 @@ async def upload_attachment(
     return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
             "kind": att.kind, "responds_to_id": att.responds_to_id,
             "concern_id": att.concern_id, "assessment_id": att.assessment_id,
+            "case_ref": att.case_ref,
             "costing_offer_id": att.costing_offer_id,
             "validation_issue_id": att.validation_issue_id}
 

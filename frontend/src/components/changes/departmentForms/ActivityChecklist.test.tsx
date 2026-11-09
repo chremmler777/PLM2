@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ActivityChecklist, {
-  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, refToNos, restToNo,
+  checklistItemLabel, checklistProgress, earlierAnswers, missingDocuments, casesOf, refToNos, restToNo,
   riskKeyOf, saysWhat, verdictEvidence,
 } from './ActivityChecklist'
 
@@ -290,5 +290,28 @@ describe('verdict evidence (spec §4)', () => {
     expect(verdictEvidence(DEFS, value).missing).toEqual(['Cycle time change'])
     ;(value.impacts[0] as { remark: string }).remark = 'cycle +0.4 s, trial TR-22'
     expect(verdictEvidence(DEFS, value).missing).toEqual([])
+  })
+})
+
+describe('modification cases (2026-11-08)', () => {
+  const def = { key: 'modification_external', label_de: 'x', label_en: 'External modification (supplier)',
+    extra: false,
+    requires_documents: [{ kind: 'change_ppt', label_de: 'p', label_en: 'Change presentation', extensions: ['.pptx'] },
+      { kind: 'rfq', label_de: 'r', label_en: 'Change RFQ', extensions: ['.pdf'] }],
+    case_documents: [{ kind: 'change_ppt', label_de: 'p', label_en: 'Change presentation', extensions: ['.pptx'] },
+      { kind: 'rfq', label_de: 'r', label_en: 'Change RFQ', extensions: ['.pdf'] }] }
+  const value = { impacts: [{ key: 'modification_external', answer: 'yes', impacted: true,
+    cases: [{ id: 'cA', text: 'Insert LH' }, { id: 'cB', text: 'Insert RH' }] }] }
+  it('owes the documents per case, not once per row', () => {
+    const filedA = [{ kind: 'change_ppt', case_ref: 'cA' }, { kind: 'rfq', case_ref: 'cA' }]
+    // case B still owes both, although the kinds are filed (for A)
+    expect(missingDocuments([def] as never, value, filedA as never).map((m) => m.doc.kind))
+      .toEqual(['change_ppt', 'rfq'])
+    const all = [...filedA, { kind: 'change_ppt', case_ref: 'cB' }, { kind: 'rfq', case_ref: 'cB' }]
+    expect(missingDocuments([def] as never, value, all as never)).toEqual([])
+  })
+  it('reads plain-text cases of the first version', () => {
+    expect(casesOf({ key: 'modification_external', impacted: true, cases: ['Insert LH'] }).map((c) => c.text))
+      .toEqual(['Insert LH'])
   })
 })

@@ -35,7 +35,7 @@ export interface ImpactItem {
   remark?: string
   /** Internal / External modification: one line per case (2026-11-08); each
    *  becomes its own costing line on submit. `remark` mirrors them. */
-  cases?: string[]
+  cases?: (string | CaseEntry)[]
   /** Spec §4: with no Yes, the reference that shows this No. */
   ref?: string
   choice?: string
@@ -45,6 +45,15 @@ export interface ImpactItem {
 
 /** Rows that take several cases, each a costing line (backend CASE_KEYS). */
 export const CASE_KEYS = new Set(['modification_internal', 'modification_external'])
+export interface CaseEntry { id: string; text: string }
+const newCaseId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+/** A row's cases as {id, text}; the first falls back to the remark. */
+export const casesOf = (i: ImpactItem): CaseEntry[] => {
+  const raw = i.cases ?? []
+  const out = raw.map((c) => (typeof c === 'string' ? { id: '', text: c } : c))
+    .map((c, n) => (c.id ? c : { ...c, id: `legacy${n}` }))
+  return out.length ? out : [{ id: '', text: i.remark ?? '' }]
+}
 
 export const impactsOf = (
   value: Record<string, unknown> | null | undefined,
@@ -107,13 +116,27 @@ export const docLabel = (d: ChecklistRequiredDocument, lang: 'de' | 'en' = 'en')
  */
 export function missingDocuments(
   defs: ChecklistItemDef[], value: Record<string, unknown> | null | undefined,
-  attachments: Pick<Attachment, 'kind'>[],
+  attachments: Pick<Attachment, 'kind' | 'case_ref'>[],
 ): MissingDocument[] {
   const filed = new Set(attachments.map((a) => a.kind))
-  const yes = new Set(impactsOf(value).filter((i) => i.key && i.answer === 'yes').map((i) => i.key!))
-  return defs.flatMap((item) => (yes.has(item.key) ? item.requires_documents ?? [] : [])
-    .filter((doc) => !filed.has(doc.kind))
-    .map((doc) => ({ key: item.key, item, doc })))
+  const rows = impactsOf(value).filter((i) => i.key && i.answer === 'yes')
+  const yes = new Set(rows.map((i) => i.key!))
+  return defs.flatMap((item) => {
+    if (!yes.has(item.key)) return []
+    const row = rows.find((i) => i.key === item.key)!
+    const cases = item.case_documents?.length
+      ? casesOf(row).filter((c) => c.id && !c.id.startsWith('legacy') && c.text.trim()) : []
+    if (cases.length) {
+      // 2026-11-08: each case owes its own documents
+      return cases.flatMap((c) => item.case_documents!
+        .filter((doc) => !(attachments as Pick<Attachment, 'kind' | 'case_ref'>[])
+          .some((a) => a.kind === doc.kind && a.case_ref === c.id))
+        .map((doc) => ({ key: item.key, item, doc })))
+    }
+    return (item.requires_documents ?? [])
+      .filter((doc) => !filed.has(doc.kind))
+      .map((doc) => ({ key: item.key, item, doc }))
+  })
 }
 
 const EMPTY_EVIDENCE = new Set(['ok', 'okay', 'tbd', 'na', 'n/a', 'done', 'checked', 'yes', 'no', 'none', '-'])
@@ -316,7 +339,9 @@ export default function ActivityChecklist({
   const row = (id: string, label: string, def?: ChecklistItemDef) => {
     const item = answerFor(id)
     // The documents this Yes owes, each in its own slot on the row.
-    const docs = item.answer === 'yes' ? def?.requires_documents ?? [] : []
+    // a row whose cases carry their own documents has no row-level slots
+    const docs = item.answer === 'yes' && !def?.case_documents?.length
+      ? def?.requires_documents ?? [] : []
     // Answering by hand drops the Rest → No mark: the row was now considered.
     const { bulk: _bulk, ...own } = item
     void _bulk
@@ -401,30 +426,63 @@ export default function ActivityChecklist({
               </div>
             )}
             {item.key && CASE_KEYS.has(item.key) ? (() => {
-              const cases = item.cases?.length ? item.cases : [item.remark ?? '']
-              const putCases = (next: string[]) => put({ ...item, cases: next,
-                remark: next.map((c) => c.trim()).filter(Boolean).join('; ') })
+              const cases = casesOf(item)
+              const putCases = (next: CaseEntry[]) => put({ ...item,
+                cases: next.map((c) => (c.id && !c.id.startsWith('legacy') ? c : { ...c, id: newCaseId() })),
+                remark: next.map((c) => c.text.trim()).filter(Boolean).join('; ') })
+              const caseDocs = def?.case_documents ?? []
               return (
-                <div className="space-y-1" data-testid={`check-cases-${id}`}>
+                <div className="space-y-1.5" data-testid={`check-cases-${id}`}>
                   {cases.map((c, n) => (
-                    <div key={n} className="flex items-center gap-1">
-                      <input type="text" data-testid={n === 0 ? `check-remark-${id}` : `check-case-${id}-${n}`}
-                        value={c}
-                        onChange={(e) => putCases(cases.map((x, m) => (m === n ? e.target.value : x)))}
-                        placeholder={t('check.casePlaceholder', lang)}
-                        aria-label={`${t('check.case', lang)} ${n + 1}`}
-                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-                      {cases.length > 1 && (
-                        <button type="button" className="text-xs text-slate-400 hover:text-red-300 px-1"
-                          aria-label={t('check.caseRemove', lang)}
-                          onClick={() => putCases(cases.filter((_, m) => m !== n))}>×</button>
-                      )}
+                    <div key={c.id || n} className="rounded border border-slate-700 bg-slate-900/40 p-1.5 space-y-1"
+                      data-testid={`check-case-box-${id}-${n}`}>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] text-slate-500 w-12 flex-shrink-0">{t('check.case', lang)} {n + 1}</span>
+                        <input type="text" data-testid={n === 0 ? `check-remark-${id}` : `check-case-${id}-${n}`}
+                          value={c.text}
+                          onChange={(e) => putCases(cases.map((x, m) => (m === n ? { ...x, text: e.target.value } : x)))}
+                          placeholder={t('check.casePlaceholder', lang)}
+                          aria-label={`${t('check.case', lang)} ${n + 1}`}
+                          className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                        {cases.length > 1 && (
+                          <button type="button" className="text-xs text-slate-400 hover:text-red-300 px-1"
+                            aria-label={t('check.caseRemove', lang)}
+                            onClick={() => putCases(cases.filter((_, m) => m !== n))}>×</button>
+                        )}
+                      </div>
+                      {/* each case files its own documents (2026-11-08) */}
+                      {c.id && !c.id.startsWith('legacy') && c.text.trim() && caseDocs.map((doc) => {
+                        const filed = attachments.filter((x) => x.kind === doc.kind && x.case_ref === c.id)
+                        const name = docLabel(doc, lang)
+                        return (
+                          <div key={doc.kind} data-testid={`check-casedoc-${id}-${n}-${doc.kind}`}
+                            data-state={filed.length > 0 ? 'filed' : 'required'}
+                            className={`ml-12 rounded border px-2 py-1 ${filed.length > 0
+                              ? 'border-slate-700/60' : 'border-amber-700/60 bg-amber-950/20'}`}>
+                            <p className={`text-[11px] font-medium ${filed.length > 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                              {t(filed.length > 0 ? 'check.docFiled' : 'check.docRequired', lang).replace('{d}', name)}
+                            </p>
+                            {filed.length > 0 && changeId != null && (
+                              <ul className="text-sm">
+                                {filed.map((x) => <AttachmentRow key={x.id} changeId={changeId} attachment={x} />)}
+                              </ul>
+                            )}
+                            {changeId != null && assessmentId != null && (
+                              <AttachmentDropzone changeId={changeId} assessmentId={assessmentId} caseRef={c.id} compact
+                                kind={doc.kind} extensions={doc.extensions}
+                                label={t('check.docSlot', lang).replace('{d}', lang === 'en' ? name.charAt(0).toLowerCase() + name.slice(1) : name)
+                                  .replace('{x}', doc.extensions.join(', '))}
+                                onUploaded={() => onUploaded?.()} />
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   ))}
                   <div className="flex items-center gap-3">
                     <button type="button" data-testid={`check-case-add-${id}`}
                       className="text-[11px] text-sky-300 hover:text-sky-200"
-                      onClick={() => putCases([...cases, ''])}>{t('check.caseAdd', lang)}</button>
+                      onClick={() => putCases([...cases, { id: newCaseId(), text: '' }])}>{t('check.caseAdd', lang)}</button>
                     <span className="text-[11px] text-slate-500">{t('check.caseHint', lang)}</span>
                   </div>
                 </div>

@@ -27,6 +27,8 @@ interface Props {
   respondsToId?: number;
   concernId?: number;
   assessmentId?: number;
+  /** The modification case the document belongs to (with assessmentId). */
+  caseRef?: string;
   /** A vendor quote files itself under the offer it prices. */
   costingOfferId?: number;
   /** Evidence and customer mails filed into one validation issue. */
@@ -42,7 +44,7 @@ interface Props {
 }
 
 export default function AttachmentDropzone({
-  changeId, onUploaded, kind, respondsToId, concernId, assessmentId,
+  changeId, onUploaded, kind, respondsToId, concernId, assessmentId, caseRef,
   costingOfferId, validationIssueId, label, compact = false, extensions,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +71,7 @@ export default function AttachmentDropzone({
     for (const f of ok) {
       try {
         await changesApi.uploadAttachment(changeId, f,
-          { kind, respondsToId, concernId, assessmentId, costingOfferId, validationIssueId });
+          { kind, respondsToId, concernId, assessmentId, caseRef, costingOfferId, validationIssueId });
         uploaded += 1;
       } catch (e) {
         toast.error(apiErrorMessage(e, t('attach.failed').replace('{name}', f.name)));

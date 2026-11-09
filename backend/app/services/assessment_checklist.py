@@ -88,16 +88,43 @@ def allowed_extensions(kind: str) -> tuple | None:
     return doc[2] if doc else None
 
 
+# Christoph 2026-11-08: a modification row holds several cases and each case
+# carries its own documents (filed with the case's id, attachment case_ref).
+CASE_DOCUMENTS = {
+    "modification_external": ("change_ppt", "rfq"),
+    "modification_internal": ("change_ppt",),
+}
+
+
+def case_list(entry: dict) -> list[dict]:
+    """The cases of a row as {id, text}; a case stored as plain text (first
+    version of 2026-11-08) has no id and no documents of its own."""
+    out = []
+    for c in entry.get("cases") or []:
+        if isinstance(c, dict):
+            text = str(c.get("text") or "").strip()
+            if text:
+                out.append({"id": str(c.get("id") or "") or None, "text": text})
+        elif str(c).strip():
+            out.append({"id": None, "text": str(c).strip()})
+    return out
+
+
 def missing_documents(impacts, filed_kinds: set,
-                      department_name: str | None = None) -> list[str]:
-    """What a checklist answer still owes, one sentence per Yes row, e.g.
-    "External modification needs the change presentation (PPT) and the
-    change RFQ attached before you submit". Empty when nothing is owed.
+                      department_name: str | None = None,
+                      filed_by_case: dict | None = None) -> list[str]:
+    """What a checklist answer still owes, one sentence per Yes row (or per
+    case), e.g. "External modification needs the change presentation (PPT)
+    and the change RFQ attached before you submit". Empty when nothing is
+    owed.
 
     `impacts` is the submitted (or stored) checklist; a row counts as Yes by
-    its answer, or by `impacted` for rows stored before answers existed."""
+    its answer, or by `impacted` for rows stored before answers existed. A
+    modification row with case ids owes the documents per case (filed with
+    that case's id); without ids the row owes them once, as before."""
     out: list[str] = []
     seen: set = set()
+    filed_by_case = filed_by_case or {}
     for entry in impacts or []:
         if not isinstance(entry, dict):
             continue
@@ -107,11 +134,20 @@ def missing_documents(impacts, filed_kinds: set,
         if not key or not yes or key in seen:
             continue
         seen.add(key)
+        label = (label_for(key, department_name) or key).split(" (")[0]
+        cases = [c for c in case_list(entry) if c["id"]]
+        if key in CASE_DOCUMENTS and cases:
+            for n, c in enumerate(cases, 1):
+                have = filed_by_case.get(c["id"], set())
+                owed = [DOCUMENT_PHRASES[k] for k in CASE_DOCUMENTS[key] if k not in have]
+                if owed:
+                    out.append(f"{label}, case {n} '{c['text'][:60]}' needs "
+                               f"{' and '.join(owed)} attached before you submit")
+            continue
         owed = [DOCUMENT_PHRASES[k] for k in REQUIRES_DOCUMENTS.get(key, ())
                 if k not in filed_kinds]
         if not owed:
             continue
-        label = (label_for(key, department_name) or key).split(" (")[0]
         out.append(f"{label} needs {' and '.join(owed)} attached before you submit")
     return out
 
@@ -283,6 +319,11 @@ def _entry(item: tuple, extra: bool) -> dict:
     docs = required_documents(key)
     if docs:
         out["requires_documents"] = docs
+    if key in CASE_DOCUMENTS:
+        out["case_documents"] = [
+            {"kind": k, "label_de": REQUIRED_DOCUMENTS[k][0],
+             "label_en": REQUIRED_DOCUMENTS[k][1],
+             "extensions": list(REQUIRED_DOCUMENTS[k][2])} for k in CASE_DOCUMENTS[key]]
     return out
 
 
