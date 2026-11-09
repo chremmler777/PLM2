@@ -27,6 +27,7 @@
  * the lead and admins read. Sales has nothing to fill in here — they get the
  * picture and put a price on it later.
  */
+import { requestBookHours } from '../../api/hours'
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -1028,7 +1029,21 @@ function EffortRow({
       </td>
       <td className={`${cellCls} text-xs text-slate-400 whitespace-nowrap`}>{t('costpos.type.time')}</td>
       <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
-        {editable ? (
+        {kind === 'internal_effort' ? (
+          // Christoph 2026-11-08: the booked hours, never typed here; add or
+          // correct them in Book hours (one place for hours)
+          <span className="inline-flex items-center gap-1.5">
+            <span data-testid={`costpos-effort-value-${kind}-${departmentId}`}
+              className="tabular-nums text-slate-200">
+              {position?.hours != null ? `${position.hours} h` : t('costpos.noneBooked')}
+            </span>
+            {editable && (
+              <button type="button" data-testid={`costpos-effort-book-${departmentId}`}
+                onClick={() => requestBookHours({ departmentId })}
+                className={btnSm.secondary}>{t('hours.title')}</button>
+            )}
+          </span>
+        ) : editable ? (
           <span className="inline-flex items-center gap-1.5">
             <label htmlFor={`effort-${kind}-${departmentId}`} className="sr-only">{t(labelKey)}</label>
             <input id={`effort-${kind}-${departmentId}`}

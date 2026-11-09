@@ -1202,7 +1202,9 @@ async def delete_hours(
         raise HTTPException(status_code=403, detail="Only your own booking is yours to take back")
     if not window_open(change):
         raise HTTPException(status_code=400, detail="The booking window of this change has ended")
+    dept_id = row.department_id
     await ImplementationService.delete_booking(db, change, row, current_user)
+    await HoursService.sync_assessment_effort(db, change, dept_id, current_user.id)
     out = await HoursService.state(db, change, current_user)
     await db.commit()
     return out
