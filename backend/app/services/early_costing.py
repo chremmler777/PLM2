@@ -388,7 +388,17 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
     reasons.extend(empty)
     if not await _has_answer(session, change, department_id):
         reasons.append("Nothing entered yet: hours or an amount on at least one line")
-    return {"reasons": reasons, "position_ids": ids}
+    # one tag per reason for the banner (Christoph 2026-11-08)
+    def tag(r: str) -> str:
+        for prefix, t in (("Waiting on", "waiting"), ("Quoted positions", "quote_missing"),
+                          ("Estimated positions", "basis_missing"), ("Compare the quote", "compare"),
+                          ("Enter the price", "price_missing"), ("Enter the hours", "hours_missing"),
+                          ("Nothing entered", "empty")):
+            if r.startswith(prefix):
+                return t
+        return "other"
+    return {"reasons": reasons, "position_ids": ids,
+            "items": [{"tag": tag(r), "text": r} for r in reasons]}
 
 
 #: Spec §4 "<Dept> has no cost" (C18): why a department that owes a costing

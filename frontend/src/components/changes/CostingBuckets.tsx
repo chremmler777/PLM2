@@ -70,7 +70,7 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
       className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
       <span>{finalized
         ? (noCost ? t('nocost.finalized').replace('{x}', noCost) : t('costing.finalizedBody'))
-        : t('costing.finalizeHint')}</span>
+        : reasons.length ? t('costing.notYet') : t('costing.finalizeHint')}</span>
       {!finalized && v2 && (
         <NoCostButton changeId={changeId} departmentId={departmentId} departmentName={departmentName} />
       )}
@@ -88,8 +88,16 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
         </button>
       )}
       {reasons.length > 0 && (
-        <ul data-testid={`costing-why-not-${departmentId}`} className="basis-full space-y-0.5 text-red-300">
-          {reasons.map((r, n) => <li key={n}>• {r}</li>)}
+        <ul data-testid={`costing-why-not-${departmentId}`} className="basis-full space-y-1">
+          {(check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))).map((r, n) => (
+            <li key={n} className="flex items-start gap-2 rounded border border-slate-700 bg-slate-900/60 px-2 py-1">
+              <span className={`flex-shrink-0 rounded px-1.5 text-[11px] font-semibold ${
+                r.tag === 'waiting' ? 'bg-sky-800 text-sky-100'
+                  : r.tag === 'compare' ? 'bg-amber-800 text-amber-100' : 'bg-red-800 text-red-100'}`}>
+                {t(`costing.tag.${r.tag}`)}</span>
+              <span className="text-slate-200">{r.text}</span>
+            </li>
+          ))}
         </ul>
       )}
     </div>

@@ -493,7 +493,7 @@ function SupplierLines({ changeId, position: p, editable, currency, onChanged }:
       <thead>
         <tr>
           <th className={th}>{t('costpos.supplier')}</th><th className={th}>{t('costpos.status')}</th>
-          <th className={th}>{t('costpos.shopFile')}</th><th className={`${th} text-right`}>{t('costpos.shopDays')}</th>
+          <th className={th}>{t('costpos.shopFile')}</th><th className={`${th} text-right`}>{t('costpos.totalDays')}</th>
           <th className={`${th} text-right`}>{t('costpos.price')}</th>
           <th className={`${th} text-right`}>{t('costpos.transport')}</th><th className={th} />
         </tr>
