@@ -973,6 +973,9 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     # costing
     ("PUT", "/changes/{change_id}/weight-estimate"),
     ("PUT", "/changes/{change_id}/bank-build"),
+    # what Sales offers the customer for the old stock (Sales, PM, lead,
+    # admin; Christoph 2026-11-09)
+    ("PUT", "/changes/{change_id}/changeover-offer"),
     ("POST", "/changes/{change_id}/bank-build/publish"),
     ("POST", "/changes/{change_id}/costing/positions"),
     ("PUT", "/changes/{change_id}/costing/positions/{pid}"),
@@ -991,6 +994,8 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     # spec §4 [R4]: quote vs the estimate an offer / approval was given on
     ("POST", "/changes/{change_id}/costing/positions/{pid}/estimate-check"),
     ("POST", "/changes/{change_id}/supplier-waits/{wait_id}/close"),
+    # undo an accidental close (that department, PM, admin; Christoph 2026-11-08)
+    ("POST", "/changes/{change_id}/supplier-waits/{wait_id}/reopen"),
     ("PUT", "/changes/{change_id}/scope-definition"),
     ("POST", "/changes/{change_id}/actual-costs"),
     ("DELETE", "/changes/{change_id}/actual-costs/{cost_id}"),
@@ -1024,6 +1029,11 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
     ("DELETE", "/changes/{change_id}/concerns/{concern_id}"),
     # plan
     ("POST", "/changes/{change_id}/plan/seed"),
+    # plan editors only (Christoph 2026-11-09): reset / delete the plan,
+    # the one Sales buffer at its end
+    ("POST", "/changes/{change_id}/plan/reset"),
+    ("DELETE", "/changes/{change_id}/plan"),
+    ("PUT", "/changes/{change_id}/plan/sales-buffer"),
     ("POST", "/changes/{change_id}/plan/tasks"),
     ("PATCH", "/changes/{change_id}/plan/tasks"),
     ("PATCH", "/changes/{change_id}/plan/tasks/{task_id}"),
