@@ -392,8 +392,8 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-offer-summary-11').textContent)
       .toBe(`2 ${t('costpos.partsSum')} + 2 ${t('costpos.altSum')}`)
     // 8e85fd31: one supplier table per line; the starred alternative is marked
-    expect(screen.getByTestId('supplier-star-83').textContent).toBe('★')
-    expect(screen.getByTestId('supplier-star-84').textContent).toBe('☆')
+    expect(screen.getByTestId('supplier-star-83').textContent).toBe(`★ ${t('costpos.favorite')}`)
+    expect(screen.getByTestId('supplier-star-84').textContent).toBe(`☆ ${t('costpos.makeFavorite')}`)
     // 0b6529d8: a quote is filed via 'Quote received' from an asked shop, the
     // free new-offer form is gone from the line
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
@@ -503,13 +503,13 @@ describe('CostPositions', () => {
       return {}
     }) as never)
     await screen.findByTestId('supplier-star-91')
-    expect(screen.getByTestId('supplier-star-91').textContent).toBe('★')
-    expect(screen.getByTestId('supplier-star-92').textContent).toBe('☆')
+    expect(screen.getByTestId('supplier-star-91').textContent).toBe(`★ ${t('costpos.favorite')}`)
+    expect(screen.getByTestId('supplier-star-92').textContent).toBe(`☆ ${t('costpos.makeFavorite')}`)
     fireEvent.click(screen.getByTestId('supplier-star-92'))
     await waitFor(() => expect(changesApi.updateCostingOffer)
       .toHaveBeenCalledWith(7, 92, { favorite: true }))
-    await waitFor(() => expect(screen.getByTestId('supplier-star-92').textContent).toBe('★'))
-    expect(screen.getByTestId('supplier-star-91').textContent).toBe('☆')
+    await waitFor(() => expect(screen.getByTestId('supplier-star-92').textContent).toBe(`★ ${t('costpos.favorite')}`))
+    expect(screen.getByTestId('supplier-star-91').textContent).toBe(`☆ ${t('costpos.makeFavorite')}`)
   })
 
   it('deletes a cost line only after a confirm, and names the line on the delete button', async () => {
@@ -558,9 +558,9 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('offer-new-11')).toBeNull()
     expect(screen.queryByTestId('costpos-delete-11')).toBeNull()
     // The vote is still visible — Sales needs to know which vendor was chosen.
-    expect(screen.getByTestId('supplier-star-91').textContent).toBe('★')
-    expect((screen.getByTestId('supplier-star-91') as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByTestId('supplier-star-92').textContent).toBe('☆')
+    // 57e13348: a Favourite badge; a reader gets no 'Make favourite' button
+    expect(screen.getByTestId('supplier-star-91').textContent).toBe(`★ ${t('costpos.favorite')}`)
+    expect(screen.queryByTestId('supplier-star-92')).toBeNull()
     const a = screen.getByTestId('supplier-line-11-Vendor A')
     expect(a.textContent).toContain('Vendor A')
     expect(a.textContent).toContain('30')
