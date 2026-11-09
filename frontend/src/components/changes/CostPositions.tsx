@@ -437,6 +437,55 @@ function OfferRow({
   )
 }
 
+/** One asked shop's quote, name given: total cost, lead time (days), the
+ *  quote number and the quote file; Save files the quote with its file. */
+function ShopQuoteRow({ changeId, positionId, shop, onDone }: {
+  changeId: number; positionId: number; shop: string; onDone: () => void
+}) {
+  const [cost, setCost] = useState('')
+  const [days, setDays] = useState('')
+  const [ref, setRef] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const save = useMutation({
+    mutationFn: async () => {
+      const offer = await changesApi.addCostingOffer(changeId, positionId, {
+        vendor_name: shop, cost: Number(cost) || 0, shipping_included: true,
+        lead_time_days: num(days), lead_time_unit: 'calendar_days',
+        ...(ref.trim() ? { quote_ref: ref.trim() } : {}),
+      })
+      if (file) {
+        await changesApi.uploadAttachment(changeId, file, { kind: 'vendor_quote', costingOfferId: offer.id })
+      }
+      return offer
+    },
+    onSuccess: () => { toast.success(t('costpos.shopQuoteSaved').replace('{x}', shop)); onDone() },
+    onError: (e: unknown) => toastError(e, 'Could not save the quote'),
+  })
+  return (
+    <div data-testid={`shop-quote-${positionId}-${shop}`}
+      className="basis-full flex flex-wrap items-center gap-2 rounded border border-amber-700/60 bg-amber-950/20 px-2 py-1">
+      <span className="w-36 truncate text-xs font-medium text-amber-100" title={shop}>{shop}</span>
+      <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
+        aria-label={t('costpos.shopTotal')} placeholder={t('costpos.shopTotal')}
+        className={`${fieldCls} w-28 tabular-nums text-right`} />
+      <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
+        aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
+        className={`${fieldCls} w-24 tabular-nums text-right`} />
+      <input value={ref} onChange={(e) => setRef(e.target.value)}
+        aria-label={t('costpos.shopRef')} placeholder={t('costpos.shopRef')}
+        className={`${fieldCls} w-28`} />
+      <label className="cursor-pointer rounded border border-slate-600 px-1.5 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700/60">
+        {file ? file.name : t('costpos.shopFile')}
+        <input type="file" className="sr-only" accept=".pdf,.xlsx,.xls,.doc,.docx,.msg,.eml"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      </label>
+      <button type="button" className={btnSm.primary} data-testid={`shop-quote-save-${positionId}-${shop}`}
+        disabled={!(Number(cost) > 0) || save.isPending} onClick={() => save.mutate()}>
+        {t('common.save')}</button>
+    </div>
+  )
+}
+
 /** Christoph 2026-11-08: the shops this line's RFQ went to, each a supplier
  *  wait on the line (asked today, expected in 14 days); its quote closes it. */
 function RfqShops({ changeId, position: p, editable, onChanged }: {
@@ -449,6 +498,9 @@ function RfqShops({ changeId, position: p, editable, onChanged }: {
   })
   const mine = (waits ?? []).filter((w) => w.position_id === p.id)
   const [shop, setShop] = useState('')
+  // the shops still owing their quote: one row each, the name is given
+  const quoted = new Set((p.offers ?? []).map((o) => o.vendor_name.trim().toLowerCase()))
+  const owing = mine.filter((w) => w.is_open && !quoted.has(w.vendor_name.trim().toLowerCase()))
   const iso = (d: Date) => d.toISOString().slice(0, 10)
   const add = useMutation({
     mutationFn: () => {
@@ -476,6 +528,10 @@ function RfqShops({ changeId, position: p, editable, onChanged }: {
             ? 'bg-emerald-900/60 text-emerald-100' : w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
           {w.vendor_name} · {w.is_open ? t('costpos.rfqWaiting') : t('costpos.rfqIn')}
         </span>
+      ))}
+      {editable && owing.map((w) => (
+        <ShopQuoteRow key={w.id} changeId={changeId} positionId={p.id} shop={w.vendor_name}
+          onDone={() => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }} />
       ))}
       {editable && (
         <span className="inline-flex items-center gap-1">
