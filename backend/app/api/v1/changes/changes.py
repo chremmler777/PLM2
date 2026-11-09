@@ -2649,15 +2649,22 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
     a = (await db.get(ChangeAssessment, att.assessment_id)
          if att.assessment_id is not None else None)
     if a is not None and a.change_id == change.id:
-        if not await ChangeService._may_attach_evidence(db, change, a, user):
+        # Christoph 2026-11-08: an assessment's document is removed only by
+        # whoever uploaded it, or an admin
+        if not (is_admin or att.uploaded_by == user.id):
             raise HTTPException(
                 status_code=403,
-                detail="Only a member of the assessed department, the "
-                       "change lead, Project Management, Sales or an "
-                       "admin may remove that assessment's evidence")
+                detail="Only whoever uploaded it, or an admin, may remove that "
+                       "assessment's document")
         submitted = (a.submitted_at is not None
                      or a.effective_status == "submitted")
-        if submitted and att.phase == "post_scoping":
+        # Christoph 2026-11-08: a wrong change PPT / RFQ may be removed while
+        # the change is still assessed or costed; the department's assessment
+        # then reopens if the document is owed (delete_attachment)
+        from app.services.early_stage_service import SEND_BACK_STATUSES
+        reopenable = (att.kind in ("change_ppt", "rfq")
+                      and change.status in SEND_BACK_STATUSES)
+        if submitted and att.phase == "post_scoping" and not reopenable:
             frozen("The assessment is submitted: its evidence is the record "
                    "the verdict stands on and cannot be removed")
         return
@@ -2672,6 +2679,44 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
         status_code=403,
         detail="Only the uploader, the change lead, Project Management or "
                "an admin may remove that document")
+
+
+async def _reopen_if_document_owed(db: AsyncSession, change, gone: dict,
+                                   user_id: int) -> None:
+    """Christoph 2026-11-08: a required document (change PPT / RFQ, per case
+    or per row) removed from a SUBMITTED assessment reopens that department's
+    assessment (send-back, its task active again) and, in costing, its
+    costing finalization: the answer is missing a document now."""
+    if gone["kind"] not in ("change_ppt", "rfq") or gone["assessment_id"] is None:
+        return
+    a = await db.get(ChangeAssessment, gone["assessment_id"])
+    if a is None or a.submitted_at is None:
+        return
+    from app.services import assessment_checklist as checklist
+    from app.models.workflow import Department
+    filed: set = set()
+    by_case: dict = {}
+    for k, ref in (await db.execute(
+            select(ChangeAttachment.kind, ChangeAttachment.case_ref).where(
+                ChangeAttachment.change_id == change.id,
+                ChangeAttachment.assessment_id == a.id))).all():
+        filed.add(k)
+        if ref:
+            by_case.setdefault(ref, set()).add(k)
+    dept = await db.get(Department, a.department_id)
+    owed = checklist.missing_documents(a.details_dict.get("impacts"), filed,
+                                       dept.name if dept else None,
+                                       filed_by_case=by_case)
+    if not owed:
+        return
+    from app.services.early_stage_service import EarlyStageService
+    from app.services import early_costing
+    reason = f"Document removed ({gone['filename']}): " + "; ".join(owed)
+    await db.refresh(change, ["assessments"])
+    sent = await EarlyStageService._send_back_assessments(
+        db, change, [a.department_id], user_id, reason)
+    if sent and change.status == "costing":
+        await early_costing.clear_finalization(db, change, a.department_id, user_id, reason)
 
 
 @router.delete("/{change_id}/attachments/{attachment_id}", status_code=204)
@@ -2703,7 +2748,10 @@ async def delete_attachment(
         raise HTTPException(
             status_code=400,
             detail="Baseline documents are frozen once scoping ends and cannot be deleted.")
+    gone = {"assessment_id": att.assessment_id, "kind": att.kind,
+            "filename": att.filename}
     stored_path = await ChangeService.delete_attachment(db, change, att, current_user.id)
+    await _reopen_if_document_owed(db, change, gone, current_user.id)
     await db.commit()
     if stored_path and os.path.exists(stored_path):
         try:

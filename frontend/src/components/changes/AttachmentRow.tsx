@@ -42,12 +42,15 @@ export function KindChip({ kind }: { kind?: string | null }) {
   )
 }
 
-export function AttachmentRow({ changeId, attachment: a, onDelete }: {
+export function AttachmentRow({ changeId, attachment: a, onDelete, confirm = false }: {
   changeId: number
   attachment: Attachment
   /** Omitted where the file may not be deleted (frozen baseline, read-only view). */
   onDelete?: (a: Attachment) => void
+  /** Ask "Delete? Yes / No" before deleting (Christoph 2026-11-08). */
+  confirm?: boolean
 }) {
+  const [asking, setAsking] = useState(false)
   return (
     // Delete leads the row rather than trailing it: the control sits where the
     // eye starts, muted until the row is hovered so it never dominates the name.
@@ -58,10 +61,20 @@ export function AttachmentRow({ changeId, attachment: a, onDelete }: {
           className="flex-shrink-0 rounded text-slate-500 hover:text-red-400 opacity-60 group-hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 transition-opacity"
           aria-label={`Delete ${a.filename}`}
           title="Delete attachment"
-          onClick={() => onDelete(a)}
+          onClick={() => (confirm ? setAsking(true) : onDelete(a))}
         >
           <X aria-hidden="true" size={14} />
         </button>
+      )}
+      {onDelete && asking && (
+        <span className="inline-flex items-center gap-1 flex-shrink-0" data-testid={`attach-confirm-${a.id}`}>
+          <span className="text-[11px] text-red-200">{t('risk.confirmDelete')}</span>
+          <button type="button" data-testid={`attach-delete-yes-${a.id}`}
+            className="rounded bg-red-800 px-1.5 text-[11px] text-white hover:bg-red-700"
+            onClick={() => { setAsking(false); onDelete(a) }}>{t('risk.yes')}</button>
+          <button type="button" className="rounded border border-slate-600 px-1.5 text-[11px] text-slate-200"
+            onClick={() => setAsking(false)}>{t('risk.no')}</button>
+        </span>
       )}
       <span className="min-w-0">
         <span className="block truncate">

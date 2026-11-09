@@ -13,6 +13,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Flag, Info, Minus } from 'lucide-react'
+import { useAuth } from '../../../contexts/AuthContext'
+import { toastError } from '../../../lib/apiError'
 import { changesApi } from '../../../api/changes'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
@@ -282,6 +284,7 @@ export default function ActivityChecklist({
   /** Mark the rows still unanswered (after the submit form's "jump to open"). */
   highlightOpen?: boolean
 }) {
+  const { userId, isAdmin } = useAuth()
   const { data: items = [], isSuccess: itemsLoaded } = useQuery({
     queryKey: ['assessment-checklist', departmentId],
     queryFn: () => changesApi.assessmentChecklist(departmentId),
@@ -464,7 +467,9 @@ export default function ActivityChecklist({
                             </p>
                             {filed.length > 0 && changeId != null && (
                               <ul className="text-sm">
-                                {filed.map((x) => <AttachmentRow key={x.id} changeId={changeId} attachment={x} />)}
+                                {filed.map((x) => <AttachmentRow key={x.id} changeId={changeId} attachment={x} confirm
+                                  onDelete={!(isAdmin || x.uploaded_by === userId) ? undefined : (att) => { changesApi.deleteAttachment(changeId, att.id)
+                                    .then(() => onUploaded?.()).catch((e: unknown) => toastError(e, t('attach.deleteFailed'))) }} />)}
                               </ul>
                             )}
                             {changeId != null && assessmentId != null && (

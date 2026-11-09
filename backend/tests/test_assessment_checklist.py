@@ -549,3 +549,32 @@ async def test_each_modification_case_owes_its_own_documents(client, admin_auth,
             headers=admin_auth)
     res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
+
+
+async def test_removing_a_required_document_reopens_the_assessment(
+        client, admin_auth, tab, session_factory):
+    """Christoph 2026-11-08: a wrong RFQ may be deleted after the submit; the
+    assessment is then missing it and goes back to the department."""
+    from app.models.change import ChangeAssessment
+    impacts = answered("Tool Engineer", yes={"modification_external"},
+                       remarks={"modification_external": "Insert LH 2x"})
+    for i in impacts:
+        if i.get("key") == "modification_external":
+            i["cases"] = [{"id": "cA", "text": "Insert LH 2x"}]
+    ids = {}
+    for kind, name in (("change_ppt", "a.pptx"), ("rfq", "wrong.pdf")):
+        up = await client.post(
+            f"/api/v1/changes/{tab['change_id']}/attachments",
+            files={"file": (name, b"x", "application/octet-stream")},
+            data={"assessment_id": str(tab["assessment_id"]), "kind": kind, "case_ref": "cA"},
+            headers=admin_auth)
+        ids[kind] = up.json()["id"]
+    res = await _submit(client, admin_auth, tab, impacts)
+    assert res.status_code == 200, res.text
+    d = await client.delete(
+        f"/api/v1/changes/{tab['change_id']}/attachments/{ids['rfq']}", headers=admin_auth)
+    assert d.status_code == 204, d.text
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, tab["assessment_id"])
+        assert a.submitted_at is None and a.verdict == "pending"
+        assert "wrong.pdf" in a.details_dict["sent_back"]["reason"]

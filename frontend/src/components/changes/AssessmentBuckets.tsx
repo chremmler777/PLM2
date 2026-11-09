@@ -14,6 +14,8 @@ import {
   TriangleAlert, Wrench, X,
 } from 'lucide-react'
 import { changesApi } from '../../api/changes'
+import { useAuth } from '../../contexts/AuthContext'
+import { toastError } from '../../lib/apiError'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
 import RoutingDeviationPanel from './RoutingDeviationPanel'
 import PendingRemovalChip from './PendingRemovalChip'
@@ -23,7 +25,7 @@ import AssessmentChecks, { asksFrom, ownsCheck } from './assessment/AssessmentCh
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import {
-  impactedCount, impactsOf, choiceLabel, checklistItemLabel, DOCUMENT_EXTENSIONS,
+  impactedCount, impactsOf, choiceLabel, checklistItemLabel, DOCUMENT_EXTENSIONS, CASE_KEYS, casesOf,
 } from './departmentForms/ActivityChecklist'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
@@ -227,6 +229,7 @@ export default function AssessmentBuckets({
   const [verdictOf, setVerdictOf] = useState<Record<number, string>>({})
   // Which department is declining responsibility right now (dialog open).
   const [declining, setDeclining] = useState<number | null>(null)
+  const { userId, isAdmin } = useAuth()
   const qc = useQueryClient()
   const evidenceOf = (assessmentId?: number) =>
     assessmentId == null ? []
@@ -371,9 +374,42 @@ export default function AssessmentBuckets({
   const firstInformed = ordered.find((r) => !assessingRow(r))?.id
   const informedCount = ordered.filter((r) => !assessingRow(r)).length
 
+  // Christoph 2026-11-08: PM (and whoever sees every department) gets every
+  // question of the assessment in one list, open first, closed with answer
+  const allQuestions = (concerns as ChangeConcern[])
+    .filter((c) => c.kind === 'needs_info' && c.flag_type === 'question' && c.department_id != null)
+    .sort((x, y) => Number(!!y.is_open) - Number(!!x.is_open) || x.id - y.id)
+  const questionAnswer = (q: ChangeConcern) => q.answer_kind === 'assumed'
+    ? `${t('answer.assumed')}: ${q.assumed_value ?? ''} ${q.assumed_unit ?? ''}`.trim()
+    : q.answer_kind === 'confirmed' ? `${t('answer.confirmed')}: ${q.answer_ref ?? ''}`
+      : (q.answer_note ?? q.resolution_note ?? '')
+  const questionsPanel = (canSeeAll || isPm) && allQuestions.length > 0 && (
+    <section data-testid="pm-questions" className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {t('bucket.allQuestions').replace('{o}', String(allQuestions.filter((q) => q.is_open).length))
+          .replace('{n}', String(allQuestions.length))}
+      </p>
+      <ul className="mt-1 space-y-1">
+        {allQuestions.map((q) => (
+          <li key={q.id} data-testid={`pm-question-${q.id}`} data-open={q.is_open ? 'yes' : 'no'}
+            className={`rounded border px-2 py-1 text-xs ${q.is_open
+              ? 'border-red-700/70 bg-red-950/20 text-red-100' : 'border-slate-700 text-slate-300'}`}>
+            <span className="font-medium">{deptName(q.department_id!)}</span>
+            <span className="text-slate-500"> · #{q.id} · {t(`flag.from.${q.answer_from ?? 'our_team'}`)}</span>
+            {' '}{q.note}
+            <span className={q.is_open ? 'text-red-300' : 'text-emerald-300'}>
+              {' — '}{q.is_open ? t('bucket.qOpen') : `${t('bucket.qClosed')}${questionAnswer(q) ? `: ${questionAnswer(q)}` : ''}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+
   return (
     <div className="space-y-2">
       {deviationPanel}
+      {questionsPanel}
       {ordered.length > 0 && informedCount > 0 && informedCount < ordered.length && (
         <h3 data-testid="bucket-group-responsible"
           className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -650,10 +686,27 @@ export default function AssessmentBuckets({
                 {a && (() => {
                   const hasPpt = changePptOf(a.id).length > 0 || a.has_change_ppt === true
                   const required = verdictOf[row.id] === 'not_feasible' && !hasPpt
+                  // 2026-11-08: a case's documents sit under that case, not here
                   const ofKind = (k: string) =>
-                    evidenceOf(a.id).filter((att) => att.kind === k)
+                    evidenceOf(a.id).filter((att) => att.kind === k && !att.case_ref)
                   const legacy = evidenceOf(a.id).filter(
-                    (att) => att.kind !== 'change_ppt' && att.kind !== 'rfq')
+                    (att) => att.kind !== 'change_ppt' && att.kind !== 'rfq' && !att.case_ref)
+                  const mayDelete = isMine && rowEditable
+                  // Christoph 2026-11-08: only the uploader or an admin deletes
+                  const ownsFile = (att: { uploaded_by?: number | null }) => isAdmin || att.uploaded_by === userId
+                  const delAtt = (att: { id: number }) => {
+                    changesApi.deleteAttachment(changeId, att.id)
+                      .then(() => qc.invalidateQueries({ queryKey: ['change', changeId] }))
+                      .catch((e: unknown) => toastError(e, t('attach.deleteFailed')))
+                  }
+                  // the cases with their documents, headline first (read view)
+                  const caseGroups = impactsOf(a?.details)
+                    .filter((i) => i.key && CASE_KEYS.has(i.key) && i.answer === 'yes')
+                    .flatMap((i) => casesOf(i).map((c, n) => ({
+                      key: `${i.key}-${n}`,
+                      head: `${i.key === 'modification_external' ? 'External modification' : 'Internal modification'} · ${t('check.case')} ${n + 1}: ${c.text}`,
+                      docs: evidenceOf(a.id).filter((att) => att.case_ref && att.case_ref === c.id),
+                    })))
                   const mails = (change.attachments ?? [])
                     .filter((att) => att.kind === 'customer_email')
                   const invalidate = () =>
@@ -684,7 +737,8 @@ export default function AssessmentBuckets({
                       {atts.length > 0 && (
                         <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
                           {atts.map((att) => (
-                            <AttachmentRow key={att.id} changeId={changeId} attachment={att} />
+                            <AttachmentRow key={att.id} changeId={changeId} attachment={att}
+                              onDelete={mayDelete && ownsFile(att) ? delAtt : undefined} confirm />
                           ))}
                         </ul>
                       )}
@@ -694,6 +748,21 @@ export default function AssessmentBuckets({
                     </div>
                   )
                   return (
+                    <>
+                    {!mayDelete && caseGroups.some((g) => g.docs.length > 0) && (
+                      <div className="space-y-1" data-testid={`bucket-case-docs-${row.id}`}>
+                        {caseGroups.map((g) => (
+                          <div key={g.key} className="rounded border border-slate-700/60 px-2 py-1">
+                            <p className="text-xs font-medium text-slate-200">{g.head}</p>
+                            {g.docs.length > 0 ? (
+                              <ul className="text-sm">
+                                {g.docs.map((att) => <AttachmentRow key={att.id} changeId={changeId} attachment={att} />)}
+                              </ul>
+                            ) : <p className="text-[11px] text-slate-500">{t('bucket.noCaseDocs')}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="grid gap-2 sm:grid-cols-3"
                       data-testid={`bucket-docs-${row.id}`}>
                       {/* Keeps its historic test id: the PPT slot grew out of the
@@ -724,6 +793,7 @@ export default function AssessmentBuckets({
                               kind="customer_email" label={t('mail.slot')}
                               onUploaded={invalidate} />)}
                     </div>
+                    </>
                   )
                 })()}
 
