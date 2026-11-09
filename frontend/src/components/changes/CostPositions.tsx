@@ -80,6 +80,14 @@ export const tagLabel = (tag: string, items?: CostCategory[]): string => {
   return label === `costtag.${tag}` ? tag : label
 }
 
+/** The line's name in the total, led by its category title when it has one
+ *  ("Lab Measurement: hgjh"), Christoph 2026-11-09. */
+export const titledName = (p: CostPosition, name: string, items?: CostCategory[]): string => {
+  if (!p.tag) return name
+  const title = tagLabel(p.tag, items).replace(/ \((hours|h)\)$/, '')
+  return title && title !== name ? `${title}: ${name}` : name
+}
+
 /** "10 business days" — the number is meaningless without the unit. */
 export const leadTimeText = (days: number, unit?: LeadTimeUnit | null): string =>
   `${days} ${t(`costpos.unitShort.${unit ?? DEFAULT_UNIT}`)}`
@@ -2305,11 +2313,12 @@ function TotalGroup({ group, title, sum, testId, label }: {
 /** Christoph 2026-11-08: a supplier-priced block in the total, line by line:
  *  favourite vendor + price incl. transport (from-to while none is picked), or
  *  the estimate; a spare part as amount x price/pc + transport = total. */
-function TotalBlock({ group, lines, currency, rangeText }: {
+function TotalBlock({ group, lines, currency, rangeText, categories }: {
   group: LineGroup; lines: CostPosition[]; currency: string; rangeText: string
+  categories?: CostCategory[]
 }) {
   const row = (p: CostPosition): { label: string; amount: string } => {
-    const name = group === 'spare' ? spareName(p.label) : p.label
+    const name = titledName(p, group === 'spare' ? spareName(p.label) : p.label, categories)
     const qty = group === 'spare' ? perPieceOf(p) : 1
     const pcs = (price: number) => (group === 'spare' ? `${formatNumber(qty)} × ${money(price, currency)}` : '')
     if (p.pricing === 'quote') {
@@ -2585,12 +2594,12 @@ export default function CostPositions({
                     label={`${t('costpos.totInternal')} (${formatHours(internalHours)})`} />
                   {internalLines.filter((p) => (p.hours ?? 0) > 0 || (p.line_value ?? 0) > 0).map((p) => (
                     <TotalLine key={p.id}
-                      label={`${p.label.replace(/ \(h\)$/, '')}: ${p.hours != null ? formatHours(p.hours) : ''}${p.rate != null ? ` × ${money(p.rate, p.rate_currency ?? cur0)}/h` : ''}`}
+                      label={`${titledName(p, p.label.replace(/ \(h\)$/, ''), categories)}: ${p.hours != null ? formatHours(p.hours) : ''}${p.rate != null ? ` × ${money(p.rate, p.rate_currency ?? cur0)}/h` : ''}`}
                       amount={p.line_value != null ? money(p.line_value, p.rate_currency ?? cur0) : t('costpos.noRate')} />
                   ))}
                   {([['internal', internalChanges], ['external', externalChanges], ['spare', spareLines]] as [LineGroup, CostPosition[]][])
                     .filter(([, lines]) => lines.length > 0).map(([g, lines]) => (
-                      <TotalBlock key={g} group={g} lines={lines} currency={cur0} rangeText={rangeText(lines)} />
+                      <TotalBlock key={g} group={g} lines={lines} currency={cur0} rangeText={rangeText(lines)} categories={categories} />
                     ))}
                   <span className="col-span-2 mt-2 border-t border-slate-600" />
                   <span className="text-slate-300">{t('costpos.totSpent')}</span>
