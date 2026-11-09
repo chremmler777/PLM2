@@ -437,6 +437,47 @@ function OfferRow({
   )
 }
 
+/** An estimated supplier line, same shape as a shop's quote: total cost,
+ *  days, what the figure is based on (earlier tool, supplier figure + date). */
+function EstimateQuickRow({ changeId, position: p, onChanged }: {
+  changeId: number; position: CostPosition; onChanged: () => void
+}) {
+  const [cost, setCost] = useState(p.est_cost != null ? String(p.est_cost) : '')
+  const [days, setDays] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
+  const [basis, setBasis] = useState(p.basis_ref ?? '')
+  const dirty = num(cost) !== (p.est_cost ?? null) || num(days) !== (p.lead_time_days ?? null)
+    || basis.trim() !== (p.basis_ref ?? '')
+  const save = useMutation({
+    mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
+      est_cost: num(cost), lead_time_days: num(days), lead_time_unit: 'calendar_days',
+      basis: 'estimate', basis_ref: basis.trim() || null,
+    }),
+    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
+    onError: (e: unknown) => toastError(e, 'Could not save the estimate'),
+  })
+  const thin = !(num(cost) && num(cost)! > 0) || basis.trim().length < 5
+  return (
+    <div className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1 ${thin
+      ? 'border-red-700/70 bg-red-950/20' : 'border-slate-700'}`}>
+      <span className="w-36 text-xs font-medium text-slate-200">{t('costpos.type.estimate')}</span>
+      <input type="number" step="0.01" min={0} value={cost} onChange={(e) => setCost(e.target.value)}
+        data-testid={`est-cost-${p.id}`}
+        aria-label={t('costpos.shopTotal')} placeholder={t('costpos.shopTotal')}
+        className={`${fieldCls} w-28 tabular-nums text-right`} />
+      <input type="number" step="1" min={0} value={days} onChange={(e) => setDays(e.target.value)}
+        data-testid={`est-days-${p.id}`}
+        aria-label={t('costpos.shopDays')} placeholder={t('costpos.shopDays')}
+        className={`${fieldCls} w-24 tabular-nums text-right`} />
+      <input value={basis} onChange={(e) => setBasis(e.target.value)}
+        data-testid={`est-basis-${p.id}`}
+        aria-label={t('costpos.estBasis')} placeholder={t('costpos.estBasis')}
+        className={`${fieldCls} flex-1 min-w-[12rem]`} />
+      <button type="button" className={btnSm.primary} data-testid={`est-save-${p.id}`}
+        disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+    </div>
+  )
+}
+
 /** One asked shop's quote, name given: total cost, lead time (days), the
  *  quote number and the quote file; Save files the quote with its file. */
 function ShopQuoteRow({ changeId, positionId, shop, onDone }: {
@@ -1036,6 +1077,16 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             <input data-testid={`costpos-edit-notes-${p.id}`} value={notes}
               aria-label={t('costpos.notes')} placeholder={t('costpos.notes')}
               onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} flex-1 min-w-[10rem]`} />
+          </td>
+        </tr>
+      )}
+      {/* Christoph 2026-11-08: an estimated supplier line fills like a quote:
+          total cost, days, what it is based on */}
+      {p.kind === 'external' && !isQuote && editable && !editing && (
+        <tr data-testid={`costpos-estimate-${p.id}`} className="bg-slate-900/40">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
+            <EstimateQuickRow changeId={changeId} position={p} onChanged={onChanged} />
           </td>
         </tr>
       )}

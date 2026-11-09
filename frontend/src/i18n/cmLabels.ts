@@ -670,6 +670,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.shopRef': { de: 'Angebots-Nr.', en: 'Quote no.' },
   'costpos.shopFile': { de: 'Angebot (Datei)', en: 'Quote file' },
   'costpos.shopQuoteSaved': { de: 'Angebot von {x} gespeichert', en: 'Quote from {x} saved' },
+  'costpos.estBasis': { de: 'Grundlage: früheres Werkzeug, Lieferantenzahl + Datum', en: 'Based on: earlier tool, supplier figure + date' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
