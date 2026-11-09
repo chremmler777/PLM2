@@ -445,3 +445,31 @@ async def test_costing_finalize_needs_a_booking_after_the_assessment(
     assert res.status_code == 201, res.text
     res = await client.post(fin, headers=ec["dale"])
     assert res.status_code == 200, res.text
+
+
+@pytest.mark.hours_required
+async def test_finalize_needs_assessment_effort_hours_after_the_submit(
+        client, ec, session_factory):
+    """Christoph 2026-11-09: the Assessment effort is required like the
+    Costing effort: with its bookings deleted, finalize-check names it
+    (assessment_hours) and finalize is refused; a booking from the row
+    (assessment=true) clears it and does not count as costing time."""
+    await ready_to_finalize(session_factory, ec["cid"], ec["shop"], assessment_hours=False)
+    pos = await client.post(_u(ec, "/costing/positions"), json={
+        "department_id": ec["shop"], "label": "Insert re-cut", "kind": "external",
+        "quantity": 1, "quantity_unit": "pcs", "est_cost": 900.0,
+        "basis_ref": "Hasco figure 12 Oct 2026", "lead_time_days": 10,
+        "lead_time_unit": "calendar_days"}, headers=ec["dale"])
+    assert pos.status_code == 201, pos.text
+    check = (await client.get(_u(ec, f"/costing/departments/{ec['shop']}/finalize-check"),
+                              headers=ec["dale"])).json()
+    tags = [i["tag"] for i in check["items"]]
+    assert "assessment_hours" in tags and "book_hours" not in tags
+    fin = _u(ec, f"/costing/departments/{ec['shop']}/finalize")
+    res = await client.post(fin, headers=ec["dale"])
+    assert res.status_code == 400 and "assessment" in res.json()["detail"]
+    res = await client.post(_u(ec, "/hours"), json={
+        "department_id": ec["shop"], "hours": 1, "assessment": True}, headers=ec["dale"])
+    assert res.status_code == 201, res.text
+    res = await client.post(fin, headers=ec["dale"])
+    assert res.status_code == 200, res.text

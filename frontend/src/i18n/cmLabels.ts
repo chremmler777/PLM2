@@ -758,12 +758,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.undoReceived': { de: 'Doch nicht erhalten', en: 'Not received after all' },
   'costpos.undoReceivedHint': { de: 'Rückgängig: der Lieferant steht wieder auf WARTET', en: 'Undo: the shop is back to WAITING' },
   'costpos.undo': { de: 'rückgängig', en: 'undo' },
+  'costing.tag.assessment_hours': { de: 'BEWERTUNG BUCHEN', en: 'BOOK ASSESSMENT' },
   'costing.tag.book_hours': { de: 'STUNDEN BUCHEN', en: 'BOOK HOURS' },
   // 2026-11-09 night: the finalize-check tags the backend sends that had no label
   // (the open points showed 'costing.tag.support_hours')
   'costing.tag.support_hours': { de: 'SUPPORT-STUNDEN', en: 'SUPPORT HOURS' },
   'costing.tag.transport_missing': { de: 'TRANSPORT FEHLT', en: 'TRANSPORT MISSING' },
   'costing.tag.time_critical_missing': { de: 'ZEITKRITISCH?', en: 'TIME CRITICAL?' },
+  'costpos.bookAssessmentHours': { de: 'Stunden für die Bewertung buchen (Pflicht vor dem Abschließen)', en: 'Book your assessment hours (required before Finalize)' },
   'costpos.bookCostingHours': { de: 'Stunden für die Kalkulation buchen (Pflicht vor dem Abschließen)', en: 'Book your costing hours (required before Finalize)' },
   'costpos.leadLongest': { de: 'Lieferzeit (längste Zeile)', en: 'Lead time (longest line)' },
   // Christoph 2026-11-09: a spare part says if it is time critical (counts for the lead time)

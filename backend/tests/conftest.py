@@ -321,7 +321,8 @@ async def finalize_costing(session_factory, change_id: int, actor_id: int = 1):
 async def ready_to_finalize(session_factory, change_id: int, department_id: int,
                             actor_id: int = 1, *, support_hours: float = 0.0,
                             book_hours: bool = True, transport: bool = True,
-                            time_critical: bool | None = True):
+                            time_critical: bool | None = True,
+                            assessment_hours: bool = True):
     """Make a department pass the 2026-11-08/09 finalize rules a test is not
     about, straight in the DB (same shortcut as lock_impact): an
     implementation support / 'PM time still to come' line with hours
@@ -368,6 +369,14 @@ async def ready_to_finalize(session_factory, change_id: int, department_id: int,
                 change_id=change_id, department_id=department_id, hours=0.5,
                 booked_by=actor_id, booked_at=at, work_date=at.date(),
                 status_at_booking=change.status, note="costing (test)"))
+        if assessment_hours:
+            # the Assessment effort row is required too (Christoph 2026-11-09)
+            now = datetime.utcnow()
+            s.add(ImplementationBooking(
+                change_id=change_id, department_id=department_id, hours=0.5,
+                booked_by=actor_id, booked_at=now, work_date=now.date(),
+                status_at_booking=change.status, activity="assessment",
+                note="assessment (test)"))
         await s.commit()
 
 

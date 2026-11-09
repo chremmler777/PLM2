@@ -40,7 +40,7 @@ const TAG_WORDS: Record<string, string> = {
   transport_missing: 'transport', favourite: 'favourite', quote_missing: 'quote',
   price_missing: 'price', basis_missing: 'basis', hours_missing: 'hours',
   amount_missing: 'amount', compare: 'compare', empty: 'nothing entered',
-  book_hours: 'book hours', support_hours: 'support hours', other: 'open',
+  book_hours: 'book hours', assessment_hours: 'assessment hours', support_hours: 'support hours', other: 'open',
   time_critical_missing: 'time critical?',
 }
 

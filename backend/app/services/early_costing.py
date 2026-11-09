@@ -296,6 +296,8 @@ async def finalize(session: AsyncSession, change: ChangeRequest,
     empty, _ = await _empty_lines(session, change, department_id)
     if empty:
         raise EarlyCostingError(". ".join(empty))
+    if await _assessment_hours_missing(session, change, department_id):
+        raise EarlyCostingError("Book the hours you spent on the assessment first (Assessment effort, Book hours)")
     if await _costing_hours_missing(session, change, department_id):
         raise EarlyCostingError("Book the hours you spent on costing first (Book hours)")
     if await _support_hours_missing(session, change, department_id):
@@ -537,7 +539,37 @@ async def _costing_hours_missing(session: AsyncSession, change: ChangeRequest,
         q = q.where(ImplementationBooking.status_at_booking.in_(HoursService.PM_COSTING))
     elif since is not None:
         from datetime import timedelta
-        q = q.where(ImplementationBooking.booked_at >= since - timedelta(seconds=CLOCK_SLACK_S))
+        from sqlalchemy import or_
+        from app.services.hours_service import ASSESSMENT
+        # a booking from the Assessment effort row is assessment time
+        q = q.where(ImplementationBooking.booked_at >= since - timedelta(seconds=CLOCK_SLACK_S),
+                    or_(ImplementationBooking.activity.is_(None),
+                        ImplementationBooking.activity != ASSESSMENT))
+    return not ((await session.execute(q)).scalar() or 0)
+
+
+async def _assessment_hours_missing(session: AsyncSession, change: ChangeRequest,
+                                    department_id: int) -> bool:
+    """Christoph 2026-11-09: the Assessment effort row is required like the
+    Costing effort: a department that submitted its assessment has booked
+    time on it (red + open point when the bookings were deleted). Not the PM:
+    its row is the Scoping effort."""
+    from app.services import cm_switches
+    from app.models.change_impl import ImplementationBooking
+    from app.services.hours_service import ASSESSMENT
+    if not cm_switches.ASSESSMENT_HOURS_REQUIRED or _always_owes(change, department_id):
+        return False
+    since = max((a.submitted_at for a in _rows(change, department_id) if a.submitted_at),
+                default=None)
+    if since is None:
+        return False
+    from datetime import timedelta
+    from sqlalchemy import or_
+    q = select(func.count(ImplementationBooking.id)).where(
+        ImplementationBooking.change_id == change.id,
+        ImplementationBooking.department_id == department_id,
+        or_(ImplementationBooking.activity == ASSESSMENT,
+            ImplementationBooking.booked_at < since - timedelta(seconds=CLOCK_SLACK_S)))
     return not ((await session.execute(q)).scalar() or 0)
 
 
@@ -632,6 +664,9 @@ async def finalize_reasons(session: AsyncSession, change: ChangeRequest,
             ids.append(p.id)
     if not items and not await _has_answer(session, change, department_id):
         items.append({"tag": "empty", "text": "Nothing entered yet: hours or an amount on one line"})
+    if await _assessment_hours_missing(session, change, department_id):
+        items.append({"tag": "assessment_hours",
+                      "text": "Book the hours you spent on the assessment (Assessment effort, Book hours)"})
     if await _costing_hours_missing(session, change, department_id):
         items.append({"tag": "book_hours", "text": "Book the hours you spent on costing (Book hours)"})
     if await _support_hours_missing(session, change, department_id):

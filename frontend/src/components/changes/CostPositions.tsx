@@ -1130,50 +1130,76 @@ function BookedRow({ changeId, position: p, editable }: {
 
 /** Christoph 2026-11-08: an internal case line fills like the external
  *  estimate. 2026-11-09: hours only (no days), same look as the estimate:
- *  ESTIMATE tag, red fields + "... missing" until hours and basis are there. */
+ *  ESTIMATE tag, red fields + "... missing" until hours and basis are there;
+ *  once filled it reads as text with Edit, editing has Save and Cancel. */
 function InternalQuickRow({ changeId, position: p, onChanged }: {
   changeId: number; position: CostPosition; onChanged: () => void
 }) {
   const [hours, setHours] = useState(p.hours != null ? String(p.hours) : '')
   const [basis, setBasis] = useState(p.notes ?? '')
+  const storedMissing = !((p.hours ?? 0) > 0) || (p.notes ?? '').trim().length < 5
+  const [editing, setEditing] = useState(false)
   const dirty = num(hours) !== (p.hours ?? null) || basis.trim() !== (p.notes ?? '')
   const save = useMutation({
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
       hours: num(hours), notes: basis.trim() || null,
     }),
-    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
+    onSuccess: () => { toast.success(t('costpos.saved')); setEditing(false); onChanged() },
     onError: (e: unknown) => toastError(e, 'Could not save the internal work'),
   })
+  const cancel = () => {
+    setHours(p.hours != null ? String(p.hours) : ''); setBasis(p.notes ?? ''); setEditing(false)
+  }
   const noHours = !(Number(hours) > 0)
   const noBasis = basis.trim().length < 5
   const missing = noHours || noBasis
+  const open = editing || storedMissing
   return (
     <div data-testid={`int-row-${p.id}`} data-missing={missing ? 'yes' : 'no'}
-      className={`flex flex-wrap items-start gap-2 rounded px-2 py-1.5 ${missing
+      className={`flex flex-wrap items-start gap-2 rounded px-2 py-1.5 ${open && missing
         ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : 'border border-slate-700'}`}>
       <span className="w-36 pt-1 text-xs font-medium text-slate-200">{t('costpos.internalWork')}</span>
       <div className="flex-1 min-w-[12rem]">
         <span className="rounded border border-slate-500 px-1.5 text-[11px] font-semibold text-slate-200">{t('costpos.bannerEstimate')}</span>
-        <input value={basis} onChange={(e) => setBasis(e.target.value)}
-          data-testid={`int-basis-${p.id}`} aria-label={t('costpos.estBasis')} title={t('costpos.estBasis')}
-          placeholder={t('costpos.estBasisShort')}
-          className={`${fieldCls} mt-0.5 block w-full ${noBasis ? 'border-red-600' : ''}`} />
-        {missing && (
+        {open ? (
+          <input value={basis} onChange={(e) => setBasis(e.target.value)}
+            data-testid={`int-basis-${p.id}`} aria-label={t('costpos.estBasis')} title={t('costpos.estBasis')}
+            placeholder={t('costpos.estBasisShort')}
+            className={`${fieldCls} mt-0.5 block w-full ${noBasis ? 'border-red-600' : ''}`} />
+        ) : (
+          <span data-testid={`int-basis-text-${p.id}`} className="ml-2 text-sm text-slate-300">{p.notes}</span>
+        )}
+        {open && missing && (
           <span className="mt-0.5 block text-[11px] text-red-300">
             {[noHours && t('costpos.hours'), noBasis && t('costpos.estBasisShort')]
               .filter(Boolean).join(', ')} {t('costpos.missingWord')}</span>
         )}
       </div>
-      <label className="flex items-center gap-1 pt-5 text-xs text-slate-400">
-        <input type="number" step="0.5" min={0} value={hours} onChange={(e) => setHours(e.target.value)}
-          data-testid={`int-hours-${p.id}`} aria-label={t('costpos.hours')}
-          className={`${fieldCls} w-24 tabular-nums text-right ${noHours ? 'border-red-600' : ''}`} />
-        h
-      </label>
-      <div className="w-16 pt-5">
-        {dirty && (
-          <button type="button" className={btnSm.primary} data-testid={`int-save-${p.id}`}
-            disabled={save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+      {open ? (
+        <label className="flex items-center gap-1 pt-5 text-xs text-slate-400">
+          <input type="number" step="0.5" min={0} value={hours} onChange={(e) => setHours(e.target.value)}
+            data-testid={`int-hours-${p.id}`} aria-label={t('costpos.hours')}
+            className={`${fieldCls} w-24 tabular-nums text-right ${noHours ? 'border-red-600' : ''}`} />
+          h
+        </label>
+      ) : (
+        <span data-testid={`int-hours-text-${p.id}`} className="w-28 text-right text-sm tabular-nums text-slate-200">
+          {formatHours(p.hours ?? 0)}</span>
+      )}
+      <div className={`flex items-center gap-1 ${open ? 'pt-5' : ''}`}>
+        {open ? (
+          <>
+            <button type="button" className={btnSm.primary} data-testid={`int-save-${p.id}`}
+              disabled={!dirty || missing || save.isPending} onClick={() => save.mutate()}>{t('common.save')}</button>
+            {editing && (
+              <button type="button" className={btnSm.ghost} data-testid={`int-cancel-${p.id}`}
+                onClick={cancel}>{t('costpos.cancelEdit')}</button>
+            )}
+          </>
+        ) : (
+          <button type="button" className={btnSm.ghost} data-testid={`int-edit-${p.id}`}
+            aria-label={`${t('costpos.edit')}: ${p.label}`}
+            onClick={() => setEditing(true)}>{t('costpos.edit')}</button>
         )}
       </div>
     </div>
@@ -1706,9 +1732,12 @@ function EffortRow({
     queryKey: ['change', changeId, 'finalize-check', departmentId],
     queryFn: () => changesApi.finalizeCheck(changeId, departmentId),
     enabled: editable && kind === 'internal_effort',
+    refetchInterval: COSTING_REFETCH_MS,
   })
-  void fc
-  const bookMissing = false  // assessment hours here are optional (Christoph 2026-11-08)
+  // Christoph 2026-11-09: required like the Costing effort once the
+  // assessment is submitted (red + REQUIRED when nothing is booked)
+  const bookMissing = kind === 'internal_effort'
+    && !!fc?.items?.some((i) => i.tag === 'assessment_hours')
   // Blur and the Save click (or Enter, then blur) arrive in the same moment,
   // and isPending is only true after a render. One save at a time: a change
   // made while one is out (a second hours commit, a labour position pick) is
@@ -1788,14 +1817,16 @@ function EffortRow({
     if (inFlight.current || num(hoursRef.current) !== savedHours.current) run({ hours: true })
   }
   return (
-    <tr className={`border-t border-slate-700/70 ${supportMissing ? 'bg-red-950/40 outline outline-1 outline-red-700/70' : ''}`}
-      data-missing={supportMissing ? 'yes' : 'no'}>
+    <tr className={`border-t border-slate-700/70 ${supportMissing ? 'bg-red-950/40 outline outline-1 outline-red-700/70'
+      : bookMissing ? 'bg-red-950/30' : ''}`}
+      data-missing={supportMissing || bookMissing ? 'yes' : 'no'}>
       <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
       <td className={cellCls}>
         <span className="text-slate-200">{t(rowKey)}</span>
         <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[11px]">
           {t('costpos.standing')}
         </span>
+        {bookMissing && <span className="ml-1.5 rounded bg-red-800 px-1 text-[11px] font-semibold text-red-100">{t('costpos.required')}</span>}
       </td>
       <td className={`${cellCls} text-slate-400 text-xs`}>
         {t(descKey)}
@@ -1814,7 +1845,7 @@ function EffortRow({
             {editable && (
               <button type="button" data-testid={`costpos-effort-book-${departmentId}`}
                 data-missing={bookMissing ? 'yes' : 'no'}
-                title={bookMissing ? t('costpos.bookCostingHours') : undefined}
+                title={bookMissing ? t('costpos.bookAssessmentHours') : undefined}
                 onClick={() => requestBookHours(rowKey === 'costpos.pmScopingRow'
                   ? { departmentId, scoping: true } : { departmentId, assessment: true })}
                 className={bookMissing
