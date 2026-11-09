@@ -411,10 +411,14 @@ describe('CostPositions', () => {
   it('sums the department’s money and hours at the foot of the table', async () => {
     positions()
     await screen.findByTestId('costpos-row-11')
-    // 5200 from the favourite offer; 12 h standing + 6 h around the vendor.
-    const total = screen.getByTestId('costpos-total-2').textContent
-    expect(total).toContain('5,200.00')
-    expect(total).toContain(formatHours(18))
+    // 4862baa1: TOTAL in three lines (spent = booked hours; internal; external
+    // from–to over the quotes, favourite below)
+    expect(screen.getByTestId('costpos-total-spent-2').textContent).toContain(formatHours(12))
+    expect(screen.getByTestId('costpos-total-internal-2').textContent).toContain(formatHours(12))
+    const ext = screen.getByTestId('costpos-total-external-2').textContent
+    expect(ext).toContain('5,200.00')        // cheapest quote incl. shipping ...
+    expect(ext).toContain('5,400.00')        // ... to the dearest
+    expect(ext).toContain(t('costpos.favShort'))
   })
 
   it('draws a quoted position as one line per supplier, transport as an amount or none (8e85fd31)', async () => {
