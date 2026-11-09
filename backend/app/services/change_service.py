@@ -7196,6 +7196,14 @@ class ChangeService:
                     CostingPosition.department_id == department_id,
                     CostingPosition.kind == "internal_effort"))).scalar() or 0
             if not float(booked) > 0:
+                # one place to book (Christoph 2026-11-08): hours booked on
+                # the change for this department count too
+                from app.models.change_impl import ImplementationBooking
+                booked = (await session.execute(
+                    select(func.coalesce(func.sum(ImplementationBooking.hours), 0)).where(
+                        ImplementationBooking.change_id == change.id,
+                        ImplementationBooking.department_id == department_id))).scalar() or 0
+            if not float(booked) > 0:
                 raise ChangeError(
                     "Log the hours you spent on this assessment before you submit")
         if (verdict == "feasible_with_conditions" and cm_switches.on("ASSESSMENT_V2")

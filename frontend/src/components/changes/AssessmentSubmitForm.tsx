@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { toastError } from '../../lib/apiError'
 import { btnPrimary } from '../common/buttonStyles'
 import { changesApi } from '../../api/changes'
+import { hoursApi, hoursKey } from '../../api/hours'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
@@ -158,17 +159,27 @@ export default function AssessmentSubmitForm({
   // against this assessment. The draft keeps saving meanwhile.
   const missingDocs = notImpacted || questionnaireOpen ? [] : missingDocuments(defs, details, evidence)
   const submit = useMutation({
-    mutationFn: () => changesApi.submitAssessment(changeId, {
+    mutationFn: async () => {
+      // one place for the hours (2026-11-08): what is typed here is booked on
+      // the change like "Book hours", then the submit goes
+      const typed = parseFloat(effort)
+      if (showEffort && typed > 0) {
+        await hoursApi.book(changeId, { department_id: departmentId, hours: typed, source: 'typed',
+          note: 'Assessment' })
+      }
+      return changesApi.submitAssessment(changeId, {
       department_id: departmentId,
       // "Not impacted" is feasible by definition — nothing changes for us.
       verdict: notImpacted ? 'feasible' : verdict,
-      ...(showEffort ? { effort_hours: parseFloat(effort) } : {}),
+      ...(showEffort && parseFloat(effort) > 0 ? { effort_hours: parseFloat(effort) } : {}),
       conditions: conditions || undefined, notes: notes || undefined,
       // One envelope for everything the department answered: the checklist and,
       // where it has one, its own questionnaire.
       details,
-    }),
+    })
+    },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: hoursKey(changeId) })
       toast.success(`${departmentName}: ${notImpacted ? t('pkg.notImpacted') : verdictLabel(verdict)}`)
       clearDraft(changeId, departmentId)
       qc.invalidateQueries({ queryKey: ['change', changeId] })
@@ -188,21 +199,45 @@ export default function AssessmentSubmitForm({
   const [noRef, setNoRef] = useState('')
   const conditionMissing = verdictRefs && verdict === 'feasible_with_conditions'
     && conditions.trim().length < 5
+  // Christoph 2026-11-08: the hours are required (backend ASSESSMENT_HOURS_REQUIRED):
+  // typed now, or already booked for this department on the change
+  const { data: hoursState } = useQuery({
+    queryKey: hoursKey(changeId), queryFn: () => hoursApi.get(changeId), enabled: showEffort,
+  })
+  const ourBookings = (hoursState?.bookings ?? []).filter((b) => b.department_id === departmentId)
+  const bookedSum = ourBookings.reduce((n, b) => n + (Number(b.hours) || 0), 0)
+  const hoursOk = !showEffort || parseFloat(effort) > 0 || bookedSum > 0
   const ready = !needsChangePpt && missingDocs.length === 0 && checklistDone
-    && !(evidenceNeed && evidenceNeed.missing.length) && !conditionMissing
+    && !(evidenceNeed && evidenceNeed.missing.length) && !conditionMissing && hoursOk
     && (notImpacted || (verdict !== ''
-    // Christoph 2026-11-08: the hours are required (backend ASSESSMENT_HOURS_REQUIRED)
-    && (!showEffort || (effort !== '' && parseFloat(effort) > 0))
     && (!Fields || details.impacted !== undefined)))
   const effortField = (
-          <div>
-            <label htmlFor={`effort-${departmentId}`} className="block text-xs text-slate-500 mb-1">
-              {t('effort.hoursRequired')}
-            </label>
-            <input id={`effort-${departmentId}`} type="number" min="0" step="0.25"
-              value={effort} onChange={(e) => setEffort(e.target.value)}
-              className="w-28 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
-          </div>
+    <div data-testid={`effort-block-${departmentId}`} className="space-y-1">
+      <p className={`text-xs ${hoursOk ? 'text-slate-500' : 'text-red-300'}`}>
+        {bookedSum > 0
+          ? t('effort.alreadyBooked').replace('{h}', String(bookedSum))
+          : t('effort.hoursRequired')}
+      </p>
+      {ourBookings.length > 0 && (
+        <ul className="text-[11px] text-slate-400" data-testid={`effort-bookings-${departmentId}`}>
+          {ourBookings.map((b) => (
+            <li key={b.id}>
+              {b.hours} h{b.work_date ? ` · ${b.work_date}` : ''}{' · '}{b.booked_by_name ?? ''}
+              {b.booked_for ? ` ${t('effort.for')} ${b.booked_for}` : ''}{b.note ? ` · ${b.note}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+      <label htmlFor={`effort-${departmentId}`} className="sr-only">{t('effort.bookNow')}</label>
+      <div className="flex items-center gap-2">
+        <input id={`effort-${departmentId}`} type="number" min="0" step="0.25"
+          value={effort} onChange={(e) => setEffort(e.target.value)}
+          placeholder={t('effort.bookNow')}
+          className={`w-36 bg-slate-800 border rounded-lg px-3 py-1.5 text-sm text-slate-100 ${
+            hoursOk ? 'border-slate-600' : 'border-red-600'}`} />
+        <span className="text-[11px] text-slate-500">{t('effort.bookNowHint')}</span>
+      </div>
+    </div>
   )
   return (
     <div className="border border-slate-700 rounded-lg p-3 space-y-2 text-sm">
