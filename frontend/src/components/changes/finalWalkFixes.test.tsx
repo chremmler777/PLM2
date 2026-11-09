@@ -36,7 +36,7 @@ vi.mock('../../api/actualCosts', () => ({
 }))
 vi.mock('./pnl/OfferVsActualSection', () => ({ default: () => null }))
 vi.mock('./CostingSheetBar', () => ({ default: () => null }))
-vi.mock('./CostPositions', () => ({ default: () => null }))
+vi.mock('./CostPositions', async (importOriginal) => ({ ...(await importOriginal<typeof import('./CostPositions')>()), default: () => null }))
 vi.mock('./CostLineGrid', () => ({ default: () => null }))
 const wf = vi.hoisted(() => ({
   complete: vi.fn(),
