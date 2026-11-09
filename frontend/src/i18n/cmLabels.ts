@@ -738,6 +738,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.undo': { de: 'rückgängig', en: 'undo' },
   'costing.tag.book_hours': { de: 'STUNDEN BUCHEN', en: 'BOOK HOURS' },
   'costpos.bookCostingHours': { de: 'Stunden für die Kalkulation buchen (Pflicht vor dem Abschließen)', en: 'Book your costing hours (required before Finalize)' },
+  'costpos.leadLongest': { de: 'Lieferzeit (längste Zeile)', en: 'Lead time (longest line)' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

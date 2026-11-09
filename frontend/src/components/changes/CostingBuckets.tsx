@@ -73,23 +73,34 @@ function FinalizeBar({ changeId, departmentId, finalized, v2 = false, department
     received: 'bg-emerald-700 text-white', waiting_info: 'bg-sky-800 text-sky-100',
     book_hours: 'bg-red-700 text-white',
   }
-  const items = check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))
+  const items: { tag: string; text: string; info?: boolean }[] = check?.items ?? reasons.map((r) => ({ tag: 'other', text: r }))
+  const blocking = items.filter((i) => !i.info)
+  const infoItems = items.filter((i) => i.info)
   return (
     <div data-testid={`costing-finalize-bar-${departmentId}`}
       className="rounded border border-slate-700 bg-slate-900/40 text-xs text-slate-300">
       {/* Christoph 2026-11-08: one container of line items, a coloured banner each */}
-      {!finalized && items.length > 0 && (
-        <div className="border-b border-slate-700 px-3 py-2">
-          <p className="mb-1 font-semibold text-slate-200">
-            {reasons.length ? t('costing.beforeFinalize') : t('costing.quoteStatus')}</p>
-          <ul data-testid={`costing-why-not-${departmentId}`}
-            className="divide-y divide-slate-700/70 rounded border border-slate-700 bg-slate-950/40">
-            {items.map((r, n) => (
-              <li key={n} className="flex items-center gap-2 px-2 py-1">
-                <span className={`w-32 flex-shrink-0 rounded px-1.5 py-0.5 text-center text-[11px] font-semibold ${TAG_STYLE[r.tag] ?? TAG_STYLE.other}`}>
-                  {t(`costing.tag.${r.tag}`)}</span>
-                <span className="text-slate-200">{r.text}</span>
-              </li>
+      {/* Christoph 2026-11-08: same look as the assessment's open points */}
+      {!finalized && blocking.length > 0 && (
+        <div className="m-2 rounded border border-red-700/60 bg-red-950/20 px-2 py-1.5"
+          data-testid={`costing-why-not-${departmentId}`}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-red-300">
+            {t('bucket.openPoints').replace('{n}', String(blocking.length))}</p>
+          <ul className="mt-0.5 space-y-0.5 text-xs text-red-100">
+            {blocking.map((r, n) => (
+              <li key={n}>• <span className="mr-1 rounded bg-red-800/80 px-1 text-[10px] font-semibold text-red-50">
+                {t(`costing.tag.${r.tag}`)}</span>{r.text}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!finalized && infoItems.length > 0 && (
+        <div className="mx-2 mb-2 rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{t('costing.quoteStatus')}</p>
+          <ul className="mt-0.5 space-y-0.5 text-xs text-slate-300">
+            {infoItems.map((r, n) => (
+              <li key={n}>• <span className={`mr-1 rounded px-1 text-[10px] font-semibold ${TAG_STYLE[r.tag] ?? TAG_STYLE.other}`}>
+                {t(`costing.tag.${r.tag}`)}</span>{r.text}</li>
             ))}
           </ul>
         </div>
@@ -155,6 +166,15 @@ function LeadTimeField({ changeId, departmentId, initial }: {
       </button>
     </div>
   )
+}
+
+/** The department answered Yes to a cycle-time change (the per-plant grid's job). */
+function cycleTimeYes(a: { details?: unknown } | undefined): boolean {
+  if (!a) return false
+  let d: Record<string, unknown> = {}
+  try { d = typeof a.details === 'string' ? JSON.parse(a.details) : ((a.details as Record<string, unknown>) ?? {}) } catch { d = {} }
+  const imp = (d.impacts as { key?: string; answer?: string; impacted?: boolean }[] | undefined) ?? []
+  return imp.some((i) => i.key === 'cycle_time_change' && (i.answer === 'yes' || i.impacted))
 }
 
 /** Departments whose costing row exists for the offer only (R37). */
@@ -395,6 +415,9 @@ export default function CostingBuckets({
                         deltas and hours × rate per plant. Kept under the
                         table, one click away, for the departments that
                         still think in it. */}
+                    {/* Christoph 2026-11-08: only where the cycle time changes (± min
+                        per part); every other Yes row is a line in the table above */}
+                    {(!change.assessment_v2 || cycleTimeYes(a)) && (
                     <details open className="rounded border border-slate-700/70 bg-slate-900/30 px-2 py-1.5"
                       data-testid={`costing-plant-lines-${id}`}>
                       <summary className="cursor-pointer text-[11px] uppercase tracking-wide text-slate-500 select-none">
@@ -407,7 +430,10 @@ export default function CostingBuckets({
                           plants={plants} projectPlantId={projectPlantId} />
                       </fieldset>
                     </details>
-                    {writable && (
+                    )}
+                    {/* Christoph 2026-11-08: every line has its own days; the
+                        department's lead time is the longest of them */}
+                    {writable && !change.assessment_v2 && (
                       <LeadTimeField changeId={changeId} departmentId={id}
                         initial={leadTimeOf(id)} />
                     )}

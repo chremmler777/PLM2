@@ -2250,6 +2250,14 @@ export default function CostPositions({
       extLow += Number(p.est_cost); extHigh += Number(p.est_cost); extFav += Number(p.est_cost)
     } else extComplete = false
   }
+  // the department's lead time: the longest line (favourite quote's days on quoted lines)
+  const leadMax = Math.max(0, ...mine.map((p) => {
+    if (p.kind === 'external' && p.pricing === 'quote') {
+      const fav = (p.offers ?? []).find((o) => o.favorite)
+      return fav?.lead_time_days ?? 0
+    }
+    return p.lead_time_days ?? 0
+  }))
   const unpriced = mine.filter((p) => p.rate_missing).length
   const totals = [...byCurrency.entries()]
 
@@ -2321,6 +2329,18 @@ export default function CostPositions({
                 <span className="block" data-testid={`costpos-total-internal-${departmentId}`}>
                   <span className="text-xs text-slate-400">{t('costpos.totInternal')} ({formatHours(internalHours)}): </span>
                   {money(internalMoney, cur0)}</span>
+                {/* Christoph 2026-11-08: where the internal money comes from, line by line */}
+                {internalLines.filter((p) => (p.hours ?? 0) > 0 || (p.line_value ?? 0) > 0).map((p) => (
+                  <span key={p.id} className="block text-[11px] text-slate-500">
+                    {p.label.replace(/ \(h\)$/, '')}: {p.hours != null ? formatHours(p.hours) : ''}
+                    {p.rate != null ? ` × ${money(p.rate, p.rate_currency ?? cur0)}/h` : ''}
+                    {p.line_value != null ? ` = ${money(p.line_value, p.rate_currency ?? cur0)}` : ` (${t('costpos.noRate')})`}
+                  </span>
+                ))}
+                {leadMax > 0 && (
+                  <span className="block text-xs text-slate-400" data-testid={`costpos-total-lead-${departmentId}`}>
+                    {t('costpos.leadLongest')}: {leadMax} d</span>
+                )}
                 <span className="block" data-testid={`costpos-total-external-${departmentId}`}>
                   <span className="text-xs text-slate-400">{t('costpos.totExternal')}: </span>
                   {/* Christoph 2026-11-08: from–to over the quotes, always */}
