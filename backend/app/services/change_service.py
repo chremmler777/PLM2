@@ -6862,7 +6862,7 @@ class ChangeService:
         bare = list(dict.fromkeys(
             name(e) for e in answered
             if e.get("key") in current and e["key"] not in shown))
-        if bare:
+        if bare and cm_switches.NO_NEEDS_REFERENCE:
             raise ChangeError(
                 "Impact no: give each No its reference (the checklist, drawing "
                 "or report that shows it, e.g. 'DRW-4471 rev C'): " + ", ".join(bare))

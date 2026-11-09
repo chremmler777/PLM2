@@ -239,7 +239,8 @@ export default function AssessmentSubmitForm({
     ...(Fields && !notImpacted && details.impacted === undefined && !questionnaireOpen ? [t('why.questionnaire')] : []),
     ...missingDocs.map((m) => t('why.doc').replace('{d}', docLabel(m.doc, 'en')).replace('{r}', m.item.label_en + (m.caseLabel ? `, ${m.caseLabel}` : ''))),
     ...(needsChangePpt ? [t('why.notFeasiblePpt')] : []),
-    ...(evidenceNeed && evidenceNeed.missing.length ? [t('why.evidence').replace('{r}', evidenceNeed.missing.join(', '))] : []),
+    ...(evidenceNeed && evidenceNeed.missing.length ? [t(evidenceNeed.impact === 'yes' ? 'why.evidence' : 'why.noRef')
+      .replace('{r}', evidenceNeed.missing.join(', '))] : []),
     ...(conditionMissing ? [t('why.condition')] : []),
     ...(!hoursOk ? [t('why.hours')] : []),
   ]

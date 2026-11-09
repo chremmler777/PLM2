@@ -645,6 +645,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'why.condition': { de: 'Bedingung angeben', en: 'Say the condition' },
   'why.hours': { de: 'Stunden buchen (Knopf "Stunden buchen")', en: 'Book your hours ("Book hours")' },
   'bucket.otherDocs': { de: 'Weitere Dokumente (keinem Fall zugeordnet)', en: 'Other documents (not tied to a case)' },
+  'why.noRef': { de: 'Jedem Nein eine Referenz geben: {r}', en: 'Give each No its reference: {r}' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

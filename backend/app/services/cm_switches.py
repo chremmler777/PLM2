@@ -68,6 +68,10 @@ ASSESSMENT_HOURS_REQUIRED = True
 # number to give). True brings back the digit rule.
 YES_NEEDS_NUMBER = False
 
+# Christoph 2026-11-08: an all-No answer needs no reference per row (the No
+# is the answer). True brings back "give each No its reference".
+NO_NEEDS_REFERENCE = False
+
 # ---------------------------------------------------------------------------
 # ECR-solid switch groups (spec flow-spec rev 6, "Switches"). Every new HARD
 # gate and every new notification of the branch reads one of these at call

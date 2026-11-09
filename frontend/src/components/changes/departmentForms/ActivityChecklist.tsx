@@ -46,6 +46,7 @@ export interface ImpactItem {
 }
 
 /** Rows that take several cases, each a costing line (backend CASE_KEYS). */
+export const NO_NEEDS_REFERENCE = false
 export const CASE_KEYS = new Set(['modification_internal', 'modification_external'])
 export interface CaseEntry { id: string; text: string }
 const newCaseId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
@@ -179,6 +180,9 @@ export function verdictEvidence(
     }
     return { impact: 'yes', missing: yes.filter((i) => !evidenced(i)).map(label) }
   }
+  // Christoph 2026-11-08: all No is a complete answer, no reference per row
+  // (backend NO_NEEDS_REFERENCE off)
+  if (!NO_NEEDS_REFERENCE) return { impact: 'no', missing: [] }
   const served = new Set(defs.map((d) => d.key))
   const shown = new Set(rows.filter((i) => i.key && saysWhat(i.ref)).map((i) => i.key))
   return { impact: 'no', missing: [...new Set(rows.filter((i) => i.key && served.has(i.key)

@@ -4,13 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AssessmentSubmitForm, { draftKey } from './AssessmentSubmitForm'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { t } from '../../i18n/cmLabels'
-import { hoursApi } from '../../api/hours'
+import { hoursApi, requestBookHours } from '../../api/hours'
 // ActivityChecklist reads the viewer (who may delete assessment documents).
-// Christoph 2026-11-08 (ccf78c56): the submit form lists the department's
-// bookings and books the typed hours before the submit.
+// Christoph 2026-11-08 (125e9963): hours come only through Book hours; the
+// submit waits for the department's bookings on the change.
 vi.mock('../../api/hours', async (orig) => ({
   ...(await orig<typeof import('../../api/hours')>()),
-  hoursApi: { get: vi.fn().mockResolvedValue({ bookings: [] }), book: vi.fn().mockResolvedValue({}) },
+  hoursApi: { get: vi.fn().mockResolvedValue({ bookings: [{ id: 1, department_id: 2, hours: 3.5 }] }), book: vi.fn() },
+  requestBookHours: vi.fn(),
 }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 
@@ -41,18 +42,31 @@ afterEach(() => { window.localStorage.clear() })
 describe('AssessmentSubmitForm', () => {
   afterEach(cleanup)
 
-  it('requires effort hours before submitting', async () => {
+  it('requires booked hours before submitting', async () => {
+    // none booked yet: Submit stays grey and says why; Book hours is offered
+    vi.mocked(hoursApi.get).mockResolvedValueOnce({ bookings: [] } as never)
     render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2}
       departmentName="Quality" onDone={() => {}} />))
     fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
-    expect((screen.getByRole('button', { name: /submit assessment/i }) as HTMLButtonElement).disabled).toBeTruthy()
-    fireEvent.change(screen.getByLabelText(t('effort.bookNow')), { target: { value: '3.5' } })
     fireEvent.click(await screen.findByTestId('check-no-cycle_time_change'))
     fireEvent.click(screen.getByTestId('check-no-threed_change'))
+    await waitFor(() => expect(screen.getByTestId('assessment-why-not').textContent)
+      .toContain(t('why.hours')))
+    expect((screen.getByRole('button', { name: /submit assessment/i }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('effort-book-2'))
+    expect(requestBookHours).toHaveBeenCalledWith({ departmentId: 2 })
+    cleanup()
+    // booked: the submit carries the booked sum and books nothing itself
+    render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2}
+      departmentName="Quality" onDone={() => {}} />))
+    fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
+    fireEvent.click(await screen.findByTestId('check-no-cycle_time_change'))
+    fireEvent.click(screen.getByTestId('check-no-threed_change'))
+    await waitFor(() => expect((screen.getByRole('button', { name: /submit assessment/i }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: /submit assessment/i })); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({ department_id: 2, verdict: 'feasible', effort_hours: 3.5 })))
-    expect(hoursApi.book).toHaveBeenCalledWith(7, expect.objectContaining({ department_id: 2, hours: 3.5 }))
+    expect(hoursApi.book).not.toHaveBeenCalled()
   })
 })
 
