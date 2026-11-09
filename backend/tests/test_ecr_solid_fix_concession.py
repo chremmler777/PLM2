@@ -275,14 +275,16 @@ async def test_negative_a_non_urgent_fail_tells_management_nothing(
     assert [n.user_id for n in sales] == [fix["user"]["Sales"]["id"]]
 
 
-async def test_weight_delta_reaches_sales_only_above_two_percent(client, fix):
+async def test_weight_delta_reaches_sales_only_above_one_gram(client, fix):
+    """acd50347: Sales hears of a weight gap above WEIGHT_DELTA_TOLERANCE_G
+    (1 g), no longer above 2 % of the estimate."""
     tool = await _auth(client, fix, "Tool Engineer")
-    # estimate 500 g; 506 g = +1.2 %: no Sales task
+    # estimate 500 g; 500.5 g = +0.5 g: no Sales task
     spec = {"lower_limit": 490.0, "upper_limit": 520.0,
             "spec_source": "drawing 886.197 D, weight 505 g +/-15"}
     res = await client.post(_url(fix, "/checks"), headers=tool, json={
         "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
-        "measurement": {"sample_size": 5, "min_value": 504.0, "max_value": 508.0,
+        "measurement": {"sample_size": 5, "min_value": 500.0, "max_value": 501.0,
                         "measuring_ref": REF, **spec}})
     assert res.json()["status"] == "passed"
     assert (await _state(client, tool, fix))["weight_quote_update_open"] is False
@@ -290,7 +292,7 @@ async def test_weight_delta_reaches_sales_only_above_two_percent(client, fix):
         "department_id": fix["dept"]["Tool Engineer"], "check_key": "weight",
         "measurement": {"sample_size": 5, "min_value": 512.0, "max_value": 518.0,
                         "measuring_ref": REF}})
-    assert res.json()["status"] == "passed"     # 515 g = +3 %
+    assert res.json()["status"] == "passed"     # 515 g = +15 g
     assert (await _state(client, tool, fix))["weight_quote_update_open"] is True
 
 

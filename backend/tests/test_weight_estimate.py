@@ -120,11 +120,17 @@ async def test_the_weight_is_quoted_in_costing_only(
     assert late.status_code == 200, late.text
 
 
-async def test_a_weight_must_be_a_real_number(client, admin_auth, weighing):
+async def test_a_shot_weight_change_may_be_zero_or_negative(client, admin_auth, weighing):
+    """acd50347: the value is the signed shot weight change (-3 g, +5 g)."""
     for value in (0, -5):
         res = await client.put(_url(weighing), json={"weight_g": value},
                                headers=admin_auth)
-        assert res.status_code == 422, res.text
+        assert res.status_code == 200, res.text
+        assert res.json()["estimated_part_weight_g"] == value
+    # still a number
+    res = await client.put(_url(weighing), json={"weight_g": "heavy"},
+                           headers=admin_auth)
+    assert res.status_code == 422, res.text
 
 
 # --- editing ----------------------------------------------------------------
