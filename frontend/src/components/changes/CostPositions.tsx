@@ -666,6 +666,11 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const diverges = decisionDivergesOf(p)
   const offerCount = (p.offers ?? []).length
 
+  const setPricing = useMutation({
+    mutationFn: (v: 'estimate' | 'quote') => changesApi.updateCostPosition(changeId, p.id, { pricing: v }),
+    onSuccess: onChanged,
+    onError: (e: unknown) => toastError(e, 'Could not switch the pricing'),
+  })
   const save = useMutation({
     mutationFn: async () => {
       if (type === 'estimate') await ensureVendor(qc, vendor)
@@ -754,6 +759,23 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           )}
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
+          {/* Christoph 2026-11-08: a supplier line switches to quotes, one
+              per supplier (toolmaker, gauge maker, assembly supplier) */}
+          {p.kind === 'external' && editable && (
+            <span className="mb-0.5 flex rounded border border-slate-600 overflow-hidden w-fit"
+              role="group" aria-label={t('costpos.pricingSwitch')}>
+              {(['estimate', 'quote'] as const).map((v) => (
+                <button key={v} type="button" data-testid={`costpos-pricing-${v}-${p.id}`}
+                  aria-pressed={p.pricing === v}
+                  disabled={setPricing.isPending || p.pricing === v}
+                  onClick={() => setPricing.mutate(v)}
+                  className={`px-1.5 py-0.5 text-[11px] ${p.pricing === v
+                    ? 'bg-sky-700 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                  {t(v === 'estimate' ? 'costpos.type.estimate' : 'costpos.supplierQuotes')}
+                </button>
+              ))}
+            </span>
+          )}
           <span data-testid={`costpos-kind-${p.id}`} className="text-xs text-slate-400">
             {t(`costpos.type.${type}`)}
             {isMachine && p.machine_class && (

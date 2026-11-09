@@ -657,6 +657,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'wait.sup.forCase': { de: 'Für welchen Fall / welche Zeile', en: 'For which case / line' },
   'wait.sup.pickCase': { de: 'Fall wählen…', en: 'Pick the case…' },
   'wait.sup.allCases': { de: '(die eine Lieferantenzeile)', en: '(the one supplier line)' },
+  'costpos.pricingSwitch': { de: 'Preis aus Schätzung oder Lieferantenangeboten', en: 'Price from an estimate or supplier quotes' },
+  'costpos.supplierQuotes': { de: 'Angebote', en: 'Supplier quotes' },
   'check.yes': { de: 'Ja', en: 'Yes' },
   'check.no': { de: 'Nein', en: 'No' },
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },

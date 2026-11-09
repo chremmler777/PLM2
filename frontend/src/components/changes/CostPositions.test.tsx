@@ -615,7 +615,8 @@ describe('CostPositions — part weight', () => {
     wrap(<CostPositions changeId={7} departmentId={2} editable={false}
       departmentName="Tool Engineer" partWeightG={412} />)
     await screen.findByTestId('costpos-weight-value-2')
-    expect(screen.getByTestId('costpos-weight-value-2').textContent).toBe('412')
+    // acd50347: the shot weight change reads with its sign
+    expect(screen.getByTestId('costpos-weight-value-2').textContent).toBe('+412 g')
     expect(screen.queryByTestId('costpos-weight-2')).toBeNull()
   })
 })
