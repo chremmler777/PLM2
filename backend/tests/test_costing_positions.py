@@ -86,6 +86,16 @@ async def _add_offer(client, auth, costing, pid, **body):
                              json=payload, headers=auth)
 
 
+async def _star(client, auth, costing, oid):
+    """57e13348: with a second quote the automatic star goes; the engineer
+    picks the favourite on the offer."""
+    res = await client.put(
+        f"/api/v1/changes/{costing['change_id']}/costing/offers/{oid}",
+        json={"favorite": True}, headers=auth)
+    assert res.status_code == 200, res.text
+    return res
+
+
 async def _set_status(session_factory, change_id, status):
     async with session_factory() as s:
         change = await s.get(ChangeRequest, change_id)
@@ -216,10 +226,14 @@ async def test_favorite_is_exclusive_per_position(client, admin_auth, costing):
     first = (await _add_offer(client, admin_auth, costing, pid,
                               vendor_name="A", cost=1000.0,
                               favorite=True)).json()
+    assert first["favorite"] is True               # a single quote stars itself
     second = (await _add_offer(client, admin_auth, costing, pid,
                                vendor_name="B", cost=900.0,
                                favorite=True)).json()
-    assert second["favorite"] is True
+    # 57e13348: the second quote clears the stars, the engineer picks
+    position = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert [o["id"] for o in position["offers"] if o["favorite"]] == []
+    await _star(client, admin_auth, costing, second["id"])
 
     position = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
     favorites = [o["id"] for o in position["offers"] if o["favorite"]]
@@ -347,6 +361,7 @@ async def test_the_favorite_offers_lead_time_wins_the_roll_up(
                              cost=1200.0, lead_time_days=10,
                              favorite=True)).json()
     assert fast["lead_time_calendar_days"] == 10
+    await _star(client, admin_auth, costing, fast["id"])   # two quotes: picked
 
     listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
     # The chosen supplier's date, not the other bidder's and not the stale
@@ -744,6 +759,7 @@ async def _two_offers(client, admin_auth, costing):
                           favorite=True)).json()["id"]
     b = (await _add_offer(client, admin_auth, costing, pid,
                           vendor_name="Vendor B", cost=1500.0)).json()["id"]
+    await _star(client, admin_auth, costing, a)     # two quotes: the engineer picks A
     return pid, a, b
 
 
