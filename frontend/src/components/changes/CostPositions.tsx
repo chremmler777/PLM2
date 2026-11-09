@@ -542,6 +542,8 @@ function RfqShops({ changeId, position: p, editable, onChanged }: {
   // the shops still owing their quote: one row each, the name is given
   const quoted = new Set((p.offers ?? []).map((o) => o.vendor_name.trim().toLowerCase()))
   const owing = mine.filter((w) => w.is_open && !quoted.has(w.vendor_name.trim().toLowerCase()))
+  // Christoph 2026-11-08: a quote is filed only after "Quote received"
+  const [received, setReceived] = useState<Set<number>>(new Set())
   const iso = (d: Date) => d.toISOString().slice(0, 10)
   const add = useMutation({
     mutationFn: () => {
@@ -570,10 +572,27 @@ function RfqShops({ changeId, position: p, editable, onChanged }: {
           {w.vendor_name} · {w.is_open ? t('costpos.rfqWaiting') : t('costpos.rfqIn')}
         </span>
       ))}
-      {editable && owing.map((w) => (
-        <ShopQuoteRow key={w.id} changeId={changeId} positionId={p.id} shop={w.vendor_name}
-          onDone={() => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }} />
-      ))}
+      {owing.length > 0 && (
+        <div className="basis-full space-y-1" data-testid={`rfq-waiting-${p.id}`}>
+          <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('costpos.waitingQuotes')}</p>
+          {owing.map((w) => (
+            received.has(w.id) && editable ? (
+              <ShopQuoteRow key={w.id} changeId={changeId} positionId={p.id} shop={w.vendor_name}
+                onDone={() => { qc.invalidateQueries({ queryKey: ['change', changeId] }); onChanged() }} />
+            ) : (
+              <div key={w.id} className="flex items-center gap-2 text-xs text-slate-300">
+                <span className="w-36 truncate font-medium">{w.vendor_name}</span>
+                <span className={`rounded px-1.5 ${w.overdue ? 'bg-red-900/70 text-red-100' : 'bg-slate-700 text-slate-200'}`}>
+                  {w.chip}</span>
+                {editable && (
+                  <button type="button" className={btnSm.secondary} data-testid={`rfq-received-${w.id}`}
+                    onClick={() => setReceived(new Set([...received, w.id]))}>{t('costpos.quoteReceived')}</button>
+                )}
+              </div>
+            )
+          ))}
+        </div>
+      )}
       {editable && (
         <span className="inline-flex items-center gap-1">
           <input value={shop} onChange={(e) => setShop(e.target.value)}
@@ -589,7 +608,7 @@ function RfqShops({ changeId, position: p, editable, onChanged }: {
   )
 }
 
-function NewOfferForm({ changeId, positionId, onAdded, suggest = [] }: {
+export function NewOfferForm({ changeId, positionId, onAdded, suggest = [] }: {
   changeId: number; positionId: number; onAdded: () => void
   /** shops the RFQ went to (open waits on this line): one click fills the supplier */
   suggest?: string[]
@@ -828,12 +847,6 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const diverges = decisionDivergesOf(p)
   const offerCount = (p.offers ?? []).length
 
-  const { data: waitsAll } = useQuery({
-    queryKey: ['change', changeId, 'supplier-waits'],
-    queryFn: () => changesApi.listSupplierWaits(changeId),
-    enabled: isQuote,
-  })
-  const openShops = (waitsAll ?? []).filter((w) => w.position_id === p.id && w.is_open).map((w) => w.vendor_name)
   const setPricing = useMutation({
     mutationFn: (v: 'estimate' | 'quote') => changesApi.updateCostPosition(changeId, p.id, { pricing: v }),
     onSuccess: onChanged,
@@ -1096,7 +1109,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
         <tr data-testid={`costpos-offers-${p.id}`} className="bg-slate-900/40">
           <td />
           <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
-            <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('costpos.offers')}</p>
+            <RfqShops changeId={changeId} position={p} editable={editable} onChanged={onChanged} />
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('costpos.receivedQuotes')}</p>
             {offerCount === 0 ? (
               <p className="text-xs text-slate-600">{t('costpos.noOffers')}</p>
             ) : (
@@ -1107,9 +1121,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
                 ))}
               </ul>
             )}
-            <RfqShops changeId={changeId} position={p} editable={editable} onChanged={onChanged} />
-            {editable && <NewOfferForm changeId={changeId} positionId={p.id} onAdded={onChanged}
-              suggest={openShops} />}
+            {/* a quote comes in from an asked shop: "+ asked", then "Quote received" */}
           </td>
         </tr>
       )}
