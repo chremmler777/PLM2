@@ -322,8 +322,9 @@ export default function CostingBuckets({
         const writable = editable && (isPm || !finalized)
         return (
           <section key={id} data-testid={`costing-bucket-${id}`}
-            className={`rounded-lg border ${!finalized && owesInput(id)
-              ? 'border-red-600/80 ring-1 ring-red-700/40' : expanded ? 'border-slate-600' : 'border-slate-700'} ${
+            // Christoph 2026-11-08: red goes on the sub-container that misses
+            // something (a line, the finalize list), not on the whole bucket
+            className={`rounded-lg border ${expanded ? 'border-slate-600' : 'border-slate-700'} ${
               expanded ? 'bg-slate-800' : 'bg-slate-800/50'}`}>
             <button type="button" data-testid={`costing-toggle-${id}`}
               aria-expanded={expanded}
